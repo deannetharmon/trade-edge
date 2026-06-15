@@ -448,10 +448,13 @@ function normalizeIv(value: any): number | null {
   if (value == null) return null;
 
   const n = Number(value);
+  if (Number.isNaN(n) || n <= 0) return null;
 
-  if (Number.isNaN(n)) return null;
+  // Tastytrade often returns IV as decimal, e.g. 1.046 = 104.6%
+  // Sometimes it may already be percent, e.g. 104.6
+  if (n <= 5) return n * 100;
 
-  return n <= 1 ? n * 100 : n;
+  return n;
 }
 
 function formatGreek(
