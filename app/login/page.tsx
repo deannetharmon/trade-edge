@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useState, Suspense } from 'react';
+import { signIn, useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const BASE = 'https://api.tastytrade.com';
@@ -45,83 +46,146 @@ function EyeIcon({ open }: { open: boolean }) {
   );
 }
 
+type Step = 'sign-in' | 'credentials' | 'connecting' | 'done';
+
 function LoginContent() {
+  const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') ?? '/portfolio';
+
+  const [step, setStep] = useState<Step>('sign-in');
   const [refreshToken, setRefreshToken] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [showRefresh, setShowRefresh] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
-  const [error, setError] = useState(searchParams.get('error') ?? '');
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasStoredSecret, setHasStoredSecret] = useState(false);
+  const [error, setError] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
 
+  // Once signed in with Google, check if TastyTrade credentials exist
   useEffect(() => {
-    const existingAccess = sessionStorage.getItem('tt_access_token');
-    if (existingAccess) { router.replace(searchParams.get('redirect') ?? '/portfolio'); return; }
+    if (status === 'loading') return;
+    if (status === 'unauthenticated') { setStep('sign-in'); return; }
 
-    const storedRefresh = localStorage.getItem('tt_refresh_token');
-    const storedSecret = localStorage.getItem('tt_client_secret');
+    // Signed in — check for stored TT credentials
+    (async () => {
+      setStep('connecting');
+      try {
+        const res = await fetch('/api/auth/get-credentials');
+        const data = await res.json();
 
-    if (storedSecret) setHasStoredSecret(true);
-
-    if (storedRefresh && storedSecret) {
-      getAccessTokenFromRefresh(storedRefresh, storedSecret)
-        .then(({ accessToken, newRefreshToken }) => {
+        if (data.hasCredentials) {
+          // Hydrate localStorage and get TT access token
+          const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
+            data.refreshToken,
+            data.clientSecret
+          );
           sessionStorage.setItem('tt_access_token', accessToken);
-          if (newRefreshToken) localStorage.setItem('tt_refresh_token', newRefreshToken);
-          router.replace(searchParams.get('redirect') ?? '/portfolio');
-        })
-        .catch((e) => {
-          // Keep the client secret — it's the refresh token that expired
-          localStorage.removeItem('tt_refresh_token');
-          setError(`Session expired — paste a new refresh token. (${e.message})`);
-          setIsLoading(false);
-        });
-    } else {
-      setIsLoading(false);
-    }
-  }, [router]);
+          localStorage.setItem('tt_refresh_token', newRefreshToken ?? data.refreshToken);
+          localStorage.setItem('tt_client_secret', data.clientSecret);
 
-  const handleConnect = async () => {
-    const storedSecret = localStorage.getItem('tt_client_secret');
-    const secretToUse = clientSecret.trim() || storedSecret || '';
+          // If token rotated, update Redis
+          if (newRefreshToken) {
+            await fetch('/api/auth/get-credentials', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken: newRefreshToken }),
+            });
+          }
 
+          router.replace(redirect);
+        } else {
+          // First time — need TastyTrade credentials
+          setStep('credentials');
+        }
+      } catch (e: any) {
+        setError(e.message ?? 'Failed to load credentials');
+        setStep('credentials');
+      }
+    })();
+  }, [status, session]);
+
+  const handleConnectTastyTrade = async () => {
     if (!refreshToken.trim()) { setError('Please enter your refresh token'); return; }
-    if (!secretToUse) { setError('Please enter your client secret'); return; }
-
-    setIsLoading(true);
+    if (!clientSecret.trim()) { setError('Please enter your client secret'); return; }
+    setIsConnecting(true);
     setError('');
+
     try {
+      // Verify the credentials work first
       const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
         refreshToken.trim(),
-        secretToUse
+        clientSecret.trim()
       );
+
+      // Save encrypted to Redis
+      await fetch('/api/auth/save-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refreshToken: newRefreshToken ?? refreshToken.trim(),
+          clientSecret: clientSecret.trim(),
+        }),
+      });
+
+      // Hydrate localStorage
       sessionStorage.setItem('tt_access_token', accessToken);
       localStorage.setItem('tt_refresh_token', newRefreshToken ?? refreshToken.trim());
-      localStorage.setItem('tt_client_secret', secretToUse);
-      window.location.href = '/login';
+      localStorage.setItem('tt_client_secret', clientSecret.trim());
+
+      router.replace(redirect);
     } catch (e: any) {
-      setError(e.message || 'Could not connect');
-      setIsLoading(false);
+      setError(e.message ?? 'Could not connect to TastyTrade');
+      setIsConnecting(false);
     }
   };
 
-  if (isLoading) {
+  // ── Sign in step ──────────────────────────────────────────────────────────
+  if (step === 'sign-in') {
     return (
-      <div className="flex flex-col items-center gap-4">
-        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
-          CONNECTING...
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-10">
+          <h1 className="text-xl font-bold tracking-widest text-white"
+            style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
+          <p className="text-[10px] text-white/40 mt-1 tracking-wider"
+            style={{ fontFamily: "'DM Mono', monospace" }}>BPS · BCS · IRON CONDOR</p>
         </div>
-        <div className="flex gap-3">
-          <a href="/portfolio" className="text-white/20 text-xs tracking-widest hover:text-white/40 transition-colors">← portfolio</a>
-          <span className="text-white/10">·</span>
-          <a href="/" className="text-white/20 text-xs tracking-widest hover:text-white/40 transition-colors">hunter</a>
+
+        <div className="bg-[#111] border border-[#222] rounded-2xl p-8">
+          <h2 className="text-sm font-bold text-white tracking-wider mb-2">SIGN IN</h2>
+          <p className="text-xs text-white/40 mb-6 leading-relaxed">
+            Sign in with Google to access your trading dashboard. Your TastyTrade credentials are stored securely and never shared.
+          </p>
+
+          <button
+            onClick={() => signIn('google', { callbackUrl: `/login?redirect=${redirect}` })}
+            className="w-full py-3 bg-white text-black rounded-lg text-xs font-bold tracking-widest hover:bg-white/90 transition-colors flex items-center justify-center gap-3"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            Continue with Google
+          </button>
         </div>
       </div>
     );
   }
 
+  // ── Connecting / loading step ─────────────────────────────────────────────
+  if (step === 'connecting') {
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
+          CONNECTING...
+        </div>
+      </div>
+    );
+  }
+
+  // ── First-time TastyTrade credentials step ────────────────────────────────
   return (
     <div className="w-full max-w-sm">
       <div className="text-center mb-10">
@@ -132,11 +196,14 @@ function LoginContent() {
       </div>
 
       <div className="bg-[#111] border border-[#222] rounded-2xl p-8">
-        <h2 className="text-sm font-bold text-white tracking-wider mb-2">CONNECT YOUR ACCOUNT</h2>
+        <div className="flex items-center gap-2 mb-2">
+          {session?.user?.image && (
+            <img src={session.user.image} className="w-6 h-6 rounded-full" alt="" />
+          )}
+          <h2 className="text-sm font-bold text-white tracking-wider">CONNECT TASTYTRADE</h2>
+        </div>
         <p className="text-xs text-white/40 mb-5 leading-relaxed">
-          {hasStoredSecret
-            ? 'Your client secret is saved. Just paste a new refresh token.'
-            : "Paste both values from your TastyTrade API grant. They'll be saved locally so you won't need to do this again."}
+          Welcome{session?.user?.name ? `, ${session.user.name.split(' ')[0]}` : ''}! One-time setup — paste your TastyTrade API credentials below. They'll be stored securely and you'll never need to enter them again.
         </p>
 
         <div className="mb-5 bg-white/5 border border-white/10 rounded-lg p-3">
@@ -148,8 +215,7 @@ function LoginContent() {
               Settings → API → your app
             </a><br />
             2. Click <span className="text-white/70">Manage → Create Grant</span><br />
-            3. Copy <span className="text-white/70">Refresh Token</span>
-            {!hasStoredSecret && <> and <span className="text-white/70">Client Secret</span></>} below
+            3. Copy <span className="text-white/70">Refresh Token</span> and <span className="text-white/70">Client Secret</span>
           </p>
         </div>
 
@@ -161,7 +227,7 @@ function LoginContent() {
               type={showRefresh ? 'text' : 'password'}
               value={refreshToken}
               onChange={e => setRefreshToken(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
+              onKeyDown={e => e.key === 'Enter' && handleConnectTastyTrade()}
               autoFocus
               className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-mono"
               placeholder="paste refresh token"
@@ -175,20 +241,15 @@ function LoginContent() {
 
         {/* Client Secret */}
         <div className="mb-5">
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-[10px] text-white/40 tracking-wider uppercase">Client Secret</label>
-            {hasStoredSecret && (
-              <span className="text-[9px] text-emerald-500">✓ saved — leave blank to keep</span>
-            )}
-          </div>
-          <div className="relative">
+          <label className="text-[10px] text-white/40 tracking-wider uppercase">Client Secret</label>
+          <div className="relative mt-1">
             <input
               type={showSecret ? 'text' : 'password'}
               value={clientSecret}
               onChange={e => setClientSecret(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
+              onKeyDown={e => e.key === 'Enter' && handleConnectTastyTrade()}
               className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-mono"
-              placeholder={hasStoredSecret ? 'leave blank to use saved secret' : 'paste client secret'}
+              placeholder="paste client secret"
             />
             <button type="button" onClick={() => setShowSecret(v => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 transition-colors" tabIndex={-1}>
@@ -203,22 +264,13 @@ function LoginContent() {
           </div>
         )}
 
-        <button onClick={handleConnect} disabled={isLoading}
+        <button onClick={handleConnectTastyTrade} disabled={isConnecting}
           className="w-full py-3 bg-white text-black rounded-lg text-xs font-bold tracking-widest hover:bg-white/90 transition-colors disabled:opacity-40">
-          {isLoading ? 'CONNECTING...' : 'CONNECT →'}
+          {isConnecting ? 'CONNECTING...' : 'CONNECT →'}
         </button>
 
-        <div className="flex gap-3 mt-3">
-          <a href="/portfolio" className="flex-1 py-2.5 border border-white/10 text-white/30 rounded-lg text-xs tracking-widest hover:border-white/20 hover:text-white/50 transition-colors text-center">
-            ← Portfolio
-          </a>
-          <a href="/" className="flex-1 py-2.5 border border-white/10 text-white/30 rounded-lg text-xs tracking-widest hover:border-white/20 hover:text-white/50 transition-colors text-center">
-            Hunter
-          </a>
-        </div>
-
         <p className="text-[10px] text-white/20 text-center mt-5 leading-relaxed">
-          Both values are stored in your browser only. Never sent to our servers.
+          Credentials are encrypted and stored securely. Never shared with third parties.
         </p>
       </div>
     </div>
