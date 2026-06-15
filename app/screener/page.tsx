@@ -1608,43 +1608,6 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
     const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
     if (modelPop == null) continue;
     const pop = modelPop;
-    console.log('POP_COMPARE', {
-      occSymbol: shortLeg.occSymbol,
-      strategy,
-      expDate,
-      price,
-      shortStrike: shortLeg.strikePrice,
-      longStrike,
-      credit,
-      width,
-      breakEven: strategy === 'BPS'
-        ? shortLeg.strikePrice - credit
-        : shortLeg.strikePrice + credit,
-      shortDelta: absDelta,
-      deltaPop: (1 - absDelta) * 100,
-      shortLegIv: shortLeg.iv,
-      ivPctForPop,
-      ivForPop,
-      modelPop,
-      finalPop: pop,
-      dte: daysUntil(expDate),
-    });    
-    if (pop < RULES.POP_MIN) continue;
-    
-    console.log('Spread candidate IV debug', {
-      symbol: shortLeg.occSymbol,
-      strike: shortLeg.strikePrice,
-      iv: shortLeg.iv,
-    });
-
-    console.log('IV_DEBUG_SHORT_LEG', shortLeg);
-    console.log('IV_DEBUG_SHORT_LEG_VALUES', {
-      occSymbol: shortLeg.occSymbol,
-      strike: shortLeg.strikePrice,
-      iv: shortLeg.iv,
-      keys: Object.keys(shortLeg),
-    });
-    
     candidates.push({
           strategy,
           expiration: expDate,
@@ -1782,26 +1745,6 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
       );
       if (modelPop == null) continue;
       const pop = modelPop;
-
-      if (
-        shortLeg.occSymbol?.includes('MRVL') &&
-        expDate === '2026-07-10' &&
-        shortLeg.strikePrice === 250 &&
-        longStrike === 240
-      ) {
-        console.log('ZZZ_MRVL_250_240_POP', {
-          expDate,
-          shortStrike: shortLeg.strikePrice,
-          longStrike,
-          credit,
-          width,
-          deltaPop: (1 - absDelta) * 100,
-          shortDelta: absDelta,
-          ivForPop,
-          modelPop,
-          finalPop: pop,
-          dte: daysUntil(expDate),
-        });
       }
 
       candidates.push({
