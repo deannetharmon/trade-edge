@@ -1,15 +1,14 @@
 // app/api/auth/save-credentials/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../[...nextauth]/route';
+import { authOptions } from '@/lib/auth';
 import Redis from 'ioredis';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const redis = new Redis(process.env.REDIS_URL!);
-
 const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'hex');
 
-function encrypt(text: string): string {
+export function encrypt(text: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
   const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
