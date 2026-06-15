@@ -1780,7 +1780,8 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
         daysUntil(expDate),
         ivForPop
       );
-      const pop = modelPop ?? (1 - absDelta) * 100;
+      if (modelPop == null) continue;
+      const pop = modelPop;
 
       if (
         shortLeg.occSymbol?.includes('MRVL') &&
