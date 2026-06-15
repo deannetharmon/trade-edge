@@ -5,6 +5,9 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import {
+  classifyPositionLifecycle,
+} from '@/lib/portfolio/positionLifecycle';
 
 
 // Inject accent CSS variable style
@@ -1992,11 +1995,12 @@ async function analyzePortfolio(positions: Position[]): Promise<PortfolioAnalysi
 
 // Map index symbols to their chart-compatible equivalents
 const INDEX_CHART_SYMBOLS: Record<string, string> = {
-  'SPX': 'SPY',   // Use SPY as proxy for SPX trend — highly correlated, better data availability
-  'NDX': 'QQQ',   // Use QQQ as proxy for NDX
-  'RUT': 'IWM',   // Use IWM as proxy for RUT
-  'VIX': 'VIX',
-  'DJX': 'DIA',
+  'SPX': '^GSPC',
+  'SPXW': '^GSPC',
+  'NDX': '^NDX',
+  'RUT': '^RUT',
+  'VIX': '^VIX',
+  'DJX': '^DJI',
 };
 
 async function getTrend(symbol: string): Promise<TrendResult> {
@@ -4795,6 +4799,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   const chartPopupRef = useRef(null as HTMLDivElement | null);
   const chartButtonRef = useRef<HTMLButtonElement>(null);
   const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const lifecycle = getPositionLifecycle(pos);
 
   useEffect(() => {
     if (!showChart) return;
@@ -4833,6 +4838,16 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   const longPuts   = pos.legs.filter(l => l.optionType === 'P' && l.direction === 'Long');
   const shortCalls = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Short');
   const longCalls  = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Long');
+
+  const shortPut = lifecycle.shortPuts[0] ?? null;
+  const cspStrike = shortPut?.strikePrice ?? null;
+  const cspPremium = shortPut?.avgOpenPrice ?? pos.creditPerContract ?? 0;
+  const cspEffectiveBuyPrice = cspStrike != null ? cspStrike - cspPremium : null;
+  const cspCashRequired = cspStrike != null ? cspStrike * 100 * lifecycle.contracts : null;
+  const cspAssignmentBuffer =
+    cspStrike != null && pos.stockPrice != null && pos.stockPrice > 0
+      ? ((pos.stockPrice - cspStrike) / pos.stockPrice) * 100
+      : null;
 
   const strikesSummary = () => {
     if (pos.strategy === 'BPS' && shortPuts[0] && longPuts[0]) return `${shortPuts[0].strikePrice}P / ${longPuts[0].strikePrice}P`;
@@ -5056,14 +5071,28 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             </div>
 
             <div className="border-t-2 border-sky-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
-              <p className={`text-[9px] ${th.textFaint}`}>Strikes</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{strikesSummary()}</p>
+              <p className={`text-[9px] ${th.textFaint}`}>
+                {lifecycle.type === 'CSP' ? 'Eff Buy / Strike' : 'Strikes'}
+              </p>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: '"DM Mono", monospace' }}>
+                {lifecycle.type === 'CSP' && cspEffectiveBuyPrice != null && cspStrike != null
+                  ? `$${cspEffectiveBuyPrice.toFixed(2)} ← ${cspStrike}P`
+                  : strikesSummary()}
+              </p>
             </div>
 
             {/* ── P&L ────────────────────────────────── */}
             <div className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Buyback</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.currentValue != null ? `$${pos.currentValue.toFixed(2)}` : '—'}</p>
+              <p className={`text-[9px] ${th.textFaint}`}>
+                {lifecycle.type === 'CSP' ? 'Cash Req' : 'Buyback'}
+              </p>
+              <p className={`text-xs font-bold ${lifecycle.type === 'CSP' ? 'text-amber-400' : th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {lifecycle.type === 'CSP' && cspCashRequired != null
+                  ? `$${cspCashRequired.toLocaleString()}`
+                  : pos.currentValue != null
+                  ? `$${pos.currentValue.toFixed(2)}`
+                  : '—'}
+              </p>
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
@@ -5345,7 +5374,22 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
 }) {
-  const keys = positions.map(p => p.key);
+  const lifecycleRank: Record<string, number> = {
+    CSP: 1,
+    ASSIGNED_STOCK: 2,
+    COVERED_CALL: 3,
+    SPREAD: 4,
+    PMCC: 5,
+    UNKNOWN: 9,
+  };
+
+  const sortedPositions = [...positions].sort((a, b) => {
+    const aType = getPositionLifecycle(a).type;
+    const bType = getPositionLifecycle(b).type;
+    return (lifecycleRank[aType] ?? 9) - (lifecycleRank[bType] ?? 9);
+  });
+
+  const keys = sortedPositions.map(p => p.key);
   const allChecked = keys.length > 0 && keys.every(k => checked.has(k));
   const someChecked = keys.some(k => checked.has(k));
   const meta = ACTION_META[groupAction];
@@ -5368,7 +5412,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
         )}
       </div>
       <div className="space-y-2">
-        {positions.map(p => (
+        {sortedPositions.map(p => (
           <PositionCard key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle} onProfitTargetChange={onProfitTargetChange} onExecute={onExecute} />
         ))}
       </div>
