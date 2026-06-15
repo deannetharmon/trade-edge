@@ -5629,8 +5629,7 @@ async function runTargetedScan(
                 const delta = shortLeg.delta; if (delta == null) continue;
                 const absDelta = Math.abs(delta);
                 if (absDelta < 0.05 || absDelta > 0.60) continue;
-                const pop = (1 - absDelta) * 100;
-                if (pop < popMin) continue;
+                // POP is calculated after credit/width are known.
                 if (seenStrikes.has(shortLeg.strikePrice)) continue;
                 seenStrikes.add(shortLeg.strikePrice);
 
@@ -5646,6 +5645,27 @@ async function runTargetedScan(
                   const creditRatio = credit / width;
                   const maxLoss = width - credit;
                   const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+                  
+                  const ivForPop =
+                    normalizeIv(metrics.expirationIvxMap?.[exp]) ??
+                    normalizeIv(metrics.ivx) ??
+                    normalizeIv(metrics.ivx30) ??
+                    normalizeIv(shortLeg.iv);
+                  
+                  const modelPop = calcSpreadPop(
+                    strat,
+                    price,
+                    shortLeg.strikePrice,
+                    credit,
+                    daysUntil(exp),
+                    ivForPop
+                  );
+                  
+                  if (modelPop == null) continue;
+                  
+                  const pop = modelPop;
+                  if (pop < popMin) continue;
+                  
                   if (creditRatio > bestCreditRatio) {
                     bestCreditRatio = creditRatio;
                     bestCandidate = {
