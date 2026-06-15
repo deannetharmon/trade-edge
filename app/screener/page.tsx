@@ -1769,7 +1769,7 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
         modelPop,
         finalPop: pop,
         dte: daysUntil(expDate),
-      });
+      });Until(expDate),
             candidates.push({ strategy, expiration: expDate, dte: daysUntil(expDate), shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0, credit, spreadWidth: width, creditRatio, roc, pop, optimized: false });
           }
         }
