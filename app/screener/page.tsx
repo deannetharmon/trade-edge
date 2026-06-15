@@ -1702,12 +1702,15 @@ function tryICSideAtWidth(legs: any[], side: 'put' | 'call', width: number, pric
     const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-    const pop = (1 - absDelta) * 100; if (pop < RULES.POP_MIN) continue;
-    candidates.push({ shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, credit, creditRatio, roc, shortOI: shortLeg.openInterest, longOI: longLeg.openInterest, pop, shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol });
-  }
-  if (candidates.length === 0) return null;
-  // Pick best POP; ROC tiebreaker within 5%
-  return candidates.sort((a, b) => {
+    const ivForPop = normalizeIv(shortLeg.iv);
+    const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
+    const pop = modelPop ?? (1 - absDelta) * 100;
+    if (pop < RULES.POP_MIN) continue;
+      candidates.push({ shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, credit, creditRatio, roc, shortOI: shortLeg.openInterest, longOI: longLeg.openInterest, pop, shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol });
+    }
+    if (candidates.length === 0) return null;
+    // Pick best POP; ROC tiebreaker within 5%
+    return candidates.sort((a, b) => {
     const popDiff = b.pop - a.pop;
     if (Math.abs(popDiff) >= 5) return popDiff;
     return b.roc - a.roc;
