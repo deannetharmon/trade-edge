@@ -1781,12 +1781,20 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
       );
       const pop = modelPop ?? (1 - absDelta) * 100;
 
-      if (shortLeg.occSymbol?.includes('MRVL') && shortLeg.strikePrice === 230) {
-        console.log('ZZZ_MRVL_POP', {
+      if (
+        shortLeg.occSymbol?.includes('MRVL') &&
+        expDate === '2026-07-10' &&
+        shortLeg.strikePrice === 250 &&
+        longStrike === 240
+      ) {
+        console.log('ZZZ_MRVL_250_240_POP', {
+          expDate,
           shortStrike: shortLeg.strikePrice,
           longStrike,
           credit,
+          width,
           deltaPop: (1 - absDelta) * 100,
+          shortDelta: absDelta,
           ivForPop,
           modelPop,
           finalPop: pop,
