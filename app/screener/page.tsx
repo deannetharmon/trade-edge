@@ -1251,16 +1251,16 @@ function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number;
   
     if (c.strategy === 'BPS') {
       strategyAlignmentScore =
-        trendScore > 75 ? 25 :
-        trendScore > 40 ? 15 :
-        trendScore > 0 ? 5 :
-        -25;
+       trendScore > 75 ? 12 :
+      trendScore > 40 ? 8 :
+      trendScore > 0 ? 3 :
+      -18;
     } else if (c.strategy === 'BCS') {
       strategyAlignmentScore =
-        trendScore < -75 ? 25 :
-        trendScore < -40 ? 15 :
-        trendScore < 0 ? 5 :
-        -25;
+        trendScore < -75 ? 12 :
+        trendScore < -40 ? 8 :
+        trendScore < 0 ? 3 :
+        -18;
     } else if (c.strategy === 'IC') {
       strategyAlignmentScore =
         Math.abs(trendScore) < 40 ? 10 :
@@ -1275,9 +1275,9 @@ function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number;
     const d = c.shortDelta;
   
     deltaQualityScore =
-      d >= 0.16 && d <= 0.22 ? 10 :
-      d >= 0.12 && d <= 0.30 ? 5 :
-      -10;
+      d >= 0.16 && d <= 0.22 ? 5 :
+      d >= 0.12 && d <= 0.30 ? 3 :
+      -8;
   }
   
   const total = Math.max(
