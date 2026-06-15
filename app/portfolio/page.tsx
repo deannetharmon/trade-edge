@@ -4799,7 +4799,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   const chartPopupRef = useRef(null as HTMLDivElement | null);
   const chartButtonRef = useRef<HTMLButtonElement>(null);
   const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
-  const lifecycle = getPositionLifecycle(pos);
+  const lifecycle = classifyPositionLifecycle(pos);
 
   useEffect(() => {
     if (!showChart) return;
