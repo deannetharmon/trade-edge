@@ -1084,7 +1084,10 @@ function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number;
   // ── IVR Quality (15pts) ───────────────────────────────────────────────────
   // IVR answers "should I be selling at all?" — bell curve peaking at 50-65
   const ivr = result.ivr ?? 0;
-  const ivrRaw = ivr <= 65 ? ivr / 65 : 1 - (ivr - 65) / 100;
+  const ivrRaw =
+    ivr >= 50 && ivr <= 90 ? 1
+    : ivr < 50 ? ivr / 50
+    : 1 - (ivr - 90) / 50;
   const momentumStrength = t?.scores?.total != null ? clamp(Math.abs(t.scores.total) / 150) : 0;
   const effectiveIvrWeight = (cfg.weightIvr ?? 15) * (1 - momentumStrength * 0.35);
   const ivrScore = clamp(ivrRaw) * effectiveIvrWeight;
@@ -1427,7 +1430,11 @@ async function getQuote(symbol: string, token: string): Promise<number | null> {
     return last ?? (bid && ask ? (bid + ask) / 2 : null);
   } catch { return null; }
 }
-async function getChain(symbol: string, token: string, RULES: RulesType): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean }> {
+async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean }> {
+  // dteWindow overrides the rule-set DTE gate when provided (rank mode passes a fixed wide window).
+  const gateMin = dteWindow ? dteWindow.min : ((Number.isFinite(RULES.DTE_MIN) ? RULES.DTE_MIN : 0) - 5);
+  const gateMax = dteWindow ? dteWindow.max : ((Number.isFinite(RULES.DTE_MAX) ? RULES.DTE_MAX : 60) + 5);
+  const [loDte, hiDte] = gateMin <= gateMax ? [gateMin, gateMax] : [gateMax, gateMin];
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
   // Detect ETF/Index from TastyTrade instrument-type — no hardcoded list needed
   const instrumentType: string = nested?.data?.items?.[0]?.['instrument-type'] ?? '';
@@ -1437,7 +1444,7 @@ async function getChain(symbol: string, token: string, RULES: RulesType): Promis
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
-    const dte = daysUntil(expDate); if (dte < RULES.DTE_MIN - 5 || dte > RULES.DTE_MAX + 5) continue;
+    const dte = daysUntil(expDate); if (dte < loDte || dte > hiDte) continue;
 
     // IVX_DISCOVERY: log the full expiration group object to find IVx field name
     if (process.env.NODE_ENV !== 'production') {
@@ -5433,7 +5440,7 @@ async function runTargetedScan(
                 const displayResult: ScreenResult = {
                   ...result,
                   bestCandidate: result.bestCandidate ?? candidate,
-                  qualified: true,
+                  qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
                   failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);
@@ -5500,7 +5507,7 @@ async function runTargetedScan(
                 const displayResult: ScreenResult = {
                   ...result,
                   bestCandidate: bestCandidate,  // always our specific strike, never runChecklist's pick
-                  qualified: true,
+                  qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
                   failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
                   checks: {
                     ...result.checks,
@@ -5995,8 +6002,9 @@ export default function Home() {
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const isEtfTicker = INDEX_TICKERS.has(symbol.toUpperCase());
+          const rankDteWindow = (modeOverride ?? screenMode) === 'rank' ? { min: 7, max: 60 } : undefined;
           const [chainData, price] = await Promise.all([
-            getChain(symbol, token, getChainRules(isEtfTicker)),
+            getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow),
             getQuote(symbol, token),
           ]);
           for (const s of strategiesToScan) {
