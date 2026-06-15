@@ -1702,9 +1702,7 @@ function tryICSideAtWidth(legs: any[], side: 'put' | 'call', width: number, pric
     const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-    const ivForPop = normalizeIv(shortLeg.iv);
-    const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
-    const pop = modelPop ?? (1 - absDelta) * 100;
+    const pop = (1 - absDelta) * 100;
     if (pop < RULES.POP_MIN) continue;
       candidates.push({ shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, credit, creditRatio, roc, shortOI: shortLeg.openInterest, longOI: longLeg.openInterest, pop, shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol });
     }
@@ -1751,17 +1749,37 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
       const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
       const creditRatio = credit / width;
       const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-      const pop = (1 - absDelta) * 100;
-      candidates.push({ strategy, expiration: expDate, dte: daysUntil(expDate), shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0, credit, spreadWidth: width, creditRatio, roc, pop, optimized: false });
-    }
-  }
-  if (candidates.length === 0) return null;
-  return candidates.sort((a, b) => {
-    const popDiff = (b.pop ?? 0) - (a.pop ?? 0);
-    if (Math.abs(popDiff) >= 5) return popDiff;
-    return b.roc - a.roc;
-  })[0];
-}
+      const ivForPop = normalizeIv(shortLeg.iv);
+      const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
+      const pop = modelPop ?? (1 - absDelta) * 100;
+      
+      console.log('POP_COMPARE_UNFILTERED', {
+        occSymbol: shortLeg.occSymbol,
+        strategy,
+        expDate,
+        price,
+        shortStrike: shortLeg.strikePrice,
+        longStrike,
+        credit,
+        width,
+        shortDelta: absDelta,
+        deltaPop: (1 - absDelta) * 100,
+        shortLegIv: shortLeg.iv,
+        ivForPop,
+        modelPop,
+        finalPop: pop,
+        dte: daysUntil(expDate),
+      });
+            candidates.push({ strategy, expiration: expDate, dte: daysUntil(expDate), shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0, credit, spreadWidth: width, creditRatio, roc, pop, optimized: false });
+          }
+        }
+        if (candidates.length === 0) return null;
+        return candidates.sort((a, b) => {
+          const popDiff = (b.pop ?? 0) - (a.pop ?? 0);
+          if (Math.abs(popDiff) >= 5) return popDiff;
+          return b.roc - a.roc;
+        })[0];
+      }
 
 function findBestICUnfiltered(chain: any[], expDate: string, price: number | null): SpreadCandidate | null {
   const puts = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'P');
