@@ -1745,7 +1745,6 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
       );
       if (modelPop == null) continue;
       const pop = modelPop;
-      }
 
       candidates.push({
         strategy,
