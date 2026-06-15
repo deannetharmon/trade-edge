@@ -1,4 +1,5 @@
 // app/engine/page.tsx
+
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -37,16 +38,17 @@ function getSavedEtfRules(): EtfRules {
   } catch { return { ...DEFAULT_ETF_RULES }; }
 }
 
-const DEFAULT_ALLOC = { reserve: 20, wheel: 50, spx: 30 };
+const DEFAULT_ALLOC = { reserve: 5, wheel: 51, spx: 30, hunter: 7, longBook: 7 };
 
 type SubTab = 'actions' | 'dashboard' | 'timeline' | 'advisor';
 type ActionPriority = 'urgent' | 'review' | 'entry' | 'hold';
 type EngineStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-interface Allocation { reserve: number; wheel: number; spx: number; }
+interface Allocation { reserve: number; wheel: number; spx: number; hunter: number; longBook: number; }
 
 interface CapitalSummary {
-  obp: number;
+  obp: number;        // derivative buying power (includes margin)
+  obpCash: number;    // cash available without margin
   netLiq: number;
   reserveTarget: number;
   wheelTarget: number;
@@ -245,9 +247,16 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
     ?? balData['option-buying-power']
     ?? '0'
   );
+  const obpCash = parseFloat(
+    balData['cash-available-to-withdraw']
+    ?? balData['cash-balance']
+    ?? balData['equity-buying-power']
+    ?? String(obp)
+  );
 
   const capital: CapitalSummary = {
     obp,
+    obpCash,
     netLiq,
     reserveTarget: netLiq * (alloc.reserve / 100),
     wheelTarget: netLiq * (alloc.wheel / 100),
@@ -687,12 +696,19 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
               const longStrike = strategy === 'BCS' ? shortStrike + SPY_WIDTH : shortStrike - SPY_WIDTH;
 
               // ES=F strike anchor (scaled to SPY price — SPY ≈ SPX ÷ 10)
-              if (esFuturesSignal) {
+              // Advisory only — logs a warning but does NOT filter strikes (same as SPX behavior).
+              // Hard-gating here produced strikes far below current price when overnight range
+              // was used as a floor, causing badly OTM suggestions with stale-looking credits.
+              const spyEsAnchorNote = (() => {
+                if (!esFuturesSignal) return '';
                 const buffer = 0.005;
                 const spyOvernight = { low: esFuturesSignal.overnightLow / 10, high: esFuturesSignal.overnightHigh / 10 };
-                if (strategy === 'BPS' && shortStrike > spyOvernight.low * (1 - buffer)) continue;
-                if (strategy === 'BCS' && shortStrike < spyOvernight.high * (1 + buffer)) continue;
-              }
+                if (strategy === 'BPS' && shortStrike > spyOvernight.low * (1 - buffer))
+                  return ` ⚠ Near SPY overnight low ${spyOvernight.low.toFixed(1)}`;
+                if (strategy === 'BCS' && shortStrike < spyOvernight.high * (1 + buffer))
+                  return ` ⚠ Near SPY overnight high ${spyOvernight.high.toFixed(1)}`;
+                return '';
+              })();
 
               const shortMid = (parseFloat(item.bid ?? '0') + parseFloat(item.ask ?? '0')) / 2;
               if (shortMid <= 0) continue;
@@ -737,6 +753,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 : '';
               const taxNote = 'Short-term tax treatment.';
 
+              console.log(`[SPY screener] ✓ ${shortStrike}/${longStrike} — POP ${pop.toFixed(0)}% credit $${credit.toFixed(2)} ratio ${(creditRatio*100).toFixed(0)}%${spyEsAnchorNote}`);
               spySuggestedEntry = {
                 shortStrike, longStrike, expiration: exp.date, dte: exp.dte,
                 pop, credit, creditRatio, roc, contracts,
@@ -745,7 +762,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 strategy,
                 shortOccSymbol: shortOccSymbolSpy,
                 longOccSymbol: longOccSymbolSpy,
-                rationale: `${biasNote}${exp.dte}d DTE · ${pop.toFixed(0)}% POP · ${(creditRatio * 100).toFixed(0)}% credit ratio · ${SPY_WIDTH}-wide · ${contracts} contracts · ${taxNote}`
+                rationale: `${biasNote}${exp.dte}d DTE · ${pop.toFixed(0)}% POP · ${(creditRatio * 100).toFixed(0)}% credit ratio · ${SPY_WIDTH}-wide · ${contracts} contracts · ${taxNote}${spyEsAnchorNote}`
               };
               break;
             }
@@ -1219,7 +1236,7 @@ async function loadMarketConditions(watchlist: string[], engineData: EngineData 
   // ── FOMC ──────────────────────────────────────────────────────────────
   const isFomcDay = FOMC_DATES_2026.includes(todayStr);
   const nextFomc = FOMC_DATES_2026.find(d => d >= todayStr);
-  const fomcParts = nextFomc ? nextFomc.split('-').map(Number) : null; const daysToFomc = fomcParts ? Math.round((new Date(Date.UTC(fomcParts[0], fomcParts[1] - 1, fomcParts[2])).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 999;
+  const fomcParts = nextFomc ? nextFomc.split('-').map(Number) : null;   const daysToFomc = fomcParts ? Math.round((new Date(Date.UTC(fomcParts[0], fomcParts[1] - 1, fomcParts[2])).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 999;
   const fomcThisWeek = daysToFomc <= 3 && daysToFomc >= 0;
   if (isFomcDay) {
     score -= 25;
@@ -1379,8 +1396,8 @@ function ChartButton({ symbol, th }: { symbol: string; th: typeof THEMES[Theme] 
             if (!sparkData) {
               setSparkLoading(true);
               const YAHOO_INDEX_MAP: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
-            const chartSym = YAHOO_INDEX_MAP[symbol.toUpperCase()] ?? symbol;
-            fetch(`/api/chart?symbol=${encodeURIComponent(chartSym)}`)
+              const chartSym = YAHOO_INDEX_MAP[symbol.toUpperCase()] ?? symbol;
+              fetch(`/api/chart?symbol=${encodeURIComponent(chartSym)}`)
                 .then(r => r.json())
                 .then(d => {
                   const closes = (d?.bars ?? []).map((b: any) => b?.c).filter((v: any) => v != null).slice(-90);
@@ -1456,19 +1473,18 @@ function ChartButton({ symbol, th }: { symbol: string; th: typeof THEMES[Theme] 
             {!sparkLoading && sparkData && sparkData.length === 0 && (
               <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
             )}
-          <a
-            href={`https://www.tradingview.com/chart/?symbol=${TV_SYMBOL}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors border border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/10"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            Open in TradingView
-          </a>
+            <a href={`https://www.tradingview.com/chart/?symbol=${TV_SYMBOL}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors border border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/10"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              Open in TradingView
+            </a>
         </div>
         </>
       )}
@@ -1611,9 +1627,11 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
 
   const isWheelEntry = entry.mode === 'wheel' || entry.strategy === 'CSP' || entry.strategy === 'CC';
   const [resolvedOcc, setResolvedOcc] = useState(entry.shortOccSymbol ?? '');
+  const [resolvedLongOcc, setResolvedLongOcc] = useState(entry.longOccSymbol ?? '');
   const [resolvedExpiration, setResolvedExpiration] = useState(entry.expiration ?? '');
   const [resolvedBidAsk, setResolvedBidAsk] = useState<{ bid: number; ask: number; mid: number; delta: number | null; oi: number | null } | null>(null);
   const [resolvingOption, setResolvingOption] = useState(false);
+  const [liveRefreshNote, setLiveRefreshNote] = useState<string>('');
 
   const gtcBuyback = parseFloat((entryLimit * (1 - gtcPct / 100)).toFixed(2));
   const totalCredit = entryLimit * contracts * 100;
@@ -1622,14 +1640,61 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
       ? Math.max(0, (entry.shortStrike * 100 * contracts) - totalCredit)
       : 0
     : Math.max(0, (entry.spreadWidth - entryLimit) * contracts * 100);
-  const hasOcc = isWheelEntry ? Boolean(resolvedOcc) : Boolean(entry.shortOccSymbol && entry.longOccSymbol);
+  const hasOcc = isWheelEntry ? Boolean(resolvedOcc) : Boolean(resolvedOcc && resolvedLongOcc);
   const engineInstrumentType = (symbol: string): 'Equity Option' | 'Index Option' => {
     const normalized = String(symbol ?? '').replace(/\s+/g, '').toUpperCase();
     return normalized.startsWith('SPX') || normalized.startsWith('NDX') || normalized.startsWith('RUT') || normalized.startsWith('VIX')
       ? 'Index Option'
       : 'Equity Option';
   };
-  const legInstrumentType = isWheelEntry ? 'Equity Option' : engineInstrumentType(entry.shortOccSymbol || entry.symbol);
+  const legInstrumentType = isWheelEntry ? 'Equity Option' : engineInstrumentType(resolvedOcc || entry.symbol);
+
+  // ── Live spread re-fetch (spread entries only) ─────────────────────────
+  // Fetches current bid/ask for both legs on modal open. Updates entry limit
+  // to live mid price so the credit shown matches what TastyTrade will show.
+  const resolveSpreadLive = useCallback(async () => {
+    if (isWheelEntry) return;
+    if (!entry.shortOccSymbol || !entry.longOccSymbol) return;
+    setResolvingOption(true); setLiveRefreshNote(''); setError('');
+    try {
+      const token = await getAccessToken();
+      const qs = [
+        `equity-option=${encodeURIComponent(entry.shortOccSymbol)}`,
+        `equity-option=${encodeURIComponent(entry.longOccSymbol)}`,
+      ].join('&');
+      const md = await ttFetch(`/market-data/by-type?${qs}`, token);
+      const items: any[] = md?.data?.items ?? [];
+      const shortItem = items.find((i: any) => i.symbol === entry.shortOccSymbol);
+      const longItem  = items.find((i: any) => i.symbol === entry.longOccSymbol);
+      if (!shortItem || !longItem) {
+        setLiveRefreshNote('Live price unavailable — using scan price. Verify in TastyTrade before placing.');
+        return;
+      }
+      const shortMid = (parseFloat(shortItem.bid ?? '0') + parseFloat(shortItem.ask ?? '0')) / 2;
+      const longMid  = (parseFloat(longItem.bid  ?? '0') + parseFloat(longItem.ask  ?? '0')) / 2;
+      const liveMid  = parseFloat(Math.max(0, shortMid - longMid).toFixed(2));
+      const staleCredit = parseFloat(entry.credit.toFixed(2));
+      const drift = staleCredit > 0 ? Math.abs(liveMid - staleCredit) / staleCredit : 0;
+      // Always update to live price
+      if (liveMid > 0) {
+        setEntryLimit(liveMid);
+        setResolvedOcc(entry.shortOccSymbol);
+        setResolvedLongOcc(entry.longOccSymbol);
+        if (drift > 0.05) {
+          setLiveRefreshNote(`Live mid $${liveMid.toFixed(2)} (scan was $${staleCredit.toFixed(2)}, ${(drift * 100).toFixed(0)}% drift) — entry limit updated.`);
+        } else {
+          setLiveRefreshNote(`Live mid $${liveMid.toFixed(2)} — confirmed current.`);
+        }
+      } else {
+        setLiveRefreshNote('Live mid is $0.00 — market may be closed. Verify before placing.');
+      }
+    } catch (e: any) {
+      setLiveRefreshNote('Live price fetch failed — using scan price. Verify in TastyTrade before placing.');
+      console.warn('[EngineOrderModal] spread live re-fetch failed:', e?.message);
+    } finally {
+      setResolvingOption(false);
+    }
+  }, [isWheelEntry, entry.shortOccSymbol, entry.longOccSymbol, entry.credit]);
 
   const resolveWheelOption = useCallback(async () => {
     if (!isWheelEntry) return;
@@ -1692,7 +1757,10 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
     }
   }, [entry.symbol, entry.shortStrike, entry.dte, entry.optionType, entry.strategy, entry.credit, isWheelEntry]);
 
-  useEffect(() => { resolveWheelOption(); }, [resolveWheelOption]);
+  useEffect(() => {
+    if (isWheelEntry) resolveWheelOption();
+    else resolveSpreadLive();
+  }, [isWheelEntry, resolveWheelOption, resolveSpreadLive]);
 
   const placeOrder = async () => {
     setPhase('placing'); setError('');
@@ -1711,8 +1779,8 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
       const legs = isWheelEntry
         ? [{ 'instrument-type': legInstrumentType, symbol: resolvedOcc, quantity: contracts, action: 'Sell to Open' }]
         : [
-            { 'instrument-type': legInstrumentType, symbol: entry.shortOccSymbol!, quantity: contracts, action: 'Sell to Open' },
-            { 'instrument-type': legInstrumentType, symbol: entry.longOccSymbol!,  quantity: contracts, action: 'Buy to Open'  },
+            { 'instrument-type': legInstrumentType, symbol: resolvedOcc,    quantity: contracts, action: 'Sell to Open' },
+            { 'instrument-type': legInstrumentType, symbol: resolvedLongOcc, quantity: contracts, action: 'Buy to Open'  },
           ];
       const closingLegs = legs.map(l => ({
         ...l,
@@ -1803,6 +1871,14 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
                   <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "'DM Mono', monospace" }}>{resolvingOption ? 'Resolving...' : resolvedOcc || 'Not resolved'}</span>
                 </div>
               )}
+              {!isWheelEntry && (
+                <div className="flex justify-between gap-3">
+                  <span className={`text-[10px] ${th.textFaint}`}>Live OCC symbols</span>
+                  <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {resolvingOption ? 'Fetching live price...' : resolvedOcc ? `${resolvedOcc.trim()} / ${resolvedLongOcc.trim()}` : 'Pending'}
+                  </span>
+                </div>
+              )}
               {isWheelEntry && resolvedBidAsk && (
                 <div className="flex justify-between">
                   <span className={`text-[10px] ${th.textFaint}`}>Bid / Ask / Mid</span>
@@ -1814,6 +1890,14 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
                 <span className={`text-[10px] ${th.text}`}>{legInstrumentType}</span>
               </div>
             </div>
+
+            {liveRefreshNote && (
+              <div className={`rounded-lg px-3 py-2 border ${liveRefreshNote.includes('drift') || liveRefreshNote.includes('failed') || liveRefreshNote.includes('unavailable') ? 'bg-amber-500/10 border-amber-600/30' : 'bg-emerald-500/10 border-emerald-700/30'}`}>
+                <p className={`text-[10px] ${liveRefreshNote.includes('drift') || liveRefreshNote.includes('failed') || liveRefreshNote.includes('unavailable') ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  ◎ {liveRefreshNote}
+                </p>
+              </div>
+            )}
 
             {/* Controls */}
             <div className="space-y-3">
@@ -2445,6 +2529,15 @@ export default function EnginePage() {
   });
   const [watchlistInput, setWatchlistInput] = useState(watchlist.join(', '));
   const [showSettings, setShowSettings] = useState(false);
+  const [deltaRange, setDeltaRange] = useState<[number, number]>(() => {
+    const r = getSavedEtfRules();
+    return [r.SPREAD_DELTA_MIN, r.SPREAD_DELTA_MAX];
+  });
+  const saveDeltaRange = (min: number, max: number) => {
+    const r = getSavedEtfRules();
+    try { localStorage.setItem('hunter-etf-rules', JSON.stringify({ ...r, SPREAD_DELTA_MIN: min, SPREAD_DELTA_MAX: max })); } catch {}
+    setDeltaRange([min, max]);
+  };
   const [status, setStatus] = useState<EngineStatus>('idle');
   const [engineData, setEngineData] = useState<EngineData | null>(null);
   const [error, setError] = useState('');
@@ -2453,6 +2546,7 @@ export default function EnginePage() {
   const [marketConditions, setMarketConditions] = useState<MarketConditions | null>(null);
   const [mcLoading, setMcLoading] = useState(false);
   const [editingAlloc, setEditingAlloc] = useState({ ...alloc });
+  const [includeMargin, setIncludeMargin] = useState(false);
   const [orderEntry, setOrderEntry] = useState<EngineOrderEntry | null>(null);
 
   const saveSubTab = (t: SubTab) => {
@@ -2461,18 +2555,16 @@ export default function EnginePage() {
   };
 
   const saveAlloc = (a: Allocation) => {
-    // Normalize to sum to 100. Return the normalized value so callers do not
-    // accidentally rerun the engine with stale state.
-    const total = a.reserve + a.wheel + a.spx;
-    const reserve = Math.round((a.reserve / total) * 100);
-    const wheel = Math.round((a.wheel / total) * 100);
+    const total = a.reserve + a.wheel + a.spx + a.hunter + a.longBook;
+    const reserve  = Math.round((a.reserve  / total) * 100);
+    const wheel    = Math.round((a.wheel    / total) * 100);
+    const spx      = Math.round((a.spx      / total) * 100);
+    const hunter   = Math.round((a.hunter   / total) * 100);
     const normalized: Allocation = {
-      reserve,
-      wheel,
-      spx: 100 - reserve - wheel,
+      reserve, wheel, spx, hunter,
+      longBook: 100 - reserve - wheel - spx - hunter,
     };
-
-    setEngineData(null); // prevent stale target denominators while reloading
+    setEngineData(null);
     setAlloc(normalized);
     try { localStorage.setItem(LS_ENGINE_ALLOC, JSON.stringify(normalized)); } catch {}
     return normalized;
@@ -2528,7 +2620,7 @@ export default function EnginePage() {
     value.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   const allocationDollar = (pct: number) =>
-    d?.capital?.obp ? d.capital.obp * (pct / 100) : 0;
+    d?.capital?.obp ? (includeMargin ? d.capital.obp : d.capital.obpCash) * (pct / 100) : 0;
 
   const allocationLabel = (pct: number) =>
     d?.capital?.obp ? `$${formatCurrency(allocationDollar(pct))}` : '$—';
@@ -2547,7 +2639,7 @@ export default function EnginePage() {
     <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       {/* Order modal */}
       {orderEntry && <EngineOrderModal entry={orderEntry} th={th} onClose={() => setOrderEntry(null)} />}
-     {/* ── Header ── */}
+      {/* ── Header ── */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 sticky top-0 z-50 flex flex-col`}>
         <div className="flex items-center justify-between w-full pb-2">
           <div className="flex items-center gap-3">
@@ -2570,6 +2662,7 @@ export default function EnginePage() {
           </div>
           <div className="flex items-center gap-3">
           {d && <span className={`text-[9px] ${th.textFaint}`}>Updated {d.lastUpdated.toLocaleTimeString()}</span>}
+
           <button onClick={runEngine} disabled={status === 'loading'}
             className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-emerald-500 hover:text-emerald-400 transition-colors disabled:opacity-40`}>
             {status === 'loading' ? '⟳ Loading...' : '↺ Refresh'}
@@ -2599,14 +2692,14 @@ export default function EnginePage() {
           </div>
         </div>
         <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <Link href="/portfolio"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</Link>
-          <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
-          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>INCOME ENGINE</span>
-          <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
-          <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
-          <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
-          <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
+          <a href="/"            className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</a>
+          <a href="/portfolio"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</a>
+          <a href="/screener"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</a>
+          <span                  className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>INCOME ENGINE</span>
+          <a href="/rinse-repeat" className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</a>
+          <a href="/trade-log"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</a>
+          <a href="/performance" className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</a>
+          <a href="/help"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</a>
         </div>
       </div>
 
@@ -2619,19 +2712,23 @@ export default function EnginePage() {
               <div>
                 <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase font-bold mb-3`}>Capital Allocation</p>
                 <div className="space-y-3">
-                  {(['reserve', 'wheel', 'spx'] as const).map(key => (
-                    <div key={key} className="flex items-center gap-3">
-                      <span className={`text-[10px] ${th.textMuted} w-16 shrink-0 capitalize`}>{key}</span>
-                      <input type="range" min={5} max={60} step={5} value={editingAlloc[key]}
-                        onChange={e => setEditingAlloc(prev => ({ ...prev, [key]: parseInt(e.target.value) }))}
-                        className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500" />
-                      <span className={`text-[10px] font-bold ${th.text} w-24 text-right`}>
-                        {editingAlloc[key]}% <span className={th.textFaint}>({allocationLabel(editingAlloc[key])})</span>
-                      </span>
-                    </div>
-                  ))}
-                  <div className={`text-[9px] ${editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    Total: {editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx}% {editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx !== 100 && '(will normalize to 100%)'}
+                  {(['reserve', 'wheel', 'spx', 'hunter', 'longBook'] as const).map(key => {
+                    const labels: Record<string, string> = { reserve: 'Reserve', wheel: 'Wheel', spx: 'SPX Engine', hunter: 'Hunter', longBook: 'Long Book' };
+                    const colors: Record<string, string> = { reserve: 'text-slate-400', wheel: 'text-blue-400', spx: 'text-violet-400', hunter: 'text-amber-400', longBook: 'text-emerald-400' };
+                    return (
+                      <div key={key} className="flex items-center gap-3">
+                        <span className={`text-[10px] w-24 shrink-0 ${colors[key]} font-medium`}>{labels[key]}</span>
+                        <input type="range" min={2} max={70} step={1} value={editingAlloc[key]}
+                          onChange={e => setEditingAlloc(prev => ({ ...prev, [key]: parseInt(e.target.value) }))}
+                          className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500" />
+                        <span className={`text-[10px] font-bold ${th.text} w-24 text-right`}>
+                          {editingAlloc[key]}% <span className={th.textFaint}>({allocationLabel(editingAlloc[key])})</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className={`text-[9px] ${editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx + editingAlloc.hunter + editingAlloc.longBook === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    Total: {editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx + editingAlloc.hunter + editingAlloc.longBook}% {editingAlloc.reserve + editingAlloc.wheel + editingAlloc.spx + editingAlloc.hunter + editingAlloc.longBook !== 100 && '(will normalize to 100%)'}
                   </div>
                   <div className={`text-[9px] ${th.textFaint}`}>
                     Dollar amounts are based on current option buying power: {d?.capital?.obp ? `$${formatCurrency(d.capital.obp)}` : 'not loaded'}.
@@ -2663,8 +2760,18 @@ export default function EnginePage() {
         <div className={`${th.sidebar} border-b ${th.border} px-6 py-3`}>
           <div className="flex items-center gap-8">
             <div className="shrink-0">
-              <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase`}>Option Buying Power</p>
-              <p className={`text-xl font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>${d.capital.obp.toLocaleString()}</p>
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase`}>Option Buying Power</p>
+                <button
+                  onClick={() => setIncludeMargin(v => !v)}
+                  className={`text-[8px] px-1.5 py-0.5 rounded border transition-colors ${includeMargin ? 'border-amber-500 text-amber-400 bg-amber-500/10' : `${th.border} ${th.textFaint} hover:border-white/30`}`}
+                  title={includeMargin ? 'Showing with margin — click for cash only' : 'Showing cash only — click to include margin'}>
+                  {includeMargin ? 'w/ Margin' : 'Cash Only'}
+                </button>
+              </div>
+              <p className={`text-xl font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                ${(includeMargin ? d.capital.obp : d.capital.obpCash).toLocaleString()}
+              </p>
             </div>
             <div className="flex-1 grid grid-cols-4 gap-4">
               <CapitalBar label={`Spread Engine · SPX+SPY (${alloc.spx}% · $${formatCurrency(d.capital.spxTarget)})`} deployed={d.capital.spxDeployed} target={d.capital.spxTarget} color="bg-violet-500" />
@@ -2692,7 +2799,7 @@ export default function EnginePage() {
       )}
 
       {/* ── Sub-tab bar ── */}
-      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[57px] z-40`}>
+      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
             { key: 'actions', label: 'Actions', icon: '⚡' },
@@ -2845,9 +2952,37 @@ export default function EnginePage() {
               {(d.spxSuggestedEntry || d.spySuggestedEntry) && (
                 <div className="border-t-2 border-dashed border-emerald-600/40">
                   {/* Section header */}
-                  <div className="flex items-center gap-3 px-4 py-2 bg-emerald-500/5 border-b border-emerald-600/20">
+                  <div className="flex items-center gap-3 px-4 py-2 bg-emerald-500/5 border-b border-emerald-600/20 flex-wrap">
                     <span className="text-[9px] font-bold tracking-widest text-emerald-400 uppercase">✦ Suggested New Positions</span>
-                    <span className={`text-[9px] ${th.textFaint}`}>Engine recommends these entries based on available capital + market conditions</span>
+                    <span className={`text-[9px] ${th.textFaint} flex-1`}>Engine recommends these entries based on available capital + market conditions</span>
+                    {/* Delta Range control — lives here because it drives which strikes get suggested */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`text-[9px] ${th.textFaint} tracking-wider`}>Δ RANGE</span>
+                      {([
+                        { label: 'Conservative', min: 0.15, max: 0.20 },
+                        { label: 'Standard',     min: 0.20, max: 0.25 },
+                        { label: 'Aggressive',   min: 0.25, max: 0.30 },
+                      ] as { label: string; min: number; max: number }[]).map(p => (
+                        <button key={p.label}
+                          onClick={() => { saveDeltaRange(p.min, p.max); runEngine(); }}
+                          className={`text-[9px] px-2 py-1 rounded border transition-colors font-bold ${
+                            deltaRange[0] === p.min && deltaRange[1] === p.max
+                              ? 'border-blue-500 text-blue-300 bg-blue-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-blue-500/50 hover:text-blue-400`
+                          }`}>
+                          {p.label}{deltaRange[0] === p.min && deltaRange[1] === p.max ? ` (${p.min}–${p.max})` : ''}
+                        </button>
+                      ))}
+                      <input type="number" min="0.05" max="0.30" step="0.01" value={deltaRange[0]}
+                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(v, deltaRange[1]); runEngine(); } }}
+                        className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
+                        style={{ fontFamily: "'DM Mono', monospace" }} />
+                      <span className={`text-[9px] ${th.textFaint}`}>–</span>
+                      <input type="number" min="0.10" max="0.35" step="0.01" value={deltaRange[1]}
+                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(deltaRange[0], v); runEngine(); } }}
+                        className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
+                        style={{ fontFamily: "'DM Mono', monospace" }} />
+                    </div>
                   </div>
 
                 {/* ── AI COMPARISON — only when both suggestions exist ── */}
