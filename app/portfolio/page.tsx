@@ -5790,10 +5790,21 @@ export default function PortfolioPage() {
             SIGN OUT
           </button>
           <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+          </div>
+        </div>
+        <div className="flex items-center gap-0 w-full border-t border-white/10">
+          <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
+          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>PORTFOLIO</span>
+          <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
+          <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
+          <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
+          <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
+          <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
+          <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
         </div>
       </div>
 
-      {/* Dry run mode banner — persistent, hard to miss */}
+      {/* Dry run mode banner */}
       {dryRunMode && (
         <div className="bg-amber-500/15 border-b border-amber-500/40 px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
