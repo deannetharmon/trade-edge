@@ -1604,7 +1604,7 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
     const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_SPREAD) continue;
-    const ivForPop = normalizeIv(shortLeg.iv) ?? normalizeIv(ivPctForPop);
+    const ivForPop = normalizeIv(ivPctForPop) ?? normalizeIv(shortLeg.iv);
     const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
     const pop = modelPop ?? (1 - absDelta) * 100;
     console.log('POP_COMPARE', {
