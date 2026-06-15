@@ -2082,6 +2082,19 @@ bestCandidate = strategy === 'IC'
     ? { status: candidatePop >= popMin ? 'pass' : 'fail', value: `${candidatePop.toFixed(0)}%`, reason: `Min ${popMin}%` }
     : { status: 'pending', value: '—', reason: 'No candidate' };
   if (bestCandidate && candidatePop < popMin) { failReasons.push(`POP ${candidatePop.toFixed(0)}% < ${popMin}%`); }
+  if (symbol === 'MRVL' && bestCandidate) {
+  console.log('FINAL_CARD_POP', {
+    symbol,
+    strategy,
+    expiration: bestCandidate.expiration,
+    shortStrike: bestCandidate.shortStrike,
+    longStrike: bestCandidate.longStrike,
+    credit: bestCandidate.credit,
+    displayedPop: bestCandidate.pop,
+    shortDelta: bestCandidate.shortDelta,
+    deltaPop: (1 - bestCandidate.shortDelta) * 100,
+  });
+}
   const hv30 = metrics.hv30 ?? null;
   const strikeIv = bestCandidate?.shortIv ?? null;
 
