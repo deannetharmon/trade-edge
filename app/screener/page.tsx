@@ -1605,7 +1605,7 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
     const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
     const pop = modelPop ?? (1 - absDelta) * 100;
     console.log('POP_COMPARE', {
-      symbol,
+      occSymbol: shortLeg.occSymbol,
       strike: shortLeg.strikePrice,
       deltaPop: (1 - absDelta) * 100,
       modelPop: modelPop,
