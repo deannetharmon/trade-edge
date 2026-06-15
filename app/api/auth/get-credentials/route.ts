@@ -1,9 +1,9 @@
 // app/api/auth/get-credentials/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../[...nextauth]/route';
+import { authOptions } from '@/lib/auth';
+import { decrypt, encrypt } from '../save-credentials/route';
 import Redis from 'ioredis';
-import { decrypt } from '../save-credentials/route';
 
 const redis = new Redis(process.env.REDIS_URL!);
 
@@ -28,7 +28,6 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// Called after TastyTrade rotates the refresh token
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
@@ -43,16 +42,7 @@ export async function PATCH(req: NextRequest) {
   const userId = (session.user as any).id;
   const key = `user:${userId}:tastytrade`;
 
-  // Import encrypt inline to avoid circular dependency
-  const { createCipheriv, randomBytes } = await import('crypto');
-  const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY ?? '', 'hex');
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
-  const encrypted = Buffer.concat([cipher.update(refreshToken, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const payload = `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
-
-  await redis.hset(key, { refresh_token: payload });
+  await redis.hset(key, { refresh_token: encrypt(refreshToken) });
 
   return NextResponse.json({ ok: true });
 }
