@@ -1587,7 +1587,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
 }
 
 // ── HUNTER Logic ─────────────────────────────────────────────────────────
-function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string, width: number, price: number | null, RULES: RulesType): SpreadCandidate | null {
+function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string, width: number, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
   const bidAskMax = getBidAskMax(price);
   const candidates: SpreadCandidate[] = [];
   for (const shortLeg of legs) {
@@ -1601,20 +1601,30 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
     const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_SPREAD) continue;
-    const ivForPop = normalizeIv(shortLeg.iv);
+    const ivForPop = normalizeIv(shortLeg.iv) ?? normalizeIv(ivPctForPop);
     const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
     const pop = modelPop ?? (1 - absDelta) * 100;
     console.log('POP_COMPARE', {
-      occSymbol: shortLeg.occSymbol,
-      strike: shortLeg.strikePrice,
-      deltaPop: (1 - absDelta) * 100,
-      modelPop: modelPop,
-      finalPop: pop,
-      iv: ivForPop,
-      dte: daysUntil(expDate),
-      credit,
-    });
-    
+  occSymbol: shortLeg.occSymbol,
+  strategy,
+  expDate,
+  price,
+  shortStrike: shortLeg.strikePrice,
+  longStrike,
+  credit,
+  width,
+  breakEven: strategy === 'BPS'
+    ? shortLeg.strikePrice - credit
+    : shortLeg.strikePrice + credit,
+  shortDelta: absDelta,
+  deltaPop: (1 - absDelta) * 100,
+  shortLegIv: shortLeg.iv,
+  ivPctForPop,
+  ivForPop,
+  modelPop,
+  finalPop: pop,
+  dte: daysUntil(expDate),
+});    
     if (pop < RULES.POP_MIN) continue;
     
     console.log('Spread candidate IV debug', {
@@ -1662,11 +1672,11 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
   })[0];
 }
 
-function findBestSpread(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null, RULES: RulesType): SpreadCandidate | null {
+function findBestSpread(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
   const legs = chain.filter(o => o.expirationDate === expDate && o.optionType === (strategy === 'BPS' ? 'P' : 'C'));
   const allCandidates: SpreadCandidate[] = [];
   for (const width of getWidthSteps(RULES.MAX_SPREAD_WIDTH, price)) {
-    const c = trySpreadAtWidth(legs, strategy, expDate, width, price, RULES);
+    const c = trySpreadAtWidth(legs, strategy, expDate, width, price, RULES, ivPctForPop);
     if (c) allCandidates.push(c);
   }
   if (allCandidates.length === 0) return null;
@@ -1963,7 +1973,14 @@ function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: a
   // Rank mode fallback: if strict rules found nothing, try relaxed rules first, then fully unfiltered
   if (!strictOnly && !bestCandidate && ivrCheck.status !== 'fail' && validExpirations.length > 0) {
     const relaxedRules: RulesType = { ...effectiveRules, CREDIT_RATIO_MIN: 0.15, ROC_MIN_SPREAD: 8, ROC_MIN_IC: 12, OI_MIN: 50, POP_MIN: 55, SPREAD_DELTA_MIN: 0.10, SPREAD_DELTA_MAX: 0.40, IC_DELTA_MIN: 0.10, IC_DELTA_MAX: 0.35 };
-    for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; bestCandidate = strategy === 'IC' ? findBestIC(chainItems, exp, price, relaxedRules) : findBestSpread(chainItems, strategy, exp, price, relaxedRules); if (bestCandidate) break; }
+    for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; const expIvxForPop =
+  normalizeIv(metrics.expirationIvxMap?.[exp]) ??
+  normalizeIv(metrics.ivx) ??
+  normalizeIv(metrics.ivx30);
+
+bestCandidate = strategy === 'IC'
+  ? findBestIC(chainItems, exp, price, relaxedRules)
+  : findBestSpread(chainItems, strategy, exp, price, relaxedRules, expIvxForPop); if (bestCandidate) break; }
   }
   // Last resort: fully unfiltered — show best available strike regardless of rules
   if (!strictOnly && !bestCandidate && validExpirations.length > 0) {
