@@ -5384,8 +5384,8 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   };
 
   const sortedPositions = [...positions].sort((a, b) => {
-    const aType = getPositionLifecycle(a).type;
-    const bType = getPositionLifecycle(b).type;
+    const aType = classifyPositionLifecycle(a).type;
+    const bType = classifyPositionLifecycle(b).type;
     return (lifecycleRank[aType] ?? 9) - (lifecycleRank[bType] ?? 9);
   });
 
