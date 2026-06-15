@@ -4841,7 +4841,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
   const shortPut = lifecycle.shortPuts[0] ?? null;
   const cspStrike = shortPut?.strikePrice ?? null;
-  const cspPremium = shortPut?.avgOpenPrice ?? pos.creditPerContract ?? 0;
+  const cspPremium = shortPut?.avgOpenPrice ?? pos.creditReceived ?? 0;
   const cspEffectiveBuyPrice = cspStrike != null ? cspStrike - cspPremium : null;
   const cspCashRequired = cspStrike != null ? cspStrike * 100 * lifecycle.contracts : null;
   const cspAssignmentBuffer =
