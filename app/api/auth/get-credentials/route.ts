@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { decrypt, encrypt } from '../save-credentials/route';
+import { encrypt, decrypt } from '@/lib/crypto';
 import Redis from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL!);
@@ -41,7 +41,6 @@ export async function PATCH(req: NextRequest) {
 
   const userId = (session.user as any).id;
   const key = `user:${userId}:tastytrade`;
-
   await redis.hset(key, { refresh_token: encrypt(refreshToken) });
 
   return NextResponse.json({ ok: true });
