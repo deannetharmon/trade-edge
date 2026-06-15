@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useState, Suspense } from 'react';
-import { signIn, useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const BASE = 'https://api.tastytrade.com';
@@ -46,15 +45,15 @@ function EyeIcon({ open }: { open: boolean }) {
   );
 }
 
-type Step = 'sign-in' | 'credentials' | 'connecting' | 'done';
+type Step = 'loading' | 'sign-in' | 'credentials' | 'connecting' | 'done';
 
 function LoginContent() {
-  const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') ?? '/portfolio';
 
-  const [step, setStep] = useState<Step>('sign-in');
+  const [step, setStep] = useState<Step>('loading');
+  const [sessionUser, setSessionUser] = useState<{ name?: string | null; image?: string | null } | null>(null);
   const [refreshToken, setRefreshToken] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [showRefresh, setShowRefresh] = useState(false);
@@ -62,48 +61,56 @@ function LoginContent() {
   const [error, setError] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // Once signed in with Google, check if TastyTrade credentials exist
   useEffect(() => {
-    if (status === 'loading') return;
-    if (status === 'unauthenticated') { setStep('sign-in'); return; }
+    // Dynamically import next-auth/react to avoid prerender issues
+    import('next-auth/react').then(({ getSession, signIn: _signIn }) => {
+      getSession().then(async (session) => {
+        if (!session?.user) {
+          setStep('sign-in');
+          return;
+        }
 
-    // Signed in — check for stored TT credentials
-    (async () => {
-      setStep('connecting');
-      try {
-        const res = await fetch('/api/auth/get-credentials');
-        const data = await res.json();
+        setSessionUser(session.user);
+        setStep('connecting');
 
-        if (data.hasCredentials) {
-          // Hydrate localStorage and get TT access token
-          const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
-            data.refreshToken,
-            data.clientSecret
-          );
-          sessionStorage.setItem('tt_access_token', accessToken);
-          localStorage.setItem('tt_refresh_token', newRefreshToken ?? data.refreshToken);
-          localStorage.setItem('tt_client_secret', data.clientSecret);
+        try {
+          const res = await fetch('/api/auth/get-credentials');
+          const data = await res.json();
 
-          // If token rotated, update Redis
-          if (newRefreshToken) {
-            await fetch('/api/auth/get-credentials', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refreshToken: newRefreshToken }),
-            });
+          if (data.hasCredentials) {
+            const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
+              data.refreshToken,
+              data.clientSecret
+            );
+            sessionStorage.setItem('tt_access_token', accessToken);
+            localStorage.setItem('tt_refresh_token', newRefreshToken ?? data.refreshToken);
+            localStorage.setItem('tt_client_secret', data.clientSecret);
+
+            if (newRefreshToken) {
+              await fetch('/api/auth/get-credentials', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: newRefreshToken }),
+              });
+            }
+
+            router.replace(redirect);
+          } else {
+            setStep('credentials');
           }
-
-          router.replace(redirect);
-        } else {
-          // First time — need TastyTrade credentials
+        } catch (e: any) {
+          setError(e.message ?? 'Failed to load credentials');
           setStep('credentials');
         }
-      } catch (e: any) {
-        setError(e.message ?? 'Failed to load credentials');
-        setStep('credentials');
-      }
-    })();
-  }, [status, session]);
+      });
+    });
+  }, []);
+
+  const handleGoogleSignIn = () => {
+    import('next-auth/react').then(({ signIn }) => {
+      signIn('google', { callbackUrl: `/login?redirect=${redirect}` });
+    });
+  };
 
   const handleConnectTastyTrade = async () => {
     if (!refreshToken.trim()) { setError('Please enter your refresh token'); return; }
@@ -112,13 +119,11 @@ function LoginContent() {
     setError('');
 
     try {
-      // Verify the credentials work first
       const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
         refreshToken.trim(),
         clientSecret.trim()
       );
 
-      // Save encrypted to Redis
       await fetch('/api/auth/save-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -128,7 +133,6 @@ function LoginContent() {
         }),
       });
 
-      // Hydrate localStorage
       sessionStorage.setItem('tt_access_token', accessToken);
       localStorage.setItem('tt_refresh_token', newRefreshToken ?? refreshToken.trim());
       localStorage.setItem('tt_client_secret', clientSecret.trim());
@@ -140,7 +144,18 @@ function LoginContent() {
     }
   };
 
-  // ── Sign in step ──────────────────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (step === 'loading' || step === 'connecting') {
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
+          {step === 'connecting' ? 'CONNECTING...' : 'LOADING...'}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Sign in ───────────────────────────────────────────────────────────────
   if (step === 'sign-in') {
     return (
       <div className="w-full max-w-sm">
@@ -158,7 +173,7 @@ function LoginContent() {
           </p>
 
           <button
-            onClick={() => signIn('google', { callbackUrl: `/login?redirect=${redirect}` })}
+            onClick={handleGoogleSignIn}
             className="w-full py-3 bg-white text-black rounded-lg text-xs font-bold tracking-widest hover:bg-white/90 transition-colors flex items-center justify-center gap-3"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -174,18 +189,7 @@ function LoginContent() {
     );
   }
 
-  // ── Connecting / loading step ─────────────────────────────────────────────
-  if (step === 'connecting') {
-    return (
-      <div className="flex flex-col items-center gap-4">
-        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
-          CONNECTING...
-        </div>
-      </div>
-    );
-  }
-
-  // ── First-time TastyTrade credentials step ────────────────────────────────
+  // ── TastyTrade credentials ────────────────────────────────────────────────
   return (
     <div className="w-full max-w-sm">
       <div className="text-center mb-10">
@@ -197,13 +201,13 @@ function LoginContent() {
 
       <div className="bg-[#111] border border-[#222] rounded-2xl p-8">
         <div className="flex items-center gap-2 mb-2">
-          {session?.user?.image && (
-            <img src={session.user.image} className="w-6 h-6 rounded-full" alt="" />
+          {sessionUser?.image && (
+            <img src={sessionUser.image} className="w-6 h-6 rounded-full" alt="" />
           )}
           <h2 className="text-sm font-bold text-white tracking-wider">CONNECT TASTYTRADE</h2>
         </div>
         <p className="text-xs text-white/40 mb-5 leading-relaxed">
-          Welcome{session?.user?.name ? `, ${session.user.name.split(' ')[0]}` : ''}! One-time setup — paste your TastyTrade API credentials below. They'll be stored securely and you'll never need to enter them again.
+          Welcome{sessionUser?.name ? `, ${sessionUser.name.split(' ')[0]}` : ''}! One-time setup — paste your TastyTrade API credentials below. They'll be stored securely and you'll never need to enter them again.
         </p>
 
         <div className="mb-5 bg-white/5 border border-white/10 rounded-lg p-3">
@@ -219,7 +223,6 @@ function LoginContent() {
           </p>
         </div>
 
-        {/* Refresh Token */}
         <div className="mb-4">
           <label className="text-[10px] text-white/40 tracking-wider uppercase">Refresh Token</label>
           <div className="relative mt-1">
@@ -239,7 +242,6 @@ function LoginContent() {
           </div>
         </div>
 
-        {/* Client Secret */}
         <div className="mb-5">
           <label className="text-[10px] text-white/40 tracking-wider uppercase">Client Secret</label>
           <div className="relative mt-1">
