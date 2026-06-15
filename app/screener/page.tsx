@@ -1244,21 +1244,70 @@ function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number;
     bufferScore = scoreBuffer(bufferPct, c.dte, uType) * (cfg.weightBuffer ?? 25);
   }
 
-  const total = Math.round(momentumScore + ivrScore + emClearanceScore + rangeScore + technicalScore + liquidityScore + bufferScore);
-  return {
-    score: Math.min(100, total),
-    dims: {
-      momentum: Math.round(momentumScore),
-      ivr: Math.round(ivrScore),
-      emClearance: Math.round(emClearanceScore),
-      range: Math.round(rangeScore),
-      technical: Math.round(technicalScore),
-      liquidity: Math.round(liquidityScore),
-      buffer: Math.round(bufferScore),
-      total: Math.min(100, total),
-    },
-  };
-}
+  let strategyAlignmentScore = 0;
+
+  if (c && t?.scores?.total != null) {
+    const trendScore = t.scores.total;
+  
+    if (c.strategy === 'BPS') {
+      strategyAlignmentScore =
+        trendScore > 75 ? 25 :
+        trendScore > 40 ? 15 :
+        trendScore > 0 ? 5 :
+        -25;
+    } else if (c.strategy === 'BCS') {
+      strategyAlignmentScore =
+        trendScore < -75 ? 25 :
+        trendScore < -40 ? 15 :
+        trendScore < 0 ? 5 :
+        -25;
+    } else if (c.strategy === 'IC') {
+      strategyAlignmentScore =
+        Math.abs(trendScore) < 40 ? 10 :
+        Math.abs(trendScore) > 75 ? -10 :
+        0;
+    }
+  }
+  
+  let deltaQualityScore = 0;
+  
+  if (c) {
+    const d = c.shortDelta;
+  
+    deltaQualityScore =
+      d >= 0.16 && d <= 0.22 ? 10 :
+      d >= 0.12 && d <= 0.30 ? 5 :
+      -10;
+  }
+  
+  const total = Math.max(
+    0,
+    Math.round(
+      momentumScore +
+      ivrScore +
+      emClearanceScore +
+      rangeScore +
+      technicalScore +
+      liquidityScore +
+      bufferScore +
+      strategyAlignmentScore +
+      deltaQualityScore
+    )
+  );
+    return {
+      score: Math.min(100, total),
+      dims: {
+        momentum: Math.round(momentumScore),
+        ivr: Math.round(ivrScore),
+        emClearance: Math.round(emClearanceScore),
+        range: Math.round(rangeScore),
+        technical: Math.round(technicalScore),
+        liquidity: Math.round(liquidityScore),
+        buffer: Math.round(bufferScore),
+        total: Math.min(100, total),
+      },
+    };
+  }
 
 function trafficLight(score: number, cfg: RankConfig): { emoji: string; label: string; color: string; border: string; bg: string } {
   if (score >= cfg.thresholdGreen)  return { emoji: '🟢', label: 'Strong',     color: 'text-emerald-400', border: 'border-emerald-600', bg: 'bg-emerald-500/10' };
