@@ -1606,28 +1606,29 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_SPREAD) continue;
     const ivForPop = normalizeIv(ivPctForPop) ?? normalizeIv(shortLeg.iv);
     const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
-    const pop = modelPop ?? (1 - absDelta) * 100;
+    if (modelPop == null) continue;
+    const pop = modelPop;
     console.log('POP_COMPARE', {
-  occSymbol: shortLeg.occSymbol,
-  strategy,
-  expDate,
-  price,
-  shortStrike: shortLeg.strikePrice,
-  longStrike,
-  credit,
-  width,
-  breakEven: strategy === 'BPS'
-    ? shortLeg.strikePrice - credit
-    : shortLeg.strikePrice + credit,
-  shortDelta: absDelta,
-  deltaPop: (1 - absDelta) * 100,
-  shortLegIv: shortLeg.iv,
-  ivPctForPop,
-  ivForPop,
-  modelPop,
-  finalPop: pop,
-  dte: daysUntil(expDate),
-});    
+      occSymbol: shortLeg.occSymbol,
+      strategy,
+      expDate,
+      price,
+      shortStrike: shortLeg.strikePrice,
+      longStrike,
+      credit,
+      width,
+      breakEven: strategy === 'BPS'
+        ? shortLeg.strikePrice - credit
+        : shortLeg.strikePrice + credit,
+      shortDelta: absDelta,
+      deltaPop: (1 - absDelta) * 100,
+      shortLegIv: shortLeg.iv,
+      ivPctForPop,
+      ivForPop,
+      modelPop,
+      finalPop: pop,
+      dte: daysUntil(expDate),
+    });    
     if (pop < RULES.POP_MIN) continue;
     
     console.log('Spread candidate IV debug', {
