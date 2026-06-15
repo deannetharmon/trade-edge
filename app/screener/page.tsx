@@ -1517,10 +1517,10 @@ async function getChain(symbol: string, token: string, RULES: RulesType, dteWind
     let greeksData: any;
     try { greeksData = await ttFetch(`/market-data/by-type?${qs}`, token); } catch { continue; }
     for (const item of greeksData?.data?.items ?? []) {
-      if (symbol.toUpperCase() === 'INTC') {
-        console.log('INTC option market-data raw item:', item);
-        console.log('INTC option market-data raw keys:', Object.keys(item));
-        console.log('INTC option market-data raw JSON:', JSON.stringify(item, null, 2));
+      if (symbol.toUpperCase() === 'MRVL') {        
+        console.log('MRVL option market-data raw item:', item);
+        console.log('MRVL option market-data raw keys:', Object.keys(item));
+        console.log('MRVL option market-data raw JSON:', JSON.stringify(item, null, 2));
       }
 
   const meta = symbolMeta[item.symbol]; if (!meta) continue;
