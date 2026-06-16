@@ -2049,7 +2049,7 @@ bestCandidate = strategy === 'IC'
   if (!strictOnly && !bestCandidate && validExpirations.length > 0) {
     for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; bestCandidate = strategy === 'IC' ? findBestICUnfiltered(chainItems, exp, price) : findBestSpreadUnfiltered(chainItems, strategy, exp, price); if (bestCandidate) break; }
   }
-  if (!bestCandidate && validExpirations.length === 0 && !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))) failReasons.push('`No ${rules.DTE_MIN}-${rules.DTE_MAX} DTE expirations`');
+  if (!bestCandidate && validExpirations.length === 0 && !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))) failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
   else if (!bestCandidate && validExpirations.length > 0 && !failReasons.length) failReasons.push('No qualifying strikes found');
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
@@ -5729,11 +5729,26 @@ async function runTargetedScan(
                   if (creditRatio > bestCreditRatio) {
                     bestCreditRatio = creditRatio;
                     bestCandidate = {
-                      strategy: strat, expiration: exp, dte: daysUntil(exp),
-                      shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta,
-                      shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
-                      credit, spreadWidth: width, creditRatio, roc, pop, optimized: false,
-                    };
+                    strategy: strat,
+                    expiration: exp,
+                    dte: daysUntil(exp),
+                    shortStrike: shortLeg.strikePrice,
+                    longStrike,
+                    shortDelta: absDelta,
+                    shortOI: shortLeg.openInterest ?? 0,
+                    longOI: longLeg.openInterest ?? 0,
+                    credit,
+                    spreadWidth: width,
+                    creditRatio,
+                    roc,
+                    pop,
+                    optimized: false,
+                    shortOccSymbol: shortLeg.occSymbol,
+                    longOccSymbol: longLeg.occSymbol,
+                    shortIv: normalizeIv(shortLeg.iv),
+                    expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
+                    expectedMove: null,
+                  };
                   }
                 }
                 if (!bestCandidate) continue;
@@ -5757,7 +5772,11 @@ async function runTargetedScan(
                     credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
                     delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
                     pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: `≥ ${popMin}% gate` },
-                    roc: { status: result.checks.roc.status, value: `${bestCandidate.roc.toFixed(0)}%`, reason: result.checks.roc.reason },
+                    roc: {
+                      status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail',
+                      value: `${bestCandidate.roc.toFixed(0)}%`,
+                      reason: `Min ${appliedRules.ROC_MIN_SPREAD}%`,
+                    },                    
                     oi: { status: result.checks.oi.status, value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`, reason: result.checks.oi.reason },
                   },
                 };
