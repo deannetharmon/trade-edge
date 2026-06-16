@@ -94,6 +94,13 @@ interface SpreadCandidate {
   callCredit?: number; callWidth?: number; totalCredit?: number; optimized?: boolean;
   shortOccSymbol?: string; longOccSymbol?: string;
   shortCallOccSymbol?: string; longCallOccSymbol?: string;
+  
+  shortBid?: number;
+  shortAsk?: number;
+  longBid?: number;
+  longAsk?: number;
+  quoteFetchedAt?: number;
+  
   // PMCC-specific
   longExpiration?: string; longDte?: number; longDelta?: number;
   longCost?: number; netDebit?: number; maxProfit?: number; extrinsicCapture?: number;
