@@ -4473,7 +4473,7 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
           }
         }}
           className="w-full ac-btn-solid text-white py-2.5 rounded-xl text-xs font-bold tracking-widest transition-colors shadow-lg border ac-border/30">
-          RUN HUNTER →
+          RUN SCREENER →
         </button>
       </div>
     </div>,
