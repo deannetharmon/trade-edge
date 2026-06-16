@@ -1382,18 +1382,14 @@ async function getAccessToken(): Promise<string> {
 }
 
 async function ttFetch(path: string, token: string): Promise<any> {
-  const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
-
-  const fetchOptions: RequestInit = {
+  const res = await fetch(`${BASE}${path}`, {
     cache: 'no-store',
     headers: {
       Authorization: `Bearer ${token}`,
       'Cache-Control': 'no-cache',
       Pragma: 'no-cache',
     },
-  };
-
-  const res = await fetch(url, fetchOptions);
+  });
 
   if (res.status === 401) {
     sessionStorage.removeItem('tt_access_token');
@@ -1403,11 +1399,13 @@ async function ttFetch(path: string, token: string): Promise<any> {
     } catch {}
 
     const freshToken = await getAccessToken();
-    const retry = await fetch(url, {
-      ...fetchOptions,
+
+    const retry = await fetch(`${BASE}${path}`, {
+      cache: 'no-store',
       headers: {
-        ...fetchOptions.headers,
         Authorization: `Bearer ${freshToken}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
     });
 
