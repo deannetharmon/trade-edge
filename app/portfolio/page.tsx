@@ -5141,7 +5141,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                   <p className={`text-xs ac-hover-text transition-colors ${pos.hitTarget ? 'text-emerald-400 font-bold' : th.textFaint}`}
                     style={{ fontFamily: "'DM Mono', monospace" }}>
                     ${pos.targetPrice.toFixed(2)}{pos.hitTarget && ' ✓'}
-                </p>
+                  </p>
+                </div>
               )}
               {!editingTarget && projection != null && projection.status === 'ontrack' && (
                 <p className="text-[9px] text-emerald-400">~by {projection.dateLabel}</p>
@@ -5149,7 +5150,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               {!editingTarget && projection != null && projection.status === 'unlikely' && (
                 <p className="text-[9px] text-yellow-400">50% unlikely before 21-DTE</p>
               )}
-            </div>
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
