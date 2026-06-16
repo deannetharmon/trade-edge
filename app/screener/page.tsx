@@ -1374,19 +1374,51 @@ async function getAccessToken(): Promise<string> {
 }
 
 async function ttFetch(path: string, token: string): Promise<any> {
-  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
+
+  const fetchOptions: RequestInit = {
+    cache: 'no-store',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+  };
+
+  const res = await fetch(url, fetchOptions);
+
   if (res.status === 401) {
-    // Token expired mid-session — clear both caches, get a fresh one, retry once
     sessionStorage.removeItem('tt_access_token');
-    try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
+    try {
+      localStorage.removeItem(LS_ACCESS_TOKEN);
+      localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY);
+    } catch {}
+
     const freshToken = await getAccessToken();
-    const retry = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${freshToken}` } });
-    if (!retry.ok) { const text = await retry.text(); throw new Error(`${path} failed (${retry.status}): ${text.slice(0, 200)}`); }
+    const retry = await fetch(url, {
+      ...fetchOptions,
+      headers: {
+        ...fetchOptions.headers,
+        Authorization: `Bearer ${freshToken}`,
+      },
+    });
+
+    if (!retry.ok) {
+      const text = await retry.text();
+      throw new Error(`${path} failed (${retry.status}): ${text.slice(0, 200)}`);
+    }
+
     return retry.json();
   }
-  if (!res.ok) { const text = await res.text(); throw new Error(`${path} failed (${res.status}): ${text.slice(0, 200)}`); }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${path} failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+
   return res.json();
 }
+
 async function loadPortfolioTickers(): Promise<{ current: string[]; historical: string[] }> {
   const token = await getAccessToken();
 
@@ -1591,7 +1623,20 @@ async function getChain(symbol: string, token: string, RULES: RulesType, dteWind
           : parsedIv;
       if (!expirations.includes(meta.expDate)) expirations.push(meta.expDate);
       if (!chains[meta.expDate]) chains[meta.expDate] = [];
-      chains[meta.expDate].push({ strikePrice: meta.strike, expirationDate: meta.expDate, optionType: meta.optionType, delta, openInterest: oi, bid, ask, mid: (bid + ask) / 2, occSymbol: item.symbol, iv });
+      chains[meta.expDate].push({
+      strikePrice: meta.strike,
+      expirationDate: meta.expDate,
+      optionType: meta.optionType,
+      delta,
+      openInterest: oi,
+      bid,
+      ask,
+      mid: (bid + ask) / 2,
+      occSymbol: item.symbol,
+      iv,
+      quoteUpdatedAt: item['updated-at'] ?? item['summary-date'] ?? null,
+      fetchedAt: Date.now(),
+    });
     }
   }
   expirations.sort(); return { expirations, chains, isEtfOrIndex };
@@ -1675,6 +1720,11 @@ function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string,
           shortOccSymbol: shortLeg.occSymbol,
           longOccSymbol: longLeg.occSymbol,
           shortIv: normalizeIv(shortLeg.iv),
+          shortBid: shortLeg.bid,
+          shortAsk: shortLeg.ask,
+          longBid: longLeg.bid,
+          longAsk: longLeg.ask,
+          quoteFetchedAt: Math.max(shortLeg.fetchedAt ?? 0, longLeg.fetchedAt ?? 0),
           expirationIvx: null,   // populated in runChecklist after candidate selected
           expectedMove: null,    // populated in runChecklist after candidate selected
         });
