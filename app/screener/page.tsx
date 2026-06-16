@@ -145,6 +145,7 @@ interface TrendResult {
     lowerLows: boolean;
   };
 }
+
 interface AutoTrendEntry {
   symbol: string;
   result: TrendResult;
