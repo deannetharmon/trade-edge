@@ -3468,6 +3468,9 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
     }
     return null;
   })();
+  const deltaExposure = c
+  ? Math.round(Math.abs(c.shortDelta) * 100)
+  : null;
 
   useEffect(() => {
     if (!existingPositions || existingPositions.length === 0) return;
@@ -3794,7 +3797,7 @@ const strategyScores = useMemo(() => {
                 <div>
                   <span className={th.label}>Cr Ratio </span>
                   <span className={`${getCreditColor(c, result.isEtf ?? false)} font-medium`}>
-                    {(c.creditRatio * 100).toFixed(0)}% of width
+                    {(c.creditRatio * 100).toFixed(0)}% 
                   </span>
                 </div>
               </div>
@@ -3810,6 +3813,12 @@ const strategyScores = useMemo(() => {
               <div className="text-xs shrink-0 w-16">
                 <div>
                   <span className={th.label}>Delta </span>
+                  <div>
+                  <span className={th.label}>Exposure </span>
+                  <span className={`${deltaExposure != null && deltaExposure <= 25 ? 'text-emerald-400' : deltaExposure != null && deltaExposure <= 35 ? 'text-yellow-400' : 'text-red-400'} font-medium`}>
+                    {deltaExposure != null ? deltaExposure : '—'}
+                  </span>
+                </div>
                   <span className={`${th.text} font-medium`}>{c.shortDelta.toFixed(2)}</span>
                 </div>
                 <div>
