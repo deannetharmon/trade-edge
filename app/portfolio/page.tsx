@@ -4834,6 +4834,30 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
   const rec = getRecommendation(pos, trend);
 
+  // ── 50%-target projection (theta-only, all-else-equal) ──
+  // pos.theta is per-share net theta with contract qty ALREADY applied (see assembly).
+  // $/day = pos.theta * 100. Do NOT multiply by qty again.
+  const projection = (() => {
+    if (pos.theta == null || pos.theta <= 0) return null;
+    if (pos.currentValue == null) return null;
+    const dailyDecay = pos.theta * 100;                 // $/day buyback erosion
+    const distToTarget = pos.currentValue - pos.targetPrice; // $ left to fall
+    if (distToTarget <= 0) {
+      return { dailyDecay, status: 'hit' as const, dateLabel: null as string | null };
+    }
+    const rawDays = distToTarget / dailyDecay;
+    const proj = new Date();
+    proj.setDate(proj.getDate() + Math.round(rawDays));
+    // 21-DTE management line
+    const dte21 = new Date(`${pos.expDate}T00:00:00`);
+    dte21.setDate(dte21.getDate() - 21);
+    const fmt = (d: Date) => `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
+    if (proj > dte21) {
+      return { dailyDecay, status: 'unlikely' as const, dateLabel: fmt(dte21) };
+    }
+    return { dailyDecay, status: 'ontrack' as const, dateLabel: fmt(proj) };
+  })();
+
   const shortPuts  = pos.legs.filter(l => l.optionType === 'P' && l.direction === 'Short');
   const longPuts   = pos.legs.filter(l => l.optionType === 'P' && l.direction === 'Long');
   const shortCalls = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Short');
@@ -5117,9 +5141,15 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                   <p className={`text-xs ac-hover-text transition-colors ${pos.hitTarget ? 'text-emerald-400 font-bold' : th.textFaint}`}
                     style={{ fontFamily: "'DM Mono', monospace" }}>
                     ${pos.targetPrice.toFixed(2)}{pos.hitTarget && ' ✓'}
-                  </p>
-                </div>
+                </p>
               )}
+              {!editingTarget && projection != null && projection.status === 'ontrack' && (
+                <p className="text-[9px] text-emerald-400">~by {projection.dateLabel}</p>
+              )}
+              {!editingTarget && projection != null && projection.status === 'unlikely' && (
+                <p className="text-[9px] text-yellow-400">50% unlikely before 21-DTE</p>
+              )}
+            </div>
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
