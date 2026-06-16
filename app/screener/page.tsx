@@ -3442,20 +3442,70 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   const scored = rankConfig ? scoreCandidate(result, rankConfig) : null;
   const light = scored ? trafficLight(scored.score, rankConfig!) : null;
   // Compute alternate strategy score for the + IC / + BPS badge
-  const altStrategyScore = useMemo(() => {
-    if (!rankConfig || !cachedEntry) return null;
-    const mainStrat = result.strategy;
-    const altStrat: 'IC' | 'BPS' | 'BCS' | null =
-      (mainStrat === 'BPS' || mainStrat === 'BCS') ? 'IC' : null;
-    if (!altStrat) return null;
+  // Compute visible strategy scores for this same symbol/expiration.
+// This is diagnostic first: it lets us see whether BPS, BCS, and IC are being
+// scored, rejected, or simply ranked lower.
+const strategyScores = useMemo(() => {
+  if (!rankConfig || !cachedEntry) return [];
+
+  const strategies: ('BPS' | 'BCS' | 'IC')[] = ['BPS', 'BCS', 'IC'];
+  const currentExp = result.bestCandidate?.expiration;
+
+  return strategies.map(strategy => {
     try {
-      const altResult = runChecklist(cachedEntry.symbol, altStrat, cachedEntry.metrics, cachedEntry.chainData, cachedEntry.price, rules, cachedEntry.trendResult);
-      const s = scoreCandidate(altResult, rankConfig);
-      if (!s) return null;
-      const l = trafficLight(s.score, rankConfig);
-      return { score: s.score, light: l, qualified: altResult.qualified };
-    } catch { return null; }
-  }, [cachedEntry, rankConfig, rules, result.strategy]);
+      const chainDataForExp = currentExp
+        ? {
+            ...cachedEntry.chainData,
+            expirations: [currentExp],
+            chains: {
+              [currentExp]: cachedEntry.chainData.chains[currentExp] ?? [],
+            },
+          }
+        : cachedEntry.chainData;
+
+      const strategyResult =
+        strategy === result.strategy
+          ? result
+          : runChecklist(
+              cachedEntry.symbol,
+              strategy,
+              cachedEntry.metrics,
+              chainDataForExp,
+              cachedEntry.price,
+              rules,
+              cachedEntry.trendResult
+            );
+
+      const scoredStrategy = scoreCandidate(strategyResult, rankConfig);
+
+      if (!scoredStrategy || !strategyResult.bestCandidate) {
+        return {
+          strategy,
+          score: null as number | null,
+          qualified: false,
+          reason: 'No candidate',
+          current: strategy === result.strategy,
+        };
+      }
+
+      return {
+        strategy,
+        score: scoredStrategy.score,
+        qualified: strategyResult.qualified,
+        reason: strategyResult.failReasons?.[0] ?? '',
+        current: strategy === result.strategy,
+      };
+    } catch {
+      return {
+        strategy,
+        score: null as number | null,
+        qualified: false,
+        reason: 'Error',
+        current: strategy === result.strategy,
+      };
+    }
+  });
+}, [cachedEntry, rankConfig, rules, result, result.strategy, result.bestCandidate?.expiration]);
   const isRankMode = screenMode === 'rank';
   const stratBadge = result.strategy === 'BPS'
     ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
@@ -3641,16 +3691,35 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
               {light.emoji} {scored.score} — {light.label}
             </span>
           )}
-          <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
-            {result.strategy}{scored && <span className="font-bold text-[9px]">{scored.score}</span>}
-          </span>
-          {(result.strategy === 'BPS' || result.strategy === 'BCS') && result.ivr != null && result.ivr >= 30 && (
-            <span className={`text-[9px] px-1.5 py-0.5 border rounded shrink-0 flex items-center gap-1 ${
-              altStrategyScore ? `${altStrategyScore.light.border} ${altStrategyScore.light.bg} ${altStrategyScore.light.color}` : 'border-slate-600 text-slate-400'
-            }`}>
-              + IC{altStrategyScore && <span className="font-bold">{altStrategyScore.score}</span>}
-            </span>
-          )}
+          {strategyScores.length > 0 ? (
+  strategyScores.map(s => {
+    const badgeClass =
+      s.strategy === 'BPS'
+        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
+        : s.strategy === 'BCS'
+          ? 'bg-red-500/15 border-red-500 text-red-500'
+          : 'bg-blue-500/15 border-blue-500 text-blue-500';
+
+    const dimClass = s.score == null ? 'opacity-40' : s.current ? '' : 'opacity-75';
+
+    return (
+      <span
+        key={s.strategy}
+        title={s.score == null ? s.reason : `${s.strategy} score ${s.score}`}
+        className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold flex items-center gap-1 ${badgeClass} ${dimClass}`}
+      >
+        {s.strategy}
+        <span className="font-bold text-[9px]">
+          {s.score == null ? '—' : s.score}
+        </span>
+      </span>
+    );
+  })
+) : (
+  <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
+    {result.strategy}{scored && <span className="font-bold text-[9px]">{scored.score}</span>}
+  </span>
+)}
         </div>
         {/* Col 3: Data fields — fixed widths */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
