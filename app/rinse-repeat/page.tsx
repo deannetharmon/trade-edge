@@ -807,9 +807,10 @@ function EnterTradeModal({ result, th, onClose }: {
 
       const ocoBody = {
         type: 'OCO',
+        source: 'options-screener',
         orders: [
-          { 'order-type': 'Limit',      'time-in-force': 'GTC', price: gtcNum.toFixed(2),  'price-effect': 'Debit', legs: closeLegs },
-          { 'order-type': 'Stop Limit', 'time-in-force': 'GTC', 'stop-trigger': stopNum.toFixed(2), price: stopNum.toFixed(2), 'price-effect': 'Debit', legs: closeLegs },
+          { 'order-type': 'Limit', 'time-in-force': 'GTC', price: gtcNum.toFixed(2), 'price-effect': 'Debit', legs: closeLegs },
+          { 'order-type': 'Stop',  'time-in-force': 'GTC', 'stop-trigger': stopNum.toFixed(2), legs: closeLegs },
         ],
       };
       const ocoRes = await ttPostComplex(`/accounts/${accountNum}/complex-orders`, token, ocoBody);
