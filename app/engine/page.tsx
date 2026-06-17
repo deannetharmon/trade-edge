@@ -368,8 +368,20 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
       currentPricesMap[sym] = last > 0 ? last : (bid + ask) / 2;
+    }
+  } catch {}
+
+  // IVR comes from /market-metrics, NOT the equity quote endpoint.
+  try {
+    const symbolsQs = watchlist.map(s => encodeURIComponent(s)).join(',');
+    const metricsData = await ttFetch(`/market-metrics?symbols=${symbolsQs}`, token);
+    for (const item of metricsData?.data?.items ?? []) {
+      const sym = item.symbol?.trim();
+      if (!sym) continue;
       const ivrRaw = item['implied-volatility-index-rank'];
-      ivrMap[sym] = ivrRaw != null ? (parseFloat(ivrRaw) > 1 ? Math.round(parseFloat(ivrRaw)) : Math.round(parseFloat(ivrRaw) * 100)) : null;
+      ivrMap[sym] = ivrRaw != null
+        ? (parseFloat(ivrRaw) > 1 ? Math.round(parseFloat(ivrRaw)) : Math.round(parseFloat(ivrRaw) * 100))
+        : null;
     }
   } catch {}
 
