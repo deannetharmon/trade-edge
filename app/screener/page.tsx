@@ -146,12 +146,6 @@ interface TrendResult {
   };
 }
 
-interface AutoTrendEntry {
-  symbol: string;
-  result: TrendResult;
-  route: AutoRoute;
-}
-
 interface ScreenResult {
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
@@ -318,8 +312,14 @@ interface FilterSuggestion {
   priority: number; rule: keyof RulesType; currentValue: number; suggestedValue: number;
   label: string; rationale: string; tradeoff: string; wouldQualify: number;
 }
+interface WatchlistTicker {
+  symbol: string;
+  classification: 'index' | 'etf' | 'stock';
+  active: boolean;
+}
 type SavedFilters = Record<string, string[]>;
 type GlobalFilters = Record<string, { bps: string[]; bcs: string[]; ic: string[] }>;
+type SavedWatchlists = Record<string, WatchlistTicker[]>;
 interface LoadPromptState {
   show: boolean; name: string; type: 'strategy' | 'global'; onLoad?: (merge: boolean) => void;
 }
@@ -832,7 +832,7 @@ function generateSuggestions(results: ScreenResult[], rules: RulesType): FilterS
 }
 
 // ── Persistent Saved Filters (LocalStorage + API fallback) ─────────────────
-async function loadFilters(strategy: string): Promise<SavedFilters | GlobalFilters> {
+async function loadFilters(strategy: string): Promise<SavedFilters | GlobalFilters | SavedWatchlists> {
   const lsKey = strategy === 'global' ? LS_GLOBAL_SESSIONS : LS_SAVED_FILTERS;
   try {
     const saved = localStorage.getItem(lsKey);
@@ -852,7 +852,7 @@ async function loadFilters(strategy: string): Promise<SavedFilters | GlobalFilte
 async function saveFilter(
   strategy: string,
   name: string,
-  payload: { tickers?: string[]; bps?: string[]; bcs?: string[]; ic?: string[] },
+  payload: { tickers?: string[] | WatchlistTicker[]; bps?: string[]; bcs?: string[]; ic?: string[] },
   replace = false
 ): Promise<{ success?: boolean; conflict?: boolean; message?: string }> {
   const lsKey = strategy === 'global' ? LS_GLOBAL_SESSIONS : LS_SAVED_FILTERS;
@@ -1056,12 +1056,7 @@ function saveRulesToStorage(rules: RulesType) {
 function saveEtfRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES_ETF, JSON.stringify(rules)); } catch {}
 }
-const TREND_DETECTION_CONCURRENCY = 8;
-const LS_BPS = 'hunter-tickers-bps';
-const LS_BCS = 'hunter-tickers-bcs';
-const LS_IC = 'hunter-tickers-ic';
 const LS_PMCC = 'hunter-tickers-pmcc';
-const LS_BROKEN = 'hunter-tickers-broken';
 const LS_CAL = 'hunter-cal-scheduled';
 const LS_CAL_ENTRY = 'hunter-cal-entry';
 const DTE_ALERT_THRESHOLD = 25;
@@ -1072,7 +1067,6 @@ const LS_SAVED_FILTERS = 'hunter-saved-filters';
 const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
 const LS_SCREEN_MODE = 'hunter-screen-mode';
 const LS_RANK_CONFIG = 'hunter-rank-config';
-const LS_SESSION_LOADED_AT = 'hunter-session-loaded-at';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache';
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
@@ -2581,55 +2575,19 @@ function LoadPromptModal({ state, onClose, th }: { state: LoadPromptState; onClo
 }
 
 // ── Sessions Panel ─────────────────────────────────────────────────────────
-function SessionsPanel({ bps, bcs, ic, broken, onLoadAll, onLoadPrompt, onReclassify, th }: {
-  bps: string; bcs: string; ic: string; broken: string;
-  onLoadAll: (bps: string, bcs: string, ic: string, broken: string) => void;
+function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
+  tickers: WatchlistTicker[];
+  onLoadAll: (tickers: WatchlistTicker[]) => void;
   onLoadPrompt: (state: Omit<LoadPromptState, 'show'>) => void;
-  onReclassify: (tickers: string[]) => Promise<void>;
   th: typeof THEMES[Theme];
 }) {
-  const [globalFilters, setGlobalFilters] = useState<GlobalFilters>({});
+  const [savedWatchlists, setSavedWatchlists] = useState<SavedWatchlists>({});
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saveError, setSaveError] = useState('');
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [portfolioStatus, setPortfolioStatus] = useState('');
-  const [lastLoadedName, setLastLoadedName] = useState<string | null>(null);
-  const [reclassifying, setReclassifying] = useState(false);
-  const [reclassifyStatus, setReclassifyStatus] = useState('');
-
-  const handleReclassify = async () => {
-    // Gather all tickers currently in the four boxes
-    const allTickers = [
-      ...normalizeTickerInput(bps),
-      ...normalizeTickerInput(bcs),
-      ...normalizeTickerInput(ic),
-      ...normalizeTickerInput(broken),
-    ];
-    if (allTickers.length === 0) {
-      setReclassifyStatus('⚠ No tickers in boxes');
-      setTimeout(() => setReclassifyStatus(''), 3000);
-      return;
-    }
-    setReclassifying(true);
-    setReclassifyStatus(`Analyzing ${allTickers.length} tickers...`);
-    try {
-      await onReclassify(allTickers);
-      setReclassifyStatus('✓ Done — tickers redistributed');
-      setTimeout(() => { setReclassifyStatus(''); setLastLoadedName(null); }, 3000);
-    } catch {
-      setReclassifyStatus('⚠ Error during re-classify');
-      setTimeout(() => setReclassifyStatus(''), 3000);
-    } finally {
-      setReclassifying(false);
-    }
-  };
-
-  const markSessionLoaded = (name: string) => {
-    setLastLoadedName(name);
-    try { localStorage.setItem(LS_SESSION_LOADED_AT, JSON.stringify({ name, at: Date.now() })); } catch {}
-  };
 
   const handleLoadFromPortfolio = async () => {
     setLoadingPortfolio(true);
@@ -2638,26 +2596,19 @@ function SessionsPanel({ bps, bcs, ic, broken, onLoadAll, onLoadPrompt, onReclas
       const { current, historical } = await loadPortfolioTickers();
       const all = [...current, ...historical];
       if (all.length === 0) { setPortfolioStatus('No positions found'); setTimeout(() => setPortfolioStatus(''), 3000); return; }
-      const allStr = all.join(', ');
       setPortfolioStatus(`Found ${current.length} current · ${historical.length} historical`);
       setTimeout(() => setPortfolioStatus(''), 4000);
-      // Check if boxes already have tickers
-      const hasExisting = [bps, bcs, ic].some(v => normalizeTickerInput(v).length > 0);
-      if (hasExisting) {
+      if (tickers.length > 0) {
         onLoadPrompt({
           name: `${all.length} tickers from portfolio`,
           type: 'strategy',
           onLoad: (doMerge: boolean) => {
-            if (doMerge) {
-              // Merge all into BPS box (user can redistribute)
-              onLoadAll(mergeTickers(bps, all), bcs, ic, broken);
-            } else {
-              onLoadAll(allStr, '', '', '');
-            }
+            if (doMerge) onLoadAll(mergeTickerLists(tickers, all));
+            else onLoadAll(mergeTickerLists([], all));
           },
         });
       } else {
-        onLoadAll(allStr, '', '', '');
+        onLoadAll(mergeTickerLists([], all));
       }
     } catch (e: any) {
       setPortfolioStatus(`Error: ${e.message}`);
@@ -2665,53 +2616,37 @@ function SessionsPanel({ bps, bcs, ic, broken, onLoadAll, onLoadPrompt, onReclas
     }
     setLoadingPortfolio(false);
   };
-  const parseTickers = normalizeTickerInput;
-  const refreshFilters = useCallback(async () => { const f = await loadFilters('global') as GlobalFilters; setGlobalFilters(f); }, []);
-  useEffect(() => { refreshFilters(); }, [refreshFilters]);
+
+  const refreshWatchlists = useCallback(async () => { const w = await loadWatchlists(); setSavedWatchlists(w); }, []);
+  useEffect(() => { refreshWatchlists(); }, [refreshWatchlists]);
+
   const handleSave = async (replace = false) => {
     if (!saveName.trim()) { setSaveError('Enter a session name'); return; }
-    const result = await saveFilter('global', saveName.trim(), { bps: parseTickers(bps), bcs: parseTickers(bcs), ic: parseTickers(ic) }, replace);
+    if (tickers.length === 0) { setSaveError('No tickers to save'); return; }
+    const result = await saveWatchlistPreset(saveName.trim(), tickers, replace);
     if (result.conflict) { setSaveError(`"${saveName}" exists — replace?`); return; }
-    await refreshFilters(); setShowSave(false); setSaveName(''); setSaveError('');
+    await refreshWatchlists(); setShowSave(false); setSaveName(''); setSaveError('');
   };
+
   const handleLoadSelect = (name: string) => {
-    const session = globalFilters[name]; if (!session) return; setShowLoad(false);
-    const allEmpty = !parseTickers(bps).length && !parseTickers(bcs).length && !parseTickers(ic).length;
-    if (allEmpty) {
-      onLoadAll(tickersToString(session.bps), tickersToString(session.bcs), tickersToString(session.ic), '');
-      markSessionLoaded(name);
-      return;
-    }
-    onLoadPrompt({ name, type: 'global', onLoad: (doMerge: boolean) => {
-      if (doMerge) onLoadAll(mergeTickers(bps, session.bps), mergeTickers(bcs, session.bcs), mergeTickers(ic, session.ic), broken);
-      else onLoadAll(tickersToString(session.bps), tickersToString(session.bcs), tickersToString(session.ic), '');
-      markSessionLoaded(name);
-    }});
+    const session = savedWatchlists[name]; if (!session) return; setShowLoad(false);
+    if (tickers.length === 0) { onLoadAll(session); return; }
+    onLoadPrompt({
+      name,
+      type: 'strategy',
+      onLoad: (doMerge: boolean) => {
+        if (doMerge) onLoadAll(mergeTickerLists(tickers, session.map(t => t.symbol)));
+        else onLoadAll(session);
+      },
+    });
   };
-  const handleDelete = async (name: string) => { await deleteFilter('global', name); await refreshFilters(); };
-  const filterNames = Object.keys(globalFilters);
+
+  const handleDelete = async (name: string) => { await deleteWatchlistPreset(name); await refreshWatchlists(); };
+  const sessionNames = Object.keys(savedWatchlists);
   return (
     <div className={`border-t ${th.border} pt-3`}>
       <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>SESSIONS</p>
 
-      {/* Loaded session indicator + re-classify */}
-      {lastLoadedName && (
-        <div className={`mb-2 px-2 py-1.5 rounded border border-yellow-700/50 bg-yellow-500/5 flex items-center justify-between gap-2`}>
-          <div>
-            <p className="text-[8px] text-yellow-400/80 leading-tight">Loaded: <span className="font-bold text-yellow-400">{lastLoadedName}</span></p>
-            {reclassifyStatus
-              ? <p className={`text-[8px] leading-tight ${reclassifyStatus.startsWith('✓') ? 'text-emerald-400' : 'text-yellow-400/70'}`}>{reclassifyStatus}</p>
-              : <p className="text-[8px] text-yellow-400/50 leading-tight">Trends may have shifted</p>
-            }
-          </div>
-          <button
-            onClick={handleReclassify}
-            disabled={reclassifying}
-            className="text-[8px] px-2 py-1 border border-yellow-600 text-yellow-400 rounded hover:bg-yellow-500/10 transition-colors font-bold shrink-0 whitespace-nowrap disabled:opacity-50">
-            {reclassifying ? '⟳ Analyzing...' : '↻ Re-classify'}
-          </button>
-        </div>
-      )}
       <div className="flex gap-2 mb-2">
         <button
           onClick={handleLoadFromPortfolio}
@@ -2722,12 +2657,12 @@ function SessionsPanel({ bps, bcs, ic, broken, onLoadAll, onLoadPrompt, onReclas
       </div>
       {portfolioStatus && <p className={`text-[9px] ${portfolioStatus.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'} mb-2`}>{portfolioStatus}</p>}
       <div className="flex gap-2">
-        <button onClick={() => onLoadAll('', '', '', '')} className={`text-[9px] px-2 py-1.5 border border-red-800 rounded-lg text-red-500 hover:border-red-500 hover:text-red-400 transition-colors font-medium flex items-center justify-center gap-1 shrink-0`}>✕ Clear</button>
+        <button onClick={() => onLoadAll([])} className={`text-[9px] px-2 py-1.5 border border-red-800 rounded-lg text-red-500 hover:border-red-500 hover:text-red-400 transition-colors font-medium flex items-center justify-center gap-1 shrink-0`}>✕ Clear</button>
         <div className="relative flex-1">
           <button onClick={() => { setShowSave(!showSave); setShowLoad(false); setSaveError(''); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>💾 Save Session</button>
           {showSave && (
             <div className={`absolute top-8 left-0 z-40 ${th.sidebar} border ${th.border} rounded-lg p-2 w-56 shadow-xl`}>
-              <p className={`text-[9px] ${th.textFaint} mb-1.5`}>Saves all three scan lists as one session</p>
+              <p className={`text-[9px] ${th.textFaint} mb-1.5`}>Saves the current watchlist as one session</p>
               <div className="flex gap-1 mb-1">
                 <input type="text" value={saveName} onChange={e => { setSaveName(e.target.value); setSaveError(''); }} placeholder="Session name..." onKeyDown={e => e.key === 'Enter' && handleSave()}
                   className={`flex-1 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[10px] ${th.text} focus:outline-none ac-focus placeholder-slate-500`} />
@@ -2738,11 +2673,11 @@ function SessionsPanel({ bps, bcs, ic, broken, onLoadAll, onLoadPrompt, onReclas
           )}
         </div>
         <div className="relative flex-1">
-          <button onClick={() => { setShowLoad(!showLoad); setShowSave(false); if (!showLoad) refreshFilters(); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>▼ Load Session</button>
+          <button onClick={() => { setShowLoad(!showLoad); setShowSave(false); if (!showLoad) refreshWatchlists(); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>▼ Load Session</button>
           {showLoad && (
             <div className={`absolute top-8 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg overflow-hidden w-56 shadow-xl`}>
-              {filterNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved sessions yet</p>
-                : filterNames.map(name => (
+              {sessionNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved sessions yet</p>
+                : sessionNames.map(name => (
                   <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
                     <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} hover:${th.text} text-left flex-1 font-medium`}>{name}</button>
                     <button onClick={() => handleDelete(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
@@ -2881,6 +2816,281 @@ function StrategyBox({ label, badge, badgeColor, borderFocus, value, onChange, s
         placeholder={`${label} tickers...`}
         className={`w-full ${th.input} border ${th.inputBorder} rounded-lg p-2 text-xs ${th.text} h-14 resize-none focus:outline-none ${borderFocus} placeholder-slate-500 leading-relaxed disabled:opacity-40`}
       />
+    </div>
+  );
+}
+
+// ── Unified watchlist persistence (live list) ──────────────────────────────
+// Talks to the authenticated /api/watchlist route (per-user, Redis-backed).
+// Falls back to localStorage only as a read-through cache for snappy reloads;
+// the server is the source of truth.
+const LS_WATCHLIST = 'hunter-watchlist';
+
+async function loadWatchlist(): Promise<WatchlistTicker[]> {
+  try {
+    const res = await fetch('/api/watchlist');
+    if (!res.ok) throw new Error(`Failed to load watchlist: ${res.status}`);
+    const data = await res.json();
+    const tickers: WatchlistTicker[] = data?.tickers ?? [];
+    try { localStorage.setItem(LS_WATCHLIST, JSON.stringify(tickers)); } catch {}
+    return tickers;
+  } catch {
+    try {
+      const cached = localStorage.getItem(LS_WATCHLIST);
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  }
+}
+
+async function persistWatchlist(tickers: WatchlistTicker[]): Promise<boolean> {
+  try { localStorage.setItem(LS_WATCHLIST, JSON.stringify(tickers)); } catch {}
+  try {
+    const res = await fetch('/api/watchlist', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ── Saved watchlist presets (named, reuses existing /api/filters route) ──
+// Stored under strategy key 'watchlist'. Same save/load/delete mechanics as
+// the existing BPS/BCS/IC saved filters, just with the richer object shape.
+async function loadWatchlists(): Promise<SavedWatchlists> {
+  return (await loadFilters('watchlist')) as SavedWatchlists;
+}
+
+async function saveWatchlistPreset(
+  name: string,
+  tickers: WatchlistTicker[],
+  replace = false
+): Promise<{ success?: boolean; conflict?: boolean; message?: string }> {
+  return saveFilter('watchlist', name, { tickers }, replace);
+}
+
+async function deleteWatchlistPreset(name: string): Promise<void> {
+  return deleteFilter('watchlist', name);
+}
+
+// ── Merge helper (array-native replacement for mergeTickers/tickersToString) ──
+// New symbols are classified automatically and added as inactive (opt-in).
+function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[]): WatchlistTicker[] {
+  const existingSymbols = new Set(existing.map(t => t.symbol));
+  const toAdd = normalizeTickerInput(newSymbols.join(','))
+    .filter(s => !existingSymbols.has(s))
+    .map((symbol): WatchlistTicker => ({
+      symbol,
+      classification: classifyUnderlying(symbol),
+      active: false,
+    }));
+  return [...existing, ...toAdd];
+}
+
+// ── WatchlistBox component ────────────────────────────────────────────────
+// Replaces the three StrategyBox instances (BPS/BCS/IC). One flat list,
+// grouped visually by Index/ETF/Stock classification, with a per-ticker
+// active checkbox driving scan inclusion. No strategy routing here —
+// strategy selection happens at scan time via trend detection (smart-skip).
+function WatchlistBox({
+  tickers,
+  onChange,
+  disabled,
+  onLoadPrompt,
+  th,
+}: {
+  tickers: WatchlistTicker[];
+  onChange: (tickers: WatchlistTicker[]) => void;
+  disabled?: boolean;
+  onLoadPrompt: (state: Omit<LoadPromptState, 'show'>) => void;
+  th: typeof THEMES[Theme];
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pendingSymbolsRef = useRef<string[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [savedWatchlists, setSavedWatchlists] = useState<SavedWatchlists>({});
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [showLoad, setShowLoad] = useState(false);
+  const [loadingPresets, setLoadingPresets] = useState(false);
+
+  const refreshPresets = useCallback(async () => {
+    setLoadingPresets(true);
+    const presets = await loadWatchlists();
+    setSavedWatchlists(presets);
+    setLoadingPresets(false);
+  }, []);
+  useEffect(() => { refreshPresets(); }, [refreshPresets]);
+
+  const handleAdd = () => {
+    if (!inputValue.trim()) return;
+    const symbols = normalizeTickerInput(inputValue);
+    if (symbols.length === 0) return;
+    onChange(mergeTickerLists(tickers, symbols));
+    setInputValue('');
+  };
+
+  const handleToggleActive = (symbol: string) => {
+    onChange(tickers.map(t => t.symbol === symbol ? { ...t, active: !t.active } : t));
+  };
+
+  const handleRemove = (symbol: string) => {
+    onChange(tickers.filter(t => t.symbol !== symbol));
+  };
+
+  const handleImgClick = () => {
+    if (fileRef.current) fileRef.current.value = '';
+    fileRef.current?.click();
+  };
+
+  const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return; setScanning(true);
+    try {
+      const symbols = await extractTickersFromImage(file);
+      if (symbols.length > 0) {
+        if (tickers.length > 0) {
+          pendingSymbolsRef.current = symbols;
+          onLoadPrompt({
+            name: `${symbols.length} ticker${symbols.length !== 1 ? 's' : ''} from image`,
+            type: 'strategy',
+            onLoad: (doMerge: boolean) => {
+              if (doMerge) onChange(mergeTickerLists(tickers, pendingSymbolsRef.current));
+              else onChange(mergeTickerLists([], pendingSymbolsRef.current));
+            },
+          });
+        } else {
+          onChange(mergeTickerLists([], symbols));
+        }
+      }
+    } catch (err: any) {
+      console.error('OCR error:', err?.message ?? err);
+    }
+    setScanning(false);
+  };
+
+  const handleSave = async (replace = false) => {
+    if (!saveName.trim()) { setSaveError('Enter a name'); return; }
+    if (tickers.length === 0) { setSaveError('No tickers to save'); return; }
+    const result = await saveWatchlistPreset(saveName.trim(), tickers, replace);
+    if (result.conflict) { setSaveError(`"${saveName}" exists — replace?`); return; }
+    await refreshPresets(); setShowSaveInput(false); setSaveName(''); setSaveError('');
+  };
+
+  const handleLoadSelect = (name: string) => {
+    const preset = savedWatchlists[name] ?? []; setShowLoad(false);
+    if (tickers.length === 0) { onChange(preset); return; }
+    onLoadPrompt({
+      name,
+      type: 'strategy',
+      onLoad: (doMerge: boolean) => {
+        if (doMerge) onChange(mergeTickerLists(tickers, preset.map(t => t.symbol)));
+        else onChange(preset);
+      },
+    });
+  };
+
+  const handleDeletePreset = async (name: string) => { await deleteWatchlistPreset(name); await refreshPresets(); };
+  const presetNames = Object.keys(savedWatchlists);
+
+  const indexes = tickers.filter(t => t.classification === 'index' || t.classification === 'etf');
+  const equities = tickers.filter(t => t.classification === 'stock');
+
+  const TickerChip = ({ t }: { t: WatchlistTicker }) => (
+    <div className={`flex items-center gap-1.5 px-2 py-1 border ${th.inputBorder} rounded-md`}>
+      <input
+        type="checkbox"
+        checked={t.active}
+        onChange={() => handleToggleActive(t.symbol)}
+        disabled={disabled}
+        className="cursor-pointer"
+      />
+      <span className={`text-[11px] font-medium ${t.active ? th.text : th.textMuted}`}>{t.symbol}</span>
+      <button
+        onClick={() => handleRemove(t.symbol)}
+        disabled={disabled}
+        className="text-[10px] text-slate-500 hover:text-red-500 transition-colors"
+      >✕</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-[10px] ${th.textMuted} font-medium tracking-wider`}>WATCHLIST</span>
+        <div className="flex items-center gap-1">
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleOCR} />
+          <button onClick={handleImgClick} disabled={disabled || scanning} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? '⟳' : '↑ img'}</button>
+          <div className="relative">
+            <button onClick={() => { setShowSaveInput(!showSaveInput); setShowLoad(false); setSaveError(''); }} disabled={disabled || tickers.length === 0} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>💾</button>
+            {showSaveInput && (
+              <div className={`absolute top-6 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg p-2 w-44 shadow-xl`}>
+                <div className="flex gap-1 mb-1">
+                  <input type="text" value={saveName} onChange={e => { setSaveName(e.target.value); setSaveError(''); }} placeholder="Watchlist name..." onKeyDown={e => e.key === 'Enter' && handleSave()}
+                    className={`flex-1 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[10px] ${th.text} focus:outline-none ac-focus placeholder-slate-500`} />
+                  <button onClick={() => handleSave()} className="text-[9px] px-1.5 py-1 ac-btn-solid text-white rounded font-medium">Save</button>
+                </div>
+                {saveError && (<div className="flex gap-1 items-center"><span className="text-[9px] text-yellow-400">{saveError}</span>{saveError.includes('exists') && <button onClick={() => handleSave(true)} className="text-[9px] px-1 py-0.5 bg-yellow-600 text-white rounded">Replace</button>}</div>)}
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <button onClick={() => { setShowLoad(!showLoad); setShowSaveInput(false); if (!showLoad) refreshPresets(); }} disabled={disabled} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>▼</button>
+            {showLoad && (
+              <div className={`absolute top-6 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg overflow-hidden w-44 shadow-xl`}>
+                {loadingPresets ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>Loading...</p>
+                  : presetNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved watchlists yet</p>
+                  : presetNames.map(name => (
+                    <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
+                      <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} text-left flex-1 font-medium`}>{name}</button>
+                      <button onClick={() => handleDeletePreset(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-1 mb-2">
+        <input
+          type="text"
+          value={inputValue}
+          onChange={e => setInputValue(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          disabled={disabled}
+          placeholder="Add tickers (comma-separated)..."
+          className={`flex-1 ${th.input} border ${th.inputBorder} rounded-lg px-2 py-1.5 text-xs ${th.text} focus:outline-none ac-focus placeholder-slate-500 disabled:opacity-40`}
+        />
+        <button onClick={handleAdd} disabled={disabled || !inputValue.trim()} className="text-[10px] px-3 py-1.5 ac-btn-solid text-white rounded-lg font-medium disabled:opacity-40">Add</button>
+      </div>
+
+      {tickers.length === 0 ? (
+        <p className={`text-[10px] ${th.textFaint} py-3 text-center`}>No tickers yet. Add some above to get started.</p>
+      ) : (
+        <div className="space-y-2">
+          {indexes.length > 0 && (
+            <div>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Indexes / ETFs ({indexes.length})</p>
+              <div className="flex flex-wrap gap-1">
+                {indexes.map(t => <TickerChip key={t.symbol} t={t} />)}
+              </div>
+            </div>
+          )}
+          {equities.length > 0 && (
+            <div>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Equities ({equities.length})</p>
+              <div className="flex flex-wrap gap-1">
+                {equities.map(t => <TickerChip key={t.symbol} t={t} />)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -4123,114 +4333,6 @@ const strategyScores = useMemo(() => {
   );
 }
 
-// ── Auto Trend Debug Panel ─────────────────────────────────────────────────
-function AutoTrendDebugPanel({ entries, th }: { entries: AutoTrendEntry[]; th: typeof THEMES[Theme] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (entries.length === 0) return null;
-
-  const stratColor = (s: string) =>
-    s === 'BPS' ? 'text-emerald-400 border-emerald-600 bg-emerald-500/10'
-    : s === 'BCS' ? 'text-red-400 border-red-600 bg-red-500/10'
-    : s === 'IC' ? 'text-blue-400 ac-border ac-bg-10'
-    : 'text-amber-400 border-amber-600 bg-amber-500/10';
-
-  const barColor = (val: number) =>
-    val > 0 ? 'bg-emerald-500' : val < 0 ? 'bg-red-500' : 'bg-slate-600';
-
-  const ScoreBar = ({ label, value, max = 50 }: { label: string; value: number; max?: number }) => {
-    const pct = Math.min(100, (Math.abs(value) / max) * 50); // 50% = center
-    const isPos = value >= 0;
-    return (
-      <div className="flex items-center gap-2">
-        <span className={`text-[9px] w-16 shrink-0 ${th.textFaint}`}>{label}</span>
-        <div className="flex-1 h-1.5 bg-slate-700 rounded-full relative overflow-hidden">
-          <div
-            className={`absolute h-full rounded-full ${barColor(value)}`}
-            style={{ width: `${pct}%`, left: isPos ? '50%' : `${50 - pct}%` }}
-          />
-          <div className="absolute left-1/2 top-0 w-px h-full bg-slate-500 opacity-50" />
-        </div>
-        <span className={`text-[9px] w-8 text-right font-mono shrink-0 ${value > 0 ? 'text-emerald-400' : value < 0 ? 'text-red-400' : th.textFaint}`}>
-          {value > 0 ? '+' : ''}{value}
-        </span>
-      </div>
-    );
-  };
-
-  return (
-    <div className={`border ${th.border} rounded-xl overflow-hidden`}>
-      <div className={`px-4 py-2.5 border-b ${th.border} flex items-center justify-between`}>
-        <p className={`text-[10px] font-bold tracking-widest ${th.textMuted}`}>TREND DETECT RESULTS</p>
-        <span className={`text-[9px] ${th.textFaint}`}>{entries.length} tickers</span>
-      </div>
-      <div className="divide-y divide-slate-800">
-        {entries.map(({ symbol, result, route }) => {
-            const s = result.scores;
-            const isOpen = expanded === symbol;
-            const label = route === 'REVIEW' ? 'REVIEW' : route;
-          return (
-            <div key={symbol}>
-              <button
-                className={`w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-800/40 transition-colors text-left`}
-                onClick={() => setExpanded(isOpen ? null : symbol)}
-              >
-                <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${stratColor(label)}`}>{label}</span>
-                <span className={`text-xs font-bold ${th.text} w-16 shrink-0`}>{symbol}</span>
-                <span className={`text-[9px] ${th.textFaint} flex-1 truncate`}>{result.reason}</span>
-                {s && (
-                  <span className={`text-[9px] font-mono shrink-0 ${s.total > 0 ? 'text-emerald-400' : s.total < 0 ? 'text-red-400' : th.textFaint}`}>
-                    {s.total > 0 ? '+' : ''}{s.total}
-                  </span>
-                )}
-                <span className={`text-[9px] ${th.textFaint} shrink-0`}>{isOpen ? '▲' : '▼'}</span>
-              </button>
-
-              {isOpen && s && (
-                <div className={`px-4 pb-3 pt-1 ${th.card} space-y-2`}>
-                  <p className={`text-[9px] ${th.textFaint} font-mono leading-relaxed mb-2`}>{result.reason}</p>
-                  <div className="space-y-1.5">
-                    <ScoreBar label="Momentum" value={s.momentum} max={50} />
-                    <ScoreBar label="MA Align" value={s.maAlignment} max={40} />
-                    <ScoreBar label="Slope" value={s.slope} max={25} />
-                    <ScoreBar label="Structure" value={s.structure} max={60} />
-                    <ScoreBar label="Chop ✗" value={-s.chop} max={25} />
-                    <ScoreBar label="Vol/Mat ✗" value={-s.volatility} max={40} />
-                  </div>
-                  <div className={`flex items-center justify-between pt-1.5 border-t ${th.border} mt-1`}>
-                    <span className={`text-[9px] font-bold ${th.textMuted}`}>TOTAL</span>
-                    <span className={`text-[10px] font-black font-mono ${s.total > 0 ? 'text-emerald-400' : s.total < 0 ? 'text-red-400' : th.textFaint}`}>
-                      {s.total > 0 ? '+' : ''}{s.total}
-                    </span>
-                  </div>
-                  {result.metrics && (
-                    <div className={`grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1.5 border-t ${th.border}`}>
-                      {[
-                        ['Mom 20d', `${(result.metrics.momentum20 * 100).toFixed(1)}%`],
-                        ['Mom 60d', `${(result.metrics.momentum60 * 100).toFixed(1)}%`],
-                        ['Mom 90d', `${(result.metrics.momentum90 * 100).toFixed(1)}%`],
-                        ['Range 60d', `${(result.metrics.range60 * 100).toFixed(1)}%`],
-                        ['Chop ratio', result.metrics.chopRatio.toFixed(1)],
-                        ['Dist MA50', `${(result.metrics.distFromMa50 * 100).toFixed(1)}%`],
-                        ['↑Hi/↑Lo', `${result.metrics.higherHighs ? '✓' : '✗'}/${result.metrics.higherLows ? '✓' : '✗'}`],
-                        ['↓Hi/↓Lo', `${result.metrics.lowerHighs ? '✓' : '✗'}/${result.metrics.lowerLows ? '✓' : '✗'}`],
-                      ].map(([k, v]) => (
-                        <div key={k} className="flex justify-between">
-                          <span className={`text-[9px] ${th.textFaint}`}>{k}</span>
-                          <span className={`text-[9px] font-mono ${th.textMuted}`}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── Range Indicator ────────────────────────────────────────────────────────
 function RangeIndicator({ value, strict, course, relaxed, lowvol, fmt }: {
   value: number; strict?: number; course?: number; relaxed?: number; lowvol?: number;
@@ -4685,180 +4787,6 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
       </div>
     </div>
   );
-}
-
-// ── Trend Detection with Yahoo Finance ──────────────────────────────────────
-type AutoRoute = 'BPS' | 'BCS' | 'IC' | 'REVIEW';
-
-function routeTrendResult(symbol: string, trendResult: TrendResult): AutoRoute {
-  const reason = trendResult.reason ?? '';
-  const score = trendResult.scores?.total ?? 0;
-  const rangeScore = trendResult.scores?.structure ?? 0;
-  const chopPenalty = trendResult.scores?.chop ?? 0;
-  const m = trendResult.metrics as any;
-
-  if (trendResult.strategy === 'BPS') return 'BPS';
-  if (trendResult.strategy === 'BCS') return 'BCS';
-  if (trendResult.strategy === 'IC') return 'IC';
-
-  // True bad-data / untradeable still goes to manual review, not bullish/bearish.
-  if (
-    reason.includes('catastrophic drop') ||
-    reason.includes('not yet tradeable') ||
-    reason.includes('no bars') ||
-    reason.includes('Not enough valid')
-  ) {
-    return 'REVIEW';
-  }
-
-  // Conflicting signal = REVIEW. Do not force into BPS just because score is positive.
-  if (reason.includes('conflicting signals')) {
-    return 'REVIEW';
-  }
-
-  // Extended bullish: review for possible CSP/BPS on pullback, but don't auto-place in BPS.
-  if (reason.includes('REVIEW EXTENDED') && trendResult.trend === 'uptrend') {
-    return 'REVIEW';
-  }
-
-  // Extended bearish: review for possible BCS/CC, but don't auto-place in BCS.
-  if (reason.includes('REVIEW EXTENDED') && trendResult.trend === 'downtrend') {
-    return 'REVIEW';
-  }
-
-  // True range/chop can go to IC only when directional strength is weak.
-  if (
-    reason.includes('NO_TRADE CHOP') ||
-    trendResult.subtype === 'CHOP' ||
-    trendResult.trend === 'sideways'
-  ) {
-    const directionalScore = Math.abs(score);
-    const chopRatio = m?.chopRatio ?? 0;
-
-    if (directionalScore <= 20 && (rangeScore >= 35 || chopRatio >= 2.5 || chopPenalty >= 10)) {
-      return 'IC';
-    }
-
-    return 'REVIEW';
-  }
-
-  return 'REVIEW';
-}
-
-async function runTrendDetection(
-  autoTickers: string,
-  bpsTickers: string,
-  bcsTickers: string,
-  icTickers: string,
-  brokenTickers: string,
-  handleBpsChange: (v: string) => void,
-  handleBcsChange: (v: string) => void,
-  handleIcChange: (v: string) => void,
-  handleBrokenChange: (v: string) => void,
-  setAutoTickers: (v: string) => void,
-  setError: (e: string) => void,
-  setStatus: (s: string) => void,
-  setLoading: (l: boolean) => void,
-  parseTickers: (s: string) => string[],
-  setAutoTrendEntries: (entries: AutoTrendEntry[]) => void,
-  showLoadPrompt: (state: Omit<LoadPromptState, 'show'>) => void
-) {
-  const autoList = Array.from(new Set(parseTickers(autoTickers)));
-  if (autoList.length === 0) {
-    setError('Enter at least one ticker for trend detection.');
-    return;
-  }
-
-  setError('');
-  setLoading(true);
-  setAutoTrendEntries([]);
-
-  try {
-    setStatus(`Analyzing ${autoList.length} ticker${autoList.length === 1 ? '' : 's'} with Yahoo Finance...`);
-    const distributions: { bps: string[]; bcs: string[]; ic: string[]; broken: string[] } = { bps: [], bcs: [], ic: [], broken: [] };
-    const entries: AutoTrendEntry[] = [];
-    let completed = 0;
-
-    const analyzeSymbol = async (symbol: string) => {
-      try {
-        const trendResult = await getTrend(symbol);
-        const route = routeTrendResult(symbol, trendResult);
-        entries.push({ symbol, result: trendResult, route });
-        if (route === 'BPS') {
-          distributions.bps.push(symbol);
-        } else if (route === 'BCS') {
-          distributions.bcs.push(symbol);
-        } else if (route === 'IC') {
-          distributions.ic.push(symbol);
-        } else {
-          distributions.broken.push(symbol);
-        }
-      } catch (e: any) {
-        const msg = e?.message ?? '';
-        const isInvalidSymbol = msg.includes('404') || msg.includes('no bars') || msg.includes('Not enough valid');
-        if (isInvalidSymbol) {
-          console.warn(`Skipping invalid/no-data symbol: ${symbol} — ${msg}`);
-        } else {
-          console.warn(`Trend detection error for ${symbol}: ${msg}`);
-          distributions.broken.push(symbol);
-        }
-      } finally {
-        completed += 1;
-        setStatus(`Analyzed ${completed}/${autoList.length} tickers...`);
-      }
-    };
-
-    for (let i = 0; i < autoList.length; i += TREND_DETECTION_CONCURRENCY) {
-      const chunk = autoList.slice(i, i + TREND_DETECTION_CONCURRENCY);
-      await Promise.all(chunk.map(analyzeSymbol));
-    }
-
-    // Sort entries to match strategy grouping order: BPS, BCS, IC, Review
-    const order = ['BPS', 'BCS', 'IC', 'REVIEW'];
-    entries.sort((a, b) => order.indexOf(a.route) - order.indexOf(b.route));
-    setAutoTrendEntries(entries);
-
-    const statusMsg = `✅ Trend detection complete: ${distributions.bps.length} BPS, ${distributions.bcs.length} BCS, ${distributions.ic.length} IC, ${distributions.broken.length} true review/error.`;
-
-    const applyDistributions = (doMerge: boolean) => {
-      if (doMerge) {
-        if (distributions.bps.length > 0) handleBpsChange(mergeTickers(bpsTickers, distributions.bps));
-        if (distributions.bcs.length > 0) handleBcsChange(mergeTickers(bcsTickers, distributions.bcs));
-        if (distributions.ic.length > 0) handleIcChange(mergeTickers(icTickers, distributions.ic));
-        if (distributions.broken.length > 0) handleBrokenChange(mergeTickers(brokenTickers, distributions.broken));
-      } else {
-        handleBpsChange(tickersToString(distributions.bps));
-        handleBcsChange(tickersToString(distributions.bcs));
-        handleIcChange(tickersToString(distributions.ic));
-        handleBrokenChange(tickersToString(distributions.broken));
-      }
-    };
-
-    // Check if any box already has tickers — if so, prompt replace vs merge
-    const hasExisting =
-      parseTickers(bpsTickers).length > 0 ||
-      parseTickers(bcsTickers).length > 0 ||
-      parseTickers(icTickers).length > 0 ||
-      parseTickers(brokenTickers).length > 0;
-
-    setAutoTickers('');
-    setStatus(statusMsg);
-
-    if (hasExisting) {
-      const total = distributions.bps.length + distributions.bcs.length + distributions.ic.length + distributions.broken.length;
-      showLoadPrompt({
-        name: `${total} ticker${total !== 1 ? 's' : ''} from trend detection`,
-        type: 'strategy',
-        onLoad: applyDistributions,
-      });
-    } else {
-      applyDistributions(false);
-    }
-  } catch (e: any) {
-    setError(e.message);
-  } finally {
-    setLoading(false);
-  }
 }
 
 // ── Yahoo Finance getTrend vNext ────────────────────────────────────────────
@@ -5643,22 +5571,22 @@ interface RawScanEntry {
 
 // ── Targeted Scan Runner ──────────────────────────────────────────────────
 async function runTargetedScan(
-  bpsTickers: string[], bcsTickers: string[], icTickers: string[],
+  symbols: string[],
   dteMin: number, dteMax: number, popMin: number,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
   cancelRef: React.MutableRefObject<boolean>,
 ): Promise<void> {
-  // PMCC excluded — different philosophy, not a spread strategy
-  const strategyMap: { symbol: string; primary: 'BPS' | 'BCS' | 'IC' }[] = [
-    ...bpsTickers.map(s => ({ symbol: s, primary: 'BPS' as const })),
-    ...bcsTickers.map(s => ({ symbol: s, primary: 'BCS' as const })),
-    ...icTickers.map(s => ({ symbol: s, primary: 'IC' as const })),
-  ];
+  // PMCC excluded — different philosophy, not a spread strategy.
+  // `primary` is a fallback label only — actual strategy exploration below
+  // tries BPS/BCS/IC per ticker regardless, and live trend (fetched per
+  // symbol) takes precedence over this label wherever it's available.
+  const strategyMap: { symbol: string; primary: 'BPS' | 'BCS' | 'IC' }[] =
+    Array.from(new Set(symbols)).map(symbol => ({ symbol, primary: 'IC' as const }));
   const allSymbols = Array.from(new Set(strategyMap.map(e => e.symbol)));
 
-  if (allSymbols.length === 0) { setError('No tickers in BPS / BCS / IC boxes.'); return; }
+  if (allSymbols.length === 0) { setError('No active tickers in watchlist.'); return; }
   setError(''); setLoading(true); setTargetedResults([]);
   cancelRef.current = false;
 
@@ -6132,14 +6060,16 @@ export default function Home() {
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
-  const [autoTickers, setAutoTickers] = useState('');
-  const autoFileRef = useRef<HTMLInputElement>(null);
-  const [autoScanning, setAutoScanning] = useState(false);
-  const autoPendingTickersRef = useRef<string[]>([]);
-  const [bpsTickers, setBpsTickers] = useState('');
-  const [bcsTickers, setBcsTickers] = useState('');
-  const [icTickers, setIcTickers] = useState('');
-  const [brokenTickers, setBrokenTickers] = useState('');
+  const [tickers, setTickers] = useState<WatchlistTicker[]>([]);
+  const [watchlistLoading, setWatchlistLoading] = useState(true);
+  useEffect(() => {
+    loadWatchlist().then(t => { setTickers(t); setWatchlistLoading(false); });
+  }, []);
+  const handleTickersChange = (next: WatchlistTicker[]) => {
+    setTickers(next);
+    clearResultsCache();
+    persistWatchlist(next);
+  };
   const [pmccTickers, setPmccTickers] = useState('');
   const [results, setResults] = useState<ScreenResult[]>(() => {
     try { const s = localStorage.getItem(LS_RESULTS_CACHE); return s ? JSON.parse(s) : []; } catch { return []; }
@@ -6163,16 +6093,12 @@ export default function Home() {
   const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>(() => {
     try { const m = localStorage.getItem(LS_SCREEN_MODE); return (m === 'filter' || m === 'rank' || m === 'targeted') ? m : 'filter'; } catch { return 'filter'; }
   });
-  const [sessionLoadedAt, setSessionLoadedAt] = useState<{ name: string; at: number } | null>(() => {
-    try { const s = localStorage.getItem(LS_SESSION_LOADED_AT); return s ? JSON.parse(s) : null; } catch { return null; }
-  });
   const [stockPresetLabel, setStockPresetLabel] = useState<string>(() => {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'Custom'; } catch { return 'Custom'; }
   });
   const [etfPresetLabel, setEtfPresetLabel] = useState<string>(() => {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET_ETF); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'ETF Custom'; } catch { return 'ETF Custom'; }
   });
-  const [autoTrendEntries, setAutoTrendEntries] = useState<AutoTrendEntry[]>([]);
   const [rankTopN, setRankTopN] = useState<number>(20);
   const [rankDteMin, setRankDteMin] = useState<number>(0);
   const [rankDteMax, setRankDteMax] = useState<number>(999);
@@ -6191,10 +6117,6 @@ export default function Home() {
   }, []);
   useEffect(() => {
     try {
-      setBpsTickers(localStorage.getItem(LS_BPS) || '');
-      setBcsTickers(localStorage.getItem(LS_BCS) || '');
-      setIcTickers(localStorage.getItem(LS_IC) || '');
-      setBrokenTickers(localStorage.getItem(LS_BROKEN) || '');
       setPmccTickers(localStorage.getItem(LS_PMCC) || '');
     } catch {}
   }, []);
@@ -6203,31 +6125,16 @@ export default function Home() {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null);
     try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RAW_SCAN_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
   };
-  const handleBpsChange = (v: string) => { setBpsTickers(v); clearResultsCache(); try { localStorage.setItem(LS_BPS, v); } catch {} };
-  const handleBcsChange = (v: string) => { setBcsTickers(v); clearResultsCache(); try { localStorage.setItem(LS_BCS, v); } catch {} };
-  const handleIcChange = (v: string) => { setIcTickers(v); clearResultsCache(); try { localStorage.setItem(LS_IC, v); } catch {} };
-  const handleBrokenChange = (v: string) => { setBrokenTickers(v); try { localStorage.setItem(LS_BROKEN, v); } catch {} };
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
-  const handleGlobalLoad = (newBps: string, newBcs: string, newIc: string, newBroken: string) => { handleBpsChange(newBps); handleBcsChange(newBcs); handleIcChange(newIc); handleBrokenChange(newBroken); if (!newBps && !newBcs && !newIc && !newBroken) { setResults([]); setAutoTrendEntries([]); } };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
 
   const parseTickers = normalizeTickerInput;
-  const autoTickerList = parseTickers(autoTickers);
 
   const downloadCSV = () => {
     const headers = ['Symbol','Strategy','Trend','Trend Subtype','Trend Confidence','Qualified','Price','IVR','Expiration','DTE','Short Put Strike','Long Put Strike','Put Width','Short Call Strike','Long Call Strike','Call Width','Short Delta','Credit','ROC%','POP%','Short OI','Long OI','Total Credit','Earnings Date','Fail Reasons'];
     const rows = results.map(r => { const c = r.bestCandidate; return [r.symbol,r.strategy,r.trendResult?.trend||'',r.trendResult?.subtype||'',r.trendResult?.confidence!=null?r.trendResult.confidence.toFixed(0)+'%':'',r.qualified?'YES':'NO',r.price?.toFixed(2)||'',r.ivr?.toFixed(1)||'',c?.expiration||'',c?.dte||'',c?.shortStrike||'',c?.longStrike||'',c?.spreadWidth||'',c?.shortCallStrike||'',c?.longCallStrike||'',c?.callWidth||'',c?.shortDelta?.toFixed(2)||'',c?.credit?.toFixed(2)||'',c?.roc?.toFixed(0)||'',c?.pop?.toFixed(0)||'',c?.shortOI||'',c?.longOI||'',c?.totalCredit?.toFixed(2)||'',r.earningsDate||'',r.failReasons.join('; ')].map(v=>`"${v}"`).join(','); });
     const blob = new Blob([[headers.join(','),...rows].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `hunter-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
-  };
-
-  const runTrendDetectionWrapper = () => {
-    return runTrendDetection(
-      autoTickers, bpsTickers, bcsTickers, icTickers, brokenTickers,
-      handleBpsChange, handleBcsChange, handleIcChange, handleBrokenChange,
-      setAutoTickers, setError, setStatus, setLoading, parseTickers,
-      setAutoTrendEntries, showLoadPrompt
-    );
   };
 
     // ── Apply rules client-side against cached raw scan data ──────────────────
@@ -6273,16 +6180,12 @@ export default function Home() {
   const runScreen = async (sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, modeOverride?: 'filter' | 'rank' | 'targeted') => {    setError('');
     setResults([]); setResultsCachedAt(null);
     try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
-    setAutoTrendEntries([]);
 
-    const autoList = parseTickers(autoTickers);
-    const bps = parseTickers(bpsTickers);
-    const bcs = parseTickers(bcsTickers);
-    const ic = parseTickers(icTickers);
+    const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
     const pmcc = parseTickers(pmccTickers);
 
-    if (!autoList.length && !bps.length && !bcs.length && !ic.length && !pmcc.length) {
-      setError('Enter at least one ticker.');
+    if (!activeSymbols.length && !pmcc.length) {
+      setError('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
       return;
     }
 
@@ -6294,7 +6197,7 @@ export default function Home() {
       setStatus('Getting access token...');
       const token = await getAccessToken();
 
-      const allSymbols = Array.from(new Set([...autoList, ...bps, ...bcs, ...ic, ...pmcc]));
+      const allSymbols = Array.from(new Set([...activeSymbols, ...pmcc]));
 
       setStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(allSymbols, token);
@@ -6315,21 +6218,29 @@ export default function Home() {
       // runChecklist will auto-select ETF rules internally per ticker
       const getChainRules = (isEtfTicker: boolean) => isEtfTicker ? eRules : sRules;
 
-      // Scan AUTO tickers (with trend detection)
-      for (let i = 0; i < autoList.length; i++) {
-        const symbol = autoList[i];
-        setStatus(`Scanning ${symbol} (${i+1}/${autoList.length})...`);
+      // Scan active watchlist tickers — one loop, smart-skip applied identically
+      // in Filter and Rank modes. Trend is fetched once per ticker and gates
+      // which strategy(ies) get attempted: NO_TRADE skips the ticker entirely,
+      // otherwise only the trend-recommended strategy is scanned. This is the
+      // "smart skip" behavior — not exploring all three strategies blindly.
+      for (let i = 0; i < activeSymbols.length; i++) {
+        const symbol = activeSymbols[i];
+        setStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
         let trendResult: TrendResult | undefined;
         try { trendResult = await getTrend(symbol); } catch (e) { console.warn(e); }
-        const trendStrategy: 'BPS' | 'BCS' | 'IC' =
-          trendResult?.strategy === 'BPS' || trendResult?.strategy === 'BCS' || trendResult?.strategy === 'IC'
-            ? trendResult.strategy : 'IC';
-        const isRankMode = (modeOverride ?? screenMode) === 'rank';
-        const strategiesToScan: ('BPS' | 'BCS' | 'IC')[] = isRankMode ? ['BPS', 'BCS', 'IC'] : [trendStrategy];
+
+        // NO_TRADE (or trend fetch failure) means the chart didn't qualify —
+        // skip this ticker entirely rather than guessing a strategy for it.
+        if (!trendResult || trendResult.strategy === 'NO_TRADE') {
+          continue;
+        }
+
+        const strategiesToScan: ('BPS' | 'BCS' | 'IC')[] = [trendResult.strategy];
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const isEtfTicker = INDEX_TICKERS.has(symbol.toUpperCase());
-          const rankDteWindow = (modeOverride ?? screenMode) === 'rank' ? { min: 7, max: 60 } : undefined;
+          const isRankMode = (modeOverride ?? screenMode) === 'rank';
+          const rankDteWindow = isRankMode ? { min: 7, max: 60 } : undefined;
           const [chainData, price] = await Promise.all([
             getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow),
             getQuote(symbol, token),
@@ -6343,44 +6254,7 @@ export default function Home() {
             }
           }
         } catch (e: any) {
-          screenResults.push(errResult(symbol, trendStrategy, e.message, trendResult));
-        }
-      }
-
-      // Scan manual boxes
-      for (const { symbols, strategy } of [
-        { symbols: bps, strategy: 'BPS' as const },
-        { symbols: bcs, strategy: 'BCS' as const },
-        { symbols: ic, strategy: 'IC' as const }
-      ]) {
-        for (const symbol of symbols) {
-          setStatus(`Scanning ${symbol}...`);
-          const isRankMode = (modeOverride ?? screenMode) === 'rank';
-          const strategiesToScan: ('BPS' | 'BCS' | 'IC')[] = isRankMode ? ['BPS', 'BCS', 'IC'] : [strategy];
-          try {
-            const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-            const isEtfTicker = INDEX_TICKERS.has(symbol.toUpperCase());
-            const chainRules = {
-              ...getChainRules(isEtfTicker),
-              DTE_MIN: RANK_SCAN_DTE_MIN,
-              DTE_MAX: RANK_SCAN_DTE_MAX,
-            };
-                        
-            const [chainData, price] = await Promise.all([
-              getChain(symbol, token, chainRules),
-              getQuote(symbol, token),
-            ]);
-            for (const s of strategiesToScan) {
-              scanCache.push({ symbol, strategy: s, metrics, chainData, price });
-              if (isRankMode) {
-                screenResults.push(...runChecklistAllExpirations(symbol, s, metrics, chainData, price, sRules, undefined, sLabel, eRules, eLabel));
-              } else {
-                screenResults.push(runChecklist(symbol, s, metrics, chainData, price, sRules, undefined, sLabel, eRules, eLabel));
-              }
-            }
-          } catch (e: any) {
-            screenResults.push(errResult(symbol, strategy, e.message));
-          }
+          screenResults.push(errResult(symbol, trendResult.strategy, e.message, trendResult));
         }
       }
 
@@ -6487,107 +6361,13 @@ export default function Home() {
       <div className="flex h-[calc(100vh-57px)]">
         {/* Sidebar */}
         <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-4 shrink-0`}>
-          {/* AUTO / TREND DETECT */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500 rounded-md tracking-wider font-bold">AUTO</span>
-                <span className={`text-[11px] ${th.textMuted} tracking-wider font-medium`}>TREND DETECT</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <input ref={autoFileRef} type="file" accept="image/*" className="hidden" onChange={async (e) => {
-                  const file = e.target.files?.[0]; if (!file) return; setAutoScanning(true);
-                  try {
-                    const tickers = await extractTickersFromImage(file);
-                    if (tickers.length > 0) {
-                      const hasExisting = autoTickers.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean).length > 0;
-                      if (hasExisting) {
-                        autoPendingTickersRef.current = tickers;
-                        showLoadPrompt({
-                          name: `${tickers.length} ticker${tickers.length !== 1 ? 's' : ''} from image`,
-                          type: 'strategy',
-                          onLoad: (doMerge: boolean) => {
-                            if (doMerge) setAutoTickers(mergeTickers(autoTickers, autoPendingTickersRef.current));
-                            else setAutoTickers(tickersToString(autoPendingTickersRef.current));
-                          },
-                        });
-                      } else {
-                        setAutoTickers(tickersToString(tickers));
-                      }
-                    } else {
-                      setError('No tickers found in image');
-                    }
-                  } catch (err: any) {
-                    console.error(err);
-                    setError(`OCR error: ${err?.message ?? 'unknown'}`);
-                  }
-                  setAutoScanning(false);
-                }} />
-                <button onClick={() => { if (autoFileRef.current) autoFileRef.current.value = ''; autoFileRef.current?.click(); }} disabled={loading || autoScanning}
-                  className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>
-                  {autoScanning ? '⟳' : '↑ img'}
-                </button>
-                <span className={`text-[9px] font-medium ${th.textFaint}`}>{autoTickerList.length}</span>
-              </div>
-            </div>
-            <textarea value={autoTickers} onChange={e => { setAutoTickers(e.target.value); setRawScanCache([]); }} placeholder="AAPL, MSFT, XOM&#10;auto-detects BPS/BCS/IC → assigns to boxes below"
-              className={`w-full ${th.input} border ${th.inputBorder} rounded-lg p-2 text-xs ${th.text} h-16 resize-none focus:outline-none focus:border-purple-500 placeholder-slate-500 leading-relaxed`} />
-            <div className="flex items-center justify-between mt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Yahoo trend detection</p>
-              <div className="flex items-center gap-1">
-                {autoTickerList.length > 0 && (
-                  <button
-                    onClick={() => setAutoTickers('')}
-                    disabled={loading}
-                    className="text-[9px] px-2 py-1 border border-red-800 rounded text-red-500 hover:border-red-500 hover:text-red-400 transition-colors disabled:opacity-40 font-bold"
-                  >
-                    ✕
-                  </button>
-                )}
-                <button
-                  onClick={runTrendDetectionWrapper}
-                  disabled={loading || autoTickerList.length === 0}
-                  className="text-[9px] px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded font-bold tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {loading ? '...' : 'ANALYZE TRENDS'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <WatchlistBox tickers={tickers} onChange={handleTickersChange} disabled={loading || watchlistLoading} onLoadPrompt={showLoadPrompt} th={th} />
 
-          <SessionsPanel bps={bpsTickers} bcs={bcsTickers} ic={icTickers} broken={brokenTickers} onLoadAll={handleGlobalLoad} onLoadPrompt={showLoadPrompt} onReclassify={async (tickers) => {
-            // Clear boxes, put all tickers into auto box, run trend detection
-            handleBpsChange('');
-            handleBcsChange('');
-            handleIcChange('');
-            handleBrokenChange('');
-            const tickerStr = tickers.join(', ');
-            await runTrendDetection(
-              tickerStr, '', '', '', '',
-              handleBpsChange, handleBcsChange, handleIcChange, handleBrokenChange,
-              () => {}, setError, setStatus, setLoading, parseTickers,
-              setAutoTrendEntries, showLoadPrompt
-            );
-          }} th={th} />
+          <SessionsPanel tickers={tickers} onLoadAll={handleTickersChange} onLoadPrompt={showLoadPrompt} th={th} />
 
           <div className={`border-t ${th.border} pt-3 space-y-4`}>
-            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>SCAN LISTS</p>
-            <StrategyBox label="BPS" badge="BULLISH" badgeColor="bg-emerald-500/15 text-emerald-500 border-emerald-500" borderFocus="focus:border-emerald-500" value={bpsTickers} onChange={handleBpsChange} strategy="BPS" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-            <StrategyBox label="BCS" badge="BEARISH" badgeColor="bg-red-500/15 text-red-500 border-red-500" borderFocus="focus:border-red-500" value={bcsTickers} onChange={handleBcsChange} strategy="BCS" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-            <StrategyBox label="IC" badge="NEUTRAL" badgeColor="bg-blue-500/15 text-blue-500 border-blue-500" borderFocus="ac-focus" value={icTickers} onChange={handleIcChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
+            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>PMCC (SEPARATE LIST)</p>
             <StrategyBox label="PMCC" badge="BULLISH+" badgeColor="bg-purple-500/15 text-purple-400 border-purple-500" borderFocus="focus:border-purple-500" value={pmccTickers} onChange={handlePmccChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-            <StrategyBox
-              label="Review / Error"
-              badge="REVIEW"
-              badgeColor="bg-amber-500/15 text-amber-500 border-amber-500"
-              borderFocus="focus:border-amber-500"
-              value={brokenTickers}
-              onChange={handleBrokenChange}
-              strategy="broken"
-              disabled={loading}
-              onLoadPrompt={showLoadPrompt}
-              th={th}
-            />
           </div>
 
           {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">{error}</div>}
@@ -6680,43 +6460,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* Stale session warning */}
-          {sessionLoadedAt && (() => {
-            const daysSince = (Date.now() - sessionLoadedAt.at) / (1000 * 60 * 60 * 24);
-            if (daysSince < 2) return null;
-            return (
-              <div className="mb-4 px-4 py-3 border border-yellow-600/50 bg-yellow-500/8 rounded-lg flex items-start gap-3">
-                <span className="text-yellow-400 text-sm mt-0.5"> </span>
-                <div className="flex-1">
-                  <p className="text-xs text-yellow-400 font-bold tracking-wider">STALE SESSION — "{sessionLoadedAt.name}"</p>
-                  <p className="text-[10px] text-yellow-400/70 mt-0.5">
-                    Loaded {Math.floor(daysSince)} day{Math.floor(daysSince) !== 1 ? 's' : ''} ago. Market conditions may have shifted — tickers could belong in different boxes now.
-                  </p>
-                </div>
-                <button
-                  onClick={async () => {
-                    const tickers = [...parseTickers(bpsTickers), ...parseTickers(bcsTickers), ...parseTickers(icTickers), ...parseTickers(brokenTickers)];
-                    if (tickers.length === 0) return;
-                    handleBpsChange(''); handleBcsChange(''); handleIcChange(''); handleBrokenChange('');
-                    setSessionLoadedAt(null);
-                    try { localStorage.removeItem(LS_SESSION_LOADED_AT); } catch {}
-                    await runTrendDetection(
-                      tickers.join(', '), '', '', '', '',
-                      handleBpsChange, handleBcsChange, handleIcChange, handleBrokenChange,
-                      () => {}, setError, setStatus, setLoading, parseTickers,
-                      setAutoTrendEntries, showLoadPrompt
-                    );
-                  }}
-                  className="text-[9px] px-3 py-1.5 border border-yellow-600 text-yellow-400 rounded hover:bg-yellow-500/10 transition-colors font-bold shrink-0 whitespace-nowrap">
-                  ↻ Re-classify now
-                </button>
-                <button
-                  onClick={() => { setSessionLoadedAt(null); try { localStorage.removeItem(LS_SESSION_LOADED_AT); } catch {} }}
-                  className="text-yellow-600 hover:text-yellow-400 text-sm shrink-0">✕</button>
-              </div>
-            );
-          })()}
-          {results.length === 0 && targetedResults.length === 0 && !loading && autoTrendEntries.length === 0 && (
+          {results.length === 0 && targetedResults.length === 0 && !loading && (
             <div className={`h-full flex flex-col items-center justify-center ${th.textFaint}`}>
               <div className="text-4xl mb-3 opacity-20">◈</div>
               <p className={`text-[10px] tracking-widest ${th.textMuted}`}>ADD TICKERS AND RUN HUNTER</p>
@@ -6725,12 +6469,6 @@ export default function Home() {
           )}
           {loading && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
 
-          {/* Trend detect debug panel — shown after ANALYZE TRENDS, cleared when RUN HUNTER fires */}
-          {!loading && autoTrendEntries.length > 0 && results.length === 0 && (
-            <div className="space-y-4">
-              <AutoTrendDebugPanel entries={autoTrendEntries} th={th} />
-            </div>
-          )}
           {(results.length > 0 || targetedResults.length > 0) && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -6914,10 +6652,8 @@ export default function Home() {
               const foundPreset = RULE_PRESETS.find(p => p.key === targetedOpts.preset);
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
-              const bps = parseTickers(bpsTickers);
-              const bcs = parseTickers(bcsTickers);
-              const ic = parseTickers(icTickers);
-              runTargetedScan(bps, bcs, ic, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, targetedCancelRef);
+              const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, targetedCancelRef);
             } else if (mode === 'rank') {
               runScreen(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel, 'rank');
             } else {
