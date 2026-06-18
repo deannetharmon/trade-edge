@@ -314,7 +314,7 @@ interface FilterSuggestion {
 }
 interface WatchlistTicker {
   symbol: string;
-  classification: 'index' | 'etf' | 'stock';
+  classification: 'index' | 'etf' | 'stock' | 'pending';
   active: boolean;
 }
 type SavedFilters = Record<string, string[]>;
@@ -905,29 +905,36 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
   } catch {}
 }
 
-// ── Index / ETF overrides ──────────────────────────────────────────────────
-const INDEX_TICKERS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'HYG', 'LQD', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'XLY', 'EEM', 'EFA', 'VXX', 'UVXY', 'ARKK', 'SMH', 'SOXX', 'XBI', 'IBB', 'GDX']);
-const INDEX_IVR_MIN = 15;
+// ── Underlying classification ────────────────────────────────────────────
+// Pure API-based classification — no hardcoded ticker lists.
+// Calls TastyTrade's /instruments/equities/{symbol} endpoint, which returns
+// is-index and is-etf booleans. A 404 means the symbol isn't an equity at
+// all (true cash-settled indexes like SPX/VIX have no shares), so we treat
+// a 404 as 'index'. Results are cached in-memory for the session.
+const classificationCache = new Map<string, 'index' | 'etf' | 'stock'>();
 
-// ── Underlying classification ──────────────────────────────────────────────
-// Three-way split drives buffer thresholds in scoring.
-// Index = broad market instruments that can move 1-2% intraday
-// ETF   = sector/thematic funds, less volatile than single stocks
-// Stock = individual equities, highest intraday swing potential
-const PURE_INDEX_TICKERS = new Set(['SPX', 'SPXW', 'NDX', 'RUT', 'VIX', 'SPY', 'QQQ', 'IWM', 'DIA']);
-const SECTOR_ETF_TICKERS = new Set(['GLD', 'SLV', 'TLT', 'HYG', 'LQD', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC', 'XLY', 'EEM', 'EFA', 'VXX', 'UVXY', 'ARKK', 'SMH', 'SOXX', 'XBI', 'IBB', 'GDX']);
-
-function classifyUnderlying(symbol: string, instrumentType?: string): 'index' | 'etf' | 'stock' {
+async function classifyUnderlying(symbol: string, token: string): Promise<'index' | 'etf' | 'stock'> {
   const s = symbol.toUpperCase();
-  if (PURE_INDEX_TICKERS.has(s)) return 'index';
-  if (SECTOR_ETF_TICKERS.has(s)) return 'etf';
-  if (instrumentType) {
-    const t = instrumentType.toLowerCase();
-    if (t.includes('index') || t.includes('future')) return 'index';
-    if (t.includes('etf')) return 'etf';
+  const cached = classificationCache.get(s);
+  if (cached) return cached;
+
+  let result: 'index' | 'etf' | 'stock';
+  try {
+    const data = await ttFetch(`/instruments/equities/${s}`, token);
+    const item = data?.data;
+    if (item?.['is-index']) result = 'index';
+    else if (item?.['is-etf']) result = 'etf';
+    else result = 'stock';
+  } catch {
+    // Not found as an equity at all — true cash-settled indexes (SPX, VIX,
+    // NDX, RUT) have no equity record, so absence of a record means index.
+    result = 'index';
   }
-  return 'stock';
+  classificationCache.set(s, result);
+  return result;
 }
+
+const INDEX_IVR_MIN = 15;
 
 // Buffer thresholds by underlying type and DTE bucket.
 // Returns a 0–1 normalized score; caller multiplies by weightBuffer.
@@ -1242,7 +1249,7 @@ function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number;
             ((result.price - c.shortStrike) / result.price) * 100,
             ((c.shortCallStrike != null ? c.shortCallStrike - result.price : result.price) / result.price) * 100
           );
-    const uType = result.underlyingType ?? classifyUnderlying(result.symbol);
+    const uType = result.underlyingType ?? 'stock';
     bufferScore = scoreBuffer(bufferPct, c.dte, uType) * (cfg.weightBuffer ?? 25);
   }
 
@@ -1380,8 +1387,6 @@ async function ttFetch(path: string, token: string): Promise<any> {
     cache: 'no-store',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
     },
   });
 
@@ -1398,8 +1403,6 @@ async function ttFetch(path: string, token: string): Promise<any> {
       cache: 'no-store',
       headers: {
         Authorization: `Bearer ${freshToken}`,
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
       },
     });
 
@@ -1562,16 +1565,14 @@ async function getQuote(symbol: string, token: string): Promise<number | null> {
     return last ?? (bid && ask ? (bid + ask) / 2 : null);
   } catch { return null; }
 }
-async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean }> {
+async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   // dteWindow overrides the rule-set DTE gate when provided (rank mode passes a fixed wide window).
   const gateMin = dteWindow ? dteWindow.min : ((Number.isFinite(RULES.DTE_MIN) ? RULES.DTE_MIN : 0) - 5);
   const gateMax = dteWindow ? dteWindow.max : ((Number.isFinite(RULES.DTE_MAX) ? RULES.DTE_MAX : 60) + 5);
   const [loDte, hiDte] = gateMin <= gateMax ? [gateMin, gateMax] : [gateMax, gateMin];
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  // Detect ETF/Index from TastyTrade instrument-type — no hardcoded list needed
-  const instrumentType: string = nested?.data?.items?.[0]?.['instrument-type'] ?? '';
-  const isEtfOrIndex = ['ETF', 'Index', 'Future'].some(t => instrumentType.toLowerCase().includes(t.toLowerCase()))
-    || INDEX_TICKERS.has(symbol.toUpperCase()); // fallback for known tickers
+  const classification = await classifyUnderlying(symbol, token);
+  const isEtfOrIndex = classification === 'index' || classification === 'etf';
   const expirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
@@ -1591,7 +1592,7 @@ async function getChain(symbol: string, token: string, RULES: RulesType, dteWind
       if (putSym) { allOCCSymbols.push(putSym); symbolMeta[putSym] = { expDate, strike: strikePrice, optionType: 'P' }; }
     }
   }
-  if (allOCCSymbols.length === 0) return { expirations, chains, isEtfOrIndex };
+  if (allOCCSymbols.length === 0) return { expirations, chains, isEtfOrIndex, classification };
   for (let i = 0; i < allOCCSymbols.length; i += 100) {
     const chunk = allOCCSymbols.slice(i, i + 100);
     const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
@@ -1639,15 +1640,14 @@ async function getChain(symbol: string, token: string, RULES: RulesType, dteWind
     });
     }
   }
-  expirations.sort(); return { expirations, chains, isEtfOrIndex };
+  expirations.sort(); return { expirations, chains, isEtfOrIndex, classification };
 }
 
 // PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
-async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean }> {
+async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  const instrumentType: string = nested?.data?.items?.[0]?.['instrument-type'] ?? '';
-  const isEtfOrIndex = ['ETF', 'Index', 'Future'].some(t => instrumentType.toLowerCase().includes(t.toLowerCase()))
-    || INDEX_TICKERS.has(symbol.toUpperCase());
+  const classification = await classifyUnderlying(symbol, token);
+  const isEtfOrIndex = classification === 'index' || classification === 'etf';
   const shortExpirations: string[] = [], longExpirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
@@ -1664,7 +1664,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
     if (isShortWindow) shortExpirations.push(expDate);
     else longExpirations.push(expDate);
   }
-  if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex };
+  if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
   for (let i = 0; i < allOCCSymbols.length; i += 100) {
     const chunk = allOCCSymbols.slice(i, i + 100);
     const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
@@ -1680,7 +1680,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
     }
   }
   shortExpirations.sort(); longExpirations.sort();
-  return { shortExpirations, longExpirations, chains, isEtfOrIndex };
+  return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
 }
 
 // ── HUNTER Logic ─────────────────────────────────────────────────────────
@@ -1972,7 +1972,7 @@ function findBestPMCC(
 
 function runPMCCChecklist(
   symbol: string,
-  pmccChainData: { shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean },
+  pmccChainData: { shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification?: 'index' | 'etf' | 'stock' },
   price: number | null,
   metrics: any,
   trendResult?: TrendResult
@@ -2040,14 +2040,14 @@ function runPMCCChecklist(
     symbol, strategy: 'PMCC', price, ivr: ivrValue,
     ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
     qualified, bestCandidate, failReasons,
-    earningsDate, trendResult, isEtf: false, underlyingType: classifyUnderlying(symbol), ruleSetApplied: 'PMCC',
+    earningsDate, trendResult, isEtf: false, underlyingType: pmccChainData.classification ?? 'stock', ruleSetApplied: 'PMCC',
     checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for PMCC' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for PMCC' } },
   };
 }
 
-function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
+function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
   const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
-  const isIndex = chainData.isEtfOrIndex ?? INDEX_TICKERS.has(symbol.toUpperCase());
+  const isIndex = chainData.isEtfOrIndex ?? false;
   // Auto-select the right rule set based on ticker type
   const RULES = isIndex ? (ETF_RULES_PARAM ?? { ...DEFAULT_ETF_RULES }) : STOCK_RULES;
   const appliedLabel = isIndex
@@ -2216,7 +2216,7 @@ bestCandidate = strategy === 'IC'
     ivHv30Diff: metrics.ivHv30Diff ?? null,
     liquidityRating: metrics.liquidityRating ?? null,
     qualified, bestCandidate, failReasons, earningsDate, trendResult,
-    isEtf: isIndex, underlyingType: classifyUnderlying(symbol), ruleSetApplied: appliedLabel,
+    isEtf: isIndex, underlyingType: chainData.classification ?? 'stock', ruleSetApplied: appliedLabel,
     checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, iv: ivCheck, emClearance: emClearanceCheck, credit: creditCheck, roc: rocCheck, pop: popCheck },
   };
 }
@@ -2598,17 +2598,18 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
       if (all.length === 0) { setPortfolioStatus('No positions found'); setTimeout(() => setPortfolioStatus(''), 3000); return; }
       setPortfolioStatus(`Found ${current.length} current · ${historical.length} historical`);
       setTimeout(() => setPortfolioStatus(''), 4000);
+      const token = await getAccessToken();
       if (tickers.length > 0) {
         onLoadPrompt({
           name: `${all.length} tickers from portfolio`,
           type: 'strategy',
-          onLoad: (doMerge: boolean) => {
-            if (doMerge) onLoadAll(mergeTickerLists(tickers, all));
-            else onLoadAll(mergeTickerLists([], all));
+          onLoad: async (doMerge: boolean) => {
+            if (doMerge) onLoadAll(await mergeTickerLists(tickers, all, token));
+            else onLoadAll(await mergeTickerLists([], all, token));
           },
         });
       } else {
-        onLoadAll(mergeTickerLists([], all));
+        onLoadAll(await mergeTickerLists([], all, token));
       }
     } catch (e: any) {
       setPortfolioStatus(`Error: ${e.message}`);
@@ -2634,9 +2635,11 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
     onLoadPrompt({
       name,
       type: 'strategy',
-      onLoad: (doMerge: boolean) => {
-        if (doMerge) onLoadAll(mergeTickerLists(tickers, session.map(t => t.symbol)));
-        else onLoadAll(session);
+      onLoad: async (doMerge: boolean) => {
+        if (doMerge) {
+          const token = await getAccessToken();
+          onLoadAll(await mergeTickerLists(tickers, session.map(t => t.symbol), token));
+        } else onLoadAll(session);
       },
     });
   };
@@ -2645,7 +2648,7 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
   const sessionNames = Object.keys(savedWatchlists);
   return (
     <div className={`border-t ${th.border} pt-3`}>
-      <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>SESSIONS</p>
+      <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>TICKER LISTS</p>
 
       <div className="flex gap-2 mb-2">
         <button
@@ -2659,7 +2662,7 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
       <div className="flex gap-2">
         <button onClick={() => onLoadAll([])} className={`text-[9px] px-2 py-1.5 border border-red-800 rounded-lg text-red-500 hover:border-red-500 hover:text-red-400 transition-colors font-medium flex items-center justify-center gap-1 shrink-0`}>✕ Clear</button>
         <div className="relative flex-1">
-          <button onClick={() => { setShowSave(!showSave); setShowLoad(false); setSaveError(''); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>💾 Save Session</button>
+          <button onClick={() => { setShowSave(!showSave); setShowLoad(false); setSaveError(''); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>💾 Save List</button>
           {showSave && (
             <div className={`absolute top-8 left-0 z-40 ${th.sidebar} border ${th.border} rounded-lg p-2 w-56 shadow-xl`}>
               <p className={`text-[9px] ${th.textFaint} mb-1.5`}>Saves the current watchlist as one session</p>
@@ -2673,7 +2676,7 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
           )}
         </div>
         <div className="relative flex-1">
-          <button onClick={() => { setShowLoad(!showLoad); setShowSave(false); if (!showLoad) refreshWatchlists(); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>▼ Load Session</button>
+          <button onClick={() => { setShowLoad(!showLoad); setShowSave(false); if (!showLoad) refreshWatchlists(); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>▼ Load List</button>
           {showLoad && (
             <div className={`absolute top-8 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg overflow-hidden w-56 shadow-xl`}>
               {sessionNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved sessions yet</p>
@@ -2827,19 +2830,39 @@ function StrategyBox({ label, badge, badgeColor, borderFocus, value, onChange, s
 const LS_WATCHLIST = 'hunter-watchlist';
 
 async function loadWatchlist(): Promise<WatchlistTicker[]> {
+  let stored: WatchlistTicker[] = [];
   try {
     const res = await fetch('/api/watchlist');
     if (!res.ok) throw new Error(`Failed to load watchlist: ${res.status}`);
     const data = await res.json();
-    const tickers: WatchlistTicker[] = data?.tickers ?? [];
-    try { localStorage.setItem(LS_WATCHLIST, JSON.stringify(tickers)); } catch {}
-    return tickers;
+    stored = data?.tickers ?? [];
   } catch {
     try {
       const cached = localStorage.getItem(LS_WATCHLIST);
-      if (cached) return JSON.parse(cached);
+      if (cached) stored = JSON.parse(cached);
     } catch {}
-    return [];
+  }
+  if (stored.length === 0) return [];
+
+  // Classification is never trusted from storage — always re-derived live
+  // from TastyTrade on load, so a stale/wrong saved value can never persist
+  // as the displayed truth. Symbol and active state are the only things
+  // that actually need to survive a reload.
+  try {
+    const token = await getAccessToken();
+    const classified = await Promise.all(
+      stored.map(async t => ({
+        symbol: t.symbol,
+        active: t.active,
+        classification: await classifyUnderlying(t.symbol, token).catch(() => 'stock' as const),
+      }))
+    );
+    try { localStorage.setItem(LS_WATCHLIST, JSON.stringify(classified)); } catch {}
+    return classified;
+  } catch {
+    // No token / offline — show stored data as-is rather than nothing,
+    // but it will be re-verified the moment a token is available again.
+    return stored;
   }
 }
 
@@ -2878,15 +2901,17 @@ async function deleteWatchlistPreset(name: string): Promise<void> {
 
 // ── Merge helper (array-native replacement for mergeTickers/tickersToString) ──
 // New symbols are classified automatically and added as inactive (opt-in).
-function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[]): WatchlistTicker[] {
+async function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[], token: string): Promise<WatchlistTicker[]> {
   const existingSymbols = new Set(existing.map(t => t.symbol));
-  const toAdd = normalizeTickerInput(newSymbols.join(','))
-    .filter(s => !existingSymbols.has(s))
-    .map((symbol): WatchlistTicker => ({
-      symbol,
-      classification: classifyUnderlying(symbol),
-      active: false,
-    }));
+  const symbolsToAdd = normalizeTickerInput(newSymbols.join(',')).filter(s => !existingSymbols.has(s));
+  const classifications = await Promise.all(
+    symbolsToAdd.map(symbol => classifyUnderlying(symbol, token).catch(() => 'stock' as const))
+  );
+  const toAdd: WatchlistTicker[] = symbolsToAdd.map((symbol, i) => ({
+    symbol,
+    classification: classifications[i],
+    active: false,
+  }));
   return [...existing, ...toAdd];
 }
 
@@ -2895,17 +2920,21 @@ function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[]): Wa
 // grouped visually by Index/ETF/Stock classification, with a per-ticker
 // active checkbox driving scan inclusion. No strategy routing here —
 // strategy selection happens at scan time via trend detection (smart-skip).
+// app/screener/page.tsx
+
 function WatchlistBox({
   tickers,
   onChange,
   disabled,
   onLoadPrompt,
+  sessionsPanel,
   th,
 }: {
   tickers: WatchlistTicker[];
   onChange: (tickers: WatchlistTicker[]) => void;
   disabled?: boolean;
   onLoadPrompt: (state: Omit<LoadPromptState, 'show'>) => void;
+  sessionsPanel?: React.ReactNode;
   th: typeof THEMES[Theme];
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -2927,12 +2956,34 @@ function WatchlistBox({
   }, []);
   useEffect(() => { refreshPresets(); }, [refreshPresets]);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!inputValue.trim()) return;
     const symbols = normalizeTickerInput(inputValue);
     if (symbols.length === 0) return;
-    onChange(mergeTickerLists(tickers, symbols));
+    const token = await getAccessToken();
+    onChange(await mergeTickerLists(tickers, symbols, token));
     setInputValue('');
+  };
+
+  // One-time fix for tickers whose classification was saved before the live
+  // TastyTrade lookup existed (or saved while it was wrong). Re-runs the real
+  // lookup for every ticker currently in the list and overwrites stored values.
+  const [reclassifying, setReclassifying] = useState(false);
+  const handleReclassifyAll = async () => {
+    if (tickers.length === 0) return;
+    setReclassifying(true);
+    try {
+      const token = await getAccessToken();
+      const updated = await Promise.all(
+        tickers.map(async t => ({
+          ...t,
+          classification: await classifyUnderlying(t.symbol, token).catch(() => t.classification),
+        }))
+      );
+      onChange(updated);
+    } finally {
+      setReclassifying(false);
+    }
   };
 
   const handleToggleActive = (symbol: string) => {
@@ -2941,6 +2992,12 @@ function WatchlistBox({
 
   const handleRemove = (symbol: string) => {
     onChange(tickers.filter(t => t.symbol !== symbol));
+  };
+
+  // Bulk select/deselect for a classification group (Indexes, ETFs, or Equities).
+  // Only flips `active` for tickers in the targeted group — other groups are untouched.
+  const setGroupActive = (group: 'index' | 'etf' | 'stock', active: boolean) => {
+    onChange(tickers.map(t => t.classification === group ? { ...t, active } : t));
   };
 
   const handleImgClick = () => {
@@ -2953,18 +3010,19 @@ function WatchlistBox({
     try {
       const symbols = await extractTickersFromImage(file);
       if (symbols.length > 0) {
+        const token = await getAccessToken();
         if (tickers.length > 0) {
           pendingSymbolsRef.current = symbols;
           onLoadPrompt({
             name: `${symbols.length} ticker${symbols.length !== 1 ? 's' : ''} from image`,
             type: 'strategy',
-            onLoad: (doMerge: boolean) => {
-              if (doMerge) onChange(mergeTickerLists(tickers, pendingSymbolsRef.current));
-              else onChange(mergeTickerLists([], pendingSymbolsRef.current));
+            onLoad: async (doMerge: boolean) => {
+              if (doMerge) onChange(await mergeTickerLists(tickers, pendingSymbolsRef.current, token));
+              else onChange(await mergeTickerLists([], pendingSymbolsRef.current, token));
             },
           });
         } else {
-          onChange(mergeTickerLists([], symbols));
+          onChange(await mergeTickerLists([], symbols, token));
         }
       }
     } catch (err: any) {
@@ -2987,9 +3045,11 @@ function WatchlistBox({
     onLoadPrompt({
       name,
       type: 'strategy',
-      onLoad: (doMerge: boolean) => {
-        if (doMerge) onChange(mergeTickerLists(tickers, preset.map(t => t.symbol)));
-        else onChange(preset);
+      onLoad: async (doMerge: boolean) => {
+        if (doMerge) {
+          const token = await getAccessToken();
+          onChange(await mergeTickerLists(tickers, preset.map(t => t.symbol), token));
+        } else onChange(preset);
       },
     });
   };
@@ -2997,8 +3057,10 @@ function WatchlistBox({
   const handleDeletePreset = async (name: string) => { await deleteWatchlistPreset(name); await refreshPresets(); };
   const presetNames = Object.keys(savedWatchlists);
 
-  const indexes = tickers.filter(t => t.classification === 'index' || t.classification === 'etf');
+  const indexesOnly = tickers.filter(t => t.classification === 'index');
+  const etfsOnly = tickers.filter(t => t.classification === 'etf');
   const equities = tickers.filter(t => t.classification === 'stock');
+  const pending = tickers.filter(t => t.classification === 'pending');
 
   const TickerChip = ({ t }: { t: WatchlistTicker }) => (
     <div className={`flex items-center gap-1.5 px-2 py-1 border ${th.inputBorder} rounded-md`}>
@@ -3006,10 +3068,12 @@ function WatchlistBox({
         type="checkbox"
         checked={t.active}
         onChange={() => handleToggleActive(t.symbol)}
-        disabled={disabled}
+        disabled={disabled || t.classification === 'pending'}
         className="cursor-pointer"
       />
-      <span className={`text-[11px] font-medium ${t.active ? th.text : th.textMuted}`}>{t.symbol}</span>
+      <span className={`text-[11px] font-medium ${t.active ? th.text : th.textMuted}`}>
+        {t.symbol}{t.classification === 'pending' && <span className={`ml-1 ${th.textFaint}`}>⟳</span>}
+      </span>
       <button
         onClick={() => handleRemove(t.symbol)}
         disabled={disabled}
@@ -3018,10 +3082,46 @@ function WatchlistBox({
     </div>
   );
 
+  const GroupHeader = ({
+    label,
+    count,
+    group,
+  }: {
+    label: string;
+    count: number;
+    group: 'index' | 'etf' | 'stock';
+  }) => (
+    <div className="flex items-center justify-between mb-1">
+      <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>{label} ({count})</p>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => setGroupActive(group, true)}
+          disabled={disabled}
+          className={`text-[9px] ${th.textMuted} ac-hover-text transition-colors disabled:opacity-40`}
+        >Select All</button>
+        <span className={`text-[9px] ${th.textFaint}`}>|</span>
+        <button
+          onClick={() => setGroupActive(group, false)}
+          disabled={disabled}
+          className={`text-[9px] ${th.textMuted} ac-hover-text transition-colors disabled:opacity-40`}
+        >Deselect All</button>
+      </div>
+    </div>
+  );
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="mb-2 flex items-center justify-between">
         <span className={`text-[10px] ${th.textMuted} font-medium tracking-wider`}>WATCHLIST</span>
+        <button onClick={handleReclassifyAll} disabled={disabled || reclassifying || tickers.length === 0}
+          title="Re-check Index/ETF/Stock type for every ticker against TastyTrade — fixes stale classifications"
+          className={`text-[9px] ${th.textFaint} ac-hover-text transition-colors disabled:opacity-40`}>
+          {reclassifying ? '⟳ Reclassifying...' : '↻ Reclassify All'}
+        </button>
+      </div>
+      
+      <div className={`border ${th.border} rounded-lg p-2 mb-2`}>
+        <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>IMPORT TICKER LIST FROM IMAGE OR ADD MANUALLY</p>
         <div className="flex items-center gap-1">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleOCR} />
           <button onClick={handleImgClick} disabled={disabled || scanning} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? '⟳' : '↑ img'}</button>
@@ -3069,21 +3169,43 @@ function WatchlistBox({
         <button onClick={handleAdd} disabled={disabled || !inputValue.trim()} className="text-[10px] px-3 py-1.5 ac-btn-solid text-white rounded-lg font-medium disabled:opacity-40">Add</button>
       </div>
 
+      {sessionsPanel && (
+        <div className="mb-2">
+          {sessionsPanel}
+        </div>
+      )}
+
       {tickers.length === 0 ? (
         <p className={`text-[10px] ${th.textFaint} py-3 text-center`}>No tickers yet. Add some above to get started.</p>
       ) : (
         <div className="space-y-2">
-          {indexes.length > 0 && (
+          {pending.length > 0 && (
             <div>
-              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Indexes / ETFs ({indexes.length})</p>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Classifying ({pending.length})</p>
               <div className="flex flex-wrap gap-1">
-                {indexes.map(t => <TickerChip key={t.symbol} t={t} />)}
+                {pending.map(t => <TickerChip key={t.symbol} t={t} />)}
+              </div>
+            </div>
+          )}
+          {indexesOnly.length > 0 && (
+            <div>
+              <GroupHeader label="Indexes" count={indexesOnly.length} group="index" />
+              <div className="flex flex-wrap gap-1">
+                {indexesOnly.map(t => <TickerChip key={t.symbol} t={t} />)}
+              </div>
+            </div>
+          )}
+          {etfsOnly.length > 0 && (
+            <div>
+              <GroupHeader label="ETFs" count={etfsOnly.length} group="etf" />
+              <div className="flex flex-wrap gap-1">
+                {etfsOnly.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
           )}
           {equities.length > 0 && (
             <div>
-              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Equities ({equities.length})</p>
+              <GroupHeader label="Equities" count={equities.length} group="stock" />
               <div className="flex flex-wrap gap-1">
                 {equities.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
@@ -3094,6 +3216,8 @@ function WatchlistBox({
     </div>
   );
 }
+
+// app/screener/page.tsx
 
 // ── Result Card ────────────────────────────────────────────────────────────
 
@@ -4462,9 +4586,9 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className={`${th.card} border ${th.border} rounded-2xl shadow-2xl w-[480px] p-6 flex flex-col gap-5`}>
-        <div className="flex items-center justify-between">
-          <p className={`text-sm font-bold tracking-widest ${th.text}`}>RUN HUNTER</p>
-          <button onClick={onClose} className={`${th.textFaint} hover:${th.text} text-lg leading-none`}>✕</button>
+        <div className="relative flex items-center justify-center">
+          <p className={`text-sm font-bold tracking-widest text-center ${th.text}`}>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</p>
+          <button onClick={onClose} className={`absolute right-0 ${th.textFaint} hover:${th.text} text-lg leading-none`}>✕</button>
         </div>
 
         {/* Mode selection */}
@@ -4790,7 +4914,7 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
 }
 
 // ── Yahoo Finance getTrend vNext ────────────────────────────────────────────
-async function getTrend(symbol: string): Promise<TrendResult> {
+async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<TrendResult> {
   const cleanSymbol = normalizeTickerToken(symbol) ?? symbol.toUpperCase();
   const res = await fetch(`/api/chart?symbol=${encodeURIComponent(cleanSymbol)}`, { cache: 'no-store' });
 
@@ -4900,7 +5024,7 @@ async function getTrend(symbol: string): Promise<TrendResult> {
   const brokePriorSupport = currentPrice < priorLow60 * 0.985 || currentPrice < priorLow40 * 0.985;
   const brokePriorResistance = currentPrice > priorHigh60 * 1.015 || currentPrice > priorHigh40 * 1.015;
 
-  const isIdx = INDEX_TICKERS.has(cleanSymbol.toUpperCase());
+  const isIdx = isIndexOrEtf ?? false;
   const highVolName = Math.abs(momentum60) > 0.18 || range60 > 0.34 || Math.abs(momentum90) > 0.30;
   const maxHealthyRange60 = isIdx ? 0.22 : highVolName ? 0.48 : 0.34;
   const maxChaoticRange60 = isIdx ? 0.30 : highVolName ? 0.72 : 0.52;
@@ -5606,7 +5730,8 @@ async function runTargetedScan(
       const { symbol, primary } = strategyMap[i];
       setStatus(`Scanning ${symbol} (${i + 1}/${strategyMap.length})...`);
       try {
-        const isEtf = INDEX_TICKERS.has(symbol.toUpperCase());
+        const classification = await classifyUnderlying(symbol, token);
+        const isEtf = classification === 'index' || classification === 'etf';
         // Use real rules but with user-specified DTE range
         const appliedRules: RulesType = { ...(isEtf ? etfRules : rules), DTE_MIN: dteMin, DTE_MAX: dteMax };
         const chainRules: RulesType = {
@@ -5621,7 +5746,7 @@ async function runTargetedScan(
         ]);
         const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
         let trendResult: TrendResult | undefined;
-        try { trendResult = await getTrend(symbol); } catch {}
+        try { trendResult = await getTrend(symbol, isEtf); } catch {}
 
         const validExps = chainData.expirations.filter(exp => {
           const dte = daysUntil(exp);
@@ -6182,9 +6307,8 @@ export default function Home() {
     try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
 
     const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-    const pmcc = parseTickers(pmccTickers);
 
-    if (!activeSymbols.length && !pmcc.length) {
+    if (!activeSymbols.length) {
       setError('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
       return;
     }
@@ -6197,7 +6321,7 @@ export default function Home() {
       setStatus('Getting access token...');
       const token = await getAccessToken();
 
-      const allSymbols = Array.from(new Set([...activeSymbols, ...pmcc]));
+      const allSymbols = Array.from(new Set(activeSymbols));
 
       setStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(allSymbols, token);
@@ -6226,8 +6350,10 @@ export default function Home() {
       for (let i = 0; i < activeSymbols.length; i++) {
         const symbol = activeSymbols[i];
         setStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
+        const classification = await classifyUnderlying(symbol, token);
+        const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
-        try { trendResult = await getTrend(symbol); } catch (e) { console.warn(e); }
+        try { trendResult = await getTrend(symbol, isEtfTicker); } catch (e) { console.warn(e); }
 
         // NO_TRADE (or trend fetch failure) means the chart didn't qualify —
         // skip this ticker entirely rather than guessing a strategy for it.
@@ -6238,7 +6364,6 @@ export default function Home() {
         const strategiesToScan: ('BPS' | 'BCS' | 'IC')[] = [trendResult.strategy];
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const isEtfTicker = INDEX_TICKERS.has(symbol.toUpperCase());
           const isRankMode = (modeOverride ?? screenMode) === 'rank';
           const rankDteWindow = isRankMode ? { min: 7, max: 60 } : undefined;
           const [chainData, price] = await Promise.all([
@@ -6255,20 +6380,6 @@ export default function Home() {
           }
         } catch (e: any) {
           screenResults.push(errResult(symbol, trendResult.strategy, e.message, trendResult));
-        }
-      }
-
-      // Scan PMCC tickers — uses dedicated chain fetcher (LEAPS + near-term)
-      for (const symbol of pmcc) {
-        setStatus(`Scanning PMCC ${symbol}...`);
-        try {
-          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
-          let trendResult: TrendResult | undefined;
-          try { trendResult = await getTrend(symbol); } catch {}
-          screenResults.push(runPMCCChecklist(symbol, pmccChain, price, metrics, trendResult));
-        } catch (e: any) {
-          screenResults.push(errResult(symbol, 'PMCC', e.message));
         }
       }
 
@@ -6305,6 +6416,65 @@ export default function Home() {
         localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(uniqueResults));
         localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
       } catch {}
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setStatus('');
+      setLoading(false);
+    }
+  };
+
+  // Scan PMCC tickers only — entirely separate action from runScreen/Run Hunter.
+  // PMCC results are appended to the existing results list (not replaced),
+  // so running PMCC after a watchlist scan adds to what's already shown.
+  const runPMCCScan = async () => {
+    const pmcc = parseTickers(pmccTickers);
+    if (!pmcc.length) {
+      setError('No PMCC tickers to scan. Add a ticker to the PMCC list first.');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      setStatus('Getting access token...');
+      const token = await getAccessToken();
+
+      setStatus('Fetching market metrics...');
+      const metricsArray = await getMarketMetrics(pmcc, token);
+      const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
+
+      const errResult = (symbol: string, strategy: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
+        symbol, strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+        qualified: false, bestCandidate: null,
+        failReasons: [msg], trendResult,
+        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
+      });
+
+      const pmccResults: ScreenResult[] = [];
+      for (const symbol of pmcc) {
+        setStatus(`Scanning PMCC ${symbol}...`);
+        try {
+          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
+          const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
+          let trendResult: TrendResult | undefined;
+          const pmccIsEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
+          try { trendResult = await getTrend(symbol, pmccIsEtfOrIndex); } catch {}
+          pmccResults.push(runPMCCChecklist(symbol, pmccChain, price, metrics, trendResult));
+        } catch (e: any) {
+          pmccResults.push(errResult(symbol, 'PMCC', e.message));
+        }
+      }
+
+      setResults(prev => {
+        const merged = [...prev, ...pmccResults];
+        const cacheTs = Date.now();
+        setResultsCachedAt(cacheTs);
+        try {
+          localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(merged));
+          localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
+        } catch {}
+        return merged;
+      });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -6361,21 +6531,32 @@ export default function Home() {
       <div className="flex h-[calc(100vh-57px)]">
         {/* Sidebar */}
         <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-4 shrink-0`}>
-          <WatchlistBox tickers={tickers} onChange={handleTickersChange} disabled={loading || watchlistLoading} onLoadPrompt={showLoadPrompt} th={th} />
-
-          <SessionsPanel tickers={tickers} onLoadAll={handleTickersChange} onLoadPrompt={showLoadPrompt} th={th} />
-
-          <div className={`border-t ${th.border} pt-3 space-y-4`}>
-            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>PMCC (SEPARATE LIST)</p>
-            <StrategyBox label="PMCC" badge="BULLISH+" badgeColor="bg-purple-500/15 text-purple-400 border-purple-500" borderFocus="focus:border-purple-500" value={pmccTickers} onChange={handlePmccChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-          </div>
-
-          {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">{error}</div>}
+          <WatchlistBox
+            tickers={tickers}
+            onChange={handleTickersChange}
+            disabled={loading || watchlistLoading}
+            onLoadPrompt={showLoadPrompt}
+            sessionsPanel={
+              <SessionsPanel tickers={tickers} onLoadAll={handleTickersChange} onLoadPrompt={showLoadPrompt} th={th} />
+            }
+            th={th}
+          />
 
           <button onClick={() => setShowRunModal(true)} disabled={loading}
-            className="w-full text-white py-2.5 rounded-lg text-xs font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg" style={{ background: `var(--accent)` }}>
-            {loading ? 'SCANNING...' : 'RUN HUNTER'}
+            className="w-full text-white py-2.5 rounded-lg text-xs font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
+            {loading ? 'SCANNING...' : <>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
           </button>
+          
+          <div className={`border-t ${th.border} pt-3 space-y-4`}>
+            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>PMCC LIST</p>
+            <StrategyBox label="PMCC" badge="BULLISH+" badgeColor="bg-purple-500/15 text-purple-400 border-purple-500" borderFocus="focus:border-purple-500" value={pmccTickers} onChange={handlePmccChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
+            <button onClick={runPMCCScan} disabled={loading || !parseTickers(pmccTickers).length}
+              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40`}>
+              {loading ? 'SCANNING...' : 'SCAN SELECTED FOR PMCC'}
+            </button>
+          </div>
+          
+          {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">{error}</div>}
           {loading && screenMode === 'targeted' && (
             <button onClick={() => { targetedCancelRef.current = true; }}
               className="w-full py-2 rounded-lg text-xs font-bold tracking-widest border border-red-600 text-red-400 hover:bg-red-600/20 transition-colors">
