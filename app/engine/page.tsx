@@ -66,6 +66,7 @@ interface SpxPosition {
   shortStrike: number;
   longStrike: number;
   expiration: string;
+  entryDate: string | null;
   dte: number;
   pop: number;
   credit: number;
@@ -115,6 +116,7 @@ interface SpySuggestion {
   credit: number;
   creditRatio: number;
   roc: number;
+  otmPct: number | null;
   contracts: number;
   spreadWidth: number;
   capitalRequired: number;
@@ -131,7 +133,9 @@ interface EngineData {
   wheelPositions: WheelPosition[];
   actions: ActionItem[];
   spxSuggestedEntry: SpxSuggestion | null;
+  spxSuggestedAlternates: SpxSuggestion[];
   spySuggestedEntry: SpySuggestion | null;
+  spySuggestedAlternates: SpySuggestion[];
   wheelSuggestions: WheelSuggestion[];
   lastUpdated: Date;
 }
@@ -145,6 +149,7 @@ interface SpxSuggestion {
   credit: number;
   creditRatio: number;
   roc: number;
+  otmPct: number | null;
   contracts: number;
   capitalRequired: number;
   rationale: string;
@@ -344,7 +349,9 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       else if (pnlPct !== null && pnlPct < -100) status = 'manage';
 
       const pop = Math.max(55, Math.min(90, 70 + (pnlPct ?? 0) * 0.1));
-      const posEntry: SpxPosition = { symbol, shortStrike, longStrike, expiration: expDate, dte, pop, credit: currentCost / (qty * multiplier), creditReceived, pnl, pnlPct, status, contracts: qty, capitalAtRisk };
+      const entryDate = (shortLeg['created-at'] ?? longLeg['created-at'] ?? null);
+      const entryDateStr = entryDate ? String(entryDate).slice(0, 10) : null;
+      const posEntry: SpxPosition = { symbol, shortStrike, longStrike, expiration: expDate, entryDate: entryDateStr, dte, pop, credit: currentCost / (qty * multiplier), creditReceived, pnl, pnlPct, status, contracts: qty, capitalAtRisk };
 
       if (symbol === 'SPY') spyPositions.push(posEntry);
       else spxPositions.push(posEntry);
@@ -368,6 +375,21 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
       currentPricesMap[sym] = last > 0 ? last : (bid + ask) / 2;
+    }
+  } catch {}
+
+  // SPX (index) and SPY (equity) spot prices — needed for suggestion-card OTM% display.
+  // Not part of the wheel watchlist query above, so fetched separately here.
+  try {
+    const spxSpyData = await ttFetch(`/market-data/by-type?index=SPX&equity=SPY`, token);
+    for (const item of spxSpyData?.data?.items ?? []) {
+      const sym = item.symbol?.trim();
+      if (!sym) continue;
+      const last = parseFloat(item.last ?? '0');
+      const bid = parseFloat(item.bid ?? '0');
+      const ask = parseFloat(item.ask ?? '0');
+      const px = last > 0 ? last : (bid + ask) / 2;
+      if (px > 0) currentPricesMap[sym] = px;
     }
   } catch {}
 
@@ -507,6 +529,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
 
   // ── SPX chain scan for suggestion ─────────────────────────────────────
   let spxSuggestedEntry: SpxSuggestion | null = null;
+  const spxSuggestedAlternates: SpxSuggestion[] = [];
   if (capital.spxAvailable >= 2500) {
     try {
       // Read user's saved ETF rules (shared with Hunter — tune once, applies here too)
@@ -534,7 +557,14 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       const deltaMin = etfRules.SPREAD_DELTA_MIN;
       const deltaMax = etfRules.SPREAD_DELTA_MAX;
 
+      // Collect up to 3 candidates, each from a distinct calendar week, ordered by
+      // closeness to the 38-DTE target (validExps is already sorted that way).
+      // No relaxed filters for alternates — same qualification rules as the primary pick.
+      const MAX_SPX_CANDIDATES = 3;
+      const seenSpxWeeks = new Set<string>();
+
       for (const exp of validExps.slice(0, 5)) {
+        if (spxSuggestedAlternates.length + (spxSuggestedEntry ? 1 : 0) >= MAX_SPX_CANDIDATES) break;
         // Skip expiries in the same calendar week (Mon-Sun) as any existing position
         // Same-week expiries share gamma risk, macro events, and Friday risk
         const getWeekStart = (dateStr: string) => {
@@ -553,13 +583,16 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
           console.log(`[SPX screener] Skipping ${exp.date} — same calendar week as existing position`);
           continue;
         }
+        if (seenSpxWeeks.has(expWeek)) continue; // already have a candidate from this week
+
         const allSymbols: string[] = [];
         for (const s of exp.strikes ?? []) {
           if (strategy === 'BCS' && s.call) allSymbols.push(s.call);
           else if (s.put) allSymbols.push(s.put);
         }
         if (allSymbols.length === 0) continue;
-        for (let i = 0; i < allSymbols.length; i += 100) {
+        let foundForThisExp = false;
+        for (let i = 0; i < allSymbols.length && !foundForThisExp; i += 100) {
           const chunk = allSymbols.slice(i, i + 100);
           const qs = chunk.map((s: string) => `equity-option=${encodeURIComponent(s)}`).join('&');
           try {
@@ -634,25 +667,35 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 ? ` Reversal anchor: ${trendContext.reversalAnchorPrice.toFixed(0)}.`
                 : '';
 
-              spxSuggestedEntry = {
+              const spxPrice = currentPricesMap['SPX'] ?? null;
+              const spxOtmPct = spxPrice != null && spxPrice > 0 ? ((spxPrice - shortStrike) / spxPrice) * 100 : null;
+
+              const candidate: SpxSuggestion = {
                 shortStrike, longStrike, expiration: exp.date, dte: exp.dte,
-                pop, credit, creditRatio, roc,
+                pop, credit, creditRatio, roc, otmPct: spxOtmPct,
                 contracts, capitalRequired: MAX_LOSS_PER_CONTRACT * contracts,
                 shortOccSymbol, longOccSymbol, strategy,
                 rationale: `${primeNote}${biasNote}${exp.dte}d DTE · ${pop.toFixed(0)}% POP · ${(creditRatio * 100).toFixed(0)}% credit ratio · 25-wide · 1256 tax treatment.${anchorNote}`
               };
+
+              if (!spxSuggestedEntry) {
+                spxSuggestedEntry = candidate;
+              } else {
+                spxSuggestedAlternates.push(candidate);
+              }
+              seenSpxWeeks.add(expWeek);
+              foundForThisExp = true;
               break;
             }
-            if (spxSuggestedEntry) break;
           } catch {}
         }
-        if (spxSuggestedEntry) break;
       }
     } catch {}
   }
 
   // ── SPY chain scan — fills remaining spread bucket capital ─────────────
   let spySuggestedEntry: SpySuggestion | null = null;
+  const spySuggestedAlternates: SpySuggestion[] = [];
   // SPY available = spread target minus ALL deployed spread capital (SPX + SPY positions)
   const spyCapitalAvailable = Math.max(0, capital.spxTarget - spxDeployed);
   const SPY_WIDTH = 3; // 3-wide default — liquid, granular
@@ -670,7 +713,12 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       const esBias = esFuturesSignal?.bias ?? 'bullish';
       const strategy: 'BPS' | 'BCS' = esBias === 'bearish' ? 'BCS' : 'BPS';
 
+      // Same distinct-week candidate collection as SPX — no relaxed filters for alternates.
+      const MAX_SPY_CANDIDATES = 3;
+      const seenSpyWeeks = new Set<string>();
+
       for (const exp of validExps.slice(0, 5)) {
+        if (spySuggestedAlternates.length + (spySuggestedEntry ? 1 : 0) >= MAX_SPY_CANDIDATES) break;
         const getWeekStartSpy = (dateStr: string) => {
           const parts = dateStr.split('-');
           const d = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
@@ -687,13 +735,16 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
           console.log(`[SPY screener] Skipping ${exp.date} — same calendar week as existing position`);
           continue;
         }
+        if (seenSpyWeeks.has(expWeekSpy)) continue; // already have a candidate from this week
+
         const allSymbols: string[] = [];
         for (const s of exp.strikes ?? []) {
           if (strategy === 'BCS' && s.call) allSymbols.push(s.call);
           else if (s.put) allSymbols.push(s.put);
         }
         if (allSymbols.length === 0) continue;
-        for (let i = 0; i < allSymbols.length; i += 100) {
+        let foundForThisExpSpy = false;
+        for (let i = 0; i < allSymbols.length && !foundForThisExpSpy; i += 100) {
           const chunk = allSymbols.slice(i, i + 100);
           const qs = chunk.map((s: string) => `equity-option=${encodeURIComponent(s)}`).join('&');
           try {
@@ -765,10 +816,15 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 : '';
               const taxNote = 'Short-term tax treatment.';
 
+              const spyPrice = currentPricesMap['SPY'] ?? null;
+              const spyOtmPct = spyPrice != null && spyPrice > 0
+                ? (strategy === 'BCS' ? ((shortStrike - spyPrice) / spyPrice) * 100 : ((spyPrice - shortStrike) / spyPrice) * 100)
+                : null;
+
               console.log(`[SPY screener] ✓ ${shortStrike}/${longStrike} — POP ${pop.toFixed(0)}% credit $${credit.toFixed(2)} ratio ${(creditRatio*100).toFixed(0)}%${spyEsAnchorNote}`);
-              spySuggestedEntry = {
+              const candidateSpy: SpySuggestion = {
                 shortStrike, longStrike, expiration: exp.date, dte: exp.dte,
-                pop, credit, creditRatio, roc, contracts,
+                pop, credit, creditRatio, roc, contracts, otmPct: spyOtmPct,
                 spreadWidth: SPY_WIDTH,
                 capitalRequired: SPY_MAX_LOSS * contracts,
                 strategy,
@@ -776,12 +832,18 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 longOccSymbol: longOccSymbolSpy,
                 rationale: `${biasNote}${exp.dte}d DTE · ${pop.toFixed(0)}% POP · ${(creditRatio * 100).toFixed(0)}% credit ratio · ${SPY_WIDTH}-wide · ${contracts} contracts · ${taxNote}${spyEsAnchorNote}`
               };
+
+              if (!spySuggestedEntry) {
+                spySuggestedEntry = candidateSpy;
+              } else {
+                spySuggestedAlternates.push(candidateSpy);
+              }
+              seenSpyWeeks.add(expWeekSpy);
+              foundForThisExpSpy = true;
               break;
             }
-            if (spySuggestedEntry) break;
           } catch {}
         }
-        if (spySuggestedEntry) break;
       }
     } catch {}
   }
@@ -909,7 +971,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
   const priorityOrder: Record<ActionPriority, number> = { urgent: 0, review: 1, entry: 2, hold: 3 };
   actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
 
-  return { capital, spxPositions, spyPositions, wheelPositions: finalWheelPositions, actions, spxSuggestedEntry, spySuggestedEntry, wheelSuggestions, lastUpdated: new Date() };
+  return { capital, spxPositions, spyPositions, wheelPositions: finalWheelPositions, actions, spxSuggestedEntry, spxSuggestedAlternates, spySuggestedEntry, spySuggestedAlternates, wheelSuggestions, lastUpdated: new Date() };
 }
 
 // ── AI analysis ────────────────────────────────────────────────────────────
@@ -1504,9 +1566,15 @@ function ChartButton({ symbol, th }: { symbol: string; th: typeof THEMES[Theme] 
   );
 }
 
-function SpxPositionRow({ pos, th }: { pos: SpxPosition; th: typeof THEMES[Theme] }) {
+function SpxPositionRow({ pos, th, spotPrice }: { pos: SpxPosition; th: typeof THEMES[Theme]; spotPrice?: number | null }) {
   const statusColors = { hold: 'text-emerald-400', watch: 'text-amber-400', close: 'text-blue-400', manage: 'text-red-400' };
   const statusBg = { hold: 'bg-emerald-500/10 border-emerald-700', watch: 'bg-amber-500/10 border-amber-700', close: 'bg-blue-500/10 border-blue-700', manage: 'bg-red-500/10 border-red-700' };
+
+  const otmText = (() => {
+    if (!spotPrice || !pos.shortStrike || spotPrice <= 0) return null;
+    return (((spotPrice - pos.shortStrike) / spotPrice) * 100).toFixed(1);
+  })();
+
   return (
     <div className={`border-b ${th.border} last:border-b-0`}>
       <div className={`flex items-center gap-3 px-4 py-2.5`}>
@@ -1517,6 +1585,10 @@ function SpxPositionRow({ pos, th }: { pos: SpxPosition; th: typeof THEMES[Theme
         <div className="w-16 shrink-0 text-center">
           <p className={`text-xs font-bold ${pos.pop >= 70 ? 'text-emerald-400' : pos.pop >= 60 ? 'text-amber-400' : 'text-red-400'}`}>{pos.pop.toFixed(0)}%</p>
           <p className={`text-[9px] ${th.textFaint}`}>POP</p>
+        </div>
+        <div className="w-16 shrink-0 text-center">
+          <p className={`text-xs font-bold ${otmText ? 'text-emerald-400' : th.textFaint}`}>{otmText ? `${otmText}%` : '—'}</p>
+          <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
         </div>
         <div className="w-20 shrink-0 text-center">
           <p className={`text-xs font-bold ${pos.pnl != null && pos.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -1569,7 +1641,17 @@ function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[T
       <span className={`text-[8px] font-bold shrink-0 ${ivrColor}`}>{ivrLabel}</span>
       <div className="flex-1 min-w-0">
         {pos.phase === 'cash-secured-put' && pos.strike && (
-          <p className={`text-[10px] ${th.textMuted}`}>{pos.strike}P · {pos.expiration} ({pos.dte}d) · {pos.pop?.toFixed(0)}% POP</p>
+          <p className={`text-[10px] ${th.textMuted}`}>
+            {pos.strike}P · {pos.expiration} ({pos.dte}d) · {pos.pop?.toFixed(0)}% POP
+            {pos.currentPrice && (
+              <>
+                {" · "}
+                <span className="text-emerald-400 font-semibold">
+                  {(((pos.currentPrice - pos.strike) / pos.currentPrice) * 100).toFixed(1)}% OTM
+                </span>
+              </>
+            )}
+          </p>
         )}
         {pos.phase === 'assigned' && pos.sharesHeld && (
           <p className={`text-[10px] ${th.textMuted}`}>{pos.sharesHeld} shares · cost ${pos.costBasis?.toFixed(2)} · current ${pos.currentPrice?.toFixed(2)}</p>
@@ -1596,9 +1678,13 @@ function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[T
 }
 
 // ── Timeline helpers ───────────────────────────────────────────────────────
+// startDte/endDte are now "days from the axis's left edge (timelineStart)",
+// not "days remaining from today" — callers compute these via dteFromAxisStart().
 function TimelineBar({ startDte, endDte, totalDays, color, label, status }: { startDte: number; endDte: number; totalDays: number; color: string; label: string; status: string }) {
-  const left = Math.max(0, ((totalDays - endDte) / totalDays) * 100);
-  const width = Math.max(2, ((endDte - startDte) / totalDays) * 100);
+  const clampedStart = Math.max(0, Math.min(startDte, totalDays));
+  const clampedEnd = Math.max(0, Math.min(endDte, totalDays));
+  const left = (clampedStart / totalDays) * 100;
+  const width = Math.max(2, ((clampedEnd - clampedStart) / totalDays) * 100);
   return (
     <div className="relative h-5" style={{ marginBottom: '3px' }}>
       <div className={`absolute h-full rounded flex items-center px-1.5 text-[9px] font-medium overflow-hidden ${color}`}
@@ -1606,6 +1692,7 @@ function TimelineBar({ startDte, endDte, totalDays, color, label, status }: { st
         <span className="truncate">{label}</span>
       </div>
     </div>
+
   );
 }
 
@@ -2530,9 +2617,13 @@ export default function EnginePage() {
   useEffect(() => { applyAccent(accent); injectAccentStyle(); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
-  const [subTab, setSubTab] = useState<SubTab>(() => {
-    try { return (localStorage.getItem(LS_ENGINE_SUBTAB) as SubTab) ?? 'actions'; } catch { return 'actions'; }
-  });
+  const [subTab, setSubTab] = useState<SubTab>('actions');
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_ENGINE_SUBTAB) as SubTab | null;
+      if (saved) setSubTab(saved);
+    } catch {}
+  }, []);
   const [alloc, setAlloc] = useState<Allocation>(() => {
     try { const s = localStorage.getItem(LS_ENGINE_ALLOC); return s ? JSON.parse(s) : DEFAULT_ALLOC; } catch { return DEFAULT_ALLOC; }
   });
@@ -2638,14 +2729,38 @@ export default function EnginePage() {
     d?.capital?.obp ? `$${formatCurrency(allocationDollar(pct))}` : '$—';
 
   // ── Timeline date helpers ──────────────────────────────────────────────
+  // Axis spans from the earliest position entry date (or today, whichever is earlier)
+  // through 60 days forward, so bars can show true elapsed time rather than just
+  // days remaining. Positions with unknown entry dates (no created-at captured)
+  // fall back to a 0-day lookback for that bar only.
   const today = new Date();
-  const timelineDays = 60;
+  const allTimelinePositions = [...(d?.spxPositions ?? []), ...(d?.spyPositions ?? [])];
+  const earliestEntryDaysAgo = allTimelinePositions.reduce((max, pos) => {
+    if (!pos.entryDate) return max;
+    const entry = new Date(pos.entryDate + 'T00:00:00');
+    const daysAgo = Math.round((today.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.max(max, daysAgo, 0);
+  }, 0);
+  const lookbackDays = Math.min(earliestEntryDaysAgo, 45); // cap lookback so the forward window stays readable
+  const forwardDays = 60;
+  const timelineDays = lookbackDays + forwardDays;
+  const timelineStart = new Date(today); timelineStart.setDate(timelineStart.getDate() - lookbackDays);
   const timelineDates: Date[] = [];
   for (let i = 0; i <= timelineDays; i += 7) {
-    const d = new Date(today); d.setDate(d.getDate() + i);
-    timelineDates.push(d);
+    const dt = new Date(timelineStart); dt.setDate(dt.getDate() + i);
+    timelineDates.push(dt);
   }
-  const fmt = (d: Date) => `${d.toLocaleString('en', { month: 'short' })} ${d.getDate()}`;
+  const fmt = (dt: Date) => `${dt.toLocaleString('en', { month: 'short' })} ${dt.getDate()}`;
+  // DTE-relative-to-axis-start helper: converts a position's entry/expiry into
+  // "days from timelineStart" so TimelineBar can place true start + end points.
+  const dteFromAxisStart = (dateStr: string | null, fallbackDte: number, isEntry: boolean): number => {
+    if (dateStr) {
+      const target = new Date(dateStr + 'T00:00:00');
+      return Math.round((target.getTime() - timelineStart.getTime()) / (1000 * 60 * 60 * 24));
+    }
+    // No entry date captured — fall back to "starts today" for entry, or DTE-based for expiry
+    return isEntry ? lookbackDays : lookbackDays + fallbackDte;
+  };
 
   return (
     <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -2929,12 +3044,13 @@ export default function EnginePage() {
                   <div className={`flex items-center gap-3 px-4 py-1.5 border-b ${th.border} ${th.sidebar}`}>
                     <div className={`w-32 text-[8px] ${th.textFaint} tracking-widest uppercase`}>Strikes</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>POP</div>
+                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>P&L</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Capital</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Qty</div>
                     <div className="flex-1 text-right text-[8px] text-slate-500 uppercase tracking-widest">Status</div>
                   </div>
-                  {d.spxPositions.map((pos, i) => <SpxPositionRow key={i} pos={pos} th={th} />)}
+                  {d.spxPositions.map((pos, i) => <SpxPositionRow key={i} pos={pos} th={th} spotPrice={marketConditions?.esFutures?.price} />)}
                 </>
               )}
 
@@ -2947,12 +3063,13 @@ export default function EnginePage() {
                   <div className={`flex items-center gap-3 px-4 py-1.5 border-b ${th.border} ${th.sidebar}`}>
                     <div className={`w-32 text-[8px] ${th.textFaint} tracking-widest uppercase`}>Strikes</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>POP</div>
+                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>P&L</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Capital</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Qty</div>
                     <div className="flex-1 text-right text-[8px] text-slate-500 uppercase tracking-widest">Status</div>
                   </div>
-                  {d.spyPositions.map((pos, i) => <SpxPositionRow key={`spy-${i}`} pos={pos} th={th} />)}
+                  {d.spyPositions.map((pos, i) => <SpxPositionRow key={`spy-${i}`} pos={pos} th={th} spotPrice={marketConditions?.esFutures?.price ? marketConditions.esFutures.price / 10 : null} />)}
                 </>
               )}
 
@@ -3043,12 +3160,44 @@ export default function EnginePage() {
                           <p className={`text-xs font-bold ${th.text}`}>{d.spxSuggestedEntry.contracts}×</p>
                           <p className={`text-[9px] ${th.textFaint}`}>contracts</p>
                         </div>
+                        {d.spxSuggestedEntry.otmPct != null && (
+                          <div className="text-center">
+                            <p className={`text-xs font-bold ${d.spxSuggestedEntry.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spxSuggestedEntry.otmPct.toFixed(1)}%</p>
+                            <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
+                          </div>
+                        )}
                         <div className="text-center">
                           <p className={`text-xs font-bold ${th.text}`}>${d.spxSuggestedEntry.capitalRequired.toLocaleString()}</p>
                           <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
                         </div>
                       </div>
                       <p className={`text-[9px] ${th.textFaint} mt-1.5 px-1`}>{d.spxSuggestedEntry.rationale}</p>
+                    </div>
+                  )}
+
+                  {/* SPX alternates — other calendar weeks that also clear all filters */}
+                  {d.spxSuggestedAlternates.length > 0 && (
+                    <div className="px-4 py-2 border-b border-emerald-600/10 bg-black/10">
+                      <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-1.5`}>Other qualifying SPX weeks</p>
+                      <div className="space-y-1.5">
+                        {d.spxSuggestedAlternates.map((alt, i) => (
+                          <div key={i} className="flex items-center gap-4 px-2 py-1.5 rounded-lg bg-white/[0.02]">
+                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{alt.shortStrike}/{alt.longStrike}P</span>
+                            <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
+                            <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
+                            <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
+                            {alt.otmPct != null && (
+                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
+                            )}
+                            <span className={`text-[9px] ${th.textFaint} flex-1`}>${alt.capitalRequired.toLocaleString()} req.</span>
+                            <button
+                              onClick={() => setOrderEntry({ mode: 'spread', symbol: 'SPX', shortOccSymbol: alt.shortOccSymbol, longOccSymbol: alt.longOccSymbol, credit: alt.credit, contracts: alt.contracts, strategy: alt.strategy, dte: alt.dte, shortStrike: alt.shortStrike, longStrike: alt.longStrike, spreadWidth: 25 })}
+                              className="text-[9px] px-2.5 py-1 border border-emerald-700 text-emerald-400 hover:bg-emerald-500/10 rounded-lg font-bold shrink-0 transition-colors">
+                              New Position
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -3086,12 +3235,44 @@ export default function EnginePage() {
                           <p className={`text-xs font-bold ${th.text}`}>{d.spySuggestedEntry.contracts}×</p>
                           <p className={`text-[9px] ${th.textFaint}`}>contracts</p>
                         </div>
+                        {d.spySuggestedEntry.otmPct != null && (
+                          <div className="text-center">
+                            <p className={`text-xs font-bold ${d.spySuggestedEntry.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spySuggestedEntry.otmPct.toFixed(1)}%</p>
+                            <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
+                          </div>
+                        )}
                         <div className="text-center">
                           <p className={`text-xs font-bold ${th.text}`}>${d.spySuggestedEntry.capitalRequired.toLocaleString()}</p>
                           <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
                         </div>
                       </div>
                       <p className={`text-[9px] ${th.textFaint} mt-1.5 px-1`}>{d.spySuggestedEntry.rationale}</p>
+                    </div>
+                  )}
+
+                  {/* SPY alternates — other calendar weeks that also clear all filters */}
+                  {d.spySuggestedAlternates.length > 0 && (
+                    <div className="px-4 py-2 bg-black/10">
+                      <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-1.5`}>Other qualifying SPY weeks</p>
+                      <div className="space-y-1.5">
+                        {d.spySuggestedAlternates.map((alt, i) => (
+                          <div key={i} className="flex items-center gap-4 px-2 py-1.5 rounded-lg bg-white/[0.02]">
+                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{alt.shortStrike}/{alt.longStrike}{alt.strategy === 'BCS' ? 'C' : 'P'}</span>
+                            <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
+                            <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
+                            <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
+                            {alt.otmPct != null && (
+                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
+                            )}
+                            <span className={`text-[9px] ${th.textFaint} flex-1`}>${alt.capitalRequired.toLocaleString()} req. · {alt.contracts}× contracts</span>
+                            <button
+                              onClick={() => setOrderEntry({ mode: 'spread', symbol: 'SPY', shortOccSymbol: alt.shortOccSymbol, longOccSymbol: alt.longOccSymbol, credit: alt.credit, contracts: alt.contracts, strategy: alt.strategy, dte: alt.dte, shortStrike: alt.shortStrike, longStrike: alt.longStrike, spreadWidth: alt.spreadWidth })}
+                              className="text-[9px] px-2.5 py-1 border border-emerald-700 text-emerald-400 hover:bg-emerald-500/10 rounded-lg font-bold shrink-0 transition-colors">
+                              New Position
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3202,8 +3383,8 @@ export default function EnginePage() {
               {/* Date headers */}
               <div className={`px-4 pt-3 pb-2 border-b ${th.border} ${th.card}`}>
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-violet-400 font-bold text-xs tracking-widest">60-DAY TIMELINE</span>
-                  <span className={`text-[9px] ${th.textFaint}`}>Rolling engine view</span>
+                  <span className="text-violet-400 font-bold text-xs tracking-widest">{timelineDays}-DAY TIMELINE</span>
+                  <span className={`text-[9px] ${th.textFaint}`}>{lookbackDays > 0 ? `${lookbackDays}d history · ${forwardDays}d forward` : 'Rolling engine view'}</span>
                 </div>
                 <div className="flex" style={{ paddingLeft: '80px' }}>
                   {timelineDates.map((d, i) => (
@@ -3216,17 +3397,20 @@ export default function EnginePage() {
 
               {/* Today marker */}
               <div className="relative px-4 pt-3 pb-2">
-                <div className="absolute top-0 bottom-0" style={{ left: `calc(80px + 4px)`, width: '1px', background: 'rgba(239,68,68,0.4)' }} />
+                <div className="absolute top-0 bottom-0" style={{ left: `calc(80px + (100% - 80px) * ${(lookbackDays / timelineDays).toFixed(4)})`, width: '1px', background: 'rgba(239,68,68,0.4)' }} />
 
                 {/* SPX positions */}
                 <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-2`}>SPX · 25-Wide · 1256 Tax</p>
-                {d.spxPositions.map((pos, i) => (
+                {d.spxPositions.map((pos, i) => {
+                  const startD = dteFromAxisStart(pos.entryDate, pos.dte, true);
+                  const endD = dteFromAxisStart(pos.expiration, pos.dte, false);
+                  return (
                   <div key={i} className="flex items-center mb-1.5">
                     <div className={`w-20 shrink-0 text-[9px] ${th.textFaint}`}>{pos.shortStrike}/{pos.longStrike}</div>
                     <div className="flex-1 relative">
                       <TimelineBar
-                        startDte={0}
-                        endDte={pos.dte}
+                        startDte={startD}
+                        endDte={endD}
                         totalDays={timelineDays}
                         color={pos.status === 'hold' ? 'bg-violet-600/80 text-violet-100' : pos.status === 'watch' ? 'bg-amber-600/80 text-amber-100' : 'bg-red-600/80 text-red-100'}
                         label={`${pos.pop.toFixed(0)}% POP`}
@@ -3234,20 +3418,24 @@ export default function EnginePage() {
                       />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {d.spxPositions.length === 0 && (
                   <p className={`text-[9px] ${th.textFaint} italic mb-3`}>No SPX positions — spread bucket available for new entry</p>
                 )}
 
                 {/* SPY positions */}
                 <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-2 mt-3`}>SPY · Flexible Width · ST Tax</p>
-                {d.spyPositions.map((pos, i) => (
+                {d.spyPositions.map((pos, i) => {
+                  const startD = dteFromAxisStart(pos.entryDate, pos.dte, true);
+                  const endD = dteFromAxisStart(pos.expiration, pos.dte, false);
+                  return (
                   <div key={`spy-${i}`} className="flex items-center mb-1.5">
                     <div className={`w-20 shrink-0 text-[9px] ${th.textFaint}`}>{pos.shortStrike}/{pos.longStrike}</div>
                     <div className="flex-1 relative">
                       <TimelineBar
-                        startDte={0}
-                        endDte={pos.dte}
+                        startDte={startD}
+                        endDte={endD}
                         totalDays={timelineDays}
                         color={pos.status === 'hold' ? 'bg-cyan-600/80 text-cyan-100' : pos.status === 'watch' ? 'bg-amber-600/80 text-amber-100' : 'bg-red-600/80 text-red-100'}
                         label={`${pos.pop.toFixed(0)}% POP`}
@@ -3255,7 +3443,8 @@ export default function EnginePage() {
                       />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {d.spyPositions.length === 0 && (
                   <p className={`text-[9px] ${th.textFaint} italic mb-3`}>No SPY positions — remaining spread capital available</p>
                 )}
@@ -3270,7 +3459,7 @@ export default function EnginePage() {
                     <div className={`w-20 shrink-0 text-[9px] ${th.textFaint}`}>{pos.symbol}</div>
                     <div className="flex-1 relative">
                       {pos.phase === 'cash-secured-put' && pos.dte && (
-                        <TimelineBar startDte={0} endDte={pos.dte} totalDays={timelineDays}
+                        <TimelineBar startDte={lookbackDays} endDte={lookbackDays + pos.dte} totalDays={timelineDays}
                           color="bg-blue-600/80 text-blue-100" label={`${pos.strike}P · ${pos.pop?.toFixed(0)}%`} status={pos.status} />
                       )}
                       {(pos.phase === 'assigned' || pos.phase === 'covered-call') && (
