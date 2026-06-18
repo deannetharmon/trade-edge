@@ -7,7 +7,7 @@ import { authOptions } from '@/lib/auth';
 
 export interface WatchlistTicker {
   symbol: string;
-  classification: 'index' | 'etf' | 'stock';
+  classification?: 'index' | 'etf' | 'stock';
   active: boolean;
 }
 
@@ -68,15 +68,20 @@ export async function PUT(request: Request) {
       (t: any) =>
         t &&
         typeof t.symbol === 'string' &&
-        ['index', 'etf', 'stock'].includes(t.classification) &&
         typeof t.active === 'boolean'
     );
     if (!isValid) {
       return NextResponse.json({ error: 'invalid ticker shape' }, { status: 400 });
     }
 
+    // Classification is intentionally never persisted — it's index/etf/stock
+    // type derived live from TastyTrade on every load, never trusted from
+    // storage. Stripping it here means a stale value can't exist in Redis
+    // even if a client sends one.
+    const toStore = tickers.map((t: any) => ({ symbol: t.symbol, active: t.active }));
+
     redis = getRedis();
-    await redis.set(`watchlist:${userId}`, JSON.stringify(tickers));
+    await redis.set(`watchlist:${userId}`, JSON.stringify(toStore));
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
