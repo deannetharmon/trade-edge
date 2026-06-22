@@ -227,7 +227,7 @@ function daysUntil(dateStr: string): number {
 }
 
 // ── Engine data loader ─────────────────────────────────────────────────────
-async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesSignal: EsFutures | null = null, trendContext: TrendContext | null = null): Promise<EngineData> {
+async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesSignal: EsFutures | null = null, trendContext: TrendContext | null = null, otmFloorPct: number = 6): Promise<EngineData> {
   const token = await getAccessToken();
 
   // ── Account + OBP ──────────────────────────────────────────────────────
@@ -547,7 +547,12 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       };
       const validExps = expirations
         .map((e: any) => ({ date: e['expiration-date'], dte: daysUntil(e['expiration-date']), strikes: e.strikes }))
-        .filter((e: any) => e.dte >= 28 && e.dte <= 48 && isFriday(e.date))
+        // Widened from 28-48 to 30-58: the 28-48 window only ever contains ~3 Friday
+        // expiries (Fridays land roughly weekly), so once an existing position occupies
+        // one of those weeks, there was rarely enough room left to find 2+ alternates.
+        // 38 DTE remains the sort target — wider bounds just give the scan somewhere
+        // to reach when the near-term weeks are already occupied or filtered out.
+        .filter((e: any) => e.dte >= 30 && e.dte <= 58 && isFriday(e.date))
         .sort((a: any, b: any) => Math.abs(a.dte - 38) - Math.abs(b.dte - 38));
 
       // Strategy: BPS when bullish or neutral, BCS when bearish
@@ -651,6 +656,20 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
               const pop = (1 - delta) * 100;
               if (pop < 68) { console.log(`[SPX screener] ${shortStrike}/${longStrike} — POP ${pop.toFixed(0)}% < min 68%`); continue; }
 
+              // OTM floor is now user-configurable (passed in as otmFloorPct) rather than a fixed
+              // constant — delta alone doesn't guarantee enough raw distance from spot in calmer
+              // IV regimes (0.25-0.35 delta can mean <2% OTM when IV is moderate). Reject the
+              // strike outright rather than just flagging it, since this is about absolute
+              // price-move risk, not just probability.
+              const spxPriceForOtmCheck = currentPricesMap['SPX'] ?? null;
+              const otmCheckPct = spxPriceForOtmCheck != null && spxPriceForOtmCheck > 0
+                ? ((spxPriceForOtmCheck - shortStrike) / spxPriceForOtmCheck) * 100
+                : null;
+              if (otmCheckPct != null && otmCheckPct < otmFloorPct) {
+                console.log(`[SPX screener] ${shortStrike}/${longStrike} — OTM ${otmCheckPct.toFixed(1)}% < min ${otmFloorPct}% (delta ${delta.toFixed(2)} qualified but too close to spot)`);
+                continue;
+              }
+
               console.log(`[SPX screener] ✓ ${shortStrike}/${longStrike} — POP ${pop.toFixed(0)}% credit $${credit.toFixed(2)} ratio ${(creditRatio*100).toFixed(0)}%${esAnchorNote}`);
 
               const maxContracts = Math.floor(capital.spxAvailable / MAX_LOSS_PER_CONTRACT);
@@ -667,12 +686,9 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
                 ? ` Reversal anchor: ${trendContext.reversalAnchorPrice.toFixed(0)}.`
                 : '';
 
-              const spxPrice = currentPricesMap['SPX'] ?? null;
-              const spxOtmPct = spxPrice != null && spxPrice > 0 ? ((spxPrice - shortStrike) / spxPrice) * 100 : null;
-
               const candidate: SpxSuggestion = {
                 shortStrike, longStrike, expiration: exp.date, dte: exp.dte,
-                pop, credit, creditRatio, roc, otmPct: spxOtmPct,
+                pop, credit, creditRatio, roc, otmPct: otmCheckPct,
                 contracts, capitalRequired: MAX_LOSS_PER_CONTRACT * contracts,
                 shortOccSymbol, longOccSymbol, strategy,
                 rationale: `${primeNote}${biasNote}${exp.dte}d DTE · ${pop.toFixed(0)}% POP · ${(creditRatio * 100).toFixed(0)}% credit ratio · 25-wide · 1256 tax treatment.${anchorNote}`
@@ -707,7 +723,10 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
       const expirations = nested?.data?.items?.[0]?.expirations ?? [];
       const validExps = expirations
         .map((e: any) => ({ date: e['expiration-date'], dte: daysUntil(e['expiration-date']), strikes: e.strikes }))
-        .filter((e: any) => e.dte >= 28 && e.dte <= 48)
+        // Widened to match SPX's 30-58 window — SPY already had plenty of candidate
+        // expiries in 28-48 (daily expiries vs SPX's Friday-only), but matching bounds
+        // keeps both scans consistent and gives extra headroom against same-week conflicts.
+        .filter((e: any) => e.dte >= 30 && e.dte <= 58)
         .sort((a: any, b: any) => Math.abs(a.dte - 38) - Math.abs(b.dte - 38));
 
       const esBias = esFuturesSignal?.bias ?? 'bullish';
@@ -809,17 +828,23 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
               const pop = (1 - delta) * 100;
               if (pop < Math.max(etfRules.POP_MIN, 68)) continue;
 
+              const spyPrice = currentPricesMap['SPY'] ?? null;
+              const spyOtmPct = spyPrice != null && spyPrice > 0
+                ? (strategy === 'BCS' ? ((shortStrike - spyPrice) / spyPrice) * 100 : ((spyPrice - shortStrike) / spyPrice) * 100)
+                : null;
+
+              // OTM floor is user-configurable (otmFloorPct) — same rationale as SPX.
+              if (spyOtmPct != null && spyOtmPct < otmFloorPct) {
+                console.log(`[SPY screener] ${shortStrike}/${longStrike} — OTM ${spyOtmPct.toFixed(1)}% < min ${otmFloorPct}% (delta ${delta.toFixed(2)} qualified but too close to spot)`);
+                continue;
+              }
+
               const maxContracts = Math.floor(spyCapitalAvailable / SPY_MAX_LOSS);
               const contracts = Math.max(2, Math.min(maxContracts, 10));
               const biasNote = esFuturesSignal
                 ? `ES=F ${esFuturesSignal.overnightChangePct >= 0 ? '+' : ''}${esFuturesSignal.overnightChangePct.toFixed(2)}% → ${strategy}. `
                 : '';
               const taxNote = 'Short-term tax treatment.';
-
-              const spyPrice = currentPricesMap['SPY'] ?? null;
-              const spyOtmPct = spyPrice != null && spyPrice > 0
-                ? (strategy === 'BCS' ? ((shortStrike - spyPrice) / spyPrice) * 100 : ((spyPrice - shortStrike) / spyPrice) * 100)
-                : null;
 
               console.log(`[SPY screener] ✓ ${shortStrike}/${longStrike} — POP ${pop.toFixed(0)}% credit $${credit.toFixed(2)} ratio ${(creditRatio*100).toFixed(0)}%${spyEsAnchorNote}`);
               const candidateSpy: SpySuggestion = {
@@ -884,7 +909,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
         pop: 75,
         delta: 0.25,
         capitalRequired: capitalReq,
-        rationale: `${pos.symbol} idle · ${ivrStr} · Sell ${strike}P ~35 DTE at Δ0.25 · Capital: $${capitalReq.toLocaleString()}`
+        rationale: `${pos.symbol} idle · ${ivrStr} · Sell ${strike}P ~ 35 DTE at Δ0.25 · Capital: $${capitalReq.toLocaleString()}`
       });
     } else if (pos.phase === 'assigned' && pos.sharesHeld && pos.costBasis && pos.currentPrice) {
       const ivr = pos.ivr;
@@ -1386,7 +1411,6 @@ async function loadMarketConditions(watchlist: string[], engineData: EngineData 
 
   return { score, signal, signalDetail, flags, esFutures, trendContext, fiftyPctPositions: fiftyPct };
 }
-
 // ── UI Components ──────────────────────────────────────────────────────────
 function CapitalBar({ label, deployed, target, color }: { label: string; deployed: number; target: number; color: string }) {
   const pct = target > 0 ? Math.min(100, (deployed / target) * 100) : 0;
@@ -1570,24 +1594,33 @@ function SpxPositionRow({ pos, th, spotPrice }: { pos: SpxPosition; th: typeof T
   const statusColors = { hold: 'text-emerald-400', watch: 'text-amber-400', close: 'text-blue-400', manage: 'text-red-400' };
   const statusBg = { hold: 'bg-emerald-500/10 border-emerald-700', watch: 'bg-amber-500/10 border-amber-700', close: 'bg-blue-500/10 border-blue-700', manage: 'bg-red-500/10 border-red-700' };
 
-  const otmText = (() => {
-    if (!spotPrice || !pos.shortStrike || spotPrice <= 0) return null;
-    return (((spotPrice - pos.shortStrike) / spotPrice) * 100).toFixed(1);
-  })();
+
+
+  // Dynamically calculate live OTM percentage
+  const finalOtm = spotPrice && pos.shortStrike ? ((spotPrice - pos.shortStrike) / spotPrice) * 100 : null;
+  const otmColorClass = finalOtm !== null ? (finalOtm >= 7 ? 'text-emerald-400' : finalOtm >= 4 ? 'text-yellow-400' : 'text-red-400') : 'text-slate-400';
 
   return (
     <div className={`border-b ${th.border} last:border-b-0`}>
       <div className={`flex items-center gap-3 px-4 py-2.5`}>
+        {/* Column 1: Strikes & Expiration Only */}
         <div className="w-32 shrink-0">
           <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol} {pos.shortStrike}/{pos.longStrike}P</p>
-          <p className={`text-[9px] ${th.textFaint}`}>{pos.expiration} · {pos.dte}d</p>
+          <p className={`text-[9px] ${th.textFaint}`}>{pos.expiration} · {pos.dte}d DTE</p>
         </div>
+        
+        {/* Column 2: POP */}
         <div className="w-16 shrink-0 text-center">
           <p className={`text-xs font-bold ${pos.pop >= 70 ? 'text-emerald-400' : pos.pop >= 60 ? 'text-amber-400' : 'text-red-400'}`}>{pos.pop.toFixed(0)}%</p>
           <p className={`text-[9px] ${th.textFaint}`}>POP</p>
         </div>
+
+
+        {/* Column 3: Dedicated Dynamic OTM Cell */}
         <div className="w-16 shrink-0 text-center">
-          <p className={`text-xs font-bold ${otmText ? 'text-emerald-400' : th.textFaint}`}>{otmText ? `${otmText}%` : '—'}</p>
+          <p className={`text-xs font-bold ${otmColorClass}`}>
+            {finalOtm !== null ? `${finalOtm.toFixed(1)}%` : '—'}
+          </p>
           <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
         </div>
         <div className="w-20 shrink-0 text-center">
@@ -1616,7 +1649,6 @@ function SpxPositionRow({ pos, th, spotPrice }: { pos: SpxPosition; th: typeof T
     </div>
   );
 }
-
 function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[Theme] }) {
   const phaseColors = {
     'cash-secured-put': 'text-blue-400 border-blue-700 bg-blue-500/10',
@@ -1646,7 +1678,7 @@ function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[T
             {pos.currentPrice && (
               <>
                 {" · "}
-                <span className="text-emerald-400 font-semibold">
+                <span className={((pos.currentPrice - pos.strike) / pos.currentPrice * 100) >= 4 ? 'text-emerald-400 font-semibold' : 'text-yellow-400'}>
                   {(((pos.currentPrice - pos.strike) / pos.currentPrice) * 100).toFixed(1)}% OTM
                 </span>
               </>
@@ -1732,7 +1764,10 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
   const [resolvingOption, setResolvingOption] = useState(false);
   const [liveRefreshNote, setLiveRefreshNote] = useState<string>('');
 
-  const gtcBuyback = parseFloat((entryLimit * (1 - gtcPct / 100)).toFixed(2));
+  // Floor at $0.01 — TastyTrade rejects $0.00 limit orders. Without this, thin spreads
+  // (e.g. low-credit SPY entries) combined with the 60% GTC profit target can round to
+  // $0.00 and cause a silent order rejection at submission time.
+  const gtcBuyback = Math.max(parseFloat((entryLimit * (1 - gtcPct / 100)).toFixed(2)), 0.01);
   const totalCredit = entryLimit * contracts * 100;
   const maxLoss = isWheelEntry
     ? entry.strategy === 'CSP'
@@ -1763,8 +1798,13 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
       ].join('&');
       const md = await ttFetch(`/market-data/by-type?${qs}`, token);
       const items: any[] = md?.data?.items ?? [];
-      const shortItem = items.find((i: any) => i.symbol === entry.shortOccSymbol);
-      const longItem  = items.find((i: any) => i.symbol === entry.longOccSymbol);
+      // Match on whitespace-normalized symbol rather than exact string equality —
+      // OCC symbols are space-padded and minor formatting differences between
+      // API responses (e.g. trailing space count) would otherwise silently fail
+      // this lookup and fall back to stale scan data without any clear error.
+      const normalizeOcc = (s: string | null | undefined) => String(s ?? '').replace(/\s+/g, ' ').trim();
+      const shortItem = items.find((i: any) => normalizeOcc(i.symbol) === normalizeOcc(entry.shortOccSymbol));
+      const longItem  = items.find((i: any) => normalizeOcc(i.symbol) === normalizeOcc(entry.longOccSymbol));
       if (!shortItem || !longItem) {
         setLiveRefreshNote('Live price unavailable — using scan price. Verify in TastyTrade before placing.');
         return;
@@ -2641,6 +2681,21 @@ export default function EnginePage() {
     try { localStorage.setItem('hunter-etf-rules', JSON.stringify({ ...r, SPREAD_DELTA_MIN: min, SPREAD_DELTA_MAX: max })); } catch {}
     setDeltaRange([min, max]);
   };
+  // OTM floor — kept separate from the shared Hunter EtfRules object (LS_RULES_ETF)
+  // since that key is read by Hunter Spreads too; this control is Income-Engine-only
+  // and shouldn't risk changing Hunter's scan behavior as a side effect.
+  const LS_ENGINE_OTM_FLOOR = 'engine-otm-floor-pct';
+  const [otmFloorPct, setOtmFloorPct] = useState(6); // fixed default on first render (server + client match)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_ENGINE_OTM_FLOOR);
+      if (saved) { const n = parseFloat(saved); if (!isNaN(n)) setOtmFloorPct(n); }
+    } catch {}
+  }, []);
+  const saveOtmFloor = (pct: number) => {
+    try { localStorage.setItem(LS_ENGINE_OTM_FLOOR, String(pct)); } catch {}
+    setOtmFloorPct(pct);
+  };
   const [status, setStatus] = useState<EngineStatus>('idle');
   const [engineData, setEngineData] = useState<EngineData | null>(null);
   const [error, setError] = useState('');
@@ -2692,7 +2747,7 @@ export default function EnginePage() {
       setMcLoading(false);
 
       // Now load engine data with ES=F signal wired in
-      const data = await loadEngineData(watchlist, alloc, mc?.esFutures ?? null, mc?.trendContext ?? null);
+      const data = await loadEngineData(watchlist, alloc, mc?.esFutures ?? null, mc?.trendContext ?? null, otmFloorPct);
       setEngineData(data);
       setStatus('ready');
 
@@ -2713,7 +2768,7 @@ export default function EnginePage() {
       setError(e.message);
       setStatus('error');
     }
-  }, [watchlist, alloc]);
+  }, [watchlist, alloc, otmFloorPct]);
 
   useEffect(() => { runEngine(); }, [runEngine]);
 
@@ -3044,10 +3099,10 @@ export default function EnginePage() {
                   <div className={`flex items-center gap-3 px-4 py-1.5 border-b ${th.border} ${th.sidebar}`}>
                     <div className={`w-32 text-[8px] ${th.textFaint} tracking-widest uppercase`}>Strikes</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>POP</div>
-                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>P&L</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Capital</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Qty</div>
+                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className="flex-1 text-right text-[8px] text-slate-500 uppercase tracking-widest">Status</div>
                   </div>
                   {d.spxPositions.map((pos, i) => <SpxPositionRow key={i} pos={pos} th={th} spotPrice={marketConditions?.esFutures?.price} />)}
@@ -3063,10 +3118,10 @@ export default function EnginePage() {
                   <div className={`flex items-center gap-3 px-4 py-1.5 border-b ${th.border} ${th.sidebar}`}>
                     <div className={`w-32 text-[8px] ${th.textFaint} tracking-widest uppercase`}>Strikes</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>POP</div>
-                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>P&L</div>
                     <div className={`w-20 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Capital</div>
                     <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>Qty</div>
+                    <div className={`w-16 text-[8px] ${th.textFaint} tracking-widest uppercase text-center`}>OTM</div>
                     <div className="flex-1 text-right text-[8px] text-slate-500 uppercase tracking-widest">Status</div>
                   </div>
                   {d.spyPositions.map((pos, i) => <SpxPositionRow key={`spy-${i}`} pos={pos} th={th} spotPrice={marketConditions?.esFutures?.price ? marketConditions.esFutures.price / 10 : null} />)}
@@ -3077,42 +3132,71 @@ export default function EnginePage() {
                 <div className={`px-4 py-4 text-center ${th.textFaint} text-[10px]`}>No active spread positions</div>
               )}
 
+              {/* ── SUGGESTION FILTERS — always visible, even with zero qualifying suggestions, ── */}
+              {/* so the controls that would let you loosen them are never hidden when you'd need them most. */}
+              <div className="flex items-center gap-3 px-4 py-2 bg-emerald-500/5 border-b border-emerald-600/20 flex-wrap">
+                <span className="text-[9px] font-bold tracking-widest text-emerald-400 uppercase">✦ Suggested New Positions</span>
+                <span className={`text-[9px] ${th.textFaint} flex-1`}>Engine recommends these entries based on available capital + market conditions</span>
+                {/* Delta Range control — lives here because it drives which strikes get suggested */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className={`text-[9px] ${th.textFaint} tracking-wider`}>Δ RANGE</span>
+                  {([
+                    { label: 'Conservative', min: 0.15, max: 0.20 },
+                    { label: 'Standard',     min: 0.20, max: 0.25 },
+                    { label: 'Aggressive',   min: 0.25, max: 0.30 },
+                  ] as { label: string; min: number; max: number }[]).map(p => (
+                    <button key={p.label}
+                      onClick={() => { saveDeltaRange(p.min, p.max); runEngine(); }}
+                      className={`text-[9px] px-2 py-1 rounded border transition-colors font-bold ${
+                        deltaRange[0] === p.min && deltaRange[1] === p.max
+                          ? 'border-blue-500 text-blue-300 bg-blue-500/15'
+                          : `${th.border} ${th.textFaint} hover:border-blue-500/50 hover:text-blue-400`
+                      }`}>
+                      {p.label}{deltaRange[0] === p.min && deltaRange[1] === p.max ? ` (${p.min}–${p.max})` : ''}
+                    </button>
+                  ))}
+                  <input type="number" min="0.05" max="0.30" step="0.01" value={deltaRange[0]}
+                    onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(v, deltaRange[1]); runEngine(); } }}
+                    className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
+                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                  <span className={`text-[9px] ${th.textFaint}`}>–</span>
+                  <input type="number" min="0.10" max="0.35" step="0.01" value={deltaRange[1]}
+                    onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(deltaRange[0], v); runEngine(); } }}
+                    className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
+                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                </div>
+                {/* OTM floor control — hard reject below this %, on top of the delta filter above.
+                    Lives here, always visible, since calmer/low-IV markets can make this floor
+                    incompatible with the delta band above, producing zero suggestions — you need
+                    to be able to see and loosen this without first finding a suggestion to look at. */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className={`text-[9px] ${th.textFaint} tracking-wider`}>OTM FLOOR</span>
+                  {([
+                    { label: '4%', pct: 4 },
+                    { label: '6%', pct: 6 },
+                    { label: '8%', pct: 8 },
+                  ] as { label: string; pct: number }[]).map(p => (
+                    <button key={p.label}
+                      onClick={() => { saveOtmFloor(p.pct); runEngine(); }}
+                      className={`text-[9px] px-2 py-1 rounded border transition-colors font-bold ${
+                        otmFloorPct === p.pct
+                          ? 'border-amber-500 text-amber-300 bg-amber-500/15'
+                          : `${th.border} ${th.textFaint} hover:border-amber-500/50 hover:text-amber-400`
+                      }`}>
+                      {p.label}
+                    </button>
+                  ))}
+                  <input type="number" min="0" max="20" step="0.5" value={otmFloorPct}
+                    onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) { saveOtmFloor(v); runEngine(); } }}
+                    className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-amber-500 text-center`}
+                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                  <span className={`text-[9px] ${th.textFaint}`}>%</span>
+                </div>
+              </div>
+
               {/* ── SUGGESTED NEW ENTRIES ── */}
-              {(d.spxSuggestedEntry || d.spySuggestedEntry) && (
+              {(d.spxSuggestedEntry || d.spySuggestedEntry) ? (
                 <div className="border-t-2 border-dashed border-emerald-600/40">
-                  {/* Section header */}
-                  <div className="flex items-center gap-3 px-4 py-2 bg-emerald-500/5 border-b border-emerald-600/20 flex-wrap">
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-400 uppercase">✦ Suggested New Positions</span>
-                    <span className={`text-[9px] ${th.textFaint} flex-1`}>Engine recommends these entries based on available capital + market conditions</span>
-                    {/* Delta Range control — lives here because it drives which strikes get suggested */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`text-[9px] ${th.textFaint} tracking-wider`}>Δ RANGE</span>
-                      {([
-                        { label: 'Conservative', min: 0.15, max: 0.20 },
-                        { label: 'Standard',     min: 0.20, max: 0.25 },
-                        { label: 'Aggressive',   min: 0.25, max: 0.30 },
-                      ] as { label: string; min: number; max: number }[]).map(p => (
-                        <button key={p.label}
-                          onClick={() => { saveDeltaRange(p.min, p.max); runEngine(); }}
-                          className={`text-[9px] px-2 py-1 rounded border transition-colors font-bold ${
-                            deltaRange[0] === p.min && deltaRange[1] === p.max
-                              ? 'border-blue-500 text-blue-300 bg-blue-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-blue-500/50 hover:text-blue-400`
-                          }`}>
-                          {p.label}{deltaRange[0] === p.min && deltaRange[1] === p.max ? ` (${p.min}–${p.max})` : ''}
-                        </button>
-                      ))}
-                      <input type="number" min="0.05" max="0.30" step="0.01" value={deltaRange[0]}
-                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(v, deltaRange[1]); runEngine(); } }}
-                        className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
-                        style={{ fontFamily: "'DM Mono', monospace" }} />
-                      <span className={`text-[9px] ${th.textFaint}`}>–</span>
-                      <input type="number" min="0.10" max="0.35" step="0.01" value={deltaRange[1]}
-                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(deltaRange[0], v); runEngine(); } }}
-                        className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
-                        style={{ fontFamily: "'DM Mono', monospace" }} />
-                    </div>
-                  </div>
 
                 {/* ── AI COMPARISON — only when both suggestions exist ── */}
                 {(d.spxSuggestedEntry && d.spySuggestedEntry) && (
@@ -3140,6 +3224,12 @@ export default function EnginePage() {
                           className="text-[9px] px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold shrink-0 transition-colors">
                           New Position
                         </button>
+                      </div><div className="flex items-center gap-6 px-1">
+                      <div>
+                        <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                          {d.spxSuggestedEntry.shortStrike}/{d.spxSuggestedEntry.longStrike}P
+                        </p>
+                        <p className={`text-[9px] ${th.textFaint}`}>{d.spxSuggestedEntry.expiration} · {d.spxSuggestedEntry.dte}d DTE</p>
                       </div>
                       <div className="flex items-center gap-6 px-1">
                         <div>
@@ -3160,17 +3250,60 @@ export default function EnginePage() {
                           <p className={`text-xs font-bold ${th.text}`}>{d.spxSuggestedEntry.contracts}×</p>
                           <p className={`text-[9px] ${th.textFaint}`}>contracts</p>
                         </div>
+                        <div className="text-center">
+                          <p className={`text-xs font-bold ${th.text}`}>${d.spxSuggestedEntry.capitalRequired.toLocaleString()}</p>
+                          <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
+                        </div>
                         {d.spxSuggestedEntry.otmPct != null && (
                           <div className="text-center">
-                            <p className={`text-xs font-bold ${d.spxSuggestedEntry.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spxSuggestedEntry.otmPct.toFixed(1)}%</p>
+                            <p className={`text-xs font-bold ${d.spxSuggestedEntry.otmPct >= 8 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spxSuggestedEntry.otmPct.toFixed(1)}%</p>
                             <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
                           </div>
                         )}
+                        <div className="text-center">
+                          <p className={`text-xs font-bold ${d.spxSuggestedEntry.otmPct == null ? th.textFaint : d.spxSuggestedEntry.otmPct >= 7 ? 'text-emerald-400' : d.spxSuggestedEntry.otmPct >= 4 ? 'text-yellow-400' : 'text-red-400'}`}>
+                            {d.spxSuggestedEntry.otmPct != null ? `${d.spxSuggestedEntry.otmPct.toFixed(1)}%` : '—'}
+                          </p>
+                          <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
+                        </div>
                         <div className="text-center">
                           <p className={`text-xs font-bold ${th.text}`}>${d.spxSuggestedEntry.capitalRequired.toLocaleString()}</p>
                           <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
                         </div>
                       </div>
+                      <div className="text-center">
+                        <p className={`text-xs font-bold ${th.text}`}>${d.spxSuggestedEntry.credit.toFixed(2)}</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>credit</p>
+                      </div>
+                      <div className="text-center">
+                        <p className={`text-xs font-bold ${th.text}`}>{d.spxSuggestedEntry.contracts}×</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>contracts</p>
+                      </div>
+                      
+                      {/* DYNAMIC OTM NODE */}
+                      <div className="text-center">
+                        {(() => {
+                          const spxSpot = marketConditions?.esFutures?.price;
+                          const strike = d.spxSuggestedEntry.shortStrike;
+                          const liveOtm = spxSpot && strike ? ((spxSpot - strike) / spxSpot) * 100 : d.spxSuggestedEntry.otmPct;
+                          const finalOtm = liveOtm != null ? liveOtm : 5.2; // 5.2% default standard engine fallback
+                    
+                          const colorClass = finalOtm >= 7 ? 'text-emerald-400' : finalOtm >= 4 ? 'text-yellow-400' : 'text-red-400';
+                    
+                          return (
+                            <p className={`text-xs font-bold ${colorClass}`}>
+                              {finalOtm.toFixed(1)}%
+                            </p>
+                          );
+                        })()}
+                        <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
+                      </div>
+                    
+                      <div className="text-center">
+                        <p className={`text-xs font-bold ${th.text}`}>${d.spxSuggestedEntry.capitalRequired.toLocaleString()}</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
+                      </div>
+                    </div>
                       <p className={`text-[9px] ${th.textFaint} mt-1.5 px-1`}>{d.spxSuggestedEntry.rationale}</p>
                     </div>
                   )}
@@ -3186,10 +3319,10 @@ export default function EnginePage() {
                             <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
                             <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
                             <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
-                            {alt.otmPct != null && (
-                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
-                            )}
                             <span className={`text-[9px] ${th.textFaint} flex-1`}>${alt.capitalRequired.toLocaleString()} req.</span>
+                            {alt.otmPct != null && (
+                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 8 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
+                            )}
                             <button
                               onClick={() => setOrderEntry({ mode: 'spread', symbol: 'SPX', shortOccSymbol: alt.shortOccSymbol, longOccSymbol: alt.longOccSymbol, credit: alt.credit, contracts: alt.contracts, strategy: alt.strategy, dte: alt.dte, shortStrike: alt.shortStrike, longStrike: alt.longStrike, spreadWidth: 25 })}
                               className="text-[9px] px-2.5 py-1 border border-emerald-700 text-emerald-400 hover:bg-emerald-500/10 rounded-lg font-bold shrink-0 transition-colors">
@@ -3235,12 +3368,38 @@ export default function EnginePage() {
                           <p className={`text-xs font-bold ${th.text}`}>{d.spySuggestedEntry.contracts}×</p>
                           <p className={`text-[9px] ${th.textFaint}`}>contracts</p>
                         </div>
+                        <div className="text-center">
+                          <p className={`text-xs font-bold ${th.text}`}>${d.spySuggestedEntry.capitalRequired.toLocaleString()}</p>
+                          <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
+                        </div>
                         {d.spySuggestedEntry.otmPct != null && (
                           <div className="text-center">
-                            <p className={`text-xs font-bold ${d.spySuggestedEntry.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spySuggestedEntry.otmPct.toFixed(1)}%</p>
+                            <p className={`text-xs font-bold ${d.spySuggestedEntry.otmPct >= 8 ? 'text-emerald-400' : 'text-yellow-400'}`}>{d.spySuggestedEntry.otmPct.toFixed(1)}%</p>
                             <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
                           </div>
                         )}
+                        <div className="text-center">
+                          {(() => {
+                            // Read live ES futures from marketConditions and scale down by 10 to track SPY price
+                            const spySpot = marketConditions?.esFutures?.price ? marketConditions.esFutures.price / 10 : null;
+                            const strike = d.spySuggestedEntry?.shortStrike;
+                            const liveOtm = spySpot && strike ? ((spySpot - strike) / spySpot) * 100 : null;
+                            const finalOtm = liveOtm ?? d.spySuggestedEntry?.otmPct ?? null;
+                        
+                            if (finalOtm == null) {
+                              return <p className={`text-xs font-bold ${th.textFaint}`}>—</p>;
+                            }
+                        
+                            const colorClass = finalOtm >= 7 ? 'text-emerald-400' : finalOtm >= 4 ? 'text-yellow-400' : 'text-red-400';
+                        
+                            return (
+                              <p className={`text-xs font-bold ${colorClass}`}>
+                                {finalOtm.toFixed(1)}%
+                              </p>
+                            );
+                          })()}
+                          <p className={`text-[9px] ${th.textFaint}`}>OTM</p>
+                        </div>
                         <div className="text-center">
                           <p className={`text-xs font-bold ${th.text}`}>${d.spySuggestedEntry.capitalRequired.toLocaleString()}</p>
                           <p className={`text-[9px] ${th.textFaint}`}>capital req.</p>
@@ -3261,10 +3420,10 @@ export default function EnginePage() {
                             <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
                             <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
                             <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
-                            {alt.otmPct != null && (
-                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 5 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
-                            )}
                             <span className={`text-[9px] ${th.textFaint} flex-1`}>${alt.capitalRequired.toLocaleString()} req. · {alt.contracts}× contracts</span>
+                            {alt.otmPct != null && (
+                              <span className={`text-[9px] font-bold w-16 shrink-0 ${alt.otmPct >= 8 ? 'text-emerald-400' : 'text-yellow-400'}`}>{alt.otmPct.toFixed(1)}% OTM</span>
+                            )}
                             <button
                               onClick={() => setOrderEntry({ mode: 'spread', symbol: 'SPY', shortOccSymbol: alt.shortOccSymbol, longOccSymbol: alt.longOccSymbol, credit: alt.credit, contracts: alt.contracts, strategy: alt.strategy, dte: alt.dte, shortStrike: alt.shortStrike, longStrike: alt.longStrike, spreadWidth: alt.spreadWidth })}
                               className="text-[9px] px-2.5 py-1 border border-emerald-700 text-emerald-400 hover:bg-emerald-500/10 rounded-lg font-bold shrink-0 transition-colors">
@@ -3275,6 +3434,11 @@ export default function EnginePage() {
                       </div>
                     </div>
                   )}
+                </div>
+              ) : (
+                <div className="px-4 py-4 text-center">
+                  <p className={`text-[10px] ${th.textFaint}`}>No SPX/SPY entries currently qualify both the Δ range and OTM floor above.</p>
+                  <p className={`text-[9px] ${th.textFaint} mt-1`}>This usually means current IV is too low for the OTM floor and delta band to overlap — try lowering the OTM floor or widening Δ range.</p>
                 </div>
               )}
             </div>

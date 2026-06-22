@@ -4,7 +4,7 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'TradeEdcge',
+  title: 'TradeEdge',
   description: 'Derivatives Trading Platform powered by TastyTrade',
 };
 

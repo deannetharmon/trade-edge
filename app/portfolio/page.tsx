@@ -920,11 +920,14 @@ function buildOpenSpreadOrder(
   // Fall back to builder only if chain symbols aren't available
   const shortSym = shortSymbolOverride ?? buildOccSymbol(underlying, expiry, optType, shortStrike);
   const longSym  = longSymbolOverride  ?? buildOccSymbol(underlying, expiry, optType, longStrike);
-  console.log(`BUILD OPEN SPREAD: short=${shortSym} long=${longSym} credit=$${credit} qty=${quantity}`);
+  // Floor at $0.01, mirroring buildCloseOrder — a zero or negative credit here
+  // would otherwise flow straight through into a guaranteed TastyTrade rejection.
+  const safeCredit = Math.max(Math.abs(credit), 0.01);
+  console.log(`BUILD OPEN SPREAD: short=${shortSym} long=${longSym} credit=$${safeCredit} qty=${quantity}`);
   return {
     'order-type': 'Limit',
     'time-in-force': 'GTC',
-    price: Math.abs(credit).toFixed(2),
+    price: safeCredit.toFixed(2),
     'price-effect': 'Credit',
     legs: [
       { symbol: shortSym, quantity, action: 'Sell to Open', 'instrument-type': itype },
@@ -4360,13 +4363,28 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         // Cancel via complex order endpoint if this is part of an OCO
         const complexId = (pos as any).gtcComplexOrderId;
         console.log(`PLACE_GTC CANCEL: orderId=${pos.gtcOrderId} complexId=${complexId}`);
-        if (complexId) {
-          console.log(`Cancelling complex order ${complexId}`);
-          await ttDelete(`/accounts/${pos.accountNumber}/complex-orders/${complexId}`, token);
-        } else {
-          console.log(`Cancelling simple order ${pos.gtcOrderId}`);
-          await ttDelete(`/accounts/${pos.accountNumber}/orders/${pos.gtcOrderId}`, token);
+
+        // Preserve enough of the original order's shape to re-place it if the
+        // replacement OCO fails to go in after cancellation succeeds. TastyTrade
+        // has no atomic "replace" operation for resting orders — cancel and place
+        // are always two separate calls — so this is the closest we can get to
+        // not leaving a position genuinely unprotected on a partial failure.
+        let cancelSucceeded = false;
+        try {
+          if (complexId) {
+            console.log(`Cancelling complex order ${complexId}`);
+            await ttDelete(`/accounts/${pos.accountNumber}/complex-orders/${complexId}`, token);
+          } else {
+            console.log(`Cancelling simple order ${pos.gtcOrderId}`);
+            await ttDelete(`/accounts/${pos.accountNumber}/orders/${pos.gtcOrderId}`, token);
+          }
+          cancelSucceeded = true;
+        } catch (cancelErr: any) {
+          // Cancellation itself failed — old order is still live and still protecting
+          // the position, so this is a normal (non-urgent) failure, not a gap.
+          throw new Error(`Could not cancel existing GTC order: ${cancelErr.message ?? 'unknown error'}. Existing protection is unchanged — nothing was replaced.`);
         }
+
         console.log(`Cancel complete, waiting 500ms...`);
         await new Promise(r => setTimeout(r, 500));
 
@@ -4377,31 +4395,70 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             {
               'order-type': 'Limit',
               'time-in-force': 'GTC',
-              price: gtcLimit.toFixed(2),
+              price: Math.max(gtcLimit, 0.01).toFixed(2),
               'price-effect': 'Debit',
               legs,
             },
             {
               'order-type': 'Stop Limit',
               'time-in-force': 'GTC',
-              'stop-trigger': stopTrigger.toFixed(2),
-              price: parseFloat((stopTrigger * 1.10).toFixed(2)).toFixed(2),  // 10% above trigger for fill room
+              'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
+              price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),  // 10% above trigger for fill room
               'price-effect': 'Debit',
               legs,
             },
           ],
         };
-        const res = await ttPostComplex(`/accounts/${pos.accountNumber}/complex-orders`, token, ocoBody);
-        const orderId = String(res?.data?.['complex-order']?.id ?? res?.data?.id ?? 'submitted');
-        setResult('success');
-        setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${orderId})`);
+
+        try {
+          const res = await ttPostComplex(`/accounts/${pos.accountNumber}/complex-orders`, token, ocoBody);
+          const orderId = String(res?.data?.['complex-order']?.id ?? res?.data?.id ?? 'submitted');
+          setResult('success');
+          setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${orderId})`);
+        } catch (placeErr: any) {
+          // The old order is already cancelled and the new one failed to go in —
+          // the position is genuinely unprotected right now. Attempt one automatic
+          // recovery by re-placing the original order before reporting anything.
+          if (!cancelSucceeded) throw placeErr;
+          setPhase('OCO placement failed — restoring original order...');
+          try {
+            const restoreBody = {
+              'order-type': 'Stop Limit',
+              'time-in-force': 'GTC',
+              'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
+              price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),
+              'price-effect': 'Debit',
+              legs,
+            };
+            const restoreRes = await ttPost(`/accounts/${pos.accountNumber}/orders`, token, restoreBody);
+            const restoreId = String(restoreRes?.data?.order?.id ?? restoreRes?.data?.id ?? 'submitted');
+            setResult('error');
+            setResultMsg(
+              `OCO placement failed (${placeErr.message ?? 'unknown error'}). ` +
+              `Original GTC was already cancelled, so a fallback stop was restored instead ` +
+              `(ID #${restoreId}, trigger $${stopTrigger.toFixed(2)}) — your position has stop protection, ` +
+              `but not the GTC profit target you configured. Retry to set up the full OCO again.`
+            );
+          } catch (restoreErr: any) {
+            // Recovery itself failed — this is the one case where the position may
+            // genuinely have no protective order at all. Make this unmistakable.
+            setResult('error');
+            setResultMsg(
+              `⚠ UNPROTECTED POSITION — OCO placement failed (${placeErr.message ?? 'unknown error'}) ` +
+              `AND the automatic fallback stop also failed (${restoreErr.message ?? 'unknown error'}). ` +
+              `The original GTC order was already cancelled. ${pos.symbol} currently has no GTC or stop order ` +
+              `protecting it. Place a new stop or GTC manually in TastyTrade right away.`
+            );
+          }
+          return;
+        }
       } else {
         setPhase('Placing stop order...');
         const stopBody = {
           'order-type': 'Stop Limit',
           'time-in-force': 'GTC',
-          'stop-trigger': stopTrigger.toFixed(2),
-          price: parseFloat((stopTrigger * 1.10).toFixed(2)).toFixed(2),
+          'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
+          price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),
           'price-effect': 'Debit',
           legs,
         };
@@ -4862,7 +4919,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   const shortCalls = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Short');
   const longCalls  = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Long');
 
-  const shortPut = lifecycle.shortPuts[0] ?? null;
+  const lifecycle = classifyPositionLifecycle(pos);
+
+  const shortPut = shortPuts[0] ?? null;
   const cspStrike = shortPut?.strikePrice ?? null;
   const cspPremium = shortPut?.avgOpenPrice ?? pos.creditReceived ?? 0;
   const cspEffectiveBuyPrice = cspStrike != null ? cspStrike - cspPremium : null;
@@ -4942,7 +5001,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                       setShowChart(true);
                       if (!sparkData) {
                         setSparkLoading(true);
-                        fetch(`/api/chart?symbol=${encodeURIComponent(pos.symbol)}`)
+                        const chartSymbol =
+                        INDEX_CHART_SYMBOLS[pos.symbol.toUpperCase() as keyof typeof INDEX_CHART_SYMBOLS] ??
+                        pos.symbol;
+                      
+                        fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`)
                           .then(r => r.json())
                           .then(d => {
                             const closes = (d?.bars ?? []).map((b: any) => b?.c).filter((v: any) => v != null).slice(-90);
@@ -4966,8 +5029,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                 {showChart && (
                   <div
                     ref={chartPopupRef}
-                    className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-                    style={{ width: '280px', top: chartPopupPos?.top ?? 0, left: chartPopupPos?.left ?? 0 }}
+                    className={`absolute top-full left-0 mt-2 z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
+                    style={{ width: '280px' }}
                     onClick={e => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -5051,7 +5114,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             </div>
 
             <div className="relative group border-t-2 border-sky-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>% Buffer</p>
+              <p className={`text-[9px] ${th.textFaint}`}>OTM %</p>
               <p className={`text-xs font-bold ${bufferColor(pos.buffer, pos.dte)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.buffer != null ? `${pos.buffer.toFixed(1)}%` : '—'}
               </p>
@@ -5117,6 +5180,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                   : '—'}
               </p>
             </div>
+
+            {/* Max Risk — already computed in calculateMaxRisk (net of credit received) but
+                previously never surfaced in the card for spread positions. CSP already shows
+                its own capital requirement via Cash Req above, so this is spread-only. */}
+            {lifecycle.type !== 'CSP' && (
+              <div className="border-t-2 border-emerald-600/50 pt-1">
+                <p className={`text-[9px] ${th.textFaint}`}>Max Risk</p>
+                <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
+                  ${pos.maxRisk.toLocaleString()}
+                </p>
+              </div>
+            )}
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Credit</p>

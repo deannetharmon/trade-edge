@@ -759,65 +759,65 @@ function EnterTradeModal({ result, th, onClose }: {
 
   const submit = async () => {
     if (!accountNum) { setResult2('error'); setResultMsg('Account not found — try refreshing'); return; }
+    // Pre-flight validation — none of this existed before, and a bad value here
+    // would otherwise only surface as an opaque TastyTrade rejection.
+    if (!(creditNum > 0)) { setResult2('error'); setResultMsg('Entry credit must be greater than $0.00.'); return; }
+    if (!(gtcNum > 0)) { setResult2('error'); setResultMsg('GTC profit price must be greater than $0.00.'); return; }
+    if (!(stopNum > 0)) { setResult2('error'); setResultMsg('Stop price must be greater than $0.00.'); return; }
+    if (gtcNum >= creditNum) { setResult2('error'); setResultMsg(`GTC profit price $${gtcNum.toFixed(2)} must be less than entry credit $${creditNum.toFixed(2)} — it isn't a profit target otherwise.`); return; }
+    if (!(qty > 0)) { setResult2('error'); setResultMsg('Quantity must be at least 1.'); return; }
     setLoading(true); setResult2(null); setResultMsg('');
 
     try {
       const token = await getAccessToken();
-
-      // Step 1: Submit entry order
-      setPhase('Submitting entry order...');
-      let entryBody: any;
-      if (isIC) {
-        const itype = instrType(profile.symbol);
-        entryBody = {
-          'order-type': 'Limit', 'time-in-force': 'GTC',
-          price: Math.abs(creditNum).toFixed(2), 'price-effect': 'Credit',
-          legs: [
-            { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.shortStrike), quantity: qty, action: 'Sell to Open', 'instrument-type': itype },
-            { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.longStrike),  quantity: qty, action: 'Buy to Open',  'instrument-type': itype },
-            { symbol: c.shortCallOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.shortCallStrike!), quantity: qty, action: 'Sell to Open', 'instrument-type': itype },
-            { symbol: c.longCallOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.longCallStrike!),  quantity: qty, action: 'Buy to Open',  'instrument-type': itype },
-          ],
-        };
-      } else {
-        entryBody = buildOpenSpreadOrder(
-          profile.symbol, c.expiration, optType,
-          c.shortStrike, c.longStrike, qty, creditNum,
-          c.shortOccSymbol, c.longOccSymbol
-        );
-      }
-
-      const entryRes = await ttPost(`/accounts/${accountNum}/orders`, token, entryBody);
-      const entryId = String(entryRes?.data?.order?.id ?? entryRes?.data?.id ?? 'submitted');
-
-      // Step 2: Place OCO (profit GTC + stop)
-      setPhase('Placing OCO profit/stop orders...');
       const itype = instrType(profile.symbol);
-      const closeLegs = isIC
+
+      // Floor prices at $0.01 — TastyTrade rejects $0.00 limit orders, and thin
+      // spreads combined with tight profit targets can round down to zero.
+      const safeCreditNum = Math.max(parseFloat(creditNum.toFixed(2)), 0.01);
+      const safeGtcNum = Math.max(parseFloat(gtcNum.toFixed(2)), 0.01);
+      const safeStopNum = Math.max(parseFloat(stopNum.toFixed(2)), 0.01);
+
+      const openLegs = isIC
         ? [
-            { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.shortStrike), quantity: qty, action: 'Buy to Close' as const, 'instrument-type': itype },
-            { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.longStrike),  quantity: qty, action: 'Sell to Close' as const, 'instrument-type': itype },
-            { symbol: c.shortCallOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.shortCallStrike!), quantity: qty, action: 'Buy to Close' as const, 'instrument-type': itype },
-            { symbol: c.longCallOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.longCallStrike!),  quantity: qty, action: 'Sell to Close' as const, 'instrument-type': itype },
+            { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.shortStrike), quantity: qty, action: 'Sell to Open' as const, 'instrument-type': itype },
+            { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'P', c.longStrike),  quantity: qty, action: 'Buy to Open'  as const, 'instrument-type': itype },
+            { symbol: c.shortCallOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.shortCallStrike!), quantity: qty, action: 'Sell to Open' as const, 'instrument-type': itype },
+            { symbol: c.longCallOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, 'C', c.longCallStrike!),  quantity: qty, action: 'Buy to Open'  as const, 'instrument-type': itype },
           ]
         : [
-            { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.shortStrike), quantity: qty, action: 'Buy to Close' as const, 'instrument-type': itype },
-            { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.longStrike),  quantity: qty, action: 'Sell to Close' as const, 'instrument-type': itype },
+            { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.shortStrike), quantity: qty, action: 'Sell to Open' as const, 'instrument-type': itype },
+            { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.longStrike),  quantity: qty, action: 'Buy to Open'  as const, 'instrument-type': itype },
           ];
+      const closeLegs = openLegs.map(l => ({
+        ...l,
+        action: l.action === 'Sell to Open' ? 'Buy to Close' as const : 'Sell to Close' as const,
+      }));
 
-      const ocoBody = {
-        type: 'OCO',
+      // Single atomic OTOCO order — entry (trigger-order) plus the OCO profit/stop
+      // bracket (child orders) submitted together in one request. This replaces the
+      // previous two-call sequence (separate entry POST, then separate OCO POST),
+      // which left a window where the entry could fill with no protection attached
+      // if the second call failed for any reason (network blip, rate limit, rejection).
+      setPhase('Submitting entry + OCO bracket...');
+      const otocoBody = {
+        type: 'OTOCO',
         source: 'options-screener',
+        'trigger-order': {
+          'order-type': 'Limit', 'time-in-force': 'GTC',
+          price: safeCreditNum.toFixed(2), 'price-effect': 'Credit',
+          legs: openLegs,
+        },
         orders: [
-          { 'order-type': 'Limit', 'time-in-force': 'GTC', price: gtcNum.toFixed(2), 'price-effect': 'Debit', legs: closeLegs },
-          { 'order-type': 'Stop',  'time-in-force': 'GTC', 'stop-trigger': stopNum.toFixed(2), legs: closeLegs },
+          { 'order-type': 'Limit', 'time-in-force': 'GTC', price: safeGtcNum.toFixed(2), 'price-effect': 'Debit', legs: closeLegs },
+          { 'order-type': 'Stop',  'time-in-force': 'GTC', 'stop-trigger': safeStopNum.toFixed(2), legs: closeLegs },
         ],
       };
-      const ocoRes = await ttPostComplex(`/accounts/${accountNum}/complex-orders`, token, ocoBody);
-      const ocoId = String(ocoRes?.data?.['complex-order']?.id ?? ocoRes?.data?.id ?? 'submitted');
+      const otocoRes = await ttPostComplex(`/accounts/${accountNum}/complex-orders`, token, otocoBody);
+      const otocoId = String(otocoRes?.data?.['complex-order']?.id ?? otocoRes?.data?.id ?? 'submitted');
 
       setResult2('success');
-      setResultMsg(`Entry #${entryId} submitted · OCO #${ocoId} placed (profit $${gtcNum.toFixed(2)} / stop $${stopNum.toFixed(2)})`);
+      setResultMsg(`OTOCO #${otocoId} submitted — entry $${safeCreditNum.toFixed(2)} credit, profit target $${safeGtcNum.toFixed(2)}, stop $${safeStopNum.toFixed(2)}`);
     } catch (e: any) {
       setResult2('error');
       setResultMsg(e.message ?? 'Failed');
@@ -869,7 +869,7 @@ function EnterTradeModal({ result, th, onClose }: {
             </div>
             <div>
               <label className={`text-[10px] ${th.textFaint} block mb-1`}>ENTRY CREDIT</label>
-              <input type="number" step={0.01} value={credit}
+              <input type="number" step={0.01} min={0.01} value={credit}
                 onChange={e => {
                   setCredit(e.target.value);
                   const n = parseFloat(e.target.value);
@@ -888,14 +888,14 @@ function EnterTradeModal({ result, th, onClose }: {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={`text-[10px] text-emerald-400 block mb-1`}>PROFIT TARGET (GTC)</label>
-                <input type="number" step={0.01} value={gtcPrice}
+                <input type="number" step={0.01} min={0.01} value={gtcPrice}
                   onChange={e => setGtcPrice(e.target.value)}
                   className={`w-full px-3 py-2 ${th.input} border border-emerald-700/50 rounded text-sm text-emerald-400 focus:outline-none`} />
                 <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{targetProfit}% profit · ${(parseFloat(gtcPrice)||0 > 0 ? ((creditNum - parseFloat(gtcPrice)) * qty * 100).toFixed(0) : '—')} gain</p>
               </div>
               <div>
                 <label className={`text-[10px] text-red-400 block mb-1`}>STOP LOSS</label>
-                <input type="number" step={0.01} value={stopPrice}
+                <input type="number" step={0.01} min={0.01} value={stopPrice}
                   onChange={e => setStopPrice(e.target.value)}
                   className={`w-full px-3 py-2 ${th.input} border border-red-700/50 rounded text-sm text-red-400 focus:outline-none`} />
                 <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{stopMultiple}× credit · -${((parseFloat(stopPrice)||0) * qty * 100).toFixed(0)} max loss</p>
@@ -1132,6 +1132,24 @@ function RRCard({ result, th, existingPositions }: {
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>POP</p>
               <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{c.pop?.toFixed(0) ?? '—'}%</p>
+            </div>
+            <div className="shrink-0">
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>OTM</p>
+              {(() => {
+                const price = currentPrice;
+                const otmPct = price != null && price > 0
+                  ? c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
+                  : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
+                  : c.strategy === 'IC' && c.shortCallStrike != null
+                    ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
+                  : null
+                  : null;
+                return (
+                  <p className={`text-xs font-bold ${otmPct == null ? th.textFaint : otmPct >= 7 ? 'text-emerald-400' : otmPct >= 4 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {otmPct != null ? `${otmPct.toFixed(1)}%` : '—'}
+                  </p>
+                );
+              })()}
             </div>
           </>
         )}

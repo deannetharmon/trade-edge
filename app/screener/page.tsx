@@ -265,7 +265,11 @@ function checkPortfolioRisk(
   }
 
   // ── Same symbol, different strikes ─────────────────────────────────────
-  if (level === 'clear' && sameSymbolPositions.length > 0 && candidate) {
+  // PMCC is excluded here — its capped-risk, long-bias diagonal structure doesn't
+  // meaningfully compound with a CSP or vertical spread on the same ticker the way
+  // two same-direction positions would, so warning about "concentration" here was
+  // misleading noise rather than a real risk signal.
+  if (level === 'clear' && sameSymbolPositions.length > 0 && candidate && candidate.strategy !== 'PMCC') {
     const existingStrategy = sameSymbolPositions[0].strategy;
     const newStrategy = candidate.strategy;
 
@@ -1501,6 +1505,15 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
       if (putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
       else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
       else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
+      // Single-leg positions aren't spreads at all — most commonly a cash-secured put
+      // (CSP) or a lone covered/naked call. These previously fell through to the
+      // generic 'SPREAD' default since they don't match any 2+-leg shape above,
+      // which mislabeled them in the existing-position banner.
+      else if (putLegs.length === 1 && callLegs.length === 0) {
+        strategy = putLegs[0].dir === 'Short' ? 'CSP' : 'LONG_PUT';
+      } else if (callLegs.length === 1 && putLegs.length === 0) {
+        strategy = callLegs[0].dir === 'Short' ? 'CC' : 'LONG_CALL';
+      }
       const sortedPuts  = putLegs.map(l => l.strike).sort((a, b) => b - a);
       const sortedCalls = callLegs.map(l => l.strike).sort((a, b) => a - b);
       let strikes = '';
@@ -2920,7 +2933,6 @@ async function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[
 // grouped visually by Index/ETF/Stock classification, with a per-ticker
 // active checkbox driving scan inclusion. No strategy routing here —
 // strategy selection happens at scan time via trend detection (smart-skip).
-// app/screener/page.tsx
 
 function WatchlistBox({
   tickers,
@@ -2994,12 +3006,11 @@ function WatchlistBox({
     onChange(tickers.filter(t => t.symbol !== symbol));
   };
 
-  // Bulk select/deselect for a classification group (Indexes, ETFs, or Equities).
-  // Only flips `active` for tickers in the targeted group — other groups are untouched.
+// Bulk select/deselect for a classification group (Indexes, ETFs, or Equities).
+// Only flips `active` for tickers in the targeted group — other groups are untouched.
   const setGroupActive = (group: 'index' | 'etf' | 'stock', active: boolean) => {
     onChange(tickers.map(t => t.classification === group ? { ...t, active } : t));
   };
-
   const handleImgClick = () => {
     if (fileRef.current) fileRef.current.value = '';
     fileRef.current?.click();
@@ -3069,15 +3080,15 @@ function WatchlistBox({
         checked={t.active}
         onChange={() => handleToggleActive(t.symbol)}
         disabled={disabled || t.classification === 'pending'}
-        className="cursor-pointer"
+        className="cursor-pointer shrink-0"
       />
-      <span className={`text-[11px] font-medium ${t.active ? th.text : th.textMuted}`}>
+      <span className={`text-[11px] font-medium flex-1 ${t.active ? th.text : th.textMuted}`}>
         {t.symbol}{t.classification === 'pending' && <span className={`ml-1 ${th.textFaint}`}>⟳</span>}
       </span>
       <button
         onClick={() => handleRemove(t.symbol)}
         disabled={disabled}
-        className="text-[10px] text-slate-500 hover:text-red-500 transition-colors"
+        className="text-[10px] text-slate-500 hover:text-red-500 transition-colors shrink-0"
       >✕</button>
     </div>
   );
@@ -3090,8 +3101,8 @@ function WatchlistBox({
     label: string;
     count: number;
     group: 'index' | 'etf' | 'stock';
-  }) => (
-    <div className="flex items-center justify-between mb-1">
+    }) => (
+      <div className="flex items-center justify-between mb-1">
       <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>{label} ({count})</p>
       <div className="flex items-center gap-1.5">
         <button
@@ -3182,7 +3193,7 @@ function WatchlistBox({
           {pending.length > 0 && (
             <div>
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Classifying ({pending.length})</p>
-              <div className="flex flex-wrap gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 {pending.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
@@ -3190,7 +3201,7 @@ function WatchlistBox({
           {indexesOnly.length > 0 && (
             <div>
               <GroupHeader label="Indexes" count={indexesOnly.length} group="index" />
-              <div className="flex flex-wrap gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 {indexesOnly.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
@@ -3198,7 +3209,7 @@ function WatchlistBox({
           {etfsOnly.length > 0 && (
             <div>
               <GroupHeader label="ETFs" count={etfsOnly.length} group="etf" />
-              <div className="flex flex-wrap gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 {etfsOnly.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
@@ -3206,7 +3217,7 @@ function WatchlistBox({
           {equities.length > 0 && (
             <div>
               <GroupHeader label="Equities" count={equities.length} group="stock" />
-              <div className="flex flex-wrap gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 {equities.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
@@ -3253,7 +3264,7 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
     );
   }
   if (c.strategy === 'IC' && c.shortCallStrike != null && c.longCallStrike != null) {
-return (
+    return (
       <div className="text-xs shrink-0">
         <span className={th.label}>Strikes </span>
         <span className={th.text}>{c.shortStrike}/{c.longStrike}</span>
@@ -6530,24 +6541,28 @@ export default function Home() {
 
       <div className="flex h-[calc(100vh-57px)]">
         {/* Sidebar */}
-        <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-4 shrink-0`}>
-          <WatchlistBox
-            tickers={tickers}
-            onChange={handleTickersChange}
-            disabled={loading || watchlistLoading}
-            onLoadPrompt={showLoadPrompt}
-            sessionsPanel={
-              <SessionsPanel tickers={tickers} onLoadAll={handleTickersChange} onLoadPrompt={showLoadPrompt} th={th} />
-            }
-            th={th}
-          />
+        <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-3 shrink-0`}>
+          {/* Watchlist + Scan — grouped together since the scan button acts directly on this list */}
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
+            <WatchlistBox
+              tickers={tickers}
+              onChange={handleTickersChange}
+              disabled={loading || watchlistLoading}
+              onLoadPrompt={showLoadPrompt}
+              sessionsPanel={
+                <SessionsPanel tickers={tickers} onLoadAll={handleTickersChange} onLoadPrompt={showLoadPrompt} th={th} />
+              }
+              th={th}
+            />
 
-          <button onClick={() => setShowRunModal(true)} disabled={loading}
-            className="w-full text-white py-2.5 rounded-lg text-xs font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
-            {loading ? 'SCANNING...' : <>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
-          </button>
-          
-          <div className={`border-t ${th.border} pt-3 space-y-4`}>
+            <button onClick={() => setShowRunModal(true)} disabled={loading}
+              className="w-full text-white py-2.5 rounded-lg text-xs font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
+              {loading ? 'SCANNING...' : <>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
+            </button>
+          </div>
+
+          {/* PMCC — separate tool, own card */}
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
             <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>PMCC LIST</p>
             <StrategyBox label="PMCC" badge="BULLISH+" badgeColor="bg-purple-500/15 text-purple-400 border-purple-500" borderFocus="focus:border-purple-500" value={pmccTickers} onChange={handlePmccChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
             <button onClick={runPMCCScan} disabled={loading || !parseTickers(pmccTickers).length}
@@ -6555,7 +6570,8 @@ export default function Home() {
               {loading ? 'SCANNING...' : 'SCAN SELECTED FOR PMCC'}
             </button>
           </div>
-          
+
+          {/* Transient alerts — not boxed, so they read as messages rather than a fixed section */}
           {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">{error}</div>}
           {loading && screenMode === 'targeted' && (
             <button onClick={() => { targetedCancelRef.current = true; }}
@@ -6565,34 +6581,36 @@ export default function Home() {
           )}
 
           {/* Last Rules Used — hidden in rank mode */}
-          {screenMode === 'filter' && <div className={`text-[9px] space-y-1 border-t ${th.border} pt-3`}>
-            <p className={`${th.textMuted} mb-2 tracking-widest font-medium`}>ACTIVE RULES</p>
-            <div className="space-y-3">
-              {[
-                { label: '📈 Stock', rules: runtimeStockRules, preset: stockPresetLabel },
-                { label: '🏦 ETF/Index', rules: runtimeEtfRules, preset: etfPresetLabel },
-              ].map(({ label, rules, preset }) => (
-                <div key={label}>
-                  <p className={`${th.textFaint} font-bold mb-1`}>{label} <span className="font-normal opacity-60">({preset})</span></p>
-                  {[
-                    ['IVR', `≥ ${rules.IVR_MIN}%`],
-                    ['DTE', `${rules.DTE_MIN}–${rules.DTE_MAX}d`],
-                    ['Credit ratio', `≥ ${(rules.CREDIT_RATIO_MIN * 100).toFixed(0)}%`],
-                    ['OI per leg', `≥ ${rules.OI_MIN}`],
-                    ['Bid-Ask', `≤ $${rules.BID_ASK_MAX}`],
-                    ['Max width', `$${rules.MAX_SPREAD_WIDTH}`],
-                    ['Min ROC spread', `${rules.ROC_MIN_SPREAD}%`],
-                    ['Min ROC IC', `${rules.ROC_MIN_IC}%`],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between">
-                      <span className={th.textFaint}>{k}</span>
-                      <span className={`${th.textMuted} font-medium`}>{v}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
+          {screenMode === 'filter' && (
+            <div className={`${th.card} border ${th.border} rounded-xl p-3 text-[9px] space-y-1`}>
+              <p className={`${th.textMuted} mb-2 tracking-widest font-medium`}>ACTIVE RULES</p>
+              <div className="space-y-3">
+                {[
+                  { label: '📈 Stock', rules: runtimeStockRules, preset: stockPresetLabel },
+                  { label: '🏦 ETF/Index', rules: runtimeEtfRules, preset: etfPresetLabel },
+                ].map(({ label, rules, preset }) => (
+                  <div key={label}>
+                    <p className={`${th.textFaint} font-bold mb-1`}>{label} <span className="font-normal opacity-60">({preset})</span></p>
+                    {[
+                      ['IVR', `≥ ${rules.IVR_MIN}%`],
+                      ['DTE', `${rules.DTE_MIN}–${rules.DTE_MAX}d`],
+                      ['Credit ratio', `≥ ${(rules.CREDIT_RATIO_MIN * 100).toFixed(0)}%`],
+                      ['OI per leg', `≥ ${rules.OI_MIN}`],
+                      ['Bid-Ask', `≤ $${rules.BID_ASK_MAX}`],
+                      ['Max width', `$${rules.MAX_SPREAD_WIDTH}`],
+                      ['Min ROC spread', `${rules.ROC_MIN_SPREAD}%`],
+                      ['Min ROC IC', `${rules.ROC_MIN_IC}%`],
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex justify-between">
+                        <span className={th.textFaint}>{k}</span>
+                        <span className={`${th.textMuted} font-medium`}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>}
+          )}
         </div>
 
         {/* Main content */}
