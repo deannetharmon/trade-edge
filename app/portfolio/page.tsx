@@ -4986,7 +4986,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 80px 70px 110px 80px 80px 90px 70px 50px 45px 45px 45px 55px 60px 90px 130px', gap: '0 12px', alignItems: 'start', minWidth: '1464px' }}>
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 80px 70px 110px 80px 80px 90px 70px 50px 45px 45px 45px 55px 60px 90px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1484px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
@@ -5350,7 +5350,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             {/* ── ACTION ─────────────────────────────── */}
             <div className="border-t-2 border-slate-500/40 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Suggested</p>
-              <span className={`text-[10px] font-bold ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
+              <span className={`text-[10px] font-bold whitespace-nowrap ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
               <p className={`text-[9px] ${th.textFaint} mt-0.5 leading-tight`}>{rec.detail}</p>
               {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight">{sig}</p> : null; })()}
             </div>
