@@ -1928,6 +1928,19 @@ OUTPUT FORMAT — JSON only, nothing else:
   "reasoning": "2-3 sentences. Be specific — use the actual numbers from the position. Tell them exactly why."
 }`;
 
+function isUpcomingEarningsRisk(earningsDate: string | null, expDate: string): boolean {
+  if (!earningsDate) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const earnings = new Date(`${earningsDate}T00:00:00`);
+  const expiry = new Date(`${expDate}T23:59:59`);
+
+  if (Number.isNaN(earnings.getTime()) || Number.isNaN(expiry.getTime())) return false;
+
+  return earnings >= today && earnings <= expiry;
+}
 function buildVerdictPrompt(pos: Position, action: EvaluatedAction, detail?: string): string {
   const pnlPct = pos.pnl != null && pos.creditReceived > 0
     ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
@@ -1963,14 +1976,14 @@ Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/day: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 GTC working: ${pos.hasGtc ? 'Yes' : 'No'}
-Earnings: ${pos.earningsDate ? `YES — ${pos.earningsDate}` : 'None within expiry'}
+Earnings: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `UPCOMING — ${pos.earningsDate}` : pos.earningsDate ? `PAST — ${pos.earningsDate} — ignore as current risk` : 'None before expiration'}
 
 Flags: ${[
     pos.needsClose ? 'AT 21 DTE (standard entry — must close/roll)' : '',
     pos.entryDte <= 21 ? `SHORT-DATED ENTRY (entered at ${pos.entryDte} DTE, now ${pos.dte} DTE — fast profit capture goal, lower thresholds apply)` : '',
     pos.hitTarget ? 'TARGET HIT' : '',
     pos.buffer != null && pos.buffer < 2 ? `CRITICAL BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? `TIGHT BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? `WATCH BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : '',
-    pos.earningsDate ? `EARNINGS ${pos.earningsDate}` : '',
+    isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `UPCOMING EARNINGS ${pos.earningsDate}` : '',
     (pos.pnl ?? 0) < -pos.creditReceived ? 'LOSS EXCEEDS 1X CREDIT' : '',
   ].filter(Boolean).join(', ') || 'None'}
 ${memoryContext ? `\n${memoryContext}` : ''}
