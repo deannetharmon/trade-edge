@@ -5168,6 +5168,19 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             </div>
 
             {/* ── P&L ────────────────────────────────── */}
+            {/* Max Risk — already computed in calculateMaxRisk (net of credit received).
+                CSP already shows its own capital requirement via Cash Req next to it, so
+                this risk column is spread-only. Positioned right after Strikes so downside
+                is established before Buyback/Credit, ahead of the value columns. */}
+            {lifecycle.type !== 'CSP' && (
+              <div className="border-t-2 border-emerald-600/50 pt-1">
+                <p className={`text-[9px] ${th.textFaint}`}>Max Risk</p>
+                <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
+                  ${pos.maxRisk.toLocaleString()}
+                </p>
+              </div>
+            )}
+
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>
                 {lifecycle.type === 'CSP' ? 'Cash Req' : 'Buyback'}
@@ -5180,18 +5193,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
                   : '—'}
               </p>
             </div>
-
-            {/* Max Risk — already computed in calculateMaxRisk (net of credit received) but
-                previously never surfaced in the card for spread positions. CSP already shows
-                its own capital requirement via Cash Req above, so this is spread-only. */}
-            {lifecycle.type !== 'CSP' && (
-              <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>Max Risk</p>
-                <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  ${pos.maxRisk.toLocaleString()}
-                </p>
-              </div>
-            )}
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Credit</p>
