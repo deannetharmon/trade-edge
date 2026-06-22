@@ -72,8 +72,8 @@ export default function HelpPage() {
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 py-4 flex items-center justify-between`}>
         <div>
-          <a href="/" className={`text-[10px] ${th.textFaint} hover:text-blue-400 transition-colors tracking-wider`}>← Back to Screener</a>
-          <h1 className="text-base font-bold tracking-widest text-white mt-1">OPTIONS HUNTER</h1>
+          <a href="/" className={`text-[10px] ${th.textFaint} hover:text-blue-400 transition-colors tracking-wider`}>← Back to TRADEEDGE</a>
+          <h1 className="text-base font-bold tracking-widest text-white mt-1">TRADEEDGE</h1>
           <p className="text-[10px] text-white/50 tracking-wider">Help & Reference Guide</p>
         </div>
       </div>
@@ -83,7 +83,7 @@ export default function HelpPage() {
         {/* Overview */}
         <Section title="Overview" th={th}>
           <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
-            OPTIONS HUNTER helps you find qualifying options trades using the Prosper trading rules. It screens stocks for Bull Put Spreads (BPS), Bear Call Spreads (BCS), and Iron Condors (IC) using real-time data from TastyTrade.
+            TRADEEDGE SCREENER helps you find qualifying options trades using the Prosper trading rules. It screens stocks for Bull Put Spreads (BPS), Bear Call Spreads (BCS), and Iron Condors (IC) using real-time data from TastyTrade.
           </p>
           <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
             The screener applies your rules automatically — IVR check, earnings check, chain liquidity, delta, credit ratio, and ROC — and returns only qualifying setups.
@@ -96,7 +96,7 @@ export default function HelpPage() {
             {[
               { step: '1', title: 'Finviz', desc: 'Run your Finviz screen (S&P 500, large cap, optionable, 500K+ avg volume). Upload a screenshot using the ↑ img button to automatically extract tickers via OCR.' },
               { step: '2', title: 'Add Tickers', desc: 'Paste tickers into the BPS, BCS, or IC scan list boxes based on your chart analysis. Or use AUTO TREND DETECT to let the screener determine the strategy for up to 5 tickers.' },
-              { step: '3', title: 'Set Rules', desc: 'Click RUN SCREENER to open the rules modal. Verify your screening rules match your current market approach, then click RUN.' },
+              { step: '3', title: 'Set Rules', desc: 'Click SCAN SELECTED ... to open the rules modal. Verify your screening rules match your current market approach, then click RUN.' },
               { step: '4', title: 'Review Results', desc: 'Qualified results appear at the top with a color-coded left border. Expand any card to see the full checklist. Disqualified results show the failure reason.' },
               { step: '5', title: 'Take Action', desc: 'For qualified trades, click 📅 Enter Tomorrow to schedule a next-day entry reminder in Google Calendar. For earnings-blocked stocks, click 📅 Follow Up to schedule a re-screen after earnings.' },
             ].map(s => (
@@ -307,7 +307,7 @@ export default function HelpPage() {
 
         {/* Footer */}
         <div className={`text-center text-[10px] ${th.textFaint} py-4 border-t ${th.border}`}>
-          <p>OPTIONS HUNTER · Based on Prosper Trading course materials</p>
+          <p>TRADEEDGE · Based on Prosper Trading course materials</p>
           <p className="mt-1">Paper trade before going live · Position size: max 5–10% of portfolio per trade</p>
         </div>
 
