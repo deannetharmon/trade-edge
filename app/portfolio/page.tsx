@@ -4977,47 +4977,138 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
     </div>
   );
 }
-// ── Greek Value Tint Helpers ──────────────────────────────────────────────
-// Returns a faint background class based on how favorable the Greek is
-// for a short premium (credit spread) position.
+// ── Greek Value Display + Tint Helpers ─────────────────────────────────────
+// These convert raw option Greeks into trader-readable values and color-code
+// the risk/benefit for short-premium positions.
+
+function fmtThetaDisplay(theta: number | null): string {
+  if (theta == null) return '—';
+  const dollarsPerDay = theta * 100;
+  const sign = dollarsPerDay >= 0 ? '+' : '-';
+  return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/day`;
+}
+
+function fmtDeltaDisplay(delta: number | null): string {
+  if (delta == null) return '—';
+  const pct = delta * 100;
+  const sign = pct >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(pct).toFixed(0)}%`;
+}
+
+function fmtGammaDisplay(gamma: number | null): string {
+  if (gamma == null) return '—';
+  return Math.abs(gamma).toFixed(3);
+}
+
+function fmtVegaDisplay(vega: number | null): string {
+  if (vega == null) return '—';
+  const sign = vega >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(vega).toFixed(2)}`;
+}
 
 function thetaTint(theta: number | null): string {
   if (theta == null) return '';
-  if (theta >= 0.10) return 'bg-emerald-500/10 rounded px-1';
-  if (theta >= 0.05) return 'bg-emerald-500/8 rounded px-1';
-  if (theta >= 0.01) return 'bg-emerald-500/5 rounded px-1';
-  if (theta < 0)     return 'bg-red-500/10 rounded px-1';
+  if (theta >= 0.10) return 'bg-emerald-500/10 rounded px-1.5';
+  if (theta >= 0.05) return 'bg-emerald-500/8 rounded px-1.5';
+  if (theta >= 0.01) return 'bg-yellow-500/8 rounded px-1.5';
+  if (theta < 0)     return 'bg-red-500/10 rounded px-1.5';
   return '';
+}
+
+function thetaTextColor(theta: number | null, fallback: string): string {
+  if (theta == null) return fallback;
+  if (theta >= 0.05) return 'text-emerald-400';
+  if (theta >= 0.01) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function thetaLabel(theta: number | null): string {
+  if (theta == null) return '';
+  if (theta >= 0.10) return '★ strong decay';
+  if (theta >= 0.05) return '✓ good decay';
+  if (theta >= 0.01) return '~ light decay';
+  return '✗ paying theta';
 }
 
 function deltaTint(delta: number | null): string {
   if (delta == null) return '';
   const abs = Math.abs(delta);
-  if (abs <= 0.05)  return 'bg-emerald-500/10 rounded px-1';
-  if (abs <= 0.10)  return 'bg-emerald-500/8 rounded px-1';
-  if (abs <= 0.15)  return 'bg-yellow-500/8 rounded px-1';
-  if (abs <= 0.25)  return 'bg-orange-500/10 rounded px-1';
-  return 'bg-red-500/10 rounded px-1';
+  if (abs <= 0.10) return 'bg-emerald-500/10 rounded px-1.5';
+  if (abs <= 0.25) return 'bg-yellow-500/8 rounded px-1.5';
+  if (abs <= 0.35) return 'bg-orange-500/10 rounded px-1.5';
+  return 'bg-red-500/10 rounded px-1.5';
+}
+
+function deltaTextColor(delta: number | null, fallback: string): string {
+  if (delta == null) return fallback;
+  const abs = Math.abs(delta);
+  if (abs <= 0.10) return 'text-emerald-400';
+  if (abs <= 0.25) return 'text-yellow-400';
+  if (abs <= 0.35) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function deltaLabel(delta: number | null): string {
+  if (delta == null) return '';
+  const abs = Math.abs(delta);
+  if (abs <= 0.10) return '✓ low exposure';
+  if (abs <= 0.25) return '~ moderate';
+  if (abs <= 0.35) return '⚠ elevated';
+  return '✗ high exposure';
 }
 
 function gammaTint(gamma: number | null): string {
   if (gamma == null) return '';
   const abs = Math.abs(gamma);
-  if (abs <= 0.001)  return 'bg-emerald-500/10 rounded px-1';
-  if (abs <= 0.003)  return 'bg-emerald-500/8 rounded px-1';
-  if (abs <= 0.006)  return 'bg-yellow-500/8 rounded px-1';
-  if (abs <= 0.010)  return 'bg-orange-500/10 rounded px-1';
-  return 'bg-red-500/10 rounded px-1';
+  if (abs <= 0.005) return 'bg-emerald-500/10 rounded px-1.5';
+  if (abs <= 0.015) return 'bg-yellow-500/8 rounded px-1.5';
+  if (abs <= 0.030) return 'bg-orange-500/10 rounded px-1.5';
+  return 'bg-red-500/10 rounded px-1.5';
+}
+
+function gammaTextColor(gamma: number | null, fallback: string): string {
+  if (gamma == null) return fallback;
+  const abs = Math.abs(gamma);
+  if (abs <= 0.005) return 'text-emerald-400';
+  if (abs <= 0.015) return 'text-yellow-400';
+  if (abs <= 0.030) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function gammaLabel(gamma: number | null): string {
+  if (gamma == null) return '';
+  const abs = Math.abs(gamma);
+  if (abs <= 0.005) return '✓ low gamma';
+  if (abs <= 0.015) return '~ watch';
+  if (abs <= 0.030) return '⚠ elevated';
+  return '✗ high gamma';
 }
 
 function vegaTint(vega: number | null): string {
   if (vega == null) return '';
-  // Short vega (negative) is favorable for premium sellers
-  if (vega <= -0.10) return 'bg-emerald-500/10 rounded px-1';
-  if (vega <= -0.05) return 'bg-emerald-500/8 rounded px-1';
-  if (vega <= -0.01) return 'bg-emerald-500/5 rounded px-1';
-  if (vega >= 0)     return 'bg-red-500/10 rounded px-1';
-  return '';
+  if (vega <= -0.10) return 'bg-emerald-500/10 rounded px-1.5';
+  if (vega <= -0.03) return 'bg-emerald-500/8 rounded px-1.5';
+  if (vega < 0)      return 'bg-yellow-500/8 rounded px-1.5';
+  if (vega <= 0.05)  return 'bg-yellow-500/8 rounded px-1.5';
+  if (vega <= 0.15)  return 'bg-orange-500/10 rounded px-1.5';
+  return 'bg-red-500/10 rounded px-1.5';
+}
+
+function vegaTextColor(vega: number | null, fallback: string): string {
+  if (vega == null) return fallback;
+  if (vega <= -0.03) return 'text-emerald-400';
+  if (vega <= 0.05) return 'text-yellow-400';
+  if (vega <= 0.15) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function vegaLabel(vega: number | null): string {
+  if (vega == null) return '';
+  if (vega <= -0.10) return '✓ short vega';
+  if (vega < 0) return '~ slight short';
+  if (vega <= 0.05) return '~ neutral';
+  if (vega <= 0.15) return '⚠ long vega';
+  return '✗ high vega';
 }
 
 // ── Buffer Color Helpers ──────────────────────────────────────────────────
@@ -5495,66 +5586,41 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             {/* ── GREEKS ─────────────────────────────── */}
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Theta</p>
-              <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${pos.theta != null ? (pos.theta >= 0 ? 'text-emerald-400' : 'text-red-400') : th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.theta != null ? (pos.theta >= 0 ? '+' : '') + pos.theta.toFixed(3) : '—'}
+              <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${thetaTextColor(pos.theta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Raw theta: ${pos.theta.toFixed(4)}` : undefined}>
+                {fmtThetaDisplay(pos.theta)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
-                {pos.theta == null ? '' : pos.theta >= 0.10 ? '★ strong decay' : pos.theta >= 0.05 ? '✓ good decay' : pos.theta >= 0.01 ? '~ light decay' : '✗ paying theta'}
+                {thetaLabel(pos.theta)}
               </p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Delta</p>
-              <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${pos.netDelta != null ? (Math.abs(pos.netDelta) > 0.15 ? 'text-yellow-400' : 'text-emerald-400') : th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.netDelta != null ? (pos.netDelta >= 0 ? '+' : '') + pos.netDelta.toFixed(3) : '—'}
+              <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${deltaTextColor(pos.netDelta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netDelta != null ? `Raw delta: ${pos.netDelta.toFixed(4)}` : undefined}>
+                {fmtDeltaDisplay(pos.netDelta)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
-                {pos.netDelta == null ? '' : (() => {
-                  const t = deltaTint(pos.netDelta);
-                  if (t.includes('emerald') && t.includes('10')) return '✓ neutral';
-                  if (t.includes('emerald')) return '✓ near neutral';
-                  if (t.includes('yellow')) return '~ directional';
-                  if (t.includes('orange')) return '⚠ exposed';
-                  return '✗ high exposure';
-                })()}
+                {deltaLabel(pos.netDelta)}
               </p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Gamma</p>
-              <p className={`text-xs font-bold inline-block ${gammaTint(pos.gamma)} ${pos.gamma != null ? (
-                Math.abs(pos.gamma) <= 0.003 ? 'text-emerald-400' :
-                Math.abs(pos.gamma) <= 0.006 ? 'text-yellow-400' :
-                Math.abs(pos.gamma) <= 0.010 ? 'text-orange-400' :
-                'text-red-400'
-              ) : th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.gamma != null ? pos.gamma.toFixed(4) : '—'}
+              <p className={`text-xs font-bold inline-block ${gammaTint(pos.gamma)} ${gammaTextColor(pos.gamma, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.gamma != null ? `Raw gamma: ${pos.gamma.toFixed(4)}` : undefined}>
+                {fmtGammaDisplay(pos.gamma)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
-                {pos.gamma == null ? '' : (() => {
-                  const t = gammaTint(pos.gamma);
-                  if (t.includes('emerald') && t.includes('10')) return '✓ low risk';
-                  if (t.includes('emerald')) return '✓ manageable';
-                  if (t.includes('yellow')) return '~ watch';
-                  if (t.includes('orange')) return '⚠ elevated';
-                  return '✗ high gamma';
-                })()}
+                {gammaLabel(pos.gamma)}
               </p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Vega</p>
-              <p className={`text-xs font-bold inline-block ${vegaTint(pos.netVega)} ${pos.netVega != null ? (pos.netVega < 0 ? 'text-emerald-400' : 'text-red-400') : th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.netVega != null ? (pos.netVega >= 0 ? '+' : '') + pos.netVega.toFixed(3) : '—'}
+              <p className={`text-xs font-bold inline-block ${vegaTint(pos.netVega)} ${vegaTextColor(pos.netVega, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netVega != null ? `Raw vega: ${pos.netVega.toFixed(4)}` : undefined}>
+                {fmtVegaDisplay(pos.netVega)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
-                {pos.netVega == null ? '' : (() => {
-                  const t = vegaTint(pos.netVega);
-                  if (t.includes('emerald') && t.includes('10')) return '✓ short vega';
-                  if (t.includes('emerald') && t.includes('8')) return '✓ short vega';
-                  if (t.includes('emerald')) return '~ slight short';
-                  return '✗ long vega (wrong side)';
-                })()}
+                {vegaLabel(pos.netVega)}
               </p>
             </div>
 
