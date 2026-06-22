@@ -5941,7 +5941,9 @@ export default function PortfolioPage() {
 
       {portfolioAnalysis && !portfolioAnalysis.error && (
         <PortfolioAnalysisPanel analysis={portfolioAnalysis} positions={positions} onClose={() => setPortfolioAnalysis(null)} th={th} />
-      )}      {portfolioAnalysis?.error && (
+      )}      
+      
+      {portfolioAnalysis?.error && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-red-900/80 border border-red-500 rounded-lg px-4 py-3 text-xs text-red-300 flex items-center gap-3">
           Portfolio analysis failed: {portfolioAnalysis.error}
           <button onClick={() => setPortfolioAnalysis(null)} className="text-red-400 hover:text-red-200">✕</button>
