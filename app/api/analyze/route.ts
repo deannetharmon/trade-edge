@@ -1,13 +1,54 @@
 // app/api/analyze/route.ts
-// Server-side proxy for OpenAI API with web search support.
-import { getAiModel, type AiProfile } from '@/lib/ai/models';
+// Server-side proxy for OpenAI API with optional web-search support.
+// Model names are selected by AI profile in lib/ai/models.ts.
+
 import { NextRequest, NextResponse } from 'next/server';
+import { getAiModel, isAiProfile, type AiProfile } from '@/lib/ai/models';
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_API = 'https://api.openai.com/v1/responses';
 
+function requestedProfile(body: any, fallback: AiProfile): AiProfile {
+  return isAiProfile(body?.profile) ? body.profile : fallback;
+}
+
+function selectedModel(body: any, fallbackProfile: AiProfile): string {
+  // Keep backward compatibility: if a caller explicitly sends "model", honor it.
+  // New client code should send "profile" instead.
+  if (typeof body?.model === 'string' && body.model.trim()) return body.model.trim();
+  return getAiModel(requestedProfile(body, fallbackProfile));
+}
+
+function normalizeChatMessages(body: any): any[] {
+  const messages: any[] = [];
+
+  if (body.system) {
+    messages.push({ role: 'system', content: body.system });
+  }
+
+  for (const m of body.messages ?? []) {
+    if (!m?.role) continue;
+    messages.push({ role: m.role, content: m.content });
+  }
+
+  return messages;
+}
+
+function extractResponsesText(data: any): string {
+  if (typeof data?.output_text === 'string') return data.output_text;
+
+  const outputItems: any[] = data?.output ?? [];
+  return outputItems
+    .filter((item: any) => item.type === 'message')
+    .flatMap((item: any) => item.content ?? [])
+    .filter((c: any) => c.type === 'output_text' || c.type === 'text')
+    .map((c: any) => c.text ?? '')
+    .join('');
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY ?? process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+
   if (!apiKey) {
     return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
   }
@@ -19,7 +60,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  // If web_search is requested, use the Responses API with gpt-4o-search-preview
   const wantsSearch = body.web_search === true;
 
   if (wantsSearch) {
@@ -29,57 +69,58 @@ export async function POST(req: NextRequest) {
   return handleStandard(body, apiKey);
 }
 
-// ── Standard chat completions (existing behavior) ──────────────────────────
+// ── Standard chat completions ──────────────────────────────────────────────
 async function handleStandard(body: any, apiKey: string) {
-  const messages: any[] = [];
-  if (body.system) messages.push({ role: 'system', content: body.system });
-  for (const m of body.messages ?? []) {
-    messages.push({ role: m.role, content: m.content });
-  }
+  const messages = normalizeChatMessages(body);
+  const model = selectedModel(body, 'analysis');
 
   try {
     const res = await fetch(OPENAI_API, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model,
         max_tokens: body.max_tokens ?? 1000,
         messages,
       }),
     });
+
     const data = await res.json();
+
     if (!res.ok) {
       return NextResponse.json(
-        { error: data?.error?.message ?? `OpenAI error ${res.status}` },
+        {
+          error: data?.error?.message ?? `OpenAI error ${res.status}`,
+          model,
+          profile: requestedProfile(body, 'analysis'),
+        },
         { status: res.status }
       );
     }
+
     const text = data?.choices?.[0]?.message?.content ?? '';
-    return NextResponse.json({ content: [{ type: 'text', text }] });
+    return NextResponse.json({ content: [{ type: 'text', text }], model });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? 'Proxy fetch failed' }, { status: 502 });
+    return NextResponse.json({ error: e.message ?? 'Proxy fetch failed', model }, { status: 502 });
   }
 }
 
-// ── Web search via Responses API ───────────────────────────────────────────
+// ── Optional web search via Responses API ──────────────────────────────────
 async function handleWithSearch(body: any, apiKey: string) {
-  // Build input array for Responses API
-  const input: any[] = [];
+  const model = selectedModel(body, 'search');
 
-  // Add conversation history as user/assistant turns
+  const input: any[] = [];
   for (const m of body.messages ?? []) {
     if (m.role === 'user') {
-      // Support multipart content (text + images)
-      if (Array.isArray(m.content)) {
-        input.push({ role: 'user', content: m.content });
-      } else {
-        input.push({ role: 'user', content: m.content });
-      }
+      input.push({ role: 'user', content: m.content });
     } else if (m.role === 'assistant') {
-      input.push({ role: 'assistant', content: typeof m.content === 'string' ? m.content : m.content?.find((p: any) => p.type === 'text')?.text ?? '' });
+      const content = typeof m.content === 'string'
+        ? m.content
+        : m.content?.find((p: any) => p.type === 'text')?.text ?? '';
+      input.push({ role: 'assistant', content });
     }
   }
 
@@ -88,35 +129,33 @@ async function handleWithSearch(body: any, apiKey: string) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-search-preview',
+        model,
         tools: [{ type: 'web_search_preview' }],
         instructions: body.system ?? '',
         input,
         max_output_tokens: body.max_tokens ?? 1000,
       }),
     });
+
     const data = await res.json();
+
     if (!res.ok) {
       return NextResponse.json(
-        { error: data?.error?.message ?? `OpenAI search error ${res.status}` },
+        {
+          error: data?.error?.message ?? `OpenAI search error ${res.status}`,
+          model,
+          profile: requestedProfile(body, 'search'),
+        },
         { status: res.status }
       );
     }
 
-    // Extract text from Responses API output array
-    const outputItems: any[] = data?.output ?? [];
-    const text = outputItems
-      .filter((item: any) => item.type === 'message')
-      .flatMap((item: any) => item.content ?? [])
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('');
-
-    return NextResponse.json({ content: [{ type: 'text', text }] });
+    const text = extractResponsesText(data);
+    return NextResponse.json({ content: [{ type: 'text', text }], model });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? 'Search proxy failed' }, { status: 502 });
+    return NextResponse.json({ error: e.message ?? 'Search proxy failed', model }, { status: 502 });
   }
 }
