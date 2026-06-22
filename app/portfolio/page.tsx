@@ -538,7 +538,7 @@ Reply with ONLY the summary text, no JSON, no labels.`;
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        profile: 'summary',
         max_tokens: 200,
         system: 'You are a concise trading journal summarizer. Respond with plain text only.',
         messages: [{ role: 'user', content: prompt }],
@@ -589,7 +589,7 @@ Reply as JSON: {"strengths": [...], "weaknesses": [...], "summary": "..."}`;
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        profile: 'summary',
         max_tokens: 300,
         system: 'You are a trading coach analyzing a trader\'s patterns. Return JSON only.',
         messages: [{ role: 'user', content: prompt }],
@@ -1974,7 +1974,7 @@ async function evaluateAction(pos: Position, action: EvaluatedAction, detail?: s
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      profile: 'fast',
       max_tokens: 400,
       system: TRADING_VERDICT_PROMPT,
       messages: [{ role: 'user', content: prompt }],
@@ -1997,13 +1997,13 @@ async function evaluateAction(pos: Position, action: EvaluatedAction, detail?: s
 }
 
 async function callAI(userMessage: string): Promise<string> {
-  // Calls our own Next.js API route which proxies to Anthropic server-side.
-  // Direct browser → api.anthropic.com calls are blocked by CORS.
+  // Calls our own Next.js API route, which selects the configured AI model server-side.
+  // Keep model names out of this client file; use profile instead.
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      profile: 'analysis',
       max_tokens: 1600,
       system: TRADING_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
@@ -2028,7 +2028,7 @@ async function callAIWithHistory(messages: ChatMessage[], systemOverride?: strin
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o-search-preview',
+      profile: 'chat',
       max_tokens: 1200,
       web_search: true,
       system: systemOverride ?? TRADING_SYSTEM_PROMPT,
@@ -4172,7 +4172,7 @@ async function fetchStopGtcSuggestion(pos: Position): Promise<StopGtcSuggestion>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      profile: 'analysis',
       max_tokens: 500,
       system: STOP_GTC_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
