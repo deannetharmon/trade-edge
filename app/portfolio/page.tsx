@@ -1435,9 +1435,12 @@ async function loadPositions(): Promise<Position[]> {
     const rawEarningsDate = earningsMap[symbol] ?? null;
     // Use string comparison (YYYY-MM-DD) — avoids UTC midnight timezone shifts
     // that cause new Date() comparisons to misclassify same-day or next-day earnings
-    const earningsWithinExpiry = rawEarningsDate && rawEarningsDate <= expDate
-      ? rawEarningsDate
-      : null;
+    const earningsWithinExpiry =
+      rawEarningsDate &&
+      rawEarningsDate >= new Date().toISOString().slice(0, 10) &&
+      rawEarningsDate <= expDate
+        ? rawEarningsDate
+        : null;
 
     return {
       key, symbol, expDate, dte, strategy, legs: positionLegs,
@@ -1735,7 +1738,7 @@ Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (volatility exposure)
 OPERATIONAL STATUS:
 GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
 Stop loss: ${pos.stopLossStatus} ${pos.stopLossPrice ? `@ $${pos.stopLossPrice}` : ''}
-Earnings within expiry: ${pos.earningsDate ? `Yes — ${pos.earningsDate}` : 'No'}
+Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `Yes — ${pos.earningsDate}` : 'No'}
 
 TREND ANALYSIS:
 Direction: ${trend?.trend ?? 'unknown'} (confidence: ${trend?.confidence ?? 'unknown'}%)
@@ -1748,7 +1751,7 @@ Flags: ${[
   pos.hitTarget ? '✓ Profit target hit' : '',
   !pos.hasGtc ? '⚠ No GTC order' : '',
   pos.buffer != null && pos.buffer < 2 ? `⚠ CRITICAL buffer ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE — near breach` : pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? `⚠ Tight buffer ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? `ℹ Buffer ${pos.buffer.toFixed(1)}% with ${pos.dte} DTE — watch closely` : '',
-  pos.earningsDate ? `⚠ Earnings ${pos.earningsDate}` : '',
+  isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `⚠ Upcoming earnings ${pos.earningsDate}` : '',
 ].filter(Boolean).join(', ') || 'None'}
 
 EXPERT DECISION CHECKLIST:
@@ -2182,7 +2185,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     'ORDERS / RISK CONTROLS',
     `GTC profit order: ${pos.hasGtc ? `Yes${pos.gtcOrderPrice != null ? ` at ${fmtMoney(pos.gtcOrderPrice)}` : ''}` : 'No'}`,
     `Stop loss status: ${pos.stopLossStatus}${pos.stopLossPrice != null ? ` at ${fmtMoney(pos.stopLossPrice)}` : ''}`,
-    `Earnings within expiry: ${pos.earningsDate ? pos.earningsDate : 'No / unknown'}`,
+    `Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? pos.earningsDate : 'No / unknown'}`,
     '',
     'ORIGINAL AI ANALYSIS',
     `Recommendation: ${analysis.recommendation}`,
@@ -4298,7 +4301,7 @@ Stock price: ${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/day: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
-Earnings within expiry: ${pos.earningsDate ? 'YES — ' + pos.earningsDate : 'None'}
+Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'YES — ' + pos.earningsDate : 'None'}
 
 CURRENT ORDERS:
 GTC profit-target: ${pos.hasGtc ? 'Yes — at $' + (pos.gtcOrderPrice?.toFixed(2) ?? '?') + '/contract (' + currentGtcPct + '% profit)' : 'None set'}
@@ -4308,7 +4311,7 @@ FLAGS: ${[
   pos.needsClose ? 'AT 21 DTE — closing soon anyway (standard entry)' : '',
   pos.entryDte <= 21 ? `SHORT-DATED ENTRY (entered at ${pos.entryDte} DTE, now ${pos.dte} DTE — set tight stop, lower GTC target to 30-40%)` : '',
   pos.buffer != null && pos.buffer < 2 ? 'CRITICAL buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE — near breach' : pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? 'TIGHT buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE' : pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? 'WATCH buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE' : '',
-  pos.earningsDate ? 'EARNINGS ' + pos.earningsDate : '',
+  isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'EARNINGS ' + pos.earningsDate : '',
   (pos.ivr ?? 0) < 30 ? 'IVR BELOW 30 — edge thin' : '',
   (pos.ivr ?? 0) > 70 ? 'IVR ABOVE 70 — elevated volatility' : '',
   profitCaptured != null && profitCaptured > 70 ? profitCaptured + '% PROFIT CAPTURED — stop must protect gains, anchor to current value' : '',
