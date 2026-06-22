@@ -1852,7 +1852,7 @@ function buildPortfolioPrompt(positions: Position[]): string {
   const totalCredit = positions.reduce((s, p) => s + p.creditReceived, 0);
   const totalPnl = positions.reduce((s, p) => s + (p.pnl ?? 0), 0);
   const totalAtRisk = positions.reduce((s, p) => s + p.maxRisk, 0);
-  const totalTheta = positions.reduce((s, p) => s + (p.theta ?? 0), 0);
+  const portfolioGreeks = calculatePortfolioGreeks(positions);
   const urgentCount = positions.filter(p => p.needsClose || p.hitTarget || (p.buffer != null && p.buffer < 5)).length;
 
   return `Analyze this options portfolio as a whole:
@@ -1862,7 +1862,10 @@ ${positions.length} open positions | ${urgentCount} requiring immediate attentio
 Total credit collected: $${totalCredit.toFixed(2)}
 Current P&L: $${totalPnl.toFixed(2)} (${totalCredit > 0 ? ((totalPnl / totalCredit) * 100).toFixed(1) : 0}% of credit)
 Total at risk: $${totalAtRisk.toFixed(2)}
-Net theta/day: $${totalTheta.toFixed(2)}
+Net delta: ${portfolioGreeks.deltaShares != null ? `${portfolioGreeks.deltaShares.toFixed(0)} share-equivalent` : 'N/A'}
+Net theta/day: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/day` : 'N/A'}
+Net gamma: ${portfolioGreeks.gammaSharesPerDollar != null ? `${portfolioGreeks.gammaSharesPerDollar.toFixed(1)} shares per $1 move` : 'N/A'}
+Net vega: ${portfolioGreeks.vegaPerIvPoint != null ? `$${portfolioGreeks.vegaPerIvPoint.toFixed(0)} per 1 IV point` : 'N/A'}
 
 POSITIONS:
 ${lines.join('\n')}
@@ -3362,6 +3365,228 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
           <p className={`text-[10px] ${th.textFaint} mt-1`}>{item.sub}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+
+interface PortfolioGreekTotals {
+  netDeltaRaw: number | null;
+  deltaShares: number | null;
+  thetaRaw: number | null;
+  thetaPerDay: number | null;
+  gammaRaw: number | null;
+  gammaSharesPerDollar: number | null;
+  vegaRaw: number | null;
+  vegaPerIvPoint: number | null;
+}
+
+function sumNullable(positions: Position[], selector: (p: Position) => number | null): number | null {
+  let total = 0;
+  let any = false;
+  for (const pos of positions) {
+    const val = selector(pos);
+    if (val == null || Number.isNaN(val)) continue;
+    total += val;
+    any = true;
+  }
+  return any ? total : null;
+}
+
+function calculatePortfolioGreeks(positions: Position[]): PortfolioGreekTotals {
+  const netDeltaRaw = sumNullable(positions, p => p.netDelta);
+  const thetaRaw = sumNullable(positions, p => p.theta);
+  const gammaRaw = sumNullable(positions, p => p.gamma);
+  const vegaRaw = sumNullable(positions, p => p.netVega);
+
+  return {
+    netDeltaRaw,
+    deltaShares: netDeltaRaw == null ? null : netDeltaRaw * 100,
+    thetaRaw,
+    thetaPerDay: thetaRaw == null ? null : thetaRaw * 100,
+    gammaRaw,
+    gammaSharesPerDollar: gammaRaw == null ? null : gammaRaw * 100,
+    vegaRaw,
+    vegaPerIvPoint: vegaRaw == null ? null : vegaRaw * 100,
+  };
+}
+
+function fmtSignedWhole(value: number | null, suffix = ''): string {
+  if (value == null) return '—';
+  const sign = value >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(value).toFixed(0)}${suffix}`;
+}
+
+function fmtSignedMoneyWhole(value: number | null, suffix = ''): string {
+  if (value == null) return '—';
+  const sign = value >= 0 ? '+' : '-';
+  return `${sign}$${Math.abs(value).toFixed(0)}${suffix}`;
+}
+
+function fmtSignedDecimal(value: number | null, decimals = 1, suffix = ''): string {
+  if (value == null) return '—';
+  const sign = value >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(value).toFixed(decimals)}${suffix}`;
+}
+
+function portfolioDeltaColor(deltaShares: number | null, fallback: string): string {
+  if (deltaShares == null) return fallback;
+  const abs = Math.abs(deltaShares);
+  if (abs <= 25) return 'text-emerald-400';
+  if (abs <= 75) return 'text-yellow-400';
+  if (abs <= 150) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function portfolioDeltaLabel(deltaShares: number | null): string {
+  if (deltaShares == null) return 'not available';
+  const abs = Math.abs(deltaShares);
+  if (abs <= 25) return 'low directional exposure';
+  if (abs <= 75) return 'moderate directional exposure';
+  if (abs <= 150) return 'elevated directional exposure';
+  return 'high directional exposure';
+}
+
+function portfolioThetaColor(thetaPerDay: number | null, fallback: string): string {
+  if (thetaPerDay == null) return fallback;
+  if (thetaPerDay >= 50) return 'text-emerald-400';
+  if (thetaPerDay >= 20) return 'text-emerald-300';
+  if (thetaPerDay >= 5) return 'text-yellow-400';
+  if (thetaPerDay >= 0) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function portfolioThetaLabel(thetaPerDay: number | null): string {
+  if (thetaPerDay == null) return 'not available';
+  if (thetaPerDay >= 50) return 'strong portfolio decay';
+  if (thetaPerDay >= 20) return 'good daily decay';
+  if (thetaPerDay >= 5) return 'light daily decay';
+  if (thetaPerDay >= 0) return 'minimal theta';
+  return 'paying theta';
+}
+
+function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: string): string {
+  if (gammaSharesPerDollar == null) return fallback;
+  const abs = Math.abs(gammaSharesPerDollar);
+  if (abs <= 1) return 'text-emerald-400';
+  if (abs <= 3) return 'text-yellow-400';
+  if (abs <= 7) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function portfolioGammaLabel(gammaSharesPerDollar: number | null): string {
+  if (gammaSharesPerDollar == null) return 'not available';
+  const abs = Math.abs(gammaSharesPerDollar);
+  if (abs <= 1) return 'low acceleration risk';
+  if (abs <= 3) return 'watch gamma';
+  if (abs <= 7) return 'elevated gamma risk';
+  return 'high gamma risk';
+}
+
+function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): string {
+  if (vegaPerIvPoint == null) return fallback;
+  if (vegaPerIvPoint <= -25) return 'text-emerald-400';
+  if (vegaPerIvPoint < 0) return 'text-emerald-300';
+  if (vegaPerIvPoint <= 25) return 'text-yellow-400';
+  if (vegaPerIvPoint <= 75) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function portfolioVegaLabel(vegaPerIvPoint: number | null): string {
+  if (vegaPerIvPoint == null) return 'not available';
+  if (vegaPerIvPoint <= -25) return 'short vol exposure';
+  if (vegaPerIvPoint < 0) return 'slight short vol';
+  if (vegaPerIvPoint <= 25) return 'near neutral vol';
+  if (vegaPerIvPoint <= 75) return 'long vol exposure';
+  return 'high long vol exposure';
+}
+
+function topGreekContributors(
+  positions: Position[],
+  selector: (p: Position) => number | null,
+  formatter: (value: number) => string,
+  count = 3
+): string {
+  const rows = positions
+    .map(p => ({ pos: p, value: selector(p) }))
+    .filter((row): row is { pos: Position; value: number } => row.value != null && !Number.isNaN(row.value))
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    .slice(0, count);
+
+  if (rows.length === 0) return 'No data';
+  return rows.map(row => `${row.pos.symbol} ${formatter(row.value)}`).join(' · ');
+}
+
+function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th: typeof THEMES[Theme] }) {
+  const totals = calculatePortfolioGreeks(positions);
+
+  const cards = [
+    {
+      label: 'Net Delta',
+      value: fmtSignedWhole(totals.deltaShares, ' sh'),
+      sub: portfolioDeltaLabel(totals.deltaShares),
+      color: portfolioDeltaColor(totals.deltaShares, th.text),
+      title: totals.netDeltaRaw != null ? `Raw net delta: ${totals.netDeltaRaw.toFixed(4)}` : undefined,
+    },
+    {
+      label: 'Theta / Day',
+      value: fmtSignedMoneyWhole(totals.thetaPerDay, '/day'),
+      sub: portfolioThetaLabel(totals.thetaPerDay),
+      color: portfolioThetaColor(totals.thetaPerDay, th.text),
+      title: totals.thetaRaw != null ? `Raw net theta: ${totals.thetaRaw.toFixed(4)}` : undefined,
+    },
+    {
+      label: 'Gamma',
+      value: fmtSignedDecimal(totals.gammaSharesPerDollar, 1, ' sh/$'),
+      sub: portfolioGammaLabel(totals.gammaSharesPerDollar),
+      color: portfolioGammaColor(totals.gammaSharesPerDollar, th.text),
+      title: totals.gammaRaw != null ? `Raw net gamma: ${totals.gammaRaw.toFixed(4)}` : undefined,
+    },
+    {
+      label: 'Vega / IV Pt',
+      value: fmtSignedMoneyWhole(totals.vegaPerIvPoint, '/pt'),
+      sub: portfolioVegaLabel(totals.vegaPerIvPoint),
+      color: portfolioVegaColor(totals.vegaPerIvPoint, th.text),
+      title: totals.vegaRaw != null ? `Raw net vega: ${totals.vegaRaw.toFixed(4)}` : undefined,
+    },
+  ];
+
+  const deltaDrivers = topGreekContributors(positions, p => p.netDelta == null ? null : p.netDelta * 100, v => fmtSignedWhole(v, ' sh'));
+  const thetaDrivers = topGreekContributors(positions, p => p.theta == null ? null : p.theta * 100, v => fmtSignedMoneyWhole(v, '/day'));
+  const gammaDrivers = topGreekContributors(positions, p => p.gamma == null ? null : p.gamma * 100, v => fmtSignedDecimal(v, 1, ' sh/$'));
+  const vegaDrivers = topGreekContributors(positions, p => p.netVega == null ? null : p.netVega * 100, v => fmtSignedMoneyWhole(v, '/pt'));
+
+  return (
+    <div className={`border ${th.border} ${th.card} rounded-lg overflow-hidden`}> 
+      <div className={`px-4 py-3 border-b ${th.border} flex items-center justify-between`}> 
+        <div>
+          <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest font-bold`}>Portfolio Greeks</p>
+          <p className={`text-[11px] ${th.textFaint} mt-0.5`}>Combined exposure across all open option positions</p>
+        </div>
+        <div className={`text-[10px] ${th.textFaint} text-right`}>
+          <p>{positions.length} open position{positions.length !== 1 ? 's' : ''}</p>
+          <p>Delta is share-equivalent · theta/vega are dollarized</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4">
+        {cards.map((card, i) => (
+          <div key={card.label} className={`p-4 ${i < cards.length - 1 ? `border-r ${th.border}` : ''}`}> 
+            <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-2`}>{card.label}</p>
+            <p className={`text-2xl font-bold ${card.color}`} style={{ fontFamily: "'DM Mono', monospace" }} title={card.title}>
+              {card.value}
+            </p>
+            <p className={`text-[10px] ${th.textFaint} mt-1`}>{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className={`grid grid-cols-4 border-t ${th.border} text-[10px]`}>
+        <div className={`p-3 ${th.textFaint} border-r ${th.border}`}><span className="font-bold text-slate-400">Δ drivers:</span> {deltaDrivers}</div>
+        <div className={`p-3 ${th.textFaint} border-r ${th.border}`}><span className="font-bold text-slate-400">Θ drivers:</span> {thetaDrivers}</div>
+        <div className={`p-3 ${th.textFaint} border-r ${th.border}`}><span className="font-bold text-slate-400">Γ drivers:</span> {gammaDrivers}</div>
+        <div className={`p-3 ${th.textFaint}`}><span className="font-bold text-slate-400">Vega drivers:</span> {vegaDrivers}</div>
+      </div>
     </div>
   );
 }
@@ -6249,9 +6474,9 @@ export default function PortfolioPage() {
 
       {positions.length > 0 && (
         <>
-          {/* <SummaryBar positions={positions} th={th} /> */}
           <div className="overflow-x-auto">
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>
+              <PortfolioGreeksDashboard positions={positions} th={th} />
 
               {needsClose.length > 0 && (
                 <PositionSection
