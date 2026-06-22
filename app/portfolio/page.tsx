@@ -1718,8 +1718,10 @@ IV edge (IV - HV30): ${ivEdge != null ? `${ivEdge.toFixed(1)}%` : 'unknown'}
 Beta: ${pos.beta ?? 'unknown'}
 
 GREEKS (net position):
+Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (directional/assignment exposure)
 Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (daily decay)
-Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
+Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (acceleration risk)
+Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (volatility exposure)
 
 OPERATIONAL STATUS:
 GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
@@ -1740,7 +1742,93 @@ Flags: ${[
   pos.earningsDate ? `⚠ Earnings ${pos.earningsDate}` : '',
 ].filter(Boolean).join(', ') || 'None'}
 
-Provide your analysis as JSON only.`;
+EXPERT DECISION CHECKLIST:
+Before giving the recommendation, evaluate all of these:
+
+1. POSITION TYPE
+- Identify the exact trade: CSP/short put, covered call, vertical spread, iron condor, PMCC, naked option, or other.
+- Do not assume covered call unless long stock plus short call exists.
+- Explain the management logic for that specific structure.
+
+2. DTE MANAGEMENT
+- >30 DTE: usually manage only if target hit, thesis broken, earnings risk, or risk/reward changed.
+- 21-30 DTE: begin active management; compare remaining premium versus risk.
+- 14-21 DTE: gamma risk rising; require stronger reason to hold.
+- 7-14 DTE: close/roll unless safely OTM with excellent reason.
+- <7 DTE: avoid expiration risk unless intentional assignment/exercise plan exists.
+
+3. PROFIT CAPTURE
+- Calculate profit captured as current P&L divided by original credit.
+- If profit is near or above 50%, favor TAKE_PROFIT.
+- If profit is only 15-35% and trade remains safe, HOLD/WATCH may be better than closing too early.
+- If loss exceeds planned stop or risk/reward is poor, recommend MANAGE/CUT_LOSSES.
+
+4. DISTANCE TO STRIKE / BUFFER
+- Use OTM % and stock price relative to short strike.
+- For CSP/short put: more buffer is good; shrinking buffer is danger.
+- For covered calls/short calls: more upside buffer is good unless willing to be assigned.
+- Under 2-3% buffer near 21 DTE is high risk.
+- 3-5% buffer near 14-21 DTE is moderate risk.
+- >5% buffer generally supports holding if Greeks are favorable.
+
+5. GREEKS
+- Delta: directional risk / assignment probability proxy.
+- Gamma: acceleration risk near expiration.
+- Theta: remaining income reward.
+- Vega: volatility expansion/contraction risk.
+- Compare theta versus gamma:
+  - If theta meaningfully exceeds gamma and buffer is healthy, holding may be valid.
+  - If gamma is large relative to theta, favor close/roll.
+- Mention whether the Greeks support HOLD, CLOSE, or ROLL.
+
+6. VOLATILITY
+- Compare IV, HV, and IVR.
+- High IVR can support keeping short premium trades if risk is controlled.
+- Low IVR weakens new short-premium rolls.
+- If IV is much higher than HV, short premium has edge but also event-risk exposure.
+- If IV is collapsing after earnings, favor taking profit sooner.
+
+7. TREND / MARKET CONTEXT
+- Use trend direction and confidence.
+- For bullish/sideways trend, CSP/put spreads are stronger.
+- For bearish/sideways trend, covered calls/call spreads are stronger.
+- If trend conflicts with the position, lower confidence or recommend manage.
+- Consider broad market risk if the underlying has high beta.
+
+8. EARNINGS / CATALYSTS
+- Only treat earnings as a risk if earningsDate is today or future and before expiration.
+- If earningsDate is in the past, state that it is not a current earnings risk.
+- If earnings is within the option cycle, favor closing/rolling unless intentionally holding through earnings.
+
+9. ORDER / EXECUTION
+- If GTC target is missing, recommend placing one.
+- If stop loss is missing or loose, flag it.
+- If rolling, say whether to roll out, up/down, and why.
+- Do not recommend rolling unless the new trade improves duration, credit, delta, or risk.
+
+10. FINAL ACTION
+Give one clear action:
+- HOLD
+- WATCH
+- TAKE_PROFIT
+- CLOSE
+- ROLL
+- MANAGE
+- CUT_LOSSES
+
+The summary must sound like an expert trader talking to me directly, using the actual numbers from the position.
+
+Return JSON only in this exact shape:
+{
+  "recommendation": "HOLD|CLOSE|ROLL|TAKE_PROFIT|CUT_LOSSES|WATCH|MANAGE",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "summary": "Direct recommendation using actual numbers.",
+  "reasoning": "Expert-level paragraph covering position type, DTE, profit %, OTM buffer, delta, theta, gamma, vega, IV/HV/IVR, trend, earnings, and execution.",
+  "risks": ["specific risk 1", "specific risk 2", "specific risk 3"],
+  "catalysts": ["specific factor in favor 1", "specific factor in favor 2"],
+  "deviatesFromRules": false,
+  "deviationNote": null
+}`;
 }
 
 function buildPortfolioPrompt(positions: Position[]): string {
@@ -1916,7 +2004,7 @@ async function callAI(userMessage: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      max_tokens: 1600,
       system: TRADING_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     }),
@@ -5460,10 +5548,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             <div className="relative">
               <button onClick={() => setShowAnalysis(false)} className={`absolute top-3 right-3 text-[10px] ${th.textFaint} hover:${th.text} z-10`}>✕</button>
               <AnalysisPanel analysis={analysis} pos={pos} th={th} />
-              <div className={`p-4 border border-indigo-500/30 rounded-lg bg-indigo-500/5 text-xs ${th.text}`}>
-                AI Position Analysis would appear here<br />
-                (component temporarily commented out to make build pass)
-              </div>
             </div>
           )}
         </>
