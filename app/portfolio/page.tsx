@@ -1630,13 +1630,22 @@ const TRADING_CHAT_PROMPT = `You are a professional options trader and portfolio
 
 You are in a live conversation about a specific position or portfolio. The trader has already seen a structured analysis. They are now asking follow-up questions to dig deeper.
 
-RESPOND IN PLAIN CONVERSATIONAL PROSE. No JSON. No bullet headers. No structured output format. Talk like a senior trader giving direct advice over the phone — clear, specific, and honest. Use numbers when they matter. Be direct about risk. Don't hedge everything with disclaimers.
+CRITICAL CONTEXT RULE:
+The first assistant message in the conversation may contain a POSITION SNAPSHOT with actual position numbers. Treat that snapshot as the source of truth for the follow-up answer. Do not ignore it. Do not answer from generic options theory when position data is available.
+
+RESPOND IN PLAIN CONVERSATIONAL PROSE. No JSON. No bullet headers. No structured output format. Talk like a senior trader giving direct advice over the phone — clear, specific, and honest. Use the actual numbers from the snapshot when they matter. Be direct about risk. Don't hedge everything with disclaimers.
 
 You know the methodology deeply:
 - BPS for bullish/neutral, BCS for bearish, IC for range-bound
 - 50% profit target with GTC at entry, hard close at 21 DTE (only for standard entries > 21 DTE; short-dated entries use lower take-profit thresholds and fast exit before expiry)
 - IVR >= 30 for edge, buffer % to short strike is critical, gamma accelerates near expiry
 - When to deviate: high IV exceptions, broken thesis, early close to protect profits
+
+For follow-up questions:
+- If asked why P&L is positive or negative, compare entry credit, current buyback value, profit captured, DTE, buffer, IV/HV/IVR, theta, gamma, delta, and vega.
+- If asked how to watch the trade better in the app, recommend specific fields, alerts, thresholds, and visual indicators.
+- If a needed value is missing, say exactly what is missing and what field should be added.
+- Never claim IV expansion or contraction unless IV-at-entry or prior IV is provided.
 
 Keep responses focused and concise — 3-6 sentences unless the question genuinely requires more. If the trader asks about rolling, give specific guidance on strikes and expiry. If they ask about risk, quantify it. If they're thinking about something wrong, say so directly.`;
 
@@ -2029,8 +2038,7 @@ async function callAIWithHistory(messages: ChatMessage[], systemOverride?: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       profile: 'chat',
-      max_tokens: 1200,
-      web_search: true,
+      max_tokens: 1400,
       system: systemOverride ?? TRADING_SYSTEM_PROMPT,
       messages,
     }),
@@ -2042,6 +2050,145 @@ async function callAIWithHistory(messages: ChatMessage[], systemOverride?: strin
   const data = await res.json();
   const text = data?.content?.find((b: any) => b.type === 'text')?.text ?? '';
   return text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+}
+
+function fmtMoney(value: number | null | undefined, digits = 2): string {
+  return value == null || !Number.isFinite(value) ? 'unknown' : `$${value.toFixed(digits)}`;
+}
+
+function fmtPct(value: number | null | undefined, digits = 1): string {
+  return value == null || !Number.isFinite(value) ? 'unknown' : `${value.toFixed(digits)}%`;
+}
+
+function fmtNum(value: number | null | undefined, digits = 3): string {
+  return value == null || !Number.isFinite(value) ? 'unknown' : value.toFixed(digits);
+}
+
+function fmtSignedMoney(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return 'unknown';
+  return `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`;
+}
+
+function fmtSignedNum(value: number | null | undefined, digits = 3): string {
+  if (value == null || !Number.isFinite(value)) return 'unknown';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
+}
+
+function getShortLegs(pos: Position): PositionLeg[] {
+  return pos.legs.filter(l => l.direction === 'Short');
+}
+
+function getLongLegs(pos: Position): PositionLeg[] {
+  return pos.legs.filter(l => l.direction === 'Long');
+}
+
+function inferPositionStructure(pos: Position): string {
+  const shorts = getShortLegs(pos);
+  const longs = getLongLegs(pos);
+  const shortPut = shorts.find(l => l.optionType === 'P');
+  const shortCall = shorts.find(l => l.optionType === 'C');
+  const longPut = longs.find(l => l.optionType === 'P');
+  const longCall = longs.find(l => l.optionType === 'C');
+
+  if (pos.strategy === 'PUT' || (shortPut && !shortCall && longs.length === 0)) return 'Cash-secured put / short put';
+  if (pos.strategy === 'CALL' || (shortCall && !shortPut && longs.length === 0)) return 'Short call / covered-call candidate only if long shares exist elsewhere';
+  if (pos.strategy === 'BPS' || (shortPut && longPut && !shortCall && !longCall)) return 'Bull put spread';
+  if (pos.strategy === 'BCS' || (shortCall && longCall && !shortPut && !longPut)) return 'Bear call spread';
+  if (pos.strategy === 'IC' || (shortPut && longPut && shortCall && longCall)) return 'Iron condor';
+  return `${pos.strategy || 'Unknown'} options position`;
+}
+
+function buildLegSnapshot(pos: Position): string {
+  return pos.legs.map(l => {
+    const side = l.direction === 'Short' ? 'SHORT' : 'LONG';
+    const opt = l.optionType === 'P' ? 'PUT' : 'CALL';
+    const mark = l.currentPrice != null ? ` | current mark ${fmtMoney(l.currentPrice)}` : '';
+    return `- ${side} ${Math.abs(l.quantity)}x ${l.strikePrice} ${opt} | avg open ${fmtMoney(l.avgOpenPrice)}${mark} | OCC ${l.symbol}`;
+  }).join('\n');
+}
+
+function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): string {
+  const shortLegs = getShortLegs(pos);
+  const primaryShort = shortLegs[0] ?? null;
+  const pnlCapture = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+  const creditPerContract = primaryShort && Math.abs(primaryShort.quantity) > 0
+    ? pos.creditReceived / (Math.abs(primaryShort.quantity) * 100)
+    : pos.creditReceived / 100;
+  const currentPerContract = primaryShort && Math.abs(primaryShort.quantity) > 0 && pos.currentValue != null
+    ? pos.currentValue / (Math.abs(primaryShort.quantity) * 100)
+    : null;
+  const remainingToTarget = pos.targetPrice != null && pos.currentValue != null
+    ? pos.currentValue - pos.targetPrice
+    : null;
+  const ivEdge = pos.iv != null && pos.hv30 != null ? pos.iv - pos.hv30 : null;
+  const thetaGammaRatio = pos.theta != null && pos.gamma != null && Math.abs(pos.gamma) > 0
+    ? Math.abs(pos.theta / pos.gamma)
+    : null;
+
+  return [
+    'POSITION SNAPSHOT — USE THIS DATA FOR EVERY FOLLOW-UP ANSWER',
+    `Position type: ${inferPositionStructure(pos)}`,
+    `Platform strategy label: ${pos.strategy}`,
+    `Symbol: ${pos.symbol}`,
+    `Expiration: ${pos.expDate}`,
+    `DTE: ${pos.dte}`,
+    `Entry date: ${pos.entryDate ?? 'unknown'}`,
+    `Entry DTE: ${pos.entryDte}`,
+    '',
+    'LEGS',
+    buildLegSnapshot(pos),
+    '',
+    'PRICE / STRIKE / BUFFER',
+    `Underlying price: ${fmtMoney(pos.stockPrice)}`,
+    `Primary short strike: ${primaryShort ? `${primaryShort.strikePrice} ${primaryShort.optionType === 'P' ? 'PUT' : 'CALL'}` : 'unknown'}`,
+    `OTM buffer to short strike: ${fmtPct(pos.buffer)}`,
+    '',
+    'P&L / PREMIUM',
+    `Total entry credit: ${fmtMoney(pos.creditReceived)}`,
+    `Entry credit per short contract: ${fmtMoney(creditPerContract)}`,
+    `Current buyback / mark value: ${fmtMoney(pos.currentValue)}`,
+    `Current mark per short contract: ${fmtMoney(currentPerContract)}`,
+    `Open P&L: ${fmtSignedMoney(pos.pnl)}`,
+    `Profit captured: ${fmtPct(pnlCapture)}`,
+    `Profit target: ${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}`,
+    `Premium still above target buyback: ${fmtMoney(remainingToTarget)}`,
+    `Max risk: ${fmtMoney(pos.maxRisk)}`,
+    '',
+    'GREEKS / VOLATILITY',
+    `Delta: ${fmtSignedNum(pos.netDelta, 3)}`,
+    `Theta/day: ${fmtSignedNum(pos.theta, 3)}`,
+    `Gamma: ${fmtSignedNum(pos.gamma, 4)}`,
+    `Theta/Gamma ratio: ${fmtNum(thetaGammaRatio, 1)}`,
+    `Vega: ${fmtSignedNum(pos.netVega, 3)}`,
+    `IVR: ${pos.ivr ?? 'unknown'}`,
+    `Current IV: ${fmtPct(pos.iv, 0)}`,
+    `HV30: ${fmtPct(pos.hv30, 0)}`,
+    `IV edge (IV - HV30): ${fmtPct(ivEdge)}`,
+    `Beta: ${fmtNum(pos.beta, 2)}`,
+    '',
+    'ORDERS / RISK CONTROLS',
+    `GTC profit order: ${pos.hasGtc ? `Yes${pos.gtcOrderPrice != null ? ` at ${fmtMoney(pos.gtcOrderPrice)}` : ''}` : 'No'}`,
+    `Stop loss status: ${pos.stopLossStatus}${pos.stopLossPrice != null ? ` at ${fmtMoney(pos.stopLossPrice)}` : ''}`,
+    `Earnings within expiry: ${pos.earningsDate ? pos.earningsDate : 'No / unknown'}`,
+    '',
+    'ORIGINAL AI ANALYSIS',
+    `Recommendation: ${analysis.recommendation}`,
+    `Confidence: ${analysis.confidence}`,
+    `Summary: ${analysis.summary}`,
+    `Reasoning: ${analysis.reasoning}`,
+    analysis.risks.length ? `Risks: ${analysis.risks.join(' | ')}` : 'Risks: none listed',
+    analysis.catalysts.length ? `In favor: ${analysis.catalysts.join(' | ')}` : 'In favor: none listed',
+    analysis.deviatesFromRules && analysis.deviationNote ? `Rule deviation note: ${analysis.deviationNote}` : '',
+    '',
+    'FOLLOW-UP RESPONSE RULES',
+    '- Do not answer with generic options theory.',
+    '- Always use the actual numbers above when they are relevant.',
+    '- If asked why P&L is positive or negative, compare entry credit, current buyback, profit captured, DTE, IV/HV/IVR, theta, gamma, vega, and buffer.',
+    '- If the app is missing the exact data needed, say what field is missing and recommend the exact metric to add.',
+    '- For IV-related explanations, note whether current IV, HV30, IVR, and vega support the answer. If IV at entry is missing, say the app should capture IV at entry before claiming IV expansion.',
+    '- For “how do I watch this better” questions, recommend specific app fields, alerts, and thresholds based on this position.',
+    '- Keep the answer direct and practical, like a senior trader coaching this exact position.'
+  ].filter(Boolean).join('\n');
 }
 
 async function analyzePosition(pos: Position, trend: TrendResult | null): Promise<PositionAnalysis> {
@@ -3413,19 +3560,9 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
 }
 
 function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos: Position; th: typeof THEMES[Theme] }) {
-  // Build a rich initial context string for the chat thread
-  const chatContext = [
-    `I've analyzed your ${analysis.symbol} ${pos.strategy} position (${pos.expDate}, ${pos.dte} DTE).`,
-    ``,
-    `**Recommendation: ${analysis.recommendation.replace('_', ' ')}** (${analysis.confidence} confidence)`,
-    ``,
-    analysis.summary,
-    ``,
-    analysis.reasoning,
-    analysis.deviatesFromRules && analysis.deviationNote ? `\n**Note:** ${analysis.deviationNote}` : '',
-    analysis.risks.length > 0 ? `\n**Key risks:** ${analysis.risks.join(' · ')}` : '',
-    analysis.catalysts.length > 0 ? `\n**In your favor:** ${analysis.catalysts.join(' · ')}` : '',
-  ].filter(Boolean).join('\n');
+  // The first chat message is hidden from the UI, but sent to the AI on every follow-up.
+  // It contains the actual position numbers so the chat answers do not become generic.
+  const chatContext = buildPositionChatContext(pos, analysis);
 
   return (
     <div className={`border-t ${th.border}`} style={{ background: 'rgba(99,102,241,0.04)' }}>
