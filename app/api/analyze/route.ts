@@ -1,5 +1,6 @@
 // app/api/analyze/route.ts
 // Server-side proxy for OpenAI API with web search support.
+import { getAiModel, type AiProfile } from '@/lib/ai/models';
 import { NextRequest, NextResponse } from 'next/server';
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
