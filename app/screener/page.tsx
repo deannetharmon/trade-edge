@@ -4530,7 +4530,7 @@ const strategyScores = useMemo(() => {
               onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
               className="flex-1 py-2.5 border border-emerald-600 hover:bg-emerald-500/10 text-emerald-400 rounded-xl text-xs font-medium tracking-wider transition-colors"
             >
-              🔍 FIND BEST
+              🔍 FIND BETTER (Similar DTE)
             </button>
           </div>
         </div>
@@ -4576,13 +4576,15 @@ const strategyScores = useMemo(() => {
 
       {/* Best Opportunity Modal — rendered via portal to escape card click handler */}
       {showBestFinder && createPortal(
-        <BestOpportunityFinder
+       <BestOpportunityFinder
           symbol={result.symbol}
           onClose={() => setShowBestFinder(false)}
           th={th}
           rules={rules}
           preferredStrategy={result.strategy as 'BPS' | 'BCS' | 'IC'}
           cachedEntry={cachedEntry}
+          onTrade={onTrade}
+          originalDte={result.bestCandidate?.dte}
         />,
         document.body
       )}
@@ -5593,11 +5595,13 @@ function getRuleDiffs(base: RulesType, relaxed: Partial<RulesType>): string[] {
 }
 
 function BestOpportunityFinder({
-  symbol, onClose, th, rules, preferredStrategy,
+  symbol, onClose, th, rules, preferredStrategy, cachedEntry, onTrade, originalDte,
 }: {
   symbol: string; onClose: () => void; th: typeof THEMES[Theme];
   rules: RulesType; preferredStrategy?: 'BPS' | 'BCS' | 'IC';
   cachedEntry?: RawScanEntry;
+  onTrade?: (result: ScreenResult) => void;
+  originalDte?: number;
 }) {
   const [loading, setLoading] = useState(false);
   const [levelResults, setLevelResults] = useState<LevelResult[]>([]);
@@ -5711,9 +5715,27 @@ function BestOpportunityFinder({
         : ['No qualifying strikes found']
   });
 }
-        results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, presetColor: level.presetColor, rulesUsed: mergedRules, ruleDiffs, ranked: candidates.sort((a, b) => b.score - a.score), failures });
+results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, presetColor: level.presetColor, rulesUsed: mergedRules, ruleDiffs, ranked: candidates.sort((a, b) => b.score - a.score), failures });
       }
-      setLevelResults(results);
+
+      // === NEW: Prefer similar expirations to the original card ===
+      let finalResults = results;
+
+      if (originalDte != null) {
+        finalResults = results
+          .map(level => {
+            const similar = level.ranked.filter(setup =>
+              Math.abs(setup.setup.dte - originalDte) <= 8
+            );
+            return {
+              ...level,
+              ranked: similar.length > 0 ? similar : level.ranked.slice(0, 1),
+            };
+          })
+          .filter(level => level.ranked.length > 0);
+      }
+
+      setLevelResults(finalResults);
     } catch (e: any) {
       setError(e.message || 'Failed to analyze chain');
     } finally {
@@ -5792,14 +5814,23 @@ function BestOpportunityFinder({
                           <span className={`text-[9px] ${th.textFaint}`}>score {Math.round(setup.score)}/100</span>
                         </div>
                         <button
-                          onClick={() => {
-                            const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
-                              ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
-                              : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
-                            alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}\n50% target: $${((setup.setup.totalCredit ?? setup.setup.credit) * 0.5).toFixed(2)}`);
-                          }}
-                          className="text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-600/10 transition-colors font-medium tracking-wider"
-                        >TRADE →</button>
+                          <button
+                            onClick={() => {
+                              if (onTrade && setup.result) {
+                                onTrade(setup.result);   // Opens the real Trade Modal
+                                onClose();               // Closes the Find Better modal
+                              } else {
+                                // Fallback (shows alert if something is wrong)
+                                const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
+                                  ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
+                                  : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
+                                alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}`);
+                              }
+                            }}
+                            className="text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-600/10 transition-colors font-medium tracking-wider"
+                          >
+                            TRADE →
+                          </button>
                       </div>
                       <div className="grid grid-cols-4 gap-3 mb-2">
                         <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Expiry</p><p className={`text-xs font-bold ${th.text}`}>{setup.setup.expiration} <span className="text-slate-500">({setup.setup.dte}d)</span></p></div>
