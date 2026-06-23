@@ -2304,6 +2304,124 @@ function runChecklistAllExpirations(
   return results;
 }
 
+// ── Rank Mode — Exhaustive Candidate Exploration ───────────────────────────
+// "Ranked" means every qualifying candidate, scored and sorted — not a
+// single best-pick per symbol. This explores all 3 strategies (BPS/BCS/IC),
+// every unique short strike, and every expiration in the rank scan window,
+// the same exploration shape runTargetedScan already uses for Targeted mode
+// — but with NO hard POP/OTM/credit-ratio floors. Score does the filtering;
+// a weak candidate still appears, just low in the ranked list, rather than
+// disappearing before you ever see it. Only two structural sanity bounds
+// apply (not quality opinions): credit must be > 0 (a negative/zero-credit
+// "spread" isn't a real premium-selling trade), and delta stays within
+// 0.05–0.60 (outside that, it's not recognizably a credit spread anymore —
+// either illiquid far-OTM or effectively stock-like deep ITM).
+function exploreAllCandidatesForRank(
+  symbol: string,
+  metrics: any,
+  chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean },
+  price: number | null,
+  rules: RulesType,
+  trendResult: TrendResult | undefined,
+  isEtf: boolean,
+  etfRules: RulesType,
+): ScreenResult[] {
+  const results: ScreenResult[] = [];
+  const validExps = chainData.expirations.filter(exp => daysUntil(exp) >= RANK_SCAN_DTE_MIN && daysUntil(exp) <= RANK_SCAN_DTE_MAX);
+  const appliedRules = isEtf ? etfRules : rules;
+
+  for (const exp of validExps) {
+    const dte = daysUntil(exp);
+    const chainItems = chainData.chains[exp] ?? [];
+    const singleExpChain = { ...chainData, expirations: [exp] };
+
+    for (const strat of (['BPS', 'BCS', 'IC'] as const)) {
+      try {
+        if (strat === 'IC') {
+          const candidate = findBestICUnfiltered(chainItems, exp, price);
+          if (!candidate) continue;
+          const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          results.push({
+            ...result,
+            bestCandidate: result.bestCandidate ?? candidate,
+            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
+            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
+          });
+          continue;
+        }
+
+        const optType = strat === 'BPS' ? 'P' : 'C';
+        const putCallLegs = chainItems.filter((o: any) => o.expirationDate === exp && o.optionType === optType);
+        const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
+        const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
+        const seenStrikes = new Set<number>();
+
+        for (const shortLeg of putCallLegs) {
+          const delta = shortLeg.delta; if (delta == null) continue;
+          const absDelta = Math.abs(delta);
+          if (absDelta < 0.05 || absDelta > 0.60) continue;
+          if (seenStrikes.has(shortLeg.strikePrice)) continue;
+          seenStrikes.add(shortLeg.strikePrice);
+
+          let bestCandidate: SpreadCandidate | null = null;
+          let bestCreditRatio = -1;
+          for (let width = stepSize; width <= maxWidth; width += stepSize) {
+            const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
+            const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
+            if (!longLeg) continue;
+            const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
+            if (credit <= 0) continue; // structural floor — not a real premium-selling trade otherwise
+            const creditRatio = credit / width;
+            const maxLoss = width - credit;
+            const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+
+            const ivForPop =
+              normalizeIv(metrics.expirationIvxMap?.[exp]) ??
+              normalizeIv(metrics.ivx) ??
+              normalizeIv(metrics.ivx30) ??
+              normalizeIv(shortLeg.iv);
+
+            const modelPop = calcSpreadPop(strat, price, shortLeg.strikePrice, credit, dte, ivForPop);
+            if (modelPop == null) continue;
+
+            if (creditRatio > bestCreditRatio) {
+              bestCreditRatio = creditRatio;
+              bestCandidate = {
+                strategy: strat, expiration: exp, dte, shortStrike: shortLeg.strikePrice, longStrike,
+                shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
+                credit, spreadWidth: width, creditRatio, roc, pop: modelPop, optimized: false,
+                shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
+                shortIv: normalizeIv(shortLeg.iv),
+                expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
+                expectedMove: null,
+              };
+            }
+          }
+          if (!bestCandidate) continue;
+
+          const syntheticChain = { ...chainData, expirations: [exp], chains: { [exp]: chainItems } };
+          const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          results.push({
+            ...result,
+            bestCandidate,
+            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
+            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
+            checks: {
+              ...result.checks,
+              credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
+              delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
+              pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
+              roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
+              oi: { status: result.checks.oi.status, value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`, reason: result.checks.oi.reason },
+            },
+          });
+        }
+      } catch {}
+    }
+  }
+  return results;
+}
+
 const strategyAccent = (s: string) => s === 'BPS' ? 'border-l-4 border-l-emerald-500' : s === 'BCS' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-blue-500';
 
 // ── Theme Toggle ───────────────────────────────────────────────────────────
@@ -6430,11 +6548,15 @@ export default function Home() {
       // runChecklist will auto-select ETF rules internally per ticker
       const getChainRules = (isEtfTicker: boolean) => isEtfTicker ? eRules : sRules;
 
-      // Scan active watchlist tickers — one loop, smart-skip applied identically
-      // in Filter and Rank modes. Trend is fetched once per ticker and gates
-      // which strategy(ies) get attempted: NO_TRADE skips the ticker entirely,
-      // otherwise only the trend-recommended strategy is scanned. This is the
-      // "smart skip" behavior — not exploring all three strategies blindly.
+      // Scan active watchlist tickers — one loop, but Filter and Rank modes
+      // diverge in shape: Filter still uses the trend-gated "smart skip" (one
+      // recommended strategy per ticker, NO_TRADE skips it entirely). Rank
+      // mode is exhaustive — every strategy, every qualifying strike, every
+      // expiration, no trend gate — because "ranked" means score sorts the
+      // full candidate set rather than a single curated pick per symbol.
+      // Trend is still fetched for Rank mode (used for the trend-alignment
+      // badge and momentum scoring) but never used to skip a ticker.
+      const isRankMode = (modeOverride ?? screenMode) === 'rank';
       for (let i = 0; i < activeSymbols.length; i++) {
         const symbol = activeSymbols[i];
         setStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
@@ -6444,30 +6566,30 @@ export default function Home() {
         try { trendResult = await getTrend(symbol, isEtfTicker); } catch (e) { console.warn(e); }
 
         // NO_TRADE (or trend fetch failure) means the chart didn't qualify —
-        // skip this ticker entirely rather than guessing a strategy for it.
-        if (!trendResult || trendResult.strategy === 'NO_TRADE') {
+        // skip this ticker entirely in Filter mode. Rank mode explores
+        // regardless; a NO_TRADE chart can still have a real credit spread,
+        // and score (not the trend gate) decides where it lands.
+        if (!isRankMode && (!trendResult || trendResult.strategy === 'NO_TRADE')) {
           continue;
         }
 
-        const strategiesToScan: ('BPS' | 'BCS' | 'IC')[] = [trendResult.strategy];
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const isRankMode = (modeOverride ?? screenMode) === 'rank';
-          const rankDteWindow = isRankMode ? { min: 7, max: 60 } : undefined;
+          const rankDteWindow = isRankMode ? { min: RANK_SCAN_DTE_MIN, max: RANK_SCAN_DTE_MAX } : undefined;
           const [chainData, price] = await Promise.all([
             getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow),
             getQuote(symbol, token),
           ]);
-          for (const s of strategiesToScan) {
+          if (isRankMode) {
+            scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
+            screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules));
+          } else if (trendResult) {
+            const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
             scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
-            if (isRankMode) {
-              screenResults.push(...runChecklistAllExpirations(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel, false));
-            } else {
-              screenResults.push(runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel));
-            }
+            screenResults.push(runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel));
           }
         } catch (e: any) {
-          screenResults.push(errResult(symbol, trendResult.strategy, e.message, trendResult));
+          screenResults.push(errResult(symbol, trendResult?.strategy ?? 'BPS', e.message, trendResult));
         }
       }
 
