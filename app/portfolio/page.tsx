@@ -171,11 +171,32 @@ interface GtcOrder {
 }
 interface StopLossInfo { status: StopStatus; price: number | null; }
 
+interface PriceSupportAnalysis {
+  verdict: 'GOOD' | 'CAUTION' | 'BAD' | 'UNKNOWN';
+  score: number;
+  lookbackDays: number;
+  price: number | null;
+  shortStrike: number | null;
+  nearestSupport: number | null;
+  supportZoneLow: number | null;
+  supportZoneHigh: number | null;
+  low20: number | null;
+  low50: number | null;
+  swingLow: number | null;
+  ma20: number | null;
+  ma50: number | null;
+  strikeVsSupportPct: number | null;
+  priceVsMa20Pct: number | null;
+  priceVsMa50Pct: number | null;
+  reason: string;
+}
+
 interface TrendResult {
   trend: 'uptrend' | 'downtrend' | 'sideways' | 'unknown';
   strategy: 'BPS' | 'BCS' | 'IC' | 'NO_TRADE';
   confidence: number;
   reason: string;
+  supportAnalysis?: PriceSupportAnalysis;
 }
 
 interface AuditEntry {
@@ -1746,7 +1767,7 @@ For follow-up questions:
 
 Keep responses focused and concise — 3-6 sentences unless the question genuinely requires more. If the trader asks about rolling, give specific guidance on strikes and expiry. If they ask about risk, quantify it. If they're thinking about something wrong, say so directly.`;
 
-const TRADING_SYSTEM_PROMPT = `You are a professional options trader and portfolio analyst with deep expertise in selling premium through credit spreads. You advise a trader who follows the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints. You understand when deviation is appropriate.
+const TRADING_SYSTEM_PROMPT = `You are a professional options trader and portfolio analyst with deep expertise in selling premium through credit spreads, cash-secured puts, covered calls, and wheel-style income trades. You advise a trader who follows the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints. You understand when deviation is appropriate.
 
 CORE METHODOLOGY (know it deeply, apply it intelligently):
 - Strategies: Bull Put Spread (BPS) for bullish/neutral, Bear Call Spread (BCS) for bearish, Iron Condor (IC) for range-bound
@@ -1754,6 +1775,16 @@ CORE METHODOLOGY (know it deeply, apply it intelligently):
 - Target exits: 50% profit (place GTC at entry), hard close at 21 DTE regardless of P&L — BUT ONLY when entry DTE was > 21. Short-dated entries (entered at ≤ 21 DTE) follow a different framework: maximize profit quickly, lower the take-profit threshold to 30-40%, tighten the loss tolerance, and exit before expiry to avoid pin/assignment risk. The 21 DTE hard-close rule does NOT apply to intentional short-dated trades.
 - Short strike deltas: BPS -0.20 to -0.30, BCS +0.20 to +0.30, IC ±0.16 to ±0.20
 - IC requires sideways price action 2+ weeks, no higher highs/lower lows
+
+PRICE SUPPORT ANALYSIS — CRITICAL FOR BULLISH PUT TRADES:
+- For CSPs and bull put spreads, evaluate whether the short put strike is below meaningful recent support.
+- Use the support analysis supplied in the position prompt: 20-day low, 50-day low, swing lows, MA20, MA50, nearest support zone, strike-vs-support %, and support verdict.
+- For BPS/CSP, ideal structure is: current price above support zone, and short strike at or below support.
+- GOOD support means the short strike is below or near recent support and price trend is holding above key moving averages.
+- CAUTION means the short strike is sitting inside/near the support zone or trend confirmation is mixed.
+- BAD means the short strike is above support, price has lost MA20/MA50, or support must hold perfectly for the trade to survive.
+- Do not give HIGH confidence to a new or continuing bullish put recommendation unless support analysis is GOOD or the rationale clearly explains why CAUTION is acceptable.
+- Support analysis is not a guarantee. It is a risk-quality filter, not a mechanical trade signal.
 
 CSP / WHEEL MANAGEMENT — CRITICAL:
 - A cash-secured put is NOT managed like a bull put spread.
@@ -1818,109 +1849,59 @@ For portfolio analysis:
 Be direct. Be honest. If a position is in trouble, say so. If a rule should be broken, explain why.`;
 
 function buildPositionPrompt(pos: Position, trend: TrendResult | null): string {
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0
-    ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1)
-    : 'unknown';
-
+  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
   const ivEdge = pos.iv != null && pos.hv30 != null ? (pos.iv - pos.hv30) : null;
-
-  // Position type detection
   const shortPut = pos.legs.find(l => l.direction === 'Short' && l.optionType === 'P');
   const longPut = pos.legs.find(l => l.direction === 'Long' && l.optionType === 'P');
   const shortCall = pos.legs.find(l => l.direction === 'Short' && l.optionType === 'C');
   const longCall = pos.legs.find(l => l.direction === 'Long' && l.optionType === 'C');
 
-  const shortQty = Math.max(1, Math.abs(shortPut?.quantity ?? shortCall?.quantity ?? 1));
-
   const isCspLike = !!shortPut && !longPut && !shortCall && !longCall;
-  const isPutSpread = !!shortPut && !!longPut;
-  const isCallSpread = !!shortCall && !!longCall;
-  const isIronCondor = !!shortPut && !!longPut && !!shortCall && !!longCall;
-
   const isDefinedRiskSpread =
     pos.strategy === 'BPS' ||
     pos.strategy === 'BCS' ||
     pos.strategy === 'IC' ||
-    isPutSpread ||
-    isCallSpread ||
-    isIronCondor;
+    (!!shortPut && !!longPut) ||
+    (!!shortCall && !!longCall);
 
-  // Calculated values
-  const creditPerContract = pos.creditReceived > 0
-    ? pos.creditReceived / 100 / shortQty
-    : 0;
-
-  const currentBuybackPerContract = pos.currentValue != null
-    ? pos.currentValue / 100 / shortQty
-    : null;
+  const shortQty = Math.max(1, Math.abs(shortPut?.quantity ?? shortCall?.quantity ?? 1));
+  const creditPerContract = pos.creditReceived / 100 / shortQty;
+  const currentBuybackPerContract = pos.currentValue != null ? pos.currentValue / 100 / shortQty : null;
+  const premiumCapturedPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
 
   const effectiveAssignmentBasis =
     isCspLike && shortPut
       ? shortPut.strikePrice - creditPerContract
       : null;
 
-  const premiumCapturedPct =
-    pos.pnl != null && pos.creditReceived > 0
-      ? (pos.pnl / pos.creditReceived) * 100
-      : null;
-
-  const remainingPremiumText =
-    currentBuybackPerContract != null
-      ? `$${currentBuybackPerContract.toFixed(2)} per contract`
-      : 'unknown';
-
-  // Strategy intent
   const strategyIntent = isCspLike
-    ? 'CSP / wheel-income: harvest premium; assignment is acceptable if basis is attractive'
+    ? 'wheel-income / cash-secured put'
     : isDefinedRiskSpread
-    ? 'Defined-risk spread: protect capital first, harvest theta second'
-    : 'Other options position: analyze based on actual legs and assignment intent';
+    ? 'defined-risk spread'
+    : 'other options position';
 
   const assignmentWilling = isCspLike
-    ? 'Yes — assignment is acceptable if effective basis is attractive'
-    : 'No / not primary intent unless explicitly stated';
+    ? 'yes — assignment is acceptable if basis is attractive'
+    : 'no / not primary intent';
 
-  // Spread risk state (GREEN/YELLOW/ORANGE/RED)
-  const spreadRiskState = (() => {
-    if (!isDefinedRiskSpread) return 'not applicable';
-
-    const buffer = pos.buffer ?? 999;
-    const deltaAbs = Math.abs(pos.netDelta ?? 0) * 100;
-    const pnlPctForRisk = premiumCapturedPct ?? 0;
-
-    if (buffer < 3 || deltaAbs > 20 || pnlPctForRisk < -75) return 'RED';
-    if (buffer < 5 || deltaAbs > 15 || pos.dte < 21) return 'ORANGE';
-    if (buffer < 8 || deltaAbs > 10 || pos.dte < 30) return 'YELLOW';
-    return 'GREEN';
-  })();
-
-  // Flags
-  const flags: string[] = [];
-
-  if (!isCspLike && pos.needsClose) {
-    flags.push('⚠ AT 21 DTE — defined-risk spread should be managed');
-  }
-  if (isCspLike && pos.dte <= 21) {
-    flags.push('ℹ CSP under 21 DTE — evaluate premium, theta, and assignment basis; do NOT auto-close');
-  }
-  if (pos.entryDte <= 21 && !isCspLike) {
-    flags.push(`ℹ SHORT-DATED ENTRY — entered at ${pos.entryDte} DTE, now ${pos.dte} DTE. Fast profit capture goal; lower thresholds apply.`);
-  }
-  if (pos.hitTarget) {
-    flags.push('✓ Profit target hit');
-  }
-  if (!pos.hasGtc) {
-    flags.push('⚠ No GTC order — profit target unprotected');
-  }
-  if (!isCspLike && pos.buffer != null && pos.buffer < 2) {
-    flags.push(`⚠ CRITICAL spread buffer ${pos.buffer.toFixed(1)}%`);
-  }
-  if (isCspLike && pos.buffer != null && pos.buffer < 2) {
-    flags.push(`ℹ CSP tight buffer ${pos.buffer.toFixed(1)}% — assignment becoming more likely, not automatic failure`);
-  }
-  if (isUpcomingEarningsRisk(pos.earningsDate, pos.expDate)) {
-    flags.push(`⚠ Upcoming earnings ${pos.earningsDate}`);
-  }
+  const support = trend?.supportAnalysis;
+  const supportText = support
+    ? `Support verdict: ${support.verdict} (${support.score}/100)
+Lookback: ${support.lookbackDays} trading days
+Current price: ${support.price != null ? `$${support.price.toFixed(2)}` : 'unknown'}
+Short put strike evaluated: ${support.shortStrike != null ? `$${support.shortStrike.toFixed(2)}` : 'not applicable'}
+Nearest support: ${support.nearestSupport != null ? `$${support.nearestSupport.toFixed(2)}` : 'unknown'}
+Support zone: ${support.supportZoneLow != null && support.supportZoneHigh != null ? `$${support.supportZoneLow.toFixed(2)} - $${support.supportZoneHigh.toFixed(2)}` : 'unknown'}
+20-day low: ${support.low20 != null ? `$${support.low20.toFixed(2)}` : 'unknown'}
+50-day low: ${support.low50 != null ? `$${support.low50.toFixed(2)}` : 'unknown'}
+Recent swing low: ${support.swingLow != null ? `$${support.swingLow.toFixed(2)}` : 'unknown'}
+MA20: ${support.ma20 != null ? `$${support.ma20.toFixed(2)}` : 'unknown'}
+MA50: ${support.ma50 != null ? `$${support.ma50.toFixed(2)}` : 'unknown'}
+Strike vs nearest support: ${support.strikeVsSupportPct != null ? `${support.strikeVsSupportPct.toFixed(1)}%` : 'unknown'}
+Price vs MA20: ${support.priceVsMa20Pct != null ? `${support.priceVsMa20Pct.toFixed(1)}%` : 'unknown'}
+Price vs MA50: ${support.priceVsMa50Pct != null ? `${support.priceVsMa50Pct.toFixed(1)}%` : 'unknown'}
+Support reason: ${support.reason}`
+    : 'Support analysis unavailable';
 
   return `Analyze this open options position:
 
@@ -1928,11 +1909,10 @@ POSITION: ${pos.symbol} ${pos.strategy}
 Detected intent: ${strategyIntent}
 Assignment willing: ${assignmentWilling}
 Effective assignment basis: ${effectiveAssignmentBasis != null ? `$${effectiveAssignmentBasis.toFixed(2)}` : 'not applicable'}
-Spread risk state: ${spreadRiskState}
 Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
-Credit received: $${pos.creditReceived.toFixed(2)} total | $${creditPerContract.toFixed(2)} per contract
-Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${remainingPremiumText}
+Credit received: $${pos.creditReceived.toFixed(2)} total | $${creditPerContract.toFixed(2)} per short contract
+Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${currentBuybackPerContract != null ? `$${currentBuybackPerContract.toFixed(2)} per short contract` : 'unknown'}
 P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
 Profit target: ${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})
@@ -1951,14 +1931,17 @@ HV30: ${pos.hv30 ?? 'unknown'}%
 IV edge (IV - HV30): ${ivEdge != null ? `${ivEdge.toFixed(1)}%` : 'unknown'}
 Beta: ${pos.beta ?? 'unknown'}
 
-GREEKS:
+PRICE SUPPORT ANALYSIS:
+${supportText}
+
+GREEKS (net position):
 Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.deltaAtEntry != null && pos.netDelta != null ? `${pos.deltaAtEntry.toFixed(4)} → ${pos.netDelta.toFixed(4)}` : 'unknown'})
 Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.thetaAtEntry != null && pos.theta != null ? `${pos.thetaAtEntry.toFixed(4)} → ${pos.theta.toFixed(4)}` : 'unknown'})
-Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
-Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'}
+Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (acceleration risk)
+Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (volatility exposure)
 
 OPERATIONAL STATUS:
-GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — profit target missing'}
+GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
 Stop loss: ${pos.stopLossStatus} ${pos.stopLossPrice ? `@ $${pos.stopLossPrice}` : ''}
 Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `Yes — ${pos.earningsDate}` : 'No'}
 
@@ -1967,122 +1950,150 @@ Direction: ${trend?.trend ?? 'unknown'} (confidence: ${trend?.confidence ?? 'unk
 Suggested strategy: ${trend?.strategy ?? 'unknown'}
 Reason: ${trend?.reason ?? 'none'}
 
-Flags: ${flags.length > 0 ? flags.join(' | ') : 'None'}
+Flags: ${[
+  !isCspLike && pos.needsClose ? '⚠ AT 21 DTE — defined-risk spread should be closed or rolled unless there is a clear reason to hold' : '',
+  isCspLike && pos.dte <= 21 ? `ℹ CSP under 21 DTE — evaluate premium, theta, delta, and assignment basis; do not auto-close` : '',
+  pos.entryDte <= 21 && !isCspLike ? `ℹ SHORT-DATED ENTRY — entered at ${pos.entryDte} DTE, now ${pos.dte} DTE. Goal is fast profit capture, NOT the standard 50%/21-DTE framework. Evaluate for early exit at 30-40% or on any sign of adverse movement.` : '',
+  pos.hitTarget ? '✓ Profit target hit' : '',
+  !pos.hasGtc ? '⚠ No GTC order' : '',
+  !isCspLike && pos.buffer != null && pos.buffer < 2 ? `⚠ CRITICAL spread buffer ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE — near breach` : '',
+  isCspLike && pos.buffer != null && pos.buffer < 2 ? `ℹ CSP tight buffer ${pos.buffer.toFixed(1)}% — assignment becoming more likely, not automatic failure` : '',
+  !isCspLike && pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? `⚠ Tight spread buffer ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : '',
+  !isCspLike && pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? `ℹ Spread buffer ${pos.buffer.toFixed(1)}% with ${pos.dte} DTE — watch closely` : '',
+  (isCspLike || pos.strategy === 'BPS') && support?.verdict === 'BAD' ? '⚠ Support check BAD — short put strike is not well protected by recent price support' : '',
+  (isCspLike || pos.strategy === 'BPS') && support?.verdict === 'CAUTION' ? 'ℹ Support check CAUTION — strike is near support or trend confirmation is mixed' : '',
+  isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `⚠ Upcoming earnings ${pos.earningsDate}` : '',
+].filter(Boolean).join(', ') || 'None'}
 
 EXPERT DECISION CHECKLIST:
-Before giving your recommendation, evaluate all of these carefully:
+Before giving the recommendation, evaluate all of these:
 
 1. POSITION TYPE
-   - Identify the exact trade structure first.
-   - Use CSP/wheel logic for a single short put with no long put.
-   - Use defined-risk spread logic for BPS, BCS, IC, or any protected vertical.
-   - Do not mix CSP logic with spread logic.
+- Identify the exact trade: CSP/short put, covered call, vertical spread, iron condor, PMCC, naked option, or other.
+- Do not assume covered call unless long stock plus short call exists.
+- Explain the management logic for that specific structure.
+- Do not manage a CSP like a BPS, and do not manage a BPS like a CSP.
 
 2. DTE MANAGEMENT
-   For defined-risk spreads:
-   - >30 DTE: manage only if target hit, thesis broken, earnings risk, or risk/reward changed.
-   - 21-30 DTE: begin active management.
-   - 14-21 DTE: gamma risk rising; require stronger reason to hold.
-   - 7-14 DTE: close/roll unless safely OTM with excellent reason.
-   - <7 DTE: avoid expiration risk unless intentional.
-   
-   For CSP / wheel:
-   - Do NOT treat 21 DTE, 16 DTE, or tight buffer as automatic close/roll triggers.
-   - Compare remaining premium, theta/day, assignment basis, and willingness to own shares.
-   - HOLD/WATCH is valid when assignment basis is acceptable and theta remains meaningful.
-   - ROLL only if it produces net credit, improves basis, or the trader wants to avoid assignment.
-   - ACCEPT ASSIGNMENT is valid when effective basis is attractive.
+- First determine whether this is a CSP/wheel position or a defined-risk spread.
+- For defined-risk spreads: 21 DTE matters. Manage actively as expiration approaches because gamma risk can overwhelm the remaining reward.
+- For CSP/wheel positions where assignment is acceptable: DO NOT treat 21 DTE, 16 DTE, or tight OTM buffer as automatic close/roll triggers.
+- For CSP/wheel positions, compare remaining premium versus theta/day, assignment basis, and willingness to own shares.
+- For CSP/wheel positions, HOLD is valid when:
+  1. assignment basis is acceptable,
+  2. theta is still meaningful,
+  3. there is still premium left to harvest,
+  4. the trader is comfortable owning shares.
+- For CSP/wheel positions, ROLL only when:
+  1. the roll produces a net credit,
+  2. the roll improves basis or reduces assignment risk,
+  3. the trader prefers avoiding assignment instead of owning shares now.
+- For CSP/wheel positions, ACCEPT ASSIGNMENT is valid when the effective basis is attractive.
 
 3. PROFIT CAPTURE
-   - Calculate profit captured as current P&L divided by original credit.
-   - For spreads: if profit is near/above 50%, favor TAKE_PROFIT.
-   - For CSPs: favor CLOSE/TAKE_PROFIT when 80-90% of premium is captured.
-   - If CSP premium is not exhausted and assignment is acceptable, HOLD/WATCH can be correct.
-   - If loss exceeds planned stop or risk/reward is poor on a spread, recommend MANAGE/CUT_LOSSES.
+- Calculate profit captured as current P&L divided by original credit.
+- For defined-risk spreads: if profit is near or above 50%, favor TAKE_PROFIT.
+- For CSP/wheel positions: favor CLOSE/TAKE_PROFIT when 80-90% of premium has been captured.
+- If CSP premium is not exhausted and assignment is acceptable, HOLD/WATCH can be correct.
+- If loss exceeds planned stop or risk/reward is poor on a spread, recommend MANAGE/CUT_LOSSES.
 
-4. DISTANCE TO STRIKE / BUFFER (Critical — read carefully)
-   Use OTM % and stock price relative to short strike. Interpret buffer by strategy type.
-   
-   For defined-risk spreads:
-   - More buffer is good; shrinking buffer is danger.
-   - Under 2-3% buffer near 21 DTE is high risk.
-   - 3-5% buffer near 14-21 DTE is moderate risk.
-   - >5% buffer generally supports holding if Greeks are favorable.
-   - A shrinking buffer can justify MANAGE, CLOSE, or ROLL because probability and spread value can expand before breach.
-   
-   For CSP / short put / wheel-income:
-   - More buffer is good, but shrinking buffer means assignment is becoming more likely, not that the trade has failed.
-   - Under 2-3% buffer near 21 DTE is high assignment risk, not an automatic close signal.
-   - 3-5% buffer near 14-21 DTE is moderate assignment risk.
-   - >5% buffer generally supports holding if theta and premium remaining are favorable.
-   - If assignment is acceptable and effective assignment basis is attractive, a narrow buffer can still support HOLD/WATCH.
-   - If assignment is not acceptable, then a narrow buffer supports ROLL or CLOSE.
+4. DISTANCE TO STRIKE / BUFFER
+- Use OTM % and stock price relative to short strike.
+- Interpret buffer by strategy type.
 
-5. GREEKS
-   - Delta: directional exposure / assignment probability proxy.
-   - Gamma: acceleration risk near expiration.
-   - Theta: remaining income reward.
-   - Vega: volatility exposure.
-   - Compare theta vs gamma: If theta meaningfully exceeds gamma and buffer is healthy, holding may be valid. If gamma is large relative to theta, favor close/roll.
-   - Mention whether Greeks support HOLD, WATCH, CLOSE, ROLL, or MANAGE.
+For defined-risk spreads:
+- More buffer is good; shrinking buffer is danger.
+- Under 2-3% buffer near 21 DTE is high risk.
+- 3-5% buffer near 14-21 DTE is moderate risk.
+- >5% buffer generally supports holding if Greeks are favorable.
+- A shrinking buffer can justify MANAGE, CLOSE, or ROLL because probability and spread value can expand before breach.
 
-6. SPREAD DEFENSE MODE (for defined-risk spreads only)
-   - GREEN: buffer >8%, delta <10, favorable theta/risk.
-   - YELLOW: buffer 5-8%, delta 10-15, or DTE <30.
-   - ORANGE: buffer 3-5%, delta 15-20, or DTE <21.
-   - RED: buffer <3%, delta >20, gamma risk rising, or loss >75% of credit.
-   - RED spreads should rarely receive HOLD. If max profit remaining is small compared with remaining risk, favor TAKE_PROFIT/CLOSE.
-   - Use spreadRiskState as a quick risk gauge, but do not let it override other factors (assignment basis for CSPs, strong thesis, etc.).
+For CSP / short put / wheel-income:
+- More buffer is good, but shrinking buffer means assignment is becoming more likely, not that the trade has failed.
+- Under 2-3% buffer near 21 DTE is high assignment risk, not an automatic close signal.
+- 3-5% buffer near 14-21 DTE is moderate assignment risk.
+- >5% buffer generally supports holding if theta and premium remaining are favorable.
+- If assignment is acceptable and effective assignment basis is attractive, a narrow buffer can still support HOLD/WATCH.
+- If assignment is not acceptable, then a narrow buffer supports ROLL or CLOSE.
+
+For covered calls / short calls:
+- More upside buffer is good unless the trader is willing to have shares called away.
+- If call-away is acceptable, shrinking buffer is not automatically bad.
+
+5. PRICE SUPPORT CHECK
+- For bullish put trades (CSP or BPS), evaluate whether the short put strike is below meaningful recent support.
+- GOOD: current price is above the support zone, trend is above MA20/MA50 or improving, and the short strike is at or below support.
+- CAUTION: the short strike is inside/near support, price is close to MA20/MA50, or support is not clearly below the strike.
+- BAD: the short strike is above support, price has lost key moving averages, or support must hold perfectly for the trade to work.
+- Do not recommend HIGH confidence for CSP/BPS unless support verdict is GOOD or the reasoning clearly explains why CAUTION is acceptable.
+- For CSP/wheel positions, weak support does not automatically mean CLOSE, but it should lower confidence and may support WATCH/ROLL if assignment is no longer attractive.
+- For defined-risk spreads, weak support should increase defensive posture because spread loss can expand before the strike is breached.
+
+6. GREEKS
+- Delta: directional risk / assignment probability proxy.
+- Gamma: acceleration risk near expiration.
+- Theta: remaining income reward.
+- Vega: volatility expansion/contraction risk.
+- Compare theta versus gamma:
+  - If theta meaningfully exceeds gamma and buffer/support are healthy, holding may be valid.
+  - If gamma is large relative to theta, favor close/roll on spreads.
+- Mention whether the Greeks support HOLD, CLOSE, or ROLL.
 
 7. VOLATILITY
-   - Compare IV, HV, and IVR.
-   - High IVR can support short premium if risk is controlled.
-   - Low IVR weakens new short-premium rolls.
-   - If IV is unknown, do not list missing IV as a risk unless directly relevant.
-   - If IV is collapsing after earnings, favor taking profit sooner.
+- Compare IV, HV, and IVR.
+- High IVR can support keeping short premium trades if risk is controlled.
+- Low IVR weakens new short-premium rolls.
+- If IV is much higher than HV, short premium has edge but also event-risk exposure.
+- If IV is collapsing after earnings, favor taking profit sooner.
 
 8. TREND / MARKET CONTEXT
-   - Use trend direction and confidence.
-   - Bullish/sideways trend supports CSP and BPS.
-   - Bearish/sideways trend supports covered calls and BCS.
-   - If trend conflicts with position, lower confidence or recommend management.
-   - Consider beta if broad market risk matters.
+- Use trend direction and confidence.
+- For bullish/sideways trend, CSP/put spreads are stronger.
+- For bearish/sideways trend, covered calls/call spreads are stronger.
+- If trend conflicts with the position, lower confidence or recommend manage.
+- Consider broad market risk if the underlying has high beta.
 
 9. EARNINGS / CATALYSTS
-   - Only treat earnings as risk if earningsDate is today/future and before expiration.
-   - If earningsDate is in the past, ignore it as current risk.
-   - If earnings is within the option cycle, favor closing/rolling unless intentionally holding through earnings.
+- Only treat earnings as a risk if earningsDate is today or future and before expiration.
+- If earningsDate is in the past, state that it is not a current earnings risk.
+- If earnings is within the option cycle, favor closing/rolling unless intentionally holding through earnings.
 
 10. ORDER / EXECUTION
-    - If GTC target is missing, recommend placing one.
-    - If stop loss is missing or loose, flag it.
-    - If rolling, say whether to roll out, up/down, and why.
-    - Do not recommend rolling unless the new trade improves duration, credit, delta, or risk.
+- If GTC target is missing, recommend placing one.
+- If stop loss is missing or loose, flag it.
+- If rolling, say whether to roll out, up/down, and why.
+- Do not recommend rolling unless the new trade improves duration, credit, delta, support location, or risk.
 
-11. CSP / WHEEL OVERRIDE RULE (Very Important)
-    If this is a CSP/short put, assignment is acceptable, and effective assignment basis is attractive, do NOT recommend MANAGE, CLOSE, or ROLL solely because DTE is under 21 or buffer is under 2-3%. 
-    The recommendation should usually be HOLD/WATCH unless:
-    - theta has collapsed,
-    - the trader no longer wants shares,
-    - earnings risk is unacceptable, or
-    - rolling clearly improves basis for net credit.
+11. SPREAD DEFENSE MODE
+For defined-risk spreads only:
+- GREEN: buffer >8%, delta <10, favorable theta/risk, and support is GOOD or not relevant.
+- YELLOW: buffer 5-8%, delta 10-15, DTE <30, or support is CAUTION.
+- ORANGE: buffer 3-5%, delta 15-20, DTE <21, or support is BAD.
+- RED: buffer <3%, delta >20, gamma risk rising, loss >75% of credit, or price has clearly lost support.
+- RED spreads should rarely receive HOLD.
+- If remaining reward is small compared with remaining risk, favor TAKE_PROFIT/CLOSE.
 
-12. FINAL ACTION
-    Give one clear action:
-    - HOLD
-    - WATCH
-    - TAKE_PROFIT
-    - CLOSE
-    - ROLL
-    - MANAGE
-    - CUT_LOSSES
+12. CSP/WHEEL OVERRIDE RULE
+- If the position is a CSP/short put, assignment is acceptable, and the effective assignment basis is attractive, do not recommend MANAGE, CLOSE, or ROLL solely because DTE is under 21 or buffer is under 2%. The recommendation should usually be HOLD/WATCH unless theta has collapsed, the trader no longer wants the shares, support has failed badly enough to change assignment desirability, earnings risk is unacceptable, or rolling clearly improves basis for a net credit.
+
+13. FINAL ACTION
+Give one clear action:
+- HOLD
+- WATCH
+- TAKE_PROFIT
+- CLOSE
+- ROLL
+- MANAGE
+- CUT_LOSSES
+
+The summary must sound like an expert trader talking to me directly, using the actual numbers from the position.
 
 Return JSON only in this exact shape:
 {
   "recommendation": "HOLD|CLOSE|ROLL|TAKE_PROFIT|CUT_LOSSES|WATCH|MANAGE",
   "confidence": "HIGH|MEDIUM|LOW",
-  "summary": "Direct recommendation using actual numbers from the position.",
-  "reasoning": "Expert-level paragraph covering position type, DTE, profit %, OTM buffer, delta, theta, gamma, vega, IV/HV/IVR, trend, earnings, assignment basis (if CSP), spreadRiskState (if spread), and risk/reward.",
+  "summary": "Direct recommendation using actual numbers.",
+  "reasoning": "Expert-level paragraph covering position type, DTE, profit %, OTM buffer, price support, delta, theta, gamma, vega, IV/HV/IVR, trend, earnings, assignment basis, and execution.",
   "risks": ["specific risk 1", "specific risk 2", "specific risk 3"],
   "catalysts": ["specific factor in favor 1", "specific factor in favor 2"],
   "deviatesFromRules": false,
@@ -2551,33 +2562,222 @@ const INDEX_CHART_SYMBOLS: Record<string, string> = {
   'DJX': '^DJI',
 };
 
-async function getTrend(symbol: string): Promise<TrendResult> {
+function avgNumbers(arr: number[]): number {
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function pctDistance(a: number | null, b: number | null): number | null {
+  if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+  return ((a - b) / b) * 100;
+}
+
+function nearestBelowOrEqual(values: number[], target: number): number | null {
+  const candidates = values.filter(v => Number.isFinite(v) && v <= target);
+  if (candidates.length === 0) return null;
+  return Math.max(...candidates);
+}
+
+function detectSwingLows(lows: number[], window = 2): number[] {
+  const swings: number[] = [];
+  for (let i = window; i < lows.length - window; i++) {
+    const current = lows[i];
+    const left = lows.slice(i - window, i);
+    const right = lows.slice(i + 1, i + 1 + window);
+    if (left.every(v => current <= v) && right.every(v => current <= v)) swings.push(current);
+  }
+  return swings;
+}
+
+
+function buildPriceSupportAnalysis(
+  bars: { c: number; h?: number; l?: number }[],
+  shortStrike: number | null
+): PriceSupportAnalysis {
+  const validBars = bars
+    .map(b => ({
+      c: Number(b.c),
+      h: Number.isFinite(Number(b.h)) ? Number(b.h) : Number(b.c),
+      l: Number.isFinite(Number(b.l)) ? Number(b.l) : Number(b.c),
+    }))
+    .filter(b => Number.isFinite(b.c) && Number.isFinite(b.h) && Number.isFinite(b.l));
+
+  if (validBars.length < 20) {
+    return {
+      verdict: 'UNKNOWN',
+      score: 0,
+      lookbackDays: validBars.length,
+      price: validBars.length > 0 ? validBars[validBars.length - 1].c : null,
+      shortStrike,
+      nearestSupport: null,
+      supportZoneLow: null,
+      supportZoneHigh: null,
+      low20: null,
+      low50: null,
+      swingLow: null,
+      ma20: null,
+      ma50: null,
+      strikeVsSupportPct: null,
+      priceVsMa20Pct: null,
+      priceVsMa50Pct: null,
+      reason: 'Not enough price history to evaluate support.',
+    };
+  }
+
+  const closes = validBars.map(b => b.c);
+  const lows = validBars.map(b => b.l);
+  const price = closes[closes.length - 1];
+
+  const low20 = Math.min(...lows.slice(-20));
+  const low50 = validBars.length >= 50 ? Math.min(...lows.slice(-50)) : null;
+  const ma20 = avgNumbers(closes.slice(-20));
+  const ma50 = validBars.length >= 50 ? avgNumbers(closes.slice(-50)) : null;
+
+  const recentSwingLows = detectSwingLows(lows.slice(-60), 2).slice(-5);
+  const nearestSwingBelow = nearestBelowOrEqual(recentSwingLows, price);
+  const supportCandidates = [low20, low50, nearestSwingBelow, ma20, ma50]
+    .filter((v): v is number => v != null && Number.isFinite(v) && v <= price * 1.02);
+
+  const nearestSupport = supportCandidates.length > 0
+    ? supportCandidates.reduce((best, v) => Math.abs(price - v) < Math.abs(price - best) ? v : best, supportCandidates[0])
+    : null;
+
+  const supportZoneLow = supportCandidates.length > 0 ? Math.min(...supportCandidates) : null;
+  const supportZoneHigh = supportCandidates.length > 0 ? Math.max(...supportCandidates) : null;
+
+  const strikeVsSupportPct = shortStrike != null && nearestSupport != null
+    ? pctDistance(shortStrike, nearestSupport)
+    : null;
+  const priceVsMa20Pct = pctDistance(price, ma20);
+  const priceVsMa50Pct = ma50 != null ? pctDistance(price, ma50) : null;
+
+  let score = 50;
+  const reasons: string[] = [];
+
+  if (price > ma20) { score += 10; reasons.push('price is above MA20'); }
+  else { score -= 15; reasons.push('price is below MA20'); }
+
+  if (ma50 != null) {
+    if (price > ma50) { score += 10; reasons.push('price is above MA50'); }
+    else { score -= 15; reasons.push('price is below MA50'); }
+
+    if (ma20 > ma50) { score += 10; reasons.push('MA20 is above MA50'); }
+    else { score -= 10; reasons.push('MA20 is below MA50'); }
+  }
+
+  if (shortStrike != null && nearestSupport != null) {
+    if (shortStrike <= nearestSupport * 0.99) {
+      score += 20;
+      reasons.push('short strike is below nearest support');
+    } else if (shortStrike <= nearestSupport * 1.01) {
+      score += 5;
+      reasons.push('short strike is near support');
+    } else {
+      score -= 25;
+      reasons.push('short strike is above nearest support');
+    }
+  } else if (shortStrike == null) {
+    reasons.push('no short put strike supplied for support comparison');
+  }
+
+  if (low50 != null && price > low50) {
+    score += 5;
+    reasons.push('price remains above the 50-day low');
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  const verdict: PriceSupportAnalysis['verdict'] =
+    shortStrike == null || nearestSupport == null ? 'UNKNOWN' :
+    score >= 75 ? 'GOOD' :
+    score >= 50 ? 'CAUTION' :
+    'BAD';
+
+  return {
+    verdict,
+    score,
+    lookbackDays: validBars.length,
+    price,
+    shortStrike,
+    nearestSupport,
+    supportZoneLow,
+    supportZoneHigh,
+    low20,
+    low50,
+    swingLow: nearestSwingBelow,
+    ma20,
+    ma50,
+    strikeVsSupportPct,
+    priceVsMa20Pct,
+    priceVsMa50Pct,
+    reason: reasons.join('; '),
+  };
+}
+
+async function getTrend(symbol: string, shortPutStrike: number | null = null): Promise<TrendResult> {
   const chartSymbol = INDEX_CHART_SYMBOLS[symbol.toUpperCase()] ?? symbol;
   const res = await fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`, { cache: 'no-store' });
-  if (!res.ok) return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Chart data unavailable' };
+  if (!res.ok) {
+    return {
+      trend: 'unknown',
+      strategy: 'NO_TRADE',
+      confidence: 0,
+      reason: 'Chart data unavailable',
+      supportAnalysis: {
+        verdict: 'UNKNOWN',
+        score: 0,
+        lookbackDays: 0,
+        price: null,
+        shortStrike: shortPutStrike,
+        nearestSupport: null,
+        supportZoneLow: null,
+        supportZoneHigh: null,
+        low20: null,
+        low50: null,
+        swingLow: null,
+        ma20: null,
+        ma50: null,
+        strikeVsSupportPct: null,
+        priceVsMa20Pct: null,
+        priceVsMa50Pct: null,
+        reason: 'Chart data unavailable.',
+      },
+    };
+  }
+
   const data = await res.json();
-  const bars: { c: number }[] = data?.bars ?? [];
-  const closes = bars.map((b: any) => b.c).filter((c: any): c is number => Number.isFinite(c));
-  if (closes.length < 50) return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data' };
-  const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const bars: { c: number; h?: number; l?: number }[] = data?.bars ?? [];
+  const closes = bars.map((b: any) => Number(b.c)).filter((c: any): c is number => Number.isFinite(c));
+  const supportAnalysis = buildPriceSupportAnalysis(bars, shortPutStrike);
+
+  if (closes.length < 50) {
+    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data', supportAnalysis };
+  }
+
   const price = closes[closes.length - 1];
-  const ma20 = avg(closes.slice(-20)); const ma50 = avg(closes.slice(-50));
+  const ma20 = avgNumbers(closes.slice(-20));
+  const ma50 = avgNumbers(closes.slice(-50));
   const mom20 = (price - closes[closes.length - 21]) / closes[closes.length - 21];
-  const low20 = Math.min(...closes.slice(-20)); const high20 = Math.max(...closes.slice(-20));
+  const low20 = Math.min(...closes.slice(-20));
+  const high20 = Math.max(...closes.slice(-20));
   const higherLows = low20 > Math.min(...closes.slice(-40, -20)) * 0.985;
   const lowerHighs = high20 < Math.max(...closes.slice(-40, -20)) * 1.015;
+
   let score = 0;
   if (price > ma20) score += 2; else score -= 2;
   if (price > ma50) score += 2; else score -= 2;
   if (ma20 > ma50) score += 2; else score -= 2;
   if (mom20 > 0.03) score += 2; else if (mom20 < -0.03) score -= 2;
   if (higherLows) score += 2; else if (lowerHighs) score -= 2;
-  const confidence = Math.min(100, Math.abs(score) * 10);
-  if (score >= 4) return { trend: 'uptrend', strategy: 'BPS', confidence, reason: 'Price above MA20/MA50, positive momentum' };
-  if (score <= -4) return { trend: 'downtrend', strategy: 'BCS', confidence, reason: 'Price below MA20/MA50, negative momentum' };
-  return { trend: 'sideways', strategy: 'IC', confidence, reason: 'Mixed signals, range-bound' };
-}
 
+  const confidence = Math.min(100, Math.abs(score) * 10);
+  const supportSuffix = supportAnalysis.verdict !== 'UNKNOWN'
+    ? ` | Support ${supportAnalysis.verdict}: ${supportAnalysis.reason}`
+    : '';
+
+  if (score >= 4) return { trend: 'uptrend', strategy: 'BPS', confidence, reason: `Price above MA20/MA50, positive momentum${supportSuffix}`, supportAnalysis };
+  if (score <= -4) return { trend: 'downtrend', strategy: 'BCS', confidence, reason: `Price below MA20/MA50, negative momentum${supportSuffix}`, supportAnalysis };
+  return { trend: 'sideways', strategy: 'IC', confidence, reason: `Mixed signals, range-bound${supportSuffix}`, supportAnalysis };
+}
 // ── Helpers ────────────────────────────────────────────────────────────────
 function stratColor(strategy: string) {
   if (strategy === 'BPS') return 'text-emerald-400 border-emerald-700';
@@ -5803,8 +6003,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   };
 
   useEffect(() => {
-    getTrend(pos.symbol).then(t => setTrend(t)).catch(() => {});
-  }, [pos.symbol]);
+    const shortPutStrike = pos.legs.find(l => l.direction === 'Short' && l.optionType === 'P')?.strikePrice ?? null;
+    getTrend(pos.symbol, shortPutStrike).then(t => setTrend(t)).catch(() => {});
+  }, [pos.symbol, pos.legs]);
 
   const rec = getRecommendation(pos, trend);
 
