@@ -4947,9 +4947,18 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
 }
 
 // ── Yahoo Finance getTrend vNext ────────────────────────────────────────────
+// Yahoo Finance doesn't recognize cash-settled index tickers in their raw
+// TastyTrade form — SPX/SPXW need ^GSPC, NDX needs ^NDX, etc. Without this
+// translation, /api/chart returns ~0 closes for these symbols, getTrend
+// throws "no bars", and the caller's catch-and-skip logic silently drops
+// the index from results entirely — same map app/engine/page.tsx already
+// uses for its own SPX/NDX/RUT/VIX chart lookups, kept in sync here.
+const YAHOO_INDEX_CHART_MAP: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
+
 async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<TrendResult> {
   const cleanSymbol = normalizeTickerToken(symbol) ?? symbol.toUpperCase();
-  const res = await fetch(`/api/chart?symbol=${encodeURIComponent(cleanSymbol)}`, { cache: 'no-store' });
+  const chartSymbol = YAHOO_INDEX_CHART_MAP[cleanSymbol] ?? cleanSymbol;
+  const res = await fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`, { cache: 'no-store' });
 
   if (!res.ok) throw new Error(`Yahoo chart fetch failed for ${cleanSymbol} (${res.status})`);
 
