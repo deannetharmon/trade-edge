@@ -4710,7 +4710,7 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
                   className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 <div className="flex gap-1.5">
-                  {[0, 4, 6, 8].map(v => (
+                  {[4, 8, 12, 16, 20].map(v => (
                     <button key={v} onClick={() => setTOtmMin(v)}
                       className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                         tOtmMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
