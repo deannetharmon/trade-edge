@@ -1570,8 +1570,15 @@ async function getMarketMetrics(symbols: string[], token: string) {
 }
 
 async function getQuote(symbol: string, token: string): Promise<number | null> {
+  // Cash-settled indexes (SPX, NDX, RUT, VIX, XSP) have no equity instrument
+  // record — they trade on TastyTrade's market-data endpoint under the
+  // `index=` parameter, not `equity=`. Quoting them as an equity silently
+  // returns no items, which previously made every index symbol's spot price
+  // resolve to null and drop out of every downstream POP/OTM calculation.
+  const classification = await classifyUnderlying(symbol, token).catch(() => 'stock' as const);
+  const queryParam = classification === 'index' ? 'index' : 'equity';
   try {
-    const data = await ttFetch(`/market-data/by-type?equity=${encodeURIComponent(symbol)}`, token);
+    const data = await ttFetch(`/market-data/by-type?${queryParam}=${encodeURIComponent(symbol)}`, token);
     const item = data.data?.items?.[0]; if (!item) return null;
     const last = item.last != null ? parseFloat(item.last) : null;
     const bid = item.bid != null ? parseFloat(item.bid) : null;
