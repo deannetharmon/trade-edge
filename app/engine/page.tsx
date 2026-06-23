@@ -1896,6 +1896,110 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
     }
   }, [entry.symbol, entry.shortStrike, entry.dte, entry.optionType, entry.strategy, entry.credit, isWheelEntry]);
 
+  // ── Submit order to TastyTrade ──────────────────────────────────────────
+  // Spread entries: single Limit order, 2 legs (Sell to Open short / Buy to Open long),
+  //   price-effect Credit, followed by a separate GTC profit-target close order.
+  // Wheel entries (CSP/CC): single-leg Limit order (Sell to Open), price-effect Credit,
+  //   followed by a separate GTC profit-target close order.
+  // Both submit the entry first, then the GTC close as an independent order — matching
+  // the OTOCO/bracket pattern already used elsewhere (entry GTC + profit-target GTC).
+  const placeOrder = useCallback(async () => {
+    if (!hasOcc || entryLimit <= 0) return;
+    setPhase('placing');
+    setError('');
+    try {
+      const token = await getAccessToken();
+      const accountsData = await ttFetch('/customers/me/accounts', token);
+      const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
+        ?? accountsData?.data?.items?.[0];
+      const accountNumber = account?.account?.['account-number'];
+      if (!accountNumber) throw new Error('No account found');
+
+      const postOrder = async (body: unknown): Promise<any> => {
+        const res = await fetch(`${BASE}/accounts/${accountNumber}/orders`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const errMsg =
+            data?.error?.message ??
+            data?.['error-message'] ??
+            (Array.isArray(data?.error?.errors)
+              ? data.error.errors.map((e: any) => `${e.domain ?? ''} ${e.reason ?? e.message ?? e}`).join('; ')
+              : null) ??
+            JSON.stringify(data?.error ?? data).slice(0, 300);
+          throw new Error(`Order rejected: ${errMsg}`);
+        }
+        return data;
+      };
+
+      // Entry order — opens the position
+      const entryBody = isWheelEntry
+        ? {
+            'order-type': 'Limit',
+            'time-in-force': 'GTC',
+            price: entryLimit.toFixed(2),
+            'price-effect': 'Credit',
+            legs: [
+              { symbol: resolvedOcc, quantity: contracts, action: 'Sell to Open', 'instrument-type': legInstrumentType },
+            ],
+          }
+        : {
+            'order-type': 'Limit',
+            'time-in-force': 'GTC',
+            price: entryLimit.toFixed(2),
+            'price-effect': 'Credit',
+            legs: [
+              { symbol: resolvedOcc, quantity: contracts, action: 'Sell to Open', 'instrument-type': legInstrumentType },
+              { symbol: resolvedLongOcc, quantity: contracts, action: 'Buy to Open', 'instrument-type': legInstrumentType },
+            ],
+          };
+
+      const entryRes = await postOrder(entryBody);
+      const entryOrderId = String(entryRes?.data?.order?.id ?? entryRes?.data?.id ?? 'submitted');
+
+      // GTC profit-target close order — floored at $0.01 (TastyTrade rejects $0.00 limits)
+      const closeBody = isWheelEntry
+        ? {
+            'order-type': 'Limit',
+            'time-in-force': 'GTC',
+            price: gtcBuyback.toFixed(2),
+            'price-effect': 'Debit',
+            legs: [
+              { symbol: resolvedOcc, quantity: contracts, action: 'Buy to Close', 'instrument-type': legInstrumentType },
+            ],
+          }
+        : {
+            'order-type': 'Limit',
+            'time-in-force': 'GTC',
+            price: gtcBuyback.toFixed(2),
+            'price-effect': 'Debit',
+            legs: [
+              { symbol: resolvedOcc, quantity: contracts, action: 'Buy to Close', 'instrument-type': legInstrumentType },
+              { symbol: resolvedLongOcc, quantity: contracts, action: 'Sell to Close', 'instrument-type': legInstrumentType },
+            ],
+          };
+
+      try {
+        await postOrder(closeBody);
+      } catch (gtcErr: any) {
+        // Entry succeeded but GTC failed — surface this clearly rather than masking it as a full failure
+        console.warn('[EngineOrderModal] Entry order placed but GTC close order failed:', gtcErr?.message);
+        setOrderId(`${entryOrderId} (GTC close failed — set manually: ${gtcErr?.message ?? 'unknown error'})`);
+        setPhase('done');
+        return;
+      }
+
+      setOrderId(entryOrderId);
+      setPhase('done');
+    } catch (e: any) {
+      setError(e?.message ?? 'Order submission failed.');
+      setPhase('error');
+    }
+  }, [hasOcc, entryLimit, isWheelEntry, resolvedOcc, resolvedLongOcc, contracts, legInstrumentType, gtcBuyback]);
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={onClose}>
       <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md`} onClick={e => e.stopPropagation()}>
