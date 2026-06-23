@@ -1863,7 +1863,7 @@ Total credit collected: $${totalCredit.toFixed(2)}
 Current P&L: $${totalPnl.toFixed(2)} (${totalCredit > 0 ? ((totalPnl / totalCredit) * 100).toFixed(1) : 0}% of credit)
 Total at risk: $${totalAtRisk.toFixed(2)}
 Net delta: ${portfolioGreeks.deltaShares != null ? `${portfolioGreeks.deltaShares.toFixed(0)} share-equivalent` : 'N/A'}
-Net theta/day: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/d' : 'N/A'}
+Net theta/d: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/d` : 'N/A'}
 Net gamma: ${portfolioGreeks.gammaSharesPerDollar != null ? `${portfolioGreeks.gammaSharesPerDollar.toFixed(1)} shares per $1 move` : 'N/A'}
 Net vega: ${portfolioGreeks.vegaPerIvPoint != null ? `$${portfolioGreeks.vegaPerIvPoint.toFixed(0)} per 1 IV point` : 'N/A'}
 
@@ -1980,7 +1980,7 @@ Current profit target: ${Math.round(pos.profitTarget * 100)}%
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
-Theta/day: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
+Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 GTC working: ${pos.hasGtc ? 'Yes' : 'No'}
 Earnings: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `UPCOMING — ${pos.earningsDate}` : pos.earningsDate ? `PAST — ${pos.earningsDate} — ignore as current risk` : 'None before expiration'}
 
@@ -2175,7 +2175,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     '',
     'GREEKS / VOLATILITY',
     `Delta: ${fmtSignedNum(pos.netDelta, 3)}`,
-    `Theta/day: ${fmtSignedNum(pos.theta, 3)}`,
+    `Theta/d: ${fmtSignedNum(pos.theta, 3)}`,
     `Gamma: ${fmtSignedNum(pos.gamma, 4)}`,
     `Theta/Gamma ratio: ${fmtNum(thetaGammaRatio, 1)}`,
     `Vega: ${fmtSignedNum(pos.netVega, 3)}`,
@@ -3357,7 +3357,7 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
         { label: 'Captured', value: `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(0)}`, sub: `of $${totalCredit.toFixed(0)} · ${capturedPct.toFixed(0)}%`, color: totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400' },
         { label: `${positions.length > 0 ? Math.round(positions.reduce((s,p) => s + p.profitTarget, 0) / positions.length * 100) : 50}% Target`, value: `$${Math.round(positions.reduce((s,p) => s + p.targetPrice, 0))}`, sub: `${totalCredit > 0 ? Math.round((totalPnl / Math.max(positions.reduce((s,p) => s + p.targetPrice, 0), 1)) * 100) : 0}% of target`, color: 'text-yellow-400' },
         { label: 'At Risk', value: `$${totalAtRisk.toFixed(0)}`, sub: 'max loss if expired', color: th.textMuted },
-        { label: 'Est. Theta/Day', value: totalTheta > 0 ? `+$${totalTheta.toFixed(2)}` : '—', sub: 'daily decay', color: 'text-blue-400' },
+        { label: 'Est. Theta/D', value: totalTheta > 0 ? `+$${totalTheta.toFixed(2)}` : '—', sub: 'daily decay', color: 'text-blue-400' },
       ].map((item, i, arr) => (
         <div key={item.label} className={`p-5 ${i < arr.length - 1 ? `border-r ${th.border}` : ''} flex flex-col items-center text-center`}>
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-2`}>{item.label}</p>
@@ -3432,19 +3432,20 @@ function fmtSignedDecimal(value: number | null, decimals = 1, suffix = ''): stri
 function portfolioDeltaColor(deltaShares: number | null, fallback: string): string {
   if (deltaShares == null) return fallback;
   const abs = Math.abs(deltaShares);
-  if (abs <= 25) return 'text-emerald-400';
-  if (abs <= 75) return 'text-yellow-400';
-  if (abs <= 150) return 'text-orange-400';
+  if (abs <= 100) return 'text-emerald-400';
+  if (abs <= 250) return 'text-yellow-400';
+  if (abs <= 500) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function portfolioDeltaLabel(deltaShares: number | null): string {
   if (deltaShares == null) return 'not available';
   const abs = Math.abs(deltaShares);
-  if (abs <= 25) return 'low directional exposure';
-  if (abs <= 75) return 'moderate directional exposure';
-  if (abs <= 150) return 'elevated directional exposure';
-  return 'high directional exposure';
+  if (abs <= 25) return 'neutral';
+  if (abs <= 100) return deltaShares >= 0 ? 'mild bullish' : 'mild bearish';
+  if (abs <= 250) return deltaShares >= 0 ? 'bullish' : 'bearish';
+  if (abs <= 500) return 'elevated direction';
+  return 'high directional risk';
 }
 
 function portfolioThetaColor(thetaPerDay: number | null, fallback: string): string {
@@ -3468,37 +3469,38 @@ function portfolioThetaLabel(thetaPerDay: number | null): string {
 function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: string): string {
   if (gammaSharesPerDollar == null) return fallback;
   const abs = Math.abs(gammaSharesPerDollar);
-  if (abs <= 1) return 'text-emerald-400';
-  if (abs <= 3) return 'text-yellow-400';
-  if (abs <= 7) return 'text-orange-400';
+  if (abs <= 5) return 'text-emerald-400';
+  if (abs <= 15) return 'text-yellow-400';
+  if (abs <= 30) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function portfolioGammaLabel(gammaSharesPerDollar: number | null): string {
   if (gammaSharesPerDollar == null) return 'not available';
   const abs = Math.abs(gammaSharesPerDollar);
-  if (abs <= 1) return 'low risk';
-  if (abs <= 3) return 'moderate risk';
-  if (abs <= 7) return 'elevated risk';
-  return 'high risk';
+  if (abs <= 5) return 'low gamma risk';
+  if (abs <= 15) return 'moderate gamma risk';
+  if (abs <= 30) return 'elevated gamma risk';
+  return 'high gamma risk';
 }
 
 function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): string {
   if (vegaPerIvPoint == null) return fallback;
-  if (vegaPerIvPoint <= -25) return 'text-emerald-400';
-  if (vegaPerIvPoint < 0) return 'text-emerald-300';
-  if (vegaPerIvPoint <= 25) return 'text-yellow-400';
-  if (vegaPerIvPoint <= 75) return 'text-orange-400';
+  const abs = Math.abs(vegaPerIvPoint);
+  if (abs <= 100) return 'text-emerald-400';
+  if (abs <= 250) return 'text-yellow-400';
+  if (abs <= 500) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function portfolioVegaLabel(vegaPerIvPoint: number | null): string {
   if (vegaPerIvPoint == null) return 'not available';
-  if (vegaPerIvPoint <= -25) return 'short vol';
-  if (vegaPerIvPoint < 0) return 'slight short vol';
-  if (vegaPerIvPoint <= 25) return 'neutral vol';
-  if (vegaPerIvPoint <= 75) return 'long vol';
-  return 'high long vol';
+  const abs = Math.abs(vegaPerIvPoint);
+  const side = vegaPerIvPoint < 0 ? 'short vol' : vegaPerIvPoint > 0 ? 'long vol' : 'neutral vol';
+  if (abs <= 100) return `low ${side} risk`;
+  if (abs <= 250) return `moderate ${side} risk`;
+  if (abs <= 500) return `elevated ${side} risk`;
+  return `high ${side} risk`;
 }
 
 function topGreekContributors(
@@ -3565,7 +3567,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
       drivers: thetaDrivers,
       color: portfolioThetaColor(totals.thetaPerDay, th.text),
       title: totals.thetaRaw != null
-        ? `Theta: $${totals.thetaPerDay?.toFixed(0)}/day · raw ${totals.thetaRaw.toFixed(4)} · ${portfolioThetaLabel(totals.thetaPerDay)}`
+        ? `Theta: $${totals.thetaPerDay?.toFixed(0)}/d · raw ${totals.thetaRaw.toFixed(4)} · ${portfolioThetaLabel(totals.thetaPerDay)}`
         : undefined,
     },
     {
@@ -4141,10 +4143,10 @@ function assessExtendConditions(pos: Position): {
 
   // Theta check
   if (pos.theta != null && pos.theta < 0.02) {
-    warnings.push(`Theta only $${(pos.theta * 100).toFixed(2)}/day — slow decay, extra holding time has low reward`);
+    warnings.push(`Theta only $${(pos.theta * 100).toFixed(2)}/d — slow decay, extra holding time has low reward`);
     score -= 1;
   } else if (pos.theta != null && pos.theta >= 0.05) {
-    reasons.push(`Theta $${(pos.theta * 100).toFixed(2)}/day — strong decay working in your favor`);
+    reasons.push(`Theta $${(pos.theta * 100).toFixed(2)}/d — strong decay working in your favor`);
     score += 1;
   }
 
@@ -4562,7 +4564,7 @@ MARKET DATA:
 Stock price: ${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
-Theta/day: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
+Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'YES — ' + pos.earningsDate : 'None'}
 
 CURRENT ORDERS:
@@ -5247,7 +5249,7 @@ function fmtThetaDisplay(theta: number | null): string {
   if (theta == null) return '—';
   const dollarsPerDay = theta * 100;
   const sign = dollarsPerDay >= 0 ? '+' : '-';
-  return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/d';
+  return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/d`;
 }
 
 function fmtDeltaDisplay(delta: number | null): string {
@@ -5295,82 +5297,98 @@ function thetaLabel(theta: number | null): string {
 function deltaTint(delta: number | null): string {
   if (delta == null) return '';
   const abs = Math.abs(delta);
-  if (abs <= 0.10) return 'bg-emerald-500/10 rounded px-1.5';
-  if (abs <= 0.25) return 'bg-yellow-500/8 rounded px-1.5';
-  if (abs <= 0.35) return 'bg-orange-500/10 rounded px-1.5';
+  if (abs <= 0.15) return 'bg-emerald-500/10 rounded px-1.5';
+  if (abs <= 0.35) return 'bg-yellow-500/8 rounded px-1.5';
+  if (abs <= 0.60) return 'bg-orange-500/10 rounded px-1.5';
   return 'bg-red-500/10 rounded px-1.5';
 }
 
 function deltaTextColor(delta: number | null, fallback: string): string {
   if (delta == null) return fallback;
   const abs = Math.abs(delta);
-  if (abs <= 0.10) return 'text-emerald-400';
-  if (abs <= 0.25) return 'text-yellow-400';
-  if (abs <= 0.35) return 'text-orange-400';
+  if (abs <= 0.15) return 'text-emerald-400';
+  if (abs <= 0.35) return 'text-yellow-400';
+  if (abs <= 0.60) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function deltaLabel(delta: number | null): string {
   if (delta == null) return '';
   const abs = Math.abs(delta);
-  if (abs <= 0.10) return '✓ low exposure';
-  if (abs <= 0.25) return '~ moderate';
-  if (abs <= 0.35) return '⚠ elevated';
+  if (abs <= 0.15) return '✓ low exposure';
+  if (abs <= 0.35) return '~ moderate';
+  if (abs <= 0.60) return '⚠ elevated';
   return '✗ high exposure';
 }
 
 function gammaTint(gamma: number | null): string {
   if (gamma == null) return '';
   const abs = Math.abs(gamma);
-  if (abs <= 0.005) return 'bg-emerald-500/10 rounded px-1.5';
-  if (abs <= 0.015) return 'bg-yellow-500/8 rounded px-1.5';
-  if (abs <= 0.030) return 'bg-orange-500/10 rounded px-1.5';
+  if (abs < 0.030) return 'bg-emerald-500/10 rounded px-1.5';
+  if (abs < 0.080) return 'bg-yellow-500/8 rounded px-1.5';
+  if (abs < 0.150) return 'bg-orange-500/10 rounded px-1.5';
   return 'bg-red-500/10 rounded px-1.5';
 }
 
 function gammaTextColor(gamma: number | null, fallback: string): string {
   if (gamma == null) return fallback;
   const abs = Math.abs(gamma);
-  if (abs <= 0.005) return 'text-emerald-400';
-  if (abs <= 0.015) return 'text-yellow-400';
-  if (abs <= 0.030) return 'text-orange-400';
+  if (abs < 0.030) return 'text-emerald-400';
+  if (abs < 0.080) return 'text-yellow-400';
+  if (abs < 0.150) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function gammaLabel(gamma: number | null): string {
   if (gamma == null) return '';
   const abs = Math.abs(gamma);
-  if (abs <= 0.005) return '✓ low gamma';
-  if (abs <= 0.015) return '~ watch';
-  if (abs <= 0.030) return '⚠ elevated';
+  if (abs < 0.030) return '✓ low gamma';
+  if (abs < 0.080) return '~ moderate';
+  if (abs < 0.150) return '⚠ elevated';
   return '✗ high gamma';
 }
 
 function vegaTint(vega: number | null): string {
   if (vega == null) return '';
-  if (vega <= -0.10) return 'bg-emerald-500/10 rounded px-1.5';
-  if (vega <= -0.03) return 'bg-emerald-500/8 rounded px-1.5';
-  if (vega < 0)      return 'bg-yellow-500/8 rounded px-1.5';
-  if (vega <= 0.05)  return 'bg-yellow-500/8 rounded px-1.5';
-  if (vega <= 0.15)  return 'bg-orange-500/10 rounded px-1.5';
+  const abs = Math.abs(vega);
+  if (abs <= 0.30) return 'bg-emerald-500/10 rounded px-1.5';
+  if (abs <= 0.75) return 'bg-yellow-500/8 rounded px-1.5';
+  if (abs <= 1.50) return 'bg-orange-500/10 rounded px-1.5';
   return 'bg-red-500/10 rounded px-1.5';
 }
 
 function vegaTextColor(vega: number | null, fallback: string): string {
   if (vega == null) return fallback;
-  if (vega <= -0.03) return 'text-emerald-400';
-  if (vega <= 0.05) return 'text-yellow-400';
-  if (vega <= 0.15) return 'text-orange-400';
+  const abs = Math.abs(vega);
+  if (abs <= 0.30) return 'text-emerald-400';
+  if (abs <= 0.75) return 'text-yellow-400';
+  if (abs <= 1.50) return 'text-orange-400';
   return 'text-red-400';
 }
 
 function vegaLabel(vega: number | null): string {
   if (vega == null) return '';
-  if (vega <= -0.10) return '✓ short vega';
-  if (vega < 0) return '~ slight short';
-  if (vega <= 0.05) return '~ neutral';
-  if (vega <= 0.15) return '⚠ long vega';
-  return '✗ high vega';
+  const abs = Math.abs(vega);
+  if (abs <= 0.30) return '✓ low vol risk';
+  if (abs <= 0.75) return '~ moderate vol';
+  if (abs <= 1.50) return '⚠ elevated vol';
+  return '✗ high vol risk';
+}
+
+function ivrTextColor(ivr: number | null, fallback: string): string {
+  if (ivr == null) return fallback;
+  if (ivr < 20) return 'text-red-400';
+  if (ivr < 40) return 'text-yellow-400';
+  if (ivr <= 70) return 'text-emerald-400';
+  return 'text-emerald-300';
+}
+
+function ivrLabel(ivr: number | null): string {
+  if (ivr == null) return '';
+  if (ivr < 20) return '✗ poor premium';
+  if (ivr < 40) return '~ fair premium';
+  if (ivr <= 70) return '✓ good premium';
+  return '★ excellent premium';
 }
 
 // ── Buffer Color Helpers ──────────────────────────────────────────────────
@@ -5486,11 +5504,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
   // ── 50%-target projection (theta-only, all-else-equal) ──
   // pos.theta is per-share net theta with contract qty ALREADY applied (see assembly).
-  // $/day = pos.theta * 100. Do NOT multiply by qty again.
+  // $/d = pos.theta * 100. Do NOT multiply by qty again.
   const projection = (() => {
     if (pos.theta == null || pos.theta <= 0) return null;
     if (pos.currentValue == null) return null;
-    const dailyDecay = pos.theta * 100;                 // $/day buyback erosion
+    const dailyDecay = pos.theta * 100;                 // $/d buyback erosion
     const distToTarget = pos.currentValue - pos.targetPrice; // $ left to fall
     if (distToTarget <= 0) {
       return { dailyDecay, status: 'hit' as const, dateLabel: null as string | null };
@@ -5888,8 +5906,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
             <div className="border-t-2 border-purple-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
               <p className={`text-[9px] ${th.textFaint}`}>IVR</p>
-              <p className={`text-xs font-bold ${pos.ivr != null ? (pos.ivr >= 30 ? 'text-emerald-400' : 'text-yellow-400') : th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.ivr ?? '—'}
+              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+                {ivrLabel(pos.ivr)}
               </p>
             </div>
 
