@@ -5937,13 +5937,40 @@ async function runTargetedScan(
   }
 }
 
+function calcTargetedEntryOtmPct(entry: TargetedScanEntry): number | null {
+  const c = entry.candidate;
+  const price = entry.price;
+
+  if (!c || price == null || price <= 0) return null;
+
+  if (c.strategy === 'BPS') {
+    return ((price - c.shortStrike) / price) * 100;
+  }
+
+  if (c.strategy === 'BCS') {
+    return ((c.shortStrike - price) / price) * 100;
+  }
+
+  if (c.strategy === 'IC') {
+    const putOtm = ((price - c.shortStrike) / price) * 100;
+    const callStrike = c.shortCallStrike ?? null;
+
+    if (callStrike == null) return putOtm;
+
+    const callOtm = ((callStrike - price) / price) * 100;
+    return Math.min(putOtm, callOtm);
+  }
+
+  return null;
+}
+
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
 function TargetedScanResultsPanel({
   entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions,
 }: {
   entries: TargetedScanEntry[];
-  sortBy: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc';
-  setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc') => void;
+  sortBy: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
+setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm') => void;
   popMin: number;
   th: typeof THEMES[Theme];
   rankConfig: RankConfig;
@@ -5999,12 +6026,13 @@ function TargetedScanResultsPanel({
   if (activeTrendOnly) pool = pool.filter(e => e.strategy === e.primaryStrategy);
   // 5. sort
   pool.sort((a, b) => {
-    if (activeSort === 'pop')         return b.pop - a.pop;
-    if (activeSort === 'credit')      return (b.candidate.credit ?? 0) - (a.candidate.credit ?? 0);
-    if (activeSort === 'creditRatio') return (b.candidate.creditRatio ?? 0) - (a.candidate.creditRatio ?? 0);
-    if (activeSort === 'roc')         return b.candidate.roc - a.candidate.roc;
-    return b.score - a.score;
-  });
+  if (activeSort === 'pop')         return b.pop - a.pop;
+  if (activeSort === 'credit')      return (b.candidate.credit ?? 0) - (a.candidate.credit ?? 0);
+  if (activeSort === 'creditRatio') return (b.candidate.creditRatio ?? 0) - (a.candidate.creditRatio ?? 0);
+  if (activeSort === 'roc')         return b.candidate.roc - a.candidate.roc;
+  if (activeSort === 'otm')         return (calcTargetedEntryOtmPct(b) ?? -999) - (calcTargetedEntryOtmPct(a) ?? -999);
+  return b.score - a.score;
+});
 
   const totalVisible  = pool.length;
   const display       = pool.slice(0, showTopN);
@@ -6024,6 +6052,7 @@ function TargetedScanResultsPanel({
     { key: 'credit',      label: 'Credit $' },
     { key: 'creditRatio', label: 'Credit %' },
     { key: 'roc',         label: 'ROC %'    },
+    { key: 'otm',         label: 'OTM %'    },
   ];
 
   return (
