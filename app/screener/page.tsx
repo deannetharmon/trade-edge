@@ -2431,7 +2431,16 @@ function exploreAllCandidatesForRank(
               delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
               pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
               roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
-              oi: { status: result.checks.oi.status, value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`, reason: result.checks.oi.reason },
+              oi: (() => {
+              const minOI = Math.min(bestCandidate.shortOI, bestCandidate.longOI);
+              return {
+                status: minOI >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
+                value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
+                reason: minOI >= appliedRules.OI_MIN
+                  ? `Both legs ≥ ${appliedRules.OI_MIN}`
+                  : `Below OI floor ${appliedRules.OI_MIN}`,
+              };
+            })(),
             },
           });
         }
