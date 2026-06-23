@@ -3458,11 +3458,11 @@ function portfolioThetaColor(thetaPerDay: number | null, fallback: string): stri
 
 function portfolioThetaLabel(thetaPerDay: number | null): string {
   if (thetaPerDay == null) return 'not available';
-  if (thetaPerDay >= 50) return 'strong portfolio decay';
-  if (thetaPerDay >= 20) return 'good daily decay';
-  if (thetaPerDay >= 5) return 'light daily decay';
-  if (thetaPerDay >= 0) return 'minimal theta';
-  return 'paying theta';
+  if (thetaPerDay >= 50) return 'strong income';
+  if (thetaPerDay >= 20) return 'healthy income';
+  if (thetaPerDay >= 5) return 'light income';
+  if (thetaPerDay >= 0) return 'minimal income';
+  return 'negative theta';
 }
 
 function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: string): string {
@@ -3477,10 +3477,10 @@ function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: stri
 function portfolioGammaLabel(gammaSharesPerDollar: number | null): string {
   if (gammaSharesPerDollar == null) return 'not available';
   const abs = Math.abs(gammaSharesPerDollar);
-  if (abs <= 1) return 'low acceleration risk';
-  if (abs <= 3) return 'watch gamma';
-  if (abs <= 7) return 'elevated gamma risk';
-  return 'high gamma risk';
+  if (abs <= 1) return 'low risk';
+  if (abs <= 3) return 'moderate risk';
+  if (abs <= 7) return 'elevated risk';
+  return 'high risk';
 }
 
 function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): string {
@@ -3494,11 +3494,11 @@ function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): st
 
 function portfolioVegaLabel(vegaPerIvPoint: number | null): string {
   if (vegaPerIvPoint == null) return 'not available';
-  if (vegaPerIvPoint <= -25) return 'short vol exposure';
+  if (vegaPerIvPoint <= -25) return 'short vol';
   if (vegaPerIvPoint < 0) return 'slight short vol';
-  if (vegaPerIvPoint <= 25) return 'near neutral vol';
-  if (vegaPerIvPoint <= 75) return 'long vol exposure';
-  return 'high long vol exposure';
+  if (vegaPerIvPoint <= 25) return 'neutral vol';
+  if (vegaPerIvPoint <= 75) return 'long vol';
+  return 'high long vol';
 }
 
 function topGreekContributors(
@@ -3523,19 +3523,19 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
   const deltaDrivers = topGreekContributors(
     positions,
     p => p.netDelta == null ? null : p.netDelta * 100,
-    v => fmtSignedWhole(v, ' sh'),
+    v => fmtSignedWhole(v, ' shares'),
     2
   );
   const thetaDrivers = topGreekContributors(
     positions,
     p => p.theta == null ? null : p.theta * 100,
-    v => fmtSignedMoneyWhole(v, '/day'),
+    v => fmtSignedMoneyWhole(v, '/d'),
     2
   );
   const gammaDrivers = topGreekContributors(
     positions,
     p => p.gamma == null ? null : p.gamma * 100,
-    v => fmtSignedDecimal(v, 1, ' sh/$'),
+    v => fmtSignedDecimal(v, 1, '/$'),
     2
   );
   const vegaDrivers = topGreekContributors(
@@ -3547,35 +3547,43 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
 
   const cards = [
     {
-      label: 'Δ',
-      value: fmtSignedWhole(totals.deltaShares, ' sh'),
+      greek: 'Δ',
+      label: 'Direction',
+      value: fmtSignedWhole(totals.deltaShares, ' shares'),
+      status: portfolioDeltaLabel(totals.deltaShares),
       drivers: deltaDrivers,
       color: portfolioDeltaColor(totals.deltaShares, th.text),
       title: totals.netDeltaRaw != null
-        ? `Net delta: ${totals.deltaShares?.toFixed(0)} shares · raw ${totals.netDeltaRaw.toFixed(4)} · ${portfolioDeltaLabel(totals.deltaShares)}`
+        ? `Net delta: ${totals.deltaShares?.toFixed(0)} share-equivalent · raw ${totals.netDeltaRaw.toFixed(4)} · ${portfolioDeltaLabel(totals.deltaShares)}`
         : undefined,
     },
     {
-      label: 'Θ',
-      value: fmtSignedMoneyWhole(totals.thetaPerDay, '/day'),
+      greek: 'Θ',
+      label: 'Income',
+      value: fmtSignedMoneyWhole(totals.thetaPerDay, '/d'),
+      status: portfolioThetaLabel(totals.thetaPerDay),
       drivers: thetaDrivers,
       color: portfolioThetaColor(totals.thetaPerDay, th.text),
       title: totals.thetaRaw != null
-        ? `Theta/day: $${totals.thetaPerDay?.toFixed(0)} · raw ${totals.thetaRaw.toFixed(4)} · ${portfolioThetaLabel(totals.thetaPerDay)}`
+        ? `Theta: $${totals.thetaPerDay?.toFixed(0)}/day · raw ${totals.thetaRaw.toFixed(4)} · ${portfolioThetaLabel(totals.thetaPerDay)}`
         : undefined,
     },
     {
-      label: 'Γ',
-      value: fmtSignedDecimal(totals.gammaSharesPerDollar, 1, ' sh/$'),
+      greek: 'Γ',
+      label: 'Gamma Risk',
+      value: fmtSignedDecimal(totals.gammaSharesPerDollar, 1, '/$'),
+      status: portfolioGammaLabel(totals.gammaSharesPerDollar),
       drivers: gammaDrivers,
       color: portfolioGammaColor(totals.gammaSharesPerDollar, th.text),
       title: totals.gammaRaw != null
-        ? `Gamma: ${totals.gammaSharesPerDollar?.toFixed(1)} shares per $1 move · raw ${totals.gammaRaw.toFixed(4)} · ${portfolioGammaLabel(totals.gammaSharesPerDollar)}`
+        ? `Gamma: ${totals.gammaSharesPerDollar?.toFixed(1)} share-equivalent per $1 underlying move · raw ${totals.gammaRaw.toFixed(4)} · ${portfolioGammaLabel(totals.gammaSharesPerDollar)}`
         : undefined,
     },
     {
-      label: 'V',
+      greek: 'V',
+      label: 'Volatility',
       value: fmtSignedMoneyWhole(totals.vegaPerIvPoint, '/pt'),
+      status: portfolioVegaLabel(totals.vegaPerIvPoint),
       drivers: vegaDrivers,
       color: portfolioVegaColor(totals.vegaPerIvPoint, th.text),
       title: totals.vegaRaw != null
@@ -3590,7 +3598,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
         <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest font-bold`}>
           Portfolio Greeks <span className="normal-case tracking-normal font-medium">({positions.length} position{positions.length !== 1 ? 's' : ''})</span>
         </p>
-        <p className={`text-[10px] ${th.textFaint}`}>Δ = share-equivalent · Θ/V dollarized</p>
+        <p className={`text-[10px] ${th.textFaint}`}>Δ = share-equivalent · Θ/V dollarized · healthy zone shown under value</p>
       </div>
 
       <div className="grid grid-cols-4">
@@ -3601,11 +3609,15 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
             title={card.title}
           >
             <div className="flex items-baseline gap-2">
-              <span className={`text-[11px] ${th.textFaint} font-bold`}>{card.label}</span>
-              <span className={`text-xl font-bold ${card.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {card.value}
-              </span>
+              <span className={`text-[10px] ${th.textFaint} font-bold uppercase tracking-wider`}>{card.label}</span>
+              <span className={`text-[10px] ${th.textFaint} font-bold`}>{card.greek}</span>
             </div>
+            <div className={`text-xl font-bold ${card.color} mt-0.5`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              {card.value}
+            </div>
+            <p className={`text-[10px] ${card.color} mt-0.5 truncate`}>
+              {card.status}
+            </p>
             <p className={`text-[10px] ${th.textFaint} mt-1 truncate`}>
               {card.drivers}
             </p>
