@@ -266,23 +266,14 @@ function getCreditColor(candidate: SpreadCandidate, isEtfOrIndex: boolean): stri
   return 'text-red-400';
 }
 
-function getOiColor(candidate: SpreadCandidate, oiMin: number): string {
-  // The SHORT leg(s) drive this color, not the long leg. The short leg is what
-  // you actively trade twice — sell to open, then buy to close at the GTC
-  // profit target — and it's the leg that carries assignment risk if it ever
-  // goes ITM. The long leg is protection that typically only transacts
-  // alongside the short leg as part of the same spread order, where the market
-  // maker quotes off the short leg's liquidity anyway — thin long-leg OI alone
-  // rarely blocks a clean fill the way thin short-leg OI does.
-  //
-  // For IC, there are two short legs (put + call) and both carry the same
-  // exposure, so color on whichever short side is thinner.
-  const shortLegOi = candidate.strategy === 'IC'
-    ? Math.min(candidate.shortOI ?? 0, candidate.shortCallOI ?? 0)
-    : (candidate.shortOI ?? 0);
-
-  if (shortLegOi >= oiMin) return 'text-emerald-400';
-  if (shortLegOi >= oiMin * 0.6) return 'text-yellow-400';
+function getOiColor(legOi: number | undefined, oiMin: number): string {
+  // Each leg is colored independently on its own OI — a 600/80 reading shows
+  // green/red side by side, not one blended color for the whole field. This
+  // keeps the display honest: a thin long leg doesn't get hidden behind a
+  // liquid short leg, and vice versa.
+  const oi = legOi ?? 0;
+  if (oi >= oiMin) return 'text-emerald-400';
+  if (oi >= oiMin * 0.6) return 'text-yellow-400';
   return 'text-red-400';
 }
 
@@ -4197,28 +4188,28 @@ const strategyScores = useMemo(() => {
                   </span>
                 </div>
               </div>
-              <div className={`text-xs shrink-0 ${c.strategy === 'IC' ? 'w-28' : 'w-16'}`} title="Open interest — short leg / long leg. Color reflects short-leg liquidity (the leg you actively trade twice); long-leg OI shown for reference only.">
+              <div className={`text-xs shrink-0 ${c.strategy === 'IC' ? 'w-28' : 'w-16'}`} title="Open interest — short leg / long leg, each colored on its own OI">
                 {c.strategy === 'IC' ? (
                   <>
                     <div>
                       <span className={th.label}>OI P </span>
-                      <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
-                        {c.shortOI ?? '—'}/{c.longOI ?? '—'}
-                      </span>
+                      <span className={`font-bold ${getOiColor(c.shortOI, rules.OI_MIN)}`}>{c.shortOI ?? '—'}</span>
+                      <span className={`font-bold ${th.textFaint}`}>/</span>
+                      <span className={`font-bold ${getOiColor(c.longOI, rules.OI_MIN)}`}>{c.longOI ?? '—'}</span>
                     </div>
                     <div>
                       <span className={th.label}>OI C </span>
-                      <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
-                        {c.shortCallOI ?? '—'}/{c.longCallOI ?? '—'}
-                      </span>
+                      <span className={`font-bold ${getOiColor(c.shortCallOI, rules.OI_MIN)}`}>{c.shortCallOI ?? '—'}</span>
+                      <span className={`font-bold ${th.textFaint}`}>/</span>
+                      <span className={`font-bold ${getOiColor(c.longCallOI, rules.OI_MIN)}`}>{c.longCallOI ?? '—'}</span>
                     </div>
                   </>
                 ) : (
                   <div>
                     <span className={th.label}>OI </span>
-                    <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
-                      {c.shortOI ?? '—'}/{c.longOI ?? '—'}
-                    </span>
+                    <span className={`font-bold ${getOiColor(c.shortOI, rules.OI_MIN)}`}>{c.shortOI ?? '—'}</span>
+                    <span className={`font-bold ${th.textFaint}`}>/</span>
+                    <span className={`font-bold ${getOiColor(c.longOI, rules.OI_MIN)}`}>{c.longOI ?? '—'}</span>
                   </div>
                 )}
               </div>
