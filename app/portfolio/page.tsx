@@ -44,6 +44,7 @@ const LS_PROFIT_TARGETS = 'hunter-profit-targets';
 const LS_AUDIT_LOG = 'hunter-audit-log';
 const LS_MEMORY = 'hunter-trading-memory';
 const LS_DRY_RUN = 'hunter-dry-run';
+const LS_ENTRY_SNAPSHOTS = 'hunter-entry-snapshots';
 const MEMORY_RAW_TRADES_PER_SYMBOL = 5;   // keep this many raw; summarize older
 const MEMORY_RAW_ACTIONS = 20;            // ring buffer size for action history
 const MEMORY_SUMMARIZE_INTERVAL_DAYS = 7; // re-summarize behavior weekly
@@ -91,6 +92,15 @@ interface Position {
   needsClose: boolean;
   entryDte: number;
   entryDate: string | null;  // date position was opened (YYYY-MM-DD)
+  // Entry snapshot fields are captured the first time TradeEdge sees the open position.
+  // For positions opened before this feature existed, the first snapshot will be 'first tracked', not true trade entry.
+  entrySnapshotKey?: string | null;
+  entrySnapshotCreatedAt?: string | null;
+  ivAtEntry?: number | null;
+  deltaAtEntry?: number | null;
+  thetaAtEntry?: number | null;
+  otmAtEntry?: number | null;
+  dteAtEntry?: number | null;
   accountNumber: string;
   // Greeks
   ivr: number | null;
@@ -611,6 +621,88 @@ Reply as JSON: {"strengths": [...], "weaknesses": [...], "summary": "..."}`;
 
 function clearMemory() {
   try { localStorage.removeItem(LS_MEMORY); } catch {}
+}
+
+
+// ── Entry Snapshot Tracking ────────────────────────────────────────────────
+interface EntrySnapshot {
+  key: string;
+  createdAt: string;
+  symbol: string;
+  strategy: string;
+  expDate: string;
+  entryDate: string | null;
+  ivAtEntry: number | null;
+  deltaAtEntry: number | null;
+  thetaAtEntry: number | null;
+  otmAtEntry: number | null;
+  dteAtEntry: number | null;
+}
+
+function readEntrySnapshots(): Record<string, EntrySnapshot> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    return JSON.parse(localStorage.getItem(LS_ENTRY_SNAPSHOTS) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeEntrySnapshots(snapshots: Record<string, EntrySnapshot>) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(LS_ENTRY_SNAPSHOTS, JSON.stringify(snapshots));
+  } catch {}
+}
+
+function positionEntrySnapshotKey(pos: Pick<Position, 'accountNumber' | 'symbol' | 'expDate' | 'entryDate' | 'legs'>): string {
+  const legsKey = pos.legs
+    .map(l => `${l.direction[0]}${l.optionType}${l.strikePrice}x${Math.abs(l.quantity)}`)
+    .sort()
+    .join('|');
+  return [pos.accountNumber, pos.symbol, pos.expDate, pos.entryDate ?? 'unknown', legsKey].join('::');
+}
+
+function attachEntrySnapshots(positions: Position[]): Position[] {
+  const snapshots = readEntrySnapshots();
+  let changed = false;
+
+  const enriched = positions.map(pos => {
+    const key = positionEntrySnapshotKey(pos);
+    let snap = snapshots[key];
+
+    if (!snap) {
+      snap = {
+        key,
+        createdAt: new Date().toISOString(),
+        symbol: pos.symbol,
+        strategy: pos.strategy,
+        expDate: pos.expDate,
+        entryDate: pos.entryDate,
+        ivAtEntry: pos.iv ?? null,
+        deltaAtEntry: pos.netDelta ?? null,
+        thetaAtEntry: pos.theta ?? null,
+        otmAtEntry: pos.buffer ?? null,
+        dteAtEntry: pos.entryDte ?? pos.dte ?? null,
+      };
+      snapshots[key] = snap;
+      changed = true;
+    }
+
+    return {
+      ...pos,
+      entrySnapshotKey: key,
+      entrySnapshotCreatedAt: snap.createdAt,
+      ivAtEntry: snap.ivAtEntry ?? null,
+      deltaAtEntry: snap.deltaAtEntry ?? null,
+      thetaAtEntry: snap.thetaAtEntry ?? null,
+      otmAtEntry: snap.otmAtEntry ?? null,
+      dteAtEntry: snap.dteAtEntry ?? pos.entryDte ?? null,
+    };
+  });
+
+  if (changed) writeEntrySnapshots(snapshots);
+  return enriched;
 }
 
 // ── Auth & API ─────────────────────────────────────────────────────────────
@@ -1385,7 +1477,7 @@ async function loadPositions(): Promise<Position[]> {
   try { profitTargets = JSON.parse(localStorage.getItem(LS_PROFIT_TARGETS) ?? '{}'); } catch {}
 
   const today = new Date();
-  const positions: Position[] = Object.entries(groups).map(([key, legs]) => {
+  let positions: Position[] = Object.entries(groups).map(([key, legs]) => {
     const [symbol, expDate] = key.split('::');
     const dte = Math.round((new Date(expDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     const openedAt = legs[0]?.['created-at']?.slice(0, 10) ?? null;
@@ -1536,6 +1628,8 @@ async function loadPositions(): Promise<Position[]> {
       })(),
     };
   });
+
+  positions = attachEntrySnapshots(positions);
 
   const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
   positions.sort((a, b) => {
@@ -1723,15 +1817,19 @@ Max risk: $${pos.maxRisk.toFixed(2)}
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
+OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'}
 Current IV: ${pos.iv ?? 'unknown'}%
+IV at entry / first tracked: ${pos.ivAtEntry ?? 'unknown'}%
+IV change: ${pos.ivAtEntry != null && pos.iv != null ? `${(pos.iv - pos.ivAtEntry).toFixed(1)} pts` : 'unknown'}
 HV30: ${pos.hv30 ?? 'unknown'}%
 IV edge (IV - HV30): ${ivEdge != null ? `${ivEdge.toFixed(1)}%` : 'unknown'}
 Beta: ${pos.beta ?? 'unknown'}
 
 GREEKS (net position):
-Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (directional/assignment exposure)
-Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (daily decay)
+Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.deltaAtEntry != null && pos.netDelta != null ? `${pos.deltaAtEntry.toFixed(4)} → ${pos.netDelta.toFixed(4)}` : 'unknown'})
+Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.thetaAtEntry != null && pos.theta != null ? `${pos.thetaAtEntry.toFixed(4)} → ${pos.theta.toFixed(4)}` : 'unknown'})
 Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (acceleration risk)
 Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (volatility exposure)
 
@@ -1979,6 +2077,8 @@ Current profit target: ${Math.round(pos.profitTarget * 100)}%
 
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
+OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 GTC working: ${pos.hasGtc ? 'Yes' : 'No'}
@@ -2093,6 +2193,42 @@ function fmtSignedNum(value: number | null | undefined, digits = 3): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
 }
 
+
+function fmtEntryNowPct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${entry.toFixed(digits)}→${current.toFixed(digits)}%`;
+}
+
+function fmtEntryNowDelta(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)}%`;
+}
+
+function fmtEntryNowTheta(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)}/d`;
+}
+
+function fmtEntryNowDte(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${entry.toFixed(0)}→${current.toFixed(0)}d`;
+}
+
+function fmtPointChange(entry: number | null | undefined, current: number | null | undefined, digits = 0, suffix = ' pts'): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  const diff = current - entry;
+  const sign = diff >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(diff).toFixed(digits)}${suffix}`;
+}
+
+function entryChangeColor(entry: number | null | undefined, current: number | null | undefined, goodWhenDown = true, fallback = 'text-slate-500'): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return fallback;
+  const diff = current - entry;
+  if (Math.abs(diff) < 0.01) return fallback;
+  const good = goodWhenDown ? diff < 0 : diff > 0;
+  return good ? 'text-emerald-400' : 'text-red-400';
+}
+
 function getShortLegs(pos: Position): PositionLeg[] {
   return pos.legs.filter(l => l.direction === 'Short');
 }
@@ -2181,6 +2317,12 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `Vega: ${fmtSignedNum(pos.netVega, 3)}`,
     `IVR: ${pos.ivr ?? 'unknown'}`,
     `Current IV: ${fmtPct(pos.iv, 0)}`,
+    `IV at entry / first tracked: ${fmtPct(pos.ivAtEntry, 0)}`,
+    `IV change: ${fmtPointChange(pos.ivAtEntry, pos.iv, 0)}`,
+    `Delta entry → now: ${fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}`,
+    `Theta entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
+    `OTM entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
+    `DTE entry → now: ${fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}`,
     `HV30: ${fmtPct(pos.hv30, 0)}`,
     `IV edge (IV - HV30): ${fmtPct(ivEdge)}`,
     `Beta: ${fmtNum(pos.beta, 2)}`,
@@ -2204,7 +2346,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     '- Always use the actual numbers above when they are relevant.',
     '- If asked why P&L is positive or negative, compare entry credit, current buyback, profit captured, DTE, IV/HV/IVR, theta, gamma, vega, and buffer.',
     '- If the app is missing the exact data needed, say what field is missing and recommend the exact metric to add.',
-    '- For IV-related explanations, note whether current IV, HV30, IVR, and vega support the answer. If IV at entry is missing, say the app should capture IV at entry before claiming IV expansion.',
+    '- For IV-related explanations, compare IV at entry / first tracked to current IV when available. If entry IV is still missing, say so before claiming IV expansion or contraction.',
     '- For “how do I watch this better” questions, recommend specific app fields, alerts, and thresholds based on this position.',
     '- Keep the answer direct and practical, like a senior trader coaching this exact position.'
   ].filter(Boolean).join('\n');
@@ -4569,6 +4711,8 @@ ${profitCaptured != null && profitCaptured > 50 ? 'WARNING: ' + profitCaptured +
 MARKET DATA:
 Stock price: ${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
+OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'YES — ' + pos.earningsDate : 'None'}
@@ -5397,6 +5541,13 @@ function ivrLabel(ivr: number | null): string {
   return '★ Excellent Premium';
 }
 
+
+function entrySnapshotAgeLabel(pos: Position): string {
+  if (!pos.entrySnapshotCreatedAt) return 'entry snapshot not captured';
+  const days = Math.max(0, Math.round((Date.now() - new Date(pos.entrySnapshotCreatedAt).getTime()) / 86400000));
+  return days === 0 ? 'captured today' : `captured ${days}d ago`;
+}
+
 // ── Buffer Color Helpers ──────────────────────────────────────────────────
 function bufferColor(buffer: number | null, dte: number): string {
   if (buffer == null) return 'text-[#808080]';
@@ -5604,7 +5755,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 80px 70px 110px 80px 80px 90px 70px 50px 45px 45px 45px 55px 60px 80px 90px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1564px' }}>
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 80px 70px 110px 80px 80px 90px 70px 50px 45px 45px 45px 55px 60px 120px 80px 90px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1710px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
@@ -5910,7 +6061,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               </p>
             </div>
 
-            <div className="border-t-2 border-purple-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
+            <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>IVR</p>
               <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.ivr ?? '—'}
@@ -5918,6 +6069,23 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
               </p>
+            </div>
+
+            <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
+              <p className={`text-[9px] ${th.textFaint}`}>Entry → Now</p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.ivAtEntry, pos.iv, true, th.textFaint)}>IV {fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.otmAtEntry, pos.buffer, false, th.textFaint)}>OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}</span>
+              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}</p>
             </div>
 
             {/* ── ORDERS ─────────────────────────────── */}
