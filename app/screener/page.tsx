@@ -4439,85 +4439,8 @@ const strategyScores = useMemo(() => {
               </div>
             </div>
           )}
-          console.log('RULE DEBUG', {
-            result,
-            ruleSetApplied: result.ruleSetApplied,
-            rules: result.rules,
-          });
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-  {Object.entries({
-    ...result.checks,
-  
-    oi: result.bestCandidate
-      ? (() => {
-          const minOI = Math.min(result.bestCandidate.shortOI, result.bestCandidate.longOI);
-          return {
-            status: minOI >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
-            value: `${result.bestCandidate.shortOI}/${result.bestCandidate.longOI}`,
-            reason: minOI >= appliedRules.OI_MIN
-              ? `Both legs ≥ ${appliedRules.OI_MIN}`
-              : `Below OI floor ${appliedRules.OI_MIN}`,
-          };
-        })()
-      : result.checks.oi,
-  
-    emClearance: result.bestCandidate && result.price != null
-      ? (() => {
-          const c = result.bestCandidate;
-          const ivx =
-            c.expirationIvx ??
-            result.ivx ??
-            result.ivx30 ??
-            null;
-  
-          if (ivx == null || ivx <= 0) {
-            return result.checks.emClearance;
-          }
-  
-          const em = c.expectedMove ?? result.price * (ivx / 100) * Math.sqrt(c.dte / 365);
-          const emBoundary = c.strategy === 'BPS'
-            ? result.price - em
-            : result.price + em;
-  
-          const clearancePct = c.strategy === 'BPS'
-            ? ((emBoundary - c.shortStrike) / result.price) * 100
-            : ((c.shortStrike - emBoundary) / result.price) * 100;
-  
-          const clearanceDollar = Math.abs(emBoundary - c.shortStrike);
-  
-          if (clearancePct >= 15) {
-            return {
-              status: 'pass' as const,
-              value: `+$${clearanceDollar.toFixed(2)} beyond EM`,
-              reason: `EM ${c.strategy === 'BPS' ? '-' : '+'}$${em.toFixed(2)} using IVx ${ivx.toFixed(1)}% — strike well outside expected move`,
-            };
-          }
-  
-          if (clearancePct >= 5) {
-            return {
-              status: 'warn' as const,
-              value: `+$${clearanceDollar.toFixed(2)} beyond EM`,
-              reason: `EM ${c.strategy === 'BPS' ? '-' : '+'}$${em.toFixed(2)} using IVx ${ivx.toFixed(1)}% — outside but close`,
-            };
-          }
-  
-          if (clearancePct >= 0) {
-            return {
-              status: 'warn' as const,
-              value: `+$${clearanceDollar.toFixed(2)} beyond EM`,
-              reason: `EM ${c.strategy === 'BPS' ? '-' : '+'}$${em.toFixed(2)} using IVx ${ivx.toFixed(1)}% — barely outside expected move`,
-            };
-          }
-  
-          return {
-            status: 'fail' as const,
-            value: `$${clearanceDollar.toFixed(2)} inside EM`,
-            reason: `EM ${c.strategy === 'BPS' ? '-' : '+'}$${em.toFixed(2)} using IVx ${ivx.toFixed(1)}% — strike is inside expected move`,
-          };
-        })()
-      : result.checks.emClearance,
-  }).map(([key, check]) => {
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {Object.entries(result.checks).map(([key, check]) => {
       if (key === 'iv') {
         console.log('IV_RENDER_DEBUG', {
           symbol: result.symbol,
