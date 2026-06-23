@@ -265,6 +265,17 @@ function getCreditColor(candidate: SpreadCandidate, isEtfOrIndex: boolean): stri
   return 'text-red-400';
 }
 
+function getOiColor(candidate: SpreadCandidate, oiMin: number): string {
+  // Both legs need adequate open interest to fill cleanly — color on the
+  // tighter (lower) of the two legs, same three-tier pattern as credit/ROC.
+  // Green = clears the active OI_MIN threshold, yellow = within 60% of it
+  // (fillable but thinner), red = meaningfully below.
+  const tighter = Math.min(candidate.shortOI ?? 0, candidate.longOI ?? 0);
+  if (tighter >= oiMin) return 'text-emerald-400';
+  if (tighter >= oiMin * 0.6) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
 function normalCdf(x: number): number {
   const sign = x < 0 ? -1 : 1;
   const absX = Math.abs(x) / Math.sqrt(2);
@@ -4163,6 +4174,14 @@ const strategyScores = useMemo(() => {
                   <span className={th.label}>OTM </span>
                   <span className={`font-bold ${otmPct != null ? getOtmColor(otmPct, result.ivr, result.isEtf ?? false) : th.textFaint}`}>
                     {otmPct != null ? `${otmPct.toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+              </div>
+              <div className="text-xs shrink-0 w-16" title="Open interest — short leg / long leg">
+                <div>
+                  <span className={th.label}>OI </span>
+                  <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
+                    {c.shortOI ?? '—'}/{c.longOI ?? '—'}
                   </span>
                 </div>
               </div>
