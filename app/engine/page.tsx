@@ -1896,67 +1896,76 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
     }
   }, [entry.symbol, entry.shortStrike, entry.dte, entry.optionType, entry.strategy, entry.credit, isWheelEntry]);
 
-  useEffect(() => {
-    if (isWheelEntry) resolveWheelOption();
-    else resolveSpreadLive();
-  }, [isWheelEntry, resolveWheelOption, resolveSpreadLive]);
+    useEffect(() => {
+    runEngine();
+  }, [runEngine]);
 
-  const placeOrder = async () => {
-    setPhase('placing'); setError('');
-    try {
-      const token = await getAccessToken();
-      const accountsData = await ttFetch('/customers/me/accounts', token);
-      const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-        ?? accountsData?.data?.items?.[0];
-      const accountNumber = account?.account?.['account-number'];
-      if (!accountNumber) throw new Error('No account found');
+  const d = engineData;
 
-      if (!hasOcc) throw new Error('Missing OCC option symbol(s). Refresh the engine during market hours and try again.');
-      if (entryLimit <= 0) throw new Error('Entry credit must be greater than $0.00.');
-      if (!isWheelEntry && entryLimit >= entry.spreadWidth) throw new Error(`Entry credit $${entryLimit.toFixed(2)} cannot be greater than/equal to spread width $${entry.spreadWidth.toFixed(2)}.`);
+  const formatCurrency = (value: number) => {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
 
-      const legs = isWheelEntry
-        ? [{ 'instrument-type': legInstrumentType, symbol: resolvedOcc, quantity: contracts, action: 'Sell to Open' }]
-        : [
-            { 'instrument-type': legInstrumentType, symbol: resolvedOcc,    quantity: contracts, action: 'Sell to Open' },
-            { 'instrument-type': legInstrumentType, symbol: resolvedLongOcc, quantity: contracts, action: 'Buy to Open'  },
-          ];
-      const closingLegs = legs.map(l => ({
-        ...l,
-        action: l.action === 'Sell to Open' ? 'Buy to Close' : 'Sell to Close',
-      }));
+  const allocationDollar = (pct: number) => {
+    if (!d?.capital?.obp) return 0;
+    const base = includeMargin ? d.capital.obp : d.capital.obpCash;
+    return base * (pct / 100);
+  };
 
-      const payload = {
-        type: 'OTOCO',
-        'trigger-order': {
-          'time-in-force': 'GTC', 'order-type': 'Limit',
-          price: entryLimit.toFixed(2), 'price-effect': 'Credit', legs,
-        },
-        orders: [{
-          'time-in-force': 'GTC', 'order-type': 'Limit',
-          price: gtcBuyback.toFixed(2), 'price-effect': 'Debit', legs: closingLegs,
-        }],
-      };
+  const allocationLabel = (pct: number) => {
+    return d?.capital?.obp ? `$${formatCurrency(allocationDollar(pct))}` : '$—';
+  };
 
-      const res = await fetch(`${BASE}/accounts/${accountNumber}/complex-orders`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = data?.error?.message
-          ?? data?.['error-message']
-          ?? data?.errors?.[0]?.message
-          ?? data?.error?.errors?.map((e: any) => e.message ?? e.reason ?? String(e)).join('; ')
-          ?? JSON.stringify(data).slice(0, 500)
-          ?? `Order failed (${res.status})`;
-        console.error('Engine order rejected:', JSON.stringify({ payload, data }, null, 2));
-        throw new Error(detail);
-      }
-      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
-      setPhase('done');
-    } catch (e: any) { setError(e.message); setPhase('error'); }
+  // ── Timeline date helpers ──────────────────────────────────────────────
+  const today = new Date();
+  const allTimelinePositions = [
+    ...(d?.spxPositions ?? []),
+    ...(d?.spyPositions ?? []),
+  ];
+
+  const earliestEntryDaysAgo = allTimelinePositions.reduce((max, pos) => {
+    if (!pos.entryDate) return max;
+
+    const entry = new Date(`${pos.entryDate}T00:00:00`);
+    const daysAgo = Math.round(
+      (today.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return Math.max(max, daysAgo, 0);
+  }, 0);
+
+  const lookbackDays = Math.min(earliestEntryDaysAgo, 45);
+  const forwardDays = 60;
+  const timelineDays = lookbackDays + forwardDays;
+
+  const timelineStart = new Date(today);
+  timelineStart.setDate(timelineStart.getDate() - lookbackDays);
+
+  const timelineDates: Date[] = [];
+
+  for (let i = 0; i <= timelineDays; i += 7) {
+    const dt = new Date(timelineStart);
+    dt.setDate(dt.getDate() + i);
+    timelineDates.push(dt);
+  }
+
+  const fmt = (dt: Date) => {
+    return `${dt.toLocaleString('en', { month: 'short' })} ${dt.getDate()}`;
+  };
+
+  const dteFromAxisStart = (
+    dateStr: string | null,
+    fallbackDte: number,
+    isEntry: boolean
+  ): number => {
+    if (dateStr) {
+      const target = new Date(`${dateStr}T00:00:00`);
+      return Math.round(
+        (target.getTime() - timelineStart.getTime()) / (1000 * 60 * 60 * 24)
+      );
+    }
+
+    return isEntry ? lookbackDays : lookbackDays + fallbackDte;
   };
 
   return (
