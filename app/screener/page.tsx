@@ -5788,17 +5788,33 @@ function BestOpportunityFinder({
                             <span className={`text-xs font-bold ${gradeColor(setup.grade)}`}>Grade {setup.grade}</span>
                             <span className={`text-[9px] ${th.textFaint}`}>score {Math.round(setup.score)}/100</span>
                           </div>
-                          <button
+                         <button
                             onClick={() => {
-                              if (onTrade && setup.result) {
+                              // Try the real handler first
+                              if (typeof onTrade === 'function' && setup.result) {
                                 onTrade(setup.result);
                                 onClose();
-                              } else {
-                                const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
-                                  ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
-                                  : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
-                                alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}`);
+                                return;
                               }
+                          
+                              // Fallback: manually trigger the global trade flow if possible
+                              // This helps when onTrade wasn't passed properly from Targeted mode
+                              if (setup.result && setup.result.bestCandidate) {
+                                // Try to find the global setTradeResult if it exists on window (dev helper)
+                                const globalSetTrade = (window as any).__setTradeResult;
+                                if (typeof globalSetTrade === 'function') {
+                                  globalSetTrade(setup.result);
+                                  onClose();
+                                  return;
+                                }
+                              }
+                          
+                              // Last resort: show details
+                              const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
+                                ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
+                                : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
+                              
+                              alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}`);
                             }}
                             className="text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-600/10 transition-colors font-medium tracking-wider"
                           >
@@ -6377,6 +6393,7 @@ function TargetedScanResultsPanel({
                           onTrade={onTrade}
                           cachedEntry={entry.cachedEntry}
                           existingPositions={existingPositions}
+                          onTrade={setTradeResult}
                         />
                       </div>
                     </div>
@@ -6965,13 +6982,14 @@ export default function Home() {
                   rules={runtimeStockRules}
                   etfRules={runtimeEtfRules}
                   existingPositions={existingPositions}
+                  onTrade={setTradeResult}
                 />
               ) : screenMode === 'filter' ? (
                 <>
                   {qualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
-                      <div className="space-y-2">{qualified.map(r => <ResultCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />)}</div>
+                      <div className="space-y-2">{qualified.map(r => <ResultCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} onTrade={setTradeResult}/>)}</div>
                     </div>
                   )}
                   {disqualified.length > 0 && (
