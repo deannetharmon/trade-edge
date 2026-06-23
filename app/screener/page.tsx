@@ -4439,6 +4439,11 @@ const strategyScores = useMemo(() => {
               </div>
             </div>
           )}
+          console.log('RULE DEBUG', {
+            result,
+            ruleSetApplied: result.ruleSetApplied,
+            rules: result.rules,
+          });
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
   {Object.entries({
@@ -6195,7 +6200,17 @@ async function runTargetedScan(
                       value: `${bestCandidate.roc.toFixed(0)}%`,
                       reason: `Min ${appliedRules.ROC_MIN_SPREAD}%`,
                     },                    
-                    oi: { status: result.checks.oi.status, value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`, reason: result.checks.oi.reason },
+                    oi: (() => {
+                      const minOI = Math.min(bestCandidate.shortOI, bestCandidate.longOI);
+                    
+                      return {
+                        status: minOI >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
+                        value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
+                        reason: minOI >= appliedRules.OI_MIN
+                          ? `Both legs ≥ ${appliedRules.OI_MIN}`
+                          : `Below OI floor ${appliedRules.OI_MIN}`,
+                      };
+                    })(),
                   },
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);
