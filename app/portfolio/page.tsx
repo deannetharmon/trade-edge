@@ -3429,6 +3429,11 @@ function fmtSignedDecimal(value: number | null, decimals = 1, suffix = ''): stri
   return `${sign}${Math.abs(value).toFixed(decimals)}${suffix}`;
 }
 
+function fmtAbsDecimal(value: number | null, decimals = 1, suffix = ''): string {
+  if (value == null) return '—';
+  return `${Math.abs(value).toFixed(decimals)}${suffix}`;
+}
+
 function portfolioDeltaColor(deltaShares: number | null, fallback: string): string {
   if (deltaShares == null) return fallback;
   const abs = Math.abs(deltaShares);
@@ -3439,13 +3444,13 @@ function portfolioDeltaColor(deltaShares: number | null, fallback: string): stri
 }
 
 function portfolioDeltaLabel(deltaShares: number | null): string {
-  if (deltaShares == null) return 'not available';
+  if (deltaShares == null) return 'Not Available';
   const abs = Math.abs(deltaShares);
-  if (abs <= 25) return 'neutral';
-  if (abs <= 100) return deltaShares >= 0 ? 'mild bullish' : 'mild bearish';
-  if (abs <= 250) return deltaShares >= 0 ? 'bullish' : 'bearish';
-  if (abs <= 500) return 'elevated direction';
-  return 'high directional risk';
+  if (abs <= 25) return '⚪ Neutral';
+  if (abs <= 100) return deltaShares >= 0 ? '🟢 Mild Bullish' : '🟢 Mild Bearish';
+  if (abs <= 250) return deltaShares >= 0 ? '🟡 Bullish' : '🟡 Bearish';
+  if (abs <= 500) return '🟠 Elevated Direction';
+  return '🔴 High Directional Risk';
 }
 
 function portfolioThetaColor(thetaPerDay: number | null, fallback: string): string {
@@ -3458,12 +3463,12 @@ function portfolioThetaColor(thetaPerDay: number | null, fallback: string): stri
 }
 
 function portfolioThetaLabel(thetaPerDay: number | null): string {
-  if (thetaPerDay == null) return 'not available';
-  if (thetaPerDay >= 50) return 'strong income';
-  if (thetaPerDay >= 20) return 'healthy income';
-  if (thetaPerDay >= 5) return 'light income';
-  if (thetaPerDay >= 0) return 'minimal income';
-  return 'negative theta';
+  if (thetaPerDay == null) return 'Not Available';
+  if (thetaPerDay >= 50) return '🟢 Excellent Income';
+  if (thetaPerDay >= 20) return '🟢 Strong Income';
+  if (thetaPerDay >= 5) return '🟡 Light Income';
+  if (thetaPerDay >= 0) return '🟠 Minimal Income';
+  return '🔴 Negative Theta';
 }
 
 function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: string): string {
@@ -3476,12 +3481,12 @@ function portfolioGammaColor(gammaSharesPerDollar: number | null, fallback: stri
 }
 
 function portfolioGammaLabel(gammaSharesPerDollar: number | null): string {
-  if (gammaSharesPerDollar == null) return 'not available';
+  if (gammaSharesPerDollar == null) return 'Not Available';
   const abs = Math.abs(gammaSharesPerDollar);
-  if (abs <= 5) return 'low gamma risk';
-  if (abs <= 15) return 'moderate gamma risk';
-  if (abs <= 30) return 'elevated gamma risk';
-  return 'high gamma risk';
+  if (abs <= 5) return '🟢 Low Gamma Risk';
+  if (abs <= 15) return '🟡 Moderate Gamma Risk';
+  if (abs <= 30) return '🟠 Elevated Gamma Risk';
+  return '🔴 High Gamma Risk';
 }
 
 function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): string {
@@ -3494,13 +3499,14 @@ function portfolioVegaColor(vegaPerIvPoint: number | null, fallback: string): st
 }
 
 function portfolioVegaLabel(vegaPerIvPoint: number | null): string {
-  if (vegaPerIvPoint == null) return 'not available';
+  if (vegaPerIvPoint == null) return 'Not Available';
   const abs = Math.abs(vegaPerIvPoint);
-  const side = vegaPerIvPoint < 0 ? 'short vol' : vegaPerIvPoint > 0 ? 'long vol' : 'neutral vol';
-  if (abs <= 100) return `low ${side} risk`;
-  if (abs <= 250) return `moderate ${side} risk`;
-  if (abs <= 500) return `elevated ${side} risk`;
-  return `high ${side} risk`;
+  if (abs < 1) return '⚪ Neutral Vol';
+  const side = vegaPerIvPoint < 0 ? 'Short Vol' : 'Long Vol';
+  if (abs <= 100) return vegaPerIvPoint < 0 ? `🟢 ${side}` : `🟡 ${side}`;
+  if (abs <= 250) return `🟡 Moderate ${side}`;
+  if (abs <= 500) return `🟠 Elevated ${side}`;
+  return `🔴 High ${side} Risk`;
 }
 
 function topGreekContributors(
@@ -3537,7 +3543,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
   const gammaDrivers = topGreekContributors(
     positions,
     p => p.gamma == null ? null : p.gamma * 100,
-    v => fmtSignedDecimal(v, 1, '/$'),
+    v => fmtAbsDecimal(v, 1),
     2
   );
   const vegaDrivers = topGreekContributors(
@@ -3573,7 +3579,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
     {
       greek: 'Γ',
       label: 'Gamma Risk',
-      value: fmtSignedDecimal(totals.gammaSharesPerDollar, 1, '/$'),
+      value: fmtAbsDecimal(totals.gammaSharesPerDollar, 1),
       status: portfolioGammaLabel(totals.gammaSharesPerDollar),
       drivers: gammaDrivers,
       color: portfolioGammaColor(totals.gammaSharesPerDollar, th.text),
@@ -3600,7 +3606,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
         <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest font-bold`}>
           Portfolio Greeks <span className="normal-case tracking-normal font-medium">({positions.length} position{positions.length !== 1 ? 's' : ''})</span>
         </p>
-        <p className={`text-[10px] ${th.textFaint}`}>Δ = share-equivalent · Θ/V dollarized · healthy zone shown under value</p>
+        <p className={`text-[10px] ${th.textFaint}`}>status line shows healthy zone</p>
       </div>
 
       <div className="grid grid-cols-4">
@@ -3617,7 +3623,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
             <div className={`text-xl font-bold ${card.color} mt-0.5`} style={{ fontFamily: "'DM Mono', monospace" }}>
               {card.value}
             </div>
-            <p className={`text-[10px] ${card.color} mt-0.5 truncate`}>
+            <p className={`text-[11px] font-bold ${card.color} mt-1 truncate`}>
               {card.status}
             </p>
             <p className={`text-[10px] ${th.textFaint} mt-1 truncate`}>
@@ -5288,10 +5294,10 @@ function thetaTextColor(theta: number | null, fallback: string): string {
 
 function thetaLabel(theta: number | null): string {
   if (theta == null) return '';
-  if (theta >= 0.10) return '★ strong decay';
-  if (theta >= 0.05) return '✓ good decay';
-  if (theta >= 0.01) return '~ light decay';
-  return '✗ paying theta';
+  if (theta >= 0.10) return '★ Strong Decay';
+  if (theta >= 0.05) return '✓ Good Decay';
+  if (theta >= 0.01) return '~ Light Decay';
+  return '✗ Paying Theta';
 }
 
 function deltaTint(delta: number | null): string {
@@ -5315,10 +5321,10 @@ function deltaTextColor(delta: number | null, fallback: string): string {
 function deltaLabel(delta: number | null): string {
   if (delta == null) return '';
   const abs = Math.abs(delta);
-  if (abs <= 0.15) return '✓ low exposure';
-  if (abs <= 0.35) return '~ moderate';
-  if (abs <= 0.60) return '⚠ elevated';
-  return '✗ high exposure';
+  if (abs <= 0.15) return '✓ Low Exposure';
+  if (abs <= 0.35) return '~ Moderate';
+  if (abs <= 0.60) return '⚠ Elevated';
+  return '✗ High Exposure';
 }
 
 function gammaTint(gamma: number | null): string {
@@ -5342,10 +5348,10 @@ function gammaTextColor(gamma: number | null, fallback: string): string {
 function gammaLabel(gamma: number | null): string {
   if (gamma == null) return '';
   const abs = Math.abs(gamma);
-  if (abs < 0.030) return '✓ low gamma';
-  if (abs < 0.080) return '~ moderate';
-  if (abs < 0.150) return '⚠ elevated';
-  return '✗ high gamma';
+  if (abs < 0.030) return '✓ Low Gamma';
+  if (abs < 0.080) return '~ Moderate';
+  if (abs < 0.150) return '⚠ Elevated';
+  return '✗ High Gamma';
 }
 
 function vegaTint(vega: number | null): string {
@@ -5369,10 +5375,10 @@ function vegaTextColor(vega: number | null, fallback: string): string {
 function vegaLabel(vega: number | null): string {
   if (vega == null) return '';
   const abs = Math.abs(vega);
-  if (abs <= 0.30) return '✓ low vol risk';
-  if (abs <= 0.75) return '~ moderate vol';
-  if (abs <= 1.50) return '⚠ elevated vol';
-  return '✗ high vol risk';
+  if (abs <= 0.30) return '✓ Low Vol Risk';
+  if (abs <= 0.75) return '~ Moderate Vol';
+  if (abs <= 1.50) return '⚠ Elevated Vol';
+  return '✗ High Vol Risk';
 }
 
 function ivrTextColor(ivr: number | null, fallback: string): string {
@@ -5385,10 +5391,10 @@ function ivrTextColor(ivr: number | null, fallback: string): string {
 
 function ivrLabel(ivr: number | null): string {
   if (ivr == null) return '';
-  if (ivr < 20) return '✗ poor premium';
-  if (ivr < 40) return '~ fair premium';
-  if (ivr <= 70) return '✓ good premium';
-  return '★ excellent premium';
+  if (ivr < 20) return '✗ Poor Premium';
+  if (ivr < 40) return '~ Fair Premium';
+  if (ivr <= 70) return '✓ Good Premium';
+  return '★ Excellent Premium';
 }
 
 // ── Buffer Color Helpers ──────────────────────────────────────────────────
@@ -5869,7 +5875,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${thetaTextColor(pos.theta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Raw theta: ${pos.theta.toFixed(4)}` : undefined}>
                 {fmtThetaDisplay(pos.theta)}
               </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+              <p className={`text-[8px] mt-0.5 font-semibold ${thetaTextColor(pos.theta, th.textFaint)}`}>
                 {thetaLabel(pos.theta)}
               </p>
             </div>
@@ -5879,7 +5885,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${deltaTextColor(pos.netDelta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netDelta != null ? `Raw delta: ${pos.netDelta.toFixed(4)}` : undefined}>
                 {fmtDeltaDisplay(pos.netDelta)}
               </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+              <p className={`text-[8px] mt-0.5 font-semibold ${deltaTextColor(pos.netDelta, th.textFaint)}`}>
                 {deltaLabel(pos.netDelta)}
               </p>
             </div>
@@ -5889,7 +5895,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-xs font-bold inline-block ${gammaTint(pos.gamma)} ${gammaTextColor(pos.gamma, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.gamma != null ? `Raw gamma: ${pos.gamma.toFixed(4)}` : undefined}>
                 {fmtGammaDisplay(pos.gamma)}
               </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+              <p className={`text-[8px] mt-0.5 font-semibold ${gammaTextColor(pos.gamma, th.textFaint)}`}>
                 {gammaLabel(pos.gamma)}
               </p>
             </div>
@@ -5899,7 +5905,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-xs font-bold inline-block ${vegaTint(pos.netVega)} ${vegaTextColor(pos.netVega, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netVega != null ? `Raw vega: ${pos.netVega.toFixed(4)}` : undefined}>
                 {fmtVegaDisplay(pos.netVega)}
               </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+              <p className={`text-[8px] mt-0.5 font-semibold ${vegaTextColor(pos.netVega, th.textFaint)}`}>
                 {vegaLabel(pos.netVega)}
               </p>
             </div>
@@ -5909,7 +5915,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
               <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.ivr ?? '—'}
               </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+              <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
               </p>
             </div>
