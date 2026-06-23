@@ -5620,7 +5620,6 @@ function BestOpportunityFinder({
   const scoreCandidateLocal = (result: ScreenResult, strat: string): BestSetup | null => {
     if (!result.qualified || !result.bestCandidate) return null;
     const c = result.bestCandidate;
-    // Use the same scoreCandidate function as Hunter cards for consistency
     const cfg = getSavedRankConfig();
     const scored = scoreCandidate(result, cfg);
     const score = scored?.score ?? 0;
@@ -5637,8 +5636,6 @@ function BestOpportunityFinder({
     return { strategy: strat, grade, setup: c, score, notes, result };
   };
 
-  // Only run the preferred strategy. If none specified, run all three.
-  // This prevents BCS from surfacing as "best" on a BPS-classified stock.
   const strategiesToRun: ('BPS' | 'BCS' | 'IC')[] = preferredStrategy
     ? [preferredStrategy]
     : ['BPS', 'BCS', 'IC'];
@@ -5646,7 +5643,6 @@ function BestOpportunityFinder({
   const findBest = async () => {
     setLoading(true); setError(''); setLevelResults([]);
     try {
-      // Always fetch live data — never use cache
       const token = await getAccessToken();
       const [metricsArray, fetchedPrice] = await Promise.all([getMarketMetrics([symbol], token), getQuote(symbol, token)]);
       const metrics = metricsArray[0] || { symbol, ivRank: null, earningsExpectedDate: null };
@@ -5663,70 +5659,52 @@ function BestOpportunityFinder({
         const candidates: BestSetup[] = [];
         const failures: { strategy: string; reasons: string[] }[] = [];
         for (const strat of strategiesToRun) {
+          const checklistResults = runChecklistAllExpirations(
+            symbol,
+            strat,
+            metrics,
+            baseChainData,
+            price,
+            mergedRules,
+            undefined,
+            level.presetLabel,
+            getSavedEtfRules(),
+            level.presetLabel,
+            level.presetKey === 'strict'
+          );
 
-  const results = runChecklistAllExpirations(
-  symbol,
-  strat,
-  metrics,
-  baseChainData,
-  price,
-  mergedRules,
-  undefined,
-  level.presetLabel,
-  getSavedEtfRules(),
-  level.presetLabel,
-  level.presetKey === 'strict'
-);
+          const rankedResults = checklistResults
+            .filter(r => r.bestCandidate)
+            .map(r => ({
+              result: r,
+              scored: scoreCandidate(r, getSavedRankConfig())
+            }))
+            .sort((a, b) => (b.scored?.score ?? 0) - (a.scored?.score ?? 0));
 
-  const rankedResults = results
-    .filter(r => r.bestCandidate)
-    .map(r => ({
-      result: r,
-      scored: scoreCandidate(r, getSavedRankConfig())
-    }))
-    .sort((a, b) =>
-      (b.scored?.score ?? 0) - (a.scored?.score ?? 0)
-    );
+          if (rankedResults.length > 0) {
+            const bestResult = rankedResults[0].result;
+            const setup = scoreCandidateLocal(bestResult, strat);
+            if (setup) {
+              candidates.push(setup);
+              continue;
+            }
+          }
 
-  if (rankedResults.length > 0) {
-    const bestResult = rankedResults[0].result;
-    const setup = scoreCandidateLocal(bestResult, strat);
-
-    if (setup) {
-      candidates.push(setup);
-      continue;
-    }
-  }
-
-  const diagnostic = runChecklist(
-    symbol,
-    strat,
-    metrics,
-    baseChainData,
-    price,
-    mergedRules
-  );
-
-  failures.push({
-    strategy: strat,
-    reasons:
-      diagnostic.failReasons.length > 0
-        ? diagnostic.failReasons
-        : ['No qualifying strikes found']
-  });
-}
-results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, presetColor: level.presetColor, rulesUsed: mergedRules, ruleDiffs, ranked: candidates.sort((a, b) => b.score - a.score), failures });
+          const diagnostic = runChecklist(symbol, strat, metrics, baseChainData, price, mergedRules);
+          failures.push({
+            strategy: strat,
+            reasons: diagnostic.failReasons.length > 0 ? diagnostic.failReasons : ['No qualifying strikes found']
+          });
+        }
+        results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, presetColor: level.presetColor, rulesUsed: mergedRules, ruleDiffs, ranked: candidates.sort((a, b) => b.score - a.score), failures });
       }
 
-      // === NEW: Prefer similar expirations to the original card ===
+      // Prefer similar expirations to the original card (±8 DTE)
       let finalResults = results;
-
       if (originalDte != null) {
         finalResults = results
           .map(level => {
-            const similar = level.ranked.filter(setup =>
-              Math.abs(setup.setup.dte - originalDte) <= 8
-            );
+            const similar = level.ranked.filter(setup => Math.abs(setup.setup.dte - originalDte) <= 8);
             return {
               ...level,
               ranked: similar.length > 0 ? similar : level.ranked.slice(0, 1),
@@ -5743,7 +5721,6 @@ results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, prese
     }
   };
 
-  // Auto-run immediately on open (always live)
   useEffect(() => {
     findBest();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5754,13 +5731,12 @@ results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, prese
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center z-[60] p-4">
       <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden`}>
-        {/* Sticky header */}
         <div className="px-6 pt-6 pb-4 shrink-0">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h2 className={`text-lg font-bold ${th.text}`}>Best Opportunity — {symbol}</h2>
+              <h2 className={`text-lg font-bold ${th.text}`}>Find Better — {symbol}</h2>
               <p className={`text-[9px] ${th.textFaint} mt-0.5`}>
-                Tests all rule levels against {preferredStrategy ?? 'all strategies'}. Always uses live chain data.
+                Similar DTE to original card. Tests rule levels with live data.
               </p>
             </div>
             <button onClick={onClose} className="text-2xl text-slate-400 hover:text-white ml-4">✕</button>
@@ -5774,104 +5750,102 @@ results.push({ presetKey: level.presetKey, presetLabel: level.presetLabel, prese
           {error && <div className="p-4 bg-red-500/10 border border-red-500 rounded-xl text-red-400 text-sm mt-3">{error}</div>}
         </div>
 
-        {/* Scrollable results */}
         <div className="overflow-y-auto flex-1 px-6 pb-6">
           <div className="space-y-4">
-          {levelResults.map(level => (
-            <div key={level.presetKey} className={`border ${th.border} rounded-xl overflow-hidden`}>
-              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${th.border} ${th.card}`}>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold tracking-widest px-2 py-0.5 border rounded ${level.presetColor}`}>{level.presetLabel.toUpperCase()}</span>
-                  {level.ruleDiffs.length === 0 ? (
-                    <span className={`text-[9px] ${th.textFaint}`}>Course baseline — no changes</span>
-                  ) : level.presetKey === 'strict' ? (
-                    <span className="text-[9px] text-red-400">Tighter: {level.ruleDiffs.join(' · ')}</span>
-                  ) : level.presetKey === 'shortterm' ? (
-                    <span className="text-[9px] text-orange-400">7–14 DTE · very active daily management, high gamma risk</span>
-                  ) : level.presetKey === 'intermediate' ? (
-                    <span className="text-[9px] text-amber-400">15–29 DTE · active management required</span>
-                  ) : (
-                    <span className="text-[9px] text-yellow-400">Relaxed vs Course: {level.ruleDiffs.join(' · ')}</span>
-                  )}
+            {levelResults.map(level => (
+              <div key={level.presetKey} className={`border ${th.border} rounded-xl overflow-hidden`}>
+                <div className={`flex items-center justify-between px-4 py-2.5 border-b ${th.border} ${th.card}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold tracking-widest px-2 py-0.5 border rounded ${level.presetColor}`}>{level.presetLabel.toUpperCase()}</span>
+                    {level.ruleDiffs.length === 0 ? (
+                      <span className={`text-[9px] ${th.textFaint}`}>Course baseline — no changes</span>
+                    ) : level.presetKey === 'strict' ? (
+                      <span className="text-[9px] text-red-400">Tighter: {level.ruleDiffs.join(' · ')}</span>
+                    ) : level.presetKey === 'shortterm' ? (
+                      <span className="text-[9px] text-orange-400">7–14 DTE · very active daily management</span>
+                    ) : level.presetKey === 'intermediate' ? (
+                      <span className="text-[9px] text-amber-400">15–29 DTE · active management</span>
+                    ) : (
+                      <span className="text-[9px] text-yellow-400">Relaxed vs Course: {level.ruleDiffs.join(' · ')}</span>
+                    )}
+                  </div>
+                  {level.ranked.length > 0
+                    ? <span className={`text-[10px] ${th.textFaint}`}>{level.ranked.length} setup{level.ranked.length !== 1 ? 's' : ''} found</span>
+                    : <span className="text-[10px] text-slate-500">No setup found</span>}
                 </div>
-                {level.ranked.length > 0
-                  ? <span className={`text-[10px] ${th.textFaint}`}>{level.ranked.length} setup{level.ranked.length !== 1 ? 's' : ''} found</span>
-                  : <span className="text-[10px] text-slate-500">No setup found</span>}
-              </div>
 
-              {level.ranked.length > 0 ? (
-                <div className="divide-y divide-[inherit]" style={{ borderColor: 'inherit' }}>
-                  {level.ranked.map((setup, idx) => (
-                    <div key={setup.strategy} className={`p-4 ${idx === 0 ? '' : 'opacity-80'}`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border ${idx === 0 ? 'border-emerald-500 text-emerald-400' : idx === 1 ? 'border-slate-500 text-slate-400' : 'border-slate-700 text-slate-500'}`}>{idx + 1}</span>
-                          <span className={`text-xs font-bold px-2 py-0.5 border rounded ${setup.strategy === 'BPS' ? 'text-emerald-400 border-emerald-700' : setup.strategy === 'BCS' ? 'text-red-400 border-red-700' : 'text-blue-400 ac-border-faint'}`}>{setup.strategy}</span>
-                          {preferredStrategy && setup.strategy !== preferredStrategy && (
-                            <span className="text-[9px] px-2 py-0.5 rounded border border-yellow-600/60 bg-yellow-500/10 text-yellow-400 font-bold">⚠ contradicts {preferredStrategy} box</span>
-                          )}
-                          <span className={`text-xs font-bold ${gradeColor(setup.grade)}`}>Grade {setup.grade}</span>
-                          <span className={`text-[9px] ${th.textFaint}`}>score {Math.round(setup.score)}/100</span>
+                {level.ranked.length > 0 ? (
+                  <div className="divide-y divide-[inherit]" style={{ borderColor: 'inherit' }}>
+                    {level.ranked.map((setup, idx) => (
+                      <div key={setup.strategy} className={`p-4 ${idx === 0 ? '' : 'opacity-80'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border ${idx === 0 ? 'border-emerald-500 text-emerald-400' : idx === 1 ? 'border-slate-500 text-slate-400' : 'border-slate-700 text-slate-500'}`}>{idx + 1}</span>
+                            <span className={`text-xs font-bold px-2 py-0.5 border rounded ${setup.strategy === 'BPS' ? 'text-emerald-400 border-emerald-700' : setup.strategy === 'BCS' ? 'text-red-400 border-red-700' : 'text-blue-400 ac-border-faint'}`}>{setup.strategy}</span>
+                            {preferredStrategy && setup.strategy !== preferredStrategy && (
+                              <span className="text-[9px] px-2 py-0.5 rounded border border-yellow-600/60 bg-yellow-500/10 text-yellow-400 font-bold">⚠ contradicts {preferredStrategy} box</span>
+                            )}
+                            <span className={`text-xs font-bold ${gradeColor(setup.grade)}`}>Grade {setup.grade}</span>
+                            <span className={`text-[9px] ${th.textFaint}`}>score {Math.round(setup.score)}/100</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (onTrade && setup.result) {
+                                onTrade(setup.result);
+                                onClose();
+                              } else {
+                                const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
+                                  ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
+                                  : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
+                                alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}`);
+                              }
+                            }}
+                            className="text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-600/10 transition-colors font-medium tracking-wider"
+                          >
+                            TRADE →
+                          </button>
                         </div>
-                        <button
-                         <button
-                          onClick={() => {
-                            if (onTrade && setup.result) {
-                              onTrade(setup.result);
-                              onClose();
-                            } else {
-                              const strikesStr = setup.strategy === 'IC' && setup.setup.shortCallStrike != null
-                                ? `Puts: ${setup.setup.shortStrike}/${setup.setup.longStrike} · Calls: ${setup.setup.shortCallStrike}/${setup.setup.longCallStrike}`
-                                : `${setup.setup.shortStrike}/${setup.setup.longStrike}`;
-                              alert(`${setup.strategy} ${symbol} [${level.presetLabel} rules]\nExp: ${setup.setup.expiration} (${setup.setup.dte}d)\nStrikes: ${strikesStr}\nCredit: $${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}`);
-                            }
-                          }}
-                          className="text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-600/10 transition-colors font-medium tracking-wider"
-                        >
-                          TRADE →
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-4 gap-3 mb-2">
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Expiry</p><p className={`text-xs font-bold ${th.text}`}>{setup.setup.expiration} <span className="text-slate-500">({setup.setup.dte}d)</span></p></div>
-                        <div>
-                          <p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Strikes</p>
-                          {setup.strategy === 'IC' && setup.setup.shortCallStrike != null ? (
-                            <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortStrike}/{setup.setup.longStrike} · {setup.setup.shortCallStrike}/{setup.setup.longCallStrike}</p>
-                          ) : (
-                            <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortStrike}/{setup.setup.longStrike}</p>
-                          )}
+                        <div className="grid grid-cols-4 gap-3 mb-2">
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Expiry</p><p className={`text-xs font-bold ${th.text}`}>{setup.setup.expiration} <span className="text-slate-500">({setup.setup.dte}d)</span></p></div>
+                          <div>
+                            <p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Strikes</p>
+                            {setup.strategy === 'IC' && setup.setup.shortCallStrike != null ? (
+                              <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortStrike}/{setup.setup.longStrike} · {setup.setup.shortCallStrike}/{setup.setup.longCallStrike}</p>
+                            ) : (
+                              <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortStrike}/{setup.setup.longStrike}</p>
+                            )}
+                          </div>
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Credit</p><p className="text-xs font-bold text-emerald-400">${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}</p></div>
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>ROC / POP</p><p className={`text-xs font-bold ${th.text}`}>{setup.setup.roc.toFixed(0)}% / {setup.setup.pop?.toFixed(0) ?? '—'}%</p></div>
                         </div>
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Credit</p><p className="text-xs font-bold text-emerald-400">${(setup.setup.totalCredit ?? setup.setup.credit).toFixed(2)}</p></div>
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>ROC / POP</p><p className={`text-xs font-bold ${th.text}`}>{setup.setup.roc.toFixed(0)}% / {setup.setup.pop?.toFixed(0) ?? '—'}%</p></div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-3 mb-2">
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>50% Target</p><p className="text-xs font-bold text-emerald-400">${((setup.setup.totalCredit ?? setup.setup.credit) * 0.5).toFixed(2)}</p></div>
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Credit Ratio</p><p className={`text-xs font-bold ${th.text}`}>{(setup.setup.creditRatio * 100).toFixed(0)}% of width</p></div>
-                        <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>OI Short/Long</p>
-                          {setup.strategy === 'IC' && setup.setup.shortCallStrike != null ? (
-                            <p className={`text-xs font-bold ${th.text}`}>Put: {setup.setup.shortOI}/{setup.setup.longOI} · Call: {setup.setup.shortOI}/{setup.setup.longOI}</p>
-                          ) : (
-                            <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortOI} / {setup.setup.longOI}</p>
-                          )}
+                        <div className="grid grid-cols-3 gap-3 mb-2">
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>50% Target</p><p className="text-xs font-bold text-emerald-400">${((setup.setup.totalCredit ?? setup.setup.credit) * 0.5).toFixed(2)}</p></div>
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>Credit Ratio</p><p className={`text-xs font-bold ${th.text}`}>{(setup.setup.creditRatio * 100).toFixed(0)}% of width</p></div>
+                          <div><p className={`text-[9px] ${th.textFaint} uppercase tracking-wider`}>OI Short/Long</p>
+                            {setup.strategy === 'IC' && setup.setup.shortCallStrike != null ? (
+                              <p className={`text-xs font-bold ${th.text}`}>Put: {setup.setup.shortOI}/{setup.setup.longOI} · Call: {setup.setup.shortOI}/{setup.setup.longOI}</p>
+                            ) : (
+                              <p className={`text-xs font-bold ${th.text}`}>{setup.setup.shortOI} / {setup.setup.longOI}</p>
+                            )}
+                          </div>
                         </div>
+                        <p className={`text-[9px] ${th.textFaint}`}>{setup.notes[0]}</p>
                       </div>
-                      <p className={`text-[9px] ${th.textFaint}`}>{setup.notes[0]}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="px-4 py-3 space-y-1.5">
-                  {level.failures.map(f => (
-                    <div key={f.strategy} className="flex items-start gap-2">
-                      <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${f.strategy === 'BPS' ? 'text-emerald-400 border-emerald-800' : f.strategy === 'BCS' ? 'text-red-400 border-red-800' : 'text-blue-400 border-blue-800'}`}>{f.strategy}</span>
-                      <p className={`text-[9px] ${th.textFaint}`}>{f.reasons.join(' · ')}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-4 py-3 space-y-1.5">
+                    {level.failures.map(f => (
+                      <div key={f.strategy} className="flex items-start gap-2">
+                        <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${f.strategy === 'BPS' ? 'text-emerald-400 border-emerald-800' : f.strategy === 'BCS' ? 'text-red-400 border-red-800' : 'text-blue-400 border-blue-800'}`}>{f.strategy}</span>
+                        <p className={`text-[9px] ${th.textFaint}`}>{f.reasons.join(' · ')}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
