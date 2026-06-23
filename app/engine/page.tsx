@@ -3165,13 +3165,16 @@ export default function EnginePage() {
                     className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
                     style={{ fontFamily: "'DM Mono', monospace" }} />
                 </div>
-                {/* OTM floor control — hard reject below this %, on top of the delta filter above.
-                    Lives here, always visible, since calmer/low-IV markets can make this floor
-                    incompatible with the delta band above, producing zero suggestions — you need
-                    to be able to see and loosen this without first finding a suggestion to look at. */}
+                {/* OTM floor control — hard reject below this %, on top of the delta filter above. */}
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span className={`text-[9px] ${th.textFaint} tracking-wider`}>OTM FLOOR</span>
-                  {([
+                  <div className="flex flex-col leading-tight mr-1">
+                    <span className={`text-[9px] ${th.textFaint} tracking-wider`}>OTM FLOOR</span>
+                    <span className={`text-[8px] ${th.textFaint}`}>
+                      Hard reject below this distance from spot
+                    </span>
+                  </div>
+                
+                  {[
                     { label: '4%', pct: 4 },
                     { label: '6%', pct: 6 },
                     { label: '8%', pct: 8 },
@@ -3182,14 +3185,28 @@ export default function EnginePage() {
                         otmFloorPct === p.pct
                           ? 'border-amber-500 text-amber-300 bg-amber-500/15'
                           : `${th.border} ${th.textFaint} hover:border-amber-500/50 hover:text-amber-400`
-                      }`}>
+                      }`}
+                    >
                       {p.label}
                     </button>
                   ))}
-                  <input type="number" min="0" max="20" step="0.5" value={otmFloorPct}
-                    onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) { saveOtmFloor(v); runEngine(); } }}
-                    className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-amber-500 text-center`}
-                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    step="0.5"
+                    value={otmFloorPct}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v) && v >= 0) {
+                        saveOtmFloor(v);
+                        runEngine();
+                      }
+                    }}
+                    className={`w-12 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-amber-500 text-center`}
+                    style={{ fontFamily: '"DM Mono", monospace' }}
+                  />
                   <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 </div>
               </div>
