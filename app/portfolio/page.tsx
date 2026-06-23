@@ -1755,6 +1755,23 @@ CORE METHODOLOGY (know it deeply, apply it intelligently):
 - Short strike deltas: BPS -0.20 to -0.30, BCS +0.20 to +0.30, IC ±0.16 to ±0.20
 - IC requires sideways price action 2+ weeks, no higher highs/lower lows
 
+CSP / WHEEL MANAGEMENT — CRITICAL:
+- A cash-secured put is NOT managed like a bull put spread.
+- If strategy is CSP, PUT, or a single short put with no long protective leg, assume the trader may be using it for wheel-income unless the prompt says otherwise.
+- For CSP/wheel positions, assignment can be acceptable and may be part of the plan.
+- Do NOT apply the 21 DTE hard-close rule automatically to CSP/wheel positions.
+- For CSP/wheel positions, evaluate:
+  1. premium remaining,
+  2. theta per day,
+  3. effective assignment basis,
+  4. stock price versus short strike,
+  5. delta/assignment risk,
+  6. whether rolling improves basis for a net credit.
+- Recommend HOLD when the CSP is OTM, theta-positive, has meaningful premium left, and assignment is acceptable.
+- Recommend TAKE_PROFIT or CLOSE when 80-90% of premium has been captured.
+- Recommend ROLL only when expiration is near, meaningful extrinsic value remains, and the roll can be done for a net credit or better basis.
+- Recommend accepting assignment when the effective basis is attractive and the trader is willing to own shares.
+
 WHEN TO DEVIATE FROM RULES (apply professional judgment):
 - If IV is very high (IVR > 70) and credit is exceptional, a wider spread or slightly aggressive delta can be justified
 - If a position is at 40% profit but 15 DTE with gamma risk rising sharply, closing early beats waiting for 50%
@@ -1803,10 +1820,22 @@ Be direct. Be honest. If a position is in trouble, say so. If a rule should be b
 function buildPositionPrompt(pos: Position, trend: TrendResult | null): string {
   const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
   const ivEdge = pos.iv != null && pos.hv30 != null ? (pos.iv - pos.hv30) : null;
+  const shortPut = pos.legs.find(l => l.direction === 'Short' && l.optionType === 'P');
+  const longPut = pos.legs.find(l => l.direction === 'Long' && l.optionType === 'P');
+  const isCspLike = !!shortPut && !longPut;
+  const effectiveAssignmentBasis =
+    isCspLike && shortPut
+      ? shortPut.strikePrice - (pos.creditReceived / 100 / Math.max(1, shortPut.quantity))
+      : null;
+  const strategyIntent = isCspLike ? 'wheel-income / cash-secured put' : 'defined-risk spread or other options position';
+  const assignmentWilling = isCspLike ? 'yes — assignment is acceptable if basis is attractive' : 'no / not primary intent';
 
   return `Analyze this open options position:
 
 POSITION: ${pos.symbol} ${pos.strategy}
+Detected intent: ${strategyIntent}
+Assignment willing: ${assignmentWilling}
+Effective assignment basis: ${effectiveAssignmentBasis != null ? `$${effectiveAssignmentBasis.toFixed(2)}` : 'not applicable'}
 Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
 Credit received: $${pos.creditReceived.toFixed(2)} | Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'}
