@@ -204,28 +204,17 @@ async function getSector(symbol: string): Promise<string> {
   } catch { return 'Unknown'; }
 }
 
-// ── Portfolio risk types ───────────────────────────────────────────────────
-type RiskLevel = 'clear' | 'same_symbol' | 'same_strikes' | 'synthetic_ic' | 'sector_concentration';
-
+// ── Portfolio context ──────────────────────────────────────────────────────
+// Plain factual awareness only — no severity grading, no dismiss flow, no
+// recommendation copy. The goal is just "don't get mixed up about what you
+// already hold," not a graded risk warning system. Existing-position detail
+// (strategy/strikes/expiration/qty) is shown separately by the always-visible
+// "Open Position" banner — this only covers what that banner doesn't: broader
+// sector concentration across the whole portfolio.
 interface PortfolioRisk {
-  level: RiskLevel;
-  warnings: string[];           // specific factual flags
-  recommendation: string;       // AI-style actionable guidance
+  sameSymbolCount: number;       // open positions on this exact symbol
   sectorName: string;
-  sectorCount: number;          // how many open positions in same sector
-}
-
-function parseStrikesFromString(strikes: string): { puts: number[]; calls: number[] } {
-  const puts: number[] = [], calls: number[] = [];
-  const parts = strikes.replace(/·/g, '/').split('/');
-  for (const p of parts) {
-    const m = p.trim().match(/^(\d+(?:\.\d+)?)(P|C)$/i);
-    if (!m) continue;
-    const n = parseFloat(m[1]);
-    if (m[2].toUpperCase() === 'P') puts.push(n);
-    else calls.push(n);
-  }
-  return { puts, calls };
+  sectorCount: number;           // open positions in the same sector (excluding this symbol)
 }
 
 function checkPortfolioRisk(
@@ -235,81 +224,9 @@ function checkPortfolioRisk(
   sectorName: string,
   allSectorCounts: Record<string, number>,
 ): PortfolioRisk {
-  const warnings: string[] = [];
-  let level: RiskLevel = 'clear';
-  let recommendation = '';
-
   const sameSymbolPositions = existingPositions.filter(p => p.symbol === symbol);
   const sectorCount = allSectorCounts[sectorName] ?? 0;
-
-  // ── Same strikes check ──────────────────────────────────────────────────
-  if (candidate && sameSymbolPositions.length > 0) {
-    for (const pos of sameSymbolPositions) {
-      const existing = parseStrikesFromString(pos.strikes);
-      const newPuts  = candidate.strategy === 'BPS' || candidate.strategy === 'IC'
-        ? [candidate.shortStrike, candidate.longStrike] : [];
-      const newCalls = candidate.strategy === 'BCS' || candidate.strategy === 'IC'
-        ? [candidate.shortCallStrike ?? candidate.shortStrike, candidate.longCallStrike ?? candidate.longStrike] : [];
-
-      const putOverlap  = newPuts.some(s  => existing.puts.some(e  => Math.abs(e - s)  < 1));
-      const callOverlap = newCalls.some(s => existing.calls.some(e => Math.abs(e - s) < 1));
-      const exactMatch  = putOverlap && (newCalls.length === 0 || callOverlap);
-
-      if (exactMatch) {
-        level = 'same_strikes';
-        warnings.push(`Duplicate strikes: you already hold ${pos.strikes} on ${symbol} (exp ${pos.expDate})`);
-        recommendation = `This is nearly identical to your existing ${pos.symbol} ${pos.strategy} position. Adding it doubles your notional risk on this ticker without diversification benefit. Only consider this if you intentionally want to scale up your position size — and only if your account can absorb a full loss on both spreads simultaneously.`;
-        break;
-      }
-    }
-  }
-
-  // ── Same symbol, different strikes ─────────────────────────────────────
-  // PMCC is excluded here — its capped-risk, long-bias diagonal structure doesn't
-  // meaningfully compound with a CSP or vertical spread on the same ticker the way
-  // two same-direction positions would, so warning about "concentration" here was
-  // misleading noise rather than a real risk signal.
-  if (level === 'clear' && sameSymbolPositions.length > 0 && candidate && candidate.strategy !== 'PMCC') {
-    const existingStrategy = sameSymbolPositions[0].strategy;
-    const newStrategy = candidate.strategy;
-
-    // Check if adding this creates a synthetic IC
-    const hasPuts  = sameSymbolPositions.some(p => p.strategy === 'BPS');
-    const hasCalls = sameSymbolPositions.some(p => p.strategy === 'BCS');
-    const addingCalls = newStrategy === 'BCS';
-    const addingPuts  = newStrategy === 'BPS';
-
-    if ((hasPuts && addingCalls) || (hasCalls && addingPuts)) {
-      level = 'synthetic_ic';
-      warnings.push(`Adding this ${newStrategy} would create a synthetic Iron Condor on ${symbol}`);
-      recommendation = `You already have a ${existingStrategy} on ${symbol}. Adding this ${newStrategy} effectively builds an IC — which can be a valid strategy, but evaluate whether the combined structure has sufficient buffer on both sides and fits your current market view on ${symbol}. If you intended to enter an IC, it may be cleaner to close both and re-enter as a single IC order.`;
-    } else {
-      level = 'same_symbol';
-      warnings.push(`You already have ${sameSymbolPositions.length} open position${sameSymbolPositions.length > 1 ? 's' : ''} on ${symbol}: ${sameSymbolPositions.map(p => p.strikes).join(', ')}`);
-      const totalQty = sameSymbolPositions.reduce((s, p) => s + p.qty, 0);
-      recommendation = `Adding this increases your ${symbol} exposure to ${totalQty + (candidate ? 1 : 0)} spread${totalQty > 0 ? 's' : ''}. This concentrates risk on a single name. Only add if your conviction on ${symbol} is high and the combined risk fits your position-sizing rules.`;
-    }
-  }
-
-  // ── Sector concentration ────────────────────────────────────────────────
-  const SECTOR_LIMIT = 3;
-  if (sectorName !== 'Index' && sectorName !== 'Unknown' && sectorCount >= SECTOR_LIMIT) {
-    const sectorWarning = `Sector concentration: you already have ${sectorCount} open position${sectorCount !== 1 ? 's' : ''} in ${sectorName}`;
-    warnings.push(sectorWarning);
-    if (level === 'clear') {
-      level = 'sector_concentration';
-      recommendation = `You have ${sectorCount} positions already in ${sectorName}. Adding another increases sector risk — a sector-wide event (regulatory, macro, earnings miss from a major player) could hit multiple positions simultaneously. Consider whether your portfolio has sufficient exposure to other sectors before adding this.`;
-    } else {
-      // Append sector note to existing recommendation
-      recommendation += ` Additionally, you already have ${sectorCount} ${sectorName} positions open — sector concentration amplifies the risk here.`;
-    }
-  }
-
-  if (level === 'clear') {
-    recommendation = 'No portfolio conflicts detected. Evaluate on its own merits.';
-  }
-
-  return { level, warnings, recommendation, sectorName, sectorCount };
+  return { sameSymbolCount: sameSymbolPositions.length, sectorName, sectorCount };
 }
 
 interface FilterSuggestion {
@@ -1068,8 +985,81 @@ function saveEtfRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES_ETF, JSON.stringify(rules)); } catch {}
 }
 const LS_PMCC = 'hunter-tickers-pmcc';
-const LS_CAL = 'hunter-cal-scheduled';
-const LS_CAL_ENTRY = 'hunter-cal-entry';
+const LS_CAL = 'hunter-cal-scheduled'; // legacy — superseded by LS_FOLLOWUPS, kept only so old presence flags don't error on read
+const LS_CAL_ENTRY = 'hunter-cal-entry'; // legacy — superseded by LS_FOLLOWUPS
+const LS_FOLLOWUPS = 'hunter-followups';
+
+// ── Follow-ups — unified "remind me about this candidate" record ───────────
+// Replaces the old earnings-only CalendarButton + qualified-only EntryCalendarButton
+// split. A follow-up can be set on any row, for any reason, regardless of mode or
+// qualified status. Storage is localStorage today; the load/save functions below are
+// the only place that needs to change to move this to Redis (mirror the
+// /api/trading-memory route pattern — same userId-scoped GET/POST of one JSON blob).
+interface FollowUp {
+  id: string;
+  symbol: string;
+  strategy: string;
+  expiration: string | null;
+  shortStrike: number | null;
+  longStrike: number | null;
+  credit: number | null;
+  pop: number | null;
+  reason: string;       // optional freeform note, blank in most cases
+  scheduledFor: string; // ISO date (YYYY-MM-DD)
+  createdAt: string;    // ISO date
+}
+
+function loadFollowUps(): FollowUp[] {
+  try {
+    const raw = localStorage.getItem(LS_FOLLOWUPS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFollowUps(list: FollowUp[]): void {
+  try { localStorage.setItem(LS_FOLLOWUPS, JSON.stringify(list)); } catch {}
+}
+
+function followUpKey(symbol: string, strategy: string, expiration: string | null): string {
+  return `${symbol}-${strategy}-${expiration ?? 'none'}`;
+}
+
+// Same symbol + strategy + expiration already has a standing follow-up — nothing new
+// to schedule, so the button should not reappear for this exact candidate.
+function findExistingFollowUp(list: FollowUp[], symbol: string, strategy: string, expiration: string | null): FollowUp | null {
+  const key = followUpKey(symbol, strategy, expiration);
+  return list.find(f => followUpKey(f.symbol, f.strategy, f.expiration) === key) ?? null;
+}
+
+function addFollowUp(fu: Omit<FollowUp, 'id' | 'createdAt'>): FollowUp {
+  const list = loadFollowUps();
+  const record: FollowUp = { ...fu, id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, createdAt: toIsoDate(new Date()) };
+  list.push(record);
+  saveFollowUps(list);
+  return record;
+}
+
+function removeFollowUp(id: string): void {
+  saveFollowUps(loadFollowUps().filter(f => f.id !== id));
+}
+
+function buildFollowUpCalUrl(fu: FollowUp): string {
+  const followUp = new Date(`${fu.scheduledFor}T09:00:00`);
+  const end = new Date(followUp); end.setHours(end.getHours() + 1);
+  const strikes = fu.longStrike != null ? `${fu.shortStrike}/${fu.longStrike}` : fu.shortStrike != null ? `${fu.shortStrike}` : '';
+  const title = encodeURIComponent(`Follow up: ${fu.symbol}${strikes ? ` ${strikes}` : ''}`);
+  const detailParts = [
+    `${fu.symbol} — ${fu.strategy}${strikes ? ` ${strikes}` : ''}`,
+    fu.expiration ? `Exp ${fu.expiration}` : null,
+    fu.credit != null ? `Credit $${fu.credit.toFixed(2)}` : null,
+    fu.pop != null ? `POP ${fu.pop.toFixed(0)}%` : null,
+    fu.reason ? `Note: ${fu.reason}` : null,
+  ].filter(Boolean);
+  const details = encodeURIComponent(detailParts.join(' · '));
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${formatCalDate(followUp)}/${formatCalDate(end)}&details=${details}`;
+}
 const DTE_ALERT_THRESHOLD = 25;
 const POST_EARNINGS_RESCREEN_DAYS = 3;
 const ESTIMATED_EARNINGS_CYCLE_DAYS = 91; // ~13 weeks / one reporting cycle
@@ -1081,7 +1071,6 @@ const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache';
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
-const LS_DISMISSED_WARNINGS = 'hunter-dismissed-portfolio-warnings';
 
 interface RankConfig {
   weightMomentum: number;     // 0–25
@@ -3781,31 +3770,16 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   const c = result.bestCandidate;
   const t = result.trendResult;
   const matchingPositions = (existingPositions ?? []).filter(p => p.symbol === result.symbol);
-  const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(LS_DISMISSED_WARNINGS) ?? '[]'));
-    } catch {
-      return new Set();
-    }
-  });
 
-  const warningId = c
-    ? `${result.symbol}-${result.strategy}-${c.expiration}-${c.shortStrike}-${c.longStrike}-${portfolioRisk?.level ?? 'clear'}`
-    : `${result.symbol}-${result.strategy}-${portfolioRisk?.level ?? 'clear'}`;
-
-  const dismissWarning = () => {
-    const next = new Set(dismissedWarnings);
-    next.add(warningId);
-    setDismissedWarnings(next);
-    try {
-      localStorage.setItem(LS_DISMISSED_WARNINGS, JSON.stringify(Array.from(next)));
-    } catch {}
-  };
-
-  const showPortfolioWarning = Boolean(
+  // Plain factual sector note — only shown when there's something the "Open
+  // Position" banner doesn't already cover (that banner handles same-symbol
+  // detail; this covers broader same-sector exposure across other tickers).
+  const SECTOR_LIMIT = 3;
+  const showSectorNote = Boolean(
     portfolioRisk &&
-    portfolioRisk.level !== 'clear' &&
-    !dismissedWarnings.has(warningId)
+    portfolioRisk.sectorName !== 'Index' &&
+    portfolioRisk.sectorName !== 'Unknown' &&
+    portfolioRisk.sectorCount >= SECTOR_LIMIT
   );
 
   const otmPct = (() => {
@@ -4063,7 +4037,12 @@ const strategyScores = useMemo(() => {
           <StockResearch
             symbol={result.symbol}
             th={th}
-            riskContext={portfolioRisk && portfolioRisk.level !== 'clear' ? portfolioRisk.recommendation : undefined}
+            riskContext={portfolioRisk && (portfolioRisk.sameSymbolCount > 0 || portfolioRisk.sectorCount >= SECTOR_LIMIT)
+              ? [
+                  portfolioRisk.sameSymbolCount > 0 ? `Already holds ${portfolioRisk.sameSymbolCount} position(s) on this symbol.` : null,
+                  portfolioRisk.sectorCount >= SECTOR_LIMIT ? `${portfolioRisk.sectorCount} open positions in ${portfolioRisk.sectorName} sector.` : null,
+                ].filter(Boolean).join(' ')
+              : undefined}
             tradeContext={c ? `${result.strategy} ${c.shortStrike}/${c.longStrike}${c.strategy === 'IC' ? ` · ${c.shortCallStrike}/${c.longCallStrike}` : ''} exp ${c.expiration} (${c.dte}d) · credit $${(c.totalCredit ?? c.credit).toFixed(2)} · ROC ${c.roc.toFixed(0)}% · POP ${c.pop?.toFixed(0)}% · IVR ${result.ivr?.toFixed(1)}%` : `${result.strategy} on ${result.symbol}`}
           />
         </div>
@@ -4385,48 +4364,14 @@ const strategyScores = useMemo(() => {
         </div>
       )}
 
-      {/* Portfolio risk banner */}
-      {showPortfolioWarning && portfolioRisk && (
-        <div className={`border-t px-4 py-2.5 rounded-b-lg ${
-          portfolioRisk.level === 'same_strikes'
-            ? 'border-red-500/40 bg-red-500/8'
-            : portfolioRisk.level === 'synthetic_ic'
-            ? 'border-purple-500/30 bg-purple-500/8'
-            : 'border-amber-500/30 bg-amber-500/8'
-        }`} onClick={e => e.stopPropagation()}>
-          {/* Warnings */}
-          <div className="flex items-start gap-2 mb-1.5">
-            <span className={`text-sm shrink-0 mt-0.5 ${
-              portfolioRisk.level === 'same_strikes' ? 'text-red-400'
-              : portfolioRisk.level === 'synthetic_ic' ? 'text-purple-400'
-              : 'text-amber-400'
-            }`}>⚠</span>
-            <div className="space-y-0.5">
-              {portfolioRisk.warnings.map((w, i) => (
-                <p key={i} className={`text-[10px] font-bold ${
-                  portfolioRisk.level === 'same_strikes' ? 'text-red-300'
-                  : portfolioRisk.level === 'synthetic_ic' ? 'text-purple-300'
-                  : 'text-amber-300'
-                }`}>{w}</p>
-              ))}
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                dismissWarning();
-              }}
-              className="ml-auto text-[9px] px-2 py-0.5 border border-white/20 rounded text-white/50 hover:text-white hover:border-white/40 transition-colors"
-              title="Hide this warning for this specific setup"
-            >
-              Dismiss
-            </button>
-          </div>
-          {/* Recommendation */}
-          <p className={`text-[10px] leading-relaxed ml-5 ${
-            portfolioRisk.level === 'same_strikes' ? 'text-red-400/80'
-            : portfolioRisk.level === 'synthetic_ic' ? 'text-purple-400/80'
-            : 'text-amber-400/80'
-          }`}>{portfolioRisk.recommendation}</p>
+      {/* Sector concentration note — plain fact, no severity/dismiss. Same-symbol
+          detail is already covered by the always-visible "Open Position" banner
+          below, so this only fires for broader same-sector exposure. */}
+      {showSectorNote && portfolioRisk && (
+        <div className="border-t border-white/10 bg-white/[0.02] px-4 py-2 rounded-b-lg" onClick={e => e.stopPropagation()}>
+          <p className={`text-[10px] ${th.textFaint}`}>
+            ▸ {portfolioRisk.sectorCount} open position{portfolioRisk.sectorCount !== 1 ? 's' : ''} in {portfolioRisk.sectorName}
+          </p>
         </div>
       )}
 
