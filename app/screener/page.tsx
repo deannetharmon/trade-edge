@@ -2106,7 +2106,18 @@ function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: a
   
   // Rank mode fallback: if strict rules found nothing, try relaxed rules first, then fully unfiltered
   if (!strictOnly && !bestCandidate && ivrCheck.status !== 'fail' && validExpirations.length > 0) {
-    const relaxedRules: RulesType = { ...effectiveRules, CREDIT_RATIO_MIN: 0.15, ROC_MIN_SPREAD: 8, ROC_MIN_IC: 12, OI_MIN: 50, POP_MIN: 55, SPREAD_DELTA_MIN: 0.10, SPREAD_DELTA_MAX: 0.40, IC_DELTA_MIN: 0.10, IC_DELTA_MAX: 0.35 };
+    const relaxedRules: RulesType = {
+      ...effectiveRules,
+      CREDIT_RATIO_MIN: 0.15,
+      ROC_MIN_SPREAD: 8,
+      ROC_MIN_IC: 12,
+      OI_MIN: effectiveRules.OI_MIN,
+      POP_MIN: 55,
+      SPREAD_DELTA_MIN: 0.10,
+      SPREAD_DELTA_MAX: 0.40,
+      IC_DELTA_MIN: 0.10,
+      IC_DELTA_MAX: 0.35,
+    };
     for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; const expIvxForPop =
   normalizeIv(metrics.expirationIvxMap?.[exp]) ??
   normalizeIv(metrics.ivx) ??
@@ -2120,8 +2131,16 @@ bestCandidate = strategy === 'IC'
   if (!strictOnly && !bestCandidate && validExpirations.length > 0) {
     for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; bestCandidate = strategy === 'IC' ? findBestICUnfiltered(chainItems, exp, price) : findBestSpreadUnfiltered(chainItems, strategy, exp, price); if (bestCandidate) break; }
   }
-  if (!bestCandidate && validExpirations.length === 0 && !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))) failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
-  else if (!bestCandidate && validExpirations.length > 0 && !failReasons.length) failReasons.push('No qualifying strikes found');
+  if (bestCandidate) {
+    failReasons.length = 0;
+  } else if (
+    validExpirations.length === 0 &&
+    !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
+  ) {
+    failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
+  } else if (validExpirations.length > 0 && !failReasons.length) {
+    failReasons.push('No qualifying strikes found');
+  }
   // Weighted on the SHORT leg(s) — the leg you actively trade twice (sell to
   // open, buy to close at the GTC profit target) and the one that carries
   // assignment risk. The long leg is protection that typically only transacts
