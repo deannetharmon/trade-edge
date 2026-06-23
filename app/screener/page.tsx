@@ -4549,8 +4549,13 @@ const strategyScores = useMemo(() => {
 
       {/* Existing position banner */}
       {matchingPositions.length > 0 && (
-        <div className="border-t border-amber-500/30 bg-amber-500/8 px-4 py-2 flex items-center gap-3 flex-wrap rounded-b-lg"
-             onClick={e => e.stopPropagation()}>
+        <div 
+          className="border-t border-l-2 border-amber-500 bg-amber-500/10 px-4 py-2 flex items-center gap-3 flex-wrap rounded-b-lg"
+          onClick={e => e.stopPropagation()}
+        >
+          <span className="text-[9px] font-bold text-amber-400 tracking-widest shrink-0 uppercase flex items-center gap-1">
+            ▸ Open Position
+          </span>
           <span className="text-[9px] font-bold text-amber-400 tracking-widest shrink-0 uppercase">▸ Open Position</span>
           {matchingPositions.map((p, i) => (
             <div key={i} className="flex items-center gap-2 text-[10px]" style={{ fontFamily: "'DM Mono', monospace" }}>
@@ -6131,17 +6136,18 @@ function calcTargetedEntryOtmPct(entry: TargetedScanEntry): number | null {
 
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
 function TargetedScanResultsPanel({
-  entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions,
+  entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
 }: {
   entries: TargetedScanEntry[];
   sortBy: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
-setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm') => void;
+  setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm') => void;
   popMin: number;
   th: typeof THEMES[Theme];
   rankConfig: RankConfig;
   rules: RulesType;
   etfRules: RulesType;
   existingPositions: ExistingPosition[];
+  onTrade?: (result: ScreenResult) => void;
 }) {
   // ── State — all arrays, no Sets, no useMemo ─────────────────────────────
   const [hiddenSymbols, setHiddenSymbols]       = useState<string[]>([]);
@@ -6364,7 +6370,7 @@ setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm') => vo
                           rules={ar}
                           screenMode="targeted"
                           rankConfig={rankConfig}
-                          onTrade={() => {}}
+                          onTrade={onTrade}
                           cachedEntry={entry.cachedEntry}
                           existingPositions={existingPositions}
                         />
