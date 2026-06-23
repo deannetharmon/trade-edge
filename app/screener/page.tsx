@@ -6393,7 +6393,6 @@ function TargetedScanResultsPanel({
                           onTrade={onTrade}
                           cachedEntry={entry.cachedEntry}
                           existingPositions={existingPositions}
-                          onTrade={setTradeResult}
                         />
                       </div>
                     </div>
@@ -6989,13 +6988,25 @@ export default function Home() {
                   {qualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
-                      <div className="space-y-2">{qualified.map(r => <ResultCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} onTrade={setTradeResult}/>)}</div>
+                      <div className="space-y-2">{qualified.map(r => {qualified.map(r => (
+                        <ResultCard 
+                          key={`${r.symbol}-${r.strategy}`} 
+                          result={r} 
+                          th={th} 
+                          rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} 
+                          screenMode={screenMode} 
+                          rankConfig={rankConfig} 
+                          onTrade={setTradeResult} 
+                          cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} 
+                          existingPositions={existingPositions} 
+                        />
+                      ))}</div>
                     </div>
                   )}
                   {disqualified.length > 0 && (
                     <div>
                       <p className={`text-[9px] ${th.textFaint} tracking-widest mb-2 font-medium`}>DISQUALIFIED</p>
-                      <div className="space-y-2">{disqualified.map(r => <ResultCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />)}</div>
+                      <div className="space-y-2">{disqualified.map(r => <ResultCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />)}</div>
                     </div>
                   )}
                 </>
@@ -7139,7 +7150,7 @@ export default function Home() {
                             </span>
                           </div>
                           <div className="flex-1">
-                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
                           </div>
                         </div>
                       ))}
