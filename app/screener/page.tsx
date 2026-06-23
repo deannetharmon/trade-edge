@@ -6432,6 +6432,16 @@ export default function Home() {
   const [rankTopN, setRankTopN] = useState<number>(20);
   const [rankDteMin, setRankDteMin] = useState<number>(0);
   const [rankDteMax, setRankDteMax] = useState<number>(999);
+  // Post-scan, client-side filters — consistent with Targeted mode's POP/strategy
+  // filters (same pattern, same default-off floors). Filtering happens entirely
+  // over the already-fetched `results` array; no rescan needed to loosen these,
+  // unlike the old hard floors that used to live inside the scan loop itself.
+  const [rankPopMin, setRankPopMin] = useState<number>(0);
+  const [rankOtmMin, setRankOtmMin] = useState<number>(0);
+  const [rankCreditRatioMin, setRankCreditRatioMin] = useState<number>(0);
+  const [rankStrategies, setRankStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
+  const toggleRankStrategy = (s: string) =>
+    setRankStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
 
   // ── Targeted Scan state ────────────────────────────────────────────────────
   const [targetedDteMin, setTargetedDteMin] = useState<number>(21);
@@ -6961,10 +6971,40 @@ export default function Home() {
                     </div>
                   )}
                 </>
-              ) : (
+              ) : (() => {
+                // Post-scan, client-side filters over the already-fetched `results`
+                // array — same approach Targeted mode uses, so loosening a filter
+                // never requires a rescan. Order: DTE -> strategy -> POP -> OTM ->
+                // credit ratio, then slice to the Show-top count.
+                const filtered = results.filter(r => {
+                  const dte = r.bestCandidate?.dte ?? 0;
+                  if (dte < rankDteMin || dte > rankDteMax) return false;
+                  if (!rankStrategies.includes(r.strategy)) return false;
+                  const c = r.bestCandidate;
+                  if (c) {
+                    if ((c.pop ?? 0) < rankPopMin) return false;
+                    if ((c.creditRatio ?? 0) * 100 < rankCreditRatioMin) return false;
+                    if (rankOtmMin > 0) {
+                      const price = r.price;
+                      if (price == null || price <= 0) return false;
+                      const otmPct = c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
+                        : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
+                        : c.strategy === 'IC' && c.shortCallStrike != null
+                          ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
+                          : null;
+                      if (otmPct == null || otmPct < rankOtmMin) return false;
+                    }
+                  }
+                  return true;
+                });
+                const display = filtered.slice(0, rankTopN);
+
+                return (
                 <div>
-                  <div className="flex items-center gap-3 mb-3 flex-wrap">
-                    <p className="text-[9px] text-purple-400 tracking-widest font-medium">⬡ RANKED — ALL OPPORTUNITIES</p>
+                  <div className="flex items-center gap-3 mb-2 flex-wrap">
+                    <p className="text-[9px] text-purple-400 tracking-widest font-medium shrink-0">
+                      ⬡ RANKED — {display.length} of {filtered.length} SHOWN
+                    </p>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textFaint}`}>Show top</span>
                       {[10, 20, 50, 999].map(n => (
@@ -6997,15 +7037,73 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Filter row 2 — POP / OTM / Credit Ratio / Strategy, same pattern as Targeted */}
+                  <div className="flex items-center gap-3 mb-3 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
+                      {[0, 50, 60, 70, 80].map(v => (
+                        <button key={v} onClick={() => setRankPopMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            rankPopMin === v
+                              ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-purple-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
+                      {[0, 4, 8, 12, 16].map(v => (
+                        <button key={v} onClick={() => setRankOtmMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            rankOtmMin === v
+                              ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-purple-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
+                      {[0, 15, 20, 25, 33].map(v => (
+                        <button key={v} onClick={() => setRankCreditRatioMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            rankCreditRatioMin === v
+                              ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-purple-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
+                      {(['BPS', 'BCS', 'IC'] as const).map(s => {
+                        const on = rankStrategies.includes(s);
+                        const c  = s === 'BPS' ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
+                                 : s === 'BCS' ? 'border-red-600 text-red-400 bg-red-500/10'
+                                 :               'border-blue-600 text-blue-400 bg-blue-500/10';
+                        return (
+                          <button key={s} onClick={() => toggleRankStrategy(s)}
+                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                              on ? c : `${th.border} ${th.textFaint} opacity-40`
+                            }`}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
-                    {results
-                      .filter(r => {
-                        const dte = r.bestCandidate?.dte ?? 0;
-                        return dte >= rankDteMin && dte <= rankDteMax;
-                      })
-                      .slice(0, rankTopN)
-                      .map((r, i) => (
-                        <div key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}`} className="flex items-start gap-2">
+                    {display.map((r, i) => (
+                        <div key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}-${r.bestCandidate?.shortStrike}`} className="flex items-start gap-2">
                           <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
                             <span className={`text-[9px] ${th.textFaint} w-5 text-right`}>{i + 1}</span>
                             <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${dteBadgeColor(r.bestCandidate?.dte ?? 0)}`}>
@@ -7019,7 +7117,8 @@ export default function Home() {
                       ))}
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>
