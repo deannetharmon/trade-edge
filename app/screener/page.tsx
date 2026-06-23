@@ -6272,7 +6272,7 @@ export default function Home() {
   const [targetedDteMin, setTargetedDteMin] = useState<number>(21);
   const [targetedDteMax, setTargetedDteMax] = useState<number>(45);
   const [targetedPopMin, setTargetedPopMin] = useState<number>(70);
-  const [targetedSortBy, setTargetedSortBy] = useState<'score' | 'pop' | 'credit' | 'creditRatio' | 'roc'>('score');
+  const [targetedSortBy, setTargetedSortBy] = useState<'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm'>('score');
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
