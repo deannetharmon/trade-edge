@@ -91,6 +91,7 @@ interface SpreadCandidate {
   roc: number; pop: number | null; shortOI: number; longOI: number; shortIv?: number | null;
   expirationIvx?: number | null; expectedMove?: number | null;
   shortCallStrike?: number; longCallStrike?: number;
+  shortCallOI?: number; longCallOI?: number;
   callCredit?: number; callWidth?: number; totalCredit?: number; optimized?: boolean;
   shortOccSymbol?: string; longOccSymbol?: string;
   shortCallOccSymbol?: string; longCallOccSymbol?: string;
@@ -266,13 +267,22 @@ function getCreditColor(candidate: SpreadCandidate, isEtfOrIndex: boolean): stri
 }
 
 function getOiColor(candidate: SpreadCandidate, oiMin: number): string {
-  // Both legs need adequate open interest to fill cleanly — color on the
-  // tighter (lower) of the two legs, same three-tier pattern as credit/ROC.
-  // Green = clears the active OI_MIN threshold, yellow = within 60% of it
-  // (fillable but thinner), red = meaningfully below.
-  const tighter = Math.min(candidate.shortOI ?? 0, candidate.longOI ?? 0);
-  if (tighter >= oiMin) return 'text-emerald-400';
-  if (tighter >= oiMin * 0.6) return 'text-yellow-400';
+  // The SHORT leg(s) drive this color, not the long leg. The short leg is what
+  // you actively trade twice — sell to open, then buy to close at the GTC
+  // profit target — and it's the leg that carries assignment risk if it ever
+  // goes ITM. The long leg is protection that typically only transacts
+  // alongside the short leg as part of the same spread order, where the market
+  // maker quotes off the short leg's liquidity anyway — thin long-leg OI alone
+  // rarely blocks a clean fill the way thin short-leg OI does.
+  //
+  // For IC, there are two short legs (put + call) and both carry the same
+  // exposure, so color on whichever short side is thinner.
+  const shortLegOi = candidate.strategy === 'IC'
+    ? Math.min(candidate.shortOI ?? 0, candidate.shortCallOI ?? 0)
+    : (candidate.shortOI ?? 0);
+
+  if (shortLegOi >= oiMin) return 'text-emerald-400';
+  if (shortLegOi >= oiMin * 0.6) return 'text-yellow-400';
   return 'text-red-400';
 }
 
@@ -1806,7 +1816,7 @@ function findBestIC(chain: any[], expDate: string, price: number | null, RULES: 
   const totalCredit = parseFloat((bestPut.credit + bestCall.credit).toFixed(2));
   const maxLoss = Math.max(bestPut.width - bestPut.credit, bestCall.width - bestCall.credit);
   const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_IC) return null;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, optimized: true, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, shortCallOI: bestCall.shortOI, longCallOI: bestCall.longOI, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, optimized: true, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
 }
 
 
@@ -1895,7 +1905,7 @@ function findBestICUnfiltered(chain: any[], expDate: string, price: number | nul
   const totalCredit = parseFloat((putSpread.credit + callSpread.credit).toFixed(2));
   const maxLoss = Math.max(putSpread.spreadWidth - putSpread.credit, callSpread.spreadWidth - callSpread.credit);
   const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false };
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false };
 }
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
@@ -2114,14 +2124,24 @@ bestCandidate = strategy === 'IC'
   }
   if (!bestCandidate && validExpirations.length === 0 && !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))) failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
   else if (!bestCandidate && validExpirations.length > 0 && !failReasons.length) failReasons.push('No qualifying strikes found');
+  // Weighted on the SHORT leg(s) — the leg you actively trade twice (sell to
+  // open, buy to close at the GTC profit target) and the one that carries
+  // assignment risk. The long leg is protection that typically only transacts
+  // alongside the short leg in the same spread order, so its OI alone rarely
+  // blocks a clean fill the way thin short-leg OI does. For IC, both short
+  // legs (put + call) carry the same exposure, so the worse of the two gates.
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
     : (() => {
-        const minOI = Math.min(bestCandidate.shortOI, bestCandidate.longOI);
-        const val = `${bestCandidate.shortOI}/${bestCandidate.longOI}`;
-        if (minOI >= effectiveRules.OI_MIN) return { status: 'pass' as const, value: val, reason: `Both legs ≥ ${effectiveRules.OI_MIN}` };
-        if (minOI >= 100) return { status: 'warn' as const, value: val, reason: `Below target (${effectiveRules.OI_MIN}) — fills may be difficult` };
-        return { status: 'warn' as const, value: val, reason: `Very low OI — spread likely untradeable` };
+        const shortLegOi = strategy === 'IC'
+          ? Math.min(bestCandidate.shortOI, bestCandidate.shortCallOI ?? 0)
+          : bestCandidate.shortOI;
+        const val = strategy === 'IC'
+          ? `P ${bestCandidate.shortOI}/${bestCandidate.longOI} · C ${bestCandidate.shortCallOI ?? '—'}/${bestCandidate.longCallOI ?? '—'}`
+          : `${bestCandidate.shortOI}/${bestCandidate.longOI}`;
+        if (shortLegOi >= effectiveRules.OI_MIN) return { status: 'pass' as const, value: val, reason: `Short leg${strategy === 'IC' ? 's' : ''} ≥ ${effectiveRules.OI_MIN}` };
+        if (shortLegOi >= 100) return { status: 'warn' as const, value: val, reason: `Below target (${effectiveRules.OI_MIN}) on short leg — fills may be difficult` };
+        return { status: 'warn' as const, value: val, reason: `Very low OI on short leg — spread likely untradeable` };
       })();
   const deltaCheck: CheckResult = bestCandidate ? { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Within target range' } : { status: 'pending', value: '—', reason: 'No candidate' };
 
@@ -4177,13 +4197,30 @@ const strategyScores = useMemo(() => {
                   </span>
                 </div>
               </div>
-              <div className="text-xs shrink-0 w-16" title="Open interest — short leg / long leg">
-                <div>
-                  <span className={th.label}>OI </span>
-                  <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
-                    {c.shortOI ?? '—'}/{c.longOI ?? '—'}
-                  </span>
-                </div>
+              <div className={`text-xs shrink-0 ${c.strategy === 'IC' ? 'w-28' : 'w-16'}`} title="Open interest — short leg / long leg. Color reflects short-leg liquidity (the leg you actively trade twice); long-leg OI shown for reference only.">
+                {c.strategy === 'IC' ? (
+                  <>
+                    <div>
+                      <span className={th.label}>OI P </span>
+                      <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
+                        {c.shortOI ?? '—'}/{c.longOI ?? '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className={th.label}>OI C </span>
+                      <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
+                        {c.shortCallOI ?? '—'}/{c.longCallOI ?? '—'}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <span className={th.label}>OI </span>
+                    <span className={`font-bold ${getOiColor(c, rules.OI_MIN)}`}>
+                      {c.shortOI ?? '—'}/{c.longOI ?? '—'}
+                    </span>
+                  </div>
+                )}
               </div>
               {result.ivx != null && (
                 <div className="text-xs shrink-0 w-28">
