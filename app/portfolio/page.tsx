@@ -1863,7 +1863,7 @@ Total credit collected: $${totalCredit.toFixed(2)}
 Current P&L: $${totalPnl.toFixed(2)} (${totalCredit > 0 ? ((totalPnl / totalCredit) * 100).toFixed(1) : 0}% of credit)
 Total at risk: $${totalAtRisk.toFixed(2)}
 Net delta: ${portfolioGreeks.deltaShares != null ? `${portfolioGreeks.deltaShares.toFixed(0)} share-equivalent` : 'N/A'}
-Net theta/day: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/day` : 'N/A'}
+Net theta/day: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/d' : 'N/A'}
 Net gamma: ${portfolioGreeks.gammaSharesPerDollar != null ? `${portfolioGreeks.gammaSharesPerDollar.toFixed(1)} shares per $1 move` : 'N/A'}
 Net vega: ${portfolioGreeks.vegaPerIvPoint != null ? `$${portfolioGreeks.vegaPerIvPoint.toFixed(0)} per 1 IV point` : 'N/A'}
 
@@ -5247,7 +5247,7 @@ function fmtThetaDisplay(theta: number | null): string {
   if (theta == null) return '—';
   const dollarsPerDay = theta * 100;
   const sign = dollarsPerDay >= 0 ? '+' : '-';
-  return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/day`;
+  return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/d';
 }
 
 function fmtDeltaDisplay(delta: number | null): string {
