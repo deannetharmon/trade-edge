@@ -4576,15 +4576,16 @@ const FILTER_PRESETS = [
   { key: 'intermediate',label: 'Intermediate', color: 'border-amber-500 text-amber-400',    desc: '15–29 DTE — active management' },
 ];
 
-function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedPreset, onRun, onClose }: {
+function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedPreset, onRun, onClose }: {
   th: typeof THEMES[Theme];
   lastMode: 'filter' | 'rank' | 'targeted';
   lastPreset: string;
   lastTargetedDteMin: number;
   lastTargetedDteMax: number;
   lastTargetedPopMin: number;
+  lastTargetedOtmMin: number;
   lastTargetedPreset: string;
-  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; preset: string }) => void;
+  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; preset: string }) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode);
@@ -4592,6 +4593,7 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
   const [tDteMin, setTDteMin] = useState(lastTargetedDteMin);
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
+  const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
   return createPortal(
@@ -4697,12 +4699,33 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
                 </div>
               </div>
             </div>
+
+            {/* OTM floor — hard reject below this % distance from spot. For IC,
+                gates on the worse (tighter) side of put/call, matching the OTM%
+                already shown in TargetedScanResultsPanel via calcTargetedEntryOtmPct. */}
+            <div>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN OTM %</p>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} max={30} value={tOtmMin} onChange={e => setTOtmMin(Math.min(30, Math.max(0, parseFloat(e.target.value) || 0)))}
+                  className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
+                <span className={`text-[9px] ${th.textFaint}`}>%</span>
+                <div className="flex gap-1.5">
+                  {[0, 4, 6, 8].map(v => (
+                    <button key={v} onClick={() => setTOtmMin(v)}
+                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                        tOtmMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
+                      }`}>{v}%</button>
+                  ))}
+                </div>
+              </div>
+              <p className={`text-[8px] ${th.textFaint} mt-1`}>For Iron Condors, gates on the tighter of put/call side</p>
+            </div>
           </div>
         )}
 
         <button onClick={() => {
           if (mode === 'targeted') {
-            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, preset: tPreset });
+            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, preset: tPreset });
           } else {
             onRun(mode, mode === 'filter' ? preset : undefined);
           }
@@ -5707,7 +5730,7 @@ interface RawScanEntry {
 // ── Targeted Scan Runner ──────────────────────────────────────────────────
 async function runTargetedScan(
   symbols: string[],
-  dteMin: number, dteMax: number, popMin: number,
+  dteMin: number, dteMax: number, popMin: number, otmMin: number,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
@@ -5788,6 +5811,13 @@ async function runTargetedScan(
                 const candidate = findBestICUnfiltered(chainItems, exp, price);
                 if (!candidate || (candidate.pop ?? 0) < popMin) continue;
                 if (candidate.dte < dteMin || candidate.dte > dteMax) continue;
+                // OTM floor — IC gates on the tighter (worse) side of put/call,
+                // matching calcTargetedEntryOtmPct's display formula.
+                if (price != null && price > 0 && candidate.shortCallStrike != null) {
+                  const putOtmPct = ((price - candidate.shortStrike) / price) * 100;
+                  const callOtmPct = ((candidate.shortCallStrike - price) / price) * 100;
+                  if (Math.min(putOtmPct, callOtmPct) < otmMin) continue;
+                }
                 const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
                 const displayResult: ScreenResult = {
                   ...result,
@@ -5821,6 +5851,15 @@ async function runTargetedScan(
                 // POP is calculated after credit/width are known.
                 if (seenStrikes.has(shortLeg.strikePrice)) continue;
                 seenStrikes.add(shortLeg.strikePrice);
+
+                // OTM floor — depends only on short strike + spot, not spread width,
+                // so gate here once per short strike rather than per-width below.
+                if (price != null && price > 0) {
+                  const otmPct = strat === 'BPS'
+                    ? ((price - shortLeg.strikePrice) / price) * 100
+                    : ((shortLeg.strikePrice - price) / price) * 100;
+                  if (otmPct < otmMin) continue;
+                }
 
                 // Find best long leg for this short strike (best credit ratio within maxWidth)
                 let bestCandidate: SpreadCandidate | null = null;
@@ -6272,6 +6311,7 @@ export default function Home() {
   const [targetedDteMin, setTargetedDteMin] = useState<number>(21);
   const [targetedDteMax, setTargetedDteMax] = useState<number>(45);
   const [targetedPopMin, setTargetedPopMin] = useState<number>(70);
+  const [targetedOtmMin, setTargetedOtmMin] = useState<number>(6); // matches Income Engine OTM floor default
   const [targetedSortBy, setTargetedSortBy] = useState<'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm'>('score');
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
@@ -6865,6 +6905,7 @@ export default function Home() {
           lastTargetedDteMin={targetedDteMin}
           lastTargetedDteMax={targetedDteMax}
           lastTargetedPopMin={targetedPopMin}
+          lastTargetedOtmMin={targetedOtmMin}
           lastTargetedPreset={targetedPreset}
           onClose={() => setShowRunModal(false)}
           onRun={(mode, preset, targetedOpts) => {
@@ -6875,13 +6916,14 @@ export default function Home() {
               setTargetedDteMin(targetedOpts.dteMin);
               setTargetedDteMax(targetedOpts.dteMax);
               setTargetedPopMin(targetedOpts.popMin);
+              setTargetedOtmMin(targetedOpts.otmMin);
               setTargetedPreset(targetedOpts.preset);
               // Find rules for chosen preset
               const foundPreset = RULE_PRESETS.find(p => p.key === targetedOpts.preset);
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, targetedCancelRef);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, targetedCancelRef);
             } else if (mode === 'rank') {
               runScreen(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel, 'rank');
             } else {
