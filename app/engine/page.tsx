@@ -1642,7 +1642,13 @@ function SpxPositionRow({ pos, th, spotPrice }: { pos: SpxPosition; th: typeof T
     </div>
   );
 }
-function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[Theme] }) {
+function WheelPositionRow({ pos, th, openChartSymbol, onOpenChart, onCloseChart }: {
+  pos: WheelPosition;
+  th: typeof THEMES[Theme];
+  openChartSymbol: string | null;
+  onOpenChart: (symbol: string, rect: DOMRect) => void;
+  onCloseChart: () => void;
+}) {
   const phaseColors = {
     'cash-secured-put': 'text-blue-400 border-blue-700 bg-blue-500/10',
     'assigned': 'text-amber-400 border-amber-700 bg-amber-500/10',
@@ -1660,7 +1666,7 @@ function WheelPositionRow({ pos, th }: { pos: WheelPosition; th: typeof THEMES[T
       <div className="w-16 shrink-0">
         <p className={`text-xs font-bold ${th.text}`}>{pos.symbol}</p>
         {pos.currentPrice && <p className={`text-[9px] ${th.textFaint}`}>${pos.currentPrice.toFixed(2)}</p>}
-        <ChartButton symbol={pos.symbol} th={th} isOpen={openChartSymbol === pos.symbol} onOpen={openChart} onClose={closeChart} />
+        <ChartButton symbol={pos.symbol} th={th} isOpen={openChartSymbol === pos.symbol} onOpen={onOpenChart} onClose={onCloseChart} />
       </div>
       <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${phaseColors[pos.phase]}`}>{phaseLabel[pos.phase]}</span>
       <span className={`text-[8px] font-bold shrink-0 ${ivrColor}`}>{ivrLabel}</span>
@@ -3540,7 +3546,7 @@ export default function EnginePage() {
                   if (aActive === bActive) return 0;
                   return aActive ? -1 : 1;
                 })
-                .map((pos, i) => <WheelPositionRow key={i} pos={pos} th={th} />)}
+                .map((pos, i) => <WheelPositionRow key={i} pos={pos} th={th} openChartSymbol={openChartSymbol} onOpenChart={openChart} onCloseChart={closeChart} />)}
 
               {/* Wheel suggestions — idle capital deployment */}
               {d.wheelSuggestions.filter(s => s.action !== 'wait').length > 0 && (
