@@ -7116,6 +7116,7 @@ export default function Home() {
                         { label: 'All', min: 0, max: 999 },
                         { label: '< 21', min: 0, max: 20 },
                         { label: '21-45', min: 21, max: 45 },
+                        { label: '30-45', min: 30, max: 45 },
                         { label: '> 45', min: 46, max: 999 },
                       ].map(d => (
                         <button key={d.label} onClick={() => { setRankDteMin(d.min); setRankDteMax(d.max); }}
