@@ -3516,9 +3516,14 @@ function TradeModal({ result, th, onClose }: {
           legs: closingLegs,
         },
         {
+          // NOTE: this OCO stop child must use 'order-type': 'Stop' with
+          // stop-trigger only — no price field. Combining 'Stop Limit'
+          // with both price and stop-trigger is rejected by TastyTrade's
+          // complex-order endpoint on real submission (it isn't caught
+          // by the entry-leg-only dry-run, since TT doesn't support
+          // dry-running complex/OTOCO orders at all).
           'time-in-force': 'GTC',
-          'order-type': 'Stop Limit',
-          price: '0.01',
+          'order-type': 'Stop',
           'stop-trigger': stopPrice.toFixed(2),
           'price-effect': 'Debit',
           legs: closingLegs,
