@@ -6473,15 +6473,19 @@ export default function Home() {
     persistWatchlist(next);
   };
   const [pmccTickers, setPmccTickers] = useState('');
-  const [results, setResults] = useState<ScreenResult[]>(() => {
-    try { const s = localStorage.getItem(LS_RESULTS_CACHE); return s ? JSON.parse(s) : []; } catch { return []; }
-  });
-  const [rawScanCache, setRawScanCache] = useState<RawScanEntry[]>(() => {
-    try { const s = localStorage.getItem(LS_RAW_SCAN_CACHE); return s ? JSON.parse(s) : []; } catch { return []; }
-  });
-  const [resultsCachedAt, setResultsCachedAt] = useState<number | null>(() => {
-    try { const s = localStorage.getItem(LS_RESULTS_CACHE_AT); return s ? parseInt(s, 10) : null; } catch { return null; }
-  });
+  // NOTE: results/rawScanCache/resultsCachedAt/screenMode used to read
+  // localStorage directly inside these useState lazy initializers. That
+  // runs synchronously on first render on BOTH server (no localStorage ->
+  // empty/default) and client (localStorage present -> already-populated
+  // cards). The resulting first-paint mismatch is what was causing React
+  // hydration error #418/#423 — confirmed via Network tab: server HTML
+  // contains zero result cards, but client's first paint already shows
+  // cached ones. Fix: start at plain defaults here (matches server every
+  // time); the real cached values are loaded in the
+  // "load cached scan state" useEffect below, strictly post-mount.
+  const [results, setResults] = useState<ScreenResult[]>([]);
+  const [rawScanCache, setRawScanCache] = useState<RawScanEntry[]>([]);
+  const [resultsCachedAt, setResultsCachedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -6492,9 +6496,7 @@ export default function Home() {
   const [runtimeStockRules, setRuntimeStockRules] = useState<RulesType>(getSavedRules);
   const [runtimeEtfRules, setRuntimeEtfRules] = useState<RulesType>(getSavedEtfRules);
   const [rankConfig, setRankConfig] = useState<RankConfig>(getSavedRankConfig);
-  const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>(() => {
-    try { const m = localStorage.getItem(LS_SCREEN_MODE); return (m === 'filter' || m === 'rank' || m === 'targeted') ? m : 'filter'; } catch { return 'filter'; }
-  });
+  const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>('filter');
   const [stockPresetLabel, setStockPresetLabel] = useState<string>(() => {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'Custom'; } catch { return 'Custom'; }
   });
@@ -6531,6 +6533,31 @@ export default function Home() {
   useEffect(() => {
     try {
       setPmccTickers(localStorage.getItem(LS_PMCC) || '');
+    } catch {}
+  }, []);
+
+  // load cached scan state — runs once, strictly after mount/hydration.
+  // This is the post-hydration counterpart to the plain-default
+  // useState calls above for results/rawScanCache/resultsCachedAt/
+  // screenMode. Keeping the localStorage reads here (instead of inside
+  // the initializers) guarantees the first client render always matches
+  // the server's render, eliminating the #418/#423 hydration mismatch.
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem(LS_RESULTS_CACHE);
+      if (s) setResults(JSON.parse(s));
+    } catch {}
+    try {
+      const s = localStorage.getItem(LS_RAW_SCAN_CACHE);
+      if (s) setRawScanCache(JSON.parse(s));
+    } catch {}
+    try {
+      const s = localStorage.getItem(LS_RESULTS_CACHE_AT);
+      if (s) setResultsCachedAt(parseInt(s, 10));
+    } catch {}
+    try {
+      const m = localStorage.getItem(LS_SCREEN_MODE);
+      if (m === 'filter' || m === 'rank' || m === 'targeted') setScreenMode(m);
     } catch {}
   }, []);
 
