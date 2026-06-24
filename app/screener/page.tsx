@@ -5,33 +5,15 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 
-// Inject accent CSS variable stylel
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-accent-style')) {
-    const style = document.createElement('style');
-    style.id = 'hunter-accent-style';
-    style.textContent = `
-      :root { --accent: #3b82f6; --accent-r: 59; --accent-g: 130; --accent-b: 246; }
-      .accent-border { border-color: var(--accent) !important; }
-      .accent-text { color: var(--accent) !important; }
-      .accent-bg { background-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1) !important; }
-      .accent-ring { box-shadow: 0 0 0 1px var(--accent) !important; }
-      nav a.active-nav, nav span.active-nav { background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2); color: var(--accent); }
-    `;
-    document.head.appendChild(style);
-  }
-}
-
-// Inject DM Sans font
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
+// NOTE: accent-style and DM-Sans-font <head> injection used to live here
+// as module-level side effects (`if (typeof document !== 'undefined') {...}`).
+// That ran document.head.appendChild() the instant the client bundle
+// evaluated — i.e. during/before React's hydration pass over this same
+// page. Direct DOM mutation outside React during the hydration window is
+// a known cause of React error #418/#423 hydration mismatches, which can
+// leave the page's event handling broken even though it looks normal.
+// Moved into a useEffect inside Home() (search "ensureHeadAssets") so it
+// runs strictly after React commits the initial tree.
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 type Theme = 'dark' | 'medium' | 'light';
@@ -6452,6 +6434,33 @@ export default function Home() {
   const th = THEMES[theme];
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
+
+  // ensureHeadAssets — runs once after mount, strictly post-hydration.
+  // Replaces the old module-level document.head.appendChild() side effects
+  // (accent CSS vars + DM Sans font link) that used to fire at client
+  // bundle-evaluation time and could race React's hydration of this page.
+  useEffect(() => {
+    if (!document.getElementById('hunter-accent-style')) {
+      const style = document.createElement('style');
+      style.id = 'hunter-accent-style';
+      style.textContent = `
+        :root { --accent: #3b82f6; --accent-r: 59; --accent-g: 130; --accent-b: 246; }
+        .accent-border { border-color: var(--accent) !important; }
+        .accent-text { color: var(--accent) !important; }
+        .accent-bg { background-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1) !important; }
+        .accent-ring { box-shadow: 0 0 0 1px var(--accent) !important; }
+        nav a.active-nav, nav span.active-nav { background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2); color: var(--accent); }
+      `;
+      document.head.appendChild(style);
+    }
+    if (!document.getElementById('hunter-font')) {
+      const link = document.createElement('link');
+      link.id = 'hunter-font';
+      link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
+      document.head.appendChild(link);
+    }
+  }, []);
 
   const [tickers, setTickers] = useState<WatchlistTicker[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(true);
