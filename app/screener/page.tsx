@@ -2446,11 +2446,24 @@ function exploreAllCandidatesForRank(
           const candidate = findBestICUnfiltered(chainItems, exp, price);
           if (!candidate) continue;
           const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          const icBestCandidate = result.bestCandidate ?? candidate;
+          // Recompute earnings against THIS candidate's actual dte -- the
+          // strictOnly call into runChecklist above never set its internal
+          // bestCandidate, so its earnings check is still the generic
+          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
+          const icEarningsCheck: CheckResult = (() => {
+            if (isEtf || !result.earningsDate) return result.checks.earnings;
+            const ed = daysUntil(result.earningsDate);
+            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
+            if (ed <= icBestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${icBestCandidate.dte}d expiry — scored lower in rank mode` };
+            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${icBestCandidate.dte}d expiry` };
+          })();
           results.push({
             ...result,
-            bestCandidate: result.bestCandidate ?? candidate,
+            bestCandidate: icBestCandidate,
             qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
             failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
+            checks: { ...result.checks, earnings: icEarningsCheck },
           });
           continue;
         }
@@ -2506,6 +2519,17 @@ function exploreAllCandidatesForRank(
 
           const syntheticChain = { ...chainData, expirations: [exp], chains: { [exp]: chainItems } };
           const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          // Recompute earnings against THIS candidate's actual dte -- the
+          // strictOnly call into runChecklist above never set its internal
+          // bestCandidate, so its earnings check is still the generic
+          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
+          const spreadEarningsCheck: CheckResult = (() => {
+            if (isEtf || !result.earningsDate) return result.checks.earnings;
+            const ed = daysUntil(result.earningsDate);
+            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
+            if (ed <= bestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
+            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
+          })();
           results.push({
             ...result,
             bestCandidate,
@@ -2513,6 +2537,7 @@ function exploreAllCandidatesForRank(
             failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
             checks: {
               ...result.checks,
+              earnings: spreadEarningsCheck,
               credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
               delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
               pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
