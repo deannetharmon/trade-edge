@@ -7059,6 +7059,9 @@ export default function PortfolioPage() {
       const { positions: data, pendingOrders: pendingData } = await loadPositions();
       setPositions(data);
       setPendingOrders(pendingData);
+      // TEMP DIAGNOSTIC -- remove after verifying extraction works
+      console.log('PENDING_ORDERS_DEBUG count:', pendingData.length);
+      console.log('PENDING_ORDERS_DEBUG full:', JSON.stringify(pendingData, null, 2));
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
