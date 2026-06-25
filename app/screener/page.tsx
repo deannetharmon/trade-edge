@@ -3787,9 +3787,11 @@ async function sendChatMessage(messages: ChatMessage[], symbol: string, tradeCon
   return data?.content?.find((b: any) => b.type === 'text')?.text ?? '';
 }
 
-function StockResearch({ symbol, th, riskContext, tradeContext }: {
-  symbol: string; th: typeof THEMES[Theme]; riskContext?: string; tradeContext?: string;
-}) {
+// Shared state for the AI Research feature. ResultCard owns one of these per
+// card so the inline button (Col 1, header row) and the full-width panel
+// (bottom of card, below the Open Position banner) can stay in sync without
+// the panel needing to live next to the button in the layout.
+function useStockResearch(symbol: string, tradeContext: string | undefined, riskContext: string | undefined) {
   const [open, setOpen]           = useState(false);
   const [loading, setLoading]     = useState(false);
   const [initialResult, setInitialResult] = useState<string | null>(null);
@@ -3802,7 +3804,7 @@ function StockResearch({ symbol, th, riskContext, tradeContext }: {
 
   const context = tradeContext ?? `${symbol} options analysis`;
 
-  const handleOpen = async (e: React.MouseEvent) => {
+  const handleToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (open) { setOpen(false); return; }
     setOpen(true);
@@ -3836,78 +3838,94 @@ function StockResearch({ symbol, th, riskContext, tradeContext }: {
     }
   };
 
-  return (
-    <div onClick={e => e.stopPropagation()}>
-      <button onClick={handleOpen}
-        className={`inline-flex items-center gap-1 text-[9px] px-2 py-0.5 border rounded transition-colors ${
-          open ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10'
-               : `${th.border} ${th.textFaint} hover:border-indigo-500 hover:text-indigo-400`
-        }`}>
-        <span className="text-[8px]">◎</span> Research
-      </button>
+  return {
+    open, loading, error, messages, input, setInput, chatLoading,
+    chatBottomRef, inputRef, handleToggle, handleSend,
+  };
+}
 
-      {open && (
-        <div className={`mt-2 rounded-xl border border-indigo-500/30 bg-indigo-500/5 overflow-hidden`}
-             style={{ width: '520px', maxWidth: '90vw' }}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-indigo-500/20">
-            <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest">◎ {symbol} — AI Research</p>
-            <button onClick={() => setOpen(false)} className={`text-[10px] ${th.textFaint} hover:text-red-400`}>✕</button>
+// Small inline trigger — lives in Col 1 of the ResultCard header row.
+function StockResearchButton({ research, th }: {
+  research: ReturnType<typeof useStockResearch>; th: typeof THEMES[Theme];
+}) {
+  return (
+    <button onClick={research.handleToggle}
+      className={`inline-flex items-center gap-1 text-[9px] px-2 py-0.5 border rounded transition-colors ${
+        research.open ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10'
+             : `${th.border} ${th.textFaint} hover:border-indigo-500 hover:text-indigo-400`
+      }`}>
+      <span className="text-[8px]">◎</span> Research
+    </button>
+  );
+}
+
+// Full-width chat panel — rendered at the very bottom of the card, below the
+// Open Position banner, so it never overlaps the strikes/credit/POP columns
+// in the header row above it.
+function StockResearchPanel({ symbol, th, research }: {
+  symbol: string; th: typeof THEMES[Theme]; research: ReturnType<typeof useStockResearch>;
+}) {
+  if (!research.open) return null;
+  return (
+    <div onClick={e => e.stopPropagation()}
+         className={`w-full border-t border-indigo-500/30 bg-indigo-500/5 overflow-hidden`}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-indigo-500/20">
+        <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest">◎ {symbol} — AI Research</p>
+        <button onClick={(e) => { e.stopPropagation(); research.handleToggle(e); }} className={`text-[10px] ${th.textFaint} hover:text-red-400`}>✕</button>
+      </div>
+      {/* Chat area */}
+      <div className="px-4 py-2 space-y-3 max-h-64 overflow-y-auto">
+        {research.loading && (
+          <div className="flex items-center gap-2 py-2">
+            <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            <span className={`text-[10px] ${th.textFaint}`}>Analyzing {symbol} trade setup...</span>
           </div>
-          {/* Chat area */}
-          <div className="px-3 py-2 space-y-3 max-h-64 overflow-y-auto">
-            {loading && (
-              <div className="flex items-center gap-2 py-2">
-                <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                <span className={`text-[10px] ${th.textFaint}`}>Analyzing {symbol} trade setup...</span>
-              </div>
+        )}
+        {research.error && <p className="text-red-400 text-[10px]">{research.error}</p>}
+        {research.messages.map((m, i) => (
+          <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {m.role === 'assistant' && (
+              <span className="text-[8px] text-indigo-400 mt-1 shrink-0">◎</span>
             )}
-            {error && <p className="text-red-400 text-[10px]">{error}</p>}
-            {messages.map((m, i) => (
-              <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {m.role === 'assistant' && (
-                  <span className="text-[8px] text-indigo-400 mt-1 shrink-0">◎</span>
-                )}
-                <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 max-w-[90%] ${
-                  m.role === 'user'
-                    ? 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
-                    : `${th.card} ${th.textMuted} border ${th.borderLight}`
-                }`}>
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {chatLoading && (
-              <div className="flex gap-2">
-                <span className="text-[8px] text-indigo-400 mt-1">◎</span>
-                <div className={`text-[11px] ${th.card} border ${th.borderLight} rounded-lg px-2.5 py-1.5`}>
-                  <div className="flex gap-1">
-                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={chatBottomRef} />
+            <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 max-w-[80%] ${
+              m.role === 'user'
+                ? 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
+                : `${th.card} ${th.textMuted} border ${th.borderLight}`
+            }`}>
+              {m.content}
+            </div>
           </div>
-          {/* Input */}
-          <div className={`flex gap-2 px-3 py-2 border-t border-indigo-500/20`}>
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Ask about this trade..."
-              className={`flex-1 text-[11px] ${th.input} border ${th.inputBorder} rounded-lg px-2.5 py-1.5 ${th.text} focus:outline-none focus:border-indigo-500 placeholder-slate-500`}
-            />
-            <button onClick={handleSend} disabled={!input.trim() || chatLoading || loading}
-              className="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-40">
-              Send
-            </button>
+        ))}
+        {research.chatLoading && (
+          <div className="flex gap-2">
+            <span className="text-[8px] text-indigo-400 mt-1">◎</span>
+            <div className={`text-[11px] ${th.card} border ${th.borderLight} rounded-lg px-2.5 py-1.5`}>
+              <div className="flex gap-1">
+                <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+        <div ref={research.chatBottomRef} />
+      </div>
+      {/* Input */}
+      <div className={`flex gap-2 px-4 py-2 border-t border-indigo-500/20`}>
+        <input
+          ref={research.inputRef}
+          value={research.input}
+          onChange={e => research.setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); research.handleSend(); } }}
+          placeholder="Ask about this trade..."
+          className={`flex-1 text-[11px] ${th.input} border ${th.inputBorder} rounded-lg px-2.5 py-1.5 ${th.text} focus:outline-none focus:border-indigo-500 placeholder-slate-500`}
+        />
+        <button onClick={research.handleSend} disabled={!research.input.trim() || research.chatLoading || research.loading}
+          className="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-40">
+          Send
+        </button>
+      </div>
     </div>
   );
 }
@@ -3932,6 +3950,24 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   const c = result.bestCandidate;
   const t = result.trendResult;
   const matchingPositions = (existingPositions ?? []).filter(p => p.symbol === result.symbol);
+
+  // AI Research: state lives here so the Col-1 button and the full-width
+  // panel at the bottom of the card can share it. See useStockResearch.
+  const researchRiskContext = portfolioRisk && (portfolioRisk.sameSymbolCount > 0 || portfolioRisk.sectorCount >= SECTOR_LIMIT)
+    ? [
+        portfolioRisk.sameSymbolCount > 0 ? `Already holds ${portfolioRisk.sameSymbolCount} position(s) on this symbol.` : null,
+        portfolioRisk.sectorCount >= SECTOR_LIMIT ? `${portfolioRisk.sectorCount} open positions in ${portfolioRisk.sectorName} sector.` : null,
+      ].filter(Boolean).join(' ')
+    : undefined;
+  const researchTradeContext = result.bestCandidate
+    ? `${result.strategy} ${result.bestCandidate.shortStrike}/${result.bestCandidate.longStrike}${result.strategy === 'IC' ? ` · ${result.bestCandidate.shortCallStrike}/${result.bestCandidate.longCallStrike}` : ''} exp ${result.bestCandidate.expiration} (${result.bestCandidate.dte}d) · credit $${(result.bestCandidate.totalCredit ?? result.bestCandidate.credit).toFixed(2)} · ROC ${result.bestCandidate.roc.toFixed(0)}% · POP ${result.bestCandidate.pop?.toFixed(0)}% · IVR ${result.ivr?.toFixed(1)}%`
+    : `${result.strategy} on ${result.symbol}`;
+  const research = useStockResearch(result.symbol, researchTradeContext, researchRiskContext);
+  // Opening Research expands the card so the full-width panel at the bottom
+  // is immediately visible; closing Research does not force a collapse.
+  useEffect(() => {
+    if (research.open) setExpanded(true);
+  }, [research.open]);
 
   // Plain factual sector note — only shown when there's something the "Open
   // Position" banner doesn't already cover (that banner handles same-symbol
@@ -4196,17 +4232,7 @@ const strategyScores = useMemo(() => {
               </div>
             )}
           </div>
-          <StockResearch
-            symbol={result.symbol}
-            th={th}
-            riskContext={portfolioRisk && (portfolioRisk.sameSymbolCount > 0 || portfolioRisk.sectorCount >= SECTOR_LIMIT)
-              ? [
-                  portfolioRisk.sameSymbolCount > 0 ? `Already holds ${portfolioRisk.sameSymbolCount} position(s) on this symbol.` : null,
-                  portfolioRisk.sectorCount >= SECTOR_LIMIT ? `${portfolioRisk.sectorCount} open positions in ${portfolioRisk.sectorName} sector.` : null,
-                ].filter(Boolean).join(' ')
-              : undefined}
-            tradeContext={c ? `${result.strategy} ${c.shortStrike}/${c.longStrike}${c.strategy === 'IC' ? ` · ${c.shortCallStrike}/${c.longCallStrike}` : ''} exp ${c.expiration} (${c.dte}d) · credit $${(c.totalCredit ?? c.credit).toFixed(2)} · ROC ${c.roc.toFixed(0)}% · POP ${c.pop?.toFixed(0)}% · IVR ${result.ivr?.toFixed(1)}%` : `${result.strategy} on ${result.symbol}`}
-          />
+          <StockResearchButton research={research} th={th} />
         </div>
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
@@ -4587,6 +4613,10 @@ const strategyScores = useMemo(() => {
           ))}
         </div>
       )}
+
+      {/* AI Research panel — full width, always last, so it never overlaps
+          the header row's strikes/credit/POP columns above it. */}
+      <StockResearchPanel symbol={result.symbol} th={th} research={research} />
 
       {/* Best Opportunity Modal — rendered via portal to escape card click handler */}
       {showBestFinder && createPortal(
