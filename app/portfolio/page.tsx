@@ -6727,6 +6727,88 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   );
 }
 
+// ── Pending Order Card ──────────────────────────────────────────────────────
+function PendingOrderCard({ order, th, cancelling, onCancel }: {
+  order: PendingOrder; th: typeof THEMES[Theme];
+  cancelling: boolean; onCancel: (order: PendingOrder) => void;
+}) {
+  const strategyColor = order.strategy === 'BPS'
+    ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
+    : order.strategy === 'BCS'
+    ? 'border-red-600 text-red-400 bg-red-500/10'
+    : order.strategy === 'IC'
+    ? 'border-blue-600 text-blue-400 bg-blue-500/10'
+    : 'border-slate-600 text-slate-400 bg-slate-500/10';
+
+  const putLegs = order.legs.filter(l => l.optionType === 'P').sort((a, b) => b.strikePrice - a.strikePrice);
+  const callLegs = order.legs.filter(l => l.optionType === 'C').sort((a, b) => a.strikePrice - b.strikePrice);
+  const strikesDisplay = order.strategy === 'IC' && putLegs.length >= 2 && callLegs.length >= 2
+    ? `${putLegs[0].strikePrice}P/${putLegs[1].strikePrice}P · ${callLegs[0].strikePrice}C/${callLegs[1].strikePrice}C`
+    : putLegs.length >= 2
+      ? `${putLegs[0].strikePrice}P/${putLegs[1].strikePrice}P`
+      : callLegs.length >= 2
+        ? `${callLegs[0].strikePrice}C/${callLegs[1].strikePrice}C`
+        : order.legs.map(l => `${l.strikePrice}${l.optionType ?? ''}`).join('/');
+
+  return (
+    <div className={`border border-yellow-700/60 ${th.card} rounded-lg p-4`}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{order.symbol}</span>
+          <span className={`text-[10px] font-bold px-2 py-0.5 border rounded ${strategyColor}`}>{order.strategy}</span>
+          <span className={`text-xs ${th.textMuted}`}>{strikesDisplay}</span>
+          {order.expDate && <span className={`text-[10px] ${th.textFaint}`}>exp {order.expDate}</span>}
+          <span className={`text-[10px] font-bold px-2 py-0.5 border rounded border-yellow-600 text-yellow-400 bg-yellow-500/10`}>
+            {order.status}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {order.limitPrice != null && (
+            <span className={`text-xs font-bold ${order.priceEffect === 'Credit' ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${order.limitPrice.toFixed(2)} {order.priceEffect ?? ''}
+            </span>
+          )}
+          <button
+            onClick={() => onCancel(order)}
+            disabled={cancelling}
+            className="text-[10px] px-3 py-1.5 border border-red-700 text-red-400 rounded hover:bg-red-600/20 transition-colors font-bold disabled:opacity-40"
+          >
+            {cancelling ? 'CANCELLING...' : 'CANCEL'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Pending Orders Section ──────────────────────────────────────────────────
+function PendingOrdersSection({ orders, th, cancellingOrderIds, onCancel }: {
+  orders: PendingOrder[]; th: typeof THEMES[Theme];
+  cancellingOrderIds: Set<string>; onCancel: (order: PendingOrder) => void;
+}) {
+  if (orders.length === 0) return null;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[10px] text-yellow-400 tracking-widest font-bold uppercase">
+          ⏳ Pending Orders — {orders.length}
+        </p>
+      </div>
+      <div className="space-y-2">
+        {orders.map(order => (
+          <PendingOrderCard
+            key={order.id}
+            order={order}
+            th={th}
+            cancelling={cancellingOrderIds.has(order.id)}
+            onCancel={onCancel}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Position Section with group-action header ──────────────────────────────
 function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, groupAction, onGroupAction, onExecute }: {
   title: string; titleColor: string; positions: Position[];
@@ -7210,24 +7292,30 @@ export default function PortfolioPage() {
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
 
-      {loading && positions.length === 0 && (
+      {loading && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex items-center justify-center h-64">
           <div className={`text-sm ${th.textFaint} tracking-widest`}>FETCHING POSITIONS...</div>
         </div>
       )}
 
-      {!loading && !error && positions.length === 0 && (
+      {!loading && !error && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex flex-col items-center justify-center h-64 gap-2">
           <p className={`text-sm ${th.textFaint} tracking-widest`}>NO OPEN POSITIONS FOUND</p>
           <p className={`text-xs ${th.textFaint}`}>Options positions from your TastyTrade account will appear here</p>
         </div>
       )}
 
-      {positions.length > 0 && (
+      {(positions.length > 0 || pendingOrders.length > 0) && (
         <>
           <div className="overflow-x-auto">
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>
               <PortfolioGreeksDashboard positions={positions} th={th} />
+
+              <PendingOrdersSection
+                orders={pendingOrders} th={th}
+                cancellingOrderIds={cancellingOrderIds}
+                onCancel={cancelPendingOrder}
+              />
 
               {needsClose.length > 0 && (
                 <PositionSection
