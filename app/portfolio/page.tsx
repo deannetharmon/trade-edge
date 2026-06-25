@@ -121,6 +121,67 @@ interface Position {
   earningsDate: string | null; // next earnings only if on/before option expiration
 }
 
+// ── Position Snapshots ───────────────────────────────────────────────────
+// Daily snapshot of a position's live state, captured client-side whenever
+// the Portfolio page loads (TastyTrade can't be called server-side, so this
+// can only run while the browser is open — see project notes). Kept
+// permanently once captured; only the "Clear Snapshot History" button
+// removes them. This is what lets a future 21-vs-30-DTE exit comparison use
+// real recorded values instead of a modeled estimate.
+interface PositionSnapshot {
+  date: string;          // YYYY-MM-DD, the day this snapshot was taken
+  dte: number;
+  currentValue: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  iv: number | null;
+  theta: number | null;
+  gamma: number | null;
+  netDelta: number | null;
+  stockPrice: number | null;
+}
+
+function todayLocalDateString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
+  if (positions.length === 0) return;
+  const today = todayLocalDateString();
+  const entries = positions.map(p => ({
+    positionKey: p.key,
+    snapshot: {
+      date: today,
+      dte: p.dte,
+      currentValue: p.currentValue,
+      pnl: p.pnl,
+      pnlPct: p.pnlPct,
+      iv: p.iv,
+      theta: p.theta,
+      gamma: p.gamma,
+      netDelta: p.netDelta,
+      stockPrice: p.stockPrice,
+    } as PositionSnapshot,
+  }));
+  try {
+    await fetch('/api/position-snapshots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+  } catch (e) {
+    console.error('Snapshot capture failed (non-blocking):', e);
+  }
+}
+
+async function clearSnapshotHistory(): Promise<void> {
+  await fetch('/api/position-snapshots', { method: 'DELETE' });
+}
+
 interface PositionAnalysis {
   positionKey: string;
   symbol: string;
@@ -6879,6 +6940,8 @@ export default function PortfolioPage() {
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
+  const [clearingSnapshots, setClearingSnapshots] = useState(false);
   const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType }[] | null>(null);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
@@ -6911,6 +6974,7 @@ export default function PortfolioPage() {
       const data = await loadPositions();
       setPositions(data);
       setLastRefresh(new Date());
+      captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
       if (e.message === 'Not authenticated' || e.message === 'Session expired') { window.location.href = '/login'; return; }
       setError(e.message);
