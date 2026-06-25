@@ -3707,6 +3707,9 @@ function TradeModal({ result, th, onClose }: {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      // TEMP DEBUG -- remove once preflight failure is diagnosed
+      console.log('PLACE_ORDER_DEBUG payload sent:', JSON.stringify(payload, null, 2));
+      console.log('PLACE_ORDER_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
       setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
       setPhase('done');
