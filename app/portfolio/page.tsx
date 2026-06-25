@@ -1533,9 +1533,6 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
   const pendingOrders: PendingOrder[] = [];
   try {
     const complexData = await fetchAllComplexOrders(accountNumber, token);
-    // TEMP RAW DIAGNOSTIC -- remove after verifying response shape
-    console.log('RAW_COMPLEX_ORDERS_DEBUG count:', (complexData?.data?.items ?? []).length);
-    console.log('RAW_COMPLEX_ORDERS_DEBUG full:', JSON.stringify(complexData, null, 2));
     for (const order of complexData?.data?.items ?? []) {
       // Parent OCO envelope has no status/tif/type — check nested sub-orders instead
       const nestedOrders: any[] = order.orders ?? [];
@@ -1625,11 +1622,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
         }
       }
     }
-  } catch (e: any) {
-    // TEMP RAW DIAGNOSTIC -- remove after verifying error
-    console.log('COMPLEX_ORDERS_CATCH_DEBUG error:', e?.message ?? e);
-    console.log('COMPLEX_ORDERS_CATCH_DEBUG full:', e);
-  }
+  } catch {}
 
   const plBySymbol: Record<string, number> = {};
   try {
