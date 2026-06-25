@@ -6722,8 +6722,13 @@ export default function Home() {
     const applyTs = Date.now();
     setResultsCachedAt(applyTs);
     try {
-      localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(screenResults));
-      localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
+      try {
+        localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(screenResults));
+        localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
+        console.log('[SAVE DEBUG site1] saved', screenResults.length, 'results,', JSON.stringify(screenResults).length, 'bytes');
+      } catch (e) {
+        console.error('[SAVE DEBUG site1] FAILED:', e);
+      }
     } catch {}
   }, [rawScanCache]);
 
@@ -6853,9 +6858,14 @@ export default function Home() {
       const cacheTs = Date.now();
       setResultsCachedAt(cacheTs);
       try {
-        localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(uniqueResults));
+        const serialized = JSON.stringify(uniqueResults);
+        console.log('[SAVE DEBUG site2] about to save', uniqueResults.length, 'results,', serialized.length, 'bytes, mode:', (modeOverride ?? screenMode));
+        localStorage.setItem(LS_RESULTS_CACHE, serialized);
         localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
-      } catch {}
+        console.log('[SAVE DEBUG site2] save succeeded');
+      } catch (e) {
+        console.error('[SAVE DEBUG site2] FAILED:', e);
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
