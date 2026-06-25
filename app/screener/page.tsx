@@ -1947,7 +1947,9 @@ function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate
         creditRatio,
         roc,
         pop,
-        optimized: false
+        optimized: false,
+        shortOccSymbol: shortLeg.occSymbol,
+        longOccSymbol: longLeg.occSymbol,
       });
     }
   }
@@ -1970,7 +1972,7 @@ function findBestICUnfiltered(chain: any[], expDate: string, price: number | nul
   const totalCredit = parseFloat((putSpread.credit + callSpread.credit).toFixed(2));
   const maxLoss = Math.max(putSpread.spreadWidth - putSpread.credit, callSpread.spreadWidth - callSpread.credit);
   const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false };
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false, shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol, shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
 }
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
