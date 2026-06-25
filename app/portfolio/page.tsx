@@ -494,6 +494,76 @@ async function findRollCandidates(pos: Position, token: string): Promise<RollCan
   }
 }
 
+// ── Roll Candidate Categorization ───────────────────────────────────────────
+type RollCategory = 'bestCredit' | 'safest' | 'closestDelta';
+
+const ROLL_CATEGORY_LABELS: Record<RollCategory, string> = {
+  bestCredit: 'Best Credit',
+  safest: 'Safest / Most Liquid',
+  closestDelta: 'Closest to Target Delta',
+};
+
+interface CategorizedRollPick {
+  candidate: RollCandidate;
+  categories: RollCategory[];
+}
+
+function liquidityScore(c: RollCandidate): number {
+  const combinedOi = (c.shortOi ?? 0) + (c.longOi ?? 0);
+  const oiScore = Math.min(70, (combinedOi / 2000) * 70);
+  const combinedBidAsk = (c.shortBidAsk ?? 0.10) + (c.longBidAsk ?? 0.10);
+  const bidAskScore = Math.max(0, 30 - (combinedBidAsk / 0.20) * 30);
+  return oiScore + bidAskScore;
+}
+
+function pickForCategory(
+  candidates: RollCandidate[],
+  scoreFn: (c: RollCandidate) => number,
+  higherIsBetter: boolean
+): RollCandidate | null {
+  if (candidates.length === 0) return null;
+  const compliant = candidates.filter(c => c.ruleViolations.length === 0);
+  const pool = compliant.length > 0 ? compliant : candidates;
+  return pool.reduce((best, c) => {
+    if (!best) return c;
+    const cScore = scoreFn(c);
+    const bestScore = scoreFn(best);
+    return higherIsBetter
+      ? (cScore > bestScore ? c : best)
+      : (cScore < bestScore ? c : best);
+  }, null as RollCandidate | null);
+}
+
+function categorizeRollCandidates(candidates: RollCandidate[], strategy: string): CategorizedRollPick[] {
+  if (candidates.length === 0) return [];
+
+  const targetDelta = strategy === 'BCS' ? 0.25 : -0.25;
+
+  const bestCreditPick = pickForCategory(candidates, c => c.creditRatio, true);
+  const safestPick = pickForCategory(candidates, c => liquidityScore(c), true);
+  const closestDeltaPick = pickForCategory(candidates, c => Math.abs(c.delta - targetDelta), false);
+
+  const keyOf = (c: RollCandidate) => `${c.expiry}-${c.shortStrike}-${c.longStrike}`;
+  const picks = new Map<string, CategorizedRollPick>();
+
+  const register = (candidate: RollCandidate | null, category: RollCategory) => {
+    if (!candidate) return;
+    const key = keyOf(candidate);
+    const existing = picks.get(key);
+    if (existing) {
+      existing.categories.push(category);
+    } else {
+      picks.set(key, { candidate, categories: [category] });
+    }
+  };
+
+  register(bestCreditPick, 'bestCredit');
+  register(safestPick, 'safest');
+  register(closestDeltaPick, 'closestDelta');
+
+  return Array.from(picks.values()).sort((a, b) => b.categories.length - a.categories.length);
+}
+
 // ── Theme ──────────────────────────────────────────────────────────────────
 
 
