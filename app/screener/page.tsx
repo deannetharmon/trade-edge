@@ -3951,6 +3951,17 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   const t = result.trendResult;
   const matchingPositions = (existingPositions ?? []).filter(p => p.symbol === result.symbol);
 
+  // Plain factual sector note — only shown when there's something the "Open
+  // Position" banner doesn't already cover (that banner handles same-symbol
+  // detail; this covers broader same-sector exposure across other tickers).
+  const SECTOR_LIMIT = 3;
+  const showSectorNote = Boolean(
+    portfolioRisk &&
+    portfolioRisk.sectorName !== 'Index' &&
+    portfolioRisk.sectorName !== 'Unknown' &&
+    portfolioRisk.sectorCount >= SECTOR_LIMIT
+  );
+
   // AI Research: state lives here so the Col-1 button and the full-width
   // panel at the bottom of the card can share it. See useStockResearch.
   const researchRiskContext = portfolioRisk && (portfolioRisk.sameSymbolCount > 0 || portfolioRisk.sectorCount >= SECTOR_LIMIT)
@@ -3968,17 +3979,6 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   useEffect(() => {
     if (research.open) setExpanded(true);
   }, [research.open]);
-
-  // Plain factual sector note — only shown when there's something the "Open
-  // Position" banner doesn't already cover (that banner handles same-symbol
-  // detail; this covers broader same-sector exposure across other tickers).
-  const SECTOR_LIMIT = 3;
-  const showSectorNote = Boolean(
-    portfolioRisk &&
-    portfolioRisk.sectorName !== 'Index' &&
-    portfolioRisk.sectorName !== 'Unknown' &&
-    portfolioRisk.sectorCount >= SECTOR_LIMIT
-  );
 
   const otmPct = (() => {
     if (!c || result.price == null || result.price <= 0) return null;
