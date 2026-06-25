@@ -1533,6 +1533,9 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
   const pendingOrders: PendingOrder[] = [];
   try {
     const complexData = await fetchAllComplexOrders(accountNumber, token);
+    // TEMP RAW DIAGNOSTIC -- remove after verifying response shape
+    console.log('RAW_COMPLEX_ORDERS_DEBUG count:', (complexData?.data?.items ?? []).length);
+    console.log('RAW_COMPLEX_ORDERS_DEBUG full:', JSON.stringify(complexData, null, 2));
     for (const order of complexData?.data?.items ?? []) {
       // Parent OCO envelope has no status/tif/type — check nested sub-orders instead
       const nestedOrders: any[] = order.orders ?? [];
@@ -7059,9 +7062,6 @@ export default function PortfolioPage() {
       const { positions: data, pendingOrders: pendingData } = await loadPositions();
       setPositions(data);
       setPendingOrders(pendingData);
-      // TEMP DIAGNOSTIC -- remove after verifying extraction works
-      console.log('PENDING_ORDERS_DEBUG count:', pendingData.length);
-      console.log('PENDING_ORDERS_DEBUG full:', JSON.stringify(pendingData, null, 2));
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
