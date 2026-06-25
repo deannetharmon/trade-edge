@@ -402,12 +402,16 @@ async function findRollCandidates(pos: Position, token: string): Promise<RollCan
     const chainData = await ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/expirations`, token);
     const expirations: any[] = chainData?.data?.items ?? [];
     const today = new Date();
+    console.log(`ROLL_SEARCH_DEBUG ${pos.symbol}: raw expirations count=`, expirations.length);
+    console.log(`ROLL_SEARCH_DEBUG ${pos.symbol}: raw expirations`, expirations.map((e: any) => e['expiration-date']));
     const validExpiries = expirations
       .map((e: any) => ({
         expiry: e['expiration-date'],
         dte: Math.round((new Date(e['expiration-date']).getTime() - today.getTime()) / 86400000),
       }))
       .filter(e => e.dte >= 28 && e.dte <= 50);
+
+    console.log(`ROLL_SEARCH_DEBUG ${pos.symbol}: validExpiries (28-50 DTE)=`, validExpiries);
 
     if (validExpiries.length === 0) return [];
 
