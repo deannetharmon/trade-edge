@@ -1622,7 +1622,11 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
         }
       }
     }
-  } catch {}
+  } catch (e: any) {
+    // TEMP RAW DIAGNOSTIC -- remove after verifying error
+    console.log('COMPLEX_ORDERS_CATCH_DEBUG error:', e?.message ?? e);
+    console.log('COMPLEX_ORDERS_CATCH_DEBUG full:', e);
+  }
 
   const plBySymbol: Record<string, number> = {};
   try {
