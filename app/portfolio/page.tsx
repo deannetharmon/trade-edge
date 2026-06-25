@@ -121,6 +121,33 @@ interface Position {
   earningsDate: string | null; // next earnings only if on/before option expiration
 }
 
+// ── Pending Orders ───────────────────────────────────────────────────────
+// An unfilled OTOCO entry/opening order -- the trigger leg of a complex
+// order that hasn't filled yet, so it has no corresponding Position. These
+// come from the same /complex-orders fetch loadPositions already does for
+// gtcSymbols, filtered down to legs with Sell to Open / Buy to Open actions
+// (as opposed to Buy to Close / Sell to Close, which mark GTC/stop orders
+// protecting an already-open position -- those are tracked separately via
+// Position.hasGtc / gtcOrderId / stopLossStatus, not here).
+interface PendingOrderLeg {
+  symbol: string;       // OCC option symbol, space-padded as TastyTrade returns it
+  action: string;       // 'Sell to Open' | 'Buy to Open' | etc.
+  optionType: 'P' | 'C' | null;
+  strikePrice: number;
+}
+interface PendingOrder {
+  id: string;                 // complex-order id -- pending orders are always complex-order-sourced
+  accountNumber: string;
+  symbol: string;              // underlying symbol
+  strategy: string;             // inferred from legs: BPS / BCS / IC / UNKNOWN
+  legs: PendingOrderLeg[];
+  expDate: string | null;       // expiration date of the option legs, if parseable
+  limitPrice: number | null;    // trigger order's limit price
+  priceEffect: string | null;   // 'Credit' | 'Debit'
+  status: string;               // raw status string from the trigger/nested order
+  createdAt: string | null;
+}
+
 // ── Position Snapshots ───────────────────────────────────────────────────
 // Daily snapshot of a position's live state, captured client-side whenever
 // the Portfolio page loads (TastyTrade can't be called server-side, so this
@@ -1367,7 +1394,7 @@ function classifyPositionStopLoss(position: Pick<Position, 'legs' | 'creditRecei
   return orderPrice <= stopThreshold + 0.02 ? { status: 'live', price: orderPrice } : { status: 'loose', price: orderPrice };
 }
 
-async function loadPositions(): Promise<Position[]> {
+async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: PendingOrder[] }> {
   const token = await getAccessToken();
   const accountsData = await ttFetch('/customers/me/accounts', token);
   const accounts = accountsData?.data?.items ?? [];
@@ -1503,6 +1530,7 @@ async function loadPositions(): Promise<Position[]> {
     }
   } catch {}
 
+  const pendingOrders: PendingOrder[] = [];
   try {
     const complexData = await fetchAllComplexOrders(accountNumber, token);
     for (const order of complexData?.data?.items ?? []) {
@@ -1535,6 +1563,58 @@ async function loadPositions(): Promise<Position[]> {
               if (fromOcc === 'SPX') gtcSymbols.add('SPXW');
               console.log(`COMPLEX LEG occ=${leg.symbol} added=${fromOcc}`);
             }
+          }
+        }
+
+        // Pending entry order detection: the trigger leg of an OTOCO opening
+        // order uses Sell to Open / Buy to Open. GTC profit-target and stop
+        // legs on an already-open position use Buy to Close / Sell to Close
+        // -- those are tracked via Position.hasGtc/gtcOrderId elsewhere, not
+        // here. Only treat this complex order as "pending" if it's still
+        // active overall AND its trigger order's legs are opening actions.
+        if (hasActiveNested || parentActive) {
+          const triggerOrder = order['trigger-order'] ?? nestedOrders[0];
+          const triggerLegs: any[] = triggerOrder?.legs ?? [];
+          const isOpeningOrder = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
+            const action = String(l.action ?? '');
+            return action === 'Sell to Open' || action === 'Buy to Open';
+          });
+          if (isOpeningOrder) {
+            const parsedLegs: PendingOrderLeg[] = triggerLegs.map((l: any) => {
+              const occSymbol = String(l.symbol ?? '');
+              const parsed = parseOptionSymbol(occSymbol);
+              return {
+                symbol: occSymbol,
+                action: String(l.action ?? ''),
+                optionType: parsed.strikePrice > 0 ? parsed.optionType : null,
+                strikePrice: parsed.strikePrice,
+              };
+            });
+            const putLegs = parsedLegs.filter(l => l.optionType === 'P');
+            const callLegs = parsedLegs.filter(l => l.optionType === 'C');
+            let strategy = 'UNKNOWN';
+            if (putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
+            else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
+            else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
+            const underlyingSymbol =
+              triggerLegs[0]?.['underlying-symbol'] ??
+              (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
+            const expMatch = parsedLegs[0]?.symbol?.match(/(\d{6})[CP]\d{8}/);
+            const expDate = expMatch
+              ? `20${expMatch[1].slice(0, 2)}-${expMatch[1].slice(2, 4)}-${expMatch[1].slice(4, 6)}`
+              : null;
+            pendingOrders.push({
+              id: String(order.id ?? ''),
+              accountNumber,
+              symbol: underlyingSymbol ?? 'UNKNOWN',
+              strategy,
+              legs: parsedLegs,
+              expDate,
+              limitPrice: triggerOrder?.price != null ? parseFloat(triggerOrder.price) : null,
+              priceEffect: triggerOrder?.['price-effect'] ?? null,
+              status: triggerOrder?.status ?? order['status'] ?? 'unknown',
+              createdAt: order['received-at'] ?? order['updated-at'] ?? null,
+            });
           }
         }
       }
@@ -1728,7 +1808,7 @@ async function loadPositions(): Promise<Position[]> {
     if (aPri !== bPri) return aPri - bPri;
     return a.dte - b.dte;
   });
-  return positions;
+  return { positions, pendingOrders };
 }
 
 // ── Recommendation Engine ──────────────────────────────────────────────────
@@ -6976,8 +7056,9 @@ export default function PortfolioPage() {
   const fetchPositions = async () => {
     setLoading(true); setError(''); setChecked(new Set());
     try {
-      const data = await loadPositions();
+      const { positions: data, pendingOrders: pendingData } = await loadPositions();
       setPositions(data);
+      setPendingOrders(pendingData);
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
