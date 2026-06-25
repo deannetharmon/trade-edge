@@ -3186,6 +3186,8 @@ function BatchConfirmModal({
   const [rollInputs, setRollInputs] = useState<Record<string, { expiry: string; shortStrike: string; longStrike: string; credit: string }>>({});
   const [rollMode, setRollMode] = useState<Record<string, string>>({});
   const [rollSuggestions, setRollSuggestions] = useState<Record<string, RollSuggestion | null>>({});
+  const [rollCandidatePicks, setRollCandidatePicks] = useState<Record<string, CategorizedRollPick[]>>({});
+  const [rollSearchLoading, setRollSearchLoading] = useState<Record<string, boolean>>({});
   const [verdicts, setVerdicts] = useState<Record<string, ActionVerdict>>({});
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
   const [limitOverrides, setLimitOverrides] = useState<Record<string, string>>({});
@@ -3268,16 +3270,23 @@ function BatchConfirmModal({
           };
 
           if (action === 'CLOSE_ROLL') {
-            const suggestion = await fetchRollSuggestion(pos, token).catch(() => null);
-            if (!cancelled) setRollSuggestions(prev => ({ ...prev, [pos.key]: suggestion }));
-            if (suggestion && !rollInputs[pos.key]) {
+            if (!cancelled) setRollSearchLoading(prev => ({ ...prev, [pos.key]: true }));
+            const candidates = await findRollCandidates(pos, token).catch(() => []);
+            const picks = categorizeRollCandidates(candidates, pos.strategy);
+            if (!cancelled) {
+              setRollCandidatePicks(prev => ({ ...prev, [pos.key]: picks }));
+              setRollSearchLoading(prev => ({ ...prev, [pos.key]: false }));
+            }
+            const defaultPick = picks[0]?.candidate ?? null;
+            if (!cancelled) setRollSuggestions(prev => ({ ...prev, [pos.key]: defaultPick }));
+            if (defaultPick && !rollInputs[pos.key]) {
               setRollInputs(prev => ({
                 ...prev,
                 [pos.key]: {
-                  expiry: suggestion.expiry,
-                  shortStrike: String(suggestion.shortStrike),
-                  longStrike: String(suggestion.longStrike),
-                  credit: String(suggestion.credit),
+                  expiry: defaultPick.expiry,
+                  shortStrike: String(defaultPick.shortStrike),
+                  longStrike: String(defaultPick.longStrike),
+                  credit: String(defaultPick.credit),
                 },
               }));
             }
@@ -3754,70 +3763,109 @@ function BatchConfirmModal({
                           <span className={`text-[9px} ${th.textFaint}`}>{rollMode[item.pos.key] === 'roll' ? 'Closes and opens new spread.' : 'Closes position only.'}</span>
                         </div>
                         <div className="pt-2 space-y-3" style={{display: rollMode[item.pos.key] === 'roll' ? undefined : 'none'}}>
-                          {suggestion && (
-                            <div className={`rounded-lg border p-3 space-y-2 ${
-                              rollIsBlocking(suggestion) ? 'border-red-500/50 bg-red-500/5' :
-                              suggestion.ruleViolations.length > 0 ? 'border-yellow-500/40 bg-yellow-500/5' :
-                              'border-blue-500/30 bg-blue-500/5'
-                            }`}>
-                              <div className="flex items-center justify-between flex-wrap gap-2">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Suggested Roll</span>
-                                  <span className="text-[10px] ac-text" style={{ fontFamily: "'DM Mono', monospace" }}>
-                                    {suggestion.expiry} ({suggestion.dte}d) · {suggestion.shortStrike}/{suggestion.longStrike} · δ{suggestion.delta.toFixed(2)}
-                                  </span>
-                                </div>
-                                <button onClick={() => setRollInputs(prev => ({
-                                  ...prev,
-                                  [item.pos.key]: { expiry: suggestion.expiry, shortStrike: String(suggestion.shortStrike), longStrike: String(suggestion.longStrike), credit: String(suggestion.credit) }
-                                }))} className="text-[9px] px-2 py-0.5 border ac-btn rounded hover:ac-bg-20 transition-colors">
-                                  Use this
-                                </button>
-                              </div>
-                              <div className="grid grid-cols-4 gap-2">
-                                <div>
-                                  <p className={`text-[9px} ${th.textFaint}`}>Credit (mid)</p>
-                                  <p className={`text-[10px} font-bold ${suggestion.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                                    ${suggestion.creditMid.toFixed(2)}
-                                  </p>
-                                  <p className={`text-[9px} ${th.textFaint}`}>{(suggestion.creditRatio * 100).toFixed(0)}% of width</p>
-                                </div>
-                                <div>
-                                  <p className={`text-[9px} ${th.textFaint}`}>Limit order</p>
-                                  <p className={`text-[10px} font-bold text-blue-400`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                                    ${suggestion.credit.toFixed(2)}
-                                  </p>
-                                  <p className={`text-[9px} ${th.textFaint}`}>85% of mid</p>
-                                </div>
-                                <div>
-                                  <p className={`text-[9px} ${th.textFaint}`}>OI (short/long)</p>
-                                  <p className={`text-[10px} font-bold ${suggestion.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                                    {suggestion.shortOi ?? '?'} / {suggestion.longOi ?? '?'}
-                                  </p>
-                                  <p className={`text-[9px} ${th.textFaint}`}>need ≥500</p>
-                                </div>
-                                <div>
-                                  <p className={`text-[9px} ${th.textFaint}`}>Bid-ask (sh/lg)</p>
-                                  <p className={`text-[10px} font-bold ${suggestion.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                                    ${suggestion.shortBidAsk?.toFixed(2) ?? '?'} / ${suggestion.longBidAsk?.toFixed(2) ?? '?'}
-                                  </p>
-                                  <p className={`text-[9px} ${th.textFaint}`}>need ≤$0.10</p>
-                                </div>
-                              </div>
-                              {suggestion.ruleViolations.length > 0 && (
-                                <div className="space-y-1">
-                                  {suggestion.ruleViolations.map((v, i) => (
-                                    <div key={i} className="flex items-start gap-1.5">
-                                      <span className={`text-[9px} shrink-0 mt-0.5 ${rollIsBlocking(suggestion) ? 'text-red-400' : 'text-yellow-400'}`}>
-                                        {rollIsBlocking(suggestion) ? '✕' : '⚠'}
-                                      </span>
-                                      <p className={`text-[9px} leading-relaxed ${rollIsBlocking(suggestion) ? 'text-red-300' : 'text-yellow-300'}`}>{v}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                          {rollSearchLoading[item.pos.key] && (
+                            <div className="flex items-center gap-2 p-3 rounded-lg border border-blue-500/20 bg-blue-500/5">
+                              <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                              <p className="text-[10px] text-blue-300">Scanning the chain for the best roll across expirations and strikes...</p>
                             </div>
                           )}
+                          {!rollSearchLoading[item.pos.key] && (rollCandidatePicks[item.pos.key]?.length ?? 0) === 0 && (
+                            <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+                              <p className="text-[10px] text-yellow-300">No qualifying roll candidates found in the 28-50 DTE window for this symbol. Enter the new expiry/strikes/credit manually below.</p>
+                            </div>
+                          )}
+                          {(rollCandidatePicks[item.pos.key] ?? []).map((pick, pickIdx) => {
+                            const c = pick.candidate;
+                            const isSelected = suggestion != null
+                              && suggestion.expiry === c.expiry
+                              && suggestion.shortStrike === c.shortStrike
+                              && suggestion.longStrike === c.longStrike;
+                            return (
+                              <div key={`${c.expiry}-${c.shortStrike}-${c.longStrike}`} className={`rounded-lg border p-3 space-y-2 ${
+                                isSelected ? 'border-purple-500/60 bg-purple-500/10' :
+                                rollIsBlocking(c) ? 'border-red-500/50 bg-red-500/5' :
+                                c.ruleViolations.length > 0 ? 'border-yellow-500/40 bg-yellow-500/5' :
+                                'border-blue-500/30 bg-blue-500/5'
+                              }`}>
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {pick.categories.map(cat => (
+                                      <span key={cat} className="text-[9px] text-blue-400 font-bold uppercase tracking-widest px-1.5 py-0.5 border border-blue-500/40 rounded bg-blue-500/10">
+                                        {ROLL_CATEGORY_LABELS[cat]}
+                                      </span>
+                                    ))}
+                                    <span className="text-[10px] ac-text" style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      {c.expiry} ({c.dte}d) · {c.shortStrike}/{c.longStrike} · δ{c.delta.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <button onClick={() => {
+                                    setRollSuggestions(prev => ({ ...prev, [item.pos.key]: c }));
+                                    setRollInputs(prev => ({
+                                      ...prev,
+                                      [item.pos.key]: { expiry: c.expiry, shortStrike: String(c.shortStrike), longStrike: String(c.longStrike), credit: String(c.credit) }
+                                    }));
+                                  }} className={`text-[9px] px-2 py-0.5 border rounded transition-colors ${isSelected ? 'border-purple-500 text-purple-300 bg-purple-500/20' : 'ac-btn hover:ac-bg-20'}`}>
+                                    {isSelected ? '✓ Selected' : 'Use this'}
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2">
+                                  <div>
+                                    <p className={`text-[9px} ${th.textFaint}`}>Credit (mid)</p>
+                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      ${c.creditMid.toFixed(2)}
+                                    </p>
+                                    <p className={`text-[9px} ${th.textFaint}`}>{(c.creditRatio * 100).toFixed(0)}% of width</p>
+                                  </div>
+                                  <div>
+                                    <p className={`text-[9px} ${th.textFaint}`}>Limit order</p>
+                                    <p className={`text-[10px} font-bold text-blue-400`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      ${c.credit.toFixed(2)}
+                                    </p>
+                                    <p className={`text-[9px} ${th.textFaint}`}>85% of mid</p>
+                                  </div>
+                                  <div>
+                                    <p className={`text-[9px} ${th.textFaint}`}>OI (short/long)</p>
+                                    <p className={`text-[10px} font-bold ${c.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      {c.shortOi ?? '?'} / {c.longOi ?? '?'}
+                                    </p>
+                                    <p className={`text-[9px} ${th.textFaint}`}>need ≥500</p>
+                                  </div>
+                                  <div>
+                                    <p className={`text-[9px} ${th.textFaint}`}>Bid-ask (sh/lg)</p>
+                                    <p className={`text-[10px} font-bold ${c.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      ${c.shortBidAsk?.toFixed(2) ?? '?'} / ${c.longBidAsk?.toFixed(2) ?? '?'}
+                                    </p>
+                                    <p className={`text-[9px} ${th.textFaint}`}>need ≤$0.10</p>
+                                  </div>
+                                </div>
+                                <div className={`pt-2 border-t ${th.borderLight}`}>
+                                  <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <span className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Net Roll P&amp;L</span>
+                                    <span className={`text-xs font-bold ${c.netRollPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                      {c.netRollPnl >= 0 ? '+' : ''}${c.netRollPnl.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                    <span className={`text-[9px] ${th.textFaint}`}>Close cost <span className="text-red-300 font-bold">-${c.closeCost.toFixed(2)}</span></span>
+                                    <span className={`text-[9px] ${th.textFaint}`}>+</span>
+                                    <span className={`text-[9px] ${th.textFaint}`}>New credit <span className="text-emerald-300 font-bold">+${c.openCredit.toFixed(2)}</span></span>
+                                  </div>
+                                </div>
+                                {c.ruleViolations.length > 0 && (
+                                  <div className="space-y-1">
+                                    {c.ruleViolations.map((v, i) => (
+                                      <div key={i} className="flex items-start gap-1.5">
+                                        <span className={`text-[9px} shrink-0 mt-0.5 ${rollIsBlocking(c) ? 'text-red-400' : 'text-yellow-400'}`}>
+                                          {rollIsBlocking(c) ? '✕' : '⚠'}
+                                        </span>
+                                        <p className={`text-[9px} leading-relaxed ${rollIsBlocking(c) ? 'text-red-300' : 'text-yellow-300'}`}>{v}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
 
                           <div className="grid grid-cols-4 gap-2">
                             {[
