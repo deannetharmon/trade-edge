@@ -1063,8 +1063,80 @@ const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
 const LS_SCREEN_MODE = 'hunter-screen-mode';
 const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
-const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache';
+const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
+
+// ── IndexedDB helper for rawScanCache ───────────────────────────────────────
+// rawScanCache holds the full options chain per scanned symbol, which can
+// comfortably exceed localStorage's ~5-10MB origin quota across a watchlist
+// scan. A quota-exceeded write throws, and (prior to this fix) that error
+// was silently swallowed, so results would appear to save successfully but
+// vanish on next page load. IndexedDB has a much larger practical quota and
+// is the right tool for this size of structured data.
+const IDB_DB_NAME = 'hunter-db';
+const IDB_STORE_NAME = 'kv';
+const IDB_RAW_SCAN_KEY = 'rawScanCache';
+
+function idbOpen(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+        db.createObjectStore(IDB_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSet(key: string, value: unknown): Promise<void> {
+  try {
+    const db = await idbOpen();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+      tx.objectStore(IDB_STORE_NAME).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) {
+    console.error('idbSet failed (non-blocking):', e);
+  }
+}
+
+async function idbGet<T>(key: string): Promise<T | null> {
+  try {
+    const db = await idbOpen();
+    const result = await new Promise<T | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+      const req = tx.objectStore(IDB_STORE_NAME).get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return result;
+  } catch (e) {
+    console.error('idbGet failed (non-blocking):', e);
+    return null;
+  }
+}
+
+async function idbDel(key: string): Promise<void> {
+  try {
+    const db = await idbOpen();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+      tx.objectStore(IDB_STORE_NAME).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) {
+    console.error('idbDel failed (non-blocking):', e);
+  }
+}
 
 interface RankConfig {
   weightMomentum: number;     // 0–25
@@ -6583,10 +6655,6 @@ export default function Home() {
       if (s) setResults(JSON.parse(s));
     } catch {}
     try {
-      const s = localStorage.getItem(LS_RAW_SCAN_CACHE);
-      if (s) setRawScanCache(JSON.parse(s));
-    } catch {}
-    try {
       const s = localStorage.getItem(LS_RESULTS_CACHE_AT);
       if (s) setResultsCachedAt(parseInt(s, 10));
     } catch {}
@@ -6596,9 +6664,18 @@ export default function Home() {
     } catch {}
   }, []);
 
+  // rawScanCache restore — separate effect because IndexedDB access is
+  // async, unlike the synchronous localStorage reads above.
+  useEffect(() => {
+    idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
+      if (cached) setRawScanCache(cached);
+    });
+  }, []);
+
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null);
-    try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RAW_SCAN_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    idbDel(IDB_RAW_SCAN_KEY);
   };
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
@@ -6739,7 +6816,7 @@ export default function Home() {
 
       // Store raw cache for instant re-filtering
       setRawScanCache(scanCache);
-      try { localStorage.setItem(LS_RAW_SCAN_CACHE, JSON.stringify(scanCache)); } catch {}
+      idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
 
       // Remove duplicates and sort
       const uniqueResults = (modeOverride ?? screenMode) === 'rank'
