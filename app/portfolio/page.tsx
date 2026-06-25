@@ -6940,6 +6940,7 @@ export default function PortfolioPage() {
   useEffect(() => { injectAccentStyle(); applyAccent(getSavedAccent()); }, []);
 
   const [positions, setPositions] = useState<Position[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
