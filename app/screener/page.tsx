@@ -2543,13 +2543,18 @@ function exploreAllCandidatesForRank(
               pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
               roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
               oi: (() => {
-              const minOI = Math.min(bestCandidate.shortOI, bestCandidate.longOI);
+              // Gate on the SHORT leg only -- it's the one traded twice
+              // (open + close) and the one carrying assignment risk. The
+              // long leg is protection that typically only transacts as
+              // part of the same combo order, so its OI alone rarely
+              // blocks a clean fill the way thin short-leg OI does.
+              const shortLegOi = bestCandidate.shortOI;
               return {
-                status: minOI >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
+                status: shortLegOi >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
                 value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
-                reason: minOI >= appliedRules.OI_MIN
-                  ? `Both legs ≥ ${appliedRules.OI_MIN}`
-                  : `Below OI floor ${appliedRules.OI_MIN}`,
+                reason: shortLegOi >= appliedRules.OI_MIN
+                  ? `Short leg ≥ ${appliedRules.OI_MIN}`
+                  : `Below OI floor ${appliedRules.OI_MIN} on short leg`,
               };
             })(),
             },
@@ -6290,14 +6295,19 @@ async function runTargetedScan(
                       reason: `Min ${appliedRules.ROC_MIN_SPREAD}%`,
                     },                    
                     oi: (() => {
-                      const minOI = Math.min(bestCandidate.shortOI, bestCandidate.longOI);
-                    
+                      // Gate on the SHORT leg only -- it's the one traded twice
+                      // (open + close) and the one carrying assignment risk. The
+                      // long leg is protection that typically only transacts as
+                      // part of the same combo order, so its OI alone rarely
+                      // blocks a clean fill the way thin short-leg OI does.
+                      const shortLegOi = bestCandidate.shortOI;
+
                       return {
-                        status: minOI >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
+                        status: shortLegOi >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
                         value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
-                        reason: minOI >= appliedRules.OI_MIN
-                          ? `Both legs ≥ ${appliedRules.OI_MIN}`
-                          : `Below OI floor ${appliedRules.OI_MIN}`,
+                        reason: shortLegOi >= appliedRules.OI_MIN
+                          ? `Short leg ≥ ${appliedRules.OI_MIN}`
+                          : `Below OI floor ${appliedRules.OI_MIN} on short leg`,
                       };
                     })(),
                   },
