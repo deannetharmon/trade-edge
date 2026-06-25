@@ -2200,7 +2200,30 @@ bestCandidate = strategy === 'IC'
   }
   if (bestCandidate) {
     failReasons.length = 0;
+    // Re-check earnings against the ACTUAL selected trade's DTE rather than
+    // the generic RULES.DTE_MAX + 5 buffer used above (that buffer ran
+    // before a specific expiration was picked, so it could flag earnings
+    // that fall safely AFTER this trade's own expiry as a false positive).
+    if (!isIndex && earningsDate) {
+      const ed = daysUntil(earningsDate);
+      if (ed < 0) {
+        earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
+      } else if (ed <= bestCandidate.dte) {
+        if (strictOnly) {
+          failReasons.push(`Earnings in ${ed}d — before this trade's expiry`);
+          earningsCheck = { status: 'fail', value: `${ed}d (${earningsDate})`, reason: `Falls before this trade's ${bestCandidate.dte}d expiry` };
+        } else {
+          earningsCheck = { status: 'warn', value: `${ed}d (${earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
+        }
+      } else {
+        earningsCheck = { status: 'pass', value: `${ed}d (${earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
+      }
+    }
   } else if (
+    validExpirations.length === 0 &&
+    !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
+  ) {
+
     validExpirations.length === 0 &&
     !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
   ) {
