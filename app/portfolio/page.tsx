@@ -45,6 +45,8 @@ const LS_AUDIT_LOG = 'hunter-audit-log';
 const LS_MEMORY = 'hunter-trading-memory';
 const LS_DRY_RUN = 'hunter-dry-run';
 const LS_ENTRY_SNAPSHOTS = 'hunter-entry-snapshots';
+const LS_SECTION_ORDER = 'hunter-portfolio-section-order';
+const DEFAULT_SECTION_ORDER = ['pending', 'needsClose', 'hitTarget', 'noGtc', 'normal'];
 const MEMORY_RAW_TRADES_PER_SYMBOL = 5;   // keep this many raw; summarize older
 const MEMORY_RAW_ACTIONS = 20;            // ring buffer size for action history
 const MEMORY_SUMMARIZE_INTERVAL_DAYS = 7; // re-summarize behavior weekly
@@ -6727,6 +6729,49 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
   );
 }
 
+// ── Draggable Section Wrapper ───────────────────────────────────────────────
+function DraggableSection({ sectionId, index, total, th, onMove, onDragStart, onDragOver, onDrop, isDragging, children }: {
+  sectionId: string; index: number; total: number; th: typeof THEMES[Theme];
+  onMove: (id: string, direction: 'up' | 'down') => void;
+  onDragStart: (id: string) => void;
+  onDragOver: (e: React.DragEvent, id: string) => void;
+  onDrop: (id: string) => void;
+  isDragging: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      draggable
+      onDragStart={() => onDragStart(sectionId)}
+      onDragOver={e => onDragOver(e, sectionId)}
+      onDrop={() => onDrop(sectionId)}
+      className={`transition-opacity ${isDragging ? 'opacity-40' : 'opacity-100'}`}
+    >
+      <div className="flex items-center gap-2 mb-1 group">
+        <span
+          className={`text-sm ${th.textFaint} cursor-grab active:cursor-grabbing select-none opacity-40 group-hover:opacity-90 transition-opacity`}
+          title="Drag to reorder"
+        >⠿</span>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-90 transition-opacity">
+          <button
+            onClick={() => onMove(sectionId, 'up')}
+            disabled={index === 0}
+            className={`text-[10px] px-1 ${th.textFaint} hover:${th.textMuted} disabled:opacity-30 transition-colors`}
+            title="Move up"
+          >▲</button>
+          <button
+            onClick={() => onMove(sectionId, 'down')}
+            disabled={index === total - 1}
+            className={`text-[10px] px-1 ${th.textFaint} hover:${th.textMuted} disabled:opacity-30 transition-colors`}
+            title="Move down"
+          >▼</button>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ── Pending Order Card ──────────────────────────────────────────────────────
 function PendingOrderCard({ order, th, cancelling, onCancel }: {
   order: PendingOrder; th: typeof THEMES[Theme];
@@ -7161,6 +7206,52 @@ export default function PortfolioPage() {
 
   useEffect(() => { fetchPositions(); }, []);
 
+  const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_SECTION_ORDER);
+      if (saved) {
+        const parsed = JSON.parse(saved) as string[];
+        const missing = DEFAULT_SECTION_ORDER.filter(id => !parsed.includes(id));
+        setSectionOrder([...parsed.filter(id => DEFAULT_SECTION_ORDER.includes(id)), ...missing]);
+      }
+    } catch {}
+  }, []);
+
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+
+  const persistSectionOrder = (order: string[]) => {
+    setSectionOrder(order);
+    try { localStorage.setItem(LS_SECTION_ORDER, JSON.stringify(order)); } catch {}
+  };
+
+  const moveSectionWithArrow = (id: string, direction: 'up' | 'down') => {
+    const idx = sectionOrder.indexOf(id);
+    if (idx === -1) return;
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapWith < 0 || swapWith >= sectionOrder.length) return;
+    const next = [...sectionOrder];
+    [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+    persistSectionOrder(next);
+  };
+
+  const handleSectionDragStart = (id: string) => setDraggedSectionId(id);
+  const handleSectionDragOver = (e: React.DragEvent, overId: string) => {
+    e.preventDefault();
+    if (!draggedSectionId || draggedSectionId === overId) return;
+    const fromIdx = sectionOrder.indexOf(draggedSectionId);
+    const toIdx = sectionOrder.indexOf(overId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = [...sectionOrder];
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, draggedSectionId);
+    setSectionOrder(next);
+  };
+  const handleSectionDrop = (_id: string) => {
+    if (draggedSectionId) persistSectionOrder(sectionOrder);
+    setDraggedSectionId(null);
+  };
+
   // Pending orders are always complex-order-sourced (Phase 1 extraction
   // reads PendingOrder.id from the parent OTOCO/OCO complex order's own
   // id, never the trigger/nested sub-order ids) -- so cancelling one
@@ -7320,55 +7411,89 @@ export default function PortfolioPage() {
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>
               <PortfolioGreeksDashboard positions={positions} th={th} />
 
-              <PendingOrdersSection
-                orders={pendingOrders} th={th}
-                cancellingOrderIds={cancellingOrderIds}
-                onCancel={cancelPendingOrder}
-              />
-
-              {needsClose.length > 0 && (
-                <PositionSection
-                  title="⚠ Close Now — 21 DTE or Less" titleColor="text-red-400"
-                  positions={needsClose} th={th} checked={checked}
-                  onToggle={onToggle} onToggleAll={onToggleAll}
-                  onProfitTargetChange={handleProfitTargetChange}
-                  groupAction="CLOSE_ROLL" onGroupAction={onGroupAction}
-                  onExecute={(pos, action) => openBatch([{ pos, action }])}
-                />
-              )}
-
-              {hitTarget.length > 0 && (
-                <PositionSection
-                  title="✓ Profit Target Hit" titleColor="text-emerald-400"
-                  positions={hitTarget} th={th} checked={checked}
-                  onToggle={onToggle} onToggleAll={onToggleAll}
-                  onProfitTargetChange={handleProfitTargetChange}
-                  groupAction="TAKE_PROFIT" onGroupAction={onGroupAction}
-                  onExecute={(pos, action) => openBatch([{ pos, action }])}
-                />
-              )}
-
-              {noGtc.length > 0 && (
-                <PositionSection
-                  title="⏱ Missing GTC Order" titleColor="text-blue-400"
-                  positions={noGtc} th={th} checked={checked}
-                  onToggle={onToggle} onToggleAll={onToggleAll}
-                  onProfitTargetChange={handleProfitTargetChange}
-                  groupAction="PLACE_GTC" onGroupAction={onGroupAction}
-                  onExecute={(pos, action) => openBatch([{ pos, action }])}
-                />
-              )}
-
-              {normal.length > 0 && (
-                <PositionSection
-                  title="Active Positions" titleColor={th.textFaint}
-                  positions={normal} th={th} checked={checked}
-                  onToggle={onToggle} onToggleAll={onToggleAll}
-                  onProfitTargetChange={handleProfitTargetChange}
-                  groupAction="HOLD" onGroupAction={onGroupAction}
-                  onExecute={(pos, action) => openBatch([{ pos, action }])}
-                />
-              )}
+              {(() => {
+                const sectionDefs: Record<string, { hasContent: boolean; render: () => React.ReactNode }> = {
+                  pending: {
+                    hasContent: pendingOrders.length > 0,
+                    render: () => (
+                      <PendingOrdersSection
+                        orders={pendingOrders} th={th}
+                        cancellingOrderIds={cancellingOrderIds}
+                        onCancel={cancelPendingOrder}
+                      />
+                    ),
+                  },
+                  needsClose: {
+                    hasContent: needsClose.length > 0,
+                    render: () => (
+                      <PositionSection
+                        title="⚠ Close Now — 21 DTE or Less" titleColor="text-red-400"
+                        positions={needsClose} th={th} checked={checked}
+                        onToggle={onToggle} onToggleAll={onToggleAll}
+                        onProfitTargetChange={handleProfitTargetChange}
+                        groupAction="CLOSE_ROLL" onGroupAction={onGroupAction}
+                        onExecute={(pos, action) => openBatch([{ pos, action }])}
+                      />
+                    ),
+                  },
+                  hitTarget: {
+                    hasContent: hitTarget.length > 0,
+                    render: () => (
+                      <PositionSection
+                        title="✓ Profit Target Hit" titleColor="text-emerald-400"
+                        positions={hitTarget} th={th} checked={checked}
+                        onToggle={onToggle} onToggleAll={onToggleAll}
+                        onProfitTargetChange={handleProfitTargetChange}
+                        groupAction="TAKE_PROFIT" onGroupAction={onGroupAction}
+                        onExecute={(pos, action) => openBatch([{ pos, action }])}
+                      />
+                    ),
+                  },
+                  noGtc: {
+                    hasContent: noGtc.length > 0,
+                    render: () => (
+                      <PositionSection
+                        title="⏱ Missing GTC Order" titleColor="text-blue-400"
+                        positions={noGtc} th={th} checked={checked}
+                        onToggle={onToggle} onToggleAll={onToggleAll}
+                        onProfitTargetChange={handleProfitTargetChange}
+                        groupAction="PLACE_GTC" onGroupAction={onGroupAction}
+                        onExecute={(pos, action) => openBatch([{ pos, action }])}
+                      />
+                    ),
+                  },
+                  normal: {
+                    hasContent: normal.length > 0,
+                    render: () => (
+                      <PositionSection
+                        title="Active Positions" titleColor={th.textFaint}
+                        positions={normal} th={th} checked={checked}
+                        onToggle={onToggle} onToggleAll={onToggleAll}
+                        onProfitTargetChange={handleProfitTargetChange}
+                        groupAction="HOLD" onGroupAction={onGroupAction}
+                        onExecute={(pos, action) => openBatch([{ pos, action }])}
+                      />
+                    ),
+                  },
+                };
+                const visibleOrder = sectionOrder.filter(id => sectionDefs[id]?.hasContent);
+                return visibleOrder.map((id, idx) => (
+                  <DraggableSection
+                    key={id}
+                    sectionId={id}
+                    index={idx}
+                    total={visibleOrder.length}
+                    th={th}
+                    onMove={moveSectionWithArrow}
+                    onDragStart={handleSectionDragStart}
+                    onDragOver={handleSectionDragOver}
+                    onDrop={handleSectionDrop}
+                    isDragging={draggedSectionId === id}
+                  >
+                    {sectionDefs[id].render()}
+                  </DraggableSection>
+                ));
+              })()}
             </div>
           </div>
         </>
