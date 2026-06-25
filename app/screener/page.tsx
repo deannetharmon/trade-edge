@@ -1076,6 +1076,7 @@ const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
 const IDB_DB_NAME = 'hunter-db';
 const IDB_STORE_NAME = 'kv';
 const IDB_RAW_SCAN_KEY = 'rawScanCache';
+const IDB_RESULTS_KEY = 'results'; // Rank mode's exhaustive result set can also exceed localStorage's quota
 
 function idbOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -6651,10 +6652,6 @@ export default function Home() {
   // the server's render, eliminating the #418/#423 hydration mismatch.
   useEffect(() => {
     try {
-      const s = localStorage.getItem(LS_RESULTS_CACHE);
-      if (s) setResults(JSON.parse(s));
-    } catch {}
-    try {
       const s = localStorage.getItem(LS_RESULTS_CACHE_AT);
       if (s) setResultsCachedAt(parseInt(s, 10));
     } catch {}
@@ -6664,22 +6661,24 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // rawScanCache restore — separate effect because IndexedDB access is
-  // async, unlike the synchronous localStorage reads above.
+  // rawScanCache + results restore — IndexedDB access is async, unlike the
+  // synchronous localStorage reads above. results moved here after Rank
+  // mode's larger result sets were found to silently exceed localStorage's
+  // quota the same way rawScanCache did.
   useEffect(() => {
-    console.log('[IDB DEBUG] Restore effect firing, attempting idbGet...');
     idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
-      console.log('[IDB DEBUG] idbGet result:', cached ? `array of ${cached.length}` : cached);
       if (cached) setRawScanCache(cached);
-    }).catch(e => {
-      console.log('[IDB DEBUG] idbGet threw an error:', e);
+    });
+    idbGet<ScreenResult[]>(IDB_RESULTS_KEY).then(cached => {
+      if (cached) setResults(cached);
     });
   }, []);
 
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null);
-    try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    try { localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
     idbDel(IDB_RAW_SCAN_KEY);
+    idbDel(IDB_RESULTS_KEY);
   };
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
@@ -6721,14 +6720,9 @@ export default function Home() {
     setResults(screenResults);
     const applyTs = Date.now();
     setResultsCachedAt(applyTs);
+    idbSet(IDB_RESULTS_KEY, screenResults);
     try {
-      try {
-        localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(screenResults));
-        localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
-        console.log('[SAVE DEBUG site1] saved', screenResults.length, 'results,', JSON.stringify(screenResults).length, 'bytes');
-      } catch (e) {
-        console.error('[SAVE DEBUG site1] FAILED:', e);
-      }
+      localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
     } catch {}
   }, [rawScanCache]);
 
@@ -6740,7 +6734,8 @@ export default function Home() {
   }, [runtimeStockRules, runtimeEtfRules, rawScanCache, screenMode, stockPresetLabel, etfPresetLabel, applyRules]);
   const runScreen = async (sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, modeOverride?: 'filter' | 'rank' | 'targeted') => {    setError('');
     setResults([]); setResultsCachedAt(null);
-    try { localStorage.removeItem(LS_RESULTS_CACHE); localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    try { localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    idbDel(IDB_RESULTS_KEY);
 
     const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
 
@@ -6824,13 +6819,8 @@ export default function Home() {
       }
 
       // Store raw cache for instant re-filtering
-      console.log('[IDB DEBUG] About to save scanCache, length:', scanCache.length, 'mode:', (modeOverride ?? screenMode));
       setRawScanCache(scanCache);
-      idbSet(IDB_RAW_SCAN_KEY, scanCache).then(() => {
-        console.log('[IDB DEBUG] idbSet completed successfully');
-      }).catch(e => {
-        console.log('[IDB DEBUG] idbSet threw an error:', e);
-      }); // IndexedDB — full chain data can exceed localStorage's quota
+      idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
 
       // Remove duplicates and sort
       const uniqueResults = (modeOverride ?? screenMode) === 'rank'
@@ -6857,15 +6847,10 @@ export default function Home() {
       setResults(uniqueResults);
       const cacheTs = Date.now();
       setResultsCachedAt(cacheTs);
+      idbSet(IDB_RESULTS_KEY, uniqueResults); // IndexedDB — Rank mode's exhaustive result set can exceed localStorage's quota
       try {
-        const serialized = JSON.stringify(uniqueResults);
-        console.log('[SAVE DEBUG site2] about to save', uniqueResults.length, 'results,', serialized.length, 'bytes, mode:', (modeOverride ?? screenMode));
-        localStorage.setItem(LS_RESULTS_CACHE, serialized);
         localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
-        console.log('[SAVE DEBUG site2] save succeeded');
-      } catch (e) {
-        console.error('[SAVE DEBUG site2] FAILED:', e);
-      }
+      } catch {}
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -6919,8 +6904,8 @@ export default function Home() {
         const merged = [...prev, ...pmccResults];
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);
+        idbSet(IDB_RESULTS_KEY, merged);
         try {
-          localStorage.setItem(LS_RESULTS_CACHE, JSON.stringify(merged));
           localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
         } catch {}
         return merged;
