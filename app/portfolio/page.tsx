@@ -1603,7 +1603,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
             else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
             else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
             const underlyingSymbol =
-              triggerLegs[0]?.['underlying-symbol'] ??
+              triggerOrder?.['underlying-symbol'] ??
               (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
             const expMatch = parsedLegs[0]?.symbol?.match(/(\d{6})[CP]\d{8}/);
             const expDate = expMatch
@@ -7069,6 +7069,9 @@ export default function PortfolioPage() {
       const { positions: data, pendingOrders: pendingData } = await loadPositions();
       setPositions(data);
       setPendingOrders(pendingData);
+      // TEMP DIAGNOSTIC -- remove after confirming extraction works
+      console.log('PENDING_ORDERS_DEBUG count:', pendingData.length);
+      console.log('PENDING_ORDERS_DEBUG full:', JSON.stringify(pendingData, null, 2));
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
