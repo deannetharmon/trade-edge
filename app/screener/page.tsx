@@ -6667,8 +6667,12 @@ export default function Home() {
   // rawScanCache restore — separate effect because IndexedDB access is
   // async, unlike the synchronous localStorage reads above.
   useEffect(() => {
+    console.log('[IDB DEBUG] Restore effect firing, attempting idbGet...');
     idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
+      console.log('[IDB DEBUG] idbGet result:', cached ? `array of ${cached.length}` : cached);
       if (cached) setRawScanCache(cached);
+    }).catch(e => {
+      console.log('[IDB DEBUG] idbGet threw an error:', e);
     });
   }, []);
 
@@ -6815,8 +6819,13 @@ export default function Home() {
       }
 
       // Store raw cache for instant re-filtering
+      console.log('[IDB DEBUG] About to save scanCache, length:', scanCache.length, 'mode:', (modeOverride ?? screenMode));
       setRawScanCache(scanCache);
-      idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
+      idbSet(IDB_RAW_SCAN_KEY, scanCache).then(() => {
+        console.log('[IDB DEBUG] idbSet completed successfully');
+      }).catch(e => {
+        console.log('[IDB DEBUG] idbSet threw an error:', e);
+      }); // IndexedDB — full chain data can exceed localStorage's quota
 
       // Remove duplicates and sort
       const uniqueResults = (modeOverride ?? screenMode) === 'rank'
