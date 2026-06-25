@@ -1087,6 +1087,7 @@ const IDB_DB_NAME = 'hunter-db';
 const IDB_STORE_NAME = 'kv';
 const IDB_RAW_SCAN_KEY = 'rawScanCache';
 const IDB_RESULTS_KEY = 'results'; // Rank mode's exhaustive result set can also exceed localStorage's quota
+const IDB_TARGETED_RESULTS_KEY = 'targetedResults'; // Targeted mode never had any persistence at all — added here
 
 function idbOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -6024,6 +6025,7 @@ async function runTargetedScan(
 
   if (allSymbols.length === 0) { setError('No active tickers in watchlist.'); return; }
   setError(''); setLoading(true); setTargetedResults([]);
+  idbDel(IDB_TARGETED_RESULTS_KEY);
   cancelRef.current = false;
 
   try {
@@ -6257,6 +6259,7 @@ async function runTargetedScan(
 
     entries.sort((a, b) => b.score - a.score);
     setTargetedResults(entries);
+    idbSet(IDB_TARGETED_RESULTS_KEY, entries);
   } catch (e: any) {
     setError(e.message);
   } finally {
@@ -6680,10 +6683,12 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // rawScanCache + results restore — IndexedDB access is async, unlike the
-  // synchronous localStorage reads above. results moved here after Rank
-  // mode's larger result sets were found to silently exceed localStorage's
-  // quota the same way rawScanCache did.
+  // rawScanCache + results + targetedResults restore — IndexedDB access is
+  // async, unlike the synchronous localStorage reads above. results moved
+  // here after Rank mode's larger result sets were found to silently
+  // exceed localStorage's quota; targetedResults never had any persistence
+  // at all until now (Targeted mode results disappeared on every
+  // navigation, unlike Filter/Rank which at least tried localStorage).
   useEffect(() => {
     idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
       if (cached) setRawScanCache(cached);
@@ -6691,13 +6696,17 @@ export default function Home() {
     idbGet<ScreenResult[]>(IDB_RESULTS_KEY).then(cached => {
       if (cached) setResults(cached);
     });
+    idbGet<TargetedScanEntry[]>(IDB_TARGETED_RESULTS_KEY).then(cached => {
+      if (cached) setTargetedResults(cached);
+    });
   }, []);
 
   const clearResultsCache = () => {
-    setResults([]); setRawScanCache([]); setResultsCachedAt(null);
+    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]);
     try { localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
     idbDel(IDB_RAW_SCAN_KEY);
     idbDel(IDB_RESULTS_KEY);
+    idbDel(IDB_TARGETED_RESULTS_KEY);
   };
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
