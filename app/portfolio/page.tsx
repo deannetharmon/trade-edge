@@ -149,13 +149,10 @@ function todayLocalDateString(): string {
   return `${y}-${m}-${day}`;
 }
 
-<<<<<<< HEAD
 // Builds today's snapshot payload for each position and POSTs any that
 // aren't already recorded for today. Fire-and-forget from the caller's
 // perspective — failures are logged, not surfaced, since this is background
 // data collection and shouldn't interrupt the Portfolio page if it fails.
-=======
->>>>>>> 7360e362f22a615dbc72a72c3c2313353027c5e1
 async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
   if (positions.length === 0) return;
   const today = todayLocalDateString();
