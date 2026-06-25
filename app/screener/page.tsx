@@ -2223,10 +2223,6 @@ bestCandidate = strategy === 'IC'
     validExpirations.length === 0 &&
     !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
   ) {
-
-    validExpirations.length === 0 &&
-    !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
-  ) {
     failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
   } else if (validExpirations.length > 0 && !failReasons.length) {
     failReasons.push('No qualifying strikes found');
