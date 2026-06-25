@@ -19,6 +19,24 @@ function selectedModel(body: any, fallbackProfile: AiProfile): string {
   return getAiModel(requestedProfile(body, fallbackProfile));
 }
 
+// Converts an Anthropic-shaped image content part
+// ({ type: 'image', source: { type: 'base64', media_type, data } })
+// into the shape OpenAI's Chat Completions API actually accepts
+// ({ type: 'image_url', image_url: { url: 'data:<mime>;base64,<data>' } }).
+function toOpenAiContent(content: any): any {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return content;
+
+  return content.map((part: any) => {
+    if (part?.type === 'image' && part?.source?.type === 'base64') {
+      const mediaType = part.source.media_type ?? 'image/jpeg';
+      const data = part.source.data ?? '';
+      return { type: 'image_url', image_url: { url: `data:${mediaType};base64,${data}` } };
+    }
+    return part;
+  });
+}
+
 function normalizeChatMessages(body: any): any[] {
   const messages: any[] = [];
 
@@ -28,7 +46,7 @@ function normalizeChatMessages(body: any): any[] {
 
   for (const m of body.messages ?? []) {
     if (!m?.role) continue;
-    messages.push({ role: m.role, content: m.content });
+    messages.push({ role: m.role, content: toOpenAiContent(m.content) });
   }
 
   return messages;
