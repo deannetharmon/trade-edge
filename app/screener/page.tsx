@@ -3694,6 +3694,23 @@ function TradeModal({ result, th, onClose }: {
             <span className={th.textFaint}>Expiry</span>
             <span className={th.text}>{c.expiration} ({c.dte}d)</span>
           </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Next Earnings</span>
+            {!result.earningsDate ? (
+              <span className={th.textMuted}>No data</span>
+            ) : (() => {
+              const earningsDte = daysUntil(result.earningsDate);
+              if (earningsDte < 0) {
+                return <span className={th.textMuted}>{result.earningsDate} (past)</span>;
+              }
+              const fallsBeforeExpiry = earningsDte <= c.dte;
+              return (
+                <span className={fallsBeforeExpiry ? 'text-red-400 font-bold' : th.text}>
+                  {result.earningsDate} ({earningsDte}d){fallsBeforeExpiry ? ' — before expiry' : ''}
+                </span>
+              );
+            })()}
+          </div>
           <div className="flex justify-between text-xs items-center">
             <span className={th.textFaint}>Entry limit / contract</span>
             <div className="flex items-center gap-1">
