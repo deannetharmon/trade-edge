@@ -6553,6 +6553,15 @@ export default function Home() {
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
+  // Guards any render-time Date.now() math (e.g. the "Xm ago" freshness
+  // badge) from running during SSR or the first client paint, where the
+  // server's clock/timezone can legitimately differ from the browser's and
+  // produce a text-content hydration mismatch (React error #425/#418/#423).
+  // Starts false on both server and client — only flips after hydration is
+  // confirmed complete, so the live-clock text never has a chance to differ.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   // ensureHeadAssets — runs once after mount, strictly post-hydration.
   // Replaces the old module-level document.head.appendChild() side effects
   // (accent CSS vars + DM Sans font link) that used to fire at client
@@ -7125,7 +7134,7 @@ export default function Home() {
                     </>
                   )}
                   <span className={th.textFaint}>{screenMode === 'targeted' ? `${targetedResults.length} ENTRIES` : `${results.length} SCANNED`}</span>
-                  {results.length > 0 && resultsCachedAt && (
+                  {mounted && results.length > 0 && resultsCachedAt && (
                     <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
                       {rawScanCache.length > 0 ? '⚡ cached' : '↺ restored'}{' '}
                       <span className="text-purple-500/70">{(() => { const mins = Math.round((Date.now() - resultsCachedAt) / 60000); return mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()}</span>
