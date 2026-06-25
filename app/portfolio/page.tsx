@@ -6750,6 +6750,12 @@ function PendingOrderCard({ order, th, cancelling, onCancel }: {
         ? `${callLegs[0].strikePrice}C/${callLegs[1].strikePrice}C`
         : order.legs.map(l => `${l.strikePrice}${l.optionType ?? ''}`).join('/');
 
+  const submittedDisplay = order.createdAt
+    ? new Date(order.createdAt).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      })
+    : null;
+
   return (
     <div className={`border border-yellow-700/60 ${th.card} rounded-lg p-4`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -6777,6 +6783,9 @@ function PendingOrderCard({ order, th, cancelling, onCancel }: {
           </button>
         </div>
       </div>
+      {submittedDisplay && (
+        <p className={`text-[9px] ${th.textFaint} mt-1.5`}>Submitted {submittedDisplay}</p>
+      )}
     </div>
   );
 }
