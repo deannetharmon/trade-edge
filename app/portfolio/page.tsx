@@ -6517,22 +6517,22 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
 
             {/* ── GREEKS ─────────────────────────────── */}
             <div className="border-t-2 border-purple-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Theta</p>
-              <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${thetaTextColor(pos.theta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Raw theta: ${pos.theta.toFixed(4)}` : undefined}>
-                {fmtThetaDisplay(pos.theta)}
-              </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${thetaTextColor(pos.theta, th.textFaint)}`}>
-                {thetaLabel(pos.theta)}
-              </p>
-            </div>
-
-            <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Delta</p>
               <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${deltaTextColor(pos.netDelta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netDelta != null ? `Raw delta: ${pos.netDelta.toFixed(4)}` : undefined}>
                 {fmtDeltaDisplay(pos.netDelta)}
               </p>
               <p className={`text-[8px] mt-0.5 font-semibold ${deltaTextColor(pos.netDelta, th.textFaint)}`}>
                 {deltaLabel(pos.netDelta)}
+              </p>
+            </div>
+
+            <div className="border-t-2 border-purple-600/50 pt-1">
+              <p className={`text-[9px] ${th.textFaint}`}>Theta</p>
+              <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${thetaTextColor(pos.theta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Raw theta: ${pos.theta.toFixed(4)}` : undefined}>
+                {fmtThetaDisplay(pos.theta)}
+              </p>
+              <p className={`text-[8px] mt-0.5 font-semibold ${thetaTextColor(pos.theta, th.textFaint)}`}>
+                {thetaLabel(pos.theta)}
               </p>
             </div>
 
