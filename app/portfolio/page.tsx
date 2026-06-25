@@ -1544,9 +1544,6 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       const parentActive = !order['terminal-at'] && nestedOrders.length > 0;
       console.log(`COMPLEX ORDER: id=${order.id} hasActiveNested=${hasActiveNested} parentActive=${parentActive} nestedStatuses=${nestedOrders.map((o:any) => o['status']).join(',')}`);
       if (hasActiveNested || parentActive) {
-        // TEMP TARGETED DIAGNOSTIC -- remove after finding trigger order field
-        console.log(`TRIGGER_SHAPE_DEBUG id=${order.id} top-level keys:`, Object.keys(order));
-        console.log(`TRIGGER_SHAPE_DEBUG id=${order.id} full order:`, JSON.stringify(order, null, 2));
         for (const nestedOrder of nestedOrders) for (const leg of nestedOrder.legs ?? []) {
           // Prefer underlying-symbol; fall back to parsing the OCC option symbol
           const underlying = leg['underlying-symbol'];
@@ -1616,7 +1613,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
               limitPrice: triggerOrder?.price != null ? parseFloat(triggerOrder.price) : null,
               priceEffect: triggerOrder?.['price-effect'] ?? null,
               status: triggerOrder?.status ?? order['status'] ?? 'unknown',
-              createdAt: order['received-at'] ?? order['updated-at'] ?? null,
+              createdAt: triggerOrder?.['received-at'] ?? triggerOrder?.['updated-at'] ?? null,
             });
           }
         }
@@ -7062,9 +7059,6 @@ export default function PortfolioPage() {
       const { positions: data, pendingOrders: pendingData } = await loadPositions();
       setPositions(data);
       setPendingOrders(pendingData);
-      // TEMP DIAGNOSTIC -- remove after confirming extraction works
-      console.log('PENDING_ORDERS_DEBUG count:', pendingData.length);
-      console.log('PENDING_ORDERS_DEBUG full:', JSON.stringify(pendingData, null, 2));
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
     } catch (e: any) {
