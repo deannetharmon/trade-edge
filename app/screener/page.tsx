@@ -175,16 +175,26 @@ const SECTOR_MAP: Record<string, string> = {
   SPY:'Index', QQQ:'Index', IWM:'Index', DIA:'Index', SMH:'Technology', SOXX:'Technology',
   XLF:'Financials', XLK:'Technology', XLE:'Energy', XLV:'Healthcare', XLI:'Industrials',
   XLP:'Consumer', XLY:'Consumer', GLD:'Commodity', SLV:'Commodity', TLT:'Bonds',
+  // Index symbols traded directly (per project's documented index mappings:
+  // SPX/NDX/RUT/VIX) — same "Index" bucket as their SPY/QQQ/IWM ETF cousins.
+  SPX:'Index', NDX:'Index', RUT:'Index', VIX:'Index',
+  // Leveraged ETFs — bucketed by underlying sector/index exposure, same as
+  // their unleveraged cousins already above. Added after SOXL repeatedly hit
+  // the live Yahoo lookup that used to live in getSector() below (removed —
+  // see comment there).
+  SOXL:'Technology', SOXS:'Technology', TQQQ:'Index', SQQQ:'Index',
+  UPRO:'Index', SPXU:'Index', SPXL:'Index', TNA:'Index', TZA:'Index',
 };
 
+// Sector classification is static enough (SOXL doesn't change industries)
+// that a live lookup isn't worth the cost or failure modes. This used to
+// fall back to a direct browser call to Yahoo Finance for any symbol not in
+// SECTOR_MAP, which Yahoo blocks via CORS — every miss logged a console
+// error for purely cosmetic, non-blocking sector-concentration display.
+// Unmapped symbols now just resolve to 'Unknown', same as a failed lookup
+// always did anyway. Add new tickers to SECTOR_MAP above as they come up.
 async function getSector(symbol: string): Promise<string> {
-  if (SECTOR_MAP[symbol]) return SECTOR_MAP[symbol];
-  try {
-    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`);
-    const data = await res.json();
-    const sector = data?.chart?.result?.[0]?.meta?.sector;
-    return sector ?? 'Unknown';
-  } catch { return 'Unknown'; }
+  return SECTOR_MAP[symbol] ?? 'Unknown';
 }
 
 // ── Portfolio context ──────────────────────────────────────────────────────
