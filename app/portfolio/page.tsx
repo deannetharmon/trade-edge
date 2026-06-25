@@ -378,6 +378,122 @@ interface RollSuggestion {
   meetsBidAsk: boolean;         // bid-ask <= $0.10 on each leg
 }
 
+// ── Roll Candidate (multi-expiration, multi-strike search) ─────────────────
+interface RollCandidate extends RollSuggestion {
+  closeCost: number;       // pos.currentValue -- what it costs to close the old spread now
+  openCredit: number;      // new spread's credit * qty * 100 -- what opening the new spread brings in
+  netRollPnl: number;      // openCredit - closeCost -- net cash effect of this specific roll
+}
+
+async function findRollCandidates(pos: Position, token: string): Promise<RollCandidate[]> {
+  const candidates: RollCandidate[] = [];
+  try {
+    const optType = pos.strategy === 'BCS' ? 'C' : 'P';
+    const targetDelta = pos.strategy === 'BCS' ? 0.25 : -0.25;
+    const deltaMin = pos.strategy === 'BCS' ?  0.15 : -0.35;
+    const deltaMax = pos.strategy === 'BCS' ?  0.35 : -0.15;
+
+    const origShort = pos.legs.find(l => l.direction === 'Short');
+    const origLong  = pos.legs.find(l => l.direction === 'Long');
+    if (!origShort || !origLong) return [];
+    const width = Math.abs(origShort.strikePrice - origLong.strikePrice);
+    const qty = pos.legs[0]?.quantity ?? 1;
+
+    const chainData = await ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/expirations`, token);
+    const expirations: any[] = chainData?.data?.items ?? [];
+    const today = new Date();
+    const validExpiries = expirations
+      .map((e: any) => ({
+        expiry: e['expiration-date'],
+        dte: Math.round((new Date(e['expiration-date']).getTime() - today.getTime()) / 86400000),
+      }))
+      .filter(e => e.dte >= 28 && e.dte <= 50);
+
+    if (validExpiries.length === 0) return [];
+
+    for (const { expiry, dte } of validExpiries) {
+      let strikeData: any;
+      try {
+        strikeData = await ttFetch(
+          `/option-chains/${encodeURIComponent(pos.symbol)}/nested?expiration-date=${expiry}`,
+          token
+        );
+      } catch {
+        continue;
+      }
+      const strikes: any[] = strikeData?.data?.items?.[0]?.strikes ?? [];
+
+      for (const s of strikes) {
+        const leg = s[optType === 'P' ? 'put' : 'call'];
+        if (!leg) continue;
+        const delta = parseFloat(leg?.delta ?? '0');
+        if (delta === 0) continue;
+        const withinBand = delta >= Math.min(deltaMin, deltaMax) && delta <= Math.max(deltaMin, deltaMax);
+        if (!withinBand) continue;
+
+        const shortStrike = s['strike-price'];
+        const longStrike = pos.strategy === 'BCS' ? shortStrike + width : shortStrike - width;
+        const longStrikeData = strikes.find((s2: any) => s2['strike-price'] === longStrike);
+        const longLeg = longStrikeData ? longStrikeData[optType === 'P' ? 'put' : 'call'] : null;
+        if (!longLeg) continue;
+
+        const shortBid = parseFloat(leg?.bid ?? '0');
+        const shortAsk = parseFloat(leg?.ask ?? '0');
+        const longBid  = parseFloat(longLeg?.bid ?? '0');
+        const longAsk  = parseFloat(longLeg?.ask ?? '0');
+        const shortOi  = parseInt(leg?.['open-interest'] ?? leg?.['oi'] ?? '0', 10);
+        const longOi   = parseInt(longLeg?.['open-interest'] ?? longLeg?.['oi'] ?? '0', 10);
+
+        const shortMid = (shortBid + shortAsk) / 2;
+        const longMid  = (longBid + longAsk) / 2;
+        const creditMid = parseFloat((shortMid - longMid).toFixed(2));
+        if (creditMid <= 0) continue;
+        const credit = parseFloat((creditMid * 0.85).toFixed(2));
+        const creditRatio = width > 0 ? creditMid / width : 0;
+
+        const shortSymbol = leg?.symbol ?? buildOccSymbol(pos.symbol, expiry, optType, shortStrike);
+        const longSymbol  = longLeg?.symbol ?? buildOccSymbol(pos.symbol, expiry, optType, longStrike);
+        const shortBidAsk = parseFloat((shortAsk - shortBid).toFixed(2));
+        const longBidAsk  = parseFloat((longAsk - longBid).toFixed(2));
+
+        const ruleViolations: string[] = [];
+        const meetsMinCredit = creditRatio >= (1/3);
+        const meetsDte       = dte >= 30 && dte <= 45;
+        const meetsDelta     = delta >= Math.min(pos.strategy === 'BCS' ? 0.20 : -0.30, pos.strategy === 'BCS' ? 0.30 : -0.20)
+                              && delta <= Math.max(pos.strategy === 'BCS' ? 0.20 : -0.30, pos.strategy === 'BCS' ? 0.30 : -0.20);
+        const meetsOi        = shortOi >= 500 && longOi >= 500;
+        const meetsBidAsk    = shortBidAsk <= 0.10 && longBidAsk <= 0.10;
+
+        if (!meetsMinCredit) ruleViolations.push(`Credit $${creditMid.toFixed(2)} < 1/3 of $${width} spread ($${(width/3).toFixed(2)} min) — not worth rolling`);
+        if (!meetsDte)       ruleViolations.push(`DTE ${dte} outside 30-45 window`);
+        if (!meetsDelta)     ruleViolations.push(`Delta ${delta.toFixed(2)} outside ${pos.strategy === 'BCS' ? '0.20-0.30' : '-0.20 to -0.30'} range`);
+        if (!meetsOi)        ruleViolations.push(`OI too low — short: ${shortOi}, long: ${longOi} (need ≥500)`);
+        if (!meetsBidAsk)    ruleViolations.push(`Bid-ask too wide — short: $${shortBidAsk.toFixed(2)}, long: $${longBidAsk.toFixed(2)} (need ≤$0.10)`);
+
+        const closeCost = pos.currentValue ?? 0;
+        const openCredit = credit * qty * 100;
+        const netRollPnl = parseFloat((openCredit - closeCost).toFixed(2));
+
+        candidates.push({
+          expiry, dte, shortStrike, longStrike, spreadWidth: width,
+          credit, creditMid, creditRatio, delta,
+          shortSymbol, longSymbol,
+          shortOi: shortOi || null, longOi: longOi || null,
+          shortBidAsk, longBidAsk,
+          ruleViolations, meetsMinCredit, meetsDte, meetsDelta, meetsOi, meetsBidAsk,
+          closeCost, openCredit, netRollPnl,
+        });
+      }
+    }
+
+    console.log(`ROLL CANDIDATE SEARCH ${pos.symbol}: ${candidates.length} candidates across ${validExpiries.length} expirations`);
+    return candidates;
+  } catch (e) {
+    console.error('findRollCandidates failed:', e);
+    return candidates;
+  }
+}
+
 // ── Theme ──────────────────────────────────────────────────────────────────
 
 
