@@ -2159,7 +2159,7 @@ function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: a
     } else if (d < earningsBuffer) {
       if (strictOnly) {
         failReasons.push(`Earnings in ${d}d`);
-        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason: `Within ${earningsBuffer}d buffer (DTE Max + 5)` };
+        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason: `Within ${earningsBuffer}d — no qualifying ${RULES.DTE_MIN}-${RULES.DTE_MAX}d expiration clears it` };
       } else {
         earningsCheck = { status: 'warn', value: `${d}d (${earningsDate})`, reason: `Earnings within window — scored lower in rank mode` };
       }
