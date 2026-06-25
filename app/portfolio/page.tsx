@@ -7021,6 +7021,7 @@ export default function PortfolioPage() {
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -7068,6 +7069,24 @@ export default function PortfolioPage() {
   };
 
   useEffect(() => { fetchPositions(); }, []);
+
+  // Pending orders are always complex-order-sourced (Phase 1 extraction
+  // reads PendingOrder.id from the parent OTOCO/OCO complex order's own
+  // id, never the trigger/nested sub-order ids) -- so cancelling one
+  // only ever needs the complex-orders endpoint, no branching required.
+  const cancelPendingOrder = async (order: PendingOrder) => {
+    setCancellingOrderIds(prev => new Set(prev).add(order.id));
+    setError('');
+    try {
+      const token = await getAccessToken();
+      await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
+      await fetchPositions(); // refetch so pendingOrders/positions reflect the cancellation
+    } catch (e: any) {
+      setError(`Could not cancel order: ${e.message ?? 'unknown error'}`);
+    } finally {
+      setCancellingOrderIds(prev => { const next = new Set(prev); next.delete(order.id); return next; });
+    }
+  };
 
   const handleProfitTargetChange = (key: string, value: number) => {
     try {
