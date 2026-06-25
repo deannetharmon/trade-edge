@@ -1075,6 +1075,7 @@ const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
+const LS_TARGETED_RESULTS_CACHE_AT = 'hunter-targeted-results-cache-at'; // mirrors LS_RESULTS_CACHE_AT for Targeted mode's own freshness badge timestamp
 
 // ── IndexedDB helper for rawScanCache ───────────────────────────────────────
 // rawScanCache holds the full options chain per scanned symbol, which can
@@ -6013,6 +6014,7 @@ async function runTargetedScan(
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
+  setTargetedResultsCachedAt: (v: number | null) => void,
   cancelRef: React.MutableRefObject<boolean>,
 ): Promise<void> {
   // PMCC excluded — different philosophy, not a spread strategy.
@@ -6024,8 +6026,9 @@ async function runTargetedScan(
   const allSymbols = Array.from(new Set(strategyMap.map(e => e.symbol)));
 
   if (allSymbols.length === 0) { setError('No active tickers in watchlist.'); return; }
-  setError(''); setLoading(true); setTargetedResults([]);
+  setError(''); setLoading(true); setTargetedResults([]); setTargetedResultsCachedAt(null);
   idbDel(IDB_TARGETED_RESULTS_KEY);
+  try { localStorage.removeItem(LS_TARGETED_RESULTS_CACHE_AT); } catch {}
   cancelRef.current = false;
 
   try {
@@ -6259,7 +6262,10 @@ async function runTargetedScan(
 
     entries.sort((a, b) => b.score - a.score);
     setTargetedResults(entries);
+    const cacheTs = Date.now();
+    setTargetedResultsCachedAt(cacheTs);
     idbSet(IDB_TARGETED_RESULTS_KEY, entries);
+    try { localStorage.setItem(LS_TARGETED_RESULTS_CACHE_AT, String(cacheTs)); } catch {}
   } catch (e: any) {
     setError(e.message);
   } finally {
@@ -6616,6 +6622,7 @@ export default function Home() {
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [rawScanCache, setRawScanCache] = useState<RawScanEntry[]>([]);
   const [resultsCachedAt, setResultsCachedAt] = useState<number | null>(null);
+  const [targetedResultsCachedAt, setTargetedResultsCachedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -6678,6 +6685,10 @@ export default function Home() {
       if (s) setResultsCachedAt(parseInt(s, 10));
     } catch {}
     try {
+      const s = localStorage.getItem(LS_TARGETED_RESULTS_CACHE_AT);
+      if (s) setTargetedResultsCachedAt(parseInt(s, 10));
+    } catch {}
+    try {
       const m = localStorage.getItem(LS_SCREEN_MODE);
       if (m === 'filter' || m === 'rank' || m === 'targeted') setScreenMode(m);
     } catch {}
@@ -6702,8 +6713,8 @@ export default function Home() {
   }, []);
 
   const clearResultsCache = () => {
-    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]);
-    try { localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
+    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
+    try { localStorage.removeItem(LS_RESULTS_CACHE_AT); localStorage.removeItem(LS_TARGETED_RESULTS_CACHE_AT); } catch {}
     idbDel(IDB_RAW_SCAN_KEY);
     idbDel(IDB_RESULTS_KEY);
     idbDel(IDB_TARGETED_RESULTS_KEY);
@@ -7143,7 +7154,13 @@ export default function Home() {
                     </>
                   )}
                   <span className={th.textFaint}>{screenMode === 'targeted' ? `${targetedResults.length} ENTRIES` : `${results.length} SCANNED`}</span>
-                  {mounted && results.length > 0 && resultsCachedAt && (
+                  {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
+                    <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
+                      ↺ restored{' '}
+                      <span className="text-purple-500/70">{(() => { const mins = Math.round((Date.now() - targetedResultsCachedAt) / 60000); return mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()}</span>
+                    </span>
+                  )}
+                  {mounted && screenMode !== 'targeted' && results.length > 0 && resultsCachedAt && (
                     <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
                       {rawScanCache.length > 0 ? '⚡ cached' : '↺ restored'}{' '}
                       <span className="text-purple-500/70">{(() => { const mins = Math.round((Date.now() - resultsCachedAt) / 60000); return mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()}</span>
@@ -7425,7 +7442,7 @@ export default function Home() {
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, targetedCancelRef);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef);
             } else if (mode === 'rank') {
               runScreen(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel, 'rank');
             } else {
