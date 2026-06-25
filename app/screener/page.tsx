@@ -3618,6 +3618,14 @@ function TradeModal({ result, th, onClose }: {
   const [stopPct, setStopPct] = useState(200);
   const stopPrice = parseFloat((creditPerContract * (stopPct / 100)).toFixed(2));
 
+  // Stop-limit buffer — the stop leg must be submitted as 'Stop Limit',
+  // not plain 'Stop' (TastyTrade does not support stop-market orders on
+  // multi-leg spreads). This buffer sets how far above the stop-trigger
+  // price the limit sits, giving the order room to actually fill once
+  // triggered rather than resting unfilled on a fast move.
+  const [stopLimitBufferPct, setStopLimitBufferPct] = useState(5);
+  const stopLimitPrice = parseFloat((stopPrice * (1 + stopLimitBufferPct / 100)).toFixed(2));
+
   // Entry limit price (default = credit, can tweak)
   const [entryLimit, setEntryLimit] = useState(parseFloat(creditPerContract.toFixed(2)));
 
@@ -3652,15 +3660,20 @@ function TradeModal({ result, th, onClose }: {
           legs: closingLegs,
         },
         {
-          // NOTE: this OCO stop child must use 'order-type': 'Stop' with
-          // stop-trigger only — no price field. Combining 'Stop Limit'
-          // with both price and stop-trigger is rejected by TastyTrade's
-          // complex-order endpoint on real submission (it isn't caught
-          // by the entry-leg-only dry-run, since TT doesn't support
-          // dry-running complex/OTOCO orders at all).
+          // NOTE: this OCO stop child must use 'order-type': 'Stop Limit'
+          // with BOTH stop-trigger and price. TastyTrade does not support
+          // stop-MARKET orders on multi-leg spreads (confirmed via their
+          // preflight rejection: "Orders with 2 or more legs cannot be
+          // placed as 'Market' orders" — a plain 'Stop' with no price
+          // executes as a market order once triggered, which is exactly
+          // what's disallowed here). The dry-run never caught this
+          // because TT doesn't support dry-running complex/OTOCO orders
+          // at all — only the live complex-order submission validates
+          // the full OTOCO structure.
           'time-in-force': 'GTC',
-          'order-type': 'Stop',
+          'order-type': 'Stop Limit',
           'stop-trigger': stopPrice.toFixed(2),
+          price: stopLimitPrice.toFixed(2),
           'price-effect': 'Debit',
           legs: closingLegs,
         },
@@ -3828,6 +3841,19 @@ function TradeModal({ result, th, onClose }: {
             ))}
           </div>
           <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop triggers when spread costs ${stopPrice.toFixed(2)} to close ({stopPct}% of credit = {stopPct - 100}% loss on credit received)</p>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-red-900/30">
+            <span className={`text-[9px] ${th.textFaint}`}>Stop-limit buffer</span>
+            <span className={`text-[9px] ${th.textFaint}`}>limit at ${stopLimitPrice.toFixed(2)} debit</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            {[2, 5, 10, 15].map(pct => (
+              <button key={pct} onClick={() => setStopLimitBufferPct(pct)}
+                className={`flex-1 py-1 rounded text-[10px] font-bold border transition-colors ${stopLimitBufferPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
+                +{pct}%
+              </button>
+            ))}
+          </div>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop submits as Stop Limit — triggers at ${stopPrice.toFixed(2)}, fills up to ${stopLimitPrice.toFixed(2)} (required: TastyTrade does not allow stop-market orders on multi-leg spreads)</p>
         </div>
 
         {/* Dry run result */}
