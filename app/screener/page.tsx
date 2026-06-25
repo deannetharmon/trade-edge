@@ -3683,6 +3683,9 @@ function TradeModal({ result, th, onClose }: {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      // TEMP DEBUG -- remove once preflight failure is diagnosed
+      console.log('DRY_RUN_DEBUG payload sent:', payload);
+      console.log('DRY_RUN_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
       setDryRunResult(data?.data);
       setPhase('confirm');
