@@ -1547,6 +1547,9 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       const parentActive = !order['terminal-at'] && nestedOrders.length > 0;
       console.log(`COMPLEX ORDER: id=${order.id} hasActiveNested=${hasActiveNested} parentActive=${parentActive} nestedStatuses=${nestedOrders.map((o:any) => o['status']).join(',')}`);
       if (hasActiveNested || parentActive) {
+        // TEMP TARGETED DIAGNOSTIC -- remove after finding trigger order field
+        console.log(`TRIGGER_SHAPE_DEBUG id=${order.id} top-level keys:`, Object.keys(order));
+        console.log(`TRIGGER_SHAPE_DEBUG id=${order.id} full order:`, JSON.stringify(order, null, 2));
         for (const nestedOrder of nestedOrders) for (const leg of nestedOrder.legs ?? []) {
           // Prefer underlying-symbol; fall back to parsing the OCC option symbol
           const underlying = leg['underlying-symbol'];
