@@ -2190,17 +2190,36 @@ P&L RELIABILITY — READ BEFORE REACTING TO ANY LOSS:
   CLOSE/CUT_LOSSES on the strength of a number you have been told is unreliable.
 - A wide or one-sided bid/ask on a high-IV or illiquid chain routinely prints a
   phantom loss. Price the position at mid in your head and discount the artifact.
+- A RELIABLE loss is NOT automatically an actionable loss. A credit spread that is
+  comfortably OTM routinely shows an open paper loss for most of its life because:
+  (a) the trade is short vega, so any rise in IV after entry inflates buyback even
+  though price has not moved toward the strike; (b) the short leg still holds time
+  value you have not yet earned — that unrealized extrinsic reads as a loss until
+  theta grinds it out; (c) closing means buying back at the ask, and slippage on an
+  illiquid high-IV chain is real cost you would not pay if held. None of these means
+  the position is failing. A deep-OTM spread showing red is a WINNING trade that is
+  simply early — do NOT recommend CLOSE/CUT_LOSSES on the strength of that paper loss.
 
 DO NOT MANUFACTURE URGENCY:
-- Gamma risk is only material NEAR THE MONEY. Never cite "rising gamma" as a
-  reason to close a position whose short strike is comfortably OTM (buffer above
-  the DTE-appropriate threshold below). Far-OTM gamma is negligible regardless of DTE.
+- HARD GATE: if the OTM buffer to the short strike is >= 5%, "rising gamma" /
+  "gamma risk" is FORBIDDEN as a reason to close, full stop — regardless of DTE.
+  Gamma is only material near the money. At a 10-32% buffer it is negligible. Do not
+  cite it, do not list it as a risk, do not let it drive the recommendation. Only
+  below a 5% buffer near expiry may gamma legitimately factor into a close decision.
 - A safe, deep-OTM, near-max-profit position approaching 21 DTE should be framed
   as RULE-BASED PROFIT-TAKING (take the profit, redeploy capital), NOT as loss
   mitigation. These lead to the same action for opposite reasons — name the right one.
 - Reserve CLOSE/CUT_LOSSES for genuine geometry risk (thin buffer near expiry,
   trend broken against the thesis, loss approaching the stop), not for normal
   open-trade noise on a position that is working.
+- SELF-CONSISTENCY: your recommendation and reasoning may not contradict your own
+  stated geometry. If you describe a position as comfortably/significantly OTM with
+  a healthy buffer and low prob of max loss, you may NOT then recommend a danger-
+  driven exit. The ONLY valid reason to close such a position is the 21-DTE TIME
+  RULE (standard entries only) — and you must frame it that way: rule-based exit to
+  recycle capital and avoid the final-weeks gamma zone, NOT loss mitigation and NOT
+  current danger. Say plainly that the position is safe by geometry and you are
+  closing to honor the time rule.
 
 WEIGH THE WHOLE PICTURE, NOT JUST THE GREEKS:
 - Greeks are real but they are inputs, not the verdict. Weigh, in order: position
@@ -2314,7 +2333,7 @@ Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
 Credit received: $${pos.creditReceived.toFixed(2)} total | $${creditPerContract.toFixed(2)} per short contract
 Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${currentBuybackPerContract != null ? `$${currentBuybackPerContract.toFixed(2)} per short contract` : 'unknown'}
-P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}
+P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}${pos.pnl != null && pos.pnlReliable && pos.buffer != null && pos.buffer >= 5 ? ' — NOTE: reliable does not mean actionable; a paper loss on a comfortably-OTM spread is normal (short vega + unearned time value), not a reason to close' : ''}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
 Profit target: ${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})
 Max risk: $${pos.maxRisk.toFixed(2)}
@@ -2354,7 +2373,7 @@ Reason: ${trend?.reason ?? 'none'}
 Flags: ${[
   !isCspLike && pos.needsClose ? '⚠ AT 21 DTE — defined-risk spread should be closed or rolled unless there is a clear reason to hold' : '',
   isCspLike && pos.dte <= 21 ? `ℹ CSP under 21 DTE — evaluate premium, theta, delta, and assignment basis; do not auto-close` : '',
-  pos.entryDte <= 21 && !isCspLike ? `ℹ SHORT-DATED ENTRY — entered at ${pos.entryDte} DTE, now ${pos.dte} DTE. Goal is fast profit capture, NOT the standard 50%/21-DTE framework. Evaluate for early exit at 30-40% or on any sign of adverse movement.` : '',
+  pos.entryDte <= 21 && !isCspLike ? `ℹ SHORT-DATED ENTRY — entered at ${pos.entryDte} DTE, now ${pos.dte} DTE. Goal is fast profit capture, NOT the standard 50%/21-DTE framework. The 21-DTE hard-close rule does NOT apply; do NOT use close-now / time-rule framing for this position. Evaluate for early exit at 30-40% or on any sign of adverse movement.` : '',
   pos.hitTarget ? '✓ Profit target hit' : '',
   !pos.hasGtc ? '⚠ No GTC order' : '',
   !isCspLike && pos.buffer != null && pos.buffer < 2 ? `⚠ CRITICAL spread buffer ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE — near breach` : '',
@@ -6672,7 +6691,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <p className="text-xs leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.entryDate && <span className={`block text-[10px] ${th.textFaint}`}>{pos.entryDate}</span>}
                 <span className={`block font-bold ${th.text}`}>{pos.expDate}</span>
-                <span className={`block ${dteColor(pos.dte)}`}>({pos.dte}d)</span>
+                <span className={`block ${dteColor(pos.dte)}`}>({pos.dte}d){Number.isFinite(pos.entryDte) ? <span className={`text-[9px] ${th.textFaint}`}> ← {pos.entryDte}d entry</span> : null}</span>
               </p>
             </div>
 
