@@ -1,5 +1,3 @@
-mkdir -p app/api/position-intent
-cat > app/api/position-intent/route.ts << 'ROUTE_EOF'
 // app/api/position-intent/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
