@@ -82,4 +82,3 @@ export async function DELETE(_req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
-ROUTE_EOF

@@ -75,6 +75,11 @@ interface PositionLeg {
   currentPrice: number | null;
 }
 
+// Trader's reference point for AI analysis. Auto-defaulted from strategy
+// (lone short put -> acquisition, everything else -> income) and overridable
+// per position; persisted in Redis via /api/position-intent.
+type PositionIntent = 'income' | 'acquisition' | 'neutral';
+
 interface Position {
   key: string;
   symbol: string;
@@ -86,6 +91,8 @@ interface Position {
   currentValue: number | null;
   pnl: number | null;
   pnlPct: number | null;
+  pnlReliable: boolean;
+  intent: PositionIntent;
   plOpen: number | null;
   targetPrice: number;
   profitTarget: number;
@@ -1609,6 +1616,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
 
   const allOptionSymbols = optionPositions.map((p: any) => p.symbol).filter(Boolean);
   const currentPrices: Record<string, number> = {};
+  const unpriceableSymbols = new Set<string>();
   const thetaMap: Record<string, number> = {};
   const gammaMap: Record<string, number> = {};
   const deltaMap: Record<string, number> = {};
@@ -1626,7 +1634,9 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
           const ask = parseFloat(item.ask ?? '0');
           const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
           const mid = (bid + ask) / 2;
-          currentPrices[sym] = mid > 0 ? mid : mark > 0 ? mark : 0;
+          const twoSided = bid > 0 && ask > 0;
+          currentPrices[sym] = twoSided ? mid : mark > 0 ? mark : 0;
+          if (!twoSided && mark <= 0) unpriceableSymbols.add(sym);
           const theta = parseFloat(item.theta ?? 'NaN');
           const gamma = parseFloat(item.gamma ?? 'NaN');
           const delta = parseFloat(item.delta ?? 'NaN');
@@ -1834,6 +1844,12 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
   let profitTargets: Record<string, number> = {};
   try { profitTargets = JSON.parse(localStorage.getItem(LS_PROFIT_TARGETS) ?? '{}'); } catch {}
 
+  let intentOverrides: Record<string, PositionIntent> = {};
+  try {
+    const intentRes = await fetch('/api/position-intent');
+    if (intentRes.ok) intentOverrides = (await intentRes.json())?.intents ?? {};
+  } catch {}
+
   const today = new Date();
   let positions: Position[] = Object.entries(groups).map(([key, legs]) => {
     const [symbol, expDate] = key.split('::');
@@ -1871,6 +1887,12 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     }
     currentValue = currentValue * 100;
 
+    const anyLegUnpriceable = legs.some(
+      (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
+    );
+    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable;
+    const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
+    const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
     const pnl = hasCurrentPrices ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
@@ -1896,7 +1918,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       key, symbol, expDate, dte, strategy, legs: positionLegs,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
-      pnl, pnlPct, targetPrice, profitTarget, hitTarget,
+      pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
       entryDte, entryDate: openedAt, needsClose: entryDte > 21 && dte <= 21, accountNumber,
@@ -2123,6 +2145,17 @@ PRICE SUPPORT ANALYSIS — CRITICAL FOR BULLISH PUT TRADES:
 - Do not give HIGH confidence to a new or continuing bullish put recommendation unless support analysis is GOOD or the rationale clearly explains why CAUTION is acceptable.
 - Support analysis is not a guarantee. It is a risk-quality filter, not a mechanical trade signal.
 
+TRADER INTENT — HONOR IT OVER STRUCTURE:
+- Each position carries a STATED INTENT: acquisition, income, or neutral.
+- ACQUISITION means the trader wants the shares: assignment is the planned outcome,
+  NOT a failure. Do not recommend defensive rolls or cite assignment risk as a
+  negative for an acquisition-intent put that is ITM or near it — instead judge
+  whether the effective basis is still attractive given the trend.
+- INCOME means avoid assignment and manage to keep the short OTM.
+- NEUTRAL means weigh both outcomes without preference.
+- Stated intent OVERRIDES the structural read. A short put marked income is managed
+  like income even though its structure could wheel; a spread is never "acquisition."
+
 CSP / WHEEL MANAGEMENT — CRITICAL:
 - A cash-secured put is NOT managed like a bull put spread.
 - If strategy is CSP, PUT, or a single short put with no long protective leg, assume the trader may be using it for wheel-income unless the prompt says otherwise.
@@ -2147,6 +2180,36 @@ WHEN TO DEVIATE FROM RULES (apply professional judgment):
 - If IVR just dropped below 30 mid-trade but P&L is positive, holding can still make sense if trend confirms
 - Earnings risk only exists if earnings occurs on or before the option expiration; never mention post-expiration earnings as a current-position risk
 - Sometimes doing nothing is the hardest but best trade
+
+P&L RELIABILITY — READ BEFORE REACTING TO ANY LOSS:
+- The position prompt states whether the open P&L is RELIABLE or a QUOTE ARTIFACT.
+- If P&L is flagged unreliable, or if the loss magnitude conflicts with the
+  position geometry (a double-digit OTM buffer with low prob of max loss should
+  NOT show a large realizable loss), trust the GEOMETRY — buffer %, DTE, distance
+  to the short strike — over the raw mark. Say so explicitly and do not recommend
+  CLOSE/CUT_LOSSES on the strength of a number you have been told is unreliable.
+- A wide or one-sided bid/ask on a high-IV or illiquid chain routinely prints a
+  phantom loss. Price the position at mid in your head and discount the artifact.
+
+DO NOT MANUFACTURE URGENCY:
+- Gamma risk is only material NEAR THE MONEY. Never cite "rising gamma" as a
+  reason to close a position whose short strike is comfortably OTM (buffer above
+  the DTE-appropriate threshold below). Far-OTM gamma is negligible regardless of DTE.
+- A safe, deep-OTM, near-max-profit position approaching 21 DTE should be framed
+  as RULE-BASED PROFIT-TAKING (take the profit, redeploy capital), NOT as loss
+  mitigation. These lead to the same action for opposite reasons — name the right one.
+- Reserve CLOSE/CUT_LOSSES for genuine geometry risk (thin buffer near expiry,
+  trend broken against the thesis, loss approaching the stop), not for normal
+  open-trade noise on a position that is working.
+
+WEIGH THE WHOLE PICTURE, NOT JUST THE GREEKS:
+- Greeks are real but they are inputs, not the verdict. Weigh, in order: position
+  geometry (buffer, DTE, prob of max loss, defined vs undefined risk), then Greeks,
+  then market direction vs the position's directional bias, then news/catalysts
+  (earnings within expiry first), then fundamentals and the trader's stated intent.
+- Be neither optimistic nor pessimistic. Give the honest call a senior trader would
+  give on this exact position. If the right answer depends on unknowable intent or
+  direction, say MEDIUM confidence — never fake HIGH confidence to sound decisive.
 
 ANALYSIS PRINCIPLES:
 - Always consider the trend direction vs. the strategy type — a BPS in a downtrend is broken thesis
@@ -2243,14 +2306,15 @@ Support reason: ${support.reason}`
   return `Analyze this open options position:
 
 POSITION: ${pos.symbol} ${pos.strategy}
-Detected intent: ${strategyIntent}
+Stated intent: ${pos.intent.toUpperCase()} (${pos.intent === 'acquisition' ? 'trader WANTS the shares — assignment is success, not failure; do not treat ITM/assignment risk as a loss' : pos.intent === 'income' ? 'pure premium income — avoid assignment; manage to keep the short OTM' : 'directionally neutral — weigh both sides without an assignment preference'})
+Structural read (auto): ${strategyIntent}
 Assignment willing: ${assignmentWilling}
 Effective assignment basis: ${effectiveAssignmentBasis != null ? `$${effectiveAssignmentBasis.toFixed(2)}` : 'not applicable'}
 Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
 Credit received: $${pos.creditReceived.toFixed(2)} total | $${creditPerContract.toFixed(2)} per short contract
 Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${currentBuybackPerContract != null ? `$${currentBuybackPerContract.toFixed(2)} per short contract` : 'unknown'}
-P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'}
+P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
 Profit target: ${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})
 Max risk: $${pos.maxRisk.toFixed(2)}
@@ -6337,12 +6401,13 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExecute }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
   onToggle: (key: string) => void;
   onProfitTargetChange: (key: string, value: number) => void;
+  onIntentChange: (key: string, intent: PositionIntent) => void;
   onExecute: (pos: Position, action: ActionType) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -6902,6 +6967,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onExec
             return canExtend ? <ExtendProfitButton pos={pos} th={th} /> : null;
           })()}
           <SetStopLossButton pos={pos} th={th} />
+          {/* Intent — reference point for AI analysis (assignment = goal vs avoid) */}
+          <select
+            value={pos.intent}
+            onClick={e => e.stopPropagation()}
+            onChange={e => { e.stopPropagation(); onIntentChange(pos.key, e.target.value as PositionIntent); }}
+            title="Trade intent — tells the AI whether assignment is the goal"
+            className={`text-[9px] px-1.5 py-1 border rounded bg-transparent outline-none cursor-pointer ${th.borderLight} ${th.textFaint} ac-hover-text`}
+            style={{ fontFamily: "'DM Mono', monospace" }}>
+            <option value="income">Intent: Income</option>
+            <option value="acquisition">Intent: Acquire</option>
+            <option value="neutral">Intent: Neutral</option>
+          </select>
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).includes(rec.action) && (
             <span className={`text-[9px] ${th.textFaint} ml-1`}>← suggested</span>
           )}
@@ -7102,11 +7179,12 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, onCancel }: {
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, groupAction, onGroupAction, onExecute }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
   onProfitTargetChange: (key: string, value: number) => void;
+  onIntentChange: (key: string, intent: PositionIntent) => void;
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
 }) {
@@ -7149,7 +7227,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
       </div>
       <div className="space-y-2">
         {sortedPositions.map(p => (
-          <PositionCard key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle} onProfitTargetChange={onProfitTargetChange} onExecute={onExecute} />
+          <PositionCard key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle} onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute} />
         ))}
       </div>
     </div>
@@ -7508,6 +7586,15 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleIntentChange = (key: string, intent: PositionIntent) => {
+    setPositions(prev => prev.map(p => (p.key === key ? { ...p, intent } : p)));
+    fetch('/api/position-intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positionKey: key, intent }),
+    }).catch(e => console.error('Intent save failed (non-blocking):', e));
+  };
+
   const handleProfitTargetChange = (key: string, value: number) => {
     try {
       const targets = JSON.parse(localStorage.getItem(LS_PROFIT_TARGETS) ?? '{}');
@@ -7668,7 +7755,7 @@ export default function PortfolioPage() {
                         title="⚠ Close Now — 21 DTE or Less" titleColor="text-red-400"
                         positions={needsClose} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
-                        onProfitTargetChange={handleProfitTargetChange}
+                        onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="CLOSE_ROLL" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                       />
@@ -7681,7 +7768,7 @@ export default function PortfolioPage() {
                         title="✓ Profit Target Hit" titleColor="text-emerald-400"
                         positions={hitTarget} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
-                        onProfitTargetChange={handleProfitTargetChange}
+                        onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="TAKE_PROFIT" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                       />
@@ -7694,7 +7781,7 @@ export default function PortfolioPage() {
                         title="⏱ Missing GTC Order" titleColor="text-blue-400"
                         positions={noGtc} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
-                        onProfitTargetChange={handleProfitTargetChange}
+                        onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="PLACE_GTC" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                       />
@@ -7707,7 +7794,7 @@ export default function PortfolioPage() {
                         title="Active Positions" titleColor={th.textFaint}
                         positions={normal} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
-                        onProfitTargetChange={handleProfitTargetChange}
+                        onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                       />
