@@ -2201,11 +2201,15 @@ P&L RELIABILITY — READ BEFORE REACTING TO ANY LOSS:
   simply early — do NOT recommend CLOSE/CUT_LOSSES on the strength of that paper loss.
 
 DO NOT MANUFACTURE URGENCY:
-- HARD GATE: if the OTM buffer to the short strike is >= 5%, "rising gamma" /
-  "gamma risk" is FORBIDDEN as a reason to close, full stop — regardless of DTE.
-  Gamma is only material near the money. At a 10-32% buffer it is negligible. Do not
-  cite it, do not list it as a risk, do not let it drive the recommendation. Only
-  below a 5% buffer near expiry may gamma legitimately factor into a close decision.
+- HARD GATE (concept, not keyword): if the OTM buffer is >= 5%, you may NOT cite
+  expiry-proximity danger as a close reason under ANY label — not "gamma," not
+  "acceleration risk," not "late-stage risk," not "proximity to expiry," not
+  "gamma issues eroding returns." These are the same forbidden concept renamed.
+  At a 5%+ buffer the position is far from the strike and expiry proximity is NOT a
+  danger. Before listing ANY risk, state the buffer and whether it is >= 5%; if it
+  is, every risk you list must be a REAL geometry/trend/event risk, not a Greek that
+  is normal for the position. Only below a 5% buffer near expiry may expiry-proximity
+  risk legitimately factor in.
 - A safe, deep-OTM, near-max-profit position approaching 21 DTE should be framed
   as RULE-BASED PROFIT-TAKING (take the profit, redeploy capital), NOT as loss
   mitigation. These lead to the same action for opposite reasons — name the right one.
@@ -2340,7 +2344,7 @@ Max risk: $${pos.maxRisk.toFixed(2)}
 
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
-Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
+Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != null && pos.buffer >= 5 ? ` — SAFE BY GEOMETRY: short strike is ${pos.buffer.toFixed(1)}% away. Expiry-proximity/gamma risk is NOT a valid close reason here under any name. If recommending CLOSE, it must be justified ONLY by the 21-DTE time rule (standard entries) and framed as rule-based capital recycling, not danger. Do NOT list normal Greeks as risks.` : pos.buffer != null && pos.buffer < 2 ? ` — TIGHT: under 2% buffer, genuine breach risk; defensive posture warranted.` : ''}
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
 DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'}
@@ -2357,8 +2361,8 @@ ${supportText}
 GREEKS (net position):
 Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.deltaAtEntry != null && pos.netDelta != null ? `${pos.deltaAtEntry.toFixed(4)} → ${pos.netDelta.toFixed(4)}` : 'unknown'})
 Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.thetaAtEntry != null && pos.theta != null ? `${pos.thetaAtEntry.toFixed(4)} → ${pos.theta.toFixed(4)}` : 'unknown'})
-Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (acceleration risk)
-Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (volatility exposure)
+Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (only material near the money; negligible at a wide buffer)
+Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (short vega — IV rises inflate buyback as paper loss, not directional danger)
 
 OPERATIONAL STATUS:
 GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
@@ -2450,10 +2454,15 @@ For covered calls / short calls:
 - For defined-risk spreads, weak support should increase defensive posture because spread loss can expand before the strike is breached.
 
 6. GREEKS
-- Delta: directional risk / assignment probability proxy.
-- Gamma: acceleration risk near expiration.
+- A Greek is only a RISK when it is ABNORMAL for this position, never by default.
+  Do not list a Greek as a risk if it sits within normal entry parameters.
+- Delta: directional exposure / rough assignment proxy. A short-put delta of 0.20-0.30
+  is NORMAL (it is the entry target) — do NOT call it 'high delta' or a risk.
+- Gamma: only material NEAR THE MONEY. At a buffer >= 5% it is negligible and may NOT
+  be cited as a risk or a close reason under any name (gamma, acceleration, late-stage
+  risk, proximity-to-expiry risk — all forbidden above a 5% buffer).
 - Theta: remaining income reward.
-- Vega: volatility expansion/contraction risk.
+- Vega: short vega means an IV rise shows as paper loss; that is expected, not danger.
 - Compare theta versus gamma:
   - If theta meaningfully exceeds gamma and buffer/support are healthy, holding may be valid.
   - If gamma is large relative to theta, favor close/roll on spreads.
