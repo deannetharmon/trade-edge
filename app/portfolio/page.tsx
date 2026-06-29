@@ -6774,20 +6774,34 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     onProfitTargetChange(pos.key, val);
   };
 
+  const _bannerNetEdge = netEdgeLive(pos);
+  const _reviewNotClose = pos.needsClose && _bannerNetEdge != null && _bannerNetEdge > 0;
   const borderClass = checked
     ? 'border-blue-500/60'
-    : pos.needsClose ? 'border-red-500/60'
+    : pos.needsClose ? (_reviewNotClose ? 'border-amber-500/60' : 'border-red-500/60')
     : pos.hitTarget ? 'border-emerald-500/60'
     : th.border;
 
   return (
     <div ref={cardRef} className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
-      {pos.needsClose && (
-        <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
-          <span className="text-red-400 text-xs">⚠</span>
-          <span className="text-xs text-red-400 font-bold tracking-wider">CLOSE NOW — {pos.dte} DTE</span>
-        </div>
-      )}
+      {pos.needsClose && (() => {
+        // Net-edge-aware banner: past the 21-DTE rule, but if net edge is still
+        // healthy and positive, this is a REVIEW (amber), not a CLOSE NOW (red).
+        // Negative or unknown net edge keeps the red CLOSE NOW.
+        const ne = netEdgeLive(pos);
+        const healthy = ne != null && ne > 0;
+        return healthy ? (
+          <div className="bg-amber-500/10 border-b border-amber-500/40 px-4 py-1.5 flex items-center gap-2">
+            <span className="text-amber-400 text-xs">⚠</span>
+            <span className="text-xs text-amber-400 font-bold tracking-wider">REVIEW — {pos.dte} DTE · past 21-DTE rule, net edge still +${ne.toFixed(0)}/d</span>
+          </div>
+        ) : (
+          <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
+            <span className="text-red-400 text-xs">⚠</span>
+            <span className="text-xs text-red-400 font-bold tracking-wider">CLOSE NOW — {pos.dte} DTE{ne != null ? ` · net edge ${ne >= 0 ? '+' : ''}$${ne.toFixed(0)}/d` : ''}</span>
+          </div>
+        );
+      })()}
       {!pos.needsClose && isShortDateEntry(pos) && (
         <div className="bg-purple-500/10 border-b border-purple-500/30 px-4 py-1.5 flex items-center gap-2">
           <span className="text-purple-400 text-xs">⚡</span>
