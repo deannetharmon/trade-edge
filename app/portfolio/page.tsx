@@ -6358,12 +6358,77 @@ function vegaLabel(vega: number | null): string {
   return '✗ High Vol Risk';
 }
 
+function premiumEdgeValue(iv: number | null, hv30: number | null): number | null {
+  if (iv == null || hv30 == null) return null;
+  return Math.round(iv - hv30);
+}
+
+function premiumEdgeColor(pos: Position, fallback: string): string {
+  const edge = premiumEdgeValue(pos.iv, pos.hv30);
+
+  if (edge != null) {
+    if (edge >= 10) return 'text-emerald-400';
+    if (edge >= 0) return 'text-yellow-400';
+    return 'text-red-400';
+  }
+
+  return ivrTextColor(pos.ivr, fallback);
+}
+
+function premiumEdgeLabel(pos: Position): string {
+  const edge = premiumEdgeValue(pos.iv, pos.hv30);
+
+  if (edge != null) {
+    if (edge >= 10) return '✓ Rich Premium';
+    if (edge >= 0) return '~ Fair Premium';
+    return '✗ Cheap Premium';
+  }
+
+  if (pos.ivr != null) return ivrLabel(pos.ivr);
+  return 'No vol signal';
+}
+
+function premiumEdgeDisplay(pos: Position): string {
+  const edge = premiumEdgeValue(pos.iv, pos.hv30);
+  if (edge != null) return `${edge >= 0 ? '+' : ''}${edge}%`;
+  if (pos.ivr != null) return `IVR ${pos.ivr}`;
+  if (pos.iv != null) return `IV ${pos.iv}%`;
+  return '—';
+}
+
 function ivrTextColor(ivr: number | null, fallback: string): string {
   if (ivr == null) return fallback;
   if (ivr < 20) return 'text-red-400';
   if (ivr < 40) return 'text-yellow-400';
   if (ivr <= 70) return 'text-emerald-400';
   return 'text-emerald-300';
+}
+
+function ivTextColor(iv: number | null, hv30: number | null, fallback: string): string {
+  if (iv == null) return fallback;
+  if (hv30 == null) return 'text-sky-400';
+
+  const spread = iv - hv30;
+  if (spread >= 10) return 'text-emerald-400';
+  if (spread >= 0) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function ivHvLabel(iv: number | null, hv30: number | null): string {
+  if (iv == null) return '';
+  if (hv30 == null) return 'IV live';
+
+  const spread = iv - hv30;
+  if (spread >= 10) return '✓ Rich Premium';
+  if (spread >= 0) return '~ Fair Premium';
+  return '✗ IV < HV';
+}
+
+function fmtIvHv(iv: number | null, hv30: number | null): string {
+  if (iv == null && hv30 == null) return '—';
+  if (iv != null && hv30 != null) return `IV ${iv}% / HV ${hv30}%`;
+  if (iv != null) return `IV ${iv}%`;
+  return `HV ${hv30}%`;
 }
 
 function ivrLabel(ivr: number | null): string {
@@ -6882,14 +6947,33 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             {/* ── GREEKS ─────────────────────────────── */}
-            <div className="border-t-2 border-purple-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Delta</p>
-              <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${deltaTextColor(pos.netDelta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netDelta != null ? `Raw delta: ${pos.netDelta.toFixed(4)}` : undefined}>
-                {fmtDeltaDisplay(pos.netDelta)}
+            <div
+              className="relative group border-t-2 border-purple-600/50 pt-1"
+              title={`Premium edge uses IV - HV30 when HV30 exists; otherwise it falls back to IVR. IV=${pos.iv ?? '—'}%, HV30=${pos.hv30 ?? '—'}%, IVR=${pos.ivr ?? '—'}`}
+            >
+              <p className={`text-[9px] ${th.textFaint}`}>Premium</p>
+
+              <p className={`text-xs font-bold leading-tight ${premiumEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {premiumEdgeDisplay(pos)}
               </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${deltaTextColor(pos.netDelta, th.textFaint)}`}>
-                {deltaLabel(pos.netDelta)}
+
+              <p className={`text-[8px] mt-0.5 font-semibold ${premiumEdgeColor(pos, th.textFaint)}`}>
+                {premiumEdgeLabel(pos)}
               </p>
+
+              <div className="absolute bottom-full left-0 mb-2 z-50 hidden group-hover:block w-72 pointer-events-none">
+                <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-3 shadow-2xl text-[10px]">
+                  <p className="text-white font-bold mb-2 tracking-wide">PREMIUM EDGE</p>
+                  <p className="text-[#aaa] mb-1">IV: {pos.iv != null ? `${pos.iv}%` : '—'}</p>
+                  <p className="text-[#aaa] mb-1">HV30: {pos.hv30 != null ? `${pos.hv30}%` : 'not available yet'}</p>
+                  <p className="text-[#aaa] mb-1">IVR: {pos.ivr ?? '—'}</p>
+                  <p className="text-[#888] mt-2">
+                    {pos.hv30 != null
+                      ? 'Uses IV minus HV30 to estimate whether option premium is rich or cheap versus realized movement.'
+                      : 'HV30 is not available yet, so this falls back to IVR instead of showing a blank HV value.'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
