@@ -6452,7 +6452,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const chartPopupRef = useRef(null as HTMLDivElement | null);
   const chartButtonRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef(null as HTMLDivElement | null);
-  const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const [chartPopupPos, setChartPopupPos] = useState<{ bottom: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!showChart) return;
@@ -6464,7 +6464,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
       // keep within viewport horizontally
       left = Math.min(left, window.innerWidth - popupW - 8);
       left = Math.max(8, left);
-      setChartPopupPos({ top: r.bottom + 8, left });
+      setChartPopupPos({ bottom: window.innerHeight - r.bottom, left });
     };
     reposition();
     const handler = (e: MouseEvent) => {
@@ -6650,7 +6650,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                     className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
                     style={{
                       width: '280px',
-                      top: chartPopupPos ? `${chartPopupPos.top}px` : '0px',
+                      bottom: chartPopupPos ? `${chartPopupPos.bottom}px` : '0px',
                       left: chartPopupPos ? `${chartPopupPos.left}px` : '0px',
                       visibility: chartPopupPos ? 'visible' : 'hidden',
                     }}
