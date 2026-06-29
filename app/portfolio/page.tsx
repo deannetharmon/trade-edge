@@ -6366,6 +6366,33 @@ function ivrTextColor(ivr: number | null, fallback: string): string {
   return 'text-emerald-300';
 }
 
+function ivTextColor(iv: number | null, hv30: number | null, fallback: string): string {
+  if (iv == null) return fallback;
+  if (hv30 == null) return 'text-sky-400';
+
+  const spread = iv - hv30;
+  if (spread >= 10) return 'text-emerald-400';
+  if (spread >= 0) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function ivHvLabel(iv: number | null, hv30: number | null): string {
+  if (iv == null) return '';
+  if (hv30 == null) return 'IV live';
+
+  const spread = iv - hv30;
+  if (spread >= 10) return '✓ Rich Premium';
+  if (spread >= 0) return '~ Fair Premium';
+  return '✗ IV < HV';
+}
+
+function fmtIvHv(iv: number | null, hv30: number | null): string {
+  if (iv == null && hv30 == null) return '—';
+  if (iv != null && hv30 != null) return `IV ${iv}% / HV ${hv30}%`;
+  if (iv != null) return `IV ${iv}%`;
+  return `HV ${hv30}%`;
+}
+
 function ivrLabel(ivr: number | null): string {
   if (ivr == null) return '';
   if (ivr < 20) return '✗ Poor Premium';
@@ -6882,14 +6909,47 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             {/* ── GREEKS ─────────────────────────────── */}
-            <div className="border-t-2 border-purple-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Delta</p>
-              <p className={`text-xs font-bold inline-block ${deltaTint(pos.netDelta)} ${deltaTextColor(pos.netDelta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netDelta != null ? `Raw delta: ${pos.netDelta.toFixed(4)}` : undefined}>
-                {fmtDeltaDisplay(pos.netDelta)}
+            <div
+              className="relative group border-t-2 border-purple-600/50 pt-1"
+              title={`IV/IVR volatility context. IV=${pos.iv ?? '—'}%, HV30=${pos.hv30 ?? '—'}%, IVR=${pos.ivr ?? '—'}`}
+            >
+              <p className={`text-[9px] ${th.textFaint}`}>IV / IVR</p>
+            
+              <p className="text-xs font-bold leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={ivTextColor(pos.iv, pos.hv30, th.textFaint)}>
+                  {pos.iv != null ? `${pos.iv}%` : '—'}
+                </span>
+                <span className={th.textFaint}> / </span>
+                <span className={ivrTextColor(pos.ivr, th.textFaint)}>
+                  {pos.ivr != null ? pos.ivr : '—'}
+                </span>
               </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${deltaTextColor(pos.netDelta, th.textFaint)}`}>
-                {deltaLabel(pos.netDelta)}
+            
+              <p className={`text-[8px] mt-0.5 font-semibold ${ivTextColor(pos.iv, pos.hv30, th.textFaint)}`}>
+                {ivHvLabel(pos.iv, pos.hv30)}
               </p>
+            
+              <p className={`text-[8px] leading-tight ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {pos.hv30 != null ? `HV ${pos.hv30}%` : 'HV —'}
+              </p>
+            
+              <div className="absolute bottom-full left-0 mb-2 z-50 hidden group-hover:block w-72 pointer-events-none">
+                <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-3 shadow-2xl text-[10px]">
+                  <p className="text-white font-bold mb-2 tracking-wide">IV / IVR GUIDE</p>
+                  <p className="text-[#aaa] mb-1">
+                    <span className="text-white">IV:</span> current implied volatility.
+                  </p>
+                  <p className="text-[#aaa] mb-1">
+                    <span className="text-white">IVR:</span> where current IV ranks versus its recent range.
+                  </p>
+                  <p className="text-[#aaa] mb-2">
+                    <span className="text-white">HV30:</span> recent realized volatility.
+                  </p>
+                  <p className="text-[#888]">
+                    {fmtIvHv(pos.iv, pos.hv30)} · IVR {pos.ivr ?? '—'} · {ivrLabel(pos.ivr) || 'No IVR signal'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
