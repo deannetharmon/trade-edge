@@ -435,9 +435,17 @@ function classifyExit(pnl: number, creditReceived: number, holdDays: number, dte
     if (holdDays <= 3) return 'EARLY_WIN';
     return 'TARGET_HIT';
   } else {
+    // Severity beats speed. A loss is a Max Loss if it is catastrophic by
+    // EITHER measure: > 150% of credit, OR more than $400 absolute. The dollar
+    // floor catches big-dollar blowups on large-credit trades that a pure
+    // percentage misses (e.g. -$767 at -87% of an $885 credit). Previously
+    // holdDays<=2 was checked first, so same-day disasters were mislabeled
+    // FAST_CUT / "quick defense". (Dollar floor can later be made relative to
+    // average win once a two-pass classify is worth it.)
+    const MAX_LOSS_DOLLARS = -400;
+    if (pnlPct < -150 || pnl <= MAX_LOSS_DOLLARS) return 'MAX_LOSS';
     if (holdDays <= 2) return 'FAST_CUT';
     if (dteAtClose <= 21 && dteAtClose >= 0) return 'TIME_STOP';
-    if (pnlPct < -150) return 'MAX_LOSS';
     return 'FAST_CUT';
   }
 }
@@ -1056,24 +1064,50 @@ function ExitAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof 
     const pnl  = g.reduce((s, t) => s + t.pnl, 0);
     const avgH = Math.round(g.reduce((s, t) => s + t.holdDays, 0) / g.length);
     const winRate = g.length > 0 ? wins / g.length : 0;
-    return { ...d, count: g.length, winRate, pnl, avgH };
-  }).filter(Boolean);
+    // Color is derived from realized P&L, not a static expectation. A category
+    // that has actually lost money is flagged regardless of what we assumed it
+    // would be — this is why Fast Cut (a real dollar leak) must not stay grey.
+    const realized: 'good' | 'bad' | 'neutral' =
+      pnl < 0 ? 'bad' : pnl > 0 ? 'good' : 'neutral';
+    return { ...d, count: g.length, winRate, pnl, avgH, realized };
+  }).filter(Boolean)
+    // Sort by total P&L ascending so the biggest dollar drain is always first.
+    .sort((a, b) => a!.pnl - b!.pnl);
 
   if (rows.length === 0) return <p className={`text-xs ${th.textFaint} text-center py-4`}>No data</p>;
 
+  const netPnl = rows.reduce((s, r) => s + r!.pnl, 0);
+  const worst = rows[0]!; // lowest P&L after ascending sort
+  const worstIsLeak = worst.pnl < 0;
+  const leakShare = netPnl !== 0 ? Math.abs(worst.pnl) / Math.abs(netPnl) : 0;
+
   return (
     <div className="space-y-3">
+      {worstIsLeak && (
+        <div className="p-3 rounded-lg border border-red-500/40 bg-red-500/10">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] font-bold text-red-400 tracking-wider uppercase">Biggest Leak — {worst.label}</span>
+            <span className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>${worst.pnl.toFixed(0)}</span>
+          </div>
+          <p className={`text-[10px] ${th.textMuted}`}>
+            {worst.count} trade{worst.count !== 1 ? 's' : ''} · {Math.round(worst.winRate * 100)}% win ·{' '}
+            {netPnl > 0
+              ? `this category alone is ${leakShare.toFixed(1)}× your net P&L of $${netPnl.toFixed(0)} — without it you'd be far ahead`
+              : `dragging your net P&L to $${netPnl.toFixed(0)}`}
+          </p>
+        </div>
+      )}
       {rows.map(r => (
         <div key={r!.type} className={`p-3 rounded-lg border ${
-          r!.goodOrBad === 'good'    ? 'border-emerald-500/20 bg-emerald-500/5'
-          : r!.goodOrBad === 'bad'  ? 'border-red-500/20 bg-red-500/5'
+          r!.realized === 'good'    ? 'border-emerald-500/20 bg-emerald-500/5'
+          : r!.realized === 'bad'  ? 'border-red-500/20 bg-red-500/5'
           : `${th.borderLight} bg-white/2`
         }`}>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
               <span className={`text-[9px] font-bold px-1.5 py-0.5 border rounded ${
-                r!.goodOrBad === 'good' ? 'border-emerald-600 text-emerald-400'
-                : r!.goodOrBad === 'bad' ? 'border-red-600 text-red-400'
+                r!.realized === 'good' ? 'border-emerald-600 text-emerald-400'
+                : r!.realized === 'bad' ? 'border-red-600 text-red-400'
                 : `${th.border} ${th.textFaint}`
               }`}>{r!.label}</span>
               <span className={`text-[10px] ${th.textFaint}`}>{r!.count} trade{r!.count !== 1 ? 's' : ''} · avg {r!.avgH}d hold</span>
