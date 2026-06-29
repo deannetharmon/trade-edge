@@ -6404,10 +6404,16 @@ function netEdgeFrom(
   stockPrice: number | null,
 ): number | null {
   if (theta == null || gamma == null || iv == null || stockPrice == null) return null;
+  // theta and gamma are stored as RAW per-share Greeks (x qty). To get whole-
+  // position dollars they must be multiplied by the 100 option multiplier — the
+  // same x100 the Theta column applies for display. Without it, net edge
+  // collapses to ~$0 for every position.
+  const MULT = 100;
   // 1-sigma daily dollar move from IV (iv is a whole-number percent, e.g. 41).
   const dailyMove = stockPrice * (iv / 100) * Math.sqrt(1 / TRADING_DAYS);
-  const gammaCost = 0.5 * Math.abs(gamma) * dailyMove * dailyMove;
-  return theta - gammaCost;
+  const thetaDollars = theta * MULT;
+  const gammaCostDollars = 0.5 * Math.abs(gamma) * dailyMove * dailyMove * MULT;
+  return thetaDollars - gammaCostDollars;
 }
 
 function netEdgeLive(pos: Position): number | null {
