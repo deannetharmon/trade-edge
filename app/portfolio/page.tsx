@@ -6386,6 +6386,102 @@ function premiumEdgeValue(iv: number | null, hv30: number | null): number | null
   return Math.round(iv - hv30);
 }
 
+// ── Net Daily Edge (theta vs gamma) ────────────────────────────────────────
+// The dollars/day you collect from decay (theta) minus the expected dollars/day
+// gamma costs you via price movement. Positive = paid to hold; approaching $0 =
+// gamma catching up (get-out signal); negative = gamma winning.
+//
+// theta and gamma here are already whole-position, per-contract * qty dollar
+// figures (see loadPositions), and on the same unit basis, so NO x100 multiplier
+// is applied. Treat the absolute value as a directional estimate; the peak/trend
+// behavior is robust to any constant scaling.
+const TRADING_DAYS = 252;
+
+function netEdgeFrom(
+  theta: number | null,
+  gamma: number | null,
+  iv: number | null,
+  stockPrice: number | null,
+): number | null {
+  if (theta == null || gamma == null || iv == null || stockPrice == null) return null;
+  // 1-sigma daily dollar move from IV (iv is a whole-number percent, e.g. 41).
+  const dailyMove = stockPrice * (iv / 100) * Math.sqrt(1 / TRADING_DAYS);
+  const gammaCost = 0.5 * Math.abs(gamma) * dailyMove * dailyMove;
+  return theta - gammaCost;
+}
+
+function netEdgeLive(pos: Position): number | null {
+  return netEdgeFrom(pos.theta, pos.gamma, pos.iv, pos.stockPrice);
+}
+
+// Net edge over this position's snapshot history, oldest-first, nulls dropped.
+function netEdgeSeries(pos: Position): { date: string; value: number }[] {
+  const hist = pos.snapshotHistory ?? [];
+  const out: { date: string; value: number }[] = [];
+  for (const s of hist) {
+    const v = netEdgeFrom(s.theta, s.gamma, s.iv, s.stockPrice);
+    if (v != null) out.push({ date: s.date, value: v });
+  }
+  return out;
+}
+
+// Peak net edge this position has ever reached (history + today's live value).
+function netEdgePeak(pos: Position): number | null {
+  const series = netEdgeSeries(pos).map(p => p.value);
+  const live = netEdgeLive(pos);
+  if (live != null) series.push(live);
+  if (series.length === 0) return null;
+  return Math.max(...series);
+}
+
+// Yesterday's (most recent prior snapshot) net edge, for the day-over-day delta.
+function netEdgePrior(pos: Position): number | null {
+  const series = netEdgeSeries(pos);
+  if (series.length === 0) return null;
+  return series[series.length - 1].value;
+}
+
+// Percent change today vs prior snapshot. null if no prior or prior ~ 0.
+function netEdgeDayChangePct(pos: Position): number | null {
+  const live = netEdgeLive(pos);
+  const prior = netEdgePrior(pos);
+  if (live == null || prior == null || Math.abs(prior) < 0.01) return null;
+  return ((live - prior) / Math.abs(prior)) * 100;
+}
+
+// Net-edge color, keyed off this position's own peak (your approved bands):
+//  - green  : within 15% of peak (at/near peak efficiency)
+//  - amber  : fallen >15% off peak but still positive
+//  - red    : at or below $0 (gamma winning)
+function netEdgeColor(pos: Position, fallback: string): string {
+  const live = netEdgeLive(pos);
+  if (live == null) return fallback;
+  if (live <= 0) return 'text-red-400';
+  const peak = netEdgePeak(pos);
+  if (peak == null || peak <= 0) return 'text-emerald-400';
+  const offPeak = (live - peak) / peak; // <= 0
+  if (offPeak >= -0.15) return 'text-emerald-400';
+  return 'text-amber-400';
+}
+
+// Number of distinct days of snapshot history backing this position's peak.
+// Low counts mean the peak is not yet trustworthy.
+function netEdgeDaysTracked(pos: Position): number {
+  return netEdgeSeries(pos).length;
+}
+
+// True the first time today's live edge prints below the prior peak-of-history,
+// i.e. the position has rolled OVER from its peak — gamma starting to win.
+// Requires at least 2 tracked days so a brand-new position can't false-trigger.
+function netEdgeRolledOver(pos: Position): boolean {
+  const series = netEdgeSeries(pos);
+  if (series.length < 2) return false;
+  const histPeak = Math.max(...series.map(s => s.value));
+  const live = netEdgeLive(pos);
+  if (live == null) return false;
+  return live < histPeak;
+}
+
 function premiumEdgeColor(pos: Position, fallback: string): string {
   const edge = premiumEdgeValue(pos.iv, pos.hv30);
 
@@ -6974,26 +7070,51 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               className="relative group border-t-2 border-purple-600/50 pt-1"
               title={`Premium edge uses IV - HV30 when HV30 exists; otherwise it falls back to IVR. IV=${pos.iv ?? '—'}%, HV30=${pos.hv30 ?? '—'}%, IVR=${pos.ivr ?? '—'}`}
             >
-              <p className={`text-[9px] ${th.textFaint}`}>Premium</p>
+              <p className={`text-[9px] ${th.textFaint}`}>Net Edge <span className="text-[7px] opacity-60">~est</span></p>
 
-              <p className={`text-xs font-bold leading-tight ${premiumEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {premiumEdgeDisplay(pos)}
+              {/* 1. Net-edge dollar number, peak-relative color */}
+              <p className={`text-xs font-bold leading-tight ${netEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {(() => { const v = netEdgeLive(pos); return v == null ? '—' : `${v >= 0 ? '+' : ''}$${v.toFixed(0)}/d`; })()}
               </p>
 
-              <p className={`text-[8px] mt-0.5 font-semibold ${premiumEdgeColor(pos, th.textFaint)}`}>
-                {premiumEdgeLabel(pos)}
-              </p>
+              {/* 2. Day-over-day change + 4. rollover alarm */}
+              {(() => {
+                const chg = netEdgeDayChangePct(pos);
+                const rolled = netEdgeRolledOver(pos);
+                return (
+                  <p className="text-[8px] mt-0.5 font-semibold">
+                    {chg != null && (
+                      <span className={chg >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                        {chg >= 0 ? '↑' : '↓'} {Math.abs(chg).toFixed(0)}%
+                      </span>
+                    )}
+                    {rolled && <span className="text-red-400">{chg != null ? ' · ' : ''}▼ off peak</span>}
+                    {chg == null && !rolled && <span className={th.textFaint}>new</span>}
+                  </p>
+                );
+              })()}
+
+              {/* 3. Peak readout with days-tracked confidence */}
+              {(() => {
+                const peak = netEdgePeak(pos);
+                const days = netEdgeDaysTracked(pos);
+                if (peak == null) return null;
+                return (
+                  <p className={`text-[8px] leading-tight ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    peak ${peak.toFixed(0)} · {days}d
+                  </p>
+                );
+              })()}
 
               <div className="absolute bottom-full left-0 mb-2 z-50 hidden group-hover:block w-72 pointer-events-none">
                 <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-3 shadow-2xl text-[10px]">
-                  <p className="text-white font-bold mb-2 tracking-wide">PREMIUM EDGE</p>
-                  <p className="text-[#aaa] mb-1">IV: {pos.iv != null ? `${pos.iv}%` : '—'}</p>
-                  <p className="text-[#aaa] mb-1">HV30: {pos.hv30 != null ? `${pos.hv30}%` : 'not available yet'}</p>
-                  <p className="text-[#aaa] mb-1">IVR: {pos.ivr ?? '—'}</p>
+                  <p className="text-white font-bold mb-2 tracking-wide">NET DAILY EDGE</p>
+                  <p className="text-[#aaa] mb-1">Theta (collecting): {pos.theta != null ? `$${pos.theta.toFixed(0)}/d` : '—'}</p>
+                  <p className="text-[#aaa] mb-1">Gamma drag (est): {(() => { const t = pos.theta, n = netEdgeLive(pos); return (t != null && n != null) ? `$${(t - n).toFixed(0)}/d` : '—'; })()}</p>
+                  <p className="text-[#aaa] mb-1">Net edge: {(() => { const v = netEdgeLive(pos); return v == null ? '—' : `${v >= 0 ? '+' : ''}$${v.toFixed(0)}/d`; })()}</p>
+                  <p className="text-[#aaa] mb-1">Peak: {(() => { const p = netEdgePeak(pos); return p == null ? '—' : `$${p.toFixed(0)}`; })()} · tracked {netEdgeDaysTracked(pos)}d</p>
                   <p className="text-[#888] mt-2">
-                    {pos.hv30 != null
-                      ? 'Uses IV minus HV30 to estimate whether option premium is rich or cheap versus realized movement.'
-                      : 'HV30 is not available yet, so this falls back to IVR instead of showing a blank HV value.'}
+                    Theta you collect daily minus the expected daily cost of gamma (price movement). Approaching $0 means gamma is catching up — consider closing. Directional estimate; gets more reliable as snapshot history grows.
                   </p>
                 </div>
               </div>
