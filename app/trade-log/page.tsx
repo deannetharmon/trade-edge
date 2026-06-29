@@ -28,7 +28,7 @@ const CACHE_VERSION = 'v3'; // bump to invalidate stale caches
 
 type TimeRange = '1w' | '2w' | '1m' | '3m' | '6m' | '12m';
 type Outcome  = 'WIN' | 'LOSS' | 'SCRATCH' | 'OPEN';
-type ExitType = 'TARGET_HIT' | 'FAST_CUT' | 'TIME_STOP' | 'MAX_LOSS' | 'HELD_TO_EXPIRY' | 'EARLY_WIN' | 'UNKNOWN';
+import { ExitType, classifyExit } from '@/lib/classifyExit';
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
 type SortDir = 'asc' | 'desc';
 type GroupBy = 'none' | 'symbol' | 'outcome';
@@ -117,31 +117,6 @@ function rangeStartDate(range: TimeRange): string {
 }
 
 
-// ── Exit classification ───────────────────────────────────────────────────
-function classifyExit(
-  pnl: number,
-  creditReceived: number,
-  holdDays: number,
-  dteAtClose: number,
-  dteAtEntry: number,
-): ExitType {
-  if (creditReceived === 0) return 'UNKNOWN';
-  const pnlPct = (pnl / Math.abs(creditReceived)) * 100;
-  const pctOfDteUsed = dteAtEntry > 0 ? holdDays / dteAtEntry : 0;
-
-  if (pnl >= 0) {
-    if (holdDays <= 3 && pnlPct < 30) return 'EARLY_WIN';           // very fast, small win
-    if (pnlPct >= 30 && pnlPct <= 70) return 'TARGET_HIT';          // clean ~50% target
-    if (pnlPct > 70 || pctOfDteUsed >= 0.75) return 'HELD_TO_EXPIRY'; // let it ride
-    return 'TARGET_HIT';
-  } else {
-    if (pnlPct < -100) return 'MAX_LOSS';                            // loss > full credit — held too long
-    if (holdDays <= 2) return 'FAST_CUT';                            // quick defensive exit
-    if (dteAtClose > 0 && dteAtClose <= 21) return 'TIME_STOP';      // hit 21-DTE rule
-    if (holdDays >= 14) return 'MAX_LOSS';                            // held long time with a loss
-    return 'FAST_CUT';
-  }
-}
 
 async function fetchAndReconstructTrades(range: TimeRange): Promise<ClosedTrade[]> {
   const token = await getAccessToken();
@@ -381,14 +356,15 @@ Potential revenge trades (loss followed by another entry within 2 days that also
 EXIT TYPE BREAKDOWN:
 ${(() => {
   const exitLabels: Record<string, string> = {
-    TARGET_HIT:     'Target hit (40–65% profit)',
-    FAST_CUT:       'Fast cut (exit ≤2 days, loss)',
+    TARGET_HIT:     'Target hit (50–75% profit — disciplined)',
+    SCRATCH_WIN:    'Scratch win (small gain below target)',
+    HELD_TO_EXPIRY: 'Held to expiry (win but gamma-risky)',
+    MANAGED_LOSS:   'Managed loss (cut at planned stop — good)',
     TIME_STOP:      'Time stop (closed at ≤21 DTE)',
-    MAX_LOSS:       'Max loss (held too long, >150% loss)',
-    HELD_TO_EXPIRY: 'Held to expiry (win but risky)',
-    EARLY_WIN:      'Early win (closed fast, small gain)',
+    FAST_CUT:       'Fast cut (small loss, exit ≤2 days)',
+    MAX_LOSS:       'Max loss (>150% or >$400, or held too long)',
   };
-  const types = ['TARGET_HIT','FAST_CUT','TIME_STOP','MAX_LOSS','HELD_TO_EXPIRY','EARLY_WIN'];
+  const types = ['TARGET_HIT','SCRATCH_WIN','HELD_TO_EXPIRY','MANAGED_LOSS','TIME_STOP','FAST_CUT','MAX_LOSS'];
   return types.map(et => {
     const g = trades.filter(t => t.exitType === et);
     if (g.length === 0) return null;
@@ -434,20 +410,22 @@ function fmtAge(ms: number): string {
 }
 function exitTypeColor(e: ExitType) {
   if (e === 'TARGET_HIT')     return 'text-emerald-400 border-emerald-700 bg-emerald-500/8';
-  if (e === 'FAST_CUT')       return 'text-blue-400 ac-border-faint bg-blue-500/8';
-  if (e === 'TIME_STOP')      return 'text-yellow-400 border-yellow-700 bg-yellow-500/8';
-  if (e === 'MAX_LOSS')       return 'text-red-400 border-red-700 bg-red-500/8';
+  if (e === 'SCRATCH_WIN')    return 'text-teal-400 border-teal-700 bg-teal-500/8';
   if (e === 'HELD_TO_EXPIRY') return 'text-orange-400 border-orange-700 bg-orange-500/8';
-  if (e === 'EARLY_WIN')      return 'text-purple-400 border-purple-700 bg-purple-500/8';
+  if (e === 'MANAGED_LOSS')   return 'text-sky-400 border-sky-700 bg-sky-500/8';
+  if (e === 'TIME_STOP')      return 'text-yellow-400 border-yellow-700 bg-yellow-500/8';
+  if (e === 'FAST_CUT')       return 'text-blue-400 ac-border-faint bg-blue-500/8';
+  if (e === 'MAX_LOSS')       return 'text-red-400 border-red-700 bg-red-500/8';
   return 'text-slate-400 border-slate-700';
 }
 function exitTypeLabel(e: ExitType) {
   if (e === 'TARGET_HIT')     return 'Target Hit';
-  if (e === 'FAST_CUT')       return 'Fast Cut';
-  if (e === 'TIME_STOP')      return 'Time Stop';
-  if (e === 'MAX_LOSS')       return 'Max Loss';
+  if (e === 'SCRATCH_WIN')    return 'Scratch Win';
   if (e === 'HELD_TO_EXPIRY') return 'Held to Expiry';
-  if (e === 'EARLY_WIN')      return 'Early Win';
+  if (e === 'MANAGED_LOSS')   return 'Managed Loss';
+  if (e === 'TIME_STOP')      return 'Time Stop';
+  if (e === 'FAST_CUT')       return 'Fast Cut';
+  if (e === 'MAX_LOSS')       return 'Max Loss';
   return 'Unknown';
 }
 
@@ -921,11 +899,12 @@ export default function TradeLogPage() {
               label="Exit Types"
               options={[
                 { value: 'TARGET_HIT',     label: 'Target Hit' },
-                { value: 'FAST_CUT',       label: 'Fast Cut' },
-                { value: 'TIME_STOP',      label: 'Time Stop' },
-                { value: 'MAX_LOSS',       label: 'Max Loss' },
+                { value: 'SCRATCH_WIN',    label: 'Scratch Win' },
                 { value: 'HELD_TO_EXPIRY', label: 'Held to Expiry' },
-                { value: 'EARLY_WIN',      label: 'Early Win' },
+                { value: 'MANAGED_LOSS',   label: 'Managed Loss' },
+                { value: 'TIME_STOP',      label: 'Time Stop' },
+                { value: 'FAST_CUT',       label: 'Fast Cut' },
+                { value: 'MAX_LOSS',       label: 'Max Loss' },
               ]}
               selected={filterExitType}
               onChange={v => { setFilterExitType(v); saveFilter('hunter-tl-f-exit', v); }}
