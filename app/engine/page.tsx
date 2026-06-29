@@ -1503,7 +1503,7 @@ function ChartButton({ symbol, th, isOpen, onOpen, onClose }: {
 
 function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
   symbol: string;
-  pos: { top: number; left: number };
+  pos: { bottom: number; left: number };
   sparkData: number[] | null;
   sparkLoading: boolean;
   th: typeof THEMES[Theme];
@@ -1516,7 +1516,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div
         className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-        style={{ width: '280px', top: pos.top, left: pos.left }}
+        style={{ width: '280px', bottom: pos.bottom, left: pos.left }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2">
@@ -2698,7 +2698,7 @@ export default function EnginePage() {
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
   const [openChartSymbol, setOpenChartSymbol] = useState<string | null>(null);
-  const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const [chartPopupPos, setChartPopupPos] = useState<{ bottom: number; left: number } | null>(null);
   const [chartSparkData, setChartSparkData] = useState(null as number[] | null);
   const [chartSparkLoading, setChartSparkLoading] = useState(false);
 
@@ -2707,7 +2707,7 @@ export default function EnginePage() {
 
   const openChart = (symbol: string, rect: DOMRect) => {
     setChartPopupPos({
-      top: Math.min(rect.bottom + 6, window.innerHeight - 320),
+      bottom: window.innerHeight - rect.top + 6,
       left: Math.min(rect.left, window.innerWidth - 290),
     });
     setOpenChartSymbol(symbol);
