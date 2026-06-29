@@ -1432,7 +1432,7 @@ function CapitalBar({ label, deployed, target, color }: { label: string; deploye
   );
 }
 
-function ActionCard({ item, th }: { item: ActionItem; th: typeof THEMES[Theme] }) {
+function ActionCard({ item, th, openChartSymbol, onOpenChart, onCloseChart }: { item: ActionItem; th: typeof THEMES[Theme]; openChartSymbol: string | null; onOpenChart: (symbol: string, rect: DOMRect) => void; onCloseChart: () => void; }) {
   const colors = {
     urgent: { border: 'border-l-red-500',    badge: 'bg-red-500/15 text-red-400 border-red-600',     action: 'text-red-400' },
     review: { border: 'border-l-amber-500',  badge: 'bg-amber-500/15 text-amber-400 border-amber-600', action: 'text-amber-400' },
@@ -1449,6 +1449,7 @@ function ActionCard({ item, th }: { item: ActionItem; th: typeof THEMES[Theme] }
         <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${item.category === 'spx' ? 'border-violet-700 text-violet-400 bg-violet-500/10' : 'border-blue-700 text-blue-400 bg-blue-500/10'}`}>
           {item.symbol}
         </span>
+        <ChartButton symbol={item.symbol} th={th} isOpen={openChartSymbol === item.symbol} onOpen={onOpenChart} onClose={onCloseChart} />
         {isSuggested && (
           <span className="text-[8px] px-1.5 py-0.5 border border-emerald-700 text-emerald-400 bg-emerald-500/10 rounded font-bold shrink-0">SUGGESTED</span>
         )}
@@ -1503,7 +1504,7 @@ function ChartButton({ symbol, th, isOpen, onOpen, onClose }: {
 
 function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
   symbol: string;
-  pos: { bottom: number; left: number };
+  pos: { top: number; left: number };
   sparkData: number[] | null;
   sparkLoading: boolean;
   th: typeof THEMES[Theme];
@@ -1516,7 +1517,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div
         className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-        style={{ width: '280px', bottom: pos.bottom, left: pos.left }}
+        style={{ width: '280px', top: pos.top, left: pos.left }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-2">
@@ -2698,7 +2699,7 @@ export default function EnginePage() {
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
   const [openChartSymbol, setOpenChartSymbol] = useState<string | null>(null);
-  const [chartPopupPos, setChartPopupPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
   const [chartSparkData, setChartSparkData] = useState(null as number[] | null);
   const [chartSparkLoading, setChartSparkLoading] = useState(false);
 
@@ -2707,7 +2708,7 @@ export default function EnginePage() {
 
   const openChart = (symbol: string, rect: DOMRect) => {
     setChartPopupPos({
-      bottom: window.innerHeight - rect.top + 6,
+      top: Math.min(rect.bottom + 6, window.innerHeight - 320),
       left: Math.min(rect.left, window.innerWidth - 290),
     });
     setOpenChartSymbol(symbol);
@@ -3124,7 +3125,7 @@ export default function EnginePage() {
             {/* Action list */}
             {d.actions.length > 0 && (
               <div className="space-y-1.5">
-                {d.actions.map(action => <ActionCard key={action.id} item={action} th={th} />)}
+                {d.actions.map(action => <ActionCard key={action.id} item={action} th={th} openChartSymbol={openChartSymbol} onOpenChart={openChart} onCloseChart={closeChart} />)}
               </div>
             )}
 
