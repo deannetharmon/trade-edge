@@ -1781,7 +1781,14 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
             const action = String(l.action ?? '');
             return action === 'Sell to Open' || action === 'Buy to Open';
           });
-          if (isOpeningOrder) {
+          // A filled trigger means the entry already executed -- the position is
+          // now live and tracked in the positions list, so it must NOT appear as a
+          // pending entry. In an OTOCO the trigger can be Filled while the OCO
+          // bracket legs are still Live, which keeps hasActiveNested true; without
+          // this check the filled opening order leaks into Pending Orders.
+          const triggerStatus = String(triggerOrder?.status ?? '').toLowerCase();
+          const triggerIsTerminal = ['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(triggerStatus);
+          if (isOpeningOrder && !triggerIsTerminal) {
             const parsedLegs: PendingOrderLeg[] = triggerLegs.map((l: any) => {
               const occSymbol = String(l.symbol ?? '');
               const parsed = parseOptionSymbol(occSymbol);
