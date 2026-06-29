@@ -32,7 +32,7 @@ const SCRATCH_PCT = 5;
 // ── Types (shared with trade-log) ─────────────────────────────────────────
 type TimeRange = '1w' | '2w' | '1m' | '3m' | '6m' | '12m';
 type Outcome  = 'WIN' | 'LOSS' | 'SCRATCH' | 'OPEN';
-type ExitType = 'TARGET_HIT' | 'FAST_CUT' | 'TIME_STOP' | 'MAX_LOSS' | 'HELD_TO_EXPIRY' | 'EARLY_WIN' | 'UNKNOWN';
+import { ExitType, classifyExit } from '@/lib/classifyExit';
 
 interface ClosedTrade {
   id: string;
@@ -252,14 +252,15 @@ Potential revenge trades: ${revengeTrades}
 EXIT TYPE BREAKDOWN:
 ${(() => {
   const exitLabels: Record<string, string> = {
-    TARGET_HIT:     'Target hit (40–65% profit)',
-    FAST_CUT:       'Fast cut (exit ≤2 days, loss)',
+    TARGET_HIT:     'Target hit (50–75% profit — disciplined)',
+    SCRATCH_WIN:    'Scratch win (small gain below target)',
+    HELD_TO_EXPIRY: 'Held to expiry (win but gamma-risky)',
+    MANAGED_LOSS:   'Managed loss (cut at planned stop — good)',
     TIME_STOP:      'Time stop (closed at ≤21 DTE)',
-    MAX_LOSS:       'Max loss (held too long, >150% loss)',
-    HELD_TO_EXPIRY: 'Held to expiry (win but risky)',
-    EARLY_WIN:      'Early win (closed fast, small gain)',
+    FAST_CUT:       'Fast cut (small loss, exit ≤2 days)',
+    MAX_LOSS:       'Max loss (>150% or >$400, or held too long)',
   };
-  const types = ['TARGET_HIT','FAST_CUT','TIME_STOP','MAX_LOSS','HELD_TO_EXPIRY','EARLY_WIN'];
+  const types = ['TARGET_HIT','SCRATCH_WIN','HELD_TO_EXPIRY','MANAGED_LOSS','TIME_STOP','FAST_CUT','MAX_LOSS'];
   return types.map(et => {
     const g = trades.filter(t => t.exitType === et);
     if (g.length === 0) return null;
@@ -426,29 +427,6 @@ function rangeStartDate(range: TimeRange): string {
 }
 
 
-function classifyExit(pnl: number, creditReceived: number, holdDays: number, dteAtClose: number, dteAtEntry: number): ExitType {
-  const pnlPct = creditReceived !== 0 ? (pnl / Math.abs(creditReceived)) * 100 : 0;
-  const pctOfDteUsed = dteAtEntry > 0 ? holdDays / dteAtEntry : 0;
-  if (pnl > 0) {
-    if (pnlPct >= 40 && pnlPct <= 65) return 'TARGET_HIT';
-    if (pnlPct > 65 && pctOfDteUsed >= 0.8) return 'HELD_TO_EXPIRY';
-    if (holdDays <= 3) return 'EARLY_WIN';
-    return 'TARGET_HIT';
-  } else {
-    // Severity beats speed. A loss is a Max Loss if it is catastrophic by
-    // EITHER measure: > 150% of credit, OR more than $400 absolute. The dollar
-    // floor catches big-dollar blowups on large-credit trades that a pure
-    // percentage misses (e.g. -$767 at -87% of an $885 credit). Previously
-    // holdDays<=2 was checked first, so same-day disasters were mislabeled
-    // FAST_CUT / "quick defense". (Dollar floor can later be made relative to
-    // average win once a two-pass classify is worth it.)
-    const MAX_LOSS_DOLLARS = -400;
-    if (pnlPct < -150 || pnl <= MAX_LOSS_DOLLARS) return 'MAX_LOSS';
-    if (holdDays <= 2) return 'FAST_CUT';
-    if (dteAtClose <= 21 && dteAtClose >= 0) return 'TIME_STOP';
-    return 'FAST_CUT';
-  }
-}
 
 async function fetchAndReconstructTrades(range: TimeRange): Promise<ClosedTrade[]> {
   const token = await getAccessToken();
@@ -1049,12 +1027,13 @@ function DteAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof T
 // ── Exit Analysis Widget ──────────────────────────────────────────────────
 function ExitAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEMES[Theme] }) {
   const exitDefs: { type: ExitType; label: string; desc: string; goodOrBad: 'good' | 'bad' | 'neutral' }[] = [
-    { type: 'TARGET_HIT',     label: 'Target Hit',      desc: 'Closed at 40–65% profit — disciplined',        goodOrBad: 'good' },
-    { type: 'EARLY_WIN',      label: 'Early Win',       desc: 'Closed fast for small gain — left $ on table', goodOrBad: 'neutral' },
-    { type: 'HELD_TO_EXPIRY', label: 'Held to Expiry',  desc: 'Won but held > 80% of duration — got lucky',   goodOrBad: 'neutral' },
-    { type: 'FAST_CUT',       label: 'Fast Cut',        desc: 'Loss, exited within 2 days — quick defense',   goodOrBad: 'neutral' },
-    { type: 'TIME_STOP',      label: 'Time Stop',       desc: 'Closed at ≤21 DTE — rule followed',            goodOrBad: 'neutral' },
-    { type: 'MAX_LOSS',       label: 'Max Loss',        desc: 'Loss > 150% of credit — held way too long',    goodOrBad: 'bad' },
+    { type: 'TARGET_HIT',     label: 'Target Hit',      desc: 'Closed at 50–75% profit — hit the target',        goodOrBad: 'good' },
+    { type: 'SCRATCH_WIN',    label: 'Scratch Win',     desc: 'Small gain below target — edge clipped early',     goodOrBad: 'neutral' },
+    { type: 'HELD_TO_EXPIRY', label: 'Held to Expiry',  desc: 'Won but held ≥75% of duration — gamma risk',      goodOrBad: 'neutral' },
+    { type: 'MANAGED_LOSS',   label: 'Managed Loss',    desc: 'Cut at planned 2× stop — disciplined loss',       goodOrBad: 'good' },
+    { type: 'TIME_STOP',      label: 'Time Stop',       desc: 'Closed at ≤21 DTE — rule followed',               goodOrBad: 'neutral' },
+    { type: 'FAST_CUT',       label: 'Fast Cut',        desc: 'Small loss cut quickly — defensive',              goodOrBad: 'neutral' },
+    { type: 'MAX_LOSS',       label: 'Max Loss',        desc: '>150% or >$400, or held too long — failure',      goodOrBad: 'bad' },
   ];
 
   const rows = exitDefs.map(d => {
