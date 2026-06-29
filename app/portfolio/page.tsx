@@ -6451,17 +6451,38 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const [sparkLoading, setSparkLoading] = useState(false);
   const chartPopupRef = useRef(null as HTMLDivElement | null);
   const chartButtonRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef(null as HTMLDivElement | null);
   const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!showChart) return;
+    const reposition = () => {
+      if (!cardRef.current) return;
+      const r = cardRef.current.getBoundingClientRect();
+      const popupW = 280;
+      let left = r.left;
+      // keep within viewport horizontally
+      left = Math.min(left, window.innerWidth - popupW - 8);
+      left = Math.max(8, left);
+      setChartPopupPos({ top: r.bottom + 8, left });
+    };
+    reposition();
     const handler = (e: MouseEvent) => {
-      if (chartPopupRef.current && !chartPopupRef.current.contains(e.target as Node)) {
+      if (
+        chartPopupRef.current && !chartPopupRef.current.contains(e.target as Node) &&
+        chartButtonRef.current && !chartButtonRef.current.contains(e.target as Node)
+      ) {
         setShowChart(false);
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
   }, [showChart]);
 
   const handleAnalyze = async () => {
@@ -6548,7 +6569,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     : th.border;
 
   return (
-    <div className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
+    <div ref={cardRef} className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
       {pos.needsClose && (
         <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
           <span className="text-red-400 text-xs">⚠</span>
@@ -6626,8 +6647,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 {showChart && (
                   <div
                     ref={chartPopupRef}
-                    className={`absolute top-full left-0 mt-2 z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-                    style={{ width: '280px' }}
+                    className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
+                    style={{
+                      width: '280px',
+                      top: chartPopupPos ? `${chartPopupPos.top}px` : '0px',
+                      left: chartPopupPos ? `${chartPopupPos.left}px` : '0px',
+                      visibility: chartPopupPos ? 'visible' : 'hidden',
+                    }}
                     onClick={e => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between mb-2">
