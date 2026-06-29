@@ -105,6 +105,7 @@ interface Position {
   // For positions opened before this feature existed, the first snapshot will be 'first tracked', not true trade entry.
   entrySnapshotKey?: string | null;
   entrySnapshotCreatedAt?: string | null;
+  snapshotHistory?: PositionSnapshot[]; // daily snapshots for this position (for net-edge peak/trend)
   ivAtEntry?: number | null;
   deltaAtEntry?: number | null;
   thetaAtEntry?: number | null;
@@ -216,6 +217,28 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
   } catch (e) {
     console.error('Snapshot capture failed (non-blocking):', e);
   }
+}
+
+// Fetches the full snapshot store and returns it keyed by position.key.
+// Non-blocking caller handles failure by leaving history empty.
+async function fetchSnapshotStore(): Promise<Record<string, PositionSnapshot[]>> {
+  const res = await fetch('/api/position-snapshots');
+  if (!res.ok) throw new Error(`snapshot fetch ${res.status}`);
+  const data = await res.json();
+  return (data?.snapshots ?? {}) as Record<string, PositionSnapshot[]>;
+}
+
+// Attaches each position's snapshot history (sorted by date ascending) onto
+// the position object so the card render can compute net-edge peak/trend.
+function attachSnapshotHistory(
+  positions: Position[],
+  store: Record<string, PositionSnapshot[]>,
+): Position[] {
+  return positions.map(p => {
+    const hist = store[p.key] ?? [];
+    const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
+    return { ...p, snapshotHistory: sorted };
+  });
 }
 
 async function clearSnapshotHistory(): Promise<void> {
@@ -7659,6 +7682,11 @@ export default function PortfolioPage() {
       setPendingOrders(pendingData);
       setLastRefresh(new Date());
       captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
+      // Load snapshot history and attach it to positions (non-blocking; if it
+      // fails the cards simply render without peak/trend context).
+      fetchSnapshotStore()
+        .then(store => setPositions(prev => attachSnapshotHistory(prev, store)))
+        .catch(e => console.error('Snapshot history fetch failed (non-blocking):', e));
     } catch (e: any) {
       if (e.message === 'Not authenticated' || e.message === 'Session expired') { window.location.href = '/login'; return; }
       setError(e.message);
