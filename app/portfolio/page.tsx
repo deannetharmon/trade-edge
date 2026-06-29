@@ -6451,7 +6451,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const [sparkLoading, setSparkLoading] = useState(false);
   const chartPopupRef = useRef(null as HTMLDivElement | null);
   const chartButtonRef = useRef<HTMLButtonElement>(null);
-  const [chartPopupPos, setChartPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const [chartPopupPos, setChartPopupPos] = useState<{ bottom: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!showChart) return;
