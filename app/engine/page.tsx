@@ -1432,7 +1432,7 @@ function CapitalBar({ label, deployed, target, color }: { label: string; deploye
   );
 }
 
-function ActionCard({ item, th }: { item: ActionItem; th: typeof THEMES[Theme] }) {
+function ActionCard({ item, th, openChartSymbol, onOpenChart, onCloseChart }: { item: ActionItem; th: typeof THEMES[Theme]; openChartSymbol: string | null; onOpenChart: (symbol: string, rect: DOMRect) => void; onCloseChart: () => void; }) {
   const colors = {
     urgent: { border: 'border-l-red-500',    badge: 'bg-red-500/15 text-red-400 border-red-600',     action: 'text-red-400' },
     review: { border: 'border-l-amber-500',  badge: 'bg-amber-500/15 text-amber-400 border-amber-600', action: 'text-amber-400' },
@@ -1449,6 +1449,7 @@ function ActionCard({ item, th }: { item: ActionItem; th: typeof THEMES[Theme] }
         <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${item.category === 'spx' ? 'border-violet-700 text-violet-400 bg-violet-500/10' : 'border-blue-700 text-blue-400 bg-blue-500/10'}`}>
           {item.symbol}
         </span>
+        <ChartButton symbol={item.symbol} th={th} isOpen={openChartSymbol === item.symbol} onOpen={onOpenChart} onClose={onCloseChart} />
         {isSuggested && (
           <span className="text-[8px] px-1.5 py-0.5 border border-emerald-700 text-emerald-400 bg-emerald-500/10 rounded font-bold shrink-0">SUGGESTED</span>
         )}
@@ -3124,7 +3125,7 @@ export default function EnginePage() {
             {/* Action list */}
             {d.actions.length > 0 && (
               <div className="space-y-1.5">
-                {d.actions.map(action => <ActionCard key={action.id} item={action} th={th} />)}
+                {d.actions.map(action => <ActionCard key={action.id} item={action} th={th} openChartSymbol={openChartSymbol} onOpenChart={openChart} onCloseChart={closeChart} />)}
               </div>
             )}
 
