@@ -2303,6 +2303,11 @@ Be direct. Be honest. If a position is in trouble, say so. If a rule should be b
 
 function buildPositionPrompt(pos: Position, trend: TrendResult | null): string {
   const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
+  const netEdge = netEdgeLive(pos);
+  const netEdgePk = netEdgePeak(pos);
+  const thetaDollars = pos.theta != null ? pos.theta * 100 : null;
+  const gammaCostDollars = (netEdge != null && thetaDollars != null) ? (thetaDollars - netEdge) : null;
+  const netEdgeOffPeakPct = (netEdge != null && netEdgePk != null && netEdgePk > 0) ? ((netEdge - netEdgePk) / netEdgePk) * 100 : null;
   const ivEdge = pos.iv != null && pos.hv30 != null ? (pos.iv - pos.hv30) : null;
   const shortPut = pos.legs.find(l => l.direction === 'Short' && l.optionType === 'P');
   const longPut = pos.legs.find(l => l.direction === 'Long' && l.optionType === 'P');
@@ -2374,7 +2379,7 @@ Max risk: $${pos.maxRisk.toFixed(2)}
 
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
-Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != null && pos.buffer >= 5 ? ` — SAFE BY GEOMETRY: short strike is ${pos.buffer.toFixed(1)}% away. Expiry-proximity/gamma risk is NOT a valid close reason here under any name. If recommending CLOSE, it must be justified ONLY by the 21-DTE time rule (standard entries) and framed as rule-based capital recycling, not danger. Do NOT list normal Greeks as risks.` : pos.buffer != null && pos.buffer < 2 ? ` — TIGHT: under 2% buffer, genuine breach risk; defensive posture warranted.` : ''}
+Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != null && pos.buffer >= 5 ? ` — SAFE BY GEOMETRY: short strike is ${pos.buffer.toFixed(1)}% away, so breach/assignment is unlikely and a paper loss here is not danger. Do NOT cite breach proximity as a close reason. HOWEVER, a genuinely negative NET DAILY EDGE (see below) IS a valid economic close/roll reason even at a wide buffer — thin premium for the gamma risk carried is about risk/reward, not breach. Frame any close as either the 21-DTE recycling rule or weak net-edge economics, not as breach danger.` : pos.buffer != null && pos.buffer < 2 ? ` — TIGHT: under 2% buffer, genuine breach risk; defensive posture warranted.` : ''}
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
 DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'}
@@ -2391,8 +2396,18 @@ ${supportText}
 GREEKS (net position):
 Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.deltaAtEntry != null && pos.netDelta != null ? `${pos.deltaAtEntry.toFixed(4)} → ${pos.netDelta.toFixed(4)}` : 'unknown'})
 Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.thetaAtEntry != null && pos.theta != null ? `${pos.thetaAtEntry.toFixed(4)} → ${pos.theta.toFixed(4)}` : 'unknown'})
-Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (only material near the money; negligible at a wide buffer)
+Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (gamma's DOLLAR cost scales with the underlying's daily dollar move squared — it can be material even far OTM on large-notional names like SPX/NDX where a 1-sigma day is hundreds of points. Do NOT assume gamma is negligible just because the buffer is wide; see NET DAILY EDGE below for the actual theta-vs-gamma economics.)
 Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (short vega — IV rises inflate buyback as paper loss, not directional danger)
+
+NET DAILY EDGE (theta vs gamma economics):
+Net edge: ${netEdge != null ? `$${netEdge.toFixed(0)}/day` : 'unknown'}${thetaDollars != null && gammaCostDollars != null ? ` (collecting $${thetaDollars.toFixed(0)}/d theta minus ~$${gammaCostDollars.toFixed(0)}/d expected gamma cost)` : ''}
+Peak net edge (this position, tracked): ${netEdgePk != null ? `$${netEdgePk.toFixed(0)}/day` : 'unknown'}${netEdgeOffPeakPct != null ? ` — currently ${netEdgeOffPeakPct >= 0 ? 'at/near' : `${Math.abs(netEdgeOffPeakPct).toFixed(0)}% below`} peak` : ''}
+What this means: net edge estimates whether the remaining premium still justifies the gamma risk of holding. It is a RISK/REWARD measure, NOT a current loss — a profitable, deep-OTM position can have negative net edge and still be worth holding if breach risk is genuinely low.
+How to use it (conservative posture — preserve capital first):
+- Net edge clearly positive AND near peak AND comfortable buffer → the back half of premium is worth reaching for; stretching toward a 75% profit target is justified.
+- Net edge fading off its peak (even if still positive) → the easy theta is harvested; favor banking at the standard 50% target rather than stretching.
+- Net edge negative → remaining premium no longer compensates for the gamma risk; favor close/roll. Lean toward closing when corroborated by tight buffer, adverse trend, or weak support. The ONLY reason to keep holding a negative-net-edge position is that it is comfortably profitable and deep-OTM with genuinely low breach risk (don't forfeit a near-certain winner).
+- Never panic-close a likely winner on net edge alone; never stretch to 75% when net edge is negative.
 
 OPERATIONAL STATUS:
 GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
