@@ -2514,14 +2514,22 @@ For covered calls / short calls:
   Do not list a Greek as a risk if it sits within normal entry parameters.
 - Delta: directional exposure / rough assignment proxy. A short-put delta of 0.20-0.30
   is NORMAL (it is the entry target) — do NOT call it 'high delta' or a risk.
-- Gamma: only material NEAR THE MONEY. At a buffer >= 5% it is negligible and may NOT
-  be cited as a risk or a close reason under any name (gamma, acceleration, late-stage
-  risk, proximity-to-expiry risk — all forbidden above a 5% buffer).
+- Gamma — OBJECTIVE RULE (no judgment calls): gamma may be cited as a risk ONLY when the
+  NET DAILY EDGE figure quantifies it as one. Specifically:
+    * If net edge is negative OR gamma cost is a large fraction of theta (roughly half or more),
+      gamma IS a real cost — cite it, and cite the DOLLAR figure (e.g. "gamma costs ~$25/d vs $4/d
+      theta, net edge -$21/d"). Never cite gamma risk without the number behind it.
+    * If net edge is positive AND gamma cost is a small fraction of theta, gamma is NOT a risk —
+      do NOT cite it as one under any name (gamma, acceleration, late-stage risk, proximity-to-
+      expiry risk, "gamma increasing as DTE decreases"). These are all forbidden when the number
+      does not support them, regardless of buffer or DTE.
+    * NEVER use vague time-decay gestures like "gamma risk increases with expiry approaching" as a
+      standalone claim. Gamma is either quantified by net edge as a cost, or it is not mentioned.
 - Theta: remaining income reward.
 - Vega: short vega means an IV rise shows as paper loss; that is expected, not danger.
-- Compare theta versus gamma:
-  - If theta meaningfully exceeds gamma and buffer/support are healthy, holding may be valid.
-  - If gamma is large relative to theta, favor close/roll on spreads.
+- Compare theta versus gamma using the NET DAILY EDGE number, not intuition:
+  - Net edge clearly positive → theta is winning; holding may be valid.
+  - Net edge negative → gamma is winning; favor close/roll on spreads, citing the dollar figures.
 - Mention whether the Greeks support HOLD, CLOSE, or ROLL.
 
 7. VOLATILITY
