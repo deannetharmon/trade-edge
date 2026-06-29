@@ -1951,7 +1951,18 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
-      entryDte, entryDate: openedAt, needsClose: entryDte > 21 && dte <= 21, accountNumber,
+      entryDte, entryDate: openedAt,
+      // needsClose (the hard 21-DTE close-or-roll rule) applies ONLY to
+      // defined-risk spreads. A CSP is never "close now" — assignment is a valid
+      // outcome (especially under acquire intent), so CSPs get their own banner.
+      needsClose: (() => {
+        const puts = positionLegs.filter(l => l.optionType === 'P');
+        const calls = positionLegs.filter(l => l.optionType === 'C');
+        const shortPuts = puts.filter(l => l.direction === 'Short');
+        const isCsp = shortPuts.length > 0 && puts.filter(l => l.direction === 'Long').length === 0 && calls.length === 0;
+        return !isCsp && entryDte > 21 && dte <= 21;
+      })(),
+      accountNumber,
       ivr: ivrMap[symbol] ?? null,
       iv: ivMap[symbol] ?? null,
       hv30: hv30Map[symbol] ?? null,
@@ -6814,6 +6825,27 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           <span className="text-xs text-emerald-400 font-bold tracking-wider">{Math.round(pos.profitTarget * 100)}% PROFIT TARGET HIT</span>
         </div>
       )}
+      {!pos.needsClose && (() => {
+        // CSP past the 21-DTE mark gets an intent-aware banner instead of CLOSE NOW.
+        const puts = pos.legs.filter(l => l.optionType === 'P');
+        const calls = pos.legs.filter(l => l.optionType === 'C');
+        const isCsp = puts.some(l => l.direction === 'Short') && puts.filter(l => l.direction === 'Long').length === 0 && calls.length === 0;
+        if (!isCsp || pos.dte > 21 || pos.entryDte <= 21) return null;
+        if (pos.intent === 'acquisition') {
+          return (
+            <div className="bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 flex items-center gap-2">
+              <span className="text-blue-400 text-xs">◆</span>
+              <span className="text-xs text-blue-300 font-bold tracking-wider">CSP · ACQUIRE — {pos.dte} DTE · assignment is the goal, not a close trigger</span>
+            </div>
+          );
+        }
+        return (
+          <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 flex items-center gap-2">
+            <span className="text-amber-400 text-xs">⚠</span>
+            <span className="text-xs text-amber-400 font-bold tracking-wider">CSP — {pos.dte} DTE · evaluate roll for premium or take assignment; not an auto-close</span>
+          </div>
+        );
+      })()}
 
       <div className="flex items-stretch">
         {/* Checkbox */}
