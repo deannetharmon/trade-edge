@@ -46,7 +46,7 @@ const LS_MEMORY = 'hunter-trading-memory';
 const LS_DRY_RUN = 'hunter-dry-run';
 const LS_ENTRY_SNAPSHOTS = 'hunter-entry-snapshots';
 const LS_SECTION_ORDER = 'hunter-portfolio-section-order';
-const DEFAULT_SECTION_ORDER = ['pending', 'needsClose', 'hitTarget', 'noGtc', 'normal'];
+const DEFAULT_SECTION_ORDER = ['pending', 'needsClose', 'review', 'hitTarget', 'noGtc', 'normal'];
 const MEMORY_RAW_TRADES_PER_SYMBOL = 5;   // keep this many raw; summarize older
 const MEMORY_RAW_ACTIONS = 20;            // ring buffer size for action history
 const MEMORY_SUMMARIZE_INTERVAL_DAYS = 7; // re-summarize behavior weekly
@@ -7975,7 +7975,12 @@ export default function PortfolioPage() {
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
-  const needsClose = positions.filter(p => p.needsClose);
+  // Split the 21-DTE group by net-edge economics so the section headers match
+  // the card banners: genuinely close-worthy (negative/unknown net edge) vs
+  // still-earning review-worthy (positive net edge).
+  const needsCloseAll = positions.filter(p => p.needsClose);
+  const needsClose = needsCloseAll.filter(p => { const ne = netEdgeLive(p); return ne == null || ne <= 0; });
+  const review     = needsCloseAll.filter(p => { const ne = netEdgeLive(p); return ne != null && ne > 0; });
   const hitTarget  = positions.filter(p => p.hitTarget && !p.needsClose);
   const noGtc      = positions.filter(p => !p.hasGtc && !p.needsClose && !p.hitTarget);
   const normal     = positions.filter(p => !p.needsClose && !p.hitTarget && p.hasGtc);
@@ -8115,6 +8120,19 @@ export default function PortfolioPage() {
                       <PositionSection
                         title="⚠ Close Now — 21 DTE or Less" titleColor="text-red-400"
                         positions={needsClose} th={th} checked={checked}
+                        onToggle={onToggle} onToggleAll={onToggleAll}
+                        onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
+                        groupAction="CLOSE_ROLL" onGroupAction={onGroupAction}
+                        onExecute={(pos, action) => openBatch([{ pos, action }])}
+                      />
+                    ),
+                  },
+                  review: {
+                    hasContent: review.length > 0,
+                    render: () => (
+                      <PositionSection
+                        title="⚠ Review — Past 21-DTE, Still Earning" titleColor="text-amber-400"
+                        positions={review} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="CLOSE_ROLL" onGroupAction={onGroupAction}
