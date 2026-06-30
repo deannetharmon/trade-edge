@@ -1848,19 +1848,42 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
         if (hasActiveNested || parentActive) {
           const triggerOrder = order['trigger-order'] ?? nestedOrders[0];
           const triggerLegs: any[] = triggerOrder?.legs ?? [];
-          const isOpeningOrder = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
+          const triggerIsOpening = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
             const action = String(l.action ?? '');
             return action === 'Sell to Open' || action === 'Buy to Open';
           });
+          // Roll OTOCO: the trigger is a CLOSE (Buy/Sell to Close) and the
+          // contingent orders[] carry the opening legs. When the trigger is a
+          // close, read the opening legs from the first contingent order whose
+          // legs are all opening actions, and surface THAT as the pending entry.
+          const triggerIsClosing = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
+            const action = String(l.action ?? '');
+            return action === 'Buy to Close' || action === 'Sell to Close';
+          });
+          const contingentOpen = triggerIsClosing
+            ? (nestedOrders ?? []).find((o: any) => {
+                const ls: any[] = o?.legs ?? [];
+                return ls.length > 0 && ls.every((l: any) => {
+                  const a = String(l.action ?? '');
+                  return a === 'Sell to Open' || a === 'Buy to Open';
+                });
+              })
+            : null;
+          // openingSource is whichever order actually holds the opening legs we
+          // want to display as the pending entry (trigger for entry OTOCOs,
+          // contingent for roll OTOCOs).
+          const openingSource = triggerIsOpening ? triggerOrder : contingentOpen;
+          const isOpeningOrder = Boolean(openingSource);
           // A filled trigger means the entry already executed -- the position is
           // now live and tracked in the positions list, so it must NOT appear as a
           // pending entry. In an OTOCO the trigger can be Filled while the OCO
           // bracket legs are still Live, which keeps hasActiveNested true; without
           // this check the filled opening order leaks into Pending Orders.
-          const triggerStatus = String(triggerOrder?.status ?? '').toLowerCase();
-          const triggerIsTerminal = ['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(triggerStatus);
-          if (isOpeningOrder && !triggerIsTerminal) {
-            const parsedLegs: PendingOrderLeg[] = triggerLegs.map((l: any) => {
+          const openingStatus = String(openingSource?.status ?? '').toLowerCase();
+          const openingIsTerminal = ['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(openingStatus);
+          const openingLegs: any[] = openingSource?.legs ?? [];
+          if (isOpeningOrder && !openingIsTerminal) {
+            const parsedLegs: PendingOrderLeg[] = openingLegs.map((l: any) => {
               const occSymbol = String(l.symbol ?? '');
               const parsed = parseOptionSymbol(occSymbol);
               return {
@@ -1877,7 +1900,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
             else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
             else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
             const underlyingSymbol =
-              triggerOrder?.['underlying-symbol'] ??
+              openingSource?.['underlying-symbol'] ??
               (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
             const expMatch = parsedLegs[0]?.symbol?.match(/(\d{6})[CP]\d{8}/);
             const expDate = expMatch
@@ -1890,10 +1913,10 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
               strategy,
               legs: parsedLegs,
               expDate,
-              limitPrice: triggerOrder?.price != null ? parseFloat(triggerOrder.price) : null,
-              priceEffect: triggerOrder?.['price-effect'] ?? null,
-              status: triggerOrder?.status ?? order['status'] ?? 'unknown',
-              createdAt: triggerOrder?.['received-at'] ?? triggerOrder?.['updated-at'] ?? null,
+              limitPrice: openingSource?.price != null ? parseFloat(openingSource.price) : null,
+              priceEffect: openingSource?.['price-effect'] ?? null,
+              status: openingSource?.status ?? order['status'] ?? 'unknown',
+              createdAt: openingSource?.['received-at'] ?? openingSource?.['updated-at'] ?? null,
             });
           }
         }
@@ -3656,6 +3679,11 @@ function BatchConfirmModal({
               throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
             }
             orderId = `DRY-${Date.now().toString(36).toUpperCase()}`;
+          } else if (item.action === 'CLOSE_ROLL' && rollMode[item.pos.key] === 'roll') {
+            // Roll mode: do NOT submit the close standalone. It is carried as the
+            // trigger of the OTOCO built below, so the position can never end up
+            // half-rolled (closed but not re-opened). orderId is assigned there.
+            orderId = '';
           } else {
             const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, item.orderBody);
             orderId = String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
@@ -3715,24 +3743,59 @@ function BatchConfirmModal({
                 suggestion?.shortSymbol, suggestion?.longSymbol
               );
 
+              // Atomic roll via OTOCO: the close is the trigger; once it fills,
+              // the open is released as the contingent order. If the OTOCO is
+              // rejected up front, NOTHING is placed and the position is
+              // untouched. If the close fills but the open never fills, the
+              // position is flat (not naked) with a resting open visible in
+              // Pending Orders. There is no half-rolled naked state.
+              const otocoBody = {
+                type: 'OTOCO',
+                'trigger-order': item.orderBody,
+                orders: [openBody],
+              };
+
               let openId: string;
               if (dryRun) {
-                await new Promise(r => setTimeout(r, 200));
+                const token2 = await getAccessToken();
+                const validation = await ttValidateOrder(
+                  `/accounts/${item.pos.accountNumber}/complex-orders`, token2, otocoBody
+                );
+                if (!validation.valid) {
+                  throw new Error(`Roll OTOCO validation failed: ${validation.errors.join('; ')}`);
+                }
+                orderId = `DRY-${Date.now().toString(36).toUpperCase()}-ROLL`;
                 openId = `DRY-${Date.now().toString(36).toUpperCase()}-OPEN`;
               } else {
-                const openRes = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, openBody);
-                openId = String(openRes?.data?.order?.id ?? openRes?.data?.id ?? 'submitted');
+                let otocoRes: any;
+                try {
+                  otocoRes = await ttPostComplex(
+                    `/accounts/${item.pos.accountNumber}/complex-orders`, token, otocoBody
+                  );
+                } catch (otocoErr: any) {
+                  // OTOCO is validated and placed atomically. A rejection here
+                  // means the broker did not accept it — nothing was placed and
+                  // the position is unchanged. Make that explicit.
+                  throw new Error(
+                    `Roll not placed — position unchanged.\n${otocoErr?.message ?? 'Broker rejected the roll.'}`
+                  );
+                }
+                const complexId = String(
+                  otocoRes?.data?.['complex-order']?.id ?? otocoRes?.data?.id ?? 'submitted'
+                );
+                orderId = complexId;
+                openId = complexId;
               }
 
               writeAuditEntry({
                 id: crypto.randomUUID(), timestamp: new Date().toISOString(),
                 symbol: item.pos.symbol, strategy: item.pos.strategy, action: 'CLOSE_ROLL',
-                orderType: 'Sell to Open (Roll)', limitPrice: finalCredit,
+                orderType: 'OTOCO Roll (close → open)', limitPrice: finalCredit,
                 quantity: qty, orderId: openId,
                 status: dryRun ? 'dry-run' : 'submitted',
               });
 
-              results.push({ symbol: item.pos.symbol, action: item.action, orderId: `Close #${orderId} · Open #${openId}`, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
+              results.push({ symbol: item.pos.symbol, action: item.action, orderId: `Roll OTOCO #${orderId}`, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
             } else {
               results.push({ symbol: item.pos.symbol, action: item.action, orderId, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
             }
