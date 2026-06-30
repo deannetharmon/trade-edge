@@ -4109,11 +4109,18 @@ function BatchConfirmModal({
                             style={{ fontFamily: "'DM Mono', monospace" }}
                           />
                         </div>
-                        {item.estPnl != null && (
-                          <p className={`text-[10px} font-bold ${item.estPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {item.estPnl >= 0 ? '+' : ''}${item.estPnl.toFixed(2)}
-                          </p>
-                        )}
+                        {(() => {
+                          const q = Math.abs(item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
+                          const creditPc = item.pos.creditReceived / (q * 100);
+                          const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
+                          // Live P&L follows the current limit: credit kept minus cost to close.
+                          const livePnl = parseFloat(((creditPc - effLimit) * q * 100).toFixed(2));
+                          return (
+                            <p className={`text-[10px} font-bold ${livePnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {livePnl >= 0 ? '+' : ''}${livePnl.toFixed(2)}
+                            </p>
+                          );
+                        })()}
                         <p className={`text-[10px} ${th.textFaint}`}>{item.orderBody['time-in-force']}</p>
                       </div>
                     </div>
@@ -5381,10 +5388,16 @@ function TakeProfitScale({
       <div className="flex items-center justify-between mb-1">
         <span className={`text-[9px] uppercase tracking-wide ${th.textFaint}`}>Profit capture</span>
         <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-bold ${marketable ? 'text-emerald-400' : 'text-yellow-400'}`}
-                style={{ fontFamily: "'DM Mono', monospace" }}>
-            {capturedPct(limit)}% captured · ${limit.toFixed(2)}
-          </span>
+          {(() => {
+            const pnlPc = parseFloat((span - limit).toFixed(2)); // per-contract P&L
+            const isLoss = pnlPc < 0;
+            return (
+              <span className={`text-[10px] font-bold ${isLoss ? 'text-red-400' : (marketable ? 'text-emerald-400' : 'text-yellow-400')}`}
+                    style={{ fontFamily: "'DM Mono', monospace" }}>
+                {capturedPct(limit)}% · ${limit.toFixed(2)} · {pnlPc >= 0 ? '+' : ''}${pnlPc.toFixed(2)}/ct
+              </span>
+            );
+          })()}
           {ask != null && (
             <button
               type="button"
