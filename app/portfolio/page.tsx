@@ -365,6 +365,7 @@ interface BatchOrderItem {
   freshPerContract: number | null;  // per-contract spread value
   duplicateGtcWarning: boolean;
   priceError: string | null;        // null = ok, string = blocking error message
+  closeQuote?: CloseQuote | null;   // live net bid/mid/ask per contract for the scale
   // roll-specific
   rollExpiry?: string;
   rollShortStrike?: number;
@@ -1210,6 +1211,50 @@ async function fetchCloseLimit(
     // per-contract limit convention.
     const perContract = qty > 0 ? perShare / qty : perShare;
     return parseFloat(perContract.toFixed(2));
+  } catch { return null; }
+}
+
+// Live close quote for the profit-capture scale. Same fetch as fetchCloseLimit
+// but returns the per-CONTRACT net bid / mid / ask for the spread's close:
+//   netAsk = marketable now  (short legs @ ask, long legs @ bid)  -> fills fast
+//   netMid = mid on every leg                                     -> reference
+//   netBid = patient side    (short legs @ bid, long legs @ ask)  -> best price
+// All are signed as a debit-to-close (positive = you pay). Returns null if any
+// leg has no quote.
+interface CloseQuote { netBid: number; netMid: number; netAsk: number; }
+async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote | null> {
+  try {
+    const symbols = pos.legs.map(l => l.symbol);
+    const qs = symbols.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
+    const data = await ttFetch(`/market-data/by-type?${qs}`, token);
+    const items: any[] = data?.data?.items ?? [];
+    let shareBid = 0, shareMid = 0, shareAsk = 0;
+    for (const leg of pos.legs) {
+      const item = items.find((i: any) => i.symbol?.replace(/\s+/g, '') === leg.symbol?.replace(/\s+/g, ''));
+      if (!item) return null;
+      const bid = parseFloat(item.bid ?? '0');
+      const ask = parseFloat(item.ask ?? '0');
+      if (!(bid > 0) && !(ask > 0)) continue;
+      const mid = (bid + ask) / 2;
+      if (leg.direction === 'Short') {
+        // Buy to Close: cost. Marketable = ask, patient = bid.
+        shareAsk += ask * leg.quantity;
+        shareBid += bid * leg.quantity;
+        shareMid += mid * leg.quantity;
+      } else {
+        // Sell to Close: credit. Marketable = bid, patient = ask.
+        shareAsk -= bid * leg.quantity;
+        shareBid -= ask * leg.quantity;
+        shareMid -= mid * leg.quantity;
+      }
+    }
+    const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
+    const div = qty > 0 ? qty : 1;
+    return {
+      netBid: parseFloat((shareBid / div).toFixed(2)),
+      netMid: parseFloat((shareMid / div).toFixed(2)),
+      netAsk: parseFloat((shareAsk / div).toFixed(2)),
+    };
   } catch { return null; }
 }
 
@@ -3532,9 +3577,11 @@ function BatchConfirmModal({
           const orderBody = buildCloseOrder(pos, limitPrice, tif);
           const estPnl = effectiveValue != null ? pos.creditReceived - effectiveValue : pos.pnl;
 
+          const closeQuote = await fetchCloseQuote(pos, token).catch(() => null);
           const item: BatchOrderItem = {
             pos, action, orderBody, limitPrice, estPnl,
             stalePriceWarning, freshPrice, freshPerContract, duplicateGtcWarning, priceError,
+            closeQuote,
           };
 
           if (action === 'CLOSE_ROLL') {
@@ -4070,6 +4117,21 @@ function BatchConfirmModal({
                         <p className={`text-[10px} ${th.textFaint}`}>{item.orderBody['time-in-force']}</p>
                       </div>
                     </div>
+
+                    {!isExcluded && (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (
+                      <div className="px-4 pb-2">
+                        <TakeProfitScale
+                          creditPerContract={(() => {
+                            const q = Math.abs(item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
+                            return item.pos.creditReceived / (q * 100);
+                          })()}
+                          quote={item.closeQuote ?? null}
+                          limit={parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice}
+                          onChange={(price) => setLimitOverrides(prev => ({ ...prev, [item.pos.key]: price.toFixed(2) }))}
+                          th={th}
+                        />
+                      </div>
+                    )}
 
                     {item.action === 'CLOSE_ROLL' && !isExcluded && (
                       <div className={`px-4 pb-3 border-t ${th.borderLight}`}>
@@ -5250,6 +5312,132 @@ const VERDICT_STYLE = {
   CAUTION: { border: 'border-yellow-500/60',  bg: 'bg-yellow-500/8',   icon: '⚠', iconColor: 'text-yellow-400',  labelColor: 'text-yellow-300',  label: 'CAUTION' },
   STOP:    { border: 'border-red-500/60',     bg: 'bg-red-500/8',      icon: '✕', iconColor: 'text-red-400',     labelColor: 'text-red-300',     label: 'STOP' },
 };
+
+// Profit-capture scale for a closing order. The track runs from entry credit
+// (left, 0% of max profit captured) to worthless (right, 100% captured). The
+// live bid-ask band is drawn as a tinted zone; the draggable handle is the
+// limit price and writes to limitOverrides via onChange. A price at or right of
+// the bid-ask band is marketable now (green); a price well left of it is a
+// patient target that waits for decay (amber).
+function TakeProfitScale({
+  creditPerContract, quote, limit, onChange, th,
+}: {
+  creditPerContract: number;
+  quote: CloseQuote | null | undefined;
+  limit: number;
+  onChange: (price: number) => void;
+  th: typeof THEMES[Theme];
+}) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  // Scale: x = 0 at entry credit (left), x = 1 at worthless 0.00 (right).
+  const span = Math.max(creditPerContract, 0.01);
+  const toX = (price: number) => Math.min(1, Math.max(0, 1 - (price / span)));
+  const toPrice = (x: number) => parseFloat((span * (1 - Math.min(1, Math.max(0, x)))).toFixed(2));
+  const capturedPct = (price: number) =>
+    Math.round(Math.min(100, Math.max(0, (1 - price / span) * 100)));
+
+  const mid = quote?.netMid ?? null;
+  const bid = quote?.netBid ?? null;
+  const ask = quote?.netAsk ?? null;
+  const targetPrice = parseFloat((span * 0.5).toFixed(2)); // 50% capture reference
+
+  // A close fills when its limit is at or above the marketable (ask) side.
+  const marketable = ask != null && limit >= ask - 0.001;
+
+  const setFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const x = (clientX - r.left) / r.width;
+    onChange(toPrice(x));
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: MouseEvent | TouchEvent) => {
+      const cx = 'touches' in e ? e.touches[0]?.clientX : (e as MouseEvent).clientX;
+      if (cx != null) setFromClientX(cx);
+    };
+    const up = () => setDragging(false);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('touchmove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchend', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('touchmove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('touchend', up);
+    };
+  }, [dragging]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const handleX = toX(limit);
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className={`text-[9px] uppercase tracking-wide ${th.textFaint}`}>Profit capture</span>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold ${marketable ? 'text-emerald-400' : 'text-yellow-400'}`}
+                style={{ fontFamily: "'DM Mono', monospace" }}>
+            {capturedPct(limit)}% captured · ${limit.toFixed(2)}
+          </span>
+          {ask != null && (
+            <button
+              type="button"
+              onClick={() => onChange(parseFloat(Math.max(ask, 0.01).toFixed(2)))}
+              className="text-[9px] px-2 py-0.5 rounded border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 font-bold whitespace-nowrap">
+              Snap to fill
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        ref={trackRef}
+        onMouseDown={e => { setDragging(true); setFromClientX(e.clientX); }}
+        onTouchStart={e => { setDragging(true); const cx = e.touches[0]?.clientX; if (cx != null) setFromClientX(cx); }}
+        className={`relative h-6 rounded cursor-pointer select-none border ${th.borderLight}`}
+        style={{ background: 'linear-gradient(90deg, rgba(148,163,184,0.10), rgba(16,185,129,0.18))' }}
+        title="Drag to set your close limit">
+
+        {/* live bid-ask band (marketable zone) */}
+        {bid != null && ask != null && (
+          <div
+            className="absolute top-0 bottom-0 bg-emerald-500/20 border-x border-emerald-400/40"
+            style={{ left: pct(toX(ask)), width: pct(Math.max(0, toX(bid) - toX(ask))) }}
+            title={`Market: bid $${bid.toFixed(2)} / ask $${ask.toFixed(2)}`} />
+        )}
+
+        {/* 50% target marker */}
+        <div className="absolute top-0 bottom-0 w-px bg-blue-400/70" style={{ left: pct(toX(targetPrice)) }}
+             title={`50% target $${targetPrice.toFixed(2)}`} />
+
+        {/* current mid marker */}
+        {mid != null && (
+          <div className="absolute top-0 bottom-0 w-px bg-slate-300/70" style={{ left: pct(toX(mid)) }}
+               title={`Mid $${mid.toFixed(2)}`} />
+        )}
+
+        {/* draggable handle */}
+        <div
+          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-7 rounded-sm border-2 ${marketable ? 'bg-emerald-400 border-emerald-200' : 'bg-yellow-400 border-yellow-200'} shadow`}
+          style={{ left: pct(handleX) }} />
+      </div>
+
+      <div className="flex items-center justify-between mt-1">
+        <span className={`text-[8px] ${th.textFaint}`}>entry ${span.toFixed(2)} · 0%</span>
+        <span className={`text-[8px] ${th.textFaint}`}>
+          {marketable ? 'fills now' : 'waits for decay'}
+        </span>
+        <span className={`text-[8px] ${th.textFaint}`}>$0.00 · 100%</span>
+      </div>
+    </div>
+  );
+}
 
 function ActionVerdictBadge({ verdict, compact = false, th }: {
   verdict: ActionVerdict;
