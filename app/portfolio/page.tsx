@@ -3525,7 +3525,10 @@ function BatchConfirmModal({
             priceError = `GTC limit $${limitPrice.toFixed(2)} ≥ live spread $${effectivePerContract.toFixed(2)} — would execute immediately. Use Take Profit instead.`;
           }
 
-          const tif = action === 'PLACE_GTC' ? 'GTC' : 'Day';
+          // All closing actions rest as GTC so a target/stop/roll-trigger close
+          // persists across sessions instead of expiring at end of day. Only a
+          // deliberate intraday close would want Day, which we don't issue here.
+          const tif: 'GTC' | 'Day' = 'GTC';
           const orderBody = buildCloseOrder(pos, limitPrice, tif);
           const estPnl = effectiveValue != null ? pos.creditReceived - effectiveValue : pos.pnl;
 
