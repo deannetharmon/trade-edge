@@ -2125,6 +2125,30 @@ function getRecommendation(pos: Position, trend: TrendResult | null): Recommenda
   return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% profit — ${pos.dte} DTE remaining` };
 }
 
+// Shared action-relevance gate — used by BOTH the per-card buttons and the bulk
+// action bar so they never diverge on which actions apply to a position.
+function isActionRelevant(pos: Position, action: ActionType): boolean {
+  const rec = getRecommendation(pos, null);
+  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+  if (action === 'TAKE_PROFIT') {
+    return pos.hitTarget || rec.action === 'TAKE_PROFIT';
+  }
+  if (action === 'CUT_LOSSES') {
+    const breached = pos.buffer != null && pos.buffer <= 0;
+    const atExtremeLoss = pnlPct != null && pnlPct <= -200;
+    const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
+    const stopLossBreached = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
+      ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
+      : false;
+    return breached || atExtremeLoss || stopLossBreached || rec.action === 'CUT_LOSSES';
+  }
+  if (action === 'PLACE_GTC') {
+    return !pos.hasGtc;
+  }
+  // CLOSE_ROLL and anything else: always applicable.
+  return true;
+}
+
 // Separate function so getRecommendation stays clean — called in PositionCard render
 function getExtendSignal(pos: Position): string | null {
   if (!pos.hasGtc) return null;
@@ -7294,28 +7318,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
         <div className="flex items-center gap-1.5 flex-wrap">
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).map(action => {
             const meta = ACTION_META[action];
-            const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
-
-            // TAKE_PROFIT — only show when profit target hit (≥50%) or AI recommends it
-            if (action === 'TAKE_PROFIT' && !pos.hitTarget && rec.action !== 'TAKE_PROFIT') return null;
-
-            // CUT_LOSSES — only show for a true hard-exit situation.
-            // Ordinary red P/L on a credit spread is mark-to-market noise unless the
-            // short strike is breached, the stop threshold is reached, or loss is extreme.
-            if (action === 'CUT_LOSSES') {
-              const breached = pos.buffer != null && pos.buffer <= 0;
-              const atExtremeLoss = pnlPct != null && pnlPct <= -200;
-              const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
-              // stopLossPrice is per contract; currentValue is total position buyback value.
-              const stopLossBreached = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
-                ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
-                : false;
-              if (!breached && !atExtremeLoss && !stopLossBreached && rec.action !== 'CUT_LOSSES') return null;
-            }
-
-            // PLACE_GTC — hide when already has GTC
-            if (action === 'PLACE_GTC' && pos.hasGtc) return null;
-
+            if (!isActionRelevant(pos, action)) return null;
             return (
               <button key={action}
                 onClick={e => { e.stopPropagation(); onExecute(pos, action); }}
@@ -7606,7 +7609,11 @@ function BulkActionBar({ selectedKeys, positions, onExecute, onClear, th }: {
 }) {
   if (selectedKeys.size === 0) return null;
   const selected = positions.filter(p => selectedKeys.has(p.key));
-  const actions: ActionType[] = ['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'];
+  // Context-aware: only offer a batch action if it applies to at least one
+  // selected position (same relevance gate the per-card buttons use). When
+  // applied, it only runs on the positions it's actually relevant for.
+  const allActions: ActionType[] = ['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'];
+  const actions = allActions.filter(action => selected.some(pos => isActionRelevant(pos, action)));
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -7614,17 +7621,22 @@ function BulkActionBar({ selectedKeys, positions, onExecute, onClear, th }: {
         <div className={`${th.sidebar} border ${th.border} rounded-xl px-5 py-3 flex items-center gap-4 shadow-2xl`}>
           <div className="flex items-center gap-2 shrink-0">
             <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold">{selectedKeys.size}</span>
-            <span className={`text-xs font-bold ${th.text}`}>selected</span>
+            <span className={`text-xs font-bold ${th.text}`}>Apply to selected:</span>
           </div>
           <div className={`w-px h-6 ${th.border} border-l`} />
           <div className="flex items-center gap-2 flex-1 flex-wrap">
+            {actions.length === 0 && (
+              <span className={`text-[10px] ${th.textFaint}`}>No batch actions apply to the selected positions</span>
+            )}
             {actions.map(action => {
               const meta = ACTION_META[action];
+              // Only run the action on positions it's actually relevant for.
+              const targets = selected.filter(pos => isActionRelevant(pos, action));
               return (
                 <button key={action}
-                  onClick={() => onExecute(selected.map(pos => ({ pos, action })))}
+                  onClick={() => onExecute(targets.map(pos => ({ pos, action })))}
                   className={`text-[10px] px-3 py-1.5 border rounded font-bold whitespace-nowrap transition-colors ${meta.btnClass}`}>
-                  {meta.label}
+                  {meta.label} ({targets.length})
                 </button>
               );
             })}
