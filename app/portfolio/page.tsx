@@ -5354,16 +5354,43 @@ function TakeProfitScale({
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  // Scale: x = 0 at entry credit (left), x = 1 at worthless 0.00 (right).
+  // Two-segment scale, pivoted on the live mid:
+  //   x in [0, 0.5]  <->  price in [span (entry), pivot (mid)]
+  //   x in [0.5, 1]  <->  price in [pivot (mid), 0 (worthless)]
+  // This keeps mid PERMANENTLY centered on screen no matter how close it sits
+  // to entry or to zero, so the decision-relevant bid/ask zone never gets
+  // squeezed against an edge. Falls back to span/2 as the pivot before the
+  // quote loads, so the track is well-defined immediately.
   const span = Math.max(creditPerContract, 0.01);
-  const toX = (price: number) => Math.min(1, Math.max(0, 1 - (price / span)));
-  const toPrice = (x: number) => parseFloat((span * (1 - Math.min(1, Math.max(0, x)))).toFixed(2));
-  const capturedPct = (price: number) =>
-    Math.round(Math.min(100, Math.max(0, (1 - price / span) * 100)));
-
   const mid = quote?.netMid ?? null;
   const bid = quote?.netBid ?? null;
   const ask = quote?.netAsk ?? null;
+  const pivot = Math.min(Math.max(mid ?? span / 2, 0.01), span - 0.01 > 0 ? span - 0.01 : span / 2);
+
+  const toX = (price: number) => {
+    const p = Math.min(span, Math.max(0, price));
+    if (p >= pivot) {
+      const denom = span - pivot;
+      const t = denom > 0 ? (span - p) / denom : 0;
+      return Math.min(0.5, Math.max(0, t * 0.5));
+    } else {
+      const t = pivot > 0 ? (pivot - p) / pivot : 0;
+      return Math.min(1, Math.max(0.5, 0.5 + t * 0.5));
+    }
+  };
+  const toPrice = (x: number) => {
+    const xc = Math.min(1, Math.max(0, x));
+    if (xc <= 0.5) {
+      const t = xc / 0.5;
+      return parseFloat((span - t * (span - pivot)).toFixed(2));
+    } else {
+      const t = (xc - 0.5) / 0.5;
+      return parseFloat((pivot * (1 - t)).toFixed(2));
+    }
+  };
+  const capturedPct = (price: number) =>
+    Math.round(Math.min(100, Math.max(0, (1 - price / span) * 100)));
+
   const targetPrice = parseFloat((span * 0.5).toFixed(2)); // 50% capture reference
 
   // A close fills when its limit is at or above the marketable (ask) side.
