@@ -1166,6 +1166,53 @@ async function fetchFreshPositionPrice(pos: Position, token: string): Promise<nu
   } catch { return null; }
 }
 
+// Fill-optimized close price. Reuses the per-leg quote fetch but prices the
+// close toward the marketable (natural) side instead of pure mid, so
+// CUT_LOSSES / CLOSE_ROLL closes actually fill. `aggression` in [0,1]:
+//   0   = mid on every leg (patient, best price, may not fill)
+//   0.5 = halfway from mid to natural (balanced default)
+//   1   = full natural / marketable (fills fast, worst price)
+// Returns the SIGNED per-contract limit (positive = net debit to close).
+// buildCloseOrder reads the sign to set price-effect.
+async function fetchCloseLimit(
+  pos: Position,
+  token: string,
+  aggression: number = 0.5,
+): Promise<number | null> {
+  try {
+    const a = Math.min(1, Math.max(0, aggression));
+    const symbols = pos.legs.map(l => l.symbol);
+    const qs = symbols.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
+    const data = await ttFetch(`/market-data/by-type?${qs}`, token);
+    const items: any[] = data?.data?.items ?? [];
+    let perShare = 0; // net debit to close, per share (positive = we pay)
+    for (const leg of pos.legs) {
+      const item = items.find((i: any) => i.symbol?.replace(/\s+/g, '') === leg.symbol?.replace(/\s+/g, ''));
+      if (!item) return null;
+      const bid = parseFloat(item.bid ?? '0');
+      const ask = parseFloat(item.ask ?? '0');
+      if (!(bid > 0) && !(ask > 0)) continue; // no quote — treat leg as worthless
+      const mid = (bid + ask) / 2;
+      // Natural side per leg for a close:
+      //   short -> Buy to Close -> pay ASK (cost, +)
+      //   long  -> Sell to Close -> receive BID (credit, -)
+      if (leg.direction === 'Short') {
+        const legPrice = mid + (ask - mid) * a;   // mid -> ask
+        perShare += legPrice * leg.quantity;
+      } else {
+        const legPrice = mid - (mid - bid) * a;   // mid -> bid
+        perShare -= legPrice * leg.quantity;
+      }
+    }
+    const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
+    // perShare is already weighted by each leg's quantity; convert to a
+    // per-CONTRACT figure (divide by short qty) to match buildCloseOrder's
+    // per-contract limit convention.
+    const perContract = qty > 0 ? perShare / qty : perShare;
+    return parseFloat(perContract.toFixed(2));
+  } catch { return null; }
+}
+
 // ── Roll Chain Suggestion ──────────────────────────────────────────────────
 async function fetchRollSuggestion(pos: Position, token: string): Promise<RollSuggestion | null> {
   try {
@@ -1314,20 +1361,21 @@ function instrType(symbol: string): 'Equity Option' | 'Index Option' {
 function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' = 'Day'): OrderBody {
   const itype = instrType(pos.symbol);
   const effectiveTif = (!isMarketOpen() && tif === 'Day') ? 'GTC' : tif;
-  // TastyTrade REST API price convention:
-  // Negative = debit (you pay to close), Positive = credit (you receive to open)
-  // A closing spread order is a debit — we pay to buy back what we sold.
-  // Use price-effect: Debit with a POSITIVE price value (the absolute amount).
-  // Both formats have been seen in the wild; using positive + price-effect is safest.
-  // TastyTrade rejects Market orders on multi-leg spreads.
-  // Always use Limit. Floor at $0.01 — TT accepts this as a valid close price
-  // and will fill at market when the spread is essentially worthless.
-  const safePrice = Math.max(limitPrice, 0.01);
+  // TastyTrade price convention: price is always a POSITIVE magnitude, and the
+  // direction is carried by 'price-effect'. For a close, a positive net price
+  // means we PAY to buy back the spread (Debit). On rare inversions the math
+  // can come out negative — meaning closing actually pays us — which must be
+  // submitted as a Credit, not a Debit, or TastyTrade rejects the order.
+  // Hardcoding 'Debit' was the root cause of close / close-roll rejections.
+  // TastyTrade rejects Market orders on multi-leg spreads, so always Limit.
+  // Floor the MAGNITUDE at $0.01 (never a sub-penny or zero price).
+  const priceEffect: 'Debit' | 'Credit' = limitPrice < 0 ? 'Credit' : 'Debit';
+  const safePrice = Math.max(Math.abs(limitPrice), 0.01);
   return {
     'order-type': 'Limit',
     'time-in-force': effectiveTif,
     price: safePrice.toFixed(2),
-    'price-effect': 'Debit',
+    'price-effect': priceEffect,
     legs: pos.legs.map(leg => ({
       symbol: leg.symbol,
       quantity: leg.quantity,
@@ -3427,8 +3475,13 @@ function BatchConfirmModal({
             // Hard floor — negative or zero prices are always rejected by TastyTrade
             limitPrice = Math.max(parseFloat(limitPrice.toFixed(2)), 0.01);
           } else if (action === 'CUT_LOSSES' || action === 'CLOSE_ROLL') {
-            if (effectivePerContract != null) {
-              limitPrice = parseFloat((effectivePerContract * 1.02).toFixed(2));
+            // Balanced (mid->natural) optimizer; final per-leg refinement runs
+            // at submit time in submitAll where fresh quotes are available.
+            const optimized = await fetchCloseLimit(pos, token, 0.5).catch(() => null);
+            if (optimized != null && optimized > 0) {
+              limitPrice = parseFloat(Math.max(optimized, 0.01).toFixed(2));
+            } else if (effectivePerContract != null) {
+              limitPrice = parseFloat(Math.max(effectivePerContract, 0.01).toFixed(2));
             } else {
               limitPrice = parseFloat((creditPerContract * 0.5).toFixed(2));
               priceError = `No live price available — using estimated limit $${limitPrice.toFixed(2)}. Verify before submitting.`;
@@ -3571,9 +3624,18 @@ function BatchConfirmModal({
                 if (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') {
                   const pctFromLive = Math.abs(item.limitPrice - livePerContract) / livePerContract;
                   if (pctFromLive > 0.30) {
-                    const freshLimit = item.action === 'TAKE_PROFIT'
-                      ? Math.max(parseFloat(Math.min(creditPerContract * (1 - item.pos.profitTarget), livePerContract - 0.01).toFixed(2)), 0.01)
-                      : parseFloat((livePerContract * 1.02).toFixed(2));
+                    let freshLimit: number;
+                    if (item.action === 'TAKE_PROFIT') {
+                      freshLimit = Math.max(parseFloat(Math.min(creditPerContract * (1 - item.pos.profitTarget), livePerContract - 0.01).toFixed(2)), 0.01);
+                    } else {
+                      // CUT_LOSSES / CLOSE_ROLL: price to the marketable side
+                      // (balanced mid->natural) so the close fills. Fall back to
+                      // livePerContract if the per-leg optimizer can't quote.
+                      const optimized = await fetchCloseLimit(item.pos, token, 0.5).catch(() => null);
+                      freshLimit = (optimized != null && optimized > 0)
+                        ? parseFloat(Math.max(optimized, 0.01).toFixed(2))
+                        : parseFloat(Math.max(livePerContract, 0.01).toFixed(2));
+                    }
                     item.orderBody = buildCloseOrder(item.pos, freshLimit, item.orderBody['time-in-force'] as 'GTC' | 'Day');
                     (item as any).limitPrice = freshLimit;
                   }
