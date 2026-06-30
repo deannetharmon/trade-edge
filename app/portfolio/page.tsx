@@ -3540,10 +3540,23 @@ function BatchConfirmModal({
           const effectiveValue = freshPrice ?? pos.currentValue;
           const effectivePerContract = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
 
-          if (action === 'TAKE_PROFIT' || action === 'PLACE_GTC') {
-            const effectiveProfitTarget = action === 'PLACE_GTC'
-              ? getSmartGtcDefault(pos.symbol)
-              : pos.profitTarget;
+          if (action === 'TAKE_PROFIT') {
+            // Default to the LIVE MARKET (mid), not the static profit target.
+            // Take Profit's purpose is closing near where the position actually
+            // sits today — defaulting to the target made it identical to any
+            // existing GTC already resting there. The 50% target still renders
+            // as a marker on the profit-capture scale, so it's a drag/snap away.
+            if (effectivePerContract != null) {
+              limitPrice = parseFloat(Math.max(effectivePerContract, 0.01).toFixed(2));
+            } else {
+              // No live quote available — fall back to the target as a safe default.
+              limitPrice = parseFloat(Math.max((creditPerContract * (1 - pos.profitTarget)), 0.01).toFixed(2));
+              priceError = `No live price available — using target-based estimate $${limitPrice.toFixed(2)}. Verify before submitting.`;
+            }
+            limitPrice = Math.max(parseFloat(limitPrice.toFixed(2)), 0.01);
+          } else if (action === 'PLACE_GTC') {
+            // Unchanged: a GTC order's whole purpose is resting at the target.
+            const effectiveProfitTarget = getSmartGtcDefault(pos.symbol);
             const targetPrice = parseFloat((creditPerContract * (1 - effectiveProfitTarget)).toFixed(2));
             if (effectivePerContract != null && targetPrice >= effectivePerContract) {
               limitPrice = parseFloat(Math.max(effectivePerContract - 0.01, 0.01).toFixed(2));
