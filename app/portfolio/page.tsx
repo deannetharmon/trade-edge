@@ -1229,12 +1229,14 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
     const data = await ttFetch(`/market-data/by-type?${qs}`, token);
     const items: any[] = data?.data?.items ?? [];
     let shareBid = 0, shareMid = 0, shareAsk = 0;
+    console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: legs=`, pos.legs.map(l => ({ symbol: l.symbol, direction: l.direction, quantity: l.quantity })));
     for (const leg of pos.legs) {
       const item = items.find((i: any) => i.symbol?.replace(/\s+/g, '') === leg.symbol?.replace(/\s+/g, ''));
-      if (!item) return null;
+      if (!item) { console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: NO MATCH for leg symbol="${leg.symbol}" — available items=`, items.map((i: any) => i.symbol)); return null; }
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
-      if (!(bid > 0) && !(ask > 0)) continue;
+      console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: leg symbol="${leg.symbol}" direction=${leg.direction} qty=${leg.quantity} bid=${bid} ask=${ask}`);
+      if (!(bid > 0) && !(ask > 0)) { console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: leg has no quote, skipped`); continue; }
       const mid = (bid + ask) / 2;
       if (leg.direction === 'Short') {
         // Buy to Close: cost. Marketable = ask, patient = bid.
@@ -1250,6 +1252,7 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
     }
     const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
     const div = qty > 0 ? qty : 1;
+    console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: shareBid=${shareBid} shareMid=${shareMid} shareAsk=${shareAsk} qty=${qty} div=${div} -> netBid=${(shareBid/div).toFixed(2)} netMid=${(shareMid/div).toFixed(2)} netAsk=${(shareAsk/div).toFixed(2)}`);
     return {
       netBid: parseFloat((shareBid / div).toFixed(2)),
       netMid: parseFloat((shareMid / div).toFixed(2)),
