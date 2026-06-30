@@ -2202,7 +2202,12 @@ function isActionRelevant(pos: Position, action: ActionType): boolean {
   const rec = getRecommendation(pos, null);
   const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
   if (action === 'TAKE_PROFIT') {
-    return pos.hitTarget || rec.action === 'TAKE_PROFIT';
+    // Take Profit is a valid manual choice on ANY position currently in the
+    // green — not only when the formal target is hit or the engine recommends
+    // it. pnl > 0 is the gate; hitTarget / recommendation are kept so the
+    // button still shows for at-target positions even if pnl rounds to 0.
+    const inProfit = pos.pnl != null && pos.pnl > 0;
+    return inProfit || pos.hitTarget || rec.action === 'TAKE_PROFIT';
   }
   if (action === 'CUT_LOSSES') {
     const breached = pos.buffer != null && pos.buffer <= 0;
