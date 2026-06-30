@@ -1229,14 +1229,12 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
     const data = await ttFetch(`/market-data/by-type?${qs}`, token);
     const items: any[] = data?.data?.items ?? [];
     let shareBid = 0, shareMid = 0, shareAsk = 0;
-    console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: legs=`, pos.legs.map(l => ({ symbol: l.symbol, direction: l.direction, quantity: l.quantity })));
     for (const leg of pos.legs) {
       const item = items.find((i: any) => i.symbol?.replace(/\s+/g, '') === leg.symbol?.replace(/\s+/g, ''));
-      if (!item) { console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: NO MATCH for leg symbol="${leg.symbol}" — available items=`, items.map((i: any) => i.symbol)); return null; }
+      if (!item) return null;
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
-      console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: leg symbol="${leg.symbol}" direction=${leg.direction} qty=${leg.quantity} bid=${bid} ask=${ask}`);
-      if (!(bid > 0) && !(ask > 0)) { console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: leg has no quote, skipped`); continue; }
+      if (!(bid > 0) && !(ask > 0)) continue;
       const mid = (bid + ask) / 2;
       if (leg.direction === 'Short') {
         // Buy to Close: cost. Marketable = ask, patient = bid.
@@ -1252,7 +1250,6 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
     }
     const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
     const div = qty > 0 ? qty : 1;
-    console.log(`CLOSE_QUOTE_DEBUG ${pos.symbol}: shareBid=${shareBid} shareMid=${shareMid} shareAsk=${shareAsk} qty=${qty} div=${div} -> netBid=${(shareBid/div).toFixed(2)} netMid=${(shareMid/div).toFixed(2)} netAsk=${(shareAsk/div).toFixed(2)}`);
     return {
       netBid: parseFloat((shareBid / div).toFixed(2)),
       netMid: parseFloat((shareMid / div).toFixed(2)),
@@ -3532,11 +3529,16 @@ function BatchConfirmModal({
 
           const duplicateGtcWarning = pos.hasGtc && (action === 'TAKE_PROFIT' || action === 'CUT_LOSSES' || action === 'CLOSE_ROLL');
 
+          // Single quote source: fetch once, use it for BOTH the default limit
+          // and the profit-capture scale, so they can never disagree. Falls
+          // back to fetchFreshPositionPrice's mid only if this call fails.
+          const closeQuote = await fetchCloseQuote(pos, token).catch(() => null);
+
           let limitPrice: number;
           let priceError: string | null = null;
 
           const effectiveValue = freshPrice ?? pos.currentValue;
-          const effectivePerContract = freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
+          const effectivePerContract = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
 
           if (action === 'TAKE_PROFIT' || action === 'PLACE_GTC') {
             const effectiveProfitTarget = action === 'PLACE_GTC'
@@ -3580,7 +3582,6 @@ function BatchConfirmModal({
           const orderBody = buildCloseOrder(pos, limitPrice, tif);
           const estPnl = effectiveValue != null ? pos.creditReceived - effectiveValue : pos.pnl;
 
-          const closeQuote = await fetchCloseQuote(pos, token).catch(() => null);
           const item: BatchOrderItem = {
             pos, action, orderBody, limitPrice, estPnl,
             stalePriceWarning, freshPrice, freshPerContract, duplicateGtcWarning, priceError,
@@ -3649,7 +3650,19 @@ function BatchConfirmModal({
     });
 
   const totalDebit = activeItems.reduce((s, i) => s + i.limitPrice, 0);
-  const totalEstPnl = activeItems.reduce((s, i) => s + (i.estPnl ?? 0), 0);
+  const totalEstPnl = activeItems.reduce((s, i) => {
+    // Live per-item P&L from the CURRENT effective limit (override or item
+    // default), matching the per-card display — not the frozen enrich-time
+    // estPnl, which doesn't move when the limit is dragged/snapped/edited.
+    const q = Math.abs(i.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
+    const creditPc = i.pos.creditReceived / (q * 100);
+    const ovr = limitOverrides[i.pos.key];
+    const effLimit = (ovr !== undefined && ovr !== '' && !isNaN(parseFloat(ovr)))
+      ? parseFloat(ovr)
+      : i.limitPrice;
+    const livePnl = (creditPc - effLimit) * q * 100;
+    return s + livePnl;
+  }, 0);
   const warningCount = activeItems.filter(i => i.stalePriceWarning || i.duplicateGtcWarning).length;
   const priceErrorCount = activeItems.filter(i => i.priceError != null).length;
 
