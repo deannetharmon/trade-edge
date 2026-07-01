@@ -7402,47 +7402,47 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             <div className="border-t-2 border-slate-600/60 pt-1 border-r border-r-slate-700/40 pr-2">
-            <p className={`text-[9px] ${th.textFaint}`}>Entry / Expiry / DTE</p>
-          
-            <p
-              className="text-xs leading-tight"
-              style={{ fontFamily: "'DM Mono', monospace" }}
-            >
-              {pos.entryDate && (
-                <span className={`block text-[10px] ${th.textFaint}`}>
-                  {pos.entryDate}
-                </span>
-              )}
-          
-              <span className={`block font-bold ${th.text}`}>
-                {pos.expDate}
-              </span>
-          
-              <span className={`block ${dteColor(pos.dte)}`}>
-                ({pos.dte}d)
-                {Number.isFinite(pos.entryDte) && (
-                  <span className={`text-[9px] ${th.textFaint}`}>
-                    {' '}← {pos.entryDte}d entry
+              <p className={`text-[9px] ${th.textFaint}`}>Entry / Expiry / DTE</p>
+            
+              <p
+                className="text-xs leading-tight"
+                style={{ fontFamily: "'DM Mono', monospace" }}
+              >
+                {pos.entryDate && (
+                  <span className={`block text-[10px] ${th.textFaint}`}>
+                    {pos.entryDate}
                   </span>
                 )}
-              </span>
-          
-              {(() => {
-                const qty = Math.abs(
-                  pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1
-                );
-          
-                return (
-                  <span
-                    className={`block font-bold ${th.text}`}
-                    style={{ fontFamily: "'DM Mono', monospace" }}
-                  >
-                    {qty} Contract{qty !== 1 ? 's' : ''}
-                  </span>
-                );
-              })()}
-            </p>
-          </div>
+            
+                <span className={`block font-bold ${th.text}`}>
+                  {pos.expDate}
+                </span>
+            
+                <span className={`block ${dteColor(pos.dte)}`}>
+                  ({pos.dte}d)
+                  {Number.isFinite(pos.entryDte) && (
+                    <span className={`text-[9px] ${th.textFaint}`}>
+                      {' '}← {pos.entryDte}d entry
+                    </span>
+                  )}
+                </span>
+            
+                {(() => {
+                  const qty = Math.abs(
+                    pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1
+                  );
+            
+                  return (
+                    <span
+                      className={`block font-bold ${th.text}`}
+                      style={{ fontFamily: "'DM Mono', monospace" }}
+                    >
+                      {qty} Contract{qty !== 1 ? 's' : ''}
+                    </span>
+                  );
+                })()}
+              </p>
+            </div>
 
             {/* ── MARKET ─────────────────────────────── */}
             <div className="border-t-2 border-sky-600/50 pt-1">
