@@ -107,6 +107,8 @@ interface Position {
   entrySnapshotCreatedAt?: string | null;
   snapshotHistory?: PositionSnapshot[]; // daily snapshots for this position (for net-edge peak/trend)
   ivAtEntry?: number | null;
+  ivrAtEntry?: number | null;
+  popAtEntry?: number | null;
   deltaAtEntry?: number | null;
   thetaAtEntry?: number | null;
   otmAtEntry?: number | null;
@@ -969,6 +971,8 @@ interface EntrySnapshot {
   expDate: string;
   entryDate: string | null;
   ivAtEntry: number | null;
+  ivrAtEntry: number | null;
+  popAtEntry: number | null;
   deltaAtEntry: number | null;
   thetaAtEntry: number | null;
   otmAtEntry: number | null;
@@ -1016,6 +1020,8 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
         expDate: pos.expDate,
         entryDate: pos.entryDate,
         ivAtEntry: pos.iv ?? null,
+        ivrAtEntry: pos.ivr ?? null,
+        popAtEntry: getCurrentPop(pos),
         deltaAtEntry: pos.netDelta ?? null,
         thetaAtEntry: pos.theta ?? null,
         otmAtEntry: pos.buffer ?? null,
@@ -1030,6 +1036,8 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
       entrySnapshotKey: key,
       entrySnapshotCreatedAt: snap.createdAt,
       ivAtEntry: snap.ivAtEntry ?? null,
+      ivrAtEntry: snap.ivrAtEntry ?? null,
+      popAtEntry: snap.popAtEntry ?? null,
       deltaAtEntry: snap.deltaAtEntry ?? null,
       thetaAtEntry: snap.thetaAtEntry ?? null,
       otmAtEntry: snap.otmAtEntry ?? null,
@@ -2539,6 +2547,8 @@ Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != n
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
 DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'}
+IVR entry/now: ${pos.ivrAtEntry ?? 'unknown'} → ${pos.ivr ?? 'unknown'}
+POP entry/now: ${pos.popAtEntry != null ? `${pos.popAtEntry.toFixed(0)}%` : 'unknown'} → ${getCurrentPop(pos) != null ? `${getCurrentPop(pos)!.toFixed(0)}%` : 'unknown'}
 Current IV: ${pos.iv ?? 'unknown'}%
 IV at entry / first tracked: ${pos.ivAtEntry ?? 'unknown'}%
 IV change: ${pos.ivAtEntry != null && pos.iv != null ? `${(pos.iv - pos.ivAtEntry).toFixed(1)} pts` : 'unknown'}
@@ -3010,6 +3020,36 @@ function fmtEntryNowTheta(entry: number | null | undefined, current: number | nu
 function fmtEntryNowDte(entry: number | null | undefined, current: number | null | undefined): string {
   if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
   return `${entry.toFixed(0)}→${current.toFixed(0)}d`;
+}
+
+
+function normalizePercentValue(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  // Some APIs store probability as 0.78, others as 78.
+  return Math.abs(value) <= 1 ? value * 100 : value;
+}
+
+function getCurrentPop(pos: Position): number | null {
+  const raw =
+    (pos as any).pop ??
+    (pos as any).probabilityOfProfit ??
+    (pos as any).probabilityOfProfitPct ??
+    (pos as any).popPct ??
+    null;
+
+  return normalizePercentValue(raw);
+}
+
+function fmtEntryNowMaybePct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
+  const e = normalizePercentValue(entry);
+  const c = normalizePercentValue(current);
+  if (e == null || c == null) return '—';
+  return `${e.toFixed(digits)}→${c.toFixed(digits)}%`;
+}
+
+function fmtEntryNowIvr(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${entry.toFixed(0)}→${current.toFixed(0)}`;
 }
 
 function fmtPointChange(entry: number | null | undefined, current: number | null | undefined, digits = 0, suffix = ' pts'): string {
@@ -7564,6 +7604,45 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               {!editingTarget && projection != null && projection.status === 'unlikely' && (
                 <p className="text-[9px] text-yellow-400">50% unlikely before 21-DTE</p>
               )}
+            </div>
+
+
+            <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
+              <p className={`text-[9px] ${th.textFaint}`}>Trade Evolution</p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), true, th.textFaint)}>
+                  POP {fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>
+                  Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>
+                  Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.otmAtEntry, pos.buffer, false, th.textFaint)}>
+                  OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.ivrAtEntry, pos.ivr, true, th.textFaint)}>
+                  IVR {fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}
+                </span>
+              </p>
+
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
+                DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}
+              </p>
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
