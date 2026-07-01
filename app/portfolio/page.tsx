@@ -2387,10 +2387,39 @@ function getRecommendation(pos: Position, trend: TrendResult | null): Recommenda
   return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% profit — ${pos.dte} DTE remaining` };
 }
 
+// Translates the AI analysis recommendation enum into the badge's ActionType.
+// CLOSE and ROLL both collapse to CLOSE_ROLL (the badge doesn't distinguish
+// them; the AI's reasoning/summary text carries that detail). The AI never
+// produces PLACE_GTC — that's a mechanical "no GTC order exists" fact, not
+// something the model reasons about — so callers should fall back to the
+// rule engine's PLACE_GTC check independently of this mapping when relevant.
+function mapAiRecommendationToAction(rec: PositionAnalysis['recommendation']): ActionType {
+  switch (rec) {
+    case 'CLOSE':
+    case 'ROLL':
+      return 'CLOSE_ROLL';
+    case 'TAKE_PROFIT':
+      return 'TAKE_PROFIT';
+    case 'CUT_LOSSES':
+      return 'CUT_LOSSES';
+    case 'WATCH':
+      return 'WATCH';
+    case 'MANAGE':
+      return 'MANAGE';
+    case 'HOLD':
+    default:
+      return 'HOLD';
+  }
+}
+
 // Shared action-relevance gate — used by BOTH the per-card buttons and the bulk
 // action bar so they never diverge on which actions apply to a position.
-function isActionRelevant(pos: Position, action: ActionType): boolean {
-  const rec = getRecommendation(pos, null);
+// `override` lets a caller supply an already-computed recommendation (e.g.
+// an AI-analyzed verdict for this specific card) instead of the function
+// deriving one from the rule engine. Omitting it preserves the original
+// rule-based behavior — the bulk action bar always omits it intentionally.
+function isActionRelevant(pos: Position, action: ActionType, override?: Recommendation): boolean {
+  const rec = override ?? getRecommendation(pos, null);
   const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
   if (action === 'TAKE_PROFIT') {
     // Take Profit is a valid manual choice on ANY position currently in the
@@ -7332,7 +7361,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     getTrend(pos.symbol, shortPutStrike).then(t => setTrend(t)).catch(() => {});
   }, [pos.symbol, pos.legs]);
 
-  const rec = getRecommendation(pos, trend);
+  // Once this position has been analyzed by AI, its verdict replaces the
+  // rule-based badge/button logic for this card only — the AI's reasoning
+  // is strictly richer once you've paid for it. Every other card (and this
+  // one, before Analyze is clicked) stays on the free, instant rule engine.
+  const rec: Recommendation = analysis
+    ? { action: mapAiRecommendationToAction(analysis.recommendation), detail: analysis.summary }
+    : getRecommendation(pos, trend);
 
   // ── 50%-target projection (theta-only, all-else-equal) ──
   // pos.theta is per-share net theta with contract qty ALREADY applied (see assembly).
@@ -7944,7 +7979,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
         <div className="flex items-center gap-1.5 flex-wrap">
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).map(action => {
             const meta = ACTION_META[action];
-            if (!isActionRelevant(pos, action)) return null;
+            if (!isActionRelevant(pos, action, rec)) return null;
             return (
               <button key={action}
                 onClick={e => { e.stopPropagation(); onExecute(pos, action); }}
