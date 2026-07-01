@@ -107,8 +107,6 @@ interface Position {
   entrySnapshotCreatedAt?: string | null;
   snapshotHistory?: PositionSnapshot[]; // daily snapshots for this position (for net-edge peak/trend)
   ivAtEntry?: number | null;
-  ivrAtEntry?: number | null;
-  popAtEntry?: number | null;
   deltaAtEntry?: number | null;
   thetaAtEntry?: number | null;
   otmAtEntry?: number | null;
@@ -971,8 +969,6 @@ interface EntrySnapshot {
   expDate: string;
   entryDate: string | null;
   ivAtEntry: number | null;
-  ivrAtEntry: number | null;
-  popAtEntry: number | null;
   deltaAtEntry: number | null;
   thetaAtEntry: number | null;
   otmAtEntry: number | null;
@@ -1020,8 +1016,6 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
         expDate: pos.expDate,
         entryDate: pos.entryDate,
         ivAtEntry: pos.iv ?? null,
-        ivrAtEntry: pos.ivr ?? null,
-        popAtEntry: getCurrentPop(pos),
         deltaAtEntry: pos.netDelta ?? null,
         thetaAtEntry: pos.theta ?? null,
         otmAtEntry: pos.buffer ?? null,
@@ -1036,8 +1030,6 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
       entrySnapshotKey: key,
       entrySnapshotCreatedAt: snap.createdAt,
       ivAtEntry: snap.ivAtEntry ?? null,
-      ivrAtEntry: snap.ivrAtEntry ?? null,
-      popAtEntry: snap.popAtEntry ?? null,
       deltaAtEntry: snap.deltaAtEntry ?? null,
       thetaAtEntry: snap.thetaAtEntry ?? null,
       otmAtEntry: snap.otmAtEntry ?? null,
@@ -2547,8 +2539,6 @@ Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != n
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
 DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
 IVR: ${pos.ivr ?? 'unknown'}
-IVR entry/now: ${pos.ivrAtEntry ?? 'unknown'} → ${pos.ivr ?? 'unknown'}
-POP entry/now: ${pos.popAtEntry != null ? `${pos.popAtEntry.toFixed(0)}%` : 'unknown'} → ${getCurrentPop(pos) != null ? `${getCurrentPop(pos)!.toFixed(0)}%` : 'unknown'}
 Current IV: ${pos.iv ?? 'unknown'}%
 IV at entry / first tracked: ${pos.ivAtEntry ?? 'unknown'}%
 IV change: ${pos.ivAtEntry != null && pos.iv != null ? `${(pos.iv - pos.ivAtEntry).toFixed(1)} pts` : 'unknown'}
@@ -3022,36 +3012,6 @@ function fmtEntryNowDte(entry: number | null | undefined, current: number | null
   return `${entry.toFixed(0)}→${current.toFixed(0)}d`;
 }
 
-
-function normalizePercentValue(value: number | null | undefined): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  // Some APIs store probability as 0.78, others as 78.
-  return Math.abs(value) <= 1 ? value * 100 : value;
-}
-
-function getCurrentPop(pos: Position): number | null {
-  const raw =
-    (pos as any).pop ??
-    (pos as any).probabilityOfProfit ??
-    (pos as any).probabilityOfProfitPct ??
-    (pos as any).popPct ??
-    null;
-
-  return normalizePercentValue(raw);
-}
-
-function fmtEntryNowMaybePct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
-  const e = normalizePercentValue(entry);
-  const c = normalizePercentValue(current);
-  if (e == null || c == null) return '—';
-  return `${e.toFixed(digits)}→${c.toFixed(digits)}%`;
-}
-
-function fmtEntryNowIvr(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${entry.toFixed(0)}→${current.toFixed(0)}`;
-}
-
 function fmtPointChange(entry: number | null | undefined, current: number | null | undefined, digits = 0, suffix = ' pts'): string {
   if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
   const diff = current - entry;
@@ -3155,14 +3115,11 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `Vega: ${fmtSignedNum(pos.netVega, 3)}`,
     `IVR: ${pos.ivr ?? 'unknown'}`,
     `Current IV: ${fmtPct(pos.iv, 0)}`,
-    '',
-    'TRADE EVOLUTION',
-    `POP entry → now: ${fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}`,
-    `IVR entry → now: ${fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}`,
-    `IV entry → now: ${fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}`,
+    `IV at entry / first tracked: ${fmtPct(pos.ivAtEntry, 0)}`,
+    `IV change: ${fmtPointChange(pos.ivAtEntry, pos.iv, 0)}`,
     `Delta entry → now: ${fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}`,
-    `Theta/day entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
-    `OTM buffer entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
+    `Theta entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
+    `OTM entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
     `DTE entry → now: ${fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}`,
     `HV30: ${fmtPct(pos.hv30, 0)}`,
     `IV edge (IV - HV30): ${fmtPct(ivEdge)}`,
@@ -7327,7 +7284,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 70px 60px 110px 70px 70px 80px 70px 100px 45px 45px 45px 55px 60px 110px 70px 90px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1710px' }}>
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 80px 70px 110px 80px 80px 90px 70px 50px 45px 45px 45px 55px 60px 120px 80px 90px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1710px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
@@ -7446,41 +7403,16 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             <div className="border-t-2 border-slate-600/60 pt-1 border-r border-r-slate-700/40 pr-2">
               <p className={`text-[9px] ${th.textFaint}`}>Entry / Expiry / DTE</p>
-            
-              <p
-                className="text-xs leading-tight"
-                style={{ fontFamily: "'DM Mono', monospace" }}
-              >
-                {pos.entryDate && (
-                  <span className={`block text-[10px] ${th.textFaint}`}>
-                    {pos.entryDate}
-                  </span>
-                )}
-            
-                <span className={`block font-bold ${th.text}`}>
-                  {pos.expDate}
-                </span>
-            
-                <span className={`block ${dteColor(pos.dte)}`}>
-                  ({pos.dte}d)
-                  {Number.isFinite(pos.entryDte) && (
-                    <span className={`text-[9px] ${th.textFaint}`}>
-                      {' '}← {pos.entryDte}d entry
-                    </span>
-                  )}
-                </span>
-            
+              <p className="text-xs leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                {pos.entryDate && <span className={`block text-[10px] ${th.textFaint}`}>{pos.entryDate}</span>}
+                <span className={`block font-bold ${th.text}`}>{pos.expDate}</span>
+                <span className={`block ${dteColor(pos.dte)}`}>({pos.dte}d){Number.isFinite(pos.entryDte) ? <span className={`text-[9px] ${th.textFaint}`}> ← {pos.entryDte}d entry</span> : null}</span>
                 {(() => {
-                  const qty = Math.abs(
-                    pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1
-                  );
-            
+                  const qty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
                   return (
-                    <span
-                      className={`block font-bold ${th.text}`}
-                      style={{ fontFamily: "'DM Mono', monospace" }}
-                    >
-                      {qty} Contract{qty !== 1 ? 's' : ''}
+                    <span className={`block text-[9px] ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>
+                      {qty} contract{qty !== 1 ? 's' : ''}
+                    </span>
                     </span>
                   );
                 })()}
@@ -7560,18 +7492,19 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 </p>
               </div>
             ) : (
-              <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>Cash Req</p>
-                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {cspCashRequired != null ? `$${cspCashRequired.toLocaleString()}` : '—'}
-                </p>
-              </div>
+              <div className="border-t-2 border-emerald-600/50 pt-1" />
             )}
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Buyback</p>
-              <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.currentValue != null ? `$${pos.currentValue.toFixed(2)}` : '—'}
+              <p className={`text-[9px] ${th.textFaint}`}>
+                {lifecycle.type === 'CSP' ? 'Cash Req' : 'Buyback'}
+              </p>
+              <p className={`text-xs font-bold ${lifecycle.type === 'CSP' ? 'text-amber-400' : th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {lifecycle.type === 'CSP' && cspCashRequired != null
+                  ? `$${cspCashRequired.toLocaleString()}`
+                  : pos.currentValue != null
+                  ? `$${pos.currentValue.toFixed(2)}`
+                  : '—'}
               </p>
             </div>
 
@@ -7606,45 +7539,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               {!editingTarget && projection != null && projection.status === 'unlikely' && (
                 <p className="text-[9px] text-yellow-400">50% unlikely before 21-DTE</p>
               )}
-            </div>
-
-
-            <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
-              <p className={`text-[9px] ${th.textFaint}`}>Trade Evolution</p>
-
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), true, th.textFaint)}>
-                  POP {fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}
-                </span>
-              </p>
-
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>
-                  Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}
-                </span>
-              </p>
-
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>
-                  Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}
-                </span>
-              </p>
-
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.otmAtEntry, pos.buffer, false, th.textFaint)}>
-                  OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}
-                </span>
-              </p>
-
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.ivrAtEntry, pos.ivr, true, th.textFaint)}>
-                  IVR {fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}
-                </span>
-              </p>
-
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
-                DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}
-              </p>
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
@@ -7762,6 +7656,23 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
               </p>
+            </div>
+
+            <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
+              <p className={`text-[9px] ${th.textFaint}`}>Entry → Now</p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.ivAtEntry, pos.iv, true, th.textFaint)}>IV {fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}</span>
+              </p>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.otmAtEntry, pos.buffer, false, th.textFaint)}>OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}</span>
+              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}</p>
             </div>
 
             {/* ── ORDERS ─────────────────────────────── */}
