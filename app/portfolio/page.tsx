@@ -7407,6 +7407,14 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 {pos.entryDate && <span className={`block text-[10px] ${th.textFaint}`}>{pos.entryDate}</span>}
                 <span className={`block font-bold ${th.text}`}>{pos.expDate}</span>
                 <span className={`block ${dteColor(pos.dte)}`}>({pos.dte}d){Number.isFinite(pos.entryDte) ? <span className={`text-[9px] ${th.textFaint}`}> ← {pos.entryDte}d entry</span> : null}</span>
+                {(() => {
+                  const qty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
+                  return (
+                    <span className={`block text-[9px] ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                      {qty} contract{qty !== 1 ? 's' : ''}
+                    </span>
+                  );
+                })()}
               </p>
             </div>
 
