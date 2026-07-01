@@ -7410,7 +7410,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 {(() => {
                   const qty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
                   return (
-                    <span className={`block text-[9px] ${th.textFaint} !font-bold`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    <span className={`block text-[9px] ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>
+                      {qty} contract{qty !== 1 ? 's' : ''}
+                    </span>
                     </span>
                   );
                 })()}
