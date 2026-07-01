@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   classifyPositionLifecycle,
-} from '@/lib/portfolio/positionLifecycle';
+} from '@/lib/portfolio/positionLifecycle';Emtru
 
 
 // Inject accent CSS variable style
@@ -3155,11 +3155,14 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `Vega: ${fmtSignedNum(pos.netVega, 3)}`,
     `IVR: ${pos.ivr ?? 'unknown'}`,
     `Current IV: ${fmtPct(pos.iv, 0)}`,
-    `IV at entry / first tracked: ${fmtPct(pos.ivAtEntry, 0)}`,
-    `IV change: ${fmtPointChange(pos.ivAtEntry, pos.iv, 0)}`,
+    '',
+    'TRADE EVOLUTION',
+    `POP entry → now: ${fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}`,
+    `IVR entry → now: ${fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}`,
+    `IV entry → now: ${fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}`,
     `Delta entry → now: ${fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}`,
-    `Theta entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
-    `OTM entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
+    `Theta/day entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
+    `OTM buffer entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
     `DTE entry → now: ${fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}`,
     `HV30: ${fmtPct(pos.hv30, 0)}`,
     `IV edge (IV - HV30): ${fmtPct(ivEdge)}`,
@@ -7760,23 +7763,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
               </p>
-            </div>
-
-            <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
-              <p className={`text-[9px] ${th.textFaint}`}>Entry → Now</p>
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.ivAtEntry, pos.iv, true, th.textFaint)}>IV {fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}</span>
-              </p>
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}</span>
-              </p>
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}</span>
-              </p>
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.otmAtEntry, pos.buffer, false, th.textFaint)}>OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}</span>
-              </p>
-              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}</p>
             </div>
 
             {/* ── ORDERS ─────────────────────────────── */}
