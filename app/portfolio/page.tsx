@@ -980,19 +980,66 @@ interface EntrySnapshot {
   dteAtEntry: number | null;
 }
 
-function readEntrySnapshots(): Record<string, EntrySnapshot> {
+async function fetchEntrySnapshots(): Promise<Record<string, EntrySnapshot>> {
   try {
-    if (typeof localStorage === 'undefined') return {};
-    return JSON.parse(localStorage.getItem(LS_ENTRY_SNAPSHOTS) ?? '{}');
+    const res = await fetch('/api/position-entry-snapshots');
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data?.snapshots ?? {};
   } catch {
     return {};
   }
 }
 
-function writeEntrySnapshots(snapshots: Record<string, EntrySnapshot>) {
+// Upserts entries server-side. The API route never overwrites an existing
+// key, so this is safe to call speculatively (e.g. every page load for
+// positions that turn out to already have a snapshot -- those are just
+// skipped server-side).
+async function postEntrySnapshots(
+  entries: { positionKey: string; snapshot: EntrySnapshot }[]
+): Promise<Record<string, EntrySnapshot> | null> {
+  if (entries.length === 0) return null;
+  try {
+    const res = await fetch('/api/position-entry-snapshots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.snapshots ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// One-time migration: earlier versions of TradeEdge stored entry snapshots
+// in this browser's localStorage only, which meant the Trade Evolution
+// baseline never followed the trader to a different device. If old
+// localStorage data is still present, push it up to Redis (server-side
+// upsert skips anything that already exists there, so this can never
+// clobber a real baseline), then clear the local copy so this doesn't
+// re-run on every load.
+async function migrateLocalEntrySnapshotsIfNeeded(): Promise<void> {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(LS_ENTRY_SNAPSHOTS, JSON.stringify(snapshots));
+    const raw = localStorage.getItem(LS_ENTRY_SNAPSHOTS);
+    if (!raw) return;
+
+    const localSnapshots: Record<string, EntrySnapshot> = JSON.parse(raw);
+    const entries = Object.entries(localSnapshots).map(([positionKey, snapshot]) => ({
+      positionKey,
+      snapshot,
+    }));
+    if (entries.length === 0) {
+      localStorage.removeItem(LS_ENTRY_SNAPSHOTS);
+      return;
+    }
+
+    const result = await postEntrySnapshots(entries);
+    if (result != null) {
+      localStorage.removeItem(LS_ENTRY_SNAPSHOTS);
+    }
   } catch {}
 }
 
@@ -1004,9 +1051,11 @@ function positionEntrySnapshotKey(pos: Pick<Position, 'accountNumber' | 'symbol'
   return [pos.accountNumber, pos.symbol, pos.expDate, pos.entryDate ?? 'unknown', legsKey].join('::');
 }
 
-function attachEntrySnapshots(positions: Position[]): Position[] {
-  const snapshots = readEntrySnapshots();
-  let changed = false;
+async function attachEntrySnapshots(positions: Position[]): Promise<Position[]> {
+  await migrateLocalEntrySnapshotsIfNeeded();
+
+  const snapshots = await fetchEntrySnapshots();
+  const toCreate: { positionKey: string; snapshot: EntrySnapshot }[] = [];
 
   const enriched = positions.map(pos => {
     const key = positionEntrySnapshotKey(pos);
@@ -1029,7 +1078,7 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
         dteAtEntry: pos.entryDte ?? pos.dte ?? null,
       };
       snapshots[key] = snap;
-      changed = true;
+      toCreate.push({ positionKey: key, snapshot: snap });
     }
 
     return {
@@ -1046,7 +1095,10 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
     };
   });
 
-  if (changed) writeEntrySnapshots(snapshots);
+  if (toCreate.length > 0) {
+    await postEntrySnapshots(toCreate);
+  }
+
   return enriched;
 }
 
@@ -2260,7 +2312,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     };
   });
 
-  positions = attachEntrySnapshots(positions);
+  positions = await attachEntrySnapshots(positions);
 
   const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
   positions.sort((a, b) => {
