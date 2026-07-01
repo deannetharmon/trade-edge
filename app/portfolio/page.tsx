@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   classifyPositionLifecycle,
-} from '@/lib/portfolio/positionLifecycle';Emtru
+} from '@/lib/portfolio/positionLifecycle';
 
 
 // Inject accent CSS variable style
