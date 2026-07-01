@@ -1030,19 +1030,6 @@ function attachEntrySnapshots(positions: Position[]): Position[] {
       };
       snapshots[key] = snap;
       changed = true;
-    } else {
-      // One-time backfill: earlier sessions could capture a snapshot before
-      // ivr/pop data had loaded, permanently locking in a null baseline.
-      // If live data is available now and the stored baseline is still
-      // null, fill it in once so Trade Evolution stops showing '—' forever.
-      if (snap.ivrAtEntry == null && pos.ivr != null) {
-        snap.ivrAtEntry = pos.ivr;
-        changed = true;
-      }
-      if (snap.popAtEntry == null && getCurrentPop(pos) != null) {
-        snap.popAtEntry = getCurrentPop(pos);
-        changed = true;
-      }
     }
 
     return {
