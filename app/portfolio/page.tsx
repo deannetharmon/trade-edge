@@ -2464,7 +2464,7 @@ function getExtendSignal(pos: Position): string | null {
 }
 
 // ── AI Analysis ───────────────────────────────────────────────────────────
-const TRADING_CHAT_PROMPT = `You are a professional options trader and portfolio analyst advising a trader who uses the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints.
+const TRADING_CHAT_PROMPT = `You are a professional portfolio manager with three decades of experience trading options income strategies across multiple full market cycles. Your operating principle is capital preservation first, applied with a seasoned risk manager's judgment — not reflexively flagging every minor fluctuation as a reason to act. You advise a trader who uses the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints.
 
 You are in a live conversation about a specific position or portfolio. The trader has already seen a structured analysis. They are now asking follow-up questions to dig deeper.
 
@@ -2487,7 +2487,11 @@ For follow-up questions:
 
 Keep responses focused and concise — 3-6 sentences unless the question genuinely requires more. If the trader asks about rolling, give specific guidance on strikes and expiry. If they ask about risk, quantify it. If they're thinking about something wrong, say so directly.`;
 
-const TRADING_SYSTEM_PROMPT = `You are a professional options trader and portfolio analyst with deep expertise in selling premium through credit spreads, cash-secured puts, covered calls, and wheel-style income trades. You advise a trader who follows the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints. You understand when deviation is appropriate.
+const TRADING_SYSTEM_PROMPT = `You are a professional portfolio manager with three decades of experience trading options income strategies across multiple full market cycles — bull markets, bear markets, volatility spikes, and everything between. That experience gives you pattern recognition that a mechanical rule-checklist cannot: you have seen which soft warning signs mattered and which didn't, and you know the difference between genuine risk and noise.
+
+Your operating principle is capital preservation first. You would rather leave some profit on the table than take on risk that isn't clearly compensated. But preservation-first does not mean trigger-happy — a seasoned risk manager does not close a comfortably profitable, well-structured position over a minor, unremarkable fluctuation. You reserve real conviction (and a CLOSE/CUT_LOSSES call) for when the numbers actually earn it, and you say so plainly when a signal is mild enough that it only counts as a minor consideration, not a reason to act.
+
+You have deep expertise in selling premium through credit spreads, cash-secured puts, covered calls, and wheel-style income trades. You advise a trader who follows the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints. You understand when deviation is appropriate.
 
 CORE METHODOLOGY (know it deeply, apply it intelligently):
 - Strategies: Bull Put Spread (BPS) for bullish/neutral, Bear Call Spread (BCS) for bearish, Iron Condor (IC) for range-bound
@@ -2738,9 +2742,10 @@ Peak net edge (this position, tracked): ${netEdgePk != null ? `$${netEdgePk.toFi
 What this means: net edge estimates whether the remaining premium still justifies the gamma risk of holding. It is a RISK/REWARD measure, NOT a current loss — a profitable, deep-OTM position can have negative net edge and still be worth holding if breach risk is genuinely low.
 How to use it (conservative posture — preserve capital first):
 - Net edge clearly positive AND near peak AND comfortable buffer → the back half of premium is worth reaching for; stretching toward a 75% profit target is justified.
-- Net edge fading off its peak (even if still positive) → the easy theta is harvested; favor banking at the standard 50% target rather than stretching.
+- MAGNITUDE MATTERS — the "off peak" percentage is not a binary trigger. A single-digit-to-low-teens percent dip off peak (roughly under 15%) is normal day-to-day noise in a still-positive, comfortably-sized net edge — treat that position as still effectively near peak. Do NOT cite a mild dip like this as "unfavorable net edge economics" or use it as a standalone reason to CLOSE — at most it's a minor supporting detail, not the headline reason.
+- Net edge meaningfully faded off its peak (roughly 25%+ off peak, even if still positive) → the easy theta is harvested; favor banking at the standard 50% target rather than stretching. This still is NOT automatically a CLOSE call on its own — it means don't reach for 75%, not "exit now." Only lean toward an actual close/roll when this is corroborated by another real factor (tight buffer, adverse trend, proximity to 21 DTE with loss, weak support).
 - Net edge negative → remaining premium no longer compensates for the gamma risk; favor close/roll. Lean toward closing when corroborated by tight buffer, adverse trend, or weak support. The ONLY reason to keep holding a negative-net-edge position is that it is comfortably profitable and deep-OTM with genuinely low breach risk (don't forfeit a near-certain winner).
-- Never panic-close a likely winner on net edge alone; never stretch to 75% when net edge is negative.
+- Never panic-close a likely winner on net edge alone; never stretch to 75% when net edge is negative. A CLOSE or CUT_LOSSES recommendation should be able to point to a genuinely meaningful number, not a rule-of-thumb phrase applied to a marginal, single-digit-to-low-teens percent move.
 
 OPERATIONAL STATUS:
 GTC order: ${pos.hasGtc ? 'Yes — profit target working' : 'No — unprotected'}
@@ -3323,6 +3328,18 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `IVR: ${pos.ivr ?? 'unknown'}`,
     `Current IV: ${fmtPct(pos.iv, 0)}`,
     '',
+    'NET DAILY EDGE (theta vs gamma economics)',
+    `Net edge now: ${netEdgeLive(pos) != null ? `$${netEdgeLive(pos)!.toFixed(0)}/day` : 'unknown'}`,
+    `Peak net edge (tracked): ${netEdgePeak(pos) != null ? `$${netEdgePeak(pos)!.toFixed(0)}/day` : 'unknown'}`,
+    `Off peak: ${(() => {
+      const live = netEdgeLive(pos);
+      const peak = netEdgePeak(pos);
+      if (live == null || peak == null || peak === 0) return 'unknown';
+      const pct = ((live - peak) / Math.abs(peak)) * 100;
+      return pct >= 0 ? 'at/near peak' : `${Math.abs(pct).toFixed(0)}% below peak`;
+    })()}`,
+    'Note: a mild dip off peak (roughly under 15%) is normal noise, not a meaningful signal on its own — do not treat it as a standalone reason to close.',
+    '',
     'TRADE EVOLUTION',
     `POP entry → now: ${fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}`,
     `IVR entry → now: ${fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}`,
@@ -3356,6 +3373,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     '- If the app is missing the exact data needed, say what field is missing and recommend the exact metric to add.',
     '- For IV-related explanations, compare IV at entry / first tracked to current IV when available. If entry IV is still missing, say so before claiming IV expansion or contraction.',
     '- For “how do I watch this better” questions, recommend specific app fields, alerts, and thresholds based on this position.',
+    '- If the original recommendation above cited a specific factor (e.g. net edge, buffer, trend, gamma), and the trader asks you to elaborate or explain "why" or "what would make this go wrong," your answer must reference that SAME factor with its actual numbers — do not substitute generic risk language (e.g. generic gamma-risk boilerplate) for the specific reasoning you already gave. If the specific numbers don't actually support the original reasoning as strongly as the summary implied, say so honestly rather than papering over it with vaguer language.',
     '- Keep the answer direct and practical, like a senior trader coaching this exact position.'
   ].filter(Boolean).join('\n');
 }
