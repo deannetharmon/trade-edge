@@ -5,6 +5,7 @@ import { SessionProvider } from 'next-auth/react';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskStatusBar } from '@/components/tasks/TaskStatusBar';
+import { TaskNotifications } from '@/components/tasks/TaskNotifications';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -13,6 +14,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <CommandProvider>
           {children}
           <TaskStatusBar />
+          <TaskNotifications />
         </CommandProvider>
       </TaskProvider>
     </SessionProvider>
