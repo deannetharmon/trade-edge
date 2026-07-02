@@ -19,6 +19,8 @@ Each ticket should include:
 
 - [TE-0001 Background Task Manager](./TE-0001-background-task-manager.md)
 - [TE-0002 Task Manager and Command Bus Architecture](./TE-0002-task-manager-and-command-bus-architecture.md)
+- [TE-0003 Implement Task Manager Foundation](./TE-0003-implement-task-manager-foundation.md)
+- [TE-0004 Implement Command Bus Foundation](./TE-0004-implement-command-bus-foundation.md)
 
 ## Current roadmap order
 
