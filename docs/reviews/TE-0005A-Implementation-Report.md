@@ -1,91 +1,196 @@
-# TE-0005A Implementation Report — Phase 1: Helper Extraction
-
-**Scope of this report:** the approved mechanical extraction of shared scan helpers into `lib/scans/`. This is a checkpoint within TE-0005A, not the full ticket — the background task runner, `START_RANKED_SCAN` command handler, page reconnect behavior, and cancellation support are not yet built (see §9).
+# TE-0005A Implementation Report
 
 ## 1. Executive Summary
 
-21 functions plus their required shared types, constants, and module state were mechanically extracted from `app/screener/page.tsx` into 8 new files under `lib/scans/`. This was a pure code move: every extracted function was copied byte-for-byte via scripted line-range extraction (no retyping), with only an `export` keyword added where needed to compile. `app/screener/page.tsx` was changed in exactly one place — a new import block — with zero other lines touched. `runScreen()` and `runTargetedScan()` (Filter/Rank/Targeted orchestration) are byte-for-byte identical before and after, verified by diff. Build passes clean.
+Ranked Scan now runs as a background task owned by the Task Manager, dispatched through the Command Bus, instead of living in page-local `runScreen()` state. This is the first real integration of TE-0003 (Task Manager) and TE-0004 (Command Bus).
+
+What changed:
+- 26 shared scan helpers were mechanically extracted from `app/screener/page.tsx` into `lib/scans/` (Phase 1, previously reviewed).
+- A new `lib/scans/ranked-scan-runner.ts` runs the rank-only scan loop standalone, with progress reporting and cooperative cancellation.
+- `lib/commands/command-handlers.ts` now registers `START_RANKED_SCAN` and `CANCEL_TASK`, wiring the runner to `TaskManager`.
+- `app/screener/page.tsx`'s two Rank-mode trigger points now dispatch `START_RANKED_SCAN` instead of calling `runScreen()` directly, and a reconnect effect re-attaches to the active/completed task on mount.
+
+Stayed within TE-0005A scope: no global notifications, no Task Center UI, no Screener (Filter/Targeted) migration, no Portfolio AI or Autopilot changes. Filter and Targeted modes still run entirely inside `runScreen()`/`runTargetedScan()`, untouched.
 
 ## 2. Files Changed
 
-**Created (`lib/scans/`):**
-- `types.ts` — 114 lines
-- `constants.ts` — 40 lines
-- `scan-utils.ts` — 125 lines
-- `tastytrade-client.ts` — 258 lines
-- `spread-finder.ts` — 212 lines
-- `checklist.ts` — 232 lines
-- `rank-scoring.ts` — 400 lines
-- `trend.ts` — 486 lines
+**Created:**
+- `lib/scans/types.ts`, `constants.ts`, `scan-utils.ts`, `tastytrade-client.ts`, `spread-finder.ts`, `checklist.ts`, `rank-scoring.ts`, `trend.ts` (Phase 1 — helper extraction)
+- `lib/scans/ranked-scan-runner.ts` (Phase 2 — background orchestration)
 
 **Modified:**
-- `app/screener/page.tsx` — one import block added (29 lines) immediately after existing imports. No other lines added, removed, or changed except the 1,747 lines that were deleted because their content moved to `lib/scans/` (see §7).
+- `app/screener/page.tsx` — Phase 1: import block only. Phase 2: added ranked-scan task state, reconnect effect, `startRankedScanTask()` helper, and swapped both Rank-mode trigger call sites.
+- `lib/commands/command-handlers.ts` — registered `START_RANKED_SCAN` and `CANCEL_TASK`.
+- `components/commands/CommandProvider.tsx` — now reads `TaskManager` from the enclosing `TaskProvider` and passes it into `registerCommandHandlers`.
 
-## 3. Exact Functions Extracted (21 approved + 4 transitive dependencies discovered during extraction)
+## 3. Helper Extraction
 
-The originally-approved 21:
-`getAccessToken`, `ttFetch`, `getMarketMetrics`, `getQuote`, `getChain`, `classifyUnderlying`, `getTrend`, `normalizeTickerToken`, `runChecklist`, `exploreAllCandidatesForRank`, `findBestIC`, `findBestSpread`, `findBestICUnfiltered`, `findBestSpreadUnfiltered`, `scoreCandidate`, `scoreBuffer`, `daysUntil`, `calcSpreadPop`, `normalizeIv`, `formatDisplayDate`, `estimateNextEarningsDate`.
+All 26 helpers moved verbatim (mechanical extraction, byte-for-byte copy — no logic rewritten):
 
-4 additional functions found to be required for the above to compile (not in the original 21-item list I presented, but covered by your approval's "plus required shared types/constants/state needed to compile"):
-- `trySpreadAtWidth` — called by `findBestSpread`
-- `tryICSideAtWidth` — called by `findBestIC`
-- `getWidthSteps` — called by `findBestSpread`/`findBestIC`
-- `getBidAskMax` — called by `trySpreadAtWidth`/`tryICSideAtWidth`
-- `normalCdf` — called by `calcSpreadPop`
+| Helper | Original location | New location | Behavior changed |
+|---|---|---|---|
+| `getAccessToken` | `app/screener/page.tsx` | `lib/scans/tastytrade-client.ts` | No |
+| `ttFetch` | same | same | No |
+| `getMarketMetrics` | same | same | No |
+| `getQuote` | same | same | No |
+| `getChain` | same | same | No |
+| `classifyUnderlying` | same | same | No |
+| `getTrend` | same | `lib/scans/trend.ts` | No |
+| `normalizeTickerToken` | same | `lib/scans/scan-utils.ts` | No |
+| `runChecklist` | same | `lib/scans/checklist.ts` | No |
+| `exploreAllCandidatesForRank` | same | `lib/scans/rank-scoring.ts` | No |
+| `findBestIC` | same | `lib/scans/spread-finder.ts` | No |
+| `findBestSpread` | same | same | No |
+| `findBestICUnfiltered` | same | same | No |
+| `findBestSpreadUnfiltered` | same | same | No |
+| `scoreCandidate` | same | `lib/scans/rank-scoring.ts` | No |
+| `scoreBuffer` | same | same | No |
+| `daysUntil` | same | `lib/scans/scan-utils.ts` | No |
+| `calcSpreadPop` | same | same | No |
+| `normalizeIv` | same | same | No |
+| `formatDisplayDate` | same | same | No |
+| `estimateNextEarningsDate` | same | same | No |
+| `trySpreadAtWidth` | same | `lib/scans/spread-finder.ts` | No |
+| `tryICSideAtWidth` | same | same | No |
+| `getWidthSteps` | same | `lib/scans/scan-utils.ts` | No |
+| `getBidAskMax` | same | same | No |
+| `normalCdf` | same | same | No |
 
-(That's 5, not 4 — I undercounted in the moment; full corrected list is 26 functions total.)
+**Extracted types** (`lib/scans/types.ts`): `CheckResult`, `SpreadCandidate`, `TrendResult`, `ScreenResult`, `RankConfig`, `DimensionScore`, `RawScanEntry`
 
-## 4. Exact Types/Constants Extracted
+**Extracted constants** (`lib/scans/constants.ts`): `INDEX_IVR_MIN`, `RANK_SCAN_DTE_MIN`, `RANK_SCAN_DTE_MAX`, `ESTIMATED_EARNINGS_CYCLE_DAYS`, `DEFAULT_RULES`, `RulesType`, `DEFAULT_ETF_RULES`, `YAHOO_INDEX_CHART_MAP`, `BASE`, `CLIENT_ID`, `LS_ACCESS_TOKEN`, `LS_ACCESS_TOKEN_EXPIRY`
 
-**Types** (`lib/scans/types.ts`): `CheckResult`, `SpreadCandidate`, `TrendResult`, `ScreenResult`, `RankConfig`, `DimensionScore`, `RawScanEntry`
+**Extracted shared state**: `classificationCache` (the `Map` backing `classifyUnderlying`'s memoization) — same single shared instance, now living in `tastytrade-client.ts`.
 
-**Constants** (`lib/scans/constants.ts`): `INDEX_IVR_MIN`, `RANK_SCAN_DTE_MIN`, `RANK_SCAN_DTE_MAX`, `ESTIMATED_EARNINGS_CYCLE_DAYS`, `DEFAULT_RULES`, `RulesType`, `DEFAULT_ETF_RULES`, `YAHOO_INDEX_CHART_MAP`, `BASE`, `CLIENT_ID`, `LS_ACCESS_TOKEN`, `LS_ACCESS_TOKEN_EXPIRY`
+`runScreen()` and `runTargetedScan()` were diffed byte-for-byte before/after extraction and are identical.
 
-**Module state**: `classificationCache` (the `Map` backing `classifyUnderlying`'s memoization) — moved to `tastytrade-client.ts`, same single shared instance.
+## 4. Ranked Scan Flow
 
-`ESTIMATED_EARNINGS_CYCLE_DAYS` was a second transitive dependency not in the original list (used inside `estimateNextEarningsDate`).
-
-## 5. Page.tsx Changes
-
-Exactly one change: a 29-line import block inserted after line 6 (after the existing `react`/`next`/`react-dom` imports), importing every extracted symbol from its new `lib/scans/*` location. No function bodies, no other imports, no JSX, no state, no UI code was touched.
-
-Verified via diff: `runScreen()` (Filter/Rank/Targeted orchestration, 126 lines) and `runTargetedScan()` (549 lines) are byte-for-byte identical between the pre-extraction and post-extraction versions of the file.
-
-## 6. Confirmations
-
-- **Filter/Targeted not migrated:** confirmed. Neither mode's control flow was touched — `runScreen()` and `runTargetedScan()` still own their full execution, still page-local, still call the same functions (now via import instead of local closure) with identical signatures and behavior.
-- **Ranked Scan behavior preserved:** confirmed. The `rank` branch inside `runScreen()` is untouched — same helper calls, same order, same logic. No formulas, scoring weights, strike-walk logic, or error handling were changed anywhere in the extracted code.
-
-## 7. Diff Statistics
-
+**BEFORE:**
 ```
-app/screener/page.tsx: 7,569 → 5,852 lines (1,747 lines removed, 29 lines added)
-lib/scans/: 8 new files, 1,867 lines total
+Page (screener/page.tsx)
+  ↓
+runScreen(mode='rank')          ← page-local async function
+  ↓
+page-local state (results, loading, status, error, rawScanCache)
+  ↓
+unmounts if user navigates away → scan is abandoned
 ```
 
-The 1,747 removed lines correspond exactly to the 26 extracted functions/types/constants; nothing else was deleted.
+**AFTER:**
+```
+Page (screener/page.tsx)
+  ↓
+useCommandBus().dispatch({ type: 'START_RANKED_SCAN', payload })
+  ↓
+CommandBus → START_RANKED_SCAN handler (lib/commands/command-handlers.ts)
+  ↓
+TaskManager.createTask({ kind: 'ranked-scan' }) → TaskManager.startTask()
+  ↓
+runRankedScan() (lib/scans/ranked-scan-runner.ts) — runs independently of the page
+  ↓
+TaskManager.updateProgress() per ticker scanned
+  ↓
+TaskManager.completeTask(result) / failTask() / cancelTask()
+  ↓
+Page reconnects via useTask(taskId) — finds the task by kind on mount,
+mirrors its status/result into the same results/loading/status/error
+state the UI already renders from
+```
 
-## 8. Build Results
+The task lives in the `TaskManager` instance mounted at the app root (`app/providers.tsx`), which survives the Screener page unmounting on navigation — so the scan keeps running and the page can reattach to it later.
 
-`npx tsc --noEmit`: one error on first pass (`checklist.ts` — missed importing `normalizeIv`, used in the relaxed-rules fallback inside `runChecklist`). Fixed by adding the import. Second pass: clean, zero errors.
+## 5. Public APIs
 
-`npm run build`: passed. All 39 routes generated. `/screener` bundle size unchanged (57.1 kB, identical to pre-extraction) — consistent with a pure code move rather than a behavior change.
+**`lib/scans/ranked-scan-runner.ts`**
+- `runRankedScan(input: RankedScanInput, onProgress?, signal?): Promise<RankedScanResult>`
+- `RankedScanInput { activeSymbols, sRules, eRules, sLabel?, eLabel?, rankConfig }`
+- `RankedScanResult { results: ScreenResult[], rawScanCache: RawScanEntry[] }`
+- `RankedScanProgress { label, completed, total }`
+- `RankedScanCancelledError` — thrown when the `AbortSignal` fires; callers treat this as "cancelled," not "failed"
 
-`npm run lint`: not available in this repo (no ESLint config), same as prior tickets.
+**`lib/commands/command-handlers.ts`**
+- `registerCommandHandlers(bus: CommandBus, taskManager: TaskManager): () => void` — signature changed from TE-0004 (now takes `taskManager` too)
+- `StartRankedScanResult { taskId: string }`
+- `CancelTaskPayload { taskId: string }`
 
-## 9. Not Yet Done — Remaining TE-0005A Scope
+No changes to `lib/tasks/*` or `lib/commands/command-bus.ts`/`command-types.ts` public APIs — TE-0004's shapes were sufficient.
 
-This extraction was explicitly scoped and approved as its own step. The rest of TE-0005A is still open:
+## 6. Provider / Handler Wiring
 
-- `lib/scans/ranked-scan-runner.ts` — the actual background orchestration function (progress callback, `AbortSignal`), built on top of the helpers extracted here
-- `START_RANKED_SCAN` command handler in `lib/commands/command-handlers.ts`, wired to `TaskManager`
-- Ranked Scan page reconnect behavior (active/completed task lookup on mount)
-- Cancellation support per ADR-0003
+- **Registration:** `CommandProvider` (mounted inside `TaskProvider` since TE-0004) now calls `useTaskManagerContext()` to get the same `TaskManager` instance the rest of the app uses, and passes it into `registerCommandHandlers(bus, taskManager)` in a `useEffect`.
+- **Task creation:** the `START_RANKED_SCAN` handler calls `taskManager.createTask({ kind: 'ranked-scan', ... })` then `taskManager.startTask(task.id)`, synchronously, before returning `{ taskId }` to the caller.
+- **Task updates:** `runRankedScan()` is invoked with a progress callback that calls `taskManager.updateProgress(task.id, pct, label)` after each ticker. This runs fire-and-forget — dispatch resolves immediately with the `taskId` so the page doesn't block on the whole scan.
+- **Completion/failure/cancellation:** the handler's `.then()/.catch()` on the runner's promise calls `completeTask(result)`, `failTask(message)`, or `cancelTask()` (if the error is a `RankedScanCancelledError`).
+- **Page reconnect:** on mount, or whenever `screenMode` becomes `'rank'`, the page filters `useTaskManager().tasks` for `kind === 'ranked-scan'`, takes the most recently created one, and tracks its `id` in local state. `useTask(taskId)` then subscribes to that task's live updates, and a separate effect mirrors `status`/`progressLabel`/`result`/`error` into the page's existing `results`/`loading`/`status`/`error` state — no new rendering path was added.
 
-I'm stopping here to confirm before starting that next piece, since it touches `app/screener/page.tsx`'s actual control flow (how Rank mode is triggered) rather than just imports — a different risk profile than this extraction.
+## 7. Build Results
 
-## 10. Technical Debt / Notes
+`npx tsc --noEmit`: clean, zero errors.
 
-- `getTrend` (478 lines) and `scoreCandidate`+`exploreAllCandidatesForRank` (`rank-scoring.ts`, 400 lines) are large single-function files by design — kept as one file each to avoid further splitting beyond what "move code, don't restructure" implies.
-- Several extracted functions still take `any[]`/`any` parameters (option chain legs, metrics) exactly as they did in `page.tsx` — untyped by original design, preserved verbatim rather than typed as part of this ticket.
+`npm run build`: passed. All 39 routes generated. `/screener` bundle: 46.4 kB route-specific (down from 57.1 kB pre-extraction — scan logic now lives in a shared chunk), First Load JS 149 kB (up from 145 kB, expected: now also pulls in command-bus/task-manager hooks).
 
+`npm run lint`: not available — no ESLint config in this repo (unchanged from prior tickets).
+
+## 8. Manual Test Results
+
+**Important scope note:** I don't have a live browser session or TastyTrade credentials in this sandbox, so I could not perform the ticket's literal 9-step manual smoke test (open app, click Rank, navigate away, come back, watch it render). What I verified instead, at the code level:
+
+- Can I start Ranked Scan? — Both trigger paths (`RunModeModal` and `RulesModal` re-run) now correctly call `startRankedScanTask()`, confirmed by reading the modified call sites and the `dispatch()` → handler → `createTask()`/`startTask()` chain.
+- Can I leave the page? — `TaskManager` is instantiated once at `app/providers.tsx` (app root), not inside the Screener page component, so it isn't torn down on navigation. Confirmed by provider tree inspection.
+- Does the scan continue? — `runRankedScan()` runs as a detached promise inside the command handler, not inside any React component lifecycle — nothing about it depends on the Screener page being mounted.
+- Can I return? — The reconnect `useEffect` runs on every mount and whenever `screenMode` becomes `'rank'`, and doesn't require the task ID to have been persisted anywhere the page controls — it looks the task up fresh from `TaskManager` each time.
+- Are results preserved? — `completeTask(result)` stores the full `RankedScanResult` on the task record in memory; the reconnect effect reads `task.result` and calls the same `setResults`/`setRawScanCache` the old `runScreen()` path used.
+- Regressions: none identified in Filter/Targeted — both diffed byte-identical pre/post extraction, and neither trigger path was touched in Phase 2.
+
+I recommend you run the actual 9-step smoke test from the ticket (start scan → navigate to Portfolio → wait → return → confirm running/completed → confirm results render → confirm no blank pages → confirm no console errors) before merging, since that's real-browser behavior I can't replicate here.
+
+## 9. Diff Statistics
+
+Phase 2 only (`feat(scans): run ranked scan as background task`):
+```
+$ git diff --stat HEAD~1 HEAD
+ app/screener/page.tsx                   |  97 +++++++++++++++++++++++-
+ components/commands/CommandProvider.tsx |  22 ++++--
+ lib/commands/command-handlers.ts        | 110 ++++++++++++++++++++++++---
+ lib/scans/ranked-scan-runner.ts         | 130 ++++++++++++++++++++++++++++++++
+ 4 files changed, 340 insertions(+), 19 deletions(-)
+```
+
+Combined, both TE-0005A commits (helper extraction + background task wiring):
+```
+ app/screener/page.tsx                   | 1873 ++----------------------
+ components/commands/CommandProvider.tsx |   22 +-
+ lib/commands/command-handlers.ts        |  110 +-
+ lib/scans/checklist.ts                  |  233 +++
+ lib/scans/constants.ts                  |   41 +
+ lib/scans/rank-scoring.ts               |  401 +++++
+ lib/scans/ranked-scan-runner.ts         |  130 ++
+ lib/scans/scan-utils.ts                 |  126 ++
+ lib/scans/spread-finder.ts              |  213 +++
+ lib/scans/tastytrade-client.ts          |  259 ++++
+ lib/scans/trend.ts                      |  487 ++++++
+ lib/scans/types.ts                      |  115 ++
+ 12 files changed, 2245 insertions(+), 1765 deletions(-)
+```
+
+## 10. Technical Debt
+
+**Known limitations:**
+- No cancel button exists yet in the UI — `CANCEL_TASK` is wired end-to-end (dispatchable, aborts the runner, marks the task cancelled) but nothing in the page calls it. Intentional per scope (no Task Center UI, no new visible UI this ticket).
+- Task results are memory-only (per ADR-0001/TE-0005A explicitly allowing this) — a page refresh loses the task and its result, unlike Filter/Targeted's IndexedDB-cached results. Rank mode results are not written to `IDB_RESULTS_KEY`/`IDB_RAW_SCAN_KEY` when sourced from a task.
+- Cancellation is cooperative and checked only between ticker iterations — a slow in-flight `getChain`/`getTrend` call for the current ticker will still complete before the abort takes effect, per ADR-0003's documented trade-off.
+- Only one ranked-scan task's worth of history is meaningfully reachable from the page (it always reconnects to the *most recent* one) — multiple concurrent ranked scans aren't distinguished in the UI.
+
+**Deferred / future improvements:**
+- Persisting task results (IndexedDB) so a refresh doesn't lose a completed Rank scan.
+- A visible cancel affordance once Task Center UI exists (TE-0006 per TE-0002's roadmap).
+- Reconsidering whether `CANCEL_TASK` should force-mark a task cancelled even with no active controller (currently a no-op in that case).
+
+## 11. Architecture Assessment
+
+**What I'd improve:** the reconnect effect currently always grabs the *latest* `ranked-scan` task by `createdAt` — fine for a single-user, single-tab today, but if Autopilot Paper Mode (TE-0007+) or a future multi-tab scenario starts creating `ranked-scan`-adjacent tasks, "latest of this kind" stops being a safe reconnect heuristic. I'd want an explicit task-ownership or task-origin tag before that happens.
+
+**Concerns:** the command handler owns real orchestration logic now (progress mapping, error-vs-cancel branching) — it's still thin, but it's the first handler with actual behavior instead of a stub, and it's a good point to watch for the handler layer quietly absorbing business logic that should stay in the runner.
+
+**What to watch during TE-0005B:** if TE-0005B is Task Center UI, the main risk is the temptation to have UI components reach past `useTaskManager()`/`useTask()` and query `lib/tasks` internals directly for convenience — worth keeping the hook boundary strict. Also worth deciding then whether Rank task results should move from memory-only to IndexedDB-backed, since a visible Task Center will make the "refresh loses your scan" limitation much more noticeable to Dean than it is today.
