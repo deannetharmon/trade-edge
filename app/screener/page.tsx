@@ -33,11 +33,8 @@ import {
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
-import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
-import { useCommandBus } from '@/hooks/useCommandBus';
-import { useTaskManager } from '@/hooks/useTaskManager';
-import { useTask } from '@/hooks/useTask';
-import type { StartRankedScanResult } from '@/lib/commands/command-handlers';
+import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
+import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -5030,92 +5027,16 @@ export default function Home() {
   const [rankConfig, setRankConfig] = useState<RankConfig>(getSavedRankConfig);
   const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>('filter');
 
-  // ── TE-0005A: Ranked Scan now runs as a background task via the Command
-  // Bus / Task Manager instead of page-local state. `results`/`rawScanCache`/
-  // `resultsCachedAt`/`loading`/`status`/`error` above are unchanged and
-  // still drive the exact same rendering — this only changes what feeds
-  // them when in Rank mode. Filter/Targeted are untouched: they still call
-  // runScreen()/runTargetedScan() directly, as before.
-  const { dispatch } = useCommandBus();
-  const { tasks: allTasks } = useTaskManager();
-  const [rankedScanTaskId, setRankedScanTaskId] = useState<string | null>(null);
-
-  // Reconnect: on mount (or whenever screenMode becomes 'rank'), find the
-  // most recently created ranked-scan task the TaskManager already knows
-  // about — the TaskManager instance lives at the app root and survives
-  // this page unmounting/remounting on navigation, so no extra persistence
-  // is needed for this ticket (memory-only task state, per ADR-0001/TE-0005A).
-  useEffect(() => {
-    if (screenMode !== 'rank') return;
-    if (rankedScanTaskId) return; // already tracking one (e.g. just started it)
-    const rankedTasks = allTasks.filter(t => t.kind === 'ranked-scan');
-    if (rankedTasks.length === 0) return;
-    const latest = rankedTasks.reduce((a, b) => (new Date(b.createdAt) > new Date(a.createdAt) ? b : a));
-    setRankedScanTaskId(latest.id);
-  }, [screenMode, allTasks, rankedScanTaskId]);
-
-  const rankedScanTask = useTask(rankedScanTaskId);
-
-  // Mirror the reconnected/active task's state into the same
-  // results/loading/status/error/rawScanCache/resultsCachedAt state Filter
-  // and Targeted already render from — zero new rendering paths.
-  useEffect(() => {
-    if (!rankedScanTask || screenMode !== 'rank') return;
-    if (rankedScanTask.status === 'queued' || rankedScanTask.status === 'running') {
-      setLoading(true);
-      setStatus(rankedScanTask.progressLabel ?? 'Running...');
-      setError('');
-    } else if (rankedScanTask.status === 'completed') {
-      setLoading(false);
-      setStatus('');
-      const result = rankedScanTask.result as RankedScanResult | undefined;
-      if (result) {
-        setResults(result.results);
-        setRawScanCache(result.rawScanCache);
-        setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
-      }
-    } else if (rankedScanTask.status === 'failed') {
-      setLoading(false);
-      setStatus('');
-      setError(rankedScanTask.error ?? 'Ranked scan failed');
-    } else if (rankedScanTask.status === 'cancelled') {
-      setLoading(false);
-      setStatus('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankedScanTask, screenMode]);
-
-  // Starts a Ranked Scan as a background task via the Command Bus, instead
-  // of calling runScreen() directly. Same inputs runScreen's rank branch
-  // used to take; same activeSymbols derivation as runScreen.
-  const startRankedScanTask = useCallback(async (
-    sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string
-  ) => {
-    const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-    if (!activeSymbols.length) {
-      setError('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
-      return;
-    }
-    setError('');
-    setResults([]);
-    setResultsCachedAt(null);
-    setLoading(true);
-    setStatus('Starting ranked scan...');
-    setRankedScanTaskId(null); // clear so the reconnect effect above picks up the fresh task, not a stale one
-
-    const res = await dispatch<RankedScanInput, StartRankedScanResult>({
-      type: 'START_RANKED_SCAN',
-      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig },
-    });
-
-    if (res.handled && res.result?.taskId) {
-      setRankedScanTaskId(res.result.taskId);
-    } else {
-      setLoading(false);
-      setStatus('');
-      setError(res.error ?? 'Failed to start ranked scan');
-    }
-  }, [tickers, rankConfig, dispatch]);
+  // ── RF-0001: Ranked Scan orchestration extracted to features/screener/
+  // (see docs/reviews/RF-0001-Implementation-Report.md). Mechanical move —
+  // same task-reconnect/mirror/start behavior TE-0005A added, now living in
+  // useRankedScan(). Filter/Targeted are untouched: they still call
+  // runScreen()/runTargetedScan() directly in this file, as before.
+  const { startRankedScan } = useRankedScan({
+    screenMode, tickers, rankConfig,
+    setResults, setRawScanCache, setResultsCachedAt,
+    setLoading, setStatus, setError,
+  });
 
   const [stockPresetLabel, setStockPresetLabel] = useState<string>(() => {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'Custom'; } catch { return 'Custom'; }
@@ -5629,12 +5550,7 @@ export default function Home() {
                       <span className={th.textFaint}>{Array.from(new Set(targetedResults.map(e => e.symbol))).length} SYMBOLS</span>
                     </>
                   ) : (
-                    <>
-                      <span className="text-emerald-400">{results.filter(r => { const s = scoreCandidate(r, rankConfig)?.score ?? 0; return s >= rankConfig.thresholdGreen; }).length} 🟢</span>
-                      <span className="text-yellow-400">{results.filter(r => { const s = scoreCandidate(r, rankConfig)?.score ?? 0; return s >= rankConfig.thresholdYellow && s < rankConfig.thresholdGreen; }).length} 🟡</span>
-                      <span className="text-orange-400">{results.filter(r => { const s = scoreCandidate(r, rankConfig)?.score ?? 0; return s >= rankConfig.thresholdOrange && s < rankConfig.thresholdYellow; }).length} 🟠</span>
-                      <span className="text-red-400">{results.filter(r => { const s = scoreCandidate(r, rankConfig)?.score ?? 0; return s < rankConfig.thresholdOrange; }).length} 🔴</span>
-                    </>
+                    <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
                   )}
                   <span className={th.textFaint}>{screenMode === 'targeted' ? `${targetedResults.length} ENTRIES` : `${results.length} SCANNED`}</span>
                   {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
@@ -5927,7 +5843,7 @@ export default function Home() {
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
               runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef);
             } else if (mode === 'rank') {
-              startRankedScanTask(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
+              startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {
               const found = FILTER_PRESETS.find(p => p.key === preset);
               if (found) {
@@ -5939,9 +5855,10 @@ export default function Home() {
           }}
         />
       )}
-      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScanTask(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
+      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }
+
 
 
