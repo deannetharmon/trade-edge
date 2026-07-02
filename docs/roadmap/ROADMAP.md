@@ -11,30 +11,31 @@
 - TE-0003 — Implement Task Manager Foundation
 - TE-0004 — Implement Command Bus Foundation
 - TE-0005A — Background Ranked Scan Infrastructure
+- RF-0001 — Establish Feature-Oriented Screener Module
 
 ## Current Focus
 
-### RF-0001 — Establish Feature-Oriented Screener Module
+### TE-0005B — Global Background Task Status Bar
 
-Goal: begin decomposing the large Screener route by extracting Ranked Scan UI into `features/screener/` while preserving behavior.
+Goal: provide continuous app-wide visibility into running and recently completed background tasks.
 
 This validates:
 
-- feature-oriented folder architecture
-- route-as-orchestrator pattern
-- safe refactoring around the Screener
-- maintainability before adding notifications and more background workflows
+- global task UX
+- TaskManager subscription behavior
+- cross-page visibility
+- Ranked Scan result handoff
+- terminal task dismissal
 
 ## Near-Term Roadmap
 
-1. RF-0001 — Establish Feature-Oriented Screener Module
-2. TE-0005B — Global Ranked Scan Completion Notification
-3. TE-0005C — Resume Completed Ranked Scan Results
+1. TE-0005B — Global Background Task Status Bar
+2. TE-0005C — Task Completion Notifications
+3. TE-0005D — Task Center
 4. TE-0006 — Migrate Screener to Task Manager and Command Bus
-5. TE-0007 — Add Global Task Center and Notifications
-6. TE-0008 — Portfolio AI Recommendation Improvements
-7. TE-0009 — Autopilot Paper Mode Integration
-8. TE-0010 — Evaluate Durable Background Tasks
+5. TE-0007 — Portfolio AI Recommendation Improvements
+6. TE-0008 — Autopilot Paper Mode Integration
+7. TE-0009 — Evaluate Durable Background Tasks
 
 ## Milestones
 
@@ -48,36 +49,39 @@ Completed:
 - TE-0004
 - TE-0005A
 
-### Milestone 2 — Screener Modernization
+### Milestone 2 — Screener Modernization and Task UX
 
-Current:
+Completed:
 
 - RF-0001
 
-Next:
+Current:
 
 - TE-0005B
+
+Next:
+
 - TE-0005C
+- TE-0005D
 - TE-0006
-- TE-0007
 
 ### Milestone 3 — Portfolio Intelligence
 
 Planned:
 
-- TE-0008+
+- TE-0007+
 
 ### Milestone 4 — Autopilot / Paper Mode
 
 Planned:
 
-- TE-0009+
+- TE-0008+
 
 ### Milestone 5 — Production Hardening
 
 Planned:
 
-- TE-0010+
+- TE-0009+
 
 ## Working Model
 
