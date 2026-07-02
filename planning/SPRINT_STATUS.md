@@ -22,7 +22,7 @@ A sprint is not complete until all required items are true:
 | Sprint | Name | Status | Build | Deploy | Smoke Test | Review |
 |---|---|---:|---:|---:|---:|---:|
 | 1A | Core Infrastructure | Build Passed | ✅ | ✅ | ⬜ | ✅ |
-| 1B | Framework | Next | ⬜ | ⬜ | ⬜ | ⬜ |
+| 1B | Framework | Ready for Build | ⬜ | ⬜ | ⬜ | ⬜ |
 | 2 | Scoring and Risk Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 3 | Candidate Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -33,35 +33,36 @@ A sprint is not complete until all required items are true:
 | 9 | Telemetry and Analytics | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 10 | Hardening and Paper Beta | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 
-## Current Sprint — 1A Core Infrastructure
+## Current Sprint — 1B Framework
 
 ### Goal
 
-Create the Autopilot backend foundation with no UI behavior, no cron execution, no candidate scanning, and no trading logic.
+Add the non-trading framework around the Sprint 1A infrastructure: scoring utilities, dry-run runner, run locking, telemetry scaffolding, cron/manual-run endpoint shells, and dashboard shell.
 
 ### Planned Deliverables
 
-- [x] `lib/autopilot/` folder structure
-- [x] Core TypeScript models
-- [x] Autopilot config types
-- [x] Default config
-- [x] Config validation / sanitization
-- [x] Redis persistence helpers
-- [x] Paper account model
-- [x] Paper position model
-- [x] Decision log model
-- [x] Config audit log model
-- [x] Health-check endpoint
+- [x] Decision Confidence engine
+- [x] Opportunity Score framework
+- [x] Net Edge utility
+- [x] Run-locking framework
+- [x] Telemetry scaffolding
+- [x] Framework dry-run runner
+- [x] Manual dry-run endpoint
+- [x] Cron dry-run endpoint
+- [x] Telemetry endpoint
+- [x] Dashboard shell at `/autopilot`
 
-### Sprint 1A Smoke Tests
+### Sprint 1B Smoke Tests
 
-- [x] App builds cleanly in Vercel
-- [ ] Health-check endpoint responds
-- [ ] Default config can be loaded
-- [ ] Config can be saved and reloaded
-- [ ] Paper account can initialize
-- [ ] Decision log entries can persist
-- [x] No live-order route exists in Sprint 1A changes
+- [ ] App builds cleanly in Vercel
+- [ ] `/autopilot` page loads
+- [ ] `/api/autopilot/run` does not create positions
+- [ ] `/api/autopilot/cron` requires authorization
+- [ ] Telemetry endpoint returns JSON or Unauthorized
+- [ ] Decision log records dry-run no-action decision
+- [ ] No candidate scanning exists
+- [ ] No paper execution exists
+- [ ] No live-order route exists
 
 ## Sprint Reviews
 
@@ -92,3 +93,30 @@ Create the Autopilot backend foundation with no UI behavior, no cron execution, 
 
 - Manual endpoint smoke tests are still needed on the Vercel preview.
 - Sprint 1B should add framework/scoring shells only, not trading execution.
+
+### Sprint 1B — Framework Review
+
+**Result:** Ready for Vercel build verification.
+
+**Built:**
+
+- Decision Confidence framework using the v1 four-factor model.
+- Opportunity Score framework using edge, goal-alignment, risk-penalty, and posture multiplier.
+- Net Edge utility using the approved theta/gamma formula.
+- Redis-backed run-locking shell.
+- Telemetry persistence and API route.
+- Manual and cron dry-run endpoints.
+- `/autopilot` dashboard shell.
+
+**Safety:**
+
+- Manual run is dry-run only.
+- Cron run is dry-run only and requires secret authorization.
+- No candidate scanning was added.
+- No paper trades can be created.
+- No live-order path was added.
+
+**Known Follow-Up:**
+
+- Vercel build must pass before Sprint 1B is marked build-complete.
+- Endpoint smoke tests are still constrained by network access.
