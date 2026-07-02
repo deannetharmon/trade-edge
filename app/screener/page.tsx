@@ -2432,6 +2432,8 @@ function exploreAllCandidatesForRank(
   trendResult: TrendResult | undefined,
   isEtf: boolean,
   etfRules: RulesType,
+  stockPresetLabel?: string,
+  etfPresetLabel?: string,
 ): ScreenResult[] {
   const results: ScreenResult[] = [];
   const validExps = chainData.expirations.filter(exp => daysUntil(exp) >= RANK_SCAN_DTE_MIN && daysUntil(exp) <= RANK_SCAN_DTE_MAX);
@@ -2447,7 +2449,7 @@ function exploreAllCandidatesForRank(
         if (strat === 'IC') {
           const candidate = findBestICUnfiltered(chainItems, exp, price);
           if (!candidate) continue;
-          const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
           const icBestCandidate = result.bestCandidate ?? candidate;
           // Recompute earnings against THIS candidate's actual dte -- the
           // strictOnly call into runChecklist above never set its internal
@@ -2520,7 +2522,7 @@ function exploreAllCandidatesForRank(
           if (!bestCandidate) continue;
 
           const syntheticChain = { ...chainData, expirations: [exp], chains: { [exp]: chainItems } };
-          const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
+          const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
           // Recompute earnings against THIS candidate's actual dte -- the
           // strictOnly call into runChecklist above never set its internal
           // bestCandidate, so its earnings check is still the generic
@@ -6951,7 +6953,7 @@ export default function Home() {
           ]);
           if (isRankMode) {
             scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
-            screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules));
+            screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel));
           } else if (trendResult) {
             const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
             scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
