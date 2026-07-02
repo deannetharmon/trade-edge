@@ -5,6 +5,35 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 
+// ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
+// Mechanical extraction — moved, not rewritten. See docs/reviews/TE-0005A-Implementation-Report.md
+import type {
+  CheckResult, SpreadCandidate, TrendResult, ScreenResult,
+  RankConfig, DimensionScore, RawScanEntry,
+} from '@/lib/scans/types';
+import type { RulesType } from '@/lib/scans/constants';
+import {
+  INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
+  DEFAULT_RULES, DEFAULT_ETF_RULES, YAHOO_INDEX_CHART_MAP,
+  BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY,
+  ESTIMATED_EARNINGS_CYCLE_DAYS,
+} from '@/lib/scans/constants';
+import {
+  daysUntil, normalCdf, calcSpreadPop, normalizeIv, formatDisplayDate,
+  estimateNextEarningsDate, normalizeTickerToken, getWidthSteps, getBidAskMax,
+} from '@/lib/scans/scan-utils';
+import {
+  classificationCache, ttFetch, getAccessToken, classifyUnderlying,
+  getMarketMetrics, getQuote, getChain,
+} from '@/lib/scans/tastytrade-client';
+import {
+  trySpreadAtWidth, findBestSpread, tryICSideAtWidth, findBestIC,
+  findBestSpreadUnfiltered, findBestICUnfiltered,
+} from '@/lib/scans/spread-finder';
+import { runChecklist } from '@/lib/scans/checklist';
+import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank } from '@/lib/scans/rank-scoring';
+import { getTrend } from '@/lib/scans/trend';
+
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
 // That ran document.head.appendChild() the instant the client bundle
@@ -65,80 +94,8 @@ const THEMES: Record<Theme, {
 };
 
 // ── Types ──────────────────────────────────────────────────────────────────
-interface CheckResult { status: 'pass' | 'fail' | 'warn' | 'pending'; value: string; reason: string; }
-interface SpreadCandidate {
-  strategy: string; expiration: string; dte: number;
-  shortStrike: number; longStrike: number; shortDelta: number;
-  credit: number; spreadWidth: number; creditRatio: number;
-  roc: number; pop: number | null; shortOI: number; longOI: number; shortIv?: number | null;
-  expirationIvx?: number | null; expectedMove?: number | null;
-  shortCallStrike?: number; longCallStrike?: number;
-  shortCallOI?: number; longCallOI?: number;
-  callCredit?: number; callWidth?: number; totalCredit?: number; optimized?: boolean;
-  shortOccSymbol?: string; longOccSymbol?: string;
-  shortCallOccSymbol?: string; longCallOccSymbol?: string;
-  
-  shortBid?: number;
-  shortAsk?: number;
-  longBid?: number;
-  longAsk?: number;
-  quoteFetchedAt?: number;
-  
-  // PMCC-specific
-  longExpiration?: string; longDte?: number; longDelta?: number;
-  longCost?: number; netDebit?: number; maxProfit?: number; extrinsicCapture?: number;
-  longOccSymbolPMCC?: string; shortOccSymbolPMCC?: string;
-}
 
-interface TrendResult {
-  trend: 'uptrend' | 'downtrend' | 'sideways' | 'unknown';
-  strategy: 'BPS' | 'BCS' | 'IC' | 'NO_TRADE';
-  subtype: 'CONTINUATION' | 'REVERSAL' | 'RANGE' | 'CHOP' | 'UNKNOWN';
-  confidence: number; // 0-100
-  ma20: number;
-  ma50: number;
-  ma200?: number;
-  reason: string;
-  scores?: {
-    momentum: number;
-    maAlignment: number;
-    slope: number;
-    structure: number;
-    chop: number;
-    volatility: number;
-    total: number;
-  };
-  metrics?: {
-    price: number;
-    ma20: number;
-    ma50: number;
-    ma200: number;
-    momentum20: number;
-    momentum60: number;
-    momentum90: number;
-    rsi14: number;
-    ma20Slope: number;
-    ma50Slope: number;
-    range60: number;
-    chopRatio: number;
-    distFromMa50: number;
-    higherHighs: boolean;
-    higherLows: boolean;
-    lowerHighs: boolean;
-    lowerLows: boolean;
-  };
-}
 
-interface ScreenResult {
-  symbol: string; strategy: string; price: number | null; ivr: number | null;
-  ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
-  qualified: boolean; bestCandidate: SpreadCandidate | null;
-  failReasons: string[]; earningsDate?: string | null; trendResult?: TrendResult;
-  isEtf?: boolean;
-  underlyingType?: 'index' | 'etf' | 'stock';
-  ruleSetApplied?: string;
-  checks: { ivr: CheckResult; earnings: CheckResult; oi: CheckResult; delta: CheckResult; credit: CheckResult; roc: CheckResult; pop: CheckResult; iv: CheckResult; emClearance: CheckResult; };
-}
 
 interface ExistingPosition {
   symbol: string;
@@ -239,11 +196,6 @@ interface LoadPromptState {
 }
 
 // ── Helper Functions ───────────────────────────────────────────────────────
-function daysUntil(dateStr: string): number {
-  const target = new Date(dateStr);
-  const now = new Date();
-  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
 
 function getCreditColor(candidate: SpreadCandidate, isEtfOrIndex: boolean): string {
   // Visual quality standard: green = ideal, yellow = acceptable, red = weak.
@@ -269,53 +221,7 @@ function getOiColor(legOi: number | undefined, oiMin: number): string {
   return 'text-red-400';
 }
 
-function normalCdf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const absX = Math.abs(x) / Math.sqrt(2);
 
-  const t = 1 / (1 + 0.3275911 * absX);
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-
-  const erfApprox =
-    sign *
-    (1 -
-      (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) *
-        t *
-        Math.exp(-absX * absX)));
-
-  return 0.5 * (1 + erfApprox);
-}
-
-function calcSpreadPop(
-  strategy: 'BPS' | 'BCS',
-  price: number | null,
-  shortStrike: number,
-  credit: number,
-  dte: number,
-  ivPct: number | null | undefined
-): number | null {
-  if (price == null || price <= 0 || ivPct == null || ivPct <= 0 || dte <= 0) return null;
-
-  const sigma = ivPct / 100;
-  const t = dte / 365;
-
-  const breakEven =
-    strategy === 'BPS'
-      ? shortStrike - credit
-      : shortStrike + credit;
-
-  const d2 =
-    (Math.log(price / breakEven) - 0.5 * sigma * sigma * t) /
-    (sigma * Math.sqrt(t));
-
-  return strategy === 'BPS'
-    ? normalCdf(d2) * 100
-    : (1 - normalCdf(d2)) * 100;
-}
 
 function getRocColor(candidate: SpreadCandidate, isEtfOrIndex: boolean): string {
   // Visual quality standard: green = ideal, yellow = acceptable, red = weak.
@@ -377,18 +283,6 @@ function calcEmClearancePct(result: { price: number | null; bestCandidate: Sprea
     : (c.shortStrike - emBoundary) / price * 100;
 }
 
-function normalizeIv(value: any): number | null {
-  if (value == null) return null;
-
-  const n = Number(value);
-  if (Number.isNaN(n) || n <= 0) return null;
-
-  // Tastytrade often returns IV as decimal, e.g. 1.046 = 104.6%
-  // Sometimes it may already be percent, e.g. 104.6
-  if (n <= 5) return n * 100;
-
-  return n;
-}
 
 function formatGreek(
   value: number | null | undefined,
@@ -495,24 +389,7 @@ function getSavedTheme(): Theme {
   catch { return 'dark'; }
 }
 
-function getWidthSteps(maxWidth: number, price: number | null): number[] {
-  // Always start at $5 so high-priced ETFs/indexes can find narrow spreads with viable credit ratios.
-  // Step size scales with price to keep iteration count reasonable.
-  // e.g. SPY $739: steps $5, $10, $15... up to maxWidth
-  //      SPX $7412: steps $25, $50... up to maxWidth (price>=2000 uses $25 steps)
-  const stepSize = price == null ? 5 : price >= 2000 ? 25 : price >= 500 ? 5 : price >= 200 ? 5 : 5;
-  const steps: number[] = [];
-  for (let w = stepSize; w <= maxWidth; w += stepSize) steps.push(w);
-  return steps;
-}
 
-function getBidAskMax(price: number | null): number {
-  if (price == null) return 1.50;
-  if (price >= 500) return 3.00;
-  if (price >= 200) return 1.50;
-  if (price >= 100) return 0.50;
-  return 0.10;
-}
 
 function addBusinessDays(dateStr: string, days: number): Date {
 const date = new Date(`${dateStr}T12:00:00`);  let added = 0;
@@ -528,10 +405,6 @@ function formatCalDate(date: Date): string {
   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function formatDisplayDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(`${date}T12:00:00`) : date;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 function toIsoDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -541,11 +414,6 @@ function getPostEarningsRescreenDate(earningsDate: string): Date {
   return addBusinessDays(earningsDate, POST_EARNINGS_RESCREEN_DAYS);
 }
 
-function estimateNextEarningsDate(lastEarningsDate: string): Date {
-  const d = new Date(`${lastEarningsDate}T12:00:00`);
-  d.setDate(d.getDate() + ESTIMATED_EARNINGS_CYCLE_DAYS);
-  return d;
-}
 
 function buildEarningsCalUrl(symbol: string, strategy: string, earningsDate: string, ivr: number | null): string {
   const followUp = getPostEarningsRescreenDate(earningsDate);
@@ -571,21 +439,6 @@ function buildEntryCalUrl(result: ScreenResult, businessDays: number, directDate
 //
 // This prevents real tickers like KO, MO, C, F, T, X, V from being blocked while still keeping OCR imports clean.
 
-function normalizeTickerToken(raw: string): string | null {
-  const token = raw.trim().toUpperCase().replace(/[–—]/g, '-').replace(/\.$/, '');
-  if (!token) return null;
-
-  // Yahoo-style class-share normalization.
-  const normalized = token.replace('.', '-');
-  if (normalized === 'BRK-B' || normalized === 'BRK/B') return 'BRK-B';
-  if (normalized === 'BF-B' || normalized === 'BF/B') return 'BF-B';
-
-  // Allow valid US ticker shapes, including one-character tickers:
-  // C, F, T, X, V, etc.
-  if (!/^[A-Z]{1,5}(-[A-Z])?$/.test(normalized)) return null;
-
-  return normalized;
-}
 
 function normalizeTickerInput(input: string): string[] {
   const cleaned = input
@@ -836,73 +689,15 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
 // is-index and is-etf booleans. A 404 means the symbol isn't an equity at
 // all (true cash-settled indexes like SPX/VIX have no shares), so we treat
 // a 404 as 'index'. Results are cached in-memory for the session.
-const classificationCache = new Map<string, 'index' | 'etf' | 'stock'>();
 
-async function classifyUnderlying(symbol: string, token: string): Promise<'index' | 'etf' | 'stock'> {
-  const s = symbol.toUpperCase();
-  const cached = classificationCache.get(s);
-  if (cached) return cached;
 
-  let result: 'index' | 'etf' | 'stock';
-  try {
-    const data = await ttFetch(`/instruments/equities/${s}`, token);
-    const item = data?.data;
-    if (item?.['is-index']) result = 'index';
-    else if (item?.['is-etf']) result = 'etf';
-    else result = 'stock';
-  } catch {
-    // Not found as an equity at all — true cash-settled indexes (SPX, VIX,
-    // NDX, RUT) have no equity record, so absence of a record means index.
-    result = 'index';
-  }
-  classificationCache.set(s, result);
-  return result;
-}
-
-const INDEX_IVR_MIN = 15;
 
 // Buffer thresholds by underlying type and DTE bucket.
 // Returns a 0–1 normalized score; caller multiplies by weightBuffer.
 // Negative raw score (-10pt) for critically under-buffered entries.
-function scoreBuffer(bufferPct: number | null | undefined, dte: number, type: 'index' | 'etf' | 'stock'): number {
-  if (bufferPct == null) return 0.4; // unknown — neutral, don't penalize
-  const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-
-  // DTE bucket: 0=tight(21-29), 1=mid(30-39), 2=sweet(40-45+)
-  const dteBucket = dte >= 40 ? 2 : dte >= 30 ? 1 : 0;
-
-  const T: Record<'index' | 'etf' | 'stock', number[][]> = {
-    index: [
-      [3, 4, 5, 6, 8],
-      [3, 4, 5, 6, 8],
-      [3, 5, 6, 7, 8],
-    ],
-    etf: [
-      [3, 3.5, 4, 5, 7],
-      [3, 3.5, 4, 5, 7],
-      [3, 4,   5, 6, 7],
-    ],
-    stock: [
-      [3, 5,  6,  8, 10],
-      [3, 6,  7,  8, 10],
-      [6, 8, 10, 11, 12],
-    ],
-  };
-
-  const [crit, marg, ok, good, full] = T[type][dteBucket];
-
-  if (bufferPct >= full) return 1.0;
-  if (bufferPct >= good) return clamp(0.75 + (bufferPct - good) / (full - good) * 0.25);
-  if (bufferPct >= ok)   return clamp(0.5  + (bufferPct - ok)   / (good - ok)   * 0.25);
-  if (bufferPct >= marg) return clamp(0.25 + (bufferPct - marg) / (ok - marg)   * 0.25);
-  if (bufferPct >= crit) return clamp(0.05 + (bufferPct - crit) / (marg - crit) * 0.20);
-  return 0; // below critical — zero score
-}
 // ── Rules ──────────────────────────────────────────────────────────────────
 // CHANGE 1: Added EARNINGS_BUFFER_DAYS and CREDIT_MIN_ABS
 
-const RANK_SCAN_DTE_MIN = 7;
-const RANK_SCAN_DTE_MAX = 60;
 
 const PMCC_SHORT_DTE_MIN = 21;
 const PMCC_SHORT_DTE_MAX = 45;
@@ -913,13 +708,6 @@ const PMCC_LONG_DTE_MAX = 730;
 const PMCC_LONG_DTE_SWEET_MIN = 300;
 const PMCC_LONG_DTE_SWEET_MAX = 540;
 
-const DEFAULT_RULES = {
-  IVR_MIN: 30, IVR_IC_MAX: 70, OI_MIN: 500, BID_ASK_MAX: 0.10,
-  CREDIT_RATIO_MIN: 0.33, SPREAD_DELTA_MIN: 0.20, SPREAD_DELTA_MAX: 0.30,
-  IC_DELTA_MIN: 0.16, IC_DELTA_MAX: 0.20, DTE_MIN: 30, DTE_MAX: 45,
-  MAX_SPREAD_WIDTH: 100, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30, POP_MIN: 65,
-};
-type RulesType = typeof DEFAULT_RULES;
 
 const RULE_PRESETS = [
   { key: 'course',    label: 'Course',     desc: 'Exact course rules',             color: 'ac-btn bg-blue-600/10',        rules: { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 } },
@@ -955,12 +743,6 @@ const LS_ACTIVE_PRESET = 'hunter-active-preset';
 const LS_ACTIVE_PRESET_ETF = 'hunter-active-preset-etf';
 const LS_RULES_VERSION = 'hunter-rules-v3'; // bump this when defaults change
 
-const DEFAULT_ETF_RULES: RulesType = {
-  IVR_MIN: 15, IVR_IC_MAX: 70, OI_MIN: 100, BID_ASK_MAX: 0.25,
-  CREDIT_RATIO_MIN: 0.20, SPREAD_DELTA_MIN: 0.15, SPREAD_DELTA_MAX: 0.35,
-  IC_DELTA_MIN: 0.15, IC_DELTA_MAX: 0.25, DTE_MIN: 30, DTE_MAX: 45,
-  MAX_SPREAD_WIDTH: 500, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 20, POP_MIN: 65,
-};
 
 function getSavedRules(): RulesType {
   try {
@@ -1066,7 +848,6 @@ function buildFollowUpCalUrl(fu: FollowUp): string {
 }
 const DTE_ALERT_THRESHOLD = 25;
 const POST_EARNINGS_RESCREEN_DAYS = 3;
-const ESTIMATED_EARNINGS_CYCLE_DAYS = 91; // ~13 weeks / one reporting cycle
 const HUNTER_URL = 'https://options-HUNTER-dun.vercel.app';
 const LS_SAVED_FILTERS = 'hunter-saved-filters';
 const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
@@ -1151,21 +932,6 @@ async function idbDel(key: string): Promise<void> {
   }
 }
 
-interface RankConfig {
-  weightMomentum: number;     // 0–25
-  weightIvr: number;          // 0–15
-  weightEmClearance: number;  // 0–15
-  weightRange: number;        // 0–15
-  weightTechnical: number;    // 0–10
-  weightLiquidity: number;    // 0–10
-  weightBuffer: number;       // 0–10
-  dteSweetSpot: number;
-  dteRange: number;
-  thresholdGreen: number;
-  thresholdYellow: number;
-  thresholdOrange: number;
-  weightCredit: number; weightRoc: number; weightPop: number; weightDte: number;
-}
 
 const DEFAULT_RANK_CONFIG: RankConfig = {
   weightMomentum: 25, weightIvr: 15, weightEmClearance: 15, weightRange: 15, weightTechnical: 10, weightLiquidity: 10, weightBuffer: 10,
@@ -1179,216 +945,7 @@ function getSavedRankConfig(): RankConfig {
   catch { return { ...DEFAULT_RANK_CONFIG }; }
 }
 
-interface DimensionScore {
-  momentum: number; ivr: number; emClearance: number; range: number; technical: number; liquidity: number; buffer: number; total: number;
-}
 
-function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number; dims: DimensionScore } | null {
-  const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-  const t = result.trendResult;
-  const c = result.bestCandidate;
-  const rsi14 = result.trendResult?.metrics?.rsi14 ?? null;
-
-  // ── Momentum (30pts) ──────────────────────────────────────────────────────
-  // trend engine momentum is signed (-48..+48); normalize by direction alignment
-  // When total directional score is very strong (>100), boost momentum slightly
-  let momentumRaw = 0;
-  if (t?.scores?.momentum != null) {
-    const raw = t.scores.momentum;
-    const totalScore = Math.abs(t.scores.total ?? raw);
-    // normalize: 45 = typical max momentum; total score >100 = very strong signal
-    const absNorm = clamp(Math.abs(raw) / 45);
-    const totalBoost = clamp(totalScore / 120); // strong total score adds up to 15% boost
-    const expectedSign = t.strategy === 'BPS' ? 1 : t.strategy === 'BCS' ? -1 : 0;
-    const aligned = expectedSign === 0 ? 0.7 : (Math.sign(raw) === expectedSign ? 1.0 : 0.3);
-    // IVR boost: when momentum is very strong, reduce IVR penalty weight
-    // (WFC fix: strong -135 BCS signal should rank high even with 39% IVR)
-    momentumRaw = clamp(absNorm * 0.75 + totalBoost * 0.25) * aligned;
-  } else if (t?.confidence != null) {
-    momentumRaw = clamp(t.confidence / 80);
-    if (t.trend === 'sideways' || t.trend === 'unknown') momentumRaw *= 0.5;
-  } else if (c) {
-    const pop = c.pop ?? 70;
-    momentumRaw = clamp((pop - 60) / 25);
-  }
-  const momentumScore = clamp(momentumRaw) * cfg.weightMomentum;
-
-  // ── IVR Quality (15pts) ───────────────────────────────────────────────────
-  // IVR answers "should I be selling at all?" — bell curve peaking at 50-65
-  const ivr = result.ivr ?? 0;
-  const ivrRaw =
-    ivr >= 50 && ivr <= 90 ? 1
-    : ivr < 50 ? ivr / 50
-    : 1 - (ivr - 90) / 50;
-  const momentumStrength = t?.scores?.total != null ? clamp(Math.abs(t.scores.total) / 150) : 0;
-  const effectiveIvrWeight = (cfg.weightIvr ?? 15) * (1 - momentumStrength * 0.35);
-  const ivrScore = clamp(ivrRaw) * effectiveIvrWeight;
-
-  // ── EM Clearance (15pts) ──────────────────────────────────────────────────
-  // How far outside the expected move is the short strike?
-  // >15% beyond EM = full score; inside EM = zero
-  let emClearanceRaw = 0.5; // neutral default when EM unavailable
-  if (c?.expectedMove != null && c.expectedMove > 0 && result.price != null && result.price > 0) {
-    const shortStrike = c.shortStrike;
-    const price = result.price;
-    const em = c.expectedMove;
-    // Distance from short strike to the EM boundary
-    const emBoundary = c.strategy === 'BPS' ? price - em : price + em;
-    const clearancePct = c.strategy === 'BPS'
-      ? (emBoundary - shortStrike) / price * 100   // positive = outside EM
-      : (shortStrike - emBoundary) / price * 100;
-    // Score: inside EM = 0, 5% outside = 0.5, 15%+ outside = 1.0
-    emClearanceRaw = clearancePct <= 0 ? 0
-      : clearancePct >= 15 ? 1.0
-      : clearancePct / 15;
-  }
-  const emClearanceScore = clamp(emClearanceRaw) * (cfg.weightEmClearance ?? 15);
-
-  // ── 52W Range Position (20pts) ────────────────────────────────────────────
-  // BPS near 52W highs (r60 > 0.85) gets penalized — stock is stretched
-  // BCS near 52W lows (r60 < 0.15) gets penalized — stock is stretched
-  // (CAT/GOOGL fix: at 93-97% of range, BPS is a risky setup)
-  let rangeRaw = 0.5;
-  if (t?.metrics?.range60 != null) {
-    const r60 = clamp(t.metrics.range60);
-    if (t.strategy === 'BPS') {
-      // near lows = good, but also penalize if stock is at extreme highs (exhaustion risk)
-      rangeRaw = r60 > 0.85 ? (1 - r60) * 2 : 1 - r60;
-    } else if (t.strategy === 'BCS') {
-      // near highs = good, but penalize extreme lows
-      rangeRaw = r60 < 0.15 ? r60 * 2 : r60;
-    } else {
-      rangeRaw = 1 - Math.abs(r60 - 0.5) * 2;
-    }
-  } else if (t?.metrics?.distFromMa50 != null) {
-    const dist = t.metrics.distFromMa50;
-    if (t.strategy === 'BPS') rangeRaw = clamp(1 - (dist + 0.15) / 0.30);
-    else if (t.strategy === 'BCS') rangeRaw = clamp((dist + 0.15) / 0.30);
-    else rangeRaw = clamp(1 - Math.abs(dist) / 0.20);
-  } else if (c) {
-    rangeRaw = clamp(c.roc / 40);
-  }
-  const rangeScore = clamp(rangeRaw) * cfg.weightRange;
-
-  // ── Technical (15pts) ─────────────────────────────────────────────────────
-  // MA alignment signed (-34..+34), slope signed (-22..+22)
-  let technicalRaw = 0;
-  if (t?.scores != null) {
-    const maRaw = t.scores.maAlignment ?? 0;
-    const slopeRaw = t.scores.slope ?? 0;
-    const expectedSign = t.strategy === 'BPS' ? 1 : t.strategy === 'BCS' ? -1 : 0;
-    const maNorm = expectedSign === 0
-      ? clamp(Math.abs(maRaw) / 34)
-      : clamp((maRaw * expectedSign + 34) / 68);
-    const slopeNorm = expectedSign === 0
-      ? clamp(Math.abs(slopeRaw) / 22)
-      : clamp((slopeRaw * expectedSign + 22) / 44);
-    technicalRaw = maNorm * 0.6 + slopeNorm * 0.4;
-  } else if (t?.confidence != null) {
-    technicalRaw = clamp(t.confidence / 100) * 0.6;
-  } else if (c) {
-    const delta = c.shortDelta;
-    technicalRaw = delta >= 0.20 && delta <= 0.30 ? 1.0 : clamp(1 - Math.abs(delta - 0.25) / 0.15);
-  }
-  const technicalScore = clamp(technicalRaw) * cfg.weightTechnical;
-
-  // ── Liquidity (10pts) ─────────────────────────────────────────────────────
-  // OI is weighted heavily here — low OI means the spread is physically untradeable
-  // regardless of how good the other metrics look. OI < 100 is near-zero; OI >= 500 is full score.
-  let liquidityRaw = 0.4;
-  if (c) {
-    const minOI = Math.min(c.shortOI, c.longOI);
-    // Steep curve: OI=0→0, OI=100→0.18, OI=300→0.54, OI=500→1.0, OI>500→1.0
-    const oiScore = minOI <= 0 ? 0 : clamp(Math.pow(minOI / 500, 0.7));
-    const creditRatioScore = clamp((c.creditRatio - 0.15) / 0.35);
-    const rocScore = clamp(c.roc / 35);
-    // OI now carries 60% of liquidity score (was 40%) — low OI is a much bigger drag
-    liquidityRaw = oiScore * 0.6 + creditRatioScore * 0.2 + rocScore * 0.2;
-  }
-  const liquidityScore = clamp(liquidityRaw) * cfg.weightLiquidity;
-
-  // ── Buffer (25pts) ────────────────────────────────────────────────────────
-  // Derive buffer from result.price vs short strike.
-  // For BCS, buffer is distance above short call strike.
-  // underlyingType drives which threshold table is used.
-  let bufferScore = 0;
-  if (c && result.price != null) {
-    const bufferPct = c.strategy === 'BCS'
-      ? ((c.shortStrike - result.price) / result.price) * 100
-      : c.strategy === 'BPS'
-        ? ((result.price - c.shortStrike) / result.price) * 100
-        : Math.min(
-            ((result.price - c.shortStrike) / result.price) * 100,
-            ((c.shortCallStrike != null ? c.shortCallStrike - result.price : result.price) / result.price) * 100
-          );
-    const uType = result.underlyingType ?? 'stock';
-    bufferScore = scoreBuffer(bufferPct, c.dte, uType) * (cfg.weightBuffer ?? 25);
-  }
-
-  let strategyAlignmentScore = 0;
-
-  if (c && t?.scores?.total != null) {
-    const trendScore = t.scores.total;
-  
-    if (c.strategy === 'BPS') {
-      strategyAlignmentScore =
-       trendScore > 75 ? 12 :
-      trendScore > 40 ? 8 :
-      trendScore > 0 ? 3 :
-      -18;
-    } else if (c.strategy === 'BCS') {
-      strategyAlignmentScore =
-        trendScore < -75 ? 12 :
-        trendScore < -40 ? 8 :
-        trendScore < 0 ? 3 :
-        -18;
-    } else if (c.strategy === 'IC') {
-      strategyAlignmentScore =
-        Math.abs(trendScore) < 40 ? 10 :
-        Math.abs(trendScore) > 75 ? -10 :
-        0;
-    }
-  }
-  
-  let deltaQualityScore = 0;
-  
-  if (c) {
-    const d = c.shortDelta;
-  
-    deltaQualityScore =
-      d >= 0.16 && d <= 0.22 ? 5 :
-      d >= 0.12 && d <= 0.30 ? 3 :
-      -8;
-  }
-  
-  const total = Math.max(
-    0,
-    Math.round(
-      momentumScore +
-      ivrScore +
-      emClearanceScore +
-      rangeScore +
-      technicalScore +
-      liquidityScore +
-      bufferScore +
-      strategyAlignmentScore +
-      deltaQualityScore
-    )
-  );
-    return {
-      score: Math.min(100, total),
-      dims: {
-        momentum: Math.round(momentumScore),
-        ivr: Math.round(ivrScore),
-        emClearance: Math.round(emClearanceScore),
-        range: Math.round(rangeScore),
-        technical: Math.round(technicalScore),
-        liquidity: Math.round(liquidityScore),
-        buffer: Math.round(bufferScore),
-        total: Math.min(100, total),
-      },
-    };
-  }
 
 function trafficLight(score: number, cfg: RankConfig): { emoji: string; label: string; color: string; border: string; bg: string } {
   if (score >= cfg.thresholdGreen)  return { emoji: '🟢', label: 'Strong',     color: 'text-emerald-400', border: 'border-emerald-600', bg: 'bg-emerald-500/10' };
@@ -1398,101 +955,9 @@ function trafficLight(score: number, cfg: RankConfig): { emoji: string; label: s
 }
 
 // ── TastyTrade API ─────────────────────────────────────────────────────────
-const BASE = 'https://api.tastytrade.com';
-const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 
-const LS_ACCESS_TOKEN = 'tt_access_token_cache';
-const LS_ACCESS_TOKEN_EXPIRY = 'tt_access_token_expiry';
 
-async function getAccessToken(): Promise<string> {
-  // 1. Check sessionStorage first (fastest, in-memory)
-  const sessionCached = sessionStorage.getItem('tt_access_token');
-  if (sessionCached) return sessionCached;
 
-  // 2. Check localStorage cache — survives rebuilds/page reloads
-  // Access tokens are valid for ~24h; we cache for 23h to be safe
-  try {
-    const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
-    const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
-    if (lsCached && expiry && Date.now() < parseInt(expiry)) {
-      sessionStorage.setItem('tt_access_token', lsCached);
-      return lsCached;
-    }
-  } catch {}
-
-  // 3. Use refresh token to get a new access token
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) {
-    sessionStorage.removeItem('tt_access_token');
-    try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
-    localStorage.removeItem('tt_refresh_token');
-    window.location.href = '/login';
-    throw new Error('Session expired');
-  }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
-
-  // Store in both sessionStorage and localStorage
-  sessionStorage.setItem('tt_access_token', token);
-  try {
-    localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
-  } catch {}
-
-  // Save rotated refresh token if TastyTrade issued a new one
-  if (data.refresh_token && data.refresh_token !== refreshToken) {
-    localStorage.setItem('tt_refresh_token', data.refresh_token);
-  }
-  return token;
-}
-
-async function ttFetch(path: string, token: string): Promise<any> {
-  const res = await fetch(`${BASE}${path}`, {
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (res.status === 401) {
-    sessionStorage.removeItem('tt_access_token');
-    try {
-      localStorage.removeItem(LS_ACCESS_TOKEN);
-      localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY);
-    } catch {}
-
-    const freshToken = await getAccessToken();
-
-    const retry = await fetch(`${BASE}${path}`, {
-      cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${freshToken}`,
-      },
-    });
-
-    if (!retry.ok) {
-      const text = await retry.text();
-      throw new Error(`${path} failed (${retry.status}): ${text.slice(0, 200)}`);
-    }
-
-    return retry.json();
-  }
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${path} failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-
-  return res.json();
-}
 
 async function loadPortfolioTickers(): Promise<{ current: string[]; historical: string[] }> {
   const token = await getAccessToken();
@@ -1599,137 +1064,7 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
   } catch { return []; }
 }
 
-async function getMarketMetrics(symbols: string[], token: string) {
-  const data = await ttFetch(`/market-metrics?symbols=${symbols.join(',')}`, token);
 
-  return (data.data?.items || []).map((item: any) => {
-    // Build per-expiration IVx lookup map from option-expiration-implied-volatilities
-    const expirationIvxMap: Record<string, number> = {};
-    for (const e of item['option-expiration-implied-volatilities'] ?? []) {
-      if (e['expiration-date'] && e['implied-volatility'] != null) {
-        const raw = parseFloat(e['implied-volatility']);
-        expirationIvxMap[e['expiration-date']] = raw <= 1 ? raw * 100 : raw;
-      }
-    }
-
-    return {
-      symbol: item.symbol,
-      ivRank: item['implied-volatility-index-rank'] != null
-        ? parseFloat(item['implied-volatility-index-rank']) * 100
-        : null,
-      ivx: item['implied-volatility-index'] != null
-        ? parseFloat(item['implied-volatility-index']) * 100
-        : null,
-      ivx30: item['implied-volatility-30-day'] != null
-        ? parseFloat(item['implied-volatility-30-day'])
-        : null,
-      ivHv30Diff: item['iv-hv-30-day-difference'] != null
-        ? parseFloat(item['iv-hv-30-day-difference'])
-        : null,
-      liquidityRating: item['liquidity-rating'] ?? null,
-      earningsExpectedDate: item['earnings']?.['expected-report-date'] || null,
-      hv30: item['historical-volatility-30-day'] != null
-        ? parseFloat(item['historical-volatility-30-day'])
-        : null,
-      expirationIvxMap,
-    };
-  });
-}
-
-async function getQuote(symbol: string, token: string): Promise<number | null> {
-  // Cash-settled indexes (SPX, NDX, RUT, VIX, XSP) have no equity instrument
-  // record — they trade on TastyTrade's market-data endpoint under the
-  // `index=` parameter, not `equity=`. Quoting them as an equity silently
-  // returns no items, which previously made every index symbol's spot price
-  // resolve to null and drop out of every downstream POP/OTM calculation.
-  const classification = await classifyUnderlying(symbol, token).catch(() => 'stock' as const);
-  const queryParam = classification === 'index' ? 'index' : 'equity';
-  try {
-    const data = await ttFetch(`/market-data/by-type?${queryParam}=${encodeURIComponent(symbol)}`, token);
-    const item = data.data?.items?.[0]; if (!item) return null;
-    const last = item.last != null ? parseFloat(item.last) : null;
-    const bid = item.bid != null ? parseFloat(item.bid) : null;
-    const ask = item.ask != null ? parseFloat(item.ask) : null;
-    return last ?? (bid && ask ? (bid + ask) / 2 : null);
-  } catch { return null; }
-}
-async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
-  // dteWindow overrides the rule-set DTE gate when provided (rank mode passes a fixed wide window).
-  const gateMin = dteWindow ? dteWindow.min : ((Number.isFinite(RULES.DTE_MIN) ? RULES.DTE_MIN : 0) - 5);
-  const gateMax = dteWindow ? dteWindow.max : ((Number.isFinite(RULES.DTE_MAX) ? RULES.DTE_MAX : 60) + 5);
-  const [loDte, hiDte] = gateMin <= gateMax ? [gateMin, gateMax] : [gateMax, gateMin];
-  const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  const classification = await classifyUnderlying(symbol, token);
-  const isEtfOrIndex = classification === 'index' || classification === 'etf';
-  const expirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
-  const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
-  for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
-    const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
-    const dte = daysUntil(expDate); if (dte < loDte || dte > hiDte) continue;
-
-    // IVX_DISCOVERY: log the full expiration group object to find IVx field name
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('IVX_DISCOVERY expGroup keys:', Object.keys(expGroup));
-      console.log('IVX_DISCOVERY expGroup (no strikes):', JSON.stringify({ ...expGroup, strikes: `[${expGroup.strikes?.length ?? 0} strikes hidden]` }, null, 2));
-    }
-
-    for (const strike of expGroup.strikes ?? []) {
-      const strikePrice = parseFloat(strike['strike-price'] ?? '0');
-      const callSym: string = strike['call'], putSym: string = strike['put'];
-      if (callSym) { allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' }; }
-      if (putSym) { allOCCSymbols.push(putSym); symbolMeta[putSym] = { expDate, strike: strikePrice, optionType: 'P' }; }
-    }
-  }
-  if (allOCCSymbols.length === 0) return { expirations, chains, isEtfOrIndex, classification };
-  for (let i = 0; i < allOCCSymbols.length; i += 100) {
-    const chunk = allOCCSymbols.slice(i, i + 100);
-    const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
-    let greeksData: any;
-    try { greeksData = await ttFetch(`/market-data/by-type?${qs}`, token); } catch { continue; }
-    for (const item of greeksData?.data?.items ?? []) {
-      if (symbol.toUpperCase() === 'MRVL') {        
-        console.log('MRVL option market-data raw item:', item);
-        console.log('MRVL option market-data raw keys:', Object.keys(item));
-        console.log('MRVL option market-data raw JSON:', JSON.stringify(item, null, 2));
-      }
-
-  const meta = symbolMeta[item.symbol]; if (!meta) continue;
-  const bid = parseFloat(item.bid ?? '0'), ask = parseFloat(item.ask ?? '0');
-      const delta = item.delta != null ? parseFloat(item.delta) : null;
-      const oi = parseInt(item['open-interest'] ?? '0', 10);
-      const rawIv =
-        item.volatility ??
-        item['implied-volatility'] ??
-        item['mark-volatility'] ??
-        item['implied-volatility-index'] ??
-        item.iv ??
-        null;
-      const parsedIv = rawIv != null ? parseFloat(rawIv) : null;
-      const iv = parsedIv == null || Number.isNaN(parsedIv)
-        ? null
-        : parsedIv <= 1
-          ? parsedIv * 100
-          : parsedIv;
-      if (!expirations.includes(meta.expDate)) expirations.push(meta.expDate);
-      if (!chains[meta.expDate]) chains[meta.expDate] = [];
-      chains[meta.expDate].push({
-      strikePrice: meta.strike,
-      expirationDate: meta.expDate,
-      optionType: meta.optionType,
-      delta,
-      openInterest: oi,
-      bid,
-      ask,
-      mid: (bid + ask) / 2,
-      occSymbol: item.symbol,
-      iv,
-      quoteUpdatedAt: item['updated-at'] ?? item['summary-date'] ?? null,
-      fetchedAt: Date.now(),
-    });
-    }
-  }
-  expirations.sort(); return { expirations, chains, isEtfOrIndex, classification };
-}
 
 // PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
 async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
@@ -1772,208 +1107,13 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
 }
 
 // ── HUNTER Logic ─────────────────────────────────────────────────────────
-function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string, width: number, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
-  const bidAskMax = getBidAskMax(price);
-  const candidates: SpreadCandidate[] = [];
-  for (const shortLeg of legs) {
-    const delta = shortLeg.delta; if (delta == null) continue;
-    const absDelta = Math.abs(delta);
-    if (absDelta < RULES.SPREAD_DELTA_MIN || absDelta > RULES.SPREAD_DELTA_MAX) continue;
-    if (shortLeg.openInterest < RULES.OI_MIN || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
-    const longStrike = strategy === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
-    const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-    if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
-    const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
-    const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
-    const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_SPREAD) continue;
-    const ivForPop = normalizeIv(ivPctForPop) ?? normalizeIv(shortLeg.iv);
-    const modelPop = calcSpreadPop(strategy, price, shortLeg.strikePrice, credit, daysUntil(expDate), ivForPop);
-    if (modelPop == null) continue;
-    const pop = modelPop;
-    candidates.push({
-          strategy,
-          expiration: expDate,
-          dte: daysUntil(expDate),
-          shortStrike: shortLeg.strikePrice,
-          longStrike,
-          shortDelta: absDelta,
-          shortOI: shortLeg.openInterest,
-          longOI: longLeg.openInterest,
-          credit,
-          spreadWidth: width,
-          creditRatio,
-          roc,
-          pop,
-          optimized: true,
-          shortOccSymbol: shortLeg.occSymbol,
-          longOccSymbol: longLeg.occSymbol,
-          shortIv: normalizeIv(shortLeg.iv),
-          shortBid: shortLeg.bid,
-          shortAsk: shortLeg.ask,
-          longBid: longLeg.bid,
-          longAsk: longLeg.ask,
-          quoteFetchedAt: Math.max(shortLeg.fetchedAt ?? 0, longLeg.fetchedAt ?? 0),
-          expirationIvx: null,   // populated in runChecklist after candidate selected
-          expectedMove: null,    // populated in runChecklist after candidate selected
-        });
-  }
-  if (candidates.length === 0) return null;
-  // Pick best POP; use ROC as tiebreaker when POP difference is < 5%
-  return candidates.sort((a, b) => {
-    const popDiff = (b.pop ?? 0) - (a.pop ?? 0);
-    if (Math.abs(popDiff) >= 5) return popDiff;
-    return b.roc - a.roc;
-  })[0];
-}
 
-function findBestSpread(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
-  const legs = chain.filter(o => o.expirationDate === expDate && o.optionType === (strategy === 'BPS' ? 'P' : 'C'));
-  const allCandidates: SpreadCandidate[] = [];
-  for (const width of getWidthSteps(RULES.MAX_SPREAD_WIDTH, price)) {
-    const c = trySpreadAtWidth(legs, strategy, expDate, width, price, RULES, ivPctForPop);
-    if (c) allCandidates.push(c);
-  }
-  if (allCandidates.length === 0) return null;
-  // Pick best POP across all widths; ROC tiebreaker when POP difference is < 5%
-  return allCandidates.sort((a, b) => {
-    const popDiff = (b.pop ?? 0) - (a.pop ?? 0);
-    if (Math.abs(popDiff) >= 5) return popDiff;
-    return b.roc - a.roc;
-  })[0];
-}
-function tryICSideAtWidth(legs: any[], side: 'put' | 'call', width: number, price: number | null, RULES: RulesType, minCallStrike?: number): { shortStrike: number; longStrike: number; shortDelta: number; credit: number; creditRatio: number; roc: number; shortOI: number; longOI: number; pop: number; shortOccSymbol?: string; longOccSymbol?: string } | null {
-  const bidAskMax = getBidAskMax(price);
-  const candidates: { shortStrike: number; longStrike: number; shortDelta: number; credit: number; creditRatio: number; roc: number; shortOI: number; longOI: number; pop: number; shortOccSymbol?: string; longOccSymbol?: string }[] = [];
-  for (const shortLeg of legs) {
-    if (side === 'call' && minCallStrike != null && shortLeg.strikePrice <= minCallStrike) continue;
-    const delta = shortLeg.delta; if (delta == null) continue;
-    const absDelta = Math.abs(delta);
-    if (absDelta < RULES.IC_DELTA_MIN || absDelta > RULES.IC_DELTA_MAX) continue;
-    if (shortLeg.openInterest < RULES.OI_MIN || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
-    const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
-    const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-    if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
-    const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
-    const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
-    const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-    const pop = (1 - absDelta) * 100;
-    if (pop < RULES.POP_MIN) continue;
-      candidates.push({ shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, credit, creditRatio, roc, shortOI: shortLeg.openInterest, longOI: longLeg.openInterest, pop, shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol });
-    }
-    if (candidates.length === 0) return null;
-    // Pick best POP; ROC tiebreaker within 5%
-    return candidates.sort((a, b) => {
-    const popDiff = b.pop - a.pop;
-    if (Math.abs(popDiff) >= 5) return popDiff;
-    return b.roc - a.roc;
-  })[0];
-}
-function findBestIC(chain: any[], expDate: string, price: number | null, RULES: RulesType): SpreadCandidate | null {
-  const puts = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'P');
-  const calls = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'C');
-  const widthSteps = getWidthSteps(RULES.MAX_SPREAD_WIDTH, price);
-  let bestPut: (ReturnType<typeof tryICSideAtWidth> & { width: number }) | null = null;
-  for (const width of widthSteps) { const c = tryICSideAtWidth(puts, 'put', width, price, RULES); if (c && (bestPut === null || c.roc > bestPut.roc)) bestPut = { ...c, width }; }
-  if (!bestPut) return null;
-  let bestCall: (ReturnType<typeof tryICSideAtWidth> & { width: number }) | null = null;
-  for (const width of widthSteps) { const c = tryICSideAtWidth(calls, 'call', width, price, RULES, bestPut.shortStrike); if (c && (bestCall === null || c.roc > bestCall.roc)) bestCall = { ...c, width }; }
-  if (!bestCall) return null;
-  const totalCredit = parseFloat((bestPut.credit + bestCall.credit).toFixed(2));
-  const maxLoss = Math.max(bestPut.width - bestPut.credit, bestCall.width - bestCall.credit);
-  const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_IC) return null;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, shortCallOI: bestCall.shortOI, longCallOI: bestCall.longOI, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, optimized: true, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
-}
 
 
 // ── Rank Mode — Unfiltered Spread Finder ──────────────────────────────────
 // In rank mode we always want to show the best available spread regardless
 // of rules. Only gates: delta must exist, long leg must exist, credit > 0.
-function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null): SpreadCandidate | null {
-  const legs = chain.filter(o =>
-    o.expirationDate === expDate &&
-    o.optionType === (strategy === 'BPS' ? 'P' : 'C')
-  );
 
-  const candidates: SpreadCandidate[] = [];
-  const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
-  const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
-
-  for (let width = stepSize; width <= maxWidth; width += stepSize) {
-    for (const shortLeg of legs) {
-      const delta = shortLeg.delta;
-      if (delta == null) continue;
-
-      const absDelta = Math.abs(delta);
-      if (absDelta < 0.05 || absDelta > 0.60) continue;
-
-      const longStrike =
-        strategy === 'BPS'
-          ? shortLeg.strikePrice - width
-          : shortLeg.strikePrice + width;
-
-      const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-      if (!longLeg) continue;
-
-      const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
-      if (credit <= 0) continue;
-
-      const creditRatio = credit / width;
-      const maxLoss = width - credit;
-      const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-
-      const ivForPop = normalizeIv(shortLeg.iv);
-      const modelPop = calcSpreadPop(
-        strategy,
-        price,
-        shortLeg.strikePrice,
-        credit,
-        daysUntil(expDate),
-        ivForPop
-      );
-      if (modelPop == null) continue;
-      const pop = modelPop;
-
-      candidates.push({
-        strategy,
-        expiration: expDate,
-        dte: daysUntil(expDate),
-        shortStrike: shortLeg.strikePrice,
-        longStrike,
-        shortDelta: absDelta,
-        shortOI: shortLeg.openInterest ?? 0,
-        longOI: longLeg.openInterest ?? 0,
-        credit,
-        spreadWidth: width,
-        creditRatio,
-        roc,
-        pop,
-        optimized: false,
-        shortOccSymbol: shortLeg.occSymbol,
-        longOccSymbol: longLeg.occSymbol,
-      });
-    }
-  }
-
-  if (candidates.length === 0) return null;
-
-  return candidates.sort((a, b) => {
-    const popDiff = (b.pop ?? 0) - (a.pop ?? 0);
-    if (Math.abs(popDiff) >= 5) return popDiff;
-    return b.roc - a.roc;
-  })[0];
-}
-
-function findBestICUnfiltered(chain: any[], expDate: string, price: number | null): SpreadCandidate | null {
-  const puts = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'P');
-  const calls = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'C');
-  const putSpread = findBestSpreadUnfiltered([...puts.map((o: any) => ({ ...o, optionType: 'P' })), ...puts.map((o: any) => ({ ...o, optionType: 'P' }))], 'BPS', expDate, price);
-  const callSpread = findBestSpreadUnfiltered([...calls.map((o: any) => ({ ...o, optionType: 'C' })), ...calls.map((o: any) => ({ ...o, optionType: 'C' }))], 'BCS', expDate, price);
-  if (!putSpread || !callSpread) return null;
-  const totalCredit = parseFloat((putSpread.credit + callSpread.credit).toFixed(2));
-  const maxLoss = Math.max(putSpread.spreadWidth - putSpread.credit, callSpread.spreadWidth - callSpread.credit);
-  const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false, shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol, shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
-}
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
 // Long a deep ITM call (LEAPS, 70-180 DTE, delta 0.70-0.85)
@@ -2135,229 +1275,6 @@ function runPMCCChecklist(
   };
 }
 
-function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
-  const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
-  const isIndex = chainData.isEtfOrIndex ?? false;
-  // Auto-select the right rule set based on ticker type
-  const RULES = isIndex ? (ETF_RULES_PARAM ?? { ...DEFAULT_ETF_RULES }) : STOCK_RULES;
-  const appliedLabel = isIndex
-    ? (etfPresetLabel ? `ETF — ${etfPresetLabel}` : 'ETF rules')
-    : (stockPresetLabel ?? 'Custom');
-  const effectiveRules: RulesType = RULES;
-  const effectiveIvrMin = isIndex ? INDEX_IVR_MIN : effectiveRules.IVR_MIN;
-  const ivrCheck: CheckResult = ivrValue == null ? { status: 'warn', value: 'N/A', reason: 'Not available' } : ivrValue < effectiveIvrMin ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% < ${effectiveIvrMin}%`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below ${effectiveIvrMin}% minimum${isIndex ? ' (index)' : ''}` }; })() : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: isIndex ? `Above ${effectiveIvrMin}% (index floor)` : 'Above minimum' };
-
-  // Earnings buffer auto-derived: DTE_MAX + 5 days cushion
-  const earningsBuffer = RULES.DTE_MAX + 5;
-  let earningsCheck: CheckResult;
-  if (isIndex) {
-    earningsCheck = { status: 'pass', value: 'N/A (index/ETF)', reason: 'No earnings events' };
-  } else if (!earningsDate) {
-    earningsCheck = { status: 'pass', value: 'None found', reason: 'Safe to trade' };
-  } else {
-    const d = daysUntil(earningsDate);
-    if (d < 0) {
-      earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-    } else if (d < earningsBuffer) {
-      if (strictOnly) {
-        failReasons.push(`Earnings in ${d}d`);
-        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason: `Within ${earningsBuffer}d — no qualifying ${RULES.DTE_MIN}-${RULES.DTE_MAX}d expiration clears it` };
-      } else {
-        earningsCheck = { status: 'warn', value: `${d}d (${earningsDate})`, reason: `Earnings within window — scored lower in rank mode` };
-      }
-    } else {
-      earningsCheck = { status: 'pass', value: `${d}d (${earningsDate})`, reason: `Outside ${earningsBuffer}d buffer` };
-    }
-  }
-
-  const validExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); if (dte < effectiveRules.DTE_MIN || dte > effectiveRules.DTE_MAX) return false; if (strictOnly && !isIndex && earningsDate) { const ed = daysUntil(earningsDate); if (ed >= 0 && ed <= dte) return false; } return true; });
-  let bestCandidate: SpreadCandidate | null = null;
-  
-  // Rank mode fallback: if strict rules found nothing, try relaxed rules first, then fully unfiltered
-  if (!strictOnly && !bestCandidate && ivrCheck.status !== 'fail' && validExpirations.length > 0) {
-    const relaxedRules: RulesType = {
-      ...effectiveRules,
-      CREDIT_RATIO_MIN: 0.15,
-      ROC_MIN_SPREAD: 8,
-      ROC_MIN_IC: 12,
-      OI_MIN: effectiveRules.OI_MIN,
-      POP_MIN: 55,
-      SPREAD_DELTA_MIN: 0.10,
-      SPREAD_DELTA_MAX: 0.40,
-      IC_DELTA_MIN: 0.10,
-      IC_DELTA_MAX: 0.35,
-    };
-    for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; const expIvxForPop =
-  normalizeIv(metrics.expirationIvxMap?.[exp]) ??
-  normalizeIv(metrics.ivx) ??
-  normalizeIv(metrics.ivx30);
-
-bestCandidate = strategy === 'IC'
-  ? findBestIC(chainItems, exp, price, relaxedRules)
-  : findBestSpread(chainItems, strategy, exp, price, relaxedRules, expIvxForPop); if (bestCandidate) break; }
-  }
-  // Last resort: fully unfiltered — show best available strike regardless of rules
-  if (!strictOnly && !bestCandidate && validExpirations.length > 0) {
-    for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; bestCandidate = strategy === 'IC' ? findBestICUnfiltered(chainItems, exp, price) : findBestSpreadUnfiltered(chainItems, strategy, exp, price); if (bestCandidate) break; }
-  }
-  if (bestCandidate) {
-    failReasons.length = 0;
-    // Re-check earnings against the ACTUAL selected trade's DTE rather than
-    // the generic RULES.DTE_MAX + 5 buffer used above (that buffer ran
-    // before a specific expiration was picked, so it could flag earnings
-    // that fall safely AFTER this trade's own expiry as a false positive).
-    if (!isIndex && earningsDate) {
-      const ed = daysUntil(earningsDate);
-      if (ed < 0) {
-        earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-      } else if (ed <= bestCandidate.dte) {
-        if (strictOnly) {
-          failReasons.push(`Earnings in ${ed}d — before this trade's expiry`);
-          earningsCheck = { status: 'fail', value: `${ed}d (${earningsDate})`, reason: `Falls before this trade's ${bestCandidate.dte}d expiry` };
-        } else {
-          earningsCheck = { status: 'warn', value: `${ed}d (${earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
-        }
-      } else {
-        earningsCheck = { status: 'pass', value: `${ed}d (${earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
-      }
-    }
-  } else if (
-    validExpirations.length === 0 &&
-    !failReasons.some(r => r.includes('IVR') || r.includes('Earnings'))
-  ) {
-    failReasons.push(`No ${effectiveRules.DTE_MIN}-${effectiveRules.DTE_MAX} DTE expirations`);
-  } else if (validExpirations.length > 0 && !failReasons.length) {
-    failReasons.push('No qualifying strikes found');
-  }
-  // Weighted on the SHORT leg(s) — the leg you actively trade twice (sell to
-  // open, buy to close at the GTC profit target) and the one that carries
-  // assignment risk. The long leg is protection that typically only transacts
-  // alongside the short leg in the same spread order, so its OI alone rarely
-  // blocks a clean fill the way thin short-leg OI does. For IC, both short
-  // legs (put + call) carry the same exposure, so the worse of the two gates.
-  const oiCheck: CheckResult = !bestCandidate
-    ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
-    : (() => {
-        const shortLegOi = strategy === 'IC'
-          ? Math.min(bestCandidate.shortOI, bestCandidate.shortCallOI ?? 0)
-          : bestCandidate.shortOI;
-        const val = strategy === 'IC'
-          ? `P ${bestCandidate.shortOI}/${bestCandidate.longOI} · C ${bestCandidate.shortCallOI ?? '—'}/${bestCandidate.longCallOI ?? '—'}`
-          : `${bestCandidate.shortOI}/${bestCandidate.longOI}`;
-        if (shortLegOi >= effectiveRules.OI_MIN) return { status: 'pass' as const, value: val, reason: `Short leg${strategy === 'IC' ? 's' : ''} ≥ ${effectiveRules.OI_MIN}` };
-        if (shortLegOi >= 100) return { status: 'warn' as const, value: val, reason: `Below target (${effectiveRules.OI_MIN}) on short leg — fills may be difficult` };
-        return { status: 'warn' as const, value: val, reason: `Very low OI on short leg — spread likely untradeable` };
-      })();
-  const deltaCheck: CheckResult = bestCandidate ? { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Within target range' } : { status: 'pending', value: '—', reason: 'No candidate' };
-
-  const rawCredit = bestCandidate ? (bestCandidate.totalCredit ?? bestCandidate.credit) : 0;
-  const creditCheck: CheckResult = bestCandidate
-    ? { status: 'pass', value: `$${rawCredit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
-
-  const rocMin = strategy === 'IC' ? effectiveRules.ROC_MIN_IC : effectiveRules.ROC_MIN_SPREAD;
-  const rocCheck: CheckResult = bestCandidate ? { status: bestCandidate.roc >= rocMin ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${rocMin}%` } : { status: 'pending', value: '—', reason: 'No candidate' };
-  const candidatePop = bestCandidate ? (bestCandidate.pop ?? 0) : 0;
-  const popMin = effectiveRules.POP_MIN;
-  const popCheck: CheckResult = bestCandidate
-    ? { status: candidatePop >= popMin ? 'pass' : 'fail', value: `${candidatePop.toFixed(0)}%`, reason: `Min ${popMin}%` }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
-  if (bestCandidate && candidatePop < popMin) { failReasons.push(`POP ${candidatePop.toFixed(0)}% < ${popMin}%`); }
-  if (symbol === 'MRVL' && bestCandidate) {
-  console.log('FINAL_CARD_POP', {
-    symbol,
-    strategy,
-    expiration: bestCandidate.expiration,
-    shortStrike: bestCandidate.shortStrike,
-    longStrike: bestCandidate.longStrike,
-    credit: bestCandidate.credit,
-    displayedPop: bestCandidate.pop,
-    shortDelta: bestCandidate.shortDelta,
-    deltaPop: (1 - bestCandidate.shortDelta) * 100,
-  });
-}
-  const hv30 = metrics.hv30 ?? null;
-  const strikeIv = bestCandidate?.shortIv ?? null;
-
-  // ── Populate expirationIvx and expectedMove on bestCandidate ──────────────
-  if (bestCandidate) {
-    const expIvxMap: Record<string, number> = metrics.expirationIvxMap ?? {};
-    const expIvx = expIvxMap[bestCandidate.expiration] ?? null;
-    bestCandidate.expirationIvx = expIvx;
-    if (expIvx != null && price != null && price > 0) {
-      // Expected move = price × (ivx/100) × sqrt(dte/365)
-      bestCandidate.expectedMove = parseFloat(
-        (price * (expIvx / 100) * Math.sqrt(bestCandidate.dte / 365)).toFixed(2)
-      );
-    }
-  }
-
-  const ivCheck: CheckResult =
-  strikeIv == null || hv30 == null
-    ? {
-        status: 'pending',
-        value: '—',
-        reason: 'Strike IV unavailable for this expiration'
-      }
-    : (() => {
-        const edgePct = ((strikeIv / hv30 - 1) * 100);
-
-        return {
-          status:
-            strikeIv >= hv30 * 1.1
-              ? 'pass'
-              : 'warn',
-
-          value: `IV (${strikeIv.toFixed(0)}%) vs HV (${hv30.toFixed(0)}%)`,
-
-          reason:
-            edgePct >= 10
-              ? `${edgePct.toFixed(0)}% volatility edge`
-              : edgePct >= 0
-                ? `${edgePct.toFixed(0)}% volatility edge (thin)`
-                : `${Math.abs(edgePct).toFixed(0)}% below HV`
-        };
-      })();
-  
-  // ── Expected Move Clearance check ─────────────────────────────────────────
-  const emClearanceCheck: CheckResult = (() => {
-    if (!bestCandidate || bestCandidate.expectedMove == null || price == null) {
-      return { status: 'pending' as const, value: '—', reason: 'IVx unavailable for this expiration' };
-    }
-    const em = bestCandidate.expectedMove;
-    const shortStrike = bestCandidate.shortStrike;
-    const emBoundary = bestCandidate.strategy === 'BPS' ? price - em : price + em;
-    const clearancePct = bestCandidate.strategy === 'BPS'
-      ? (emBoundary - shortStrike) / price * 100
-      : (shortStrike - emBoundary) / price * 100;
-    const clearanceDollar = Math.abs(emBoundary - shortStrike).toFixed(2);
-    const emSign = bestCandidate.strategy === 'BPS' ? '-' : '+';
-    const emLabel = `EM ${emSign}$${em.toFixed(2)} → boundary ${emBoundary.toFixed(2)}`;
-
-    if (clearancePct >= 15) {
-      return { status: 'pass' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — strike well outside expected move` };
-    } else if (clearancePct >= 5) {
-      return { status: 'warn' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — outside but close, one bad day tests this strike` };
-    } else if (clearancePct >= 0) {
-      return { status: 'warn' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — barely outside expected move, high risk` };
-    } else {
-      return { status: 'fail' as const, value: `$${Math.abs(parseFloat(clearanceDollar)).toFixed(2)} INSIDE EM`, reason: `${emLabel} — strike is within the expected move, POP below 68%` };
-    }
-  })();
-
-  const qualified = ivrCheck.status === 'pass' && earningsCheck.status === 'pass' && oiCheck.status === 'pass' && deltaCheck.status === 'pass' && creditCheck.status === 'pass' && rocCheck.status === 'pass' && popCheck.status === 'pass' && bestCandidate !== null;
-
-  return {
-    symbol, strategy, price, ivr: ivrValue,
-    ivx: metrics.ivx ?? null,
-    ivx30: metrics.ivx30 ?? null,
-    ivHv30Diff: metrics.ivHv30Diff ?? null,
-    liquidityRating: metrics.liquidityRating ?? null,
-    qualified, bestCandidate, failReasons, earningsDate, trendResult,
-    isEtf: isIndex, underlyingType: chainData.classification ?? 'stock', ruleSetApplied: appliedLabel,
-    checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, iv: ivCheck, emClearance: emClearanceCheck, credit: creditCheck, roc: rocCheck, pop: popCheck },
-  };
-}
 
 // ── UI Helpers ─────────────────────────────────────────────────────────────
 const statusColor = (s: string) => s === 'pass' ? 'text-emerald-500' : s === 'fail' ? 'text-red-500' : s === 'warn' ? 'text-yellow-500' : 'text-slate-400';
@@ -2423,152 +1340,6 @@ function runChecklistAllExpirations(
 // "spread" isn't a real premium-selling trade), and delta stays within
 // 0.05–0.60 (outside that, it's not recognizably a credit spread anymore —
 // either illiquid far-OTM or effectively stock-like deep ITM).
-function exploreAllCandidatesForRank(
-  symbol: string,
-  metrics: any,
-  chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean },
-  price: number | null,
-  rules: RulesType,
-  trendResult: TrendResult | undefined,
-  isEtf: boolean,
-  etfRules: RulesType,
-  stockPresetLabel?: string,
-  etfPresetLabel?: string,
-): ScreenResult[] {
-  const results: ScreenResult[] = [];
-  const validExps = chainData.expirations.filter(exp => daysUntil(exp) >= RANK_SCAN_DTE_MIN && daysUntil(exp) <= RANK_SCAN_DTE_MAX);
-  const appliedRules = isEtf ? etfRules : rules;
-
-  for (const exp of validExps) {
-    const dte = daysUntil(exp);
-    const chainItems = chainData.chains[exp] ?? [];
-    const singleExpChain = { ...chainData, expirations: [exp] };
-
-    for (const strat of (['BPS', 'BCS', 'IC'] as const)) {
-      try {
-        if (strat === 'IC') {
-          const candidate = findBestICUnfiltered(chainItems, exp, price);
-          if (!candidate) continue;
-          const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
-          const icBestCandidate = result.bestCandidate ?? candidate;
-          // Recompute earnings against THIS candidate's actual dte -- the
-          // strictOnly call into runChecklist above never set its internal
-          // bestCandidate, so its earnings check is still the generic
-          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
-          const icEarningsCheck: CheckResult = (() => {
-            if (isEtf || !result.earningsDate) return result.checks.earnings;
-            const ed = daysUntil(result.earningsDate);
-            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
-            if (ed <= icBestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${icBestCandidate.dte}d expiry — scored lower in rank mode` };
-            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${icBestCandidate.dte}d expiry` };
-          })();
-          results.push({
-            ...result,
-            bestCandidate: icBestCandidate,
-            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
-            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
-            checks: { ...result.checks, earnings: icEarningsCheck },
-          });
-          continue;
-        }
-
-        const optType = strat === 'BPS' ? 'P' : 'C';
-        const putCallLegs = chainItems.filter((o: any) => o.expirationDate === exp && o.optionType === optType);
-        const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
-        const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
-        const seenStrikes = new Set<number>();
-
-        for (const shortLeg of putCallLegs) {
-          const delta = shortLeg.delta; if (delta == null) continue;
-          const absDelta = Math.abs(delta);
-          if (absDelta < 0.05 || absDelta > 0.60) continue;
-          if (seenStrikes.has(shortLeg.strikePrice)) continue;
-          seenStrikes.add(shortLeg.strikePrice);
-
-          let bestCandidate: SpreadCandidate | null = null;
-          let bestCreditRatio = -1;
-          for (let width = stepSize; width <= maxWidth; width += stepSize) {
-            const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
-            const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-            if (!longLeg) continue;
-            const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
-            if (credit <= 0) continue; // structural floor — not a real premium-selling trade otherwise
-            const creditRatio = credit / width;
-            const maxLoss = width - credit;
-            const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
-
-            const ivForPop =
-              normalizeIv(metrics.expirationIvxMap?.[exp]) ??
-              normalizeIv(metrics.ivx) ??
-              normalizeIv(metrics.ivx30) ??
-              normalizeIv(shortLeg.iv);
-
-            const modelPop = calcSpreadPop(strat, price, shortLeg.strikePrice, credit, dte, ivForPop);
-            if (modelPop == null) continue;
-
-            if (creditRatio > bestCreditRatio) {
-              bestCreditRatio = creditRatio;
-              bestCandidate = {
-                strategy: strat, expiration: exp, dte, shortStrike: shortLeg.strikePrice, longStrike,
-                shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
-                credit, spreadWidth: width, creditRatio, roc, pop: modelPop, optimized: false,
-                shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
-                shortIv: normalizeIv(shortLeg.iv),
-                expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
-                expectedMove: null,
-              };
-            }
-          }
-          if (!bestCandidate) continue;
-
-          const syntheticChain = { ...chainData, expirations: [exp], chains: { [exp]: chainItems } };
-          const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
-          // Recompute earnings against THIS candidate's actual dte -- the
-          // strictOnly call into runChecklist above never set its internal
-          // bestCandidate, so its earnings check is still the generic
-          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
-          const spreadEarningsCheck: CheckResult = (() => {
-            if (isEtf || !result.earningsDate) return result.checks.earnings;
-            const ed = daysUntil(result.earningsDate);
-            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
-            if (ed <= bestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
-            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
-          })();
-          results.push({
-            ...result,
-            bestCandidate,
-            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
-            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
-            checks: {
-              ...result.checks,
-              earnings: spreadEarningsCheck,
-              credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
-              delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
-              pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
-              roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
-              oi: (() => {
-              // Gate on the SHORT leg only -- it's the one traded twice
-              // (open + close) and the one carrying assignment risk. The
-              // long leg is protection that typically only transacts as
-              // part of the same combo order, so its OI alone rarely
-              // blocks a clean fill the way thin short-leg OI does.
-              const shortLegOi = bestCandidate.shortOI;
-              return {
-                status: shortLegOi >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
-                value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
-                reason: shortLegOi >= appliedRules.OI_MIN
-                  ? `Short leg ≥ ${appliedRules.OI_MIN}`
-                  : `Below OI floor ${appliedRules.OI_MIN} on short leg`,
-              };
-            })(),
-            },
-          });
-        }
-      } catch {}
-    }
-  }
-  return results;
-}
 
 const strategyAccent = (s: string) => s === 'BPS' ? 'border-l-4 border-l-emerald-500' : s === 'BCS' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-blue-500';
 
@@ -5309,487 +4080,7 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
 // throws "no bars", and the caller's catch-and-skip logic silently drops
 // the index from results entirely — same map app/engine/page.tsx already
 // uses for its own SPX/NDX/RUT/VIX chart lookups, kept in sync here.
-const YAHOO_INDEX_CHART_MAP: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
 
-async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<TrendResult> {
-  const cleanSymbol = normalizeTickerToken(symbol) ?? symbol.toUpperCase();
-  const chartSymbol = YAHOO_INDEX_CHART_MAP[cleanSymbol] ?? cleanSymbol;
-  const res = await fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`, { cache: 'no-store' });
-
-  if (!res.ok) throw new Error(`Yahoo chart fetch failed for ${cleanSymbol} (${res.status})`);
-
-  const data = await res.json();
-  const bars: { c: number }[] = data?.bars ?? [];
-  const closes = bars.map(b => b.c).filter((c): c is number => Number.isFinite(c));
-
-  const unknownResult = (reason: string): TrendResult => ({
-    trend: 'unknown',
-    strategy: 'NO_TRADE',
-    subtype: 'UNKNOWN',
-    confidence: 0,
-    ma20: 0,
-    ma50: 0,
-    ma200: 0,
-    reason,
-  });
-
-  if (closes.length < 90) {
-    throw new Error(`no bars: ${cleanSymbol} returned only ${closes.length} closes — likely invalid symbol`);
-  }
-
-  const avg = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
-  const pct = (current: number, prior: number) => prior === 0 ? 0 : (current - prior) / prior;
-  const max = (values: number[]) => Math.max(...values);
-  const min = (values: number[]) => Math.min(...values);
-  const clamp = (value: number, low = 0, high = 100) => Math.max(low, Math.min(high, value));
-  const signedScale = (value: number, fullAt: number, maxPoints: number) => {
-    const sign = value >= 0 ? 1 : -1;
-    return sign * Math.min(1, Math.abs(value) / fullAt) * maxPoints;
-  };
-  const calcRsi = (values: number[], period = 14): number | null => {
-    if (values.length < period + 1) return null;
-
-    let gains = 0;
-    let losses = 0;
-    for (let i = values.length - period; i < values.length; i++) {
-      const change = values[i] - values[i - 1];
-      if (change >= 0) gains += change;
-      else losses += Math.abs(change);
-    }
-
-    const avgGain = gains / period;
-    const avgLoss = losses / period;
-    if (avgLoss === 0) return 100;
-
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-  };
-
-  const currentPrice = closes[closes.length - 1];
-  const rsi14 = calcRsi(closes, 14) ?? 50;
-  const ma20 = avg(closes.slice(-20));
-  const ma50 = avg(closes.slice(-50));
-  const ma200 = closes.length >= 200 ? avg(closes.slice(-200)) : avg(closes);
-  const ma20Prev = avg(closes.slice(-40, -20));
-  const ma50Prev = closes.length >= 100 ? avg(closes.slice(-100, -50)) : avg(closes.slice(-90, -40));
-
-  const ma20Slope = pct(ma20, ma20Prev);
-  const ma50Slope = pct(ma50, ma50Prev);
-  const momentum10 = pct(currentPrice, closes[closes.length - 11]);
-  const momentum20 = pct(currentPrice, closes[closes.length - 21]);
-  const momentum40 = pct(currentPrice, closes[closes.length - 41]);
-  const momentum60 = pct(currentPrice, closes[closes.length - 61]);
-  const momentum90 = pct(currentPrice, closes[closes.length - 91]);
-
-  const last10 = closes.slice(-10);
-  const last20 = closes.slice(-20);
-  const prior20 = closes.slice(-40, -20);
-  const last40 = closes.slice(-40);
-  const prior40 = closes.slice(-80, -40);
-  const last60 = closes.slice(-60);
-  const prior60 = closes.slice(-120, -60);
-  const last90 = closes.slice(-90);
-
-  const high20 = max(last20), low20 = min(last20);
-  const high40 = max(last40), low40 = min(last40);
-  const high60 = max(last60), low60 = min(last60);
-  const high90 = max(last90), low90 = min(last90);
-  const priorHigh20 = max(prior20), priorLow20 = min(prior20);
-  const priorHigh40 = max(prior40), priorLow40 = min(prior40);
-  const priorHigh60 = prior60.length ? max(prior60) : priorHigh40;
-  const priorLow60 = prior60.length ? min(prior60) : priorLow40;
-
-  const range60 = pct(high60, low60);
-  const net60 = Math.abs(momentum60);
-  const chopRatio = net60 < 0.01 ? 99 : range60 / net60;
-  const distFromMa20 = pct(currentPrice, ma20);
-  const distFromMa50 = pct(currentPrice, ma50);
-  const drawdownFrom60High = pct(currentPrice, high60); // negative number
-  const drawdownFrom90High = pct(currentPrice, high90); // negative number
-  const reboundFrom60Low = pct(currentPrice, low60);
-  const reboundFrom90Low = pct(currentPrice, low90);
-  const near60High = currentPrice >= high60 * 0.96;
-  const near60Low = currentPrice <= low60 * 1.04;
-
-  const higherLows = low20 > priorLow20 * 0.985;
-  const higherHighs = high20 > priorHigh20 * 1.005;
-  const lowerHighs = high20 < priorHigh20 * 1.015;
-  const lowerLows = low20 < priorLow20 * 0.995;
-  const regimeHigherLows = low40 > priorLow40 * 0.985;
-  const regimeHigherHighs = high40 > priorHigh40 * 1.005;
-  const regimeLowerHighs = high40 < priorHigh40 * 1.015;
-  const regimeLowerLows = low40 < priorLow40 * 0.995;
-  const brokePriorSupport = currentPrice < priorLow60 * 0.985 || currentPrice < priorLow40 * 0.985;
-  const brokePriorResistance = currentPrice > priorHigh60 * 1.015 || currentPrice > priorHigh40 * 1.015;
-
-  const isIdx = isIndexOrEtf ?? false;
-  const highVolName = Math.abs(momentum60) > 0.18 || range60 > 0.34 || Math.abs(momentum90) > 0.30;
-  const maxHealthyRange60 = isIdx ? 0.22 : highVolName ? 0.48 : 0.34;
-  const maxChaoticRange60 = isIdx ? 0.30 : highVolName ? 0.72 : 0.52;
-
-  let momentumScore = 0;
-  momentumScore += signedScale(momentum20, 0.10, 18);
-  momentumScore += signedScale(momentum60, 0.22, 22);
-  // A small 90-day memory prevents a few right-edge candles from fully reversing the regime.
-  momentumScore += signedScale(momentum90, 0.35, 8);
-
-  let maAlignmentScore = 0;
-  if (currentPrice > ma20) maAlignmentScore += 8; else maAlignmentScore -= 8;
-  if (currentPrice > ma50) maAlignmentScore += 10; else maAlignmentScore -= 10;
-  if (ma20 > ma50) maAlignmentScore += 10; else maAlignmentScore -= 10;
-  // Distance from the 50MA matters, but too much distance is handled by maturity/exhaustion below.
-  maAlignmentScore += signedScale(distFromMa50, 0.12, 6);
-
-  let slopeScore = 0;
-  slopeScore += signedScale(ma20Slope, 0.035, 13);
-  slopeScore += signedScale(ma50Slope, 0.025, 9);
-
-  let structureScore = 0;
-  if (higherHighs) structureScore += 7;
-  if (higherLows) structureScore += 9;
-  if (regimeHigherHighs) structureScore += 8;
-  if (regimeHigherLows) structureScore += 10;
-  if (lowerHighs) structureScore -= 9;
-  if (lowerLows) structureScore -= 7;
-  if (regimeLowerHighs) structureScore -= 10;
-  if (regimeLowerLows) structureScore -= 8;
-
-  let regimeScore = 0;
-  if (brokePriorResistance && momentum40 > 0) regimeScore += 12;
-  if (brokePriorSupport && momentum40 < 0) regimeScore -= 12;
-  if (currentPrice > high90 * 0.98 && momentum60 > 0.08) regimeScore += 8;
-  if (currentPrice < low90 * 1.04 && momentum60 < -0.08) regimeScore -= 8;
-  // Failed trend behavior: prior strength followed by a decisive break is bearish even if the long chart was once bullish.
-  if (momentum90 > 0.10 && momentum20 < -0.07 && currentPrice < ma20 && drawdownFrom60High < -0.12) regimeScore -= 16;
-  // Recovery behavior: prior weakness followed by reclaiming averages can be a bullish reversal.
-  if (momentum90 < -0.10 && momentum20 > 0.07 && currentPrice > ma20 && reboundFrom60Low > 0.12) regimeScore += 14;
-
-  const rawDirectionalScore = momentumScore + maAlignmentScore + slopeScore + structureScore + regimeScore;
-
-  let volatilityPenalty = 0;
-  if (range60 > maxHealthyRange60) volatilityPenalty += range60 > maxChaoticRange60 ? 22 : 9;
-
-  let chopPenalty = 0;
-  if (chopRatio > 6.0) chopPenalty += 18;
-  else if (chopRatio > 4.0) chopPenalty += 10;
-  else if (chopRatio > 3.0) chopPenalty += 5;
-
-  // Trend maturity / exhaustion: direction may be right, but trade quality is poor when the move is vertical.
-  let maturityPenalty = 0;
-  const upsideExhausted =
-    (momentum10 > 0.18 && momentum20 > 0.28) ||
-    (distFromMa50 > 0.28 && reboundFrom60Low > 0.55) ||
-    (near60High && reboundFrom60Low > 0.75 && range60 > 0.55);
-  const downsideExhausted =
-    (momentum10 < -0.18 && momentum20 < -0.28) ||
-    (distFromMa50 < -0.25 && Math.abs(drawdownFrom60High) > 0.45) ||
-    (near60Low && Math.abs(drawdownFrom60High) > 0.55 && range60 > 0.55);
-
-  if (upsideExhausted || downsideExhausted) maturityPenalty += highVolName ? 16 : 24;
-  if (Math.abs(momentum20) > 0.40) maturityPenalty += 12;
-
-  const penalty = volatilityPenalty + chopPenalty + maturityPenalty;
-  const directionalScore = rawDirectionalScore > 0
-    ? rawDirectionalScore - penalty
-    : rawDirectionalScore + penalty;
-
-  const scores = {
-    momentum: Math.round(momentumScore),
-    maAlignment: Math.round(maAlignmentScore),
-    slope: Math.round(slopeScore),
-    structure: Math.round(structureScore + regimeScore),
-    chop: Math.round(chopPenalty),
-    volatility: Math.round(volatilityPenalty + maturityPenalty),
-    total: Math.round(directionalScore),
-  };
-
-  const metrics = {
-    price: currentPrice,
-    ma20,
-    ma50,
-    ma200,
-    momentum10,
-    momentum20,
-    momentum40,
-    momentum60,
-    momentum90,
-    rsi14,
-    ma20Slope,
-    ma50Slope,
-    range60,
-    chopRatio,
-    distFromMa20,
-    distFromMa50,
-    drawdownFrom60High,
-    drawdownFrom90High,
-    reboundFrom60Low,
-    reboundFrom90Low,
-    higherHighs,
-    higherLows,
-    lowerHighs,
-    lowerLows,
-    regimeHigherHighs,
-    regimeHigherLows,
-    regimeLowerHighs,
-    regimeLowerLows,
-    brokePriorSupport,
-    brokePriorResistance,
-    upsideExhausted,
-    downsideExhausted,
-  };
-
-
-
-  // ── Spike-resistant range metrics ─────────────────────────────────────────
-  // Raw high60/low60 are poisoned by single outlier candles (AFL Feb spike,
-  // INTC April spike). Sort last60 closes and trim the top/bottom 3 values
-  // to get a robust range that ignores event-driven wicks.
-  const last60Sorted = [...last60].sort((a, b) => a - b);
-  const trimN = Math.min(3, Math.floor(last60.length * 0.05));
-  const trimmedLow60  = last60Sorted[trimN];
-  const trimmedHigh60 = last60Sorted[last60Sorted.length - 1 - trimN];
-  const trimmedRange60   = trimmedLow60 > 0 ? (trimmedHigh60 - trimmedLow60) / trimmedLow60 : range60;
-  const trimmedNet60     = Math.abs(momentum60);
-  const trimmedChopRatio = trimmedNet60 < 0.01 ? 99 : trimmedRange60 / trimmedNet60;
-  const trimmedDrawdownFrom60High = trimmedHigh60 > 0 ? (currentPrice - trimmedHigh60) / trimmedHigh60 : drawdownFrom60High;
-  const trimmedReboundFrom60Low  = trimmedLow60  > 0 ? (currentPrice - trimmedLow60)  / trimmedLow60  : reboundFrom60Low;
-
-  // Use trimmed metrics for classification decisions; keep raw in `metrics` for display.
-  const tRange60    = trimmedRange60;
-  const tChopRatio  = trimmedChopRatio;
-  const tDD60High   = trimmedDrawdownFrom60High;
-  const tReb60Low   = trimmedReboundFrom60Low;
-
-  const absScore = Math.abs(directionalScore);
-  const conflictPenalty = Math.abs(momentumScore) > 12 && Math.abs(maAlignmentScore) > 12 && Math.sign(momentumScore) !== Math.sign(maAlignmentScore) ? 12 : 0;
-  const confidence = Math.round(clamp(absScore - conflictPenalty - penalty * 0.35, 0, 100));
-
-  // ── STEP 1: Hard exits — broken/untradeable charts ─────────────────────────
-  // Catastrophic recent drop (>25% in last 10 bars) = event-driven, not tradeable.
-  // Exception: stock already in a confirmed sustained downtrend (the drop is just the final leg).
-  const recentCatastrophicDrop = pct(currentPrice, max(closes.slice(-11, -1))) < -0.25;
-  const preCatastrophicDowntrend =
-    (lowerHighs || regimeLowerHighs) &&
-    (lowerLows || regimeLowerLows) &&
-    tDD60High < -0.30 &&
-    momentum60 < -0.10;
-  if (recentCatastrophicDrop && !preCatastrophicDowntrend) {
-    return {
-      trend: 'unknown', strategy: 'NO_TRADE', subtype: 'CHOP', confidence: 20,
-      ma20, ma50, ma200, scores, metrics,
-      reason: `REVIEW: catastrophic drop >25% in last 10 bars — event-driven, chart not yet tradeable. Wait for structure to form.`,
-    };
-  }
-
-  // ── STEP 2: Compute regime scores ─────────────────────────────────────────
-  // Three competing scores: trendStrength, rangeScore, chaoticScore.
-  // Classification is determined by which wins, not by gate order.
-
-  // trendStrength: how cleanly directional is this chart?
-  const trendStrength = absScore;
-
-  // rangeScore: evidence the chart is IC-range-bound.
-  // High when: recent range is tight, price is mid-channel, MAs are flat/converging,
-  // no clear directional structure, oscillating behavior.
-  let rangeScore = 0;
-  const recentRange20Pct = high20 > 0 ? (high20 - low20) / low20 : 1;
-  // Tight recent action
-  if (recentRange20Pct < 0.08) rangeScore += 20;
-  else if (recentRange20Pct < 0.12) rangeScore += 12;
-  else if (recentRange20Pct < 0.18) rangeScore += 5;
-  // Flat MAs (converging = sideways regime)
-  const maSpreadPct = Math.abs(pct(ma20, ma50));
-  if (maSpreadPct < 0.015) rangeScore += 18;
-  else if (maSpreadPct < 0.03) rangeScore += 10;
-  else if (maSpreadPct < 0.05) rangeScore += 4;
-  // Weak momentum (price going nowhere on net)
-  if (Math.abs(momentum60) < 0.03) rangeScore += 16;
-  else if (Math.abs(momentum60) < 0.06) rangeScore += 8;
-  else if (Math.abs(momentum60) < 0.10) rangeScore += 2;
-  // Oscillating structure (no consistent higher-high/lower-low pattern)
-  const mixedStructure = (higherHighs && lowerLows) || (lowerHighs && higherLows) ||
-    (!higherHighs && !lowerHighs && !higherLows && !lowerLows);
-  if (mixedStructure) rangeScore += 14;
-  // Chop: only add range score when chop is genuine (trimmed), not spike-induced
-  if (tChopRatio > 4.0) rangeScore += 10;
-  else if (tChopRatio > 2.5) rangeScore += 5;
-  // Price near MA20 (center of range)
-  if (Math.abs(distFromMa20) < 0.03) rangeScore += 8;
-  else if (Math.abs(distFromMa20) < 0.06) rangeScore += 3;
-  // Penalize strong directional MA alignment
-  if (Math.abs(maAlignmentScore) > 22) rangeScore -= 15;
-  else if (Math.abs(maAlignmentScore) > 14) rangeScore -= 8;
-
-  // chaoticScore: evidence the chart is broken/untradeable.
-  let chaoticScore = 0;
-  // Extreme trimmed range (even after spike removal, it's wild)
-  if (tRange60 > maxChaoticRange60) chaoticScore += 30;
-  else if (tRange60 > maxHealthyRange60 * 1.3) chaoticScore += 15;
-  // Strong directional score + exhaustion = broken, not tradeable
-  if (upsideExhausted && directionalScore > 45) chaoticScore += 25;
-  if (downsideExhausted && directionalScore < -45) chaoticScore += 25;
-  // Post-crash stabilization REDUCES chaoticScore — it's actually IC-eligible
-  const postCrashStabilized =
-    range60 > maxHealthyRange60 &&
-    recentRange20Pct < 0.10 &&
-    Math.abs(momentum20) < 0.05 &&
-    Math.abs(momentum40) < 0.12 &&
-    tDD60High < -0.15;
-  if (postCrashStabilized) chaoticScore -= 20;
-
-  // ── STEP 3: Directional memory — overrides marginal range calls ───────────
-  // Two booleans only. Computed from trimmed metrics + structure.
-  // Bearish: lower-high structure + slope confirmed + no strong bounce
-  const clearBearishStructure =
-    (lowerHighs || regimeLowerHighs) &&
-    (lowerLows || regimeLowerLows || brokePriorSupport || (ma20Slope < -0.008 && tDD60High < -0.12)) &&
-    (ma20Slope < -0.005 || momentum40 < -0.03 || ma50Slope < -0.008) &&
-    tDD60High < -0.06 &&
-    !(momentum90 > 0.25 && tDD60High < -0.20 && tRange60 > 0.35);
-
-  const bearishDirectionalMemory =
-    clearBearishStructure &&
-    directionalScore <= -10 &&
-    !(momentum20 > 0.08 && currentPrice > ma20 && tReb60Low > 0.20) &&
-    !(momentum60 > 0.12 && currentPrice > ma50);
-
-  // Bullish: higher-low structure + price above MA50 + slope confirmed + no sharp breakdown
-  const clearBullishStructure =
-    (higherLows || regimeHigherLows) &&
-    currentPrice > ma50 &&
-    (ma20Slope > 0.005 || momentum40 > 0.03) &&
-    directionalScore >= 8 &&
-    tDD60High > -0.25;
-
-  const bullishDirectionalMemory =
-    clearBullishStructure &&
-    directionalScore >= 15 &&
-    !(momentum20 < -0.06 && currentPrice < ma20);
-
-  // ── STEP 4: Strong directional patterns (high confidence, fire first) ──────
-  const bullishContinuation =
-    directionalScore >= 68 && ma20 > ma50 && currentPrice > ma20 &&
-    momentum60 > 0.07 && (higherLows || regimeHigherLows) && !upsideExhausted;
-
-  const bearishContinuation =
-    directionalScore <= -62 && currentPrice < ma20 &&
-    (ma20 < ma50 || ma20Slope < -0.015) &&
-    (momentum60 < -0.06 || momentum20 < -0.08) &&
-    (lowerHighs || lowerLows || brokePriorSupport);
-
-  const bullishReversal =
-    directionalScore >= 48 && currentPrice > ma20 &&
-    momentum20 > 0.035 && momentum60 > 0.07 &&
-    (higherLows || regimeHigherLows) && regimeHigherLows &&
-    momentum90 > -0.35 && !upsideExhausted;
-
-  const bearishReversal =
-    directionalScore <= -48 && currentPrice < ma20 &&
-    momentum20 < -0.035 &&
-    (momentum60 < -0.035 || ma20Slope < -0.012 || brokePriorSupport) &&
-    (lowerHighs || lowerLows || regimeLowerHighs || regimeLowerLows) &&
-    !downsideExhausted;
-
-  // High-vol recovery: confirmed V-bounce above both MAs (catches DDOG/PANW-type recoveries)
-  const volatileRecovery =
-    momentum20 > 0.06 && momentum10 > 0.02 &&
-    currentPrice > ma20 && currentPrice > ma50 &&
-    (higherLows || regimeHigherLows) &&
-    tReb60Low > 0.20 && !upsideExhausted;
-
-  if (bullishContinuation) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'CONTINUATION', confidence,
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BPS CONTINUATION: score ${scores.total}, momentum ${scores.momentum}, MA ${scores.maAlignment}, slope ${scores.slope}, structure/regime ${scores.structure}.` };
-  }
-  if (bearishContinuation) {
-    return { trend: 'downtrend', strategy: 'BCS', subtype: 'CONTINUATION', confidence,
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BCS CONTINUATION: score ${scores.total}, momentum ${scores.momentum}, MA ${scores.maAlignment}, slope ${scores.slope}, structure/regime ${scores.structure}.` };
-  }
-  if (bullishReversal) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'REVERSAL', confidence: Math.max(55, Math.min(74, confidence)),
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BPS REVERSAL: recovery with improving structure. Score ${scores.total}, 20d mom ${(momentum20 * 100).toFixed(1)}%, 60d mom ${(momentum60 * 100).toFixed(1)}%.` };
-  }
-  if (bearishReversal) {
-    return { trend: 'downtrend', strategy: 'BCS', subtype: 'REVERSAL', confidence: Math.max(55, Math.min(74, confidence)),
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BCS REVERSAL: deterioration/failure after prior strength. Score ${scores.total}, 20d mom ${(momentum20 * 100).toFixed(1)}%, 60d mom ${(momentum60 * 100).toFixed(1)}%.` };
-  }
-  if (volatileRecovery) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'REVERSAL', confidence: Math.max(52, Math.min(72, confidence)),
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BPS RECOVERY: confirmed V-bounce above both MAs. Score ${scores.total}, 20d mom +${(momentum20 * 100).toFixed(1)}%, rebound from low ${(tReb60Low * 100).toFixed(1)}%.` };
-  }
-
-  // ── STEP 5: Regime classification by score dominance ──────────────────────
-  // Now that strong directional patterns have been handled, decide between
-  // IC (rangeScore wins), BCS/BPS (trendStrength + directional memory wins),
-  // or chaotic/extended (chaoticScore wins).
-
-  // Chaotic/extended: broken chart, no clean trade
-  if (chaoticScore >= 30 && chaoticScore > rangeScore && chaoticScore > trendStrength * 0.6) {
-    if (upsideExhausted || downsideExhausted) {
-      return { trend: directionalScore > 0 ? 'uptrend' : 'downtrend', strategy: 'NO_TRADE', subtype: 'UNKNOWN',
-        confidence: Math.max(42, Math.min(58, confidence)), ma20, ma50, ma200, scores, metrics,
-        reason: `REVIEW EXTENDED: ${directionalScore > 0 ? 'bullish' : 'bearish'} direction but move is mature/vertical. 20d mom ${(momentum20 * 100).toFixed(1)}%, dist 50MA ${(distFromMa50 * 100).toFixed(1)}%, trimmed range ${(tRange60 * 100).toFixed(1)}%.` };
-    }
-    return { trend: 'sideways', strategy: 'NO_TRADE', subtype: 'CHOP',
-      confidence: Math.max(25, Math.min(48, confidence)), ma20, ma50, ma200, scores, metrics,
-      reason: `NO_TRADE CHOP: trimmed 60d range ${(tRange60 * 100).toFixed(1)}%, chop ${tChopRatio.toFixed(1)}, directional score ${scores.total}.` };
-  }
-
-  // Directional memory overrides IC when structure is confirmed
-  if (bearishDirectionalMemory && rangeScore < trendStrength + 15) {
-    const isStrong = directionalScore <= -15 && (currentPrice < ma50 || (lowerHighs && regimeLowerHighs));
-    return { trend: 'downtrend', strategy: 'BCS',
-      subtype: isStrong ? 'CONTINUATION' : 'REVERSAL',
-      confidence: Math.max(isStrong ? 52 : 45, Math.min(isStrong ? 70 : 62, confidence)),
-      ma20, ma50, ma200, scores, metrics,
-      reason: `BCS (bearish structure): score ${scores.total} — lower highs/lows confirmed, price rolling over. Trimmed range ${(tRange60 * 100).toFixed(1)}%, chop ${tChopRatio.toFixed(1)}.` };
-  }
-
-  if (bullishDirectionalMemory && rangeScore < trendStrength + 15) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'CONTINUATION',
-      confidence: Math.max(52, Math.min(70, confidence)), ma20, ma50, ma200, scores, metrics,
-      reason: `BPS (bullish structure): score ${scores.total} — higher lows, price above MA50, slope confirms direction. Trimmed range ${(tRange60 * 100).toFixed(1)}%, chop ${tChopRatio.toFixed(1)}.` };
-  }
-
-  // IC: range wins when rangeScore clearly dominates and no directional memory override
-  const rangeDominates = rangeScore >= 40 && rangeScore > trendStrength * 0.7;
-  if (rangeDominates || postCrashStabilized) {
-    return { trend: 'sideways', strategy: 'IC', subtype: 'RANGE',
-      confidence: Math.max(55, Math.min(78, Math.round(rangeScore * 0.78))),
-      ma20, ma50, ma200, scores, metrics,
-      reason: `IC RANGE: range score ${Math.round(rangeScore)} vs trend strength ${Math.round(trendStrength)}. Trimmed range ${(tRange60 * 100).toFixed(1)}%, chop ${tChopRatio.toFixed(1)}, MA spread ${(maSpreadPct * 100).toFixed(1)}%.${postCrashStabilized ? ` Post-crash stabilization: last 20 bars tight at ${(recentRange20Pct * 100).toFixed(1)}%.` : ''}` };
-  }
-
-  // Weak directional leans — assign direction if there's any structural support
-  if (directionalScore <= -18 && currentPrice < ma50 && (lowerHighs || brokePriorSupport)) {
-    return { trend: 'downtrend', strategy: 'BCS', subtype: 'REVERSAL',
-      confidence: Math.max(40, Math.min(55, confidence)), ma20, ma50, ma200, scores, metrics,
-      reason: `BCS (weak lean): score ${scores.total} — below MA50 with lower-high or support break. Monitor carefully.` };
-  }
-  if (directionalScore >= 18 && currentPrice > ma50 && (higherLows || regimeHigherLows) && momentum60 > 0.05) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'REVERSAL',
-      confidence: Math.max(40, Math.min(55, confidence)), ma20, ma50, ma200, scores, metrics,
-      reason: `BPS (weak lean): score ${scores.total} — above MA50 with higher-low structure. Monitor carefully.` };
-  }
-  if (directionalScore >= 45 && currentPrice > ma50 && momentum60 > 0.04 && ma20Slope > 0) {
-    return { trend: 'uptrend', strategy: 'BPS', subtype: 'REVERSAL',
-      confidence: Math.max(42, Math.min(58, confidence)), ma20, ma50, ma200, scores, metrics,
-      reason: `BPS (strong score, recovering): score ${scores.total} — above MA50, positive slope and momentum. Higher-low structure not yet confirmed.` };
-  }
-
-  // Final fallback: genuinely ambiguous
-  return {
-    trend: 'unknown', strategy: 'NO_TRADE', subtype: 'UNKNOWN',
-    confidence: Math.max(35, Math.min(54, confidence)),
-    ma20, ma50, ma200, scores, metrics,
-    reason: `REVIEW: conflicting signals — score ${scores.total}, range score ${Math.round(rangeScore)}, trend strength ${Math.round(trendStrength)}. Momentum ${scores.momentum}, MA ${scores.maAlignment}, slope ${scores.slope}, structure ${scores.structure}.`,
-  };
-}
 
 // ── Best Opportunity Finder ────────────────────────────────────────────────
 interface BestSetup {
@@ -6100,14 +4391,6 @@ function BestOpportunityFinder({
 }
 
 // ── Raw Scan Cache ─────────────────────────────────────────────────────────
-interface RawScanEntry {
-  symbol: string;
-  strategy: 'BPS' | 'BCS' | 'IC';
-  metrics: { symbol: string; ivRank: number | null; earningsExpectedDate: string | null };
-  chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean };
-  price: number | null;
-  trendResult?: TrendResult;
-}
 
 // ── Targeted Scan Runner ──────────────────────────────────────────────────
 async function runTargetedScan(
@@ -7567,3 +5850,4 @@ export default function Home() {
     </div>
   );
 }
+
