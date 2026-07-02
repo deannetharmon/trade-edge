@@ -5098,6 +5098,19 @@ export default function Home() {
     } catch {}
   }, []);
 
+  // TE-0005B: the global Task Status Bar's "Open Results" action links to
+  // /screener?mode=rank so a completed ranked-scan task reconnects (via
+  // useRankedScan's existing reconnect effect) regardless of whichever
+  // mode was last stored in localStorage above. Additive only — doesn't
+  // change default behavior for anyone arriving without this param.
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'rank') {
+        setScreenMode('rank');
+      }
+    } catch {}
+  }, []);
+
   // rawScanCache + results + targetedResults restore — IndexedDB access is
   // async, unlike the synchronous localStorage reads above. results moved
   // here after Rank mode's larger result sets were found to silently
@@ -5859,6 +5872,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
