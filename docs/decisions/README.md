@@ -17,3 +17,4 @@ Each decision should include:
 ## Active decisions
 
 - [ADR-0001 Background Task Manager](./ADR-0001-background-task-manager.md)
+- [ADR-0002 Command Bus and Task Manager Separation](./ADR-0002-command-bus-task-manager-separation.md)
