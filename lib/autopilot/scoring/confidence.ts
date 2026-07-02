@@ -11,6 +11,10 @@ function hoursBetween(a: Date, b: Date): number {
   return Math.abs(a.getTime() - b.getTime()) / 36e5;
 }
 
+function isValidDate(value: Date | null): value is Date {
+  return value instanceof Date && Number.isFinite(value.getTime());
+}
+
 function scoreLiquidity(input: DecisionConfidenceInput, notes: string[]): number {
   if (!input.legs.length) {
     notes.push('Liquidity: no legs supplied; score 0/40.');
@@ -33,8 +37,8 @@ function scoreLiquidity(input: DecisionConfidenceInput, notes: string[]): number
 
 function scoreLatency(input: DecisionConfidenceInput, now: Date, notes: string[]): number {
   const quoteTimes = input.legs
-    .map((leg) => leg.quoteTimestamp ? new Date(leg.quoteTimestamp) : null)
-    .filter((d): d is Date => Boolean(d) && Number.isFinite(d.getTime()));
+    .map((leg): Date | null => (leg.quoteTimestamp ? new Date(leg.quoteTimestamp) : null))
+    .filter(isValidDate);
 
   if (!quoteTimes.length) {
     notes.push('Latency: missing quote timestamps; score 0/20.');
