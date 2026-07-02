@@ -5,6 +5,7 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
@@ -8520,6 +8521,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
 }
 
 export default function PortfolioPage() {
+  const [activeTab, setActiveTab] = useState<'positions' | 'balances'>('positions');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -8743,16 +8745,20 @@ export default function PortfolioPage() {
         </div>
         <div className="flex items-center gap-0 w-full border-t border-white/10">
           <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>PORTFOLIO</span>
+          <button onClick={() => setActiveTab('positions')} className="text-[10px] font-bold px-3 py-2 tracking-wider transition-colors" style={activeTab === 'positions' ? { color: '#00d4aa', borderBottom: '2px solid #00d4aa' } : { color: 'rgba(255,255,255,0.55)' }}>POSITIONS</button>
+          <button onClick={() => setActiveTab('balances')} className="text-[10px] font-bold px-3 py-2 tracking-wider transition-colors" style={activeTab === 'balances' ? { color: '#00d4aa', borderBottom: '2px solid #00d4aa' } : { color: 'rgba(255,255,255,0.55)' }}>BALANCES</button>
           <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
           <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
           <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
           <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
           <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
           <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
-          <Link href="/balances"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">BALANCES</Link>
         </div>
       </div>
+
+      {activeTab === 'balances' && <BalancesTab />}
+
+      {activeTab === 'positions' && (<>
 
       {/* Dry run mode banner */}
       {dryRunMode && (
@@ -8853,6 +8859,8 @@ export default function PortfolioPage() {
           <button onClick={() => setPortfolioAnalysis(null)} className="text-red-400 hover:text-red-200">✕</button>
         </div>
       )}
+
+      </>)}
     </div>
   );
 }

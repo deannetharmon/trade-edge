@@ -1,9 +1,8 @@
-// app/balances/page.tsx
+// components/BalancesTab.tsx
 
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import Link from 'next/link';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -90,11 +89,6 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     netOptionsValue: parseFloat(b['long-derivative-value'] ?? '0') - parseFloat(b['short-derivative-value'] ?? '0'),
   };
 
-  // Sync history: pull TastyTrade's balance-snapshots and upsert any days
-  // we don't already have in Redis. This runs on every page load rather
-  // than requiring a daily visit -- TastyTrade retains snapshot history
-  // server-side, so a gap of several days between visits still backfills
-  // correctly as long as TastyTrade kept the snapshots.
   try {
     const snapData = await ttFetch(`/accounts/${accountNumber}/balance-snapshots`, token);
     const items = snapData?.data?.items ?? [];
@@ -105,7 +99,7 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
         cashBalance: parseFloat(item['cash-balance'] ?? '0'),
         netOptionsValue: parseFloat(item['long-derivative-value'] ?? '0') - parseFloat(item['short-derivative-value'] ?? '0'),
       }))
-      .filter((d: BalanceDay) => d.date && d.netLiquidatingValue !== 0); // TastyTrade sometimes returns an all-zero placeholder row
+      .filter((d: BalanceDay) => d.date && d.netLiquidatingValue !== 0);
 
     if (days.length > 0) {
       await fetch('/api/balance-history', {
@@ -195,7 +189,7 @@ function BalanceChart({ history, range }: { history: BalanceDay[]; range: RangeK
   );
 }
 
-export default function BalancesPage() {
+export default function BalancesTab() {
   const [current, setCurrent] = useState<CurrentBalances | null>(null);
   const [history, setHistory] = useState<BalanceDay[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,69 +212,50 @@ export default function BalancesPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-black text-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <div className="border-b border-white/10">
-        <div className="flex items-center justify-between px-6 py-3">
-          <span className="text-sm font-bold tracking-widest">TRADEEDGE</span>
-        </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <Link href="/portfolio"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</Link>
-          <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
-          <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
-          <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
-          <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
-          <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
-          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>BALANCES</span>
-          <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
-        </div>
-      </div>
+    <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+      {loading && <p className="text-white/40 text-sm">Loading balances...</p>}
+      {error && <p className="text-red-400 text-sm">{error}</p>}
 
-      <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
-        {loading && <p className="text-white/40 text-sm">Loading balances...</p>}
-        {error && <p className="text-red-400 text-sm">{error}</p>}
-
-        {!loading && current && (
-          <>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="border border-white/10 rounded-xl p-5">
-                <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Liquidating Value</p>
-                <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.netLiquidatingValue)}</p>
-              </div>
-              <div className="border border-white/10 rounded-xl p-5">
-                <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Cash Balance</p>
-                <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.cashBalance)}</p>
-              </div>
-              <div className="border border-white/10 rounded-xl p-5">
-                <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Options Value</p>
-                <p className={`text-2xl font-bold ${current.netOptionsValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {fmtSignedMoney(current.netOptionsValue)}
-                </p>
-              </div>
-            </div>
-
+      {!loading && current && (
+        <>
+          <div className="grid grid-cols-3 gap-4">
             <div className="border border-white/10 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-[10px] text-white/40 uppercase tracking-widest">Net Liq Over Time</p>
-                <div className="flex gap-1">
-                  {RANGES.map(r => (
-                    <button
-                      key={r.key}
-                      onClick={() => setRange(r.key)}
-                      className={`text-[10px] font-bold px-2.5 py-1 rounded transition-colors ${
-                        range === r.key ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'
-                      }`}
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <BalanceChart history={history} range={range} />
+              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Liquidating Value</p>
+              <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.netLiquidatingValue)}</p>
             </div>
-          </>
-        )}
-      </div>
+            <div className="border border-white/10 rounded-xl p-5">
+              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Cash Balance</p>
+              <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.cashBalance)}</p>
+            </div>
+            <div className="border border-white/10 rounded-xl p-5">
+              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Options Value</p>
+              <p className={`text-2xl font-bold ${current.netOptionsValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                {fmtSignedMoney(current.netOptionsValue)}
+              </p>
+            </div>
+          </div>
+
+          <div className="border border-white/10 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[10px] text-white/40 uppercase tracking-widest">Net Liq Over Time</p>
+              <div className="flex gap-1">
+                {RANGES.map(r => (
+                  <button
+                    key={r.key}
+                    onClick={() => setRange(r.key)}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded transition-colors ${
+                      range === r.key ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <BalanceChart history={history} range={range} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
