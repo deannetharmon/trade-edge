@@ -83,3 +83,87 @@ The original sprint was too large to verify cleanly. Splitting it creates a safe
 
 **Impact:**  
 Improves deployability and reduces the chance of building trading logic on unstable foundations.
+
+---
+
+## 2026-07-02 — Framework Before Execution
+
+**Decision:**  
+Autopilot must have configuration, persistence, audit logging, scoring utilities, run locking, telemetry, and dry-run routes before any paper execution code is introduced.
+
+**Reason:**  
+Autonomous trading systems fail when execution is built before observability and controls. The framework must prove it can log, lock, and explain before it acts.
+
+**Alternatives considered:**
+
+- Build paper entries immediately after config — rejected.
+- Build UI first and wire logic later — rejected.
+
+**Impact:**  
+Sprints 1A and 1B are intentionally non-trading. This creates a stable foundation for the Decision Engine.
+
+---
+
+## 2026-07-02 — Decision Engine Before Paper Execution
+
+**Decision:**  
+Sprint 2 is now the Decision Engine, not paper execution. Autopilot must produce ranked recommendations with full acceptance/rejection reasoning before it can create paper trades.
+
+**Reason:**  
+Thinking and acting need separate validation points. Debugging scoring, risk gates, and execution at the same time would make the system harder to verify.
+
+**Alternatives considered:**
+
+- Combine candidate ranking and paper execution in one sprint — rejected.
+
+**Impact:**  
+No paper trade creation until after the Decision Engine is validated.
+
+---
+
+## 2026-07-02 — Vercel Is the Build Pipeline
+
+**Decision:**  
+Vercel build success is the primary build gate because the local development environment lacks npm access.
+
+**Reason:**  
+The developer environment is constrained by corporate tooling. Vercel provides the reliable source of truth for Next.js compilation and TypeScript validation.
+
+**Alternatives considered:**
+
+- Require local `npm run build` — rejected as impractical in current environment.
+- Delay development until local Node/npm is available — rejected.
+
+**Impact:**  
+Each sprint is pushed to GitHub and validated by Vercel. Runtime endpoint smoke tests are deferred when preview access is blocked.
+
+---
+
+## 2026-07-02 — Dry-Run-First Manual and Cron Routes
+
+**Decision:**  
+Manual and cron endpoints initially run only a framework dry run: acquire a Redis lock, write telemetry, write a no-action decision log, update `lastRunAt`, and exit.
+
+**Reason:**  
+This validates scheduling, locking, telemetry, and auditability without enabling candidate scanning or trade execution.
+
+**Alternatives considered:**
+
+- Manual button creates paper trades immediately — rejected.
+- Cron remains absent until late build — rejected.
+
+**Impact:**  
+The automation shell exists early, but cannot trade.
+
+---
+
+## 2026-07-02 — Scoring Frameworks Are Approved but Not Yet Final Calibration
+
+**Decision:**  
+Decision Confidence, Opportunity Score, and Net Edge are implemented as framework utilities in Sprint 1B. Full calibration and risk-gate integration occurs in Sprint 2.
+
+**Reason:**  
+The formulas need to exist before the Decision Engine can orchestrate them, but they should not be treated as production-calibrated until candidate/rejection behavior is validated.
+
+**Impact:**  
+Sprint 2 will integrate these utilities into explainable ranked recommendations.
