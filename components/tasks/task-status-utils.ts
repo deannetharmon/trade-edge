@@ -75,3 +75,11 @@ export function canOpenResult(task: TradeEdgeTask): boolean {
   return task.kind === 'ranked-scan' && task.status === 'completed' && task.result != null;
 }
 
+/** Returns a route for task result reopening when the app supports it. */
+export function getTaskOpenHref(task: TradeEdgeTask): string | null {
+  if (task.kind === 'ranked-scan' && task.status === 'completed' && task.result != null) {
+    return '/screener?mode=rank';
+  }
+
+  return null;
+}

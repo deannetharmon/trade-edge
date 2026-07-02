@@ -6,6 +6,7 @@ import { TaskProvider } from '@/components/tasks/TaskProvider';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskStatusBar } from '@/components/tasks/TaskStatusBar';
 import { TaskNotifications } from '@/components/tasks/TaskNotifications';
+import { TaskDrawer } from '@/components/tasks/TaskDrawer';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -15,6 +16,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           {children}
           <TaskStatusBar />
           <TaskNotifications />
+          <TaskDrawer />
         </CommandProvider>
       </TaskProvider>
     </SessionProvider>
