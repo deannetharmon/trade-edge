@@ -13,28 +13,24 @@
 - TE-0005A — Background Ranked Scan Infrastructure
 - RF-0001 — Establish Feature-Oriented Screener Module
 - TE-0005B — Global Background Task Status Bar
+- TE-0005C — Task Completion Notifications
 
 ## Current Focus
 
-### TE-0005C — Task Completion Notifications
+### TE-0005D — Global Task Drawer
 
-Goal: add lightweight app-wide in-app notifications when background tasks complete, fail, or cancel.
+Goal: provide a compact global drawer for viewing running and recent background tasks.
 
-This validates:
-
-- TaskManager event subscription UX
-- terminal task notification handling
-- Open Results from notification
-- notification dismissal without destroying task records
+This is the final task-UX infrastructure ticket before shifting back to trader-facing features.
 
 ## Near-Term Roadmap
 
-1. TE-0005C — Task Completion Notifications
-2. TE-0005D — Task Center
-3. TE-0006 — Migrate Screener to Task Manager and Command Bus
-4. TE-0007 — Portfolio AI Recommendation Improvements
-5. TE-0008 — Autopilot Paper Mode Integration
-6. TE-0009 — Evaluate Durable Background Tasks
+1. TE-0005D — Global Task Drawer
+2. TE-0006 — Portfolio AI Recommendation Engine 2.0
+3. TE-0007 — Position Health and Exit Advisor
+4. TE-0008 — Retirement Income Engine
+5. TE-0009 — Autopilot Paper Mode
+6. TE-0010 — Performance Analytics
 
 ## Milestones
 
@@ -54,39 +50,38 @@ Completed:
 
 - RF-0001
 - TE-0005B
+- TE-0005C
 
 Current:
 
-- TE-0005C
-
-Next:
-
 - TE-0005D
-- TE-0006
 
-### Milestone 3 — Portfolio Intelligence
+### Milestone 3 — Trader Intelligence
 
 Planned:
 
-- TE-0007+
+- TE-0006 — Portfolio AI Recommendation Engine 2.0
+- TE-0007 — Position Health and Exit Advisor
+- TE-0008 — Retirement Income Engine
 
 ### Milestone 4 — Autopilot / Paper Mode
 
 Planned:
 
-- TE-0008+
+- TE-0009+
 
 ### Milestone 5 — Production Hardening
 
 Planned:
 
-- TE-0009+
+- TE-0010+
 
 ## Working Model
 
 - Dean: Product Owner / Trader
 - ChatGPT: Chief Architect / Reviewer
-- Claude: Implementation Engineer
+- Claude/Gemini: Implementation Engineer
+- Vercel: authoritative build validation after push
 
 ## Process
 
@@ -94,4 +89,5 @@ Planned:
 2. Architect creates TE/RF ticket and ADR if needed.
 3. Implementation engineer implements one ticket.
 4. Implementation engineer creates an implementation report.
-5. Architect reviews before moving to the next ticket.
+5. Vercel build validates after push.
+6. Architect reviews before moving to the next ticket.

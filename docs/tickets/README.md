@@ -25,6 +25,7 @@ Each ticket should include:
 - [RF-0001 Feature-Oriented Screener Module](./RF-0001-feature-oriented-screener-module.md)
 - [TE-0005B Global Background Task Status Bar](./TE-0005B-global-background-task-status-bar.md)
 - [TE-0005C Task Completion Notifications](./TE-0005C-task-completion-notifications.md)
+- [TE-0005D Global Task Drawer](./TE-0005D-global-task-drawer.md)
 
 ## Current roadmap order
 
