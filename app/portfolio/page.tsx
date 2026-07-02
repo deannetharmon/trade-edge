@@ -8745,14 +8745,33 @@ export default function PortfolioPage() {
         </div>
         <div className="flex items-center gap-0 w-full border-t border-white/10">
           <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <button onClick={() => setActiveTab('positions')} className="text-[10px] font-bold px-3 py-2 tracking-wider transition-colors" style={activeTab === 'positions' ? { color: '#00d4aa', borderBottom: '2px solid #00d4aa' } : { color: 'rgba(255,255,255,0.55)' }}>POSITIONS</button>
-          <button onClick={() => setActiveTab('balances')} className="text-[10px] font-bold px-3 py-2 tracking-wider transition-colors" style={activeTab === 'balances' ? { color: '#00d4aa', borderBottom: '2px solid #00d4aa' } : { color: 'rgba(255,255,255,0.55)' }}>BALANCES</button>
+          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>PORTFOLIO</span>
           <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
           <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
           <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
           <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
           <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
           <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
+        </div>
+      </div>
+
+      {/* Sub-tab bar */}
+      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
+        <div className="flex gap-0">
+          {([
+            { key: 'positions', label: 'Positions', icon: '◈' },
+            { key: 'balances', label: 'Balances', icon: '◉' },
+          ] as { key: 'positions' | 'balances'; label: string; icon: string }[]).map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? `text-white border-[var(--accent)]`
+                  : `${th.textFaint} border-transparent hover:text-white/70`
+              }`}>
+              <span className="text-sm">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
