@@ -11,29 +11,31 @@
 - TE-0003 — Implement Task Manager Foundation
 - TE-0004 — Implement Command Bus Foundation
 
-## Next Up
+## Current Focus
 
-### TE-0005 — Migrate Ranked Scan to Task Manager and Command Bus
+### TE-0005A — Background Ranked Scan Infrastructure
 
-Goal: convert Ranked Scan into the first real consumer of the Task Manager and Command Bus foundations.
+Goal: make Ranked Scan the first real consumer of the Task Manager and Command Bus foundations.
 
-This will validate:
+This ticket validates:
 
 - command dispatch ergonomics
 - task lifecycle updates
 - background-safe scan execution
 - result handoff after navigation
-- provider wiring
+- cancellation boundaries
 - current architectural boundaries
 
 ## Near-Term Roadmap
 
-1. TE-0005 — Migrate Ranked Scan to Task Manager and Command Bus
-2. TE-0006 — Migrate Screener to Task Manager and Command Bus
-3. TE-0007 — Add Global Task Center and Notifications
-4. TE-0008 — Portfolio AI Recommendation Improvements
-5. TE-0009 — Autopilot Paper Mode Integration
-6. TE-0010 — Evaluate Durable Background Tasks
+1. TE-0005A — Background Ranked Scan Infrastructure
+2. TE-0005B — Global Ranked Scan Completion Notification
+3. TE-0005C — Resume Completed Ranked Scan Results
+4. TE-0006 — Migrate Screener to Task Manager and Command Bus
+5. TE-0007 — Add Global Task Center and Notifications
+6. TE-0008 — Portfolio AI Recommendation Improvements
+7. TE-0009 — Autopilot Paper Mode Integration
+8. TE-0010 — Evaluate Durable Background Tasks
 
 ## Working Model
 
