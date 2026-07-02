@@ -14,23 +14,24 @@
 - RF-0001 — Establish Feature-Oriented Screener Module
 - TE-0005B — Global Background Task Status Bar
 - TE-0005C — Task Completion Notifications
+- TE-0005D — Global Task Drawer
 
 ## Current Focus
 
-### TE-0005D — Global Task Drawer
+### TE-0006A — Portfolio Health Scoring Framework
 
-Goal: provide a compact global drawer for viewing running and recent background tasks.
-
-This is the final task-UX infrastructure ticket before shifting back to trader-facing features.
+Goal: create a reusable portfolio position health scoring engine that supports future advisor cards, daily priorities, and recommendation logic.
 
 ## Near-Term Roadmap
 
-1. TE-0005D — Global Task Drawer
-2. TE-0006 — Portfolio AI Recommendation Engine 2.0
-3. TE-0007 — Position Health and Exit Advisor
-4. TE-0008 — Retirement Income Engine
-5. TE-0009 — Autopilot Paper Mode
-6. TE-0010 — Performance Analytics
+1. TE-0006A — Portfolio Health Scoring Framework
+2. TE-0006B — Portfolio Recommendation Rules
+3. TE-0006C — Daily Priority List
+4. TE-0006D — Position Advisor Cards
+5. TE-0006E — Recommendation Explanation Panel
+6. TE-0007 — Position Health and Exit Advisor
+7. TE-0008 — Retirement Income Engine
+8. TE-0009 — Autopilot Paper Mode
 
 ## Milestones
 
@@ -51,18 +52,20 @@ Completed:
 - RF-0001
 - TE-0005B
 - TE-0005C
-
-Current:
-
 - TE-0005D
 
 ### Milestone 3 — Trader Intelligence
 
-Planned:
+Current:
 
-- TE-0006 — Portfolio AI Recommendation Engine 2.0
-- TE-0007 — Position Health and Exit Advisor
-- TE-0008 — Retirement Income Engine
+- TE-0006A
+
+Next:
+
+- TE-0006B
+- TE-0006C
+- TE-0006D
+- TE-0006E
 
 ### Milestone 4 — Autopilot / Paper Mode
 

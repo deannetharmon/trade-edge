@@ -26,6 +26,7 @@ Each ticket should include:
 - [TE-0005B Global Background Task Status Bar](./TE-0005B-global-background-task-status-bar.md)
 - [TE-0005C Task Completion Notifications](./TE-0005C-task-completion-notifications.md)
 - [TE-0005D Global Task Drawer](./TE-0005D-global-task-drawer.md)
+- [TE-0006A Portfolio Health Scoring Framework](./TE-0006A-portfolio-health-scoring-framework.md)
 
 ## Current roadmap order
 
