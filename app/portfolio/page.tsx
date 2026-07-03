@@ -9,6 +9,12 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+import type { PositionHealthScore } from '@/features/portfolio/health/health-types';
+import { calculatePositionHealthScore } from '@/features/portfolio/health/health-score';
+import type { PortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-types';
+import { calculatePortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-engine';
+import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
+import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
 
 // Inject accent CSS variable style
@@ -133,6 +139,8 @@ interface Position {
   theta: number | null;
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
+  healthScore?: PositionHealthScore;
+  recommendation?: PortfolioRecommendation;
 }
 
 // ── Pending Orders ───────────────────────────────────────────────────────
@@ -180,6 +188,27 @@ interface PositionSnapshot {
   gamma: number | null;
   netDelta: number | null;
   stockPrice: number | null;
+}
+
+function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
+  return calculatePositionHealthScore({
+    ...pos,
+    positionId: pos.key,
+  });
+}
+
+function scorePortfolioRecommendation(pos: Position): PortfolioRecommendation {
+  const healthScore = pos.healthScore ?? (
+    typeof scorePortfolioPositionHealth === 'function'
+      ? scorePortfolioPositionHealth(pos)
+      : undefined
+  );
+
+  return calculatePortfolioRecommendation({
+    ...pos,
+    positionId: pos.key,
+    healthScore,
+  });
 }
 
 function todayLocalDateString(): string {
@@ -241,7 +270,10 @@ function attachSnapshotHistory(
   return positions.map(p => {
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
-    return { ...p, snapshotHistory: sorted };
+    const withHistory = { ...p, snapshotHistory: sorted };
+    const healthScore = scorePortfolioPositionHealth(withHistory);
+    const withHealth = { ...withHistory, healthScore };
+    return { ...withHealth, recommendation: scorePortfolioRecommendation(withHealth) };
   });
 }
 
@@ -6207,8 +6239,8 @@ OUTPUT FORMAT — JSON only, nothing else:
 }`;
 
 function buildStopGtcPrompt(pos: Position): string {
-  const creditPerContract = pos.creditReceived / 100;
   const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+  const creditPerContract = pos.creditReceived / (qty * 100);
   const currentValuePerContract = pos.currentValue != null ? pos.currentValue / (qty * 100) : null;
   const pnlPct = pos.pnl != null && pos.creditReceived > 0
     ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
@@ -6301,8 +6333,8 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   //   Maximum reasonable stop: 3× credit per contract (beyond that = max loss anyway).
   //   Minimum: current spread value + $0.01
 
-  const creditPerContract = pos.creditReceived / 100;
   const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+  const creditPerContract = pos.creditReceived / (qty * 100);
   // currentValue from pos is total across all contracts × 100
   // Per-contract spread value = currentValue / (qty * 100)
   const liveValuePerContract = pos.currentValue != null
@@ -6458,15 +6490,18 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         const perContract = fresh / (qty * 100);
         setLivePrice(perContract);
         console.log(`LIVE PRICE FETCH ${pos.symbol}: $${perContract.toFixed(4)}/contract`);
-        // Set initial input defaults using live price
+        // Set initial input defaults using live price. Anchored to credit
+        // (not live value) so the default is a consistent "1.5x what I
+        // collected" regardless of how much profit has already been
+        // captured — still respects the hard floor of live value + $0.01.
         const initGtc  = Math.min(existingGtcPrice, perContract - 0.01);
-        const initStop = Math.max(perContract * 2.0,  perContract + 0.01);
+        const initStop = Math.max(creditPerContract * 1.5, perContract + 0.01);
         setGtcPrice(Math.max(initGtc, gtcMin).toFixed(2));
         setStopPrice(Math.min(initStop, stopMax).toFixed(2));
       } else {
         setLivePriceError('Could not fetch live price — using estimates');
         setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-        const naiveStop = Math.max(creditPerContract * 2.0, stopMin);
+        const naiveStop = Math.max(creditPerContract * 1.5, stopMin);
         setStopPrice(Math.min(naiveStop, stopMax).toFixed(2));
       }
     } catch (e: any) {
@@ -6475,7 +6510,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
       console.warn('SetStopLossButton live price fetch failed:', e.message);
       setLivePriceError(`Price fetch failed: ${e.message ?? 'unknown error'}`);
       setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-      setStopPrice(Math.min(creditPerContract * 2.0, stopMax).toFixed(2));
+      setStopPrice(Math.min(creditPerContract * 1.5, stopMax).toFixed(2));
     } finally {
       if (mountedRef.current) setLivePriceLoading(false);
     }
@@ -6831,18 +6866,31 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             )}
             <div>
               <div className="flex items-center gap-2">
-                <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Stop trigger $</span>
+                <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Stop trigger</span>
+                <input
+                  type="number" min="0.1" step="0.1"
+                  value={stopMultipleDisplay === '—' ? '' : stopMultipleDisplay}
+                  onChange={e => {
+                    const mult = parseFloat(e.target.value);
+                    if (!isNaN(mult) && creditPerContract > 0) setStopPrice((mult * creditPerContract).toFixed(2));
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
+                  autoFocus={!needsOco}
+                  className={`w-16 text-[11px] px-2 py-1.5 rounded border ${
+                    stopError ? 'border-red-500' : th.inputBorder
+                  } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
+                  style={{ fontFamily: "'DM Mono', monospace" }}
+                />
+                <span className={`text-[10px] ${th.textFaint} shrink-0`}>× credit =</span>
                 <input
                   type="number" min={stopMin} max={stopMax} step="0.01" value={stopPrice}
                   onChange={e => setStopPrice(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
-                  autoFocus={!needsOco}
                   className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
                     stopError ? 'border-red-500' : th.inputBorder
                   } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
                   style={{ fontFamily: "'DM Mono', monospace" }}
                 />
-                {stopParsed > 0 && <span className={`text-[9px] ${th.textFaint} w-12 shrink-0`}>{stopMultipleDisplay}×</span>}
               </div>
               {stopError && <p className="text-[9px] text-red-400 mt-1 ml-28">{stopError}</p>}
               {!stopError && effectiveLiveDisplay != null && (
@@ -7573,6 +7621,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className={`text-[10px] font-bold ${th.textFaint} tracking-widest`}>{pos.symbol}</span>
+                <PositionHealthBadge health={pos.healthScore} />
+                <PositionRecommendationBadge recommendation={pos.recommendation} />
                       <button onClick={() => setShowChart(false)} className="text-slate-500 hover:text-white transition-colors text-sm leading-none">✕</button>
                     </div>
                       {sparkLoading && (
@@ -7970,13 +8020,23 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                   pos.stopLossStatus === 'loose' ? { icon: '⚠', label: 'Loose', cls: 'text-yellow-400'  } :
                   pos.stopLossStatus === 'none'  ? { icon: '✕', label: 'None',  cls: 'text-red-400'     } :
                                                    { icon: '—', label: '?',     cls: th.textFaint        };
+                const shortQty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+                const creditPerContract = shortQty > 0 ? pos.creditReceived / (shortQty * 100) : pos.creditReceived / 100;
+                const stopMultiple = pos.stopLossPrice != null && creditPerContract > 0
+                  ? (pos.stopLossPrice / creditPerContract).toFixed(1)
+                  : null;
                 return (
-                  <p className={`text-xs font-bold ${cfg.cls}`}>
-                    {cfg.icon} {cfg.label}
-                    {pos.stopLossPrice != null && (
-                      <span className={`ml-1 ${th.textFaint} text-[10px] font-normal`}>${pos.stopLossPrice.toFixed(2)}</span>
+                  <>
+                    <p className={`text-xs font-bold ${cfg.cls}`}>
+                      {cfg.icon} {cfg.label}
+                      {pos.stopLossPrice != null && (
+                        <span className={`ml-1 ${th.textFaint} text-[10px] font-normal`}>${pos.stopLossPrice.toFixed(2)}</span>
+                      )}
+                    </p>
+                    {stopMultiple != null && (
+                      <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{stopMultiple}× credit</p>
                     )}
-                  </p>
+                  </>
                 );
               })()}
             </div>
