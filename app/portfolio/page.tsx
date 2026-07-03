@@ -11,6 +11,9 @@ import {
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore } from '@/features/portfolio/health/health-types';
 import { calculatePositionHealthScore } from '@/features/portfolio/health/health-score';
+import type { PortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-types';
+import { calculatePortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-engine';
+import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
 
@@ -137,6 +140,7 @@ interface Position {
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
   healthScore?: PositionHealthScore;
+  recommendation?: PortfolioRecommendation;
 }
 
 // ── Pending Orders ───────────────────────────────────────────────────────
@@ -190,6 +194,20 @@ function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
   return calculatePositionHealthScore({
     ...pos,
     positionId: pos.key,
+  });
+}
+
+function scorePortfolioRecommendation(pos: Position): PortfolioRecommendation {
+  const healthScore = pos.healthScore ?? (
+    typeof scorePortfolioPositionHealth === 'function'
+      ? scorePortfolioPositionHealth(pos)
+      : undefined
+  );
+
+  return calculatePortfolioRecommendation({
+    ...pos,
+    positionId: pos.key,
+    healthScore,
   });
 }
 
@@ -253,7 +271,9 @@ function attachSnapshotHistory(
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
     const withHistory = { ...p, snapshotHistory: sorted };
-    return { ...withHistory, healthScore: scorePortfolioPositionHealth(withHistory) };
+    const healthScore = scorePortfolioPositionHealth(withHistory);
+    const withHealth = { ...withHistory, healthScore };
+    return { ...withHealth, recommendation: scorePortfolioRecommendation(withHealth) };
   });
 }
 
@@ -7586,6 +7606,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                     <div className="flex items-center justify-between mb-2">
                       <span className={`text-[10px] font-bold ${th.textFaint} tracking-widest`}>{pos.symbol}</span>
                 <PositionHealthBadge health={pos.healthScore} />
+                <PositionRecommendationBadge recommendation={pos.recommendation} />
                       <button onClick={() => setShowChart(false)} className="text-slate-500 hover:text-white transition-colors text-sm leading-none">✕</button>
                     </div>
                       {sparkLoading && (
