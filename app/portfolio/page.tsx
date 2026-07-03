@@ -9,6 +9,9 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+import type { PositionHealthScore } from '@/features/portfolio/health/health-types';
+import { calculatePositionHealthScore } from '@/features/portfolio/health/health-score';
+import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
 
 // Inject accent CSS variable style
@@ -133,6 +136,7 @@ interface Position {
   theta: number | null;
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
+  healthScore?: PositionHealthScore;
 }
 
 // ── Pending Orders ───────────────────────────────────────────────────────
@@ -180,6 +184,13 @@ interface PositionSnapshot {
   gamma: number | null;
   netDelta: number | null;
   stockPrice: number | null;
+}
+
+function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
+  return calculatePositionHealthScore({
+    ...pos,
+    positionId: pos.key,
+  });
 }
 
 function todayLocalDateString(): string {
@@ -241,7 +252,8 @@ function attachSnapshotHistory(
   return positions.map(p => {
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
-    return { ...p, snapshotHistory: sorted };
+    const withHistory = { ...p, snapshotHistory: sorted };
+    return { ...withHistory, healthScore: scorePortfolioPositionHealth(withHistory) };
   });
 }
 
@@ -7573,6 +7585,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className={`text-[10px] font-bold ${th.textFaint} tracking-widest`}>{pos.symbol}</span>
+                <PositionHealthBadge health={pos.healthScore} />
                       <button onClick={() => setShowChart(false)} className="text-slate-500 hover:text-white transition-colors text-sm leading-none">✕</button>
                     </div>
                       {sparkLoading && (
