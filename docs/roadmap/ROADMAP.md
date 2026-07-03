@@ -15,23 +15,23 @@
 - TE-0005B — Global Background Task Status Bar
 - TE-0005C — Task Completion Notifications
 - TE-0005D — Global Task Drawer
+- TE-0006A — Portfolio Health Scoring Framework
 
 ## Current Focus
 
-### TE-0006A — Portfolio Health Scoring Framework
+### TE-0006B — Portfolio Recommendation Rules
 
-Goal: create a reusable portfolio position health scoring engine that supports future advisor cards, daily priorities, and recommendation logic.
+Goal: convert portfolio health scores and position fields into one deterministic recommendation per position.
 
 ## Near-Term Roadmap
 
-1. TE-0006A — Portfolio Health Scoring Framework
-2. TE-0006B — Portfolio Recommendation Rules
-3. TE-0006C — Daily Priority List
-4. TE-0006D — Position Advisor Cards
-5. TE-0006E — Recommendation Explanation Panel
-6. TE-0007 — Position Health and Exit Advisor
-7. TE-0008 — Retirement Income Engine
-8. TE-0009 — Autopilot Paper Mode
+1. TE-0006B — Portfolio Recommendation Rules
+2. TE-0006C — Daily Priority List
+3. TE-0006D — Position Advisor Cards
+4. TE-0006E — Recommendation Explanation Panel
+5. TE-0007 — Position Health and Exit Advisor
+6. TE-0008 — Retirement Income Engine
+7. TE-0009 — Autopilot Paper Mode
 
 ## Milestones
 
@@ -56,13 +56,16 @@ Completed:
 
 ### Milestone 3 — Trader Intelligence
 
-Current:
+Completed:
 
 - TE-0006A
 
-Next:
+Current:
 
 - TE-0006B
+
+Next:
+
 - TE-0006C
 - TE-0006D
 - TE-0006E
