@@ -6360,6 +6360,41 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const [stopPrice, setStopPrice] = useState('');
   const [gtcPrice,  setGtcPrice]  = useState('');
 
+  // Modal position — fixed + viewport-aware, computed from the trigger
+  // button's rect. Fixes the modal rendering off-screen above the viewport
+  // when the button is near the top of the page (was `absolute bottom-full`,
+  // which always grows upward regardless of available space).
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [modalPos, setModalPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null);
+
+  const positionModal = useCallback(() => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const modalWidth = 384; // w-96
+    const margin = 8;
+    const spaceAbove = r.top - margin;
+    const spaceBelow = window.innerHeight - r.bottom - margin;
+    const left = Math.min(Math.max(r.left, margin), Math.max(margin, window.innerWidth - modalWidth - margin));
+
+    if (spaceAbove >= spaceBelow) {
+      setModalPos({ bottom: window.innerHeight - r.top + margin, left, maxHeight: Math.max(200, spaceAbove) });
+    } else {
+      setModalPos({ top: r.bottom + margin, left, maxHeight: Math.max(200, spaceBelow) });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    positionModal();
+    window.addEventListener('resize', positionModal);
+    window.addEventListener('scroll', positionModal, true);
+    return () => {
+      window.removeEventListener('resize', positionModal);
+      window.removeEventListener('scroll', positionModal, true);
+    };
+  }, [open, positionModal]);
+
   // AI suggestion
   const [suggestion, setSuggestion]           = useState<StopGtcSuggestion | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
@@ -6719,6 +6754,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         onClick={e => { e.stopPropagation(); open ? setOpen(false) : handleOpen(); }}
         className={`text-[9px] px-2.5 py-1 border rounded font-bold transition-colors ${
           result === 'success' ? 'border-emerald-600 text-emerald-400' :
@@ -6733,7 +6769,14 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
       {open && (
         <div
-          className={`absolute bottom-full mb-2 left-0 z-30 ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-4 w-96`}
+          className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-4 w-96 overflow-y-auto`}
+          style={{
+            top: modalPos?.top,
+            bottom: modalPos?.bottom,
+            left: modalPos?.left ?? 0,
+            maxHeight: modalPos?.maxHeight ?? '80vh',
+            visibility: modalPos ? 'visible' : 'hidden',
+          }}
           onClick={e => e.stopPropagation()}>
 
           {/* Header */}
