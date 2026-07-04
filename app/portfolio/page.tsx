@@ -6180,7 +6180,7 @@ interface StopGtcSuggestion {
   gtcPrice: number;       // recommended profit-target BTC price
   gtcPct: number;         // what % of credit that represents
   stopPrice: number;      // recommended stop trigger price
-  stopMultiple: number;   // how many × credit that is
+  stopMultiple: number;   // multiple of CURRENT spread value (NOT original credit) — see system prompt
   rationale: string;      // 2-3 sentence explanation
   gtcRationale: string;   // why this GTC level specifically
   stopRationale: string;  // why this stop level specifically
@@ -6491,7 +6491,17 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         gtcPrice:  parseFloat(safeGtc.toFixed(2)),
         stopPrice: parseFloat(safeStop.toFixed(2)),
         gtcPct:    Math.round((1 - safeGtc / creditPerContract) * 100),
-        stopMultiple: parseFloat((safeStop / creditPerContract).toFixed(1)),
+        // Bug fix: this used to recompute stopMultiple relative to credit
+        // (safeStop / creditPerContract), silently discarding the AI's own
+        // current-value-relative number — even though the system prompt
+        // explicitly tells the AI to report it relative to current value,
+        // and the AI's rationale text references that same basis. Recompute
+        // deterministically here (don't trust the model's arithmetic), but
+        // relative to the correct anchor: current spread value when known,
+        // falling back to credit only when no live price is available.
+        stopMultiple: live != null
+          ? parseFloat((safeStop / live).toFixed(2))
+          : parseFloat((safeStop / creditPerContract).toFixed(2)),
       });
       setGtcPrice(safeGtc.toFixed(2));
       setStopPrice(safeStop.toFixed(2));
@@ -6862,7 +6872,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                   <div className="p-2 rounded border border-orange-700/40 bg-orange-500/5">
                     <p className="text-[9px] text-orange-400 font-bold uppercase tracking-widest mb-0.5">Stop Trigger</p>
                     <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.stopPrice.toFixed(2)}</p>
-                    <p className={`text-[9px] ${th.textFaint}`}>{suggestion.stopMultiple}× credit</p>
+                    <p className={`text-[9px] ${th.textFaint}`}>
+                      {suggestion.stopMultiple}× {(livePrice ?? liveValuePerContract) != null ? 'current value' : 'credit'}
+                    </p>
                   </div>
                 </div>
                 <p className={`text-[10px] ${th.textFaint} leading-relaxed`}>{suggestion.rationale}</p>
