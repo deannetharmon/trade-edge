@@ -3913,7 +3913,28 @@ function TradeModal({ result, th, onClose }: {
 
 
 // ── Stock Research Component ──────────────────────────────────────────────
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
+interface ChatContentPart {
+  type: 'text' | 'image';
+  text?: string;
+  source?: { type: 'base64'; media_type: string; data: string };
+}
+interface ChatMessage { role: 'user' | 'assistant'; content: string | ChatContentPart[]; }
+interface AttachedImage { dataUrl: string; mediaType: string; data: string; name: string }
+
+function readImageFileAsBase64(file: File): Promise<{ mediaType: string; data: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const commaIdx = result.indexOf(',');
+      const data = result.slice(commaIdx + 1);
+      const mediaType = result.slice(5, result.indexOf(';')) || file.type || 'image/png';
+      resolve({ mediaType, data });
+    };
+    reader.onerror = () => reject(new Error('Failed to read image'));
+    reader.readAsDataURL(file);
+  });
+}
 
 async function fetchStockResearch(symbol: string, tradeContext: string, riskContext?: string): Promise<string> {
   let headlines = '';
@@ -3984,10 +4005,34 @@ function useStockResearch(symbol: string, tradeContext: string | undefined, risk
   const [input, setInput]         = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [error, setError]         = useState('');
+  const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [imageError, setImageError] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const context = tradeContext ?? `${symbol} options analysis`;
+
+  const handleImageFile = async (file: File) => {
+    setImageError('');
+    if (!file.type.startsWith('image/')) { setImageError('Only image files are supported'); return; }
+    if (file.size > 8 * 1024 * 1024) { setImageError('Image must be under 8MB'); return; }
+    try {
+      const { mediaType, data } = await readImageFileAsBase64(file);
+      setAttachedImage({ dataUrl: `data:${mediaType};base64,${data}`, mediaType, data, name: file.name });
+    } catch {
+      setImageError('Failed to read image');
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const item = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'));
+    if (item) {
+      const file = item.getAsFile();
+      if (file) { e.preventDefault(); handleImageFile(file); }
+    }
+  };
+
+  const clearImage = () => { setAttachedImage(null); setImageError(''); };
 
   const handleToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -4007,10 +4052,18 @@ function useStockResearch(symbol: string, tradeContext: string | undefined, risk
   };
 
   const handleSend = async () => {
-    const q = input.trim(); if (!q || chatLoading) return;
-    const newMessages: ChatMessage[] = [...messages, { role: 'user', content: q }];
+    const q = input.trim();
+    if ((!q && !attachedImage) || chatLoading) return;
+    const content: ChatMessage['content'] = attachedImage
+      ? [
+          ...(q ? [{ type: 'text' as const, text: q }] : []),
+          { type: 'image' as const, source: { type: 'base64' as const, media_type: attachedImage.mediaType, data: attachedImage.data } },
+        ]
+      : q;
+    const newMessages: ChatMessage[] = [...messages, { role: 'user', content }];
     setMessages(newMessages);
     setInput('');
+    clearImage();
     setChatLoading(true);
     try {
       const reply = await sendChatMessage(newMessages, symbol, context);
@@ -4026,6 +4079,7 @@ function useStockResearch(symbol: string, tradeContext: string | undefined, risk
   return {
     open, loading, error, messages, input, setInput, chatLoading,
     chatBottomRef, inputRef, handleToggle, handleSend,
+    attachedImage, imageError, handleImageFile, handlePaste, clearImage,
   };
 }
 
@@ -4050,6 +4104,7 @@ function StockResearchButton({ research, th }: {
 function StockResearchPanel({ symbol, th, research }: {
   symbol: string; th: typeof THEMES[Theme]; research: ReturnType<typeof useStockResearch>;
 }) {
+  const imageInputRef = useRef<HTMLInputElement>(null);
   if (!research.open) return null;
   return (
     <div onClick={e => e.stopPropagation()}
@@ -4068,20 +4123,30 @@ function StockResearchPanel({ symbol, th, research }: {
           </div>
         )}
         {research.error && <p className="text-red-400 text-[10px]">{research.error}</p>}
-        {research.messages.map((m, i) => (
-          <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {m.role === 'assistant' && (
-              <span className="text-[8px] text-indigo-400 mt-1 shrink-0">◎</span>
-            )}
-            <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 max-w-[80%] ${
-              m.role === 'user'
-                ? 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
-                : `${th.card} ${th.textMuted} border ${th.borderLight}`
-            }`}>
-              {m.content}
+        {research.messages.map((m, i) => {
+          const parts: ChatContentPart[] = Array.isArray(m.content)
+            ? m.content
+            : [{ type: 'text', text: m.content }];
+          return (
+            <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {m.role === 'assistant' && (
+                <span className="text-[8px] text-indigo-400 mt-1 shrink-0">◎</span>
+              )}
+              <div className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 max-w-[80%] ${
+                m.role === 'user'
+                  ? 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
+                  : `${th.card} ${th.textMuted} border ${th.borderLight}`
+              }`}>
+                {parts.map((p, pi) => p.type === 'image' && p.source ? (
+                  <img key={pi} src={`data:${p.source.media_type};base64,${p.source.data}`}
+                       alt="attached chart" className="max-w-[180px] max-h-[180px] rounded-md border border-indigo-500/30 mb-1" />
+                ) : (
+                  <span key={pi} className="whitespace-pre-wrap">{p.text}</span>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {research.chatLoading && (
           <div className="flex gap-2">
             <span className="text-[8px] text-indigo-400 mt-1">◎</span>
@@ -4097,19 +4162,49 @@ function StockResearchPanel({ symbol, th, research }: {
         <div ref={research.chatBottomRef} />
       </div>
       {/* Input */}
-      <div className={`flex gap-2 px-4 py-2 border-t border-indigo-500/20`}>
-        <input
-          ref={research.inputRef}
-          value={research.input}
-          onChange={e => research.setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); research.handleSend(); } }}
-          placeholder="Ask about this trade..."
-          className={`flex-1 text-[11px] ${th.input} border ${th.inputBorder} rounded-lg px-2.5 py-1.5 ${th.text} focus:outline-none focus:border-indigo-500 placeholder-slate-500`}
-        />
-        <button onClick={research.handleSend} disabled={!research.input.trim() || research.chatLoading || research.loading}
-          className="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-40">
-          Send
-        </button>
+      <div className={`px-4 py-2 border-t border-indigo-500/20`}>
+        {research.attachedImage && (
+          <div className="flex items-center gap-2 mb-2">
+            <img src={research.attachedImage.dataUrl} alt="attachment preview"
+                 className="w-10 h-10 object-cover rounded border border-indigo-500/40" />
+            <span className={`text-[9px] ${th.textFaint} truncate max-w-[140px]`}>{research.attachedImage.name}</span>
+            <button onClick={research.clearImage} className="text-[10px] text-red-400 hover:text-red-300">Remove</button>
+          </div>
+        )}
+        {research.imageError && <p className="text-red-400 text-[9px] mb-1">{research.imageError}</p>}
+        <div className="flex gap-2">
+          <input
+            type="file"
+            accept="image/*"
+            ref={imageInputRef}
+            className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) research.handleImageFile(file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            title="Attach a chart image"
+            className={`text-[12px] px-2 py-1.5 border ${th.border} ${th.textFaint} rounded-lg hover:border-indigo-500 hover:text-indigo-400 transition-colors shrink-0`}>
+            📎
+          </button>
+          <input
+            ref={research.inputRef}
+            value={research.input}
+            onChange={e => research.setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); research.handleSend(); } }}
+            onPaste={research.handlePaste}
+            placeholder="Ask about this trade... (attach or paste a chart)"
+            className={`flex-1 text-[11px] ${th.input} border ${th.inputBorder} rounded-lg px-2.5 py-1.5 ${th.text} focus:outline-none focus:border-indigo-500 placeholder-slate-500`}
+          />
+          <button onClick={research.handleSend}
+            disabled={(!research.input.trim() && !research.attachedImage) || research.chatLoading || research.loading}
+            className="text-[10px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors disabled:opacity-40 shrink-0">
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );
