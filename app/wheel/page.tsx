@@ -10,6 +10,8 @@ import {
   getWheelQuote,
   type WheelStage,
   type WheelSelectedContract,
+  type WheelChainResult,
+  type WheelChainLeg,
 } from '@/lib/wheel/chainSearch';
 
 const BASE = 'https://api.tastytrade.com';
@@ -75,6 +77,7 @@ interface WheelCandidate {
   sector?: string;
   wheelStage: WheelStage;
   costBasis?: number | null;
+  quantity?: number | null; // number of contracts; defaults to 1
   deltaOverride?: { min: number; max: number } | null;
   dteOverride?: { min: number; max: number } | null;
   manualPick?: { expirationDate: string; strikePrice: number } | null;
@@ -102,19 +105,50 @@ function fmtPct(v: number | null | undefined, digits = 1): string {
 }
 
 // Computes the same Total Premium / Daily / Monthly / Annual / ROC math as
-// Dean's Wheel_What-If spreadsheet, given a selected contract and 100-share
-// lots. referencePrice is current stock price for hunting-csp, cost basis
-// for own-writing-cc (falls back to current price if no basis set yet).
-function computeYield(contract: WheelSelectedContract, referencePrice: number | null) {
-  const premiumPerContract = contract.mid * 100; // per 1 options contract (100 sh)
-  const totalPremium = premiumPerContract; // assumes 1 contract per row for now
+// Dean's Wheel_What-If spreadsheet, given a selected contract, 100-share
+// lots, and a contract quantity. referencePrice is current stock price for
+// hunting-csp, cost basis for own-writing-cc (falls back to current price
+// if no basis set yet). ROC is measured against cost for ONE lot (100 sh)
+// regardless of quantity, since each contract requires its own 100 shares/
+// cash-secured lot -- ROC per lot doesn't change with quantity, only the
+// dollar totals do.
+function computeYield(contract: WheelSelectedContract, referencePrice: number | null, quantity: number) {
+  const premiumPerContract = contract.mid * 100;
+  const totalPremium = premiumPerContract * quantity;
   const daily = contract.dte > 0 ? totalPremium / contract.dte : 0;
   const monthly = (daily * 365) / 12;
   const annual = daily * 365;
-  const cost = referencePrice != null ? referencePrice * 100 : null;
-  const monthlyRoc = cost && cost > 0 ? (monthly / cost) * 100 : null;
+  const costPerLot = referencePrice != null ? referencePrice * 100 : null;
+  const monthlyPerLot = contract.dte > 0 ? (premiumPerContract / contract.dte) * (365 / 12) : 0;
+  const monthlyRoc = costPerLot && costPerLot > 0 ? (monthlyPerLot / costPerLot) * 100 : null;
   const annualRoc = monthlyRoc != null ? monthlyRoc * 12 : null;
   return { totalPremium, daily, monthly, annual, monthlyRoc, annualRoc };
+}
+
+// Sorted list of contracts on the correct side, within the DTE window,
+// for the "Find Better" picker -- broader than the auto-search's delta
+// filter so the trader can see and pick anything reasonable.
+function listCandidateContracts(
+  chain: WheelChainResult,
+  stage: WheelStage,
+  dteTarget: { min: number; max: number },
+): (WheelChainLeg & { dte: number })[] {
+  const wantedType = stage === 'hunting-csp' ? 'P' : 'C';
+  const out: (WheelChainLeg & { dte: number })[] = [];
+
+  for (const expDate of chain.expirations) {
+    const [y, m, d] = expDate.split('-').map(Number);
+    const dte = Math.round((new Date(y, m - 1, d).getTime() - Date.now()) / 86_400_000);
+    if (dte < dteTarget.min || dte > dteTarget.max) continue;
+
+    for (const leg of chain.chains[expDate] ?? []) {
+      if (leg.optionType !== wantedType) continue;
+      if (leg.delta == null) continue;
+      out.push({ ...leg, dte });
+    }
+  }
+
+  return out.sort((a, b) => a.expirationDate.localeCompare(b.expirationDate) || a.strikePrice - b.strikePrice);
 }
 
 export default function WheelPage() {
@@ -123,6 +157,13 @@ export default function WheelPage() {
   const [results, setResults] = useState<Record<string, RowResult>>({});
   const [newSymbol, setNewSymbol] = useState('');
   const [loadingInitial, setLoadingInitial] = useState(true);
+
+  // Find Better modal state: which symbol is open, its full contract list,
+  // and loading/error status for that fetch.
+  const [finderSymbol, setFinderSymbol] = useState<string | null>(null);
+  const [finderLoading, setFinderLoading] = useState(false);
+  const [finderError, setFinderError] = useState<string | null>(null);
+  const [finderContracts, setFinderContracts] = useState<(WheelChainLeg & { dte: number })[]>([]);
 
   const loadConfigAndCandidates = useCallback(async () => {
     try {
@@ -254,10 +295,84 @@ export default function WheelPage() {
     setCandidates(data.candidates ?? {});
   }, []);
 
+  const setQuantity = useCallback(async (symbol: string, value: string) => {
+    const parsed = parseInt(value, 10);
+    const quantity = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { quantity } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+  }, []);
+
   const refreshRow = useCallback((symbol: string) => {
     const candidate = candidates[symbol];
     if (candidate && config) searchRow(candidate, config);
   }, [candidates, config, searchRow]);
+
+  // Opens the Find Better modal for a symbol: fetches the full chain (no
+  // delta filter, just the DTE window) so the trader can see every strike
+  // on the correct side and pick one directly.
+  const openFinder = useCallback(async (symbol: string) => {
+    const candidate = candidates[symbol];
+    if (!candidate || !config) return;
+
+    setFinderSymbol(symbol);
+    setFinderLoading(true);
+    setFinderError(null);
+    setFinderContracts([]);
+
+    try {
+      const token = await getAccessToken();
+      const dteTarget = candidate.dteOverride ?? { min: config.defaultDteMin, max: config.defaultDteMax };
+      const chain = await fetchWheelChain(symbol, token, dteTarget);
+      const list = listCandidateContracts(chain, candidate.wheelStage, dteTarget);
+      setFinderContracts(list);
+    } catch (e: any) {
+      setFinderError(e.message ?? 'Failed to load chain');
+    } finally {
+      setFinderLoading(false);
+    }
+  }, [candidates, config]);
+
+  const closeFinder = useCallback(() => {
+    setFinderSymbol(null);
+    setFinderContracts([]);
+    setFinderError(null);
+  }, []);
+
+  const pickManualContract = useCallback(async (symbol: string, leg: WheelChainLeg) => {
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol,
+        candidate: { manualPick: { expirationDate: leg.expirationDate, strikePrice: leg.strikePrice } },
+      }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    closeFinder();
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [config, searchRow, closeFinder]);
+
+  const clearManualPick = useCallback(async (symbol: string) => {
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { manualPick: null } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [config, searchRow]);
 
   return (
     <div className="min-h-screen bg-black text-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -323,6 +438,7 @@ export default function WheelPage() {
                   <th className="text-left px-3 py-2">Stage</th>
                   <th className="text-right px-3 py-2">Cost Basis</th>
                   <th className="text-right px-3 py-2">Current Price</th>
+                  <th className="text-right px-3 py-2">Qty</th>
                   <th className="text-left px-3 py-2">Expiration</th>
                   <th className="text-right px-3 py-2">DTE</th>
                   <th className="text-right px-3 py-2">Strike</th>
@@ -338,11 +454,12 @@ export default function WheelPage() {
                 {Object.values(candidates).map(candidate => {
                   const result = results[candidate.symbol];
                   const contract = result?.contract ?? null;
+                  const quantity = candidate.quantity ?? 1;
                   const referencePrice = candidate.wheelStage === 'own-writing-cc'
                     ? (candidate.costBasis ?? result?.quote ?? null)
                     : (result?.quote ?? null);
 
-                  const yieldCalc = contract ? computeYield(contract, referencePrice) : null;
+                  const yieldCalc = contract ? computeYield(contract, referencePrice, quantity) : null;
 
                   return (
                     <tr key={candidate.symbol} className="border-t border-white/5 hover:bg-white/[0.02]">
@@ -375,6 +492,17 @@ export default function WheelPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{fmtMoney(result?.quote ?? null)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          key={quantity}
+                          type="number"
+                          min={1}
+                          defaultValue={quantity}
+                          onBlur={e => setQuantity(candidate.symbol, e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                          className="bg-white/5 border border-white/10 rounded px-2 py-1 w-12 text-right text-xs focus:outline-none focus:border-white/30"
+                        />
+                      </td>
 
                       {result?.loading && (
                         <td colSpan={7} className="px-3 py-2 text-white/40">Searching...</td>
@@ -401,6 +529,14 @@ export default function WheelPage() {
                       )}
 
                       <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => openFinder(candidate.symbol)} className="text-[10px] text-blue-400 hover:text-blue-300 mr-2" title="Find Better">
+                          Find Better
+                        </button>
+                        {candidate.manualPick && (
+                          <button onClick={() => clearManualPick(candidate.symbol)} className="text-[10px] text-amber-400 hover:text-amber-300 mr-2" title="Clear manual pick, resume auto-search">
+                            (manual)
+                          </button>
+                        )}
                         <button onClick={() => refreshRow(candidate.symbol)} className="text-white/40 hover:text-white/70 mr-2" title="Refresh">↻</button>
                         <button onClick={() => removeCandidate(candidate.symbol)} className="text-white/40 hover:text-red-400" title="Remove">✕</button>
                       </td>
@@ -412,6 +548,64 @@ export default function WheelPage() {
           </div>
         )}
       </div>
+
+      {/* Find Better modal */}
+      {finderSymbol && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-6" onClick={closeFinder}>
+          <div
+            className="bg-[#0a0a0a] border border-white/10 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <span className="text-sm font-bold">{finderSymbol} — choose a contract</span>
+              <button onClick={closeFinder} className="text-white/40 hover:text-white/70">✕</button>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              {finderLoading && <p className="text-white/40 text-sm p-4">Loading chain...</p>}
+              {finderError && <p className="text-red-400 text-sm p-4">{finderError}</p>}
+              {!finderLoading && !finderError && finderContracts.length === 0 && (
+                <p className="text-white/40 text-sm p-4">No contracts found in the configured DTE window.</p>
+              )}
+              {!finderLoading && !finderError && finderContracts.length > 0 && (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-[#0a0a0a]">
+                    <tr className="text-white/40 uppercase tracking-wider text-[10px] border-b border-white/10">
+                      <th className="text-left px-3 py-2">Expiration</th>
+                      <th className="text-right px-3 py-2">DTE</th>
+                      <th className="text-right px-3 py-2">Strike</th>
+                      <th className="text-right px-3 py-2">Delta</th>
+                      <th className="text-right px-3 py-2">Bid</th>
+                      <th className="text-right px-3 py-2">OI</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {finderContracts.map(leg => (
+                      <tr key={leg.occSymbol} className="border-t border-white/5 hover:bg-white/[0.03]">
+                        <td className="px-3 py-2">{leg.expirationDate}</td>
+                        <td className="px-3 py-2 text-right">{leg.dte}</td>
+                        <td className="px-3 py-2 text-right">{leg.strikePrice}</td>
+                        <td className="px-3 py-2 text-right">{leg.delta != null ? Math.abs(leg.delta).toFixed(2) : '—'}</td>
+                        <td className="px-3 py-2 text-right">{fmtMoney(leg.bid)}</td>
+                        <td className="px-3 py-2 text-right">{leg.openInterest}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            onClick={() => pickManualContract(finderSymbol, leg)}
+                            className="text-[10px] font-bold px-2 py-1 rounded bg-white/10 hover:bg-white/15"
+                          >
+                            Select
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
