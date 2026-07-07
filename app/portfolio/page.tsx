@@ -6777,6 +6777,13 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const gtcPctDisplay       = creditPerContract > 0 ? Math.round((1 - gtcParsed / creditPerContract) * 100) : 0;
   const effectiveLiveDisplay = livePrice ?? liveValuePerContract;
 
+  // Dollar P/L — the actual $ result if each order fills, so the trader never
+  // has to convert per-contract prices/multiples in their head.
+  const gtcProfitDollars  = (creditPerContract - gtcParsed) * qty * 100;
+  const stopLossDollars   = (stopParsed - creditPerContract) * qty * 100; // negative = net loss
+  const suggGtcProfitDollars = suggestion ? (creditPerContract - suggestion.gtcPrice) * qty * 100 : null;
+  const suggStopLossDollars  = suggestion ? (suggestion.stopPrice - creditPerContract) * qty * 100 : null;
+
   return (
     <div className="relative">
       <button
@@ -6884,6 +6891,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                     <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mb-0.5">GTC Target</p>
                     <p className="text-sm font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.gtcPrice.toFixed(2)}</p>
                     <p className={`text-[9px] ${th.textFaint}`}>{suggestion.gtcPct}% profit</p>
+                    {suggGtcProfitDollars != null && (
+                      <p className="text-[11px] font-bold text-emerald-300 mt-0.5">+${suggGtcProfitDollars.toFixed(2)}</p>
+                    )}
                   </div>
                   <div className="p-2 rounded border border-orange-700/40 bg-orange-500/5">
                     <p className="text-[9px] text-orange-400 font-bold uppercase tracking-widest mb-0.5">Stop Trigger</p>
@@ -6891,6 +6901,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                     <p className={`text-[9px] ${th.textFaint}`}>
                       {suggestion.stopMultiple}× {(livePrice ?? liveValuePerContract) != null ? 'current value' : 'credit'}
                     </p>
+                    {suggStopLossDollars != null && (
+                      <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
+                    )}
                   </div>
                 </div>
                 <p className={`text-[10px] ${th.textFaint} leading-relaxed`}>{suggestion.rationale}</p>
@@ -6926,6 +6939,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                     style={{ fontFamily: "'DM Mono', monospace" }}
                   />
                   {gtcPctDisplay > 0 && <span className={`text-[9px] ${th.textFaint} w-12 shrink-0`}>{gtcPctDisplay}%</span>}
+                  {!gtcError && gtcParsed > 0 && (
+                    <span className="text-[11px] font-bold text-emerald-400 shrink-0">+${gtcProfitDollars.toFixed(2)}</span>
+                  )}
                 </div>
                 {gtcError && <p className="text-[9px] text-red-400 mt-1 ml-28">{gtcError}</p>}
                 {!gtcError && effectiveLiveDisplay != null && (
@@ -6963,6 +6979,11 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                   style={{ fontFamily: "'DM Mono', monospace" }}
                 />
               </div>
+              {!stopError && stopParsed > 0 && (
+                <p className="text-[11px] font-bold text-orange-400 mt-0.5 ml-28">
+                  -${Math.abs(stopLossDollars).toFixed(2)} if stop fills
+                </p>
+              )}
               {stopError && <p className="text-[9px] text-red-400 mt-1 ml-28">{stopError}</p>}
               {!stopError && effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint} mt-0.5 ml-28`}>
@@ -6983,8 +7004,8 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
               )}
               <p className="text-[10px] text-orange-300">
                 {needsOco ? '2.' : '1.'} Place {needsOco ? 'OCO' : 'Stop Limit GTC'}:
-                {needsOco && ` profit target $${gtcParsed.toFixed(2)} (${gtcPctDisplay}%)`}
-                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} ({stopMultipleDisplay}× credit)
+                {needsOco && ` profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`}
+                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} (-${Math.abs(stopLossDollars).toFixed(2)})
               </p>
               {effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint}`}>
@@ -7023,8 +7044,8 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                 : hasErrors
                 ? 'Fix errors above to continue'
                 : needsOco
-                ? `Review OCO — profit $${gtcParsed.toFixed(2)} / stop $${stopParsed.toFixed(2)}`
-                : `Review Stop @ $${stopParsed.toFixed(2)}`}
+                ? `Review OCO — profit +$${gtcProfitDollars.toFixed(2)} / stop -$${Math.abs(stopLossDollars).toFixed(2)}`
+                : `Review Stop — loss -$${Math.abs(stopLossDollars).toFixed(2)}`}
             </button>
           )}
 
