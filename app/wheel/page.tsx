@@ -362,9 +362,11 @@ export default function WheelPage() {
                       <td className="px-3 py-2 text-right">
                         {candidate.wheelStage === 'own-writing-cc' ? (
                           <input
+                            key={candidate.costBasis ?? 'empty'}
                             type="number"
                             defaultValue={candidate.costBasis ?? ''}
                             onBlur={e => setCostBasis(candidate.symbol, e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                             placeholder="basis"
                             className="bg-white/5 border border-white/10 rounded px-2 py-1 w-20 text-right text-xs focus:outline-none focus:border-white/30"
                           />
