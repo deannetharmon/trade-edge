@@ -410,6 +410,7 @@ interface BatchOrderItem {
   duplicateGtcWarning: boolean;
   priceError: string | null;        // null = ok, string = blocking error message
   closeQuote?: CloseQuote | null;   // live net bid/mid/ask per contract for the scale
+  quoteFetchedAt?: number;          // Date.now() when closeQuote was fetched — for staleness display
   // roll-specific
   rollExpiry?: string;
   rollShortStrike?: number;
@@ -3776,8 +3777,35 @@ function BatchConfirmModal({
 
   // GTC override confirmation
   const [gtcConfirmed, setGtcConfirmed] = useState<Set<string>>(new Set());
+  const [refreshingQuote, setRefreshingQuote] = useState<Set<string>>(new Set());
 
   const marketStatus = getMarketStatus();
+
+  // Re-fetch a single item's live quote on demand — the batch is priced once
+  // at open, so a fast-moving underlying (like SMH here) can leave the quote
+  // stale if the modal stays open a while. Snap-to-fill should never target
+  // a price from several minutes ago.
+  const refreshItemQuote = async (key: string) => {
+    setRefreshingQuote(prev => new Set(prev).add(key));
+    try {
+      const item = batchItems.find(i => i.pos.key === key);
+      if (!item) return;
+      const token = await getAccessToken();
+      const [freshPrice, closeQuote] = await Promise.all([
+        fetchFreshPositionPrice(item.pos, token),
+        fetchCloseQuote(item.pos, token).catch(() => null),
+      ]);
+      const qty = item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+      const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
+      setBatchItems(prev => prev.map(i => i.pos.key === key
+        ? { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() }
+        : i));
+    } catch (e: any) {
+      console.warn('Quote refresh failed:', e.message);
+    } finally {
+      setRefreshingQuote(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  };
 
   // Enrich logic
   useEffect(() => {
@@ -3876,6 +3904,7 @@ function BatchConfirmModal({
             pos, action, orderBody, limitPrice, estPnl,
             stalePriceWarning, freshPrice, freshPerContract, duplicateGtcWarning, priceError,
             closeQuote,
+            quoteFetchedAt: Date.now(),
           };
 
           if (action === 'CLOSE_ROLL') {
@@ -4433,6 +4462,20 @@ function BatchConfirmModal({
 
                     {!isExcluded && (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (
                       <div className="px-4 pb-2">
+                        {item.quoteFetchedAt != null && (
+                          <div className="flex items-center justify-end gap-1.5 mb-1">
+                            <span className={`text-[9px] ${th.textFaint}`}>
+                              quote {Math.max(0, Math.round((Date.now() - item.quoteFetchedAt) / 1000))}s old
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => refreshItemQuote(item.pos.key)}
+                              disabled={refreshingQuote.has(item.pos.key)}
+                              className="text-[9px] px-1.5 py-0.5 rounded border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50">
+                              {refreshingQuote.has(item.pos.key) ? '...' : '↻ refresh'}
+                            </button>
+                          </div>
+                        )}
                         <TakeProfitScale
                           creditPerContract={(() => {
                             const q = Math.abs(item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
