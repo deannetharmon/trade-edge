@@ -6519,7 +6519,12 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
       if (!mountedRef.current) return;
 
       // Clamp AI suggestion to hard bounds before showing
-      const clampedGtc  = Math.min(Math.max(s.gtcPrice,  gtcMin),  gtcMax);
+      // GTC: derive price from the AI's stated gtcPct (its rationale text tracks
+      // this number reliably) rather than trusting its raw gtcPrice arithmetic —
+      // the model can write "65% target" while its price field computes to 0%.
+      const targetPct = Math.min(Math.max(s.gtcPct, 5), 95);
+      const derivedGtcPrice = creditPerContract * (1 - targetPct / 100);
+      const clampedGtc  = Math.min(Math.max(derivedGtcPrice, gtcMin),  gtcMax);
       const clampedStop = Math.min(Math.max(s.stopPrice, stopMin), stopMax);
 
       // If live price is known, enforce directional constraint
@@ -6930,7 +6935,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                     <p className="text-[9px] text-orange-400 font-bold uppercase tracking-widest mb-0.5">Stop Trigger</p>
                     <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.stopPrice.toFixed(2)}</p>
                     <p className={`text-[9px] ${th.textFaint}`}>
-                      {suggestion.stopMultiple}× {(livePrice ?? liveValuePerContract) != null ? 'current value' : 'credit'}
+                      {(effectiveLiveDisplay != null
+                        ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
+                        : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
                     </p>
                     {suggStopLossDollars != null && (
                       <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
