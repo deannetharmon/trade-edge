@@ -3,7 +3,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { fetchWheelChain, findBestWheelContract } from '@/lib/wheel/chainSearch';
 import { createPortal } from 'react-dom';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
@@ -6771,22 +6770,6 @@ export default function Home() {
   // confirmed complete, so the live-clock text never has a chance to differ.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-
-  // TEMPORARY TEST -- remove after confirming live delta works.
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = sessionStorage.getItem('tt_access_token');
-        if (!token) { console.log('WHEEL TEST: no tt_access_token in sessionStorage'); return; }
-        const chain = await fetchWheelChain('MSFT', token, { min: 20, max: 50 });
-        console.log('WHEEL TEST chain expirations:', chain.expirations);
-        const best = findBestWheelContract(chain, 'hunting-csp', { min: 0.15, max: 0.25 }, { min: 30, max: 45 });
-        console.log('WHEEL TEST best CSP contract for MSFT:', best);
-      } catch (e) {
-        console.error('WHEEL TEST error:', e);
-      }
-    })();
-  }, []);
 
   // ensureHeadAssets — runs once after mount, strictly post-hydration.
   // Replaces the old module-level document.head.appendChild() side effects
