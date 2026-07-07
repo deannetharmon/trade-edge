@@ -125,13 +125,25 @@ function computeYield(contract: WheelSelectedContract, referencePrice: number | 
   return { totalPremium, daily, monthly, annual, monthlyRoc, annualRoc };
 }
 
-// Sorted list of contracts on the correct side, within the DTE window,
-// for the "Find Better" picker -- broader than the auto-search's delta
-// filter so the trader can see and pick anything reasonable.
+// Delta-range presets for the Find Better quick-filter buttons.
+const DELTA_PRESETS: { label: string; min: number; max: number }[] = [
+  { label: '10-15', min: 0.10, max: 0.15 },
+  { label: '15-25', min: 0.15, max: 0.25 },
+  { label: '25-35', min: 0.25, max: 0.35 },
+  { label: 'Any', min: 0, max: 1 },
+];
+
+// Filters a fetched chain down to the correct side, DTE window, and
+// out-of-the-money strikes only (a deep-ITM call/put makes no sense for a
+// covered-call or CSP entry and previously cluttered the picker). Sorted by
+// closeness to the delta filter's center so the most relevant contracts are
+// always first, not just the lowest strike.
 function listCandidateContracts(
   chain: WheelChainResult,
   stage: WheelStage,
   dteTarget: { min: number; max: number },
+  deltaFilter: { min: number; max: number },
+  currentPrice: number | null,
 ): (WheelChainLeg & { dte: number })[] {
   const wantedType = stage === 'hunting-csp' ? 'P' : 'C';
   const out: (WheelChainLeg & { dte: number })[] = [];
@@ -144,11 +156,29 @@ function listCandidateContracts(
     for (const leg of chain.chains[expDate] ?? []) {
       if (leg.optionType !== wantedType) continue;
       if (leg.delta == null) continue;
+
+      const absDelta = Math.abs(leg.delta);
+      if (absDelta < deltaFilter.min || absDelta > deltaFilter.max) continue;
+
+      // OTM-only: for a CC (calls), strike must be above spot; for a CSP
+      // (puts), strike must be below spot. Skip the OTM check entirely if
+      // we don't have a live price yet rather than hiding everything.
+      if (currentPrice != null) {
+        if (wantedType === 'C' && leg.strikePrice <= currentPrice) continue;
+        if (wantedType === 'P' && leg.strikePrice >= currentPrice) continue;
+      }
+
       out.push({ ...leg, dte });
     }
   }
 
-  return out.sort((a, b) => a.expirationDate.localeCompare(b.expirationDate) || a.strikePrice - b.strikePrice);
+  const deltaCenter = (deltaFilter.min + deltaFilter.max) / 2;
+  return out.sort((a, b) => {
+    const da = Math.abs(Math.abs(a.delta ?? 0) - deltaCenter);
+    const db = Math.abs(Math.abs(b.delta ?? 0) - deltaCenter);
+    if (da !== db) return da - db;
+    return a.expirationDate.localeCompare(b.expirationDate);
+  });
 }
 
 export default function WheelPage() {
@@ -158,12 +188,16 @@ export default function WheelPage() {
   const [newSymbol, setNewSymbol] = useState('');
   const [loadingInitial, setLoadingInitial] = useState(true);
 
-  // Find Better modal state: which symbol is open, its full contract list,
-  // and loading/error status for that fetch.
+  // Find Better modal state: which symbol is open, the raw fetched chain
+  // (re-filtered client-side as the delta preset changes, no refetch), the
+  // active delta filter, current price (for OTM filtering), and status.
   const [finderSymbol, setFinderSymbol] = useState<string | null>(null);
   const [finderLoading, setFinderLoading] = useState(false);
   const [finderError, setFinderError] = useState<string | null>(null);
-  const [finderContracts, setFinderContracts] = useState<(WheelChainLeg & { dte: number })[]>([]);
+  const [finderChain, setFinderChain] = useState<WheelChainResult | null>(null);
+  const [finderPrice, setFinderPrice] = useState<number | null>(null);
+  const [finderDteTarget, setFinderDteTarget] = useState<{ min: number; max: number } | null>(null);
+  const [finderDeltaFilter, setFinderDeltaFilter] = useState(DELTA_PRESETS[1]); // 15-25 default
 
   const loadConfigAndCandidates = useCallback(async () => {
     try {
@@ -313,34 +347,45 @@ export default function WheelPage() {
     if (candidate && config) searchRow(candidate, config);
   }, [candidates, config, searchRow]);
 
-  // Opens the Find Better modal for a symbol: fetches the full chain (no
-  // delta filter, just the DTE window) so the trader can see every strike
-  // on the correct side and pick one directly.
+  // Opens the Find Better modal for a symbol: fetches the full chain once
+  // (DTE window only, no delta filter at fetch time) and stores it raw so
+  // the delta-preset buttons can re-filter instantly without refetching.
   const openFinder = useCallback(async (symbol: string) => {
     const candidate = candidates[symbol];
     if (!candidate || !config) return;
 
+    const dteTarget = candidate.dteOverride ?? { min: config.defaultDteMin, max: config.defaultDteMax };
+    const defaultDelta = candidate.deltaOverride
+      ? { min: candidate.deltaOverride.min / 100, max: candidate.deltaOverride.max / 100 }
+      : { min: config.defaultDeltaMin / 100, max: config.defaultDeltaMax / 100 };
+    const matchingPreset = DELTA_PRESETS.find(p => p.min === defaultDelta.min && p.max === defaultDelta.max) ?? DELTA_PRESETS[1];
+
     setFinderSymbol(symbol);
     setFinderLoading(true);
     setFinderError(null);
-    setFinderContracts([]);
+    setFinderChain(null);
+    setFinderPrice(results[symbol]?.quote ?? null);
+    setFinderDteTarget(dteTarget);
+    setFinderDeltaFilter(matchingPreset);
 
     try {
       const token = await getAccessToken();
-      const dteTarget = candidate.dteOverride ?? { min: config.defaultDteMin, max: config.defaultDteMax };
       const chain = await fetchWheelChain(symbol, token, dteTarget);
-      const list = listCandidateContracts(chain, candidate.wheelStage, dteTarget);
-      setFinderContracts(list);
+      setFinderChain(chain);
+      if (finderPrice == null) {
+        const quote = await getWheelQuote(symbol, token);
+        setFinderPrice(quote);
+      }
     } catch (e: any) {
       setFinderError(e.message ?? 'Failed to load chain');
     } finally {
       setFinderLoading(false);
     }
-  }, [candidates, config]);
+  }, [candidates, config, results, finderPrice]);
 
   const closeFinder = useCallback(() => {
     setFinderSymbol(null);
-    setFinderContracts([]);
+    setFinderChain(null);
     setFinderError(null);
   }, []);
 
@@ -561,47 +606,75 @@ export default function WheelPage() {
               <button onClick={closeFinder} className="text-white/40 hover:text-white/70">✕</button>
             </div>
 
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
+              <span className="text-[10px] text-white/40 uppercase tracking-wider mr-1">Delta</span>
+              {DELTA_PRESETS.map(preset => (
+                <button
+                  key={preset.label}
+                  onClick={() => setFinderDeltaFilter(preset)}
+                  className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                    finderDeltaFilter.label === preset.label
+                      ? 'border-white/40 bg-white/15 text-white'
+                      : 'border-white/10 text-white/50 hover:text-white/80'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              {finderPrice != null && (
+                <span className="text-[10px] text-white/30 ml-auto">Current: {fmtMoney(finderPrice)} — OTM only</span>
+              )}
+            </div>
+
             <div className="overflow-y-auto flex-1">
               {finderLoading && <p className="text-white/40 text-sm p-4">Loading chain...</p>}
               {finderError && <p className="text-red-400 text-sm p-4">{finderError}</p>}
-              {!finderLoading && !finderError && finderContracts.length === 0 && (
-                <p className="text-white/40 text-sm p-4">No contracts found in the configured DTE window.</p>
-              )}
-              {!finderLoading && !finderError && finderContracts.length > 0 && (
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-[#0a0a0a]">
-                    <tr className="text-white/40 uppercase tracking-wider text-[10px] border-b border-white/10">
-                      <th className="text-left px-3 py-2">Expiration</th>
-                      <th className="text-right px-3 py-2">DTE</th>
-                      <th className="text-right px-3 py-2">Strike</th>
-                      <th className="text-right px-3 py-2">Delta</th>
-                      <th className="text-right px-3 py-2">Bid</th>
-                      <th className="text-right px-3 py-2">OI</th>
-                      <th className="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {finderContracts.map(leg => (
-                      <tr key={leg.occSymbol} className="border-t border-white/5 hover:bg-white/[0.03]">
-                        <td className="px-3 py-2">{leg.expirationDate}</td>
-                        <td className="px-3 py-2 text-right">{leg.dte}</td>
-                        <td className="px-3 py-2 text-right">{leg.strikePrice}</td>
-                        <td className="px-3 py-2 text-right">{leg.delta != null ? Math.abs(leg.delta).toFixed(2) : '—'}</td>
-                        <td className="px-3 py-2 text-right">{fmtMoney(leg.bid)}</td>
-                        <td className="px-3 py-2 text-right">{leg.openInterest}</td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            onClick={() => pickManualContract(finderSymbol, leg)}
-                            className="text-[10px] font-bold px-2 py-1 rounded bg-white/10 hover:bg-white/15"
-                          >
-                            Select
-                          </button>
-                        </td>
+              {!finderLoading && !finderError && finderChain && (() => {
+                const candidate = candidates[finderSymbol];
+                const list = candidate && finderDteTarget
+                  ? listCandidateContracts(finderChain, candidate.wheelStage, finderDteTarget, { min: finderDeltaFilter.min, max: finderDeltaFilter.max }, finderPrice)
+                  : [];
+
+                if (list.length === 0) {
+                  return <p className="text-white/40 text-sm p-4">No contracts match this delta range in the configured DTE window.</p>;
+                }
+
+                return (
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#0a0a0a]">
+                      <tr className="text-white/40 uppercase tracking-wider text-[10px] border-b border-white/10">
+                        <th className="text-left px-3 py-2">Expiration</th>
+                        <th className="text-right px-3 py-2">DTE</th>
+                        <th className="text-right px-3 py-2">Strike</th>
+                        <th className="text-right px-3 py-2">Delta</th>
+                        <th className="text-right px-3 py-2">Bid</th>
+                        <th className="text-right px-3 py-2">OI</th>
+                        <th className="px-3 py-2"></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody>
+                      {list.map(leg => (
+                        <tr key={leg.occSymbol} className="border-t border-white/5 hover:bg-white/[0.03]">
+                          <td className="px-3 py-2">{leg.expirationDate}</td>
+                          <td className="px-3 py-2 text-right">{leg.dte}</td>
+                          <td className="px-3 py-2 text-right">{leg.strikePrice}</td>
+                          <td className="px-3 py-2 text-right">{leg.delta != null ? Math.abs(leg.delta).toFixed(2) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{fmtMoney(leg.bid)}</td>
+                          <td className="px-3 py-2 text-right">{leg.openInterest}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              onClick={() => pickManualContract(finderSymbol, leg)}
+                              className="text-[10px] font-bold px-2 py-1 rounded bg-white/10 hover:bg-white/15"
+                            >
+                              Select
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
           </div>
         </div>
