@@ -126,6 +126,24 @@ export async function fetchWheelChain(
   return { expirations, chains };
 }
 
+// Fetches a live equity quote (last price, falling back to bid/ask midpoint).
+// Simplified from screener's getQuote() to equities only -- Wheel candidates
+// are stocks/ETFs, not cash-settled indexes like SPX, so the index/etf
+// classification branch isn't needed here.
+export async function getWheelQuote(symbol: string, token: string): Promise<number | null> {
+  try {
+    const data = await ttFetchWheel(`/market-data/by-type?equity=${encodeURIComponent(symbol)}`, token);
+    const item = data?.data?.items?.[0];
+    if (!item) return null;
+    const last = item.last != null ? parseFloat(item.last) : null;
+    const bid = item.bid != null ? parseFloat(item.bid) : null;
+    const ask = item.ask != null ? parseFloat(item.ask) : null;
+    return last ?? (bid != null && ask != null ? (bid + ask) / 2 : null);
+  } catch {
+    return null;
+  }
+}
+
 export type WheelStage = 'hunting-csp' | 'own-writing-cc';
 
 export interface WheelDeltaTarget {

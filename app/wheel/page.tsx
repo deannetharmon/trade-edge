@@ -7,6 +7,7 @@ import Link from 'next/link';
 import {
   fetchWheelChain,
   findBestWheelContract,
+  getWheelQuote,
   type WheelStage,
   type WheelSelectedContract,
 } from '@/lib/wheel/chainSearch';
@@ -87,6 +88,7 @@ interface RowResult {
   loading: boolean;
   error: string | null;
   contract: WheelSelectedContract | null;
+  quote: number | null;
 }
 
 function fmtMoney(v: number | null | undefined, digits = 2): string {
@@ -142,7 +144,7 @@ export default function WheelPage() {
   useEffect(() => { loadConfigAndCandidates(); }, [loadConfigAndCandidates]);
 
   const searchRow = useCallback(async (candidate: WheelCandidate, cfg: WheelConfig) => {
-    setResults(prev => ({ ...prev, [candidate.symbol]: { loading: true, error: null, contract: prev[candidate.symbol]?.contract ?? null } }));
+    setResults(prev => ({ ...prev, [candidate.symbol]: { loading: true, error: null, contract: prev[candidate.symbol]?.contract ?? null, quote: prev[candidate.symbol]?.quote ?? null } }));
 
     try {
       const token = await getAccessToken();
@@ -151,7 +153,10 @@ export default function WheelPage() {
         : { min: cfg.defaultDeltaMin / 100, max: cfg.defaultDeltaMax / 100 };
       const dteTarget = candidate.dteOverride ?? { min: cfg.defaultDteMin, max: cfg.defaultDteMax };
 
-      const chain = await fetchWheelChain(candidate.symbol, token, dteTarget);
+      const [chain, quote] = await Promise.all([
+        fetchWheelChain(candidate.symbol, token, dteTarget),
+        getWheelQuote(candidate.symbol, token),
+      ]);
 
       let contract: WheelSelectedContract | null = null;
 
@@ -176,9 +181,9 @@ export default function WheelPage() {
         contract = findBestWheelContract(chain, candidate.wheelStage, deltaTarget, dteTarget);
       }
 
-      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: null, contract } }));
+      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: null, contract, quote } }));
     } catch (e: any) {
-      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: e.message ?? 'Search failed', contract: null } }));
+      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: e.message ?? 'Search failed', contract: null, quote: null } }));
     }
   }, []);
 
@@ -317,6 +322,7 @@ export default function WheelPage() {
                   <th className="text-left px-3 py-2">Symbol</th>
                   <th className="text-left px-3 py-2">Stage</th>
                   <th className="text-right px-3 py-2">Cost Basis</th>
+                  <th className="text-right px-3 py-2">Current Price</th>
                   <th className="text-left px-3 py-2">Expiration</th>
                   <th className="text-right px-3 py-2">DTE</th>
                   <th className="text-right px-3 py-2">Strike</th>
@@ -333,8 +339,8 @@ export default function WheelPage() {
                   const result = results[candidate.symbol];
                   const contract = result?.contract ?? null;
                   const referencePrice = candidate.wheelStage === 'own-writing-cc'
-                    ? (candidate.costBasis ?? null)
-                    : (contract ? contract.strikePrice : null); // rough current-price proxy until live quote is wired in
+                    ? (candidate.costBasis ?? result?.quote ?? null)
+                    : (result?.quote ?? null);
 
                   const yieldCalc = contract ? computeYield(contract, referencePrice) : null;
 
@@ -366,6 +372,7 @@ export default function WheelPage() {
                           <span className="text-white/30">—</span>
                         )}
                       </td>
+                      <td className="px-3 py-2 text-right">{fmtMoney(result?.quote ?? null)}</td>
 
                       {result?.loading && (
                         <td colSpan={7} className="px-3 py-2 text-white/40">Searching...</td>
