@@ -188,6 +188,9 @@ interface PositionSnapshot {
   theta: number | null;
   gamma: number | null;
   netDelta: number | null;
+  netVega: number | null;
+  pop: number | null;
+  buffer: number | null;
   stockPrice: number | null;
 }
 
@@ -240,6 +243,9 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
       theta: p.theta,
       gamma: p.gamma,
       netDelta: p.netDelta,
+      netVega: p.netVega,
+      pop: p.pop,
+      buffer: p.buffer,
       stockPrice: p.stockPrice,
     } as PositionSnapshot,
   }));
@@ -7222,9 +7228,13 @@ function netEdgePeak(pos: Position): number | null {
   return Math.max(...series);
 }
 
-// Yesterday's (most recent prior snapshot) net edge, for the day-over-day delta.
+// Yesterday's (most recent snapshot strictly before today) net edge, for the
+// day-over-day delta. Excludes any snapshot dated today — if the page has
+// already captured today's snapshot before this render, that entry would
+// otherwise land last in the array and get compared against itself.
 function netEdgePrior(pos: Position): number | null {
-  const series = netEdgeSeries(pos);
+  const today = todayLocalDateString();
+  const series = netEdgeSeries(pos).filter(p => p.date < today);
   if (series.length === 0) return null;
   return series[series.length - 1].value;
 }
@@ -7278,15 +7288,19 @@ function ivrSeries(pos: Position): { date: string; value: number }[] {
   return out;
 }
 
-// Yesterday's (most recent prior snapshot) value, for the day-over-day arrow.
+// Yesterday's (most recent snapshot strictly before today) value, for the
+// day-over-day arrow. Excludes today's own snapshot — same reasoning as
+// netEdgePrior above.
 function ivPrior(pos: Position): number | null {
-  const series = ivSeries(pos);
+  const today = todayLocalDateString();
+  const series = ivSeries(pos).filter(p => p.date < today);
   if (series.length === 0) return null;
   return series[series.length - 1].value;
 }
 
 function ivrPrior(pos: Position): number | null {
-  const series = ivrSeries(pos);
+  const today = todayLocalDateString();
+  const series = ivrSeries(pos).filter(p => p.date < today);
   if (series.length === 0) return null;
   return series[series.length - 1].value;
 }
@@ -7304,6 +7318,200 @@ function dayChangeArrowColor(current: number | null, prior: number | null, thres
   const diff = current - prior;
   if (Math.abs(diff) < threshold) return '';
   return diff > 0 ? 'text-emerald-400' : 'text-red-400';
+}
+
+// ── "What Moved" summary panel ──────────────────────────────────────────
+// Generic lookup: most recent snapshot value for any numeric field on
+// PositionSnapshot. Used for every metric that doesn't already have a
+// dedicated prior-day helper (netEdgePrior, ivPrior, ivrPrior above).
+// Generic lookup: most recent snapshot value strictly before today, for any
+// numeric field on PositionSnapshot. Used for every metric that doesn't
+// already have a dedicated prior-day helper (netEdgePrior, ivPrior, ivrPrior
+// above). Excludes today's date for the same reason those do.
+function priorSnapshotValue(pos: Position, field: keyof PositionSnapshot): number | null {
+  const today = todayLocalDateString();
+  const hist = (pos.snapshotHistory ?? []).filter(s => s.date < today);
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const v = hist[i][field];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
+interface MovementItem {
+  label: string;
+  detail: string;
+  tone: 'good' | 'bad' | 'neutral';
+}
+
+function movementToneColor(tone: MovementItem['tone'], fallback: string): string {
+  if (tone === 'good') return 'text-emerald-400';
+  if (tone === 'bad') return 'text-red-400';
+  return fallback;
+}
+
+// Builds the day-over-day "what moved" narrative for a position, comparing
+// today's live values against the most recent prior snapshot. Only surfaces
+// metrics that actually moved meaningfully — a flat card shows one "stable" line.
+function buildMovementSummary(pos: Position): MovementItem[] {
+  const items: MovementItem[] = [];
+  const hasHistory = (pos.snapshotHistory ?? []).length > 0;
+  if (!hasHistory) {
+    return [{ label: 'Tracking', detail: 'First day tracked — day-over-day movement will show starting tomorrow.', tone: 'neutral' }];
+  }
+
+  // Stock price
+  const priorPrice = priorSnapshotValue(pos, 'stockPrice');
+  if (priorPrice != null && pos.stockPrice != null) {
+    const diff = pos.stockPrice - priorPrice;
+    const pct = priorPrice !== 0 ? (diff / priorPrice) * 100 : null;
+    if (Math.abs(diff) >= 0.01) {
+      items.push({
+        label: 'Stock',
+        detail: `${pos.symbol} ${diff >= 0 ? '▲' : '▼'} $${Math.abs(diff).toFixed(2)}${pct != null ? ` (${diff >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%)` : ''} since yesterday`,
+        tone: 'neutral',
+      });
+    }
+  }
+
+  // P/L
+  const priorPnl = priorSnapshotValue(pos, 'pnl');
+  const curPnl = pos.pnl ?? pos.plOpen;
+  if (priorPnl != null && curPnl != null) {
+    const diff = curPnl - priorPnl;
+    if (Math.abs(diff) >= 1) {
+      items.push({
+        label: 'P/L',
+        detail: `P/L ${diff >= 0 ? 'improved' : 'fell'} $${Math.abs(diff).toFixed(0)} since yesterday`,
+        tone: diff >= 0 ? 'good' : 'bad',
+      });
+    }
+  }
+
+  // Net daily edge (theta minus estimated gamma drag)
+  const priorEdge = netEdgePrior(pos);
+  const curEdge = netEdgeLive(pos);
+  if (priorEdge != null && curEdge != null) {
+    const diff = curEdge - priorEdge;
+    if (Math.abs(diff) >= 1) {
+      items.push({
+        label: 'Net Edge',
+        detail: `Net daily edge ${diff >= 0 ? 'up' : 'down'} $${Math.abs(diff).toFixed(0)}/d — ${diff >= 0 ? 'theta pulling ahead of gamma' : 'gamma eating more of theta'}`,
+        tone: diff >= 0 ? 'good' : 'bad',
+      });
+    }
+  }
+
+  // IV — expansion hurts the mark on a short-premium position, contraction helps
+  const priorIv = ivPrior(pos);
+  if (priorIv != null && pos.iv != null) {
+    const diff = pos.iv - priorIv;
+    if (Math.abs(diff) >= 0.5) {
+      items.push({
+        label: 'IV',
+        detail: `IV ${diff >= 0 ? 'expanded' : 'contracted'} ${Math.abs(diff).toFixed(1)}pt (${priorIv.toFixed(0)}→${pos.iv.toFixed(0)}%) — ${diff >= 0 ? 'raises the buyback cost on your short premium' : 'lets your short premium mark down faster'}`,
+        tone: diff >= 0 ? 'bad' : 'good',
+      });
+    }
+  }
+
+  // IVR — informational (premium richness), not a direct verdict on this trade
+  const priorIvr = ivrPrior(pos);
+  if (priorIvr != null && pos.ivr != null) {
+    const diff = pos.ivr - priorIvr;
+    if (Math.abs(diff) >= 1) {
+      items.push({
+        label: 'IVR',
+        detail: `IVR ${diff >= 0 ? 'up' : 'down'} ${Math.abs(diff).toFixed(0)}pt (${priorIvr.toFixed(0)}→${pos.ivr.toFixed(0)}) — ${diff >= 0 ? 'richer premium if you re-enter' : 'premium richness fading'}`,
+        tone: 'neutral',
+      });
+    }
+  }
+
+  // Delta — directional drift, not inherently good or bad
+  const priorDelta = priorSnapshotValue(pos, 'netDelta');
+  if (priorDelta != null && pos.netDelta != null) {
+    const diff = pos.netDelta - priorDelta;
+    if (Math.abs(diff) >= 0.02) {
+      items.push({
+        label: 'Delta',
+        detail: `Net delta shifted ${diff >= 0 ? '+' : ''}${(diff * 100).toFixed(0)}pt (${(priorDelta * 100).toFixed(0)}→${(pos.netDelta * 100).toFixed(0)}) — picked up more ${pos.netDelta >= 0 ? 'bullish' : 'bearish'} exposure`,
+        tone: 'neutral',
+      });
+    }
+  }
+
+  // Theta — more daily decay collected is good
+  const priorTheta = priorSnapshotValue(pos, 'theta');
+  if (priorTheta != null && pos.theta != null) {
+    const diff = pos.theta - priorTheta;
+    if (Math.abs(diff) >= 0.01) {
+      items.push({
+        label: 'Theta',
+        detail: `Daily decay ${diff >= 0 ? 'increased' : 'decreased'} to $${(pos.theta * 100).toFixed(0)}/d`,
+        tone: diff >= 0 ? 'good' : 'bad',
+      });
+    }
+  }
+
+  // Gamma — rising magnitude means bigger P/L swings per $1 of stock move
+  const priorGamma = priorSnapshotValue(pos, 'gamma');
+  if (priorGamma != null && pos.gamma != null) {
+    const diff = Math.abs(pos.gamma) - Math.abs(priorGamma);
+    if (Math.abs(diff) >= 0.005) {
+      items.push({
+        label: 'Gamma',
+        detail: `Gamma risk ${diff >= 0 ? 'increased' : 'eased'} — price moves now swing P/L ${diff >= 0 ? 'faster' : 'slower'} than yesterday`,
+        tone: diff >= 0 ? 'bad' : 'good',
+      });
+    }
+  }
+
+  // Vega — rising exposure means more sensitivity to IV swings
+  const priorVega = priorSnapshotValue(pos, 'netVega');
+  if (priorVega != null && pos.netVega != null) {
+    const diff = Math.abs(pos.netVega) - Math.abs(priorVega);
+    if (Math.abs(diff) >= 0.01) {
+      items.push({
+        label: 'Vega',
+        detail: `Vega exposure ${diff >= 0 ? 'grew' : 'shrank'} — ${diff >= 0 ? 'more' : 'less'} sensitive to IV swings than yesterday`,
+        tone: diff >= 0 ? 'bad' : 'good',
+      });
+    }
+  }
+
+  // POP
+  const priorPop = priorSnapshotValue(pos, 'pop');
+  const curPop = getCurrentPop(pos);
+  if (priorPop != null && curPop != null) {
+    const diff = curPop - priorPop;
+    if (Math.abs(diff) >= 1) {
+      items.push({
+        label: 'POP',
+        detail: `Probability of profit ${diff >= 0 ? 'up' : 'down'} ${Math.abs(diff).toFixed(0)}pt (${priorPop.toFixed(0)}→${curPop.toFixed(0)}%)`,
+        tone: diff >= 0 ? 'good' : 'bad',
+      });
+    }
+  }
+
+  // OTM buffer — cushion to the short strike
+  const priorBuffer = priorSnapshotValue(pos, 'buffer');
+  if (priorBuffer != null && pos.buffer != null) {
+    const diff = pos.buffer - priorBuffer;
+    if (Math.abs(diff) >= 0.3) {
+      items.push({
+        label: 'Buffer',
+        detail: `OTM cushion ${diff >= 0 ? 'widened' : 'tightened'} to ${pos.buffer.toFixed(1)}% — ${diff >= 0 ? 'more room before the short strike' : 'price is closing in on the short strike'}`,
+        tone: diff >= 0 ? 'good' : 'bad',
+      });
+    }
+  }
+
+  if (items.length === 0) {
+    items.push({ label: 'Stable', detail: `No material moves since yesterday's snapshot.`, tone: 'neutral' });
+  }
+
+  return items;
 }
 
 // True the first time today's live edge prints below the prior peak-of-history,
@@ -8219,6 +8427,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           <span>◈</span>
           <span>{analysisLoading ? 'Analyzing...' : showAnalysis && analysis ? 'Hide Analysis' : analysis ? 'Show Analysis' : 'Analyze with AI'}</span>
         </button>
+      </div>
+
+      {/* What Moved — always-visible day-over-day summary */}
+      <div className={`border-t ${th.border} px-4 py-2`}>
+        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>What Moved</p>
+        <div className="flex flex-col gap-0.5">
+          {buildMovementSummary(pos).map((item, i) => (
+            <p key={i} className={`text-[10px] leading-tight ${movementToneColor(item.tone, th.textFaint)}`}>
+              {item.detail}
+            </p>
+          ))}
+        </div>
       </div>
 
       {/* Expanded legs */}
