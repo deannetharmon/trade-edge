@@ -6333,6 +6333,32 @@ async function fetchStopGtcSuggestion(pos: Position): Promise<StopGtcSuggestion>
   return JSON.parse(text) as StopGtcSuggestion;
 }
 
+// Kill float dust so displays never show "-$0.00" or "$99.999999".
+function clean$(n: number): number {
+  return Math.abs(n) < 0.005 ? 0 : n;
+}
+
+// Per-strategy stop multiple, persisted across sessions so the modal
+// defaults to what you actually tend to use instead of a flat 1.5x guess.
+const STOP_MULT_KEY = 'oh_last_stop_multiple';
+function getLastStopMultiple(strategy: string): number {
+  try {
+    const raw = localStorage.getItem(STOP_MULT_KEY);
+    if (!raw) return 1.5;
+    const map = JSON.parse(raw);
+    const v = map?.[strategy];
+    return typeof v === 'number' && v > 0 ? v : 1.5;
+  } catch { return 1.5; }
+}
+function saveLastStopMultiple(strategy: string, multiple: number) {
+  try {
+    const raw = localStorage.getItem(STOP_MULT_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[strategy] = parseFloat(multiple.toFixed(2));
+    localStorage.setItem(STOP_MULT_KEY, JSON.stringify(map));
+  } catch { /* non-blocking */ }
+}
+
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   // ── Price bounds ──────────────────────────────────────────────────────────
   // All valid GTC and stop prices must respect these hard bounds derived from
@@ -6556,13 +6582,13 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         // collected" regardless of how much profit has already been
         // captured — still respects the hard floor of live value + $0.01.
         const initGtc  = Math.min(existingGtcPrice, perContract - 0.01);
-        const initStop = Math.max(creditPerContract * 1.5, perContract + 0.01);
+        const initStop = Math.max(creditPerContract * getLastStopMultiple(pos.strategy), perContract + 0.01);
         setGtcPrice(Math.max(initGtc, gtcMin).toFixed(2));
         setStopPrice(Math.min(initStop, stopMax).toFixed(2));
       } else {
         setLivePriceError('Could not fetch live price — using estimates');
         setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-        const naiveStop = Math.max(creditPerContract * 1.5, stopMin);
+        const naiveStop = Math.max(creditPerContract * getLastStopMultiple(pos.strategy), stopMin);
         setStopPrice(Math.min(naiveStop, stopMax).toFixed(2));
       }
     } catch (e: any) {
@@ -6571,7 +6597,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
       console.warn('SetStopLossButton live price fetch failed:', e.message);
       setLivePriceError(`Price fetch failed: ${e.message ?? 'unknown error'}`);
       setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-      setStopPrice(Math.min(creditPerContract * 1.5, stopMax).toFixed(2));
+      setStopPrice(Math.min(creditPerContract * getLastStopMultiple(pos.strategy), stopMax).toFixed(2));
     } finally {
       if (mountedRef.current) setLivePriceLoading(false);
     }
@@ -6699,6 +6725,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
           const orderId = String(res?.data?.['complex-order']?.id ?? res?.data?.id ?? 'submitted');
           setResult('success');
           setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${orderId})`);
+          if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
         } catch (placeErr: any) {
           // The old order is already cancelled and the new one failed to go in —
           // the position is genuinely unprotected right now. Attempt one automatic
@@ -6750,6 +6777,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         const orderId = String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
         setResult('success');
         setResultMsg(`Stop Limit placed @ trigger $${stopTrigger.toFixed(2)} (ID #${orderId})`);
+        if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
       }
       setOpen(false);
       setConfirming(false);
@@ -6779,10 +6807,13 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
   // Dollar P/L — the actual $ result if each order fills, so the trader never
   // has to convert per-contract prices/multiples in their head.
-  const gtcProfitDollars  = (creditPerContract - gtcParsed) * qty * 100;
-  const stopLossDollars   = (stopParsed - creditPerContract) * qty * 100; // negative = net loss
-  const suggGtcProfitDollars = suggestion ? (creditPerContract - suggestion.gtcPrice) * qty * 100 : null;
-  const suggStopLossDollars  = suggestion ? (suggestion.stopPrice - creditPerContract) * qty * 100 : null;
+  const gtcProfitDollars  = clean$((creditPerContract - gtcParsed) * qty * 100);
+  const stopLossDollars   = clean$((stopParsed - creditPerContract) * qty * 100); // negative = net loss
+  const suggGtcProfitDollars = suggestion ? clean$((creditPerContract - suggestion.gtcPrice) * qty * 100) : null;
+  const suggStopLossDollars  = suggestion ? clean$((suggestion.stopPrice - creditPerContract) * qty * 100) : null;
+  // Breakeven context: how far the stop sits from true max risk, so "2.5x credit"
+  // isn't read as the whole loss story on a defined-risk spread.
+  const stopPctOfMaxRisk = pos.maxRisk > 0 ? (Math.abs(stopLossDollars) / pos.maxRisk) * 100 : null;
 
   return (
     <div className="relative">
@@ -6990,6 +7021,11 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                   valid range: ${Math.max(stopMin, effectiveLiveDisplay + 0.01).toFixed(2)} – ${stopMax.toFixed(2)}
                 </p>
               )}
+              {!stopError && stopPctOfMaxRisk != null && (
+                <p className={`text-[9px] ${th.textFaint} ml-28`}>
+                  = {stopPctOfMaxRisk.toFixed(0)}% of max risk (${pos.maxRisk.toFixed(2)})
+                </p>
+              )}
             </div>
           </div>
 
@@ -7036,8 +7072,11 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             <button
               disabled={hasErrors || livePriceLoading}
               onClick={() => setConfirming(true)}
+              style={needsOco && !hasErrors && !livePriceLoading
+                ? { background: 'linear-gradient(90deg, #059669 0%, #059669 48%, #ea580c 52%, #ea580c 100%)' }
+                : undefined}
               className={`w-full py-2 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                needsOco ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-orange-600 hover:bg-orange-500'
+                needsOco && !hasErrors && !livePriceLoading ? 'hover:brightness-110' : needsOco ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-orange-600 hover:bg-orange-500'
               }`}>
               {livePriceLoading
                 ? 'Fetching live price...'
