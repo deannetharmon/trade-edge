@@ -184,6 +184,7 @@ interface PositionSnapshot {
   pnl: number | null;
   pnlPct: number | null;
   iv: number | null;
+  ivr: number | null;
   theta: number | null;
   gamma: number | null;
   netDelta: number | null;
@@ -235,6 +236,7 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
       pnl: p.pnl,
       pnlPct: p.pnlPct,
       iv: p.iv,
+      ivr: p.ivr,
       theta: p.theta,
       gamma: p.gamma,
       netDelta: p.netDelta,
@@ -7256,6 +7258,54 @@ function netEdgeDaysTracked(pos: Position): number {
   return netEdgeSeries(pos).length;
 }
 
+// ── IV / IVR day-over-day tracking ──────────────────────────────────────
+// Same pattern as netEdgeSeries/Prior above, applied to raw iv/ivr fields.
+function ivSeries(pos: Position): { date: string; value: number }[] {
+  const hist = pos.snapshotHistory ?? [];
+  const out: { date: string; value: number }[] = [];
+  for (const s of hist) {
+    if (s.iv != null) out.push({ date: s.date, value: s.iv });
+  }
+  return out;
+}
+
+function ivrSeries(pos: Position): { date: string; value: number }[] {
+  const hist = pos.snapshotHistory ?? [];
+  const out: { date: string; value: number }[] = [];
+  for (const s of hist) {
+    if (s.ivr != null) out.push({ date: s.date, value: s.ivr });
+  }
+  return out;
+}
+
+// Yesterday's (most recent prior snapshot) value, for the day-over-day arrow.
+function ivPrior(pos: Position): number | null {
+  const series = ivSeries(pos);
+  if (series.length === 0) return null;
+  return series[series.length - 1].value;
+}
+
+function ivrPrior(pos: Position): number | null {
+  const series = ivrSeries(pos);
+  if (series.length === 0) return null;
+  return series[series.length - 1].value;
+}
+
+// Renders ▲/▼ vs no history / no change. Threshold avoids noise on flat values.
+function dayChangeArrow(current: number | null, prior: number | null, threshold = 0.05): string {
+  if (current == null || prior == null) return '';
+  const diff = current - prior;
+  if (Math.abs(diff) < threshold) return '';
+  return diff > 0 ? '▲' : '▼';
+}
+
+function dayChangeArrowColor(current: number | null, prior: number | null, threshold = 0.05): string {
+  if (current == null || prior == null) return '';
+  const diff = current - prior;
+  if (Math.abs(diff) < threshold) return '';
+  return diff > 0 ? 'text-emerald-400' : 'text-red-400';
+}
+
 // True the first time today's live edge prints below the prior peak-of-history,
 // i.e. the position has rolled OVER from its peak — gamma starting to win.
 // Requires at least 2 tracked days so a brand-new position can't false-trigger.
@@ -8060,10 +8110,12 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <div className="border-t-2 border-purple-600/50 pt-1" title={pos.hv30 != null ? `HV30: ${pos.hv30}%` : undefined}>
               <p className={`text-[9px] ${th.textFaint}`}>IV & IVR</p>
               <p className={`text-xs font-bold ${ivTextColor(pos.iv, pos.hv30, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                IV {pos.iv != null ? `${pos.iv}%` : '—'}
+                IV {pos.iv != null ? `${pos.iv}%` : '—'}{' '}
+                <span className={dayChangeArrowColor(pos.iv, ivPrior(pos))}>{dayChangeArrow(pos.iv, ivPrior(pos))}</span>
               </p>
               <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                IVR {pos.ivr ?? '—'}
+                IVR {pos.ivr ?? '—'}{' '}
+                <span className={dayChangeArrowColor(pos.ivr, ivrPrior(pos))}>{dayChangeArrow(pos.ivr, ivrPrior(pos))}</span>
               </p>
               <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
