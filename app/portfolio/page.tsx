@@ -96,6 +96,8 @@ interface Position {
   legs: PositionLeg[];
   creditReceived: number;
   currentValue: number | null;
+  closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
+  closeNowPnl: number | null;   // credit - closeValue — matches the close/cut-losses modal exactly
   pnl: number | null;
   pnlPct: number | null;
   pnlReliable: boolean;
@@ -1835,6 +1837,8 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
 
   const allOptionSymbols = optionPositions.map((p: any) => p.symbol).filter(Boolean);
   const currentPrices: Record<string, number> = {};
+  const currentBids: Record<string, number> = {};
+  const currentAsks: Record<string, number> = {};
   const unpriceableSymbols = new Set<string>();
   const thetaMap: Record<string, number> = {};
   const gammaMap: Record<string, number> = {};
@@ -1855,6 +1859,8 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
           const mid = (bid + ask) / 2;
           const twoSided = bid > 0 && ask > 0;
           currentPrices[sym] = twoSided ? mid : mark > 0 ? mark : 0;
+          currentBids[sym] = twoSided ? bid : mark > 0 ? mark : 0;
+          currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : 0;
           if (!twoSided && mark <= 0) unpriceableSymbols.add(sym);
           const theta = parseFloat(item.theta ?? 'NaN');
           const gamma = parseFloat(item.gamma ?? 'NaN');
@@ -2211,6 +2217,8 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
 
     const creditReceived = calculateSpreadCredit(positionLegs);
 
+    // General mark value (mid) — used for ongoing P/L tracking, badges, and
+    // rule logic throughout the app. NOT what you'd actually realize by closing.
     let currentValue = 0; let hasCurrentPrices = true;
     for (const leg of legs) {
       const qty = parseInt(leg['quantity'] ?? '1', 10);
@@ -2219,6 +2227,20 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       currentValue += leg['quantity-direction'] === 'Short' ? price * qty : -(price * qty);
     }
     currentValue = currentValue * 100;
+
+    // Marketable "if I closed now" value — same convention as fetchCloseQuote:
+    // Buy to Close (short leg) fills at ask; Sell to Close (long leg) fills at bid.
+    // This is the number that should match the close/cut-losses modal exactly.
+    let closeValue = 0; let hasCloseValue = true;
+    for (const leg of legs) {
+      const qty = parseInt(leg['quantity'] ?? '1', 10);
+      const sym = leg.symbol?.replace(/\s+/g, '');
+      const isShort = leg['quantity-direction'] === 'Short';
+      const price = isShort ? currentAsks[sym] : currentBids[sym];
+      if (price == null || price <= 0) { hasCloseValue = false; break; }
+      closeValue += isShort ? price * qty : -(price * qty);
+    }
+    closeValue = closeValue * 100;
 
     const anyLegUnpriceable = legs.some(
       (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
@@ -2251,6 +2273,8 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
       key, symbol, expDate, dte, strategy, legs: positionLegs,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
+      closeValue: hasCloseValue ? Math.abs(closeValue) : null,
+      closeNowPnl: hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
@@ -2906,7 +2930,11 @@ For covered calls / short calls:
 - Vega: short vega means an IV rise shows as paper loss; that is expected, not danger.
 - Compare theta versus gamma using the NET DAILY EDGE number, not intuition:
   - Net edge clearly positive → theta is winning; holding may be valid.
-  - Net edge negative → gamma is winning; favor close/roll on spreads, citing the dollar figures.
+  - Net edge negative → gamma is currently winning, but this is a discomfort signal, NOT a standalone
+    action trigger. Only escalate toward CLOSE/ROLL when negative net edge is paired with adverse
+    trend (moving toward the short strike) or an actual breach/stop. Negative net edge with a
+    favorable or neutral trend still supports HOLD — say so explicitly ("net edge negative but
+    trend favors the position, so holding remains reasonable").
 - Mention whether the Greeks support HOLD, CLOSE, or ROLL.
 
 7. VOLATILITY
@@ -8242,16 +8270,33 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             )}
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Buyback</p>
+              <p className={`text-[9px] ${th.textFaint}`}>Buyback (mid)</p>
               <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.currentValue != null ? `$${pos.currentValue.toFixed(2)}` : '—'}
               </p>
+              {pos.closeValue != null && (
+                <>
+                  <p className={`text-[9px] ${th.textFaint} mt-1`}>Close now (marketable)</p>
+                  <p className="text-xs font-bold text-orange-300" style={{ fontFamily: "'DM Mono', monospace" }}>
+                    ${pos.closeValue.toFixed(2)}
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Credit</p>
               <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${pos.creditReceived.toFixed(2)}</p>
             </div>
+
+            {pos.closeNowPnl != null && (
+              <div className="border-t-2 border-emerald-600/50 pt-1">
+                <p className={`text-[9px] ${th.textFaint}`}>P/L if closed now</p>
+                <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  {pos.closeNowPnl >= 0 ? '+' : ''}${pos.closeNowPnl.toFixed(2)}
+                </p>
+              </div>
+            )}
 
             <div onClick={e => e.stopPropagation()} className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>{Math.round(pos.profitTarget * 100)}% Target</p>
