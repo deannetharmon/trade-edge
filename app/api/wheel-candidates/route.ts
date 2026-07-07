@@ -65,10 +65,10 @@ export async function POST(req: NextRequest) {
 
     const existing = store[symbol];
     const merged: WheelCandidate = {
-      symbol,
       wheelStage: 'hunting-csp',
       ...existing,
       ...patch,
+      symbol,
       updatedAt: new Date().toISOString(),
     };
 
