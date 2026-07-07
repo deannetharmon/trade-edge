@@ -8540,9 +8540,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
       </div>
 
       {/* Action + Analyze row */}
-      <div className={`flex items-center justify-between px-4 py-2 border-t ${th.borderLight}`}>
+      <div className={`flex items-center px-4 py-2 border-t ${th.borderLight} overflow-x-auto`} style={{ flexWrap: 'nowrap' }}>
         {/* Quick action buttons */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 shrink-0" style={{ flexWrap: 'nowrap' }}>
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).map(action => {
             const meta = ACTION_META[action];
             if (!isActionRelevant(pos, action, rec)) return null;
@@ -8567,20 +8567,20 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             onClick={e => e.stopPropagation()}
             onChange={e => { e.stopPropagation(); onIntentChange(pos.key, e.target.value as PositionIntent); }}
             title="Trade intent — tells the AI whether assignment is the goal"
-            className={`text-[9px] px-1.5 py-1 border rounded bg-transparent outline-none cursor-pointer ${th.borderLight} ${th.textFaint} ac-hover-text`}
+            className={`text-[9px] px-1.5 py-1 border rounded bg-transparent outline-none cursor-pointer shrink-0 ${th.borderLight} ${th.textFaint} ac-hover-text`}
             style={{ fontFamily: "'DM Mono', monospace" }}>
             <option value="income">Intent: Income</option>
             <option value="acquisition">Intent: Acquire</option>
             <option value="neutral">Intent: Neutral</option>
           </select>
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).includes(rec.action) && (
-            <span className={`text-[9px] ${th.textFaint} ml-1`}>← suggested</span>
+            <span className={`text-[9px] ${th.textFaint} ml-1 shrink-0 whitespace-nowrap`}>← suggested</span>
           )}
         </div>
 
         <button
           onClick={e => { e.stopPropagation(); if (analysis || analysisLoading) { setShowAnalysis(v => !v); } else { handleAnalyze(); } }}
-          className={`text-[10px] px-3 py-1 border rounded-lg transition-colors font-bold flex items-center gap-1.5 ${
+          className={`text-[10px] px-3 py-1 border rounded-lg transition-colors font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap ml-auto ${
             showAnalysis && analysis
               ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
               : analysis
