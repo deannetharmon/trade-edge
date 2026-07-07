@@ -7934,6 +7934,12 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               </p>
 
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(pos.ivAtEntry, pos.iv, true, th.textFaint)}>
+                  IV {fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
                 <span className={entryChangeColor(pos.ivrAtEntry, pos.ivr, true, th.textFaint)}>
                   IVR {fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}
                 </span>
@@ -8051,10 +8057,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               </p>
             </div>
 
-            <div className="border-t-2 border-purple-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>IVR</p>
+            <div className="border-t-2 border-purple-600/50 pt-1" title={pos.hv30 != null ? `HV30: ${pos.hv30}%` : undefined}>
+              <p className={`text-[9px] ${th.textFaint}`}>IV & IVR</p>
+              <p className={`text-xs font-bold ${ivTextColor(pos.iv, pos.hv30, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                IV {pos.iv != null ? `${pos.iv}%` : '—'}
+              </p>
               <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                {pos.ivr ?? '—'}
+                IVR {pos.ivr ?? '—'}
               </p>
               <p className={`text-[8px] mt-0.5 font-semibold ${ivrTextColor(pos.ivr, th.textFaint)}`}>
                 {ivrLabel(pos.ivr)}
