@@ -491,6 +491,7 @@ export default function WheelPage() {
                   <th className="text-right px-3 py-2">Bid</th>
                   <th className="text-right px-3 py-2">Total Premium</th>
                   <th className="text-right px-3 py-2">Monthly</th>
+                  <th className="text-right px-3 py-2">Annual $</th>
                   <th className="text-right px-3 py-2">Annual ROC</th>
                   <th className="px-3 py-2"></th>
                 </tr>
@@ -567,6 +568,7 @@ export default function WheelPage() {
                           <td className="px-3 py-2 text-right">{fmtMoney(contract.bid)}</td>
                           <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.totalPremium, 0) : '—'}</td>
                           <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.monthly, 0) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.annual, 0) : '—'}</td>
                           <td className={`px-3 py-2 text-right font-bold ${yieldCalc?.annualRoc != null && yieldCalc.annualRoc >= 12 ? 'text-emerald-400' : 'text-white/50'}`}>
                             {yieldCalc?.annualRoc != null ? fmtPct(yieldCalc.annualRoc) : '—'}
                           </td>
