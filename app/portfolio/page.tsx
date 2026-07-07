@@ -2397,6 +2397,14 @@ function getRecommendation(pos: Position, trend: TrendResult | null): Recommenda
   if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
   if (pos.needsClose && pnlPct < 0)  return { action: 'MANAGE', detail: `${pos.dte} DTE with loss — review close/roll, don't auto-cut` };
 
+  // Acquisition-intent CSP: ITM / paper loss is the plan working, not a risk signal.
+  // Skip all breach/stop/loss-based hard exits — hold to expiration for assignment.
+  const isAcquisitionCsp = pos.strategy === 'PUT' && pos.intent === 'acquisition';
+  if (isAcquisitionCsp) {
+    if (breached) return { action: 'HOLD', detail: `ITM — on track for assignment, holding to expiration` };
+    return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% paper — acquisition intent, hold for assignment or expiry` };
+  }
+
   // Hard exits: breached strike, explicit stop breach, or very large loss.
   if (breached) return { action: 'CUT_LOSSES', detail: `Short strike breached — exit or roll immediately` };
   if (stopLossBreached) return { action: 'CUT_LOSSES', detail: `Stop threshold reached — follow the risk plan` };
