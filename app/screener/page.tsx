@@ -11,10 +11,10 @@ import type {
   CheckResult, SpreadCandidate, TrendResult, ScreenResult,
   RankConfig, DimensionScore, RawScanEntry,
 } from '@/lib/scans/types';
-import type { RulesType } from '@/lib/scans/constants';
+import type { RulesType, CspRulesType } from '@/lib/scans/constants';
 import {
   INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
-  DEFAULT_RULES, DEFAULT_ETF_RULES, YAHOO_INDEX_CHART_MAP,
+  DEFAULT_RULES, DEFAULT_ETF_RULES, DEFAULT_CSP_RULES, YAHOO_INDEX_CHART_MAP,
   BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY,
   ESTIMATED_EARNINGS_CYCLE_DAYS,
 } from '@/lib/scans/constants';
@@ -24,12 +24,13 @@ import {
 } from '@/lib/scans/scan-utils';
 import {
   classificationCache, ttFetch, getAccessToken, classifyUnderlying,
-  getMarketMetrics, getQuote, getChain,
+  getMarketMetrics, getQuote, getChain, getAvailableCash,
 } from '@/lib/scans/tastytrade-client';
 import {
   trySpreadAtWidth, findBestSpread, tryICSideAtWidth, findBestIC,
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
+import { findBestCsp } from '@/lib/scans/csp-finder';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
@@ -773,6 +774,8 @@ function saveEtfRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES_ETF, JSON.stringify(rules)); } catch {}
 }
 const LS_PMCC = 'hunter-tickers-pmcc';
+const LS_CSP = 'hunter-tickers-csp';
+const LS_CSP_CASH = 'hunter-csp-available-cash';
 const LS_CAL = 'hunter-cal-scheduled'; // legacy — superseded by LS_FOLLOWUPS, kept only so old presence flags don't error on read
 const LS_CAL_ENTRY = 'hunter-cal-entry'; // legacy — superseded by LS_FOLLOWUPS
 const LS_FOLLOWUPS = 'hunter-followups';
@@ -1274,6 +1277,93 @@ function runPMCCChecklist(
     qualified, bestCandidate, failReasons,
     earningsDate, trendResult, isEtf: false, underlyingType: pmccChainData.classification ?? 'stock', ruleSetApplied: 'PMCC',
     checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for PMCC' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for PMCC' } },
+  };
+}
+
+
+// ── CSP — Cash-Secured Put (TE-0007A) ───────────────────────────────────────
+// Follows the same pattern as runPMCCChecklist above: a strategy that isn't a
+// vertical spread gets its own dedicated checklist builder rather than being
+// forced through the spread-shaped runChecklist(). The actual contract search
+// is findBestCsp() (lib/scans/csp-finder.ts), which itself just calls Wheel's
+// findBestWheelContract — this function only turns that result into the same
+// ScreenResult shape every other strategy card already knows how to render.
+function runCspChecklist(
+  symbol: string,
+  chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification?: 'index' | 'etf' | 'stock' },
+  price: number | null,
+  metrics: any,
+  cspRules: CspRulesType,
+  availableCash: number | null,
+  trendResult?: TrendResult
+): ScreenResult {
+  const failReasons: string[] = [];
+  const ivrValue = metrics.ivRank;
+  const earningsDate = metrics.earningsExpectedDate;
+
+  // IVR — CSP is undefined-risk (assignment), so per the Prosper rule set it
+  // has a hard upper cap at 70, unlike spreads which have no cap.
+  const ivrCheck: CheckResult = ivrValue == null
+    ? { status: 'warn', value: 'N/A', reason: 'Not available' }
+    : ivrValue < cspRules.IVR_MIN
+      ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% below ${cspRules.IVR_MIN}% floor — premium too thin for the risk`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below ${cspRules.IVR_MIN}% minimum` }; })()
+      : ivrValue > cspRules.IVR_MAX
+        ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% above ${cspRules.IVR_MAX}% hard cap for CSP/naked puts`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Above ${cspRules.IVR_MAX}% hard cap — undefined risk` }; })()
+        : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: `Within ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range` };
+
+  const earningsCheck: CheckResult = !earningsDate
+    ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
+    : (() => {
+        const d = daysUntil(earningsDate);
+        if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
+        if (d <= cspRules.DTE_MAX) { failReasons.push(`Earnings in ${d}d — assignment risk into a binary event`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' }; }
+        return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
+      })();
+
+  const bestCandidate = ivrCheck.status !== 'fail' && earningsCheck.status !== 'fail'
+    ? findBestCsp(chainData, price, { rules: cspRules, contracts: 1, availableCash })
+    : null;
+  if (!bestCandidate && !failReasons.length) failReasons.push(`No qualifying put found in delta ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX} / DTE ${cspRules.DTE_MIN}-${cspRules.DTE_MAX} window`);
+
+  const oiCheck: CheckResult = !bestCandidate
+    ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
+    : bestCandidate.shortOI >= cspRules.OI_MIN
+      ? { status: 'pass', value: `${bestCandidate.shortOI}`, reason: `≥ ${cspRules.OI_MIN} minimum` }
+      : { status: 'warn', value: `${bestCandidate.shortOI}`, reason: `Below ${cspRules.OI_MIN} — fills may be difficult` };
+
+  const deltaCheck: CheckResult = bestCandidate
+    ? { status: 'pass', value: `Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: `Target ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const creditCheck: CheckResult = bestCandidate
+    ? { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `Requires $${bestCandidate.requiredCash?.toLocaleString() ?? '—'} cash` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const rocCheck: CheckResult = bestCandidate
+    ? { status: bestCandidate.roc >= 1 ? 'pass' : 'warn', value: `${bestCandidate.roc.toFixed(1)}%`, reason: `Annualized ${bestCandidate.annualizedRoc?.toFixed(0) ?? '—'}%` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const popCheck: CheckResult = bestCandidate
+    ? { status: (bestCandidate.pop ?? 0) >= 65 ? 'pass' : 'warn', value: `${bestCandidate.pop?.toFixed(0) ?? '—'}%`, reason: '1 − |delta|, put side' }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  // Capital check never disqualifies the candidate from being *found* — it's
+  // surfaced as a blocked/warned result instead, per DR-0001 §7.4.
+  if (bestCandidate?.capitalBlocked) failReasons.push(bestCandidate.capitalWarning ?? 'Insufficient cash for this CSP');
+
+  const qualified = ivrCheck.status === 'pass'
+    && earningsCheck.status === 'pass'
+    && oiCheck.status !== 'fail'
+    && bestCandidate !== null
+    && !bestCandidate.capitalBlocked;
+
+  return {
+    symbol, strategy: 'CSP', price, ivr: ivrValue,
+    ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+    qualified, bestCandidate, failReasons,
+    earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
+    underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
+    checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
   };
 }
 
@@ -2311,6 +2401,13 @@ function InfoTooltip({ th, text }: { th: typeof THEMES[Theme]; text: string }) {
 
 function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme] }) {
   const widthTag = (w: number) => <span className={`${th.textFaint} mx-0.5`}>{`·${w}·`}</span>;
+  if (c.strategy === 'CSP') {
+    return (
+      <div className="text-xs shrink-0">
+        <span className={th.label}>Put </span><span className={`${th.text} font-medium`}>{c.shortStrike}</span>
+      </div>
+    );
+  }
   if (c.strategy === 'PMCC') {
     return (
       <div className="text-xs shrink-0">
@@ -3037,7 +3134,7 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
 
   const otmPct = (() => {
     if (!c || result.price == null || result.price <= 0) return null;
-    if (c.strategy === 'BPS') return ((result.price - c.shortStrike) / result.price) * 100;
+    if (c.strategy === 'BPS' || c.strategy === 'CSP') return ((result.price - c.shortStrike) / result.price) * 100;
     if (c.strategy === 'BCS') return ((c.shortStrike - result.price) / result.price) * 100;
     if (c.strategy === 'IC' && c.shortCallStrike != null) {
       const putOtm = ((result.price - c.shortStrike) / result.price) * 100;
@@ -3144,6 +3241,8 @@ const strategyScores = useMemo(() => {
     ? 'bg-red-500/15 border-red-500 text-red-500'
     : result.strategy === 'PMCC'
     ? 'bg-purple-500/15 border-purple-500 text-purple-400'
+    : result.strategy === 'CSP'
+    ? 'bg-amber-500/15 border-amber-500 text-amber-400'
     : 'bg-blue-500/15 border-blue-500 text-blue-500';
 
   const isShortTerm = rules.DTE_MAX <= 29;
@@ -3362,24 +3461,30 @@ const strategyScores = useMemo(() => {
             </> : <>
               <div className="text-xs shrink-0 w-20">
                 <div>
-                  <span className={th.label}>Credit </span>
-                  <span className={`${getCreditColor(c, result.isEtf ?? false)} font-bold`}>
+                  <span className={th.label}>{c.strategy === 'CSP' ? 'Premium ' : 'Credit '}</span>
+                  <span className={`${c.strategy === 'CSP' ? 'text-emerald-400' : getCreditColor(c, result.isEtf ?? false)} font-bold`}>
                     ${(c.totalCredit ?? c.credit).toFixed(2)}
                   </span>
                 </div>
                 <div>
-                  <span className={th.label}>Cr Ratio </span>
-                  <span className={`${getCreditColor(c, result.isEtf ?? false)} font-medium`}>
-                    {(c.creditRatio * 100).toFixed(0)}% 
-                  </span>
+                  <span className={th.label}>{c.strategy === 'CSP' ? 'Ann. ROC ' : 'Cr Ratio '}</span>
+                  {c.strategy === 'CSP' ? (
+                    <span className={`${(c.annualizedRoc ?? 0) >= 20 ? 'text-emerald-400' : (c.annualizedRoc ?? 0) >= 10 ? 'text-yellow-400' : 'text-red-400'} font-medium`}>
+                      {c.annualizedRoc != null ? `${c.annualizedRoc.toFixed(0)}%` : '—'}
+                    </span>
+                  ) : (
+                    <span className={`${getCreditColor(c, result.isEtf ?? false)} font-medium`}>
+                      {(c.creditRatio * 100).toFixed(0)}% 
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="text-xs shrink-0 w-16">
                 <div><span className={th.label}>POP </span><span className={`${th.text} font-medium`}>{c.pop != null ? `${c.pop.toFixed(0)}%` : '—'}</span></div>
                   <div className="text-[10px]">
                     <span className={th.label}>ROC </span>
-                    <span className={`${getRocColor(c, result.isEtf ?? false)} font-medium`}>
-                      {c.roc.toFixed(0)}%
+                    <span className={`${c.strategy === 'CSP' ? th.text : getRocColor(c, result.isEtf ?? false)} font-medium`}>
+                      {c.roc.toFixed(c.strategy === 'CSP' ? 1 : 0)}%
                     </span>
                   </div>
               </div>
@@ -3605,6 +3710,29 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
+          {c && c.strategy === 'CSP' && (
+            <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CSP — Wheel Entry</p>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div><span className={th.label}>Put: </span><span className={th.text}>{c.shortStrike}P exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
+                <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.credit.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(1 contract)</span></div>
+                <div>
+                  <span className={th.label}>Required cash: </span>
+                  <span className={`font-bold ${c.capitalBlocked ? 'text-red-400' : th.text}`}>${c.requiredCash?.toLocaleString() ?? '—'}</span>
+                  <span className={`${th.textFaint} ml-1 text-[10px]`}>(strike × 100 — no margin)</span>
+                </div>
+                <div><span className={th.label}>Breakeven: </span><span className={th.text}>${c.breakeven?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(assignment price ${c.assignmentPrice?.toFixed(2) ?? '—'})</span></div>
+                <div><span className={th.label}>ROC (period): </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(premium / required cash)</span></div>
+                <div><span className={th.label}>Annualized ROC: </span><span className={th.text}>{c.annualizedRoc?.toFixed(0) ?? '—'}%</span></div>
+              </div>
+              {c.capitalBlocked ? (
+                <p className={`text-[9px] text-red-400 font-medium pt-1`}>⚠ {c.capitalWarning}</p>
+              ) : (
+                <p className={`text-[9px] text-amber-400/80 pt-1`}>Cash-secured — assignment would mean buying 100 shares/contract at ${c.shortStrike}. Only enter if owning the stock at this price is acceptable.</p>
+              )}
+            </div>
+          )}
+
           {result.failReasons.length > 0 && (
             <div className={`pt-2 border-t ${th.border}`}>
               <p className="text-[10px] text-red-500 font-medium">{result.failReasons.join(' · ')}</p>
@@ -3613,7 +3741,7 @@ const strategyScores = useMemo(() => {
 
           {/* Action Buttons */}
           <div className="flex gap-2 mt-2">
-            {c && (
+            {c && c.strategy !== 'CSP' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
@@ -3621,12 +3749,23 @@ const strategyScores = useMemo(() => {
                 ⚡ TRADE THIS
               </button>
             )}
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
-              className="flex-1 py-2.5 border border-emerald-600 hover:bg-emerald-500/10 text-emerald-400 rounded-xl text-xs font-medium tracking-wider transition-colors"
-            >
-              🔍 FIND BETTER (Similar DTE)
-            </button>
+            {c && c.strategy !== 'CSP' && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
+                className="flex-1 py-2.5 border border-emerald-600 hover:bg-emerald-500/10 text-emerald-400 rounded-xl text-xs font-medium tracking-wider transition-colors"
+              >
+                🔍 FIND BETTER (Similar DTE)
+              </button>
+            )}
+            {c && c.strategy === 'CSP' && (
+              // TE-0007A scope: no live order placement, and BestOpportunityFinder's
+              // "Find Better" is spread-specific (runs BPS/BCS/IC checklists at
+              // different risk presets) — not reused here to avoid misapplying
+              // spread logic to a single-leg CSP. Deferred to a follow-up ticket.
+              <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
+                Manual entry only — CSP trade placement and "Find Better" are not yet wired up
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -5096,6 +5235,8 @@ export default function Home() {
     persistWatchlist(next);
   };
   const [pmccTickers, setPmccTickers] = useState('');
+  const [cspTickers, setCspTickers] = useState('');
+  const [cspCashOverride, setCspCashOverride] = useState('');
   // NOTE: results/rawScanCache/resultsCachedAt/screenMode used to read
   // localStorage directly inside these useState lazy initializers. That
   // runs synchronously on first render on BOTH server (no localStorage ->
@@ -5169,6 +5310,8 @@ export default function Home() {
   useEffect(() => {
     try {
       setPmccTickers(localStorage.getItem(LS_PMCC) || '');
+      setCspTickers(localStorage.getItem(LS_CSP) || '');
+      setCspCashOverride(localStorage.getItem(LS_CSP_CASH) || '');
     } catch {}
   }, []);
 
@@ -5232,6 +5375,8 @@ export default function Home() {
     idbDel(IDB_TARGETED_RESULTS_KEY);
   };
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
+  const handleCspChange = (v: string) => { setCspTickers(v); clearResultsCache(); try { localStorage.setItem(LS_CSP, v); } catch {} };
+  const handleCspCashChange = (v: string) => { setCspCashOverride(v); try { localStorage.setItem(LS_CSP_CASH, v); } catch {} };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
 
   const parseTickers = normalizeTickerInput;
@@ -5469,6 +5614,76 @@ export default function Home() {
     }
   };
 
+  // Scan CSP tickers only — entirely separate action from runScreen/Run Hunter,
+  // same pattern as runPMCCScan above. CSP results are appended to the
+  // existing results list, so they render through the exact same result-card
+  // UI as BPS/BCS/IC/PMCC (same look and feel, per DR-0001 §10).
+  const runCspScan = async () => {
+    const csp = parseTickers(cspTickers);
+    if (!csp.length) {
+      setError('No CSP tickers to scan. Add a ticker to the CSP list first.');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      setStatus('Getting access token...');
+      const token = await getAccessToken();
+
+      setStatus('Checking available cash...');
+      const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
+      const availableCash = Number.isFinite(manualCash as number)
+        ? (manualCash as number)
+        : await getAvailableCash(token);
+
+      setStatus('Fetching market metrics...');
+      const metricsArray = await getMarketMetrics(csp, token);
+      const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
+
+      const errResult = (symbol: string, strategy: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
+        symbol, strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+        qualified: false, bestCandidate: null,
+        failReasons: [msg], trendResult,
+        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
+      });
+
+      const cspResults: ScreenResult[] = [];
+      for (const symbol of csp) {
+        setStatus(`Scanning CSP ${symbol}...`);
+        try {
+          const classification = await classifyUnderlying(symbol, token);
+          const isEtf = classification === 'index' || classification === 'etf';
+          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
+          const [chainData, price] = await Promise.all([
+            getChain(symbol, token, DEFAULT_RULES, { min: DEFAULT_CSP_RULES.DTE_MIN, max: DEFAULT_CSP_RULES.DTE_MAX }),
+            getQuote(symbol, token),
+          ]);
+          let trendResult: TrendResult | undefined;
+          try { trendResult = await getTrend(symbol, isEtf); } catch {}
+          cspResults.push(runCspChecklist(symbol, chainData, price, metrics, DEFAULT_CSP_RULES, availableCash, trendResult));
+        } catch (e: any) {
+          cspResults.push(errResult(symbol, 'CSP', e.message));
+        }
+      }
+
+      setResults(prev => {
+        const merged = [...prev, ...cspResults];
+        const cacheTs = Date.now();
+        setResultsCachedAt(cacheTs);
+        idbSet(IDB_RESULTS_KEY, merged);
+        try {
+          localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
+        } catch {}
+        return merged;
+      });
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setStatus('');
+      setLoading(false);
+    }
+  };
+
   const qualified = results.filter(r => r.qualified);
   const disqualified = results.filter(r => !r.qualified);
 
@@ -5543,6 +5758,30 @@ export default function Home() {
             <button onClick={runPMCCScan} disabled={loading || !parseTickers(pmccTickers).length}
               className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40`}>
               {loading ? 'SCANNING...' : 'SCAN SELECTED FOR PMCC'}
+            </button>
+          </div>
+
+          {/* CSP — separate tool, own card (TE-0007A). Same pattern as PMCC:
+              its own ticker list + scan button, results appended into the
+              shared `results` list so they render through the same cards. */}
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
+            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>CSP LIST</p>
+            <StrategyBox label="CSP" badge="WHEEL ENTRY" badgeColor="bg-amber-500/15 text-amber-400 border-amber-500" borderFocus="focus:border-amber-500" value={cspTickers} onChange={handleCspChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
+            <div>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1`}>AVAILABLE CASH (optional override)</p>
+              <input
+                type="number"
+                min={0}
+                placeholder="Auto-detect from account"
+                value={cspCashOverride}
+                onChange={e => handleCspCashChange(e.target.value)}
+                className={`w-full ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} focus:outline-none`}
+              />
+              <p className={`text-[8px] ${th.textFaint} mt-1`}>Leave blank to use your account&apos;s cash balance. Margin is never used by default.</p>
+            </div>
+            <button onClick={runCspScan} disabled={loading || !parseTickers(cspTickers).length}
+              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40`}>
+              {loading ? 'SCANNING...' : 'SCAN SELECTED FOR CSP'}
             </button>
           </div>
 

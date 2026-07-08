@@ -28,6 +28,21 @@ export const DEFAULT_ETF_RULES: RulesType = {
 };
 
 
+// CSP (Cash-Secured Put) — first-class strategy added in TE-0007A.
+// Delta/DTE defaults intentionally mirror Wheel's own defaults
+// (see app/api/wheel-config/route.ts DEFAULT_CONFIG) so the Screener's CSP
+// scan and the Wheel page's CSP hunting stay aligned out of the box.
+// IVR_MAX is a hard cap per the Prosper rule set: CSP/naked puts are
+// undefined-risk, so unlike spreads (no upper IVR cap) CSP stops at 70.
+export const DEFAULT_CSP_RULES = {
+  IVR_MIN: 30, IVR_MAX: 70,
+  DELTA_MIN: 0.15, DELTA_MAX: 0.25,
+  DTE_MIN: 30, DTE_MAX: 45,
+  OI_MIN: 500, BID_ASK_MAX: 0.10,
+};
+export type CspRulesType = typeof DEFAULT_CSP_RULES;
+
+
 export const YAHOO_INDEX_CHART_MAP: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
 
 

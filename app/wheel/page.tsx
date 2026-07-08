@@ -1,0 +1,686 @@
+// app/wheel/page.tsx
+
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import {
+  fetchWheelChain,
+  findBestWheelContract,
+  getWheelQuote,
+  type WheelStage,
+  type WheelSelectedContract,
+  type WheelChainResult,
+  type WheelChainLeg,
+} from '@/lib/wheel/chainSearch';
+
+const BASE = 'https://api.tastytrade.com';
+const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
+const LS_ACCESS_TOKEN = 'tt_access_token_cache';
+const LS_ACCESS_TOKEN_EXPIRY = 'tt_access_token_expiry';
+
+// Same three-tier token caching used across the app (screener/portfolio).
+async function getAccessToken(): Promise<string> {
+  const sessionCached = sessionStorage.getItem('tt_access_token');
+  if (sessionCached) return sessionCached;
+
+  try {
+    const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
+    const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
+    if (lsCached && expiry && Date.now() < parseInt(expiry)) {
+      sessionStorage.setItem('tt_access_token', lsCached);
+      return lsCached;
+    }
+  } catch {}
+
+  const refreshToken = localStorage.getItem('tt_refresh_token');
+  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
+  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
+
+  const res = await fetch(`${BASE}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
+  });
+  if (!res.ok) {
+    sessionStorage.removeItem('tt_access_token');
+    try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
+    localStorage.removeItem('tt_refresh_token');
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+  const data = await res.json();
+  const token = data.access_token;
+  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
+
+  sessionStorage.setItem('tt_access_token', token);
+  try {
+    localStorage.setItem(LS_ACCESS_TOKEN, token);
+    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
+  } catch {}
+  if (data.refresh_token && data.refresh_token !== refreshToken) {
+    localStorage.setItem('tt_refresh_token', data.refresh_token);
+  }
+  return token;
+}
+
+interface WheelConfig {
+  defaultDeltaMin: number;
+  defaultDeltaMax: number;
+  defaultDteMin: number;
+  defaultDteMax: number;
+  updatedAt: string;
+}
+
+interface WheelCandidate {
+  symbol: string;
+  sector?: string;
+  wheelStage: WheelStage;
+  costBasis?: number | null;
+  quantity?: number | null; // number of contracts; defaults to 1
+  deltaOverride?: { min: number; max: number } | null;
+  dteOverride?: { min: number; max: number } | null;
+  manualPick?: { expirationDate: string; strikePrice: number } | null;
+  updatedAt: string;
+}
+
+// Row-level derived state: the actual selected contract (auto-searched or
+// manually pinned) plus loading/error status. Kept separate from the
+// persisted WheelCandidate since this is live market data, not user config.
+interface RowResult {
+  loading: boolean;
+  error: string | null;
+  contract: WheelSelectedContract | null;
+  quote: number | null;
+}
+
+function fmtMoney(v: number | null | undefined, digits = 2): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+function fmtPct(v: number | null | undefined, digits = 1): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${v.toFixed(digits)}%`;
+}
+
+// Computes the same Total Premium / Daily / Monthly / Annual / ROC math as
+// Dean's Wheel_What-If spreadsheet, given a selected contract, 100-share
+// lots, and a contract quantity. referencePrice is current stock price for
+// hunting-csp, cost basis for own-writing-cc (falls back to current price
+// if no basis set yet). ROC is measured against cost for ONE lot (100 sh)
+// regardless of quantity, since each contract requires its own 100 shares/
+// cash-secured lot -- ROC per lot doesn't change with quantity, only the
+// dollar totals do.
+function computeYield(contract: WheelSelectedContract, referencePrice: number | null, quantity: number) {
+  const premiumPerContract = contract.mid * 100;
+  const totalPremium = premiumPerContract * quantity;
+  const daily = contract.dte > 0 ? totalPremium / contract.dte : 0;
+  const monthly = (daily * 365) / 12;
+  const annual = daily * 365;
+  const costPerLot = referencePrice != null ? referencePrice * 100 : null;
+  const monthlyPerLot = contract.dte > 0 ? (premiumPerContract / contract.dte) * (365 / 12) : 0;
+  const monthlyRoc = costPerLot && costPerLot > 0 ? (monthlyPerLot / costPerLot) * 100 : null;
+  const annualRoc = monthlyRoc != null ? monthlyRoc * 12 : null;
+  return { totalPremium, daily, monthly, annual, monthlyRoc, annualRoc };
+}
+
+// Delta-range presets for the Find Better quick-filter buttons.
+const DELTA_PRESETS: { label: string; min: number; max: number }[] = [
+  { label: '10-15', min: 0.10, max: 0.15 },
+  { label: '15-25', min: 0.15, max: 0.25 },
+  { label: '25-35', min: 0.25, max: 0.35 },
+  { label: 'Any', min: 0, max: 1 },
+];
+
+// Filters a fetched chain down to the correct side, DTE window, and
+// out-of-the-money strikes only (a deep-ITM call/put makes no sense for a
+// covered-call or CSP entry and previously cluttered the picker). Sorted by
+// closeness to the delta filter's center so the most relevant contracts are
+// always first, not just the lowest strike.
+function listCandidateContracts(
+  chain: WheelChainResult,
+  stage: WheelStage,
+  dteTarget: { min: number; max: number },
+  deltaFilter: { min: number; max: number },
+  currentPrice: number | null,
+): (WheelChainLeg & { dte: number })[] {
+  const wantedType = stage === 'hunting-csp' ? 'P' : 'C';
+  const out: (WheelChainLeg & { dte: number })[] = [];
+
+  for (const expDate of chain.expirations) {
+    const [y, m, d] = expDate.split('-').map(Number);
+    const dte = Math.round((new Date(y, m - 1, d).getTime() - Date.now()) / 86_400_000);
+    if (dte < dteTarget.min || dte > dteTarget.max) continue;
+
+    for (const leg of chain.chains[expDate] ?? []) {
+      if (leg.optionType !== wantedType) continue;
+      if (leg.delta == null) continue;
+
+      const absDelta = Math.abs(leg.delta);
+      if (absDelta < deltaFilter.min || absDelta > deltaFilter.max) continue;
+
+      // OTM-only: for a CC (calls), strike must be above spot; for a CSP
+      // (puts), strike must be below spot. Skip the OTM check entirely if
+      // we don't have a live price yet rather than hiding everything.
+      if (currentPrice != null) {
+        if (wantedType === 'C' && leg.strikePrice <= currentPrice) continue;
+        if (wantedType === 'P' && leg.strikePrice >= currentPrice) continue;
+      }
+
+      out.push({ ...leg, dte });
+    }
+  }
+
+  const deltaCenter = (deltaFilter.min + deltaFilter.max) / 2;
+  return out.sort((a, b) => {
+    const da = Math.abs(Math.abs(a.delta ?? 0) - deltaCenter);
+    const db = Math.abs(Math.abs(b.delta ?? 0) - deltaCenter);
+    if (da !== db) return da - db;
+    return a.expirationDate.localeCompare(b.expirationDate);
+  });
+}
+
+export default function WheelPage() {
+  const [config, setConfig] = useState<WheelConfig | null>(null);
+  const [candidates, setCandidates] = useState<Record<string, WheelCandidate>>({});
+  const [results, setResults] = useState<Record<string, RowResult>>({});
+  const [newSymbol, setNewSymbol] = useState('');
+  const [loadingInitial, setLoadingInitial] = useState(true);
+
+  // Find Better modal state: which symbol is open, the raw fetched chain
+  // (re-filtered client-side as the delta preset changes, no refetch), the
+  // active delta filter, current price (for OTM filtering), and status.
+  const [finderSymbol, setFinderSymbol] = useState<string | null>(null);
+  const [finderLoading, setFinderLoading] = useState(false);
+  const [finderError, setFinderError] = useState<string | null>(null);
+  const [finderChain, setFinderChain] = useState<WheelChainResult | null>(null);
+  const [finderPrice, setFinderPrice] = useState<number | null>(null);
+  const [finderDteTarget, setFinderDteTarget] = useState<{ min: number; max: number } | null>(null);
+  const [finderDeltaFilter, setFinderDeltaFilter] = useState(DELTA_PRESETS[1]); // 15-25 default
+
+  const loadConfigAndCandidates = useCallback(async () => {
+    try {
+      const [configRes, candidatesRes] = await Promise.all([
+        fetch('/api/wheel-config'),
+        fetch('/api/wheel-candidates'),
+      ]);
+      const configData = await configRes.json();
+      const candidatesData = await candidatesRes.json();
+      setConfig(configData.config);
+      setCandidates(candidatesData.candidates ?? {});
+    } catch (e) {
+      console.error('Failed to load Wheel config/candidates:', e);
+    } finally {
+      setLoadingInitial(false);
+    }
+  }, []);
+
+  useEffect(() => { loadConfigAndCandidates(); }, [loadConfigAndCandidates]);
+
+  const searchRow = useCallback(async (candidate: WheelCandidate, cfg: WheelConfig) => {
+    setResults(prev => ({ ...prev, [candidate.symbol]: { loading: true, error: null, contract: prev[candidate.symbol]?.contract ?? null, quote: prev[candidate.symbol]?.quote ?? null } }));
+
+    try {
+      const token = await getAccessToken();
+      const deltaTarget = candidate.deltaOverride
+        ? { min: candidate.deltaOverride.min / 100, max: candidate.deltaOverride.max / 100 }
+        : { min: cfg.defaultDeltaMin / 100, max: cfg.defaultDeltaMax / 100 };
+      const dteTarget = candidate.dteOverride ?? { min: cfg.defaultDteMin, max: cfg.defaultDteMax };
+
+      const [chain, quote] = await Promise.all([
+        fetchWheelChain(candidate.symbol, token, dteTarget),
+        getWheelQuote(candidate.symbol, token),
+      ]);
+
+      let contract: WheelSelectedContract | null = null;
+
+      if (candidate.manualPick) {
+        const legs = chain.chains[candidate.manualPick.expirationDate] ?? [];
+        const wantedType = candidate.wheelStage === 'hunting-csp' ? 'P' : 'C';
+        const leg = legs.find(l => l.optionType === wantedType && l.strikePrice === candidate.manualPick!.strikePrice);
+        if (leg && leg.delta != null) {
+          contract = {
+            expirationDate: candidate.manualPick.expirationDate,
+            dte: Math.max(0, Math.round((new Date(candidate.manualPick.expirationDate).getTime() - Date.now()) / 86_400_000)),
+            strikePrice: leg.strikePrice,
+            delta: Math.abs(leg.delta),
+            bid: leg.bid,
+            ask: leg.ask,
+            mid: leg.mid,
+            openInterest: leg.openInterest,
+            occSymbol: leg.occSymbol,
+          };
+        }
+      } else {
+        contract = findBestWheelContract(chain, candidate.wheelStage, deltaTarget, dteTarget);
+      }
+
+      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: null, contract, quote } }));
+    } catch (e: any) {
+      setResults(prev => ({ ...prev, [candidate.symbol]: { loading: false, error: e.message ?? 'Search failed', contract: null, quote: null } }));
+    }
+  }, []);
+
+  // Re-run the search for every candidate once config + candidates are loaded.
+  useEffect(() => {
+    if (!config || loadingInitial) return;
+    for (const candidate of Object.values(candidates)) {
+      searchRow(candidate, config);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, loadingInitial]);
+
+  const addCandidate = useCallback(async () => {
+    const symbol = newSymbol.trim().toUpperCase();
+    if (!symbol) return;
+    setNewSymbol('');
+
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { wheelStage: 'hunting-csp' } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [newSymbol, config, searchRow]);
+
+  const removeCandidate = useCallback(async (symbol: string) => {
+    const res = await fetch(`/api/wheel-candidates?symbol=${encodeURIComponent(symbol)}`, { method: 'DELETE' });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    setResults(prev => {
+      const next = { ...prev };
+      delete next[symbol];
+      return next;
+    });
+  }, []);
+
+  const toggleStage = useCallback(async (symbol: string) => {
+    const current = candidates[symbol];
+    if (!current) return;
+    const nextStage: WheelStage = current.wheelStage === 'hunting-csp' ? 'own-writing-cc' : 'hunting-csp';
+
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { wheelStage: nextStage } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [candidates, config, searchRow]);
+
+  const setCostBasis = useCallback(async (symbol: string, value: string) => {
+    const parsed = parseFloat(value);
+    const costBasis = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { costBasis } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+  }, []);
+
+  const setQuantity = useCallback(async (symbol: string, value: string) => {
+    const parsed = parseInt(value, 10);
+    const quantity = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { quantity } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+  }, []);
+
+  const refreshRow = useCallback((symbol: string) => {
+    const candidate = candidates[symbol];
+    if (candidate && config) searchRow(candidate, config);
+  }, [candidates, config, searchRow]);
+
+  // Opens the Find Better modal for a symbol: fetches the full chain once
+  // (DTE window only, no delta filter at fetch time) and stores it raw so
+  // the delta-preset buttons can re-filter instantly without refetching.
+  const openFinder = useCallback(async (symbol: string) => {
+    const candidate = candidates[symbol];
+    if (!candidate || !config) return;
+
+    const dteTarget = candidate.dteOverride ?? { min: config.defaultDteMin, max: config.defaultDteMax };
+    const defaultDelta = candidate.deltaOverride
+      ? { min: candidate.deltaOverride.min / 100, max: candidate.deltaOverride.max / 100 }
+      : { min: config.defaultDeltaMin / 100, max: config.defaultDeltaMax / 100 };
+    const matchingPreset = DELTA_PRESETS.find(p => p.min === defaultDelta.min && p.max === defaultDelta.max) ?? DELTA_PRESETS[1];
+
+    setFinderSymbol(symbol);
+    setFinderLoading(true);
+    setFinderError(null);
+    setFinderChain(null);
+    setFinderPrice(results[symbol]?.quote ?? null);
+    setFinderDteTarget(dteTarget);
+    setFinderDeltaFilter(matchingPreset);
+
+    try {
+      const token = await getAccessToken();
+      const chain = await fetchWheelChain(symbol, token, dteTarget);
+      setFinderChain(chain);
+      if (finderPrice == null) {
+        const quote = await getWheelQuote(symbol, token);
+        setFinderPrice(quote);
+      }
+    } catch (e: any) {
+      setFinderError(e.message ?? 'Failed to load chain');
+    } finally {
+      setFinderLoading(false);
+    }
+  }, [candidates, config, results, finderPrice]);
+
+  const closeFinder = useCallback(() => {
+    setFinderSymbol(null);
+    setFinderChain(null);
+    setFinderError(null);
+  }, []);
+
+  const pickManualContract = useCallback(async (symbol: string, leg: WheelChainLeg) => {
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol,
+        candidate: { manualPick: { expirationDate: leg.expirationDate, strikePrice: leg.strikePrice } },
+      }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    closeFinder();
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [config, searchRow, closeFinder]);
+
+  const clearManualPick = useCallback(async (symbol: string) => {
+    const res = await fetch('/api/wheel-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, candidate: { manualPick: null } }),
+    });
+    const data = await res.json();
+    setCandidates(data.candidates ?? {});
+    if (config && data.candidates?.[symbol]) {
+      searchRow(data.candidates[symbol], config);
+    }
+  }, [config, searchRow]);
+
+  return (
+    <div className="min-h-screen bg-black text-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <div className="border-b border-white/10">
+        <div className="flex items-center justify-between px-6 py-3">
+          <span className="text-sm font-bold tracking-widest">TRADEEDGE</span>
+        </div>
+        <div className="flex items-center gap-0 w-full border-t border-white/10">
+          <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
+          <Link href="/portfolio"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</Link>
+          <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
+          <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
+          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>WHEEL</span>
+          <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
+          <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
+          <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
+          <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
+        </div>
+      </div>
+
+      {/* Wheel sub-tab bar -- Candidates is the only tab for now */}
+      <div className="border-b border-white/10 px-6">
+        <div className="flex gap-0">
+          <span className="flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 text-white" style={{ borderColor: '#00d4aa' }}>
+            Candidates
+          </span>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+        {config && (
+          <div className="border border-white/10 rounded-lg p-3 flex items-center gap-6 text-xs text-white/50">
+            <span>Default delta: {config.defaultDeltaMin}-{config.defaultDeltaMax}</span>
+            <span>Default DTE: {config.defaultDteMin}-{config.defaultDteMax}</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <input
+            value={newSymbol}
+            onChange={e => setNewSymbol(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addCandidate(); }}
+            placeholder="Add symbol (e.g. MSFT)"
+            className="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm w-48 focus:outline-none focus:border-white/30"
+          />
+          <button onClick={addCandidate} className="text-xs font-bold px-3 py-2 rounded bg-white/10 hover:bg-white/15 transition-colors">
+            Add
+          </button>
+        </div>
+
+        {loadingInitial && <p className="text-white/40 text-sm">Loading...</p>}
+
+        {!loadingInitial && Object.keys(candidates).length === 0 && (
+          <p className="text-white/40 text-sm">No candidates yet — add a symbol above.</p>
+        )}
+
+        {!loadingInitial && Object.keys(candidates).length > 0 && (
+          <div className="border border-white/10 rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-white/5 text-white/40 uppercase tracking-wider text-[10px]">
+                  <th className="text-left px-3 py-2">Symbol</th>
+                  <th className="text-left px-3 py-2">Stage</th>
+                  <th className="text-right px-3 py-2">Cost Basis</th>
+                  <th className="text-right px-3 py-2">Current Price</th>
+                  <th className="text-right px-3 py-2">Qty</th>
+                  <th className="text-left px-3 py-2">Expiration</th>
+                  <th className="text-right px-3 py-2">DTE</th>
+                  <th className="text-right px-3 py-2">Strike</th>
+                  <th className="text-right px-3 py-2">Delta</th>
+                  <th className="text-right px-3 py-2">Bid</th>
+                  <th className="text-right px-3 py-2">Total Premium</th>
+                  <th className="text-right px-3 py-2">Monthly</th>
+                  <th className="text-right px-3 py-2">Annual $</th>
+                  <th className="text-right px-3 py-2">Annual ROC</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(candidates).map(candidate => {
+                  const result = results[candidate.symbol];
+                  const contract = result?.contract ?? null;
+                  const quantity = candidate.quantity ?? 1;
+                  const referencePrice = candidate.wheelStage === 'own-writing-cc'
+                    ? (candidate.costBasis ?? result?.quote ?? null)
+                    : (result?.quote ?? null);
+
+                  const yieldCalc = contract ? computeYield(contract, referencePrice, quantity) : null;
+
+                  return (
+                    <tr key={candidate.symbol} className="border-t border-white/5 hover:bg-white/[0.02]">
+                      <td className="px-3 py-2 font-bold">{candidate.symbol}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => toggleStage(candidate.symbol)}
+                          className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                            candidate.wheelStage === 'hunting-csp'
+                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                              : 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300'
+                          }`}
+                        >
+                          {candidate.wheelStage === 'hunting-csp' ? 'Hunting CSP' : 'Own — Writing CC'}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {candidate.wheelStage === 'own-writing-cc' ? (
+                          <input
+                            key={candidate.costBasis ?? 'empty'}
+                            type="number"
+                            defaultValue={candidate.costBasis ?? ''}
+                            onBlur={e => setCostBasis(candidate.symbol, e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                            placeholder="basis"
+                            className="bg-white/5 border border-white/10 rounded px-2 py-1 w-20 text-right text-xs focus:outline-none focus:border-white/30"
+                          />
+                        ) : (
+                          <span className="text-white/30">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">{fmtMoney(result?.quote ?? null)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          key={quantity}
+                          type="number"
+                          min={1}
+                          defaultValue={quantity}
+                          onBlur={e => setQuantity(candidate.symbol, e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                          className="bg-white/5 border border-white/10 rounded px-2 py-1 w-12 text-right text-xs focus:outline-none focus:border-white/30"
+                        />
+                      </td>
+
+                      {result?.loading && (
+                        <td colSpan={7} className="px-3 py-2 text-white/40">Searching...</td>
+                      )}
+                      {result?.error && (
+                        <td colSpan={7} className="px-3 py-2 text-red-400">{result.error}</td>
+                      )}
+                      {!result?.loading && !result?.error && !contract && (
+                        <td colSpan={7} className="px-3 py-2 text-white/30">No match in target range</td>
+                      )}
+                      {!result?.loading && contract && (
+                        <>
+                          <td className="px-3 py-2">{contract.expirationDate}</td>
+                          <td className="px-3 py-2 text-right">{contract.dte}</td>
+                          <td className="px-3 py-2 text-right">{contract.strikePrice}</td>
+                          <td className="px-3 py-2 text-right">{contract.delta.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">{fmtMoney(contract.bid)}</td>
+                          <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.totalPremium, 0) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.monthly, 0) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{yieldCalc ? fmtMoney(yieldCalc.annual, 0) : '—'}</td>
+                          <td className={`px-3 py-2 text-right font-bold ${yieldCalc?.annualRoc != null && yieldCalc.annualRoc >= 12 ? 'text-emerald-400' : 'text-white/50'}`}>
+                            {yieldCalc?.annualRoc != null ? fmtPct(yieldCalc.annualRoc) : '—'}
+                          </td>
+                        </>
+                      )}
+
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => openFinder(candidate.symbol)} className="text-[10px] text-blue-400 hover:text-blue-300 mr-2" title="Find Better">
+                          Find Better
+                        </button>
+                        {candidate.manualPick && (
+                          <button onClick={() => clearManualPick(candidate.symbol)} className="text-[10px] text-amber-400 hover:text-amber-300 mr-2" title="Clear manual pick, resume auto-search">
+                            (manual)
+                          </button>
+                        )}
+                        <button onClick={() => refreshRow(candidate.symbol)} className="text-white/40 hover:text-white/70 mr-2" title="Refresh">↻</button>
+                        <button onClick={() => removeCandidate(candidate.symbol)} className="text-white/40 hover:text-red-400" title="Remove">✕</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Find Better modal */}
+      {finderSymbol && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-6" onClick={closeFinder}>
+          <div
+            className="bg-[#0a0a0a] border border-white/10 rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <span className="text-sm font-bold">{finderSymbol} — choose a contract</span>
+              <button onClick={closeFinder} className="text-white/40 hover:text-white/70">✕</button>
+            </div>
+
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10">
+              <span className="text-[10px] text-white/40 uppercase tracking-wider mr-1">Delta</span>
+              {DELTA_PRESETS.map(preset => (
+                <button
+                  key={preset.label}
+                  onClick={() => setFinderDeltaFilter(preset)}
+                  className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                    finderDeltaFilter.label === preset.label
+                      ? 'border-white/40 bg-white/15 text-white'
+                      : 'border-white/10 text-white/50 hover:text-white/80'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+              {finderPrice != null && (
+                <span className="text-[10px] text-white/30 ml-auto">Current: {fmtMoney(finderPrice)} — OTM only</span>
+              )}
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              {finderLoading && <p className="text-white/40 text-sm p-4">Loading chain...</p>}
+              {finderError && <p className="text-red-400 text-sm p-4">{finderError}</p>}
+              {!finderLoading && !finderError && finderChain && (() => {
+                const candidate = candidates[finderSymbol];
+                const list = candidate && finderDteTarget
+                  ? listCandidateContracts(finderChain, candidate.wheelStage, finderDteTarget, { min: finderDeltaFilter.min, max: finderDeltaFilter.max }, finderPrice)
+                  : [];
+
+                if (list.length === 0) {
+                  return <p className="text-white/40 text-sm p-4">No contracts match this delta range in the configured DTE window.</p>;
+                }
+
+                return (
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#0a0a0a]">
+                      <tr className="text-white/40 uppercase tracking-wider text-[10px] border-b border-white/10">
+                        <th className="text-left px-3 py-2">Expiration</th>
+                        <th className="text-right px-3 py-2">DTE</th>
+                        <th className="text-right px-3 py-2">Strike</th>
+                        <th className="text-right px-3 py-2">Delta</th>
+                        <th className="text-right px-3 py-2">Bid</th>
+                        <th className="text-right px-3 py-2">OI</th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map(leg => (
+                        <tr key={leg.occSymbol} className="border-t border-white/5 hover:bg-white/[0.03]">
+                          <td className="px-3 py-2">{leg.expirationDate}</td>
+                          <td className="px-3 py-2 text-right">{leg.dte}</td>
+                          <td className="px-3 py-2 text-right">{leg.strikePrice}</td>
+                          <td className="px-3 py-2 text-right">{leg.delta != null ? Math.abs(leg.delta).toFixed(2) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{fmtMoney(leg.bid)}</td>
+                          <td className="px-3 py-2 text-right">{leg.openInterest}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              onClick={() => pickManualContract(finderSymbol, leg)}
+                              className="text-[10px] font-bold px-2 py-1 rounded bg-white/10 hover:bg-white/15"
+                            >
+                              Select
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

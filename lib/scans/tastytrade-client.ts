@@ -257,3 +257,30 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
 }
 
 
+// ── Account cash balance (TE-0007A — CSP capital check) ─────────────────────
+// Deliberately reads pure cash, not margin/derivative buying power — DR-0001
+// requires CSP to never recommend margin by default. Mirrors the balance
+// fields app/engine/page.tsx already reads from the same endpoint, but picks
+// the cash-only fields (cash-available-to-withdraw / cash-balance) rather
+// than engine's obp (option/derivative buying power).
+export async function getAvailableCash(token: string): Promise<number | null> {
+  try {
+    const accountsData = await ttFetch('/customers/me/accounts', token);
+    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    if (!accountNumber) return null;
+
+    const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
+    const balData = balanceData?.data ?? {};
+
+    const cash = parseFloat(
+      balData['cash-available-to-withdraw']
+      ?? balData['cash-balance']
+      ?? 'NaN'
+    );
+    return Number.isFinite(cash) ? cash : null;
+  } catch {
+    return null;
+  }
+}
+
+

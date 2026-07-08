@@ -26,6 +26,14 @@ export interface SpreadCandidate {
   longExpiration?: string; longDte?: number; longDelta?: number;
   longCost?: number; netDebit?: number; maxProfit?: number; extrinsicCapture?: number;
   longOccSymbolPMCC?: string; shortOccSymbolPMCC?: string;
+
+  // CSP-specific (TE-0007A) — single-leg cash-secured put, no long leg.
+  requiredCash?: number;       // strike * 100 * contracts
+  annualizedRoc?: number;      // roc * (365 / dte)
+  breakeven?: number;          // strike - premium per share
+  assignmentPrice?: number;    // price paid per share if assigned (== strike)
+  capitalBlocked?: boolean;    // true when requiredCash exceeds available cash
+  capitalWarning?: string | null;
 }
 
 
