@@ -12,6 +12,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { useTask } from '@/hooks/useTask';
+import {
+  completeScreenerJob,
+  failScreenerJob,
+  startScreenerJob,
+  stopScreenerJob,
+  updateScreenerJob,
+} from '@/lib/screener/screenerJobStore';
 import type { RulesType } from '@/lib/scans/constants';
 import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
 import type { StartRankedScanResult } from '@/lib/commands/command-handlers';
@@ -53,6 +60,13 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setLoading(true);
       setStatus(rankedScanTask.progressLabel ?? 'Running...');
       setError('');
+      updateScreenerJob({
+        phase: 'running',
+        kind: 'rank',
+        label: 'Ranked screener scan',
+        status: rankedScanTask.progressLabel ?? 'Running ranked scan...',
+        resultsHref: '/screener?mode=rank',
+      });
     } else if (rankedScanTask.status === 'completed') {
       setLoading(false);
       setStatus('');
@@ -61,14 +75,23 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
         setResults(result.results);
         setRawScanCache(result.rawScanCache);
         setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
+        completeScreenerJob({
+          resultCount: result.results.length,
+          status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=rank',
+        });
+      } else {
+        completeScreenerJob({ status: 'Ranked scan complete', resultsHref: '/screener?mode=rank' });
       }
     } else if (rankedScanTask.status === 'failed') {
       setLoading(false);
       setStatus('');
       setError(rankedScanTask.error ?? 'Ranked scan failed');
+      failScreenerJob(rankedScanTask.error ?? 'Ranked scan failed');
     } else if (rankedScanTask.status === 'cancelled') {
       setLoading(false);
       setStatus('');
+      stopScreenerJob('Ranked scan cancelled');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rankedScanTask, screenMode]);
@@ -89,6 +112,13 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
     setResultsCachedAt(null);
     setLoading(true);
     setStatus('Starting ranked scan...');
+    startScreenerJob({
+      kind: 'rank',
+      label: 'Ranked screener scan',
+      total: activeSymbols.length,
+      status: 'Starting ranked scan...',
+      resultsHref: '/screener?mode=rank',
+    });
     setRankedScanTaskId(null); // clear so the reconnect effect above picks up the fresh task, not a stale one
 
     const res = await dispatch<RankedScanInput, StartRankedScanResult>({
@@ -102,9 +132,9 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setLoading(false);
       setStatus('');
       setError(res.error ?? 'Failed to start ranked scan');
+      failScreenerJob(res.error ?? 'Failed to start ranked scan');
     }
   }, [tickers, rankConfig, dispatch]);
 
   return { startRankedScan };
 }
-
