@@ -25,6 +25,19 @@ function readNumber(key: string): number | null {
   }
 }
 
+function latestResultTimestamp(): { ts: number; href: string; label: string } | null {
+  let newest: { ts: number; href: string; label: string } | null = null;
+
+  for (const item of RESULT_KEYS) {
+    const ts = readNumber(item.key);
+    if (ts && (!newest || ts > newest.ts)) {
+      newest = { ts, href: item.href, label: item.label };
+    }
+  }
+
+  return newest;
+}
+
 export function ScreenerJobStatus() {
   const job = useScreenerJobState();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
@@ -38,19 +51,21 @@ export function ScreenerJobStatus() {
   useEffect(() => {
     mountedRef.current = true;
 
+    // First mount should establish the baseline, not fire a stale completion toast
+    // for results that were already cached before this build loaded.
+    if (readNumber(LAST_SEEN_KEY) == null) {
+      const latest = latestResultTimestamp();
+      if (latest) {
+        try { window.localStorage.setItem(LAST_SEEN_KEY, String(latest.ts)); } catch {}
+      }
+    }
+
     const check = () => {
       if (!mountedRef.current) return;
       const lastSeen = readNumber(LAST_SEEN_KEY) ?? 0;
-      let newest: { ts: number; href: string; label: string } | null = null;
+      const newest = latestResultTimestamp();
 
-      for (const item of RESULT_KEYS) {
-        const ts = readNumber(item.key);
-        if (ts && ts > lastSeen && (!newest || ts > newest.ts)) {
-          newest = { ts, href: item.href, label: item.label };
-        }
-      }
-
-      if (!newest) return;
+      if (!newest || newest.ts <= lastSeen) return;
       try { window.localStorage.setItem(LAST_SEEN_KEY, String(newest.ts)); } catch {}
       completeScreenerJob({
         status: newest.label,
@@ -59,7 +74,6 @@ export function ScreenerJobStatus() {
       });
     };
 
-    check();
     const timer = window.setInterval(check, 1500);
     return () => {
       mountedRef.current = false;
