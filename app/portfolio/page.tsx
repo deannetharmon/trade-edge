@@ -8026,7 +8026,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 70px 60px 110px 70px 70px 80px 70px 145px 45px 45px 45px 55px 60px 90px 60px 75px 150px', gap: '0 12px', alignItems: 'start', minWidth: '1710px' }}>
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 70px 60px 110px 70px 70px 80px 70px 45px 145px 45px 45px 55px 60px 90px 60px 75px 150px 210px', gap: '0 12px', alignItems: 'start', minWidth: '1930px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
@@ -8298,6 +8298,28 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               </div>
             )}
 
+            <div className="border-t-2 border-emerald-600/50 pt-1">
+              <p className={`text-[9px] ${th.textFaint}`}>P/L Open</p>
+              {(() => {
+                // Prefer pnl (live mid from market-data) over plOpen (EOD marks)
+                const displayPnl = pos.pnl ?? pos.plOpen;
+                const isStale = pos.pnl == null && pos.plOpen != null;
+                if (displayPnl == null) return <p className={`text-xs ${th.textFaint}`}>—</p>;
+                return (
+                  <>
+                    <p className={`text-xs font-bold ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                      {displayPnl >= 0 ? '+' : ''}${displayPnl.toFixed(0)}{isStale && <span className="text-[8px] opacity-50 ml-0.5">~</span>}
+                    </p>
+                    {pos.creditReceived !== 0 && (
+                      <p className={`font-normal text-[10px] ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                        ({displayPnl >= 0 ? '+' : ''}{(displayPnl / Math.abs(pos.creditReceived) * 100).toFixed(1)}%)
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
             <div onClick={e => e.stopPropagation()} className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>{Math.round(pos.profitTarget * 100)}% Target</p>
               {editingTarget ? (
@@ -8369,28 +8391,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>
                 DTE {fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}
               </p>
-            </div>
-
-            <div className="border-t-2 border-emerald-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
-              <p className={`text-[9px] ${th.textFaint}`}>P/L Open</p>
-              {(() => {
-                // Prefer pnl (live mid from market-data) over plOpen (EOD marks)
-                const displayPnl = pos.pnl ?? pos.plOpen;
-                const isStale = pos.pnl == null && pos.plOpen != null;
-                if (displayPnl == null) return <p className={`text-xs ${th.textFaint}`}>—</p>;
-                return (
-                  <>
-                    <p className={`text-xs font-bold ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                      {displayPnl >= 0 ? '+' : ''}${displayPnl.toFixed(0)}{isStale && <span className="text-[8px] opacity-50 ml-0.5">~</span>}
-                    </p>
-                    {pos.creditReceived !== 0 && (
-                      <p className={`font-normal text-[10px] ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                        ({displayPnl >= 0 ? '+' : ''}{(displayPnl / Math.abs(pos.creditReceived) * 100).toFixed(1)}%)
-                      </p>
-                    )}
-                  </>
-                );
-              })()}
             </div>
 
             {/* ── GREEKS ─────────────────────────────── */}
@@ -8529,11 +8529,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             {/* ── ACTION ─────────────────────────────── */}
-            <div className="border-t-2 border-slate-500/40 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Suggested</p>
-              <span className={`text-[10px] font-bold whitespace-nowrap ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
-              <p className={`text-[9px] ${th.textFaint} mt-0.5 leading-tight`}>{rec.detail}</p>
-              {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight">{sig}</p> : null; })()}
+            <div className="border-t-2 border-slate-500/40 pt-1 overflow-hidden">
+              <p className={`text-[9px] ${th.textFaint} whitespace-nowrap`}>Suggested</p>
+              <div className="flex items-baseline gap-1.5 whitespace-nowrap overflow-hidden" title={rec.detail}>
+                <span className={`text-[10px] font-bold whitespace-nowrap shrink-0 ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
+                <span className={`text-[9px] ${th.textFaint} truncate`}>{rec.detail}</span>
+              </div>
+              {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight whitespace-nowrap truncate" title={sig}>{sig}</p> : null; })()}
             </div>
           </div>
         </div>
@@ -8592,21 +8594,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
         </button>
       </div>
 
-      {/* What Moved — always-visible day-over-day summary */}
-      <div className={`border-t ${th.border} px-4 py-2`}>
-        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>What Moved</p>
-        <div className="flex flex-col gap-0.5">
-          {buildMovementSummary(pos).map((item, i) => (
-            <p key={i} className={`text-[10px] leading-tight ${movementToneColor(item.tone, th.textFaint)}`}>
-              {item.detail}
-            </p>
-          ))}
-        </div>
-      </div>
-
-      {/* Expanded legs */}
+      {/* Expanded: What Moved + Legs */}
       {expanded && (
         <div className={`border-t ${th.border} px-4 py-3`}>
+          <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>What Moved</p>
+          <div className="flex flex-col gap-0.5 mb-3">
+            {buildMovementSummary(pos).map((item, i) => (
+              <p key={i} className={`text-[10px] leading-tight ${movementToneColor(item.tone, th.textFaint)}`}>
+                {item.detail}
+              </p>
+            ))}
+          </div>
+
           <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-2`}>Legs</p>
           <div className="space-y-1.5">
             {pos.legs.map((leg, i) => (
