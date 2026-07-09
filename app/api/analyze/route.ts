@@ -7,16 +7,28 @@ import { getAiModel, isAiProfile, type AiProfile } from '@/lib/ai/models';
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_API = 'https://api.openai.com/v1/responses';
+const SAFE_FALLBACK_MODEL = process.env.AI_FAST_MODEL ?? process.env.AI_DEFAULT_MODEL ?? 'gpt-4o-mini';
 
 function requestedProfile(body: any, fallback: AiProfile): AiProfile {
   return isAiProfile(body?.profile) ? body.profile : fallback;
 }
 
 function selectedModel(body: any, fallbackProfile: AiProfile): string {
-  // Keep backward compatibility: if a caller explicitly sends "model", honor it.
-  // New client code should send "profile" instead.
+  // Keep backward compatibility: if a caller explicitly sends "model", try it first.
+  // If that model is unavailable, the route retries with the configured profile/default model.
   if (typeof body?.model === 'string' && body.model.trim()) return body.model.trim();
   return getAiModel(requestedProfile(body, fallbackProfile));
+}
+
+function fallbackModel(body: any, fallbackProfile: AiProfile): string {
+  const configured = getAiModel(requestedProfile(body, fallbackProfile));
+  return configured || SAFE_FALLBACK_MODEL;
+}
+
+function shouldRetryWithFallback(status: number, message: string, attempted: string, fallback: string): boolean {
+  if (!attempted || attempted === fallback) return false;
+  const msg = message.toLowerCase();
+  return status === 400 || status === 404 || msg.includes('model') || msg.includes('does not exist') || msg.includes('access');
 }
 
 // Converts an Anthropic-shaped image content part
@@ -64,6 +76,24 @@ function extractResponsesText(data: any): string {
     .join('');
 }
 
+async function callChatCompletions(apiKey: string, model: string, messages: any[], maxTokens: number) {
+  const res = await fetch(OPENAI_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      messages,
+    }),
+  });
+
+  const data = await res.json();
+  return { res, data };
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY ?? process.env.NEXT_PUBLIC_OPENAI_API_KEY;
 
@@ -90,37 +120,41 @@ export async function POST(req: NextRequest) {
 // ── Standard chat completions ──────────────────────────────────────────────
 async function handleStandard(body: any, apiKey: string) {
   const messages = normalizeChatMessages(body);
+  const profile = requestedProfile(body, 'analysis');
   const model = selectedModel(body, 'analysis');
+  const fallback = fallbackModel(body, 'analysis');
+  const maxTokens = body.max_tokens ?? 1000;
 
   try {
-    const res = await fetch(OPENAI_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: body.max_tokens ?? 1000,
-        messages,
-      }),
-    });
+    let { res, data } = await callChatCompletions(apiKey, model, messages, maxTokens);
 
-    const data = await res.json();
+    if (!res.ok) {
+      const message = data?.error?.message ?? `OpenAI error ${res.status}`;
+      if (shouldRetryWithFallback(res.status, message, model, fallback)) {
+        ({ res, data } = await callChatCompletions(apiKey, fallback, messages, maxTokens));
+      }
+    }
+
+    if (!res.ok && fallback !== SAFE_FALLBACK_MODEL) {
+      const message = data?.error?.message ?? `OpenAI error ${res.status}`;
+      if (shouldRetryWithFallback(res.status, message, fallback, SAFE_FALLBACK_MODEL)) {
+        ({ res, data } = await callChatCompletions(apiKey, SAFE_FALLBACK_MODEL, messages, maxTokens));
+      }
+    }
 
     if (!res.ok) {
       return NextResponse.json(
         {
           error: data?.error?.message ?? `OpenAI error ${res.status}`,
           model,
-          profile: requestedProfile(body, 'analysis'),
+          profile,
         },
         { status: res.status }
       );
     }
 
     const text = data?.choices?.[0]?.message?.content ?? '';
-    return NextResponse.json({ content: [{ type: 'text', text }], model });
+    return NextResponse.json({ content: [{ type: 'text', text }], model: data?.model ?? model });
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? 'Proxy fetch failed', model }, { status: 502 });
   }
