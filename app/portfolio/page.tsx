@@ -158,6 +158,7 @@ interface PendingOrderLeg {
   action: string;       // 'Sell to Open' | 'Buy to Open' | etc.
   optionType: 'P' | 'C' | null;
   strikePrice: number;
+  quantity: number;     // needed to rebuild the order body on Replace
 }
 interface PendingOrder {
   id: string;                 // complex-order id -- pending orders are always complex-order-sourced
@@ -170,6 +171,8 @@ interface PendingOrder {
   priceEffect: string | null;   // 'Credit' | 'Debit'
   status: string;               // raw status string from the trigger/nested order
   createdAt: string | null;
+  orderType: string | null;     // 'Limit' etc. — preserved on Replace
+  timeInForce: string | null;   // 'GTC' | 'Day' — preserved on Replace
 }
 
 // ── Position Snapshots ───────────────────────────────────────────────────
@@ -1507,6 +1510,28 @@ function instrType(symbol: string): 'Equity Option' | 'Index Option' {
   return ['SPX', 'NDX', 'RUT', 'VIX'].includes(symbol.toUpperCase().trim()) ? 'Index Option' : 'Equity Option';
 }
 
+// Rebuilds a pending entry order at a new price for the Replace flow.
+// TastyTrade has no atomic replace, so this is always paired with a cancel of
+// the original complex order first (see replacePendingOrder). This places a
+// plain multi-leg order, not a new OTOCO — if the original had a profit/stop
+// bracket attached, that bracket is gone once the parent complex order is
+// cancelled and is NOT recreated here. Surfaced to the trader in the UI.
+function buildReplaceOrder(order: PendingOrder, price: number): OrderBody {
+  const itype = instrType(order.symbol);
+  return {
+    'order-type': (order.orderType as OrderBody['order-type']) || 'Limit',
+    'time-in-force': (order.timeInForce as OrderBody['time-in-force']) || 'GTC',
+    price: Math.max(price, 0.01).toFixed(2),
+    'price-effect': (order.priceEffect as 'Debit' | 'Credit') ?? 'Credit',
+    legs: order.legs.map(l => ({
+      symbol: l.symbol,
+      quantity: l.quantity,
+      action: l.action as OrderLeg['action'],
+      'instrument-type': itype,
+    })),
+  };
+}
+
 // ── Order Builders ─────────────────────────────────────────────────────────
 function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' = 'Day'): OrderBody {
   const itype = instrType(pos.symbol);
@@ -2045,6 +2070,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
                 action: String(l.action ?? ''),
                 optionType: parsed.strikePrice > 0 ? parsed.optionType : null,
                 strikePrice: parsed.strikePrice,
+                quantity: Number(l.quantity ?? 1),
               };
             });
             const putLegs = parsedLegs.filter(l => l.optionType === 'P');
@@ -2071,6 +2097,8 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
               priceEffect: openingSource?.['price-effect'] ?? null,
               status: openingSource?.status ?? order['status'] ?? 'unknown',
               createdAt: openingSource?.['received-at'] ?? openingSource?.['updated-at'] ?? null,
+              orderType: openingSource?.['order-type'] ?? null,
+              timeInForce: openingSource?.['time-in-force'] ?? null,
             });
           }
         }
@@ -8693,9 +8721,11 @@ function DraggableSection({ sectionId, index, total, th, onMove, onDragStart, on
 }
 
 // ── Pending Order Card ──────────────────────────────────────────────────────
-function PendingOrderCard({ order, th, cancelling, onCancel }: {
+function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace }: {
   order: PendingOrder; th: typeof THEMES[Theme];
-  cancelling: boolean; onCancel: (order: PendingOrder) => void;
+  cancelling: boolean; replacing: boolean;
+  onCancel: (order: PendingOrder) => void;
+  onReplace: (order: PendingOrder, newPrice: number) => void;
 }) {
   const strategyColor = order.strategy === 'BPS'
     ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
@@ -8721,6 +8751,24 @@ function PendingOrderCard({ order, th, cancelling, onCancel }: {
       })
     : null;
 
+  // ── Replace (edit price + resubmit) ────────────────────────────────────────
+  // TastyTrade has no atomic order-replace, so this is cancel-then-place under
+  // the hood (see replacePendingOrder). Editing is local to this card so the
+  // rest of the list doesn't re-render on every keystroke.
+  const [editing, setEditing] = useState(false);
+  const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
+
+  const startEdit = () => { setNewPrice(order.limitPrice?.toFixed(2) ?? ''); setEditing(true); };
+  const cancelEdit = () => setEditing(false);
+  const parsedNewPrice = parseFloat(newPrice);
+  const priceInvalid = isNaN(parsedNewPrice) || parsedNewPrice <= 0;
+  const priceUnchanged = !priceInvalid && order.limitPrice != null && parsedNewPrice === order.limitPrice;
+  const confirmReplace = () => {
+    if (priceInvalid || priceUnchanged) return;
+    onReplace(order, parsedNewPrice);
+    setEditing(false);
+  };
+
   return (
     <div className={`border border-yellow-700/60 ${th.card} rounded-lg p-4`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -8733,32 +8781,77 @@ function PendingOrderCard({ order, th, cancelling, onCancel }: {
             {order.status}
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          {order.limitPrice != null && (
-            <span className={`text-xs font-bold ${order.priceEffect === 'Credit' ? 'text-emerald-400' : 'text-red-400'}`}>
-              ${order.limitPrice.toFixed(2)} {order.priceEffect ?? ''}
-            </span>
-          )}
-          <button
-            onClick={() => onCancel(order)}
-            disabled={cancelling}
-            className="text-[10px] px-3 py-1.5 border border-red-700 text-red-400 rounded hover:bg-red-600/20 transition-colors font-bold disabled:opacity-40"
-          >
-            {cancelling ? 'CANCELLING...' : 'CANCEL'}
-          </button>
-        </div>
+        {!editing && (
+          <div className="flex items-center gap-3">
+            {order.limitPrice != null && (
+              <span className={`text-xs font-bold ${order.priceEffect === 'Credit' ? 'text-emerald-400' : 'text-red-400'}`}>
+                ${order.limitPrice.toFixed(2)} {order.priceEffect ?? ''}
+              </span>
+            )}
+            <button
+              onClick={startEdit}
+              disabled={cancelling || replacing}
+              className="text-[10px] px-3 py-1.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
+            >
+              {replacing ? 'REPLACING...' : 'REPLACE'}
+            </button>
+            <button
+              onClick={() => onCancel(order)}
+              disabled={cancelling || replacing}
+              className="text-[10px] px-3 py-1.5 border border-red-700 text-red-400 rounded hover:bg-red-600/20 transition-colors font-bold disabled:opacity-40"
+            >
+              {cancelling ? 'CANCELLING...' : 'CANCEL'}
+            </button>
+          </div>
+        )}
       </div>
-      {submittedDisplay && (
+      {submittedDisplay && !editing && (
         <p className={`text-[9px] ${th.textFaint} mt-1.5`}>Submitted {submittedDisplay}</p>
+      )}
+      {editing && (
+        <div className="mt-3 pt-3 border-t border-yellow-700/30 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] ${th.textFaint}`}>New {(order.priceEffect ?? 'limit').toLowerCase()} price</span>
+            <input
+              type="number" min="0.01" step="0.01" autoFocus
+              value={newPrice}
+              onChange={e => setNewPrice(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') confirmReplace(); if (e.key === 'Escape') cancelEdit(); }}
+              className={`w-24 text-[11px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} text-yellow-300 outline-none focus:border-yellow-500`}
+              style={{ fontFamily: "'DM Mono', monospace" }}
+            />
+          </div>
+          <p className={`text-[9px] ${th.textFaint}`}>
+            Cancels this order and resubmits the same legs at the new price. Any attached profit-target/stop bracket is <span className="text-yellow-400 font-bold">not</span> recreated — re-add protection with Set Stop after it fills.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={confirmReplace}
+              disabled={priceInvalid || priceUnchanged || replacing}
+              className="flex-1 py-1.5 text-white text-[10px] font-bold rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:opacity-40"
+            >
+              {replacing ? 'Replacing...' : 'Confirm Replace'}
+            </button>
+            <button
+              onClick={cancelEdit}
+              disabled={replacing}
+              className={`px-4 py-1.5 border ${th.border} ${th.textFaint} rounded-lg text-[10px] hover:border-white/30 transition-colors disabled:opacity-40`}
+            >
+              Back
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
 // ── Pending Orders Section ──────────────────────────────────────────────────
-function PendingOrdersSection({ orders, th, cancellingOrderIds, onCancel }: {
+function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
-  cancellingOrderIds: Set<string>; onCancel: (order: PendingOrder) => void;
+  cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
+  onCancel: (order: PendingOrder) => void;
+  onReplace: (order: PendingOrder, newPrice: number) => void;
 }) {
   if (orders.length === 0) return null;
   return (
@@ -8775,7 +8868,9 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, onCancel }: {
             order={order}
             th={th}
             cancelling={cancellingOrderIds.has(order.id)}
+            replacing={replacingOrderIds.has(order.id)}
             onCancel={onCancel}
+            onReplace={onReplace}
           />
         ))}
       </div>
@@ -9089,6 +9184,7 @@ export default function PortfolioPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
+  const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -9203,6 +9299,47 @@ export default function PortfolioPage() {
       setError(`Could not cancel order: ${e.message ?? 'unknown error'}`);
     } finally {
       setCancellingOrderIds(prev => { const next = new Set(prev); next.delete(order.id); return next; });
+    }
+  };
+
+  // TastyTrade has no atomic order-replace -- cancel the existing complex
+  // order, then place a fresh plain order with the same legs at the new
+  // price. If cancel succeeds but the new order fails to go in, attempt one
+  // automatic recovery by re-placing the original order at its original
+  // price, mirroring the same safety pattern used for the OCO stop handler
+  // (never silently leave the trader with nothing where an order used to be).
+  const replacePendingOrder = async (order: PendingOrder, newPrice: number) => {
+    setReplacingOrderIds(prev => new Set(prev).add(order.id));
+    setError('');
+    let cancelSucceeded = false;
+    try {
+      const token = await getAccessToken();
+      await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
+      cancelSucceeded = true;
+      await new Promise(r => setTimeout(r, 500));
+      await ttPost(`/accounts/${order.accountNumber}/orders`, token, buildReplaceOrder(order, newPrice));
+    } catch (e: any) {
+      if (cancelSucceeded) {
+        try {
+          const token2 = await getAccessToken();
+          const restorePrice = order.limitPrice ?? newPrice;
+          await ttPost(`/accounts/${order.accountNumber}/orders`, token2, buildReplaceOrder(order, restorePrice));
+          setError(
+            `Replace failed (${e.message ?? 'unknown error'}) — restored the original order at $${restorePrice.toFixed(2)} instead. ` +
+            `Any attached profit/stop bracket was NOT restored.`
+          );
+        } catch (restoreErr: any) {
+          setError(
+            `⚠ Replace failed AND the automatic restore also failed (${restoreErr.message ?? 'unknown error'}). ` +
+            `The original order was already cancelled — ${order.symbol} has no pending entry order right now. Re-enter it manually in TastyTrade.`
+          );
+        }
+      } else {
+        setError(`Could not cancel order to replace it: ${e.message ?? 'unknown error'}`);
+      }
+    } finally {
+      await fetchPositions();
+      setReplacingOrderIds(prev => { const next = new Set(prev); next.delete(order.id); return next; });
     }
   };
 
@@ -9387,7 +9524,9 @@ export default function PortfolioPage() {
                       <PendingOrdersSection
                         orders={pendingOrders} th={th}
                         cancellingOrderIds={cancellingOrderIds}
+                        replacingOrderIds={replacingOrderIds}
                         onCancel={cancelPendingOrder}
+                        onReplace={replacePendingOrder}
                       />
                     )}
                     {positions.length > 0 && (
