@@ -12,6 +12,7 @@ import {
   stopScreenerJob,
   updateScreenerJob,
 } from '@/lib/screener/screenerJobStore';
+import { getAccessToken } from '@/lib/scans/tastytrade-client';
 import type { RulesType } from '@/lib/scans/constants';
 import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
 import type { ServerJobRecord } from '@/lib/jobs/types';
@@ -151,9 +152,11 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       resultsHref: '/screener?mode=rank',
     });
 
-    const input: RankedScanInput = { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig };
-
     try {
+      setStatus('Getting access token...');
+      const accessToken = await getAccessToken();
+      const input: RankedScanInput = { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, accessToken };
+
       const res = await fetch('/api/jobs/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
