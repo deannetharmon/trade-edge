@@ -48,6 +48,10 @@ export class RankedScanCancelledError extends Error {
   }
 }
 
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new RankedScanCancelledError();
+}
+
 export async function runRankedScan(
   input: RankedScanInput,
   onProgress?: RankedScanProgressCallback,
@@ -59,13 +63,18 @@ export async function runRankedScan(
     throw new Error('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
   }
 
+  throwIfCancelled(signal);
   await onProgress?.({ label: 'Getting access token...', completed: 0, total: activeSymbols.length });
+  throwIfCancelled(signal);
   const token = input.accessToken || await getAccessToken();
 
   const allSymbols = Array.from(new Set(activeSymbols));
 
+  throwIfCancelled(signal);
   await onProgress?.({ label: 'Fetching market metrics...', completed: 0, total: activeSymbols.length });
+  throwIfCancelled(signal);
   const metricsArray = await getMarketMetrics(allSymbols, token);
+  throwIfCancelled(signal);
 
   const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
@@ -89,30 +98,45 @@ export async function runRankedScan(
   // still fetched (used for the trend-alignment badge and momentum scoring)
   // but never used to skip a ticker. (Mirrors runScreen's isRankMode=true path.)
   for (let i = 0; i < activeSymbols.length; i++) {
-    if (signal?.aborted) throw new RankedScanCancelledError();
+    throwIfCancelled(signal);
 
     const symbol = activeSymbols[i];
     await onProgress?.({ label: `Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`, completed: i, total: activeSymbols.length });
+    throwIfCancelled(signal);
+
     const classification = await classifyUnderlying(symbol, token);
+    throwIfCancelled(signal);
+
     const isEtfTicker = classification === 'index' || classification === 'etf';
     let trendResult: TrendResult | undefined;
-    try { trendResult = await getTrend(symbol, isEtfTicker); } catch (e) { console.warn(e); }
+    try {
+      trendResult = await getTrend(symbol, isEtfTicker);
+      throwIfCancelled(signal);
+    } catch (e) {
+      if (signal?.aborted) throw new RankedScanCancelledError();
+      console.warn(e);
+    }
 
     try {
+      throwIfCancelled(signal);
       const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
       const rankDteWindow = { min: RANK_SCAN_DTE_MIN, max: RANK_SCAN_DTE_MAX };
       const [chainData, price] = await Promise.all([
         getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow),
         getQuote(symbol, token),
       ]);
+      throwIfCancelled(signal);
+
       scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
       screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel));
+      throwIfCancelled(signal);
     } catch (e: any) {
+      if (signal?.aborted || e instanceof RankedScanCancelledError) throw new RankedScanCancelledError();
       screenResults.push(errResult(symbol, trendResult?.strategy ?? 'BPS', e.message, trendResult));
     }
   }
 
-  if (signal?.aborted) throw new RankedScanCancelledError();
+  throwIfCancelled(signal);
 
   // Rank mode: no de-dup (exhaustive candidate set); sort by score descending,
   // no-candidate results go to the bottom. (Mirrors runScreen's rank sort.)
@@ -123,7 +147,9 @@ export async function runRankedScan(
     return sB - sA;
   });
 
+  throwIfCancelled(signal);
   await onProgress?.({ label: 'Complete', completed: activeSymbols.length, total: activeSymbols.length });
+  throwIfCancelled(signal);
 
   return { results: uniqueResults, rawScanCache: scanCache };
 }
