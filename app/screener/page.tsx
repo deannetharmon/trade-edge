@@ -32,7 +32,7 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp } from '@/lib/scans/csp-finder';
 import { runChecklist } from '@/lib/scans/checklist';
-import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank } from '@/lib/scans/rank-scoring';
+import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
@@ -2501,6 +2501,29 @@ function TradeModal({ result, th, onClose }: {
   // Entry limit price (default = credit, can tweak)
   const [entryLimit, setEntryLimit] = useState(parseFloat(creditPerContract.toFixed(2)));
 
+  // ── OTM proximity hard gate ────────────────────────────────────────────
+  // Chasing premium on a tight-to-ITM strike is the exact mistake this is
+  // meant to catch. Threshold mirrors the same buffer table the rank score
+  // uses (index/etf/stock × DTE bucket), so if the score is already
+  // flagging a weak buffer dimension, order entry blocks too.
+  const otmPct = (() => {
+    if (result.price == null) return null;
+    const price = result.price;
+    if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
+    if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
+    if (c.strategy === 'IC' && c.shortCallStrike != null) {
+      return Math.min(
+        ((price - c.shortStrike) / price) * 100,
+        ((c.shortCallStrike - price) / price) * 100
+      );
+    }
+    return null;
+  })();
+  const otmWarnThreshold = getOtmWarningThreshold(c.dte, result.underlyingType ?? 'stock');
+  const otmTooTight = otmPct != null && otmPct < otmWarnThreshold;
+  const [otmOverrideChecked, setOtmOverrideChecked] = useState(false);
+  const otmGateBlocking = otmTooTight && !otmOverrideChecked;
+
   const hasOccSymbols = c.shortOccSymbol && c.longOccSymbol &&
     (c.strategy !== 'IC' || (c.shortCallOccSymbol && c.longCallOccSymbol));
 
@@ -2619,6 +2642,18 @@ function TradeModal({ result, th, onClose }: {
         {!hasOccSymbols && (
           <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
             <p className="text-xs text-yellow-400">OCC symbols not available for this spread — rescan to populate them.</p>
+          </div>
+        )}
+
+        {otmTooTight && (
+          <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4 space-y-2">
+            <p className="text-xs text-red-400 font-bold">
+              ⚠ OTM buffer {otmPct!.toFixed(1)}% is below the {otmWarnThreshold}% threshold for this {result.underlyingType ?? 'stock'} / {c.dte}DTE setup — too close to the short strike.
+            </p>
+            <label className="flex items-center gap-2 text-[11px] text-red-300 cursor-pointer">
+              <input type="checkbox" checked={otmOverrideChecked} onChange={e => setOtmOverrideChecked(e.target.checked)} className="accent-red-500" />
+              I understand this is chasing premium on a tight strike and want to proceed anyway
+            </label>
           </div>
         )}
 
@@ -2754,19 +2789,19 @@ function TradeModal({ result, th, onClose }: {
         {phase !== 'done' && (
           <div className="flex gap-2">
             {!dryRunResult ? (
-              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun'}
+              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun' || otmGateBlocking}
                 className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
-                {phase === 'dryrun' ? 'VALIDATING...' : 'VALIDATE ORDER'}
+                {phase === 'dryrun' ? 'VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : 'VALIDATE ORDER'}
               </button>
             ) : (
               <>
-                <button onClick={runDryRun} disabled={phase === 'dryrun'}
+                <button onClick={runDryRun} disabled={phase === 'dryrun' || otmGateBlocking}
                   className={`py-2.5 px-3 border ${th.border} ${th.textFaint} rounded-xl text-xs ac-hover-border transition-colors disabled:opacity-40`}>
                   ↺
                 </button>
-                <button onClick={placeOrder} disabled={phase === 'placing'}
+                <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking}
                   className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
-                  {phase === 'placing' ? 'PLACING...' : `PLACE + GTC + STOP`}
+                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC + STOP`}
                 </button>
               </>
             )}

@@ -7,32 +7,43 @@ import { daysUntil, formatDisplayDate, estimateNextEarningsDate, calcSpreadPop, 
 import { findBestICUnfiltered } from './spread-finder';
 import { runChecklist } from './checklist';
 
+// Shared with the order-entry warning gate (TradeModal) so the hard-block
+// threshold stays in lockstep with the score instead of drifting.
+const BUFFER_THRESHOLDS: Record<'index' | 'etf' | 'stock', number[][]> = {
+  index: [
+    [3, 4, 5, 6, 8],
+    [3, 4, 5, 6, 8],
+    [3, 5, 6, 7, 8],
+  ],
+  etf: [
+    [3, 3.5, 4, 5, 7],
+    [3, 3.5, 4, 5, 7],
+    [3, 4,   5, 6, 7],
+  ],
+  stock: [
+    [3, 5,  6,  8, 10],
+    [3, 6,  7,  8, 10],
+    [6, 8, 10, 11, 12],
+  ],
+};
+
+export function getBufferThresholds(dte: number, type: 'index' | 'etf' | 'stock'): { crit: number; marg: number; ok: number; good: number; full: number } {
+  // DTE bucket: 0=tight(21-29), 1=mid(30-39), 2=sweet(40-45+)
+  const dteBucket = dte >= 40 ? 2 : dte >= 30 ? 1 : 0;
+  const [crit, marg, ok, good, full] = BUFFER_THRESHOLDS[type][dteBucket];
+  return { crit, marg, ok, good, full };
+}
+
+// Below "marg" is the same zone scoreBuffer() starts treating as
+// critical/near-zero — use it to hard-block premature order submission.
+export function getOtmWarningThreshold(dte: number, type: 'index' | 'etf' | 'stock'): number {
+  return getBufferThresholds(dte, type).marg;
+}
+
 export function scoreBuffer(bufferPct: number | null | undefined, dte: number, type: 'index' | 'etf' | 'stock'): number {
   if (bufferPct == null) return 0.4; // unknown — neutral, don't penalize
   const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-
-  // DTE bucket: 0=tight(21-29), 1=mid(30-39), 2=sweet(40-45+)
-  const dteBucket = dte >= 40 ? 2 : dte >= 30 ? 1 : 0;
-
-  const T: Record<'index' | 'etf' | 'stock', number[][]> = {
-    index: [
-      [3, 4, 5, 6, 8],
-      [3, 4, 5, 6, 8],
-      [3, 5, 6, 7, 8],
-    ],
-    etf: [
-      [3, 3.5, 4, 5, 7],
-      [3, 3.5, 4, 5, 7],
-      [3, 4,   5, 6, 7],
-    ],
-    stock: [
-      [3, 5,  6,  8, 10],
-      [3, 6,  7,  8, 10],
-      [6, 8, 10, 11, 12],
-    ],
-  };
-
-  const [crit, marg, ok, good, full] = T[type][dteBucket];
+  const { crit, marg, ok, good, full } = getBufferThresholds(dte, type);
 
   if (bufferPct >= full) return 1.0;
   if (bufferPct >= good) return clamp(0.75 + (bufferPct - good) / (full - good) * 0.25);
