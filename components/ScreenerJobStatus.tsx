@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useCommandBus } from '@/hooks/useCommandBus';
 import {
   clearScreenerJob,
   completeScreenerJob,
+  stopScreenerJob,
   useScreenerJobState,
 } from '@/lib/screener/screenerJobStore';
 
@@ -40,19 +42,14 @@ function latestResultTimestamp(): { ts: number; href: string; label: string } | 
 
 export function ScreenerJobStatus() {
   const job = useScreenerJobState();
+  const { dispatch } = useCommandBus();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
   const mountedRef = useRef(false);
 
-  // Passive completion detector for the existing Filter/Targeted/PMCC/CSP flows.
-  // Those scans already persist results to localStorage/IndexedDB when complete;
-  // this small poller lets the root layout surface completion even after the user
-  // navigates away from /screener. Ranked scans also report directly through the
-  // job store via useRankedScan.
   useEffect(() => {
     mountedRef.current = true;
 
-    // First mount should establish the baseline, not fire a stale completion toast
-    // for results that were already cached before this build loaded.
     if (readNumber(LAST_SEEN_KEY) == null) {
       const latest = latestResultTimestamp();
       if (latest) {
@@ -91,6 +88,19 @@ export function ScreenerJobStatus() {
     ? Math.min(100, Math.round((job.progressCurrent / job.progressTotal) * 100))
     : null;
 
+  const handleStop = async () => {
+    if (!job.id || stopping) return;
+    setStopping(true);
+    try {
+      await dispatch({ type: 'CANCEL_TASK', payload: { taskId: job.id } });
+      stopScreenerJob('Scan cancelled');
+    } catch {
+      stopScreenerJob('Scan stopped locally');
+    } finally {
+      setStopping(false);
+    }
+  };
+
   return (
     <div className="fixed bottom-4 right-4 z-[100] w-80 rounded-xl border border-slate-700 bg-slate-950/95 shadow-2xl backdrop-blur p-3 text-slate-100">
       <div className="flex items-start gap-3">
@@ -119,7 +129,23 @@ export function ScreenerJobStatus() {
             </div>
           )}
 
-          {!isRunning && (
+          {isRunning ? (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={handleStop}
+                disabled={stopping}
+                className="rounded-lg border border-red-500/70 px-2.5 py-1 text-[10px] font-bold tracking-wider text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                {stopping ? 'STOPPING...' : 'STOP SCAN'}
+              </button>
+              <a
+                href={job.resultsHref || '/screener'}
+                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-slate-200"
+              >
+                VIEW
+              </a>
+            </div>
+          ) : (
             <div className="mt-3 flex items-center gap-2">
               <a
                 href={job.resultsHref || '/screener'}
