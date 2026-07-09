@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import {
   clearScreenerJob,
@@ -42,6 +43,7 @@ function latestResultTimestamp(): { ts: number; href: string; label: string } | 
 
 export function ScreenerJobStatus() {
   const job = useScreenerJobState();
+  const router = useRouter();
   const { dispatch } = useCommandBus();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -87,6 +89,10 @@ export function ScreenerJobStatus() {
   const pct = job.progressTotal > 0
     ? Math.min(100, Math.round((job.progressCurrent / job.progressTotal) * 100))
     : null;
+
+  const openResults = () => {
+    router.push(job.resultsHref || '/screener?mode=rank');
+  };
 
   const handleStop = async () => {
     if (!job.id || stopping) return;
@@ -138,21 +144,21 @@ export function ScreenerJobStatus() {
               >
                 {stopping ? 'STOPPING...' : 'STOP SCAN'}
               </button>
-              <a
-                href={job.resultsHref || '/screener'}
+              <button
+                onClick={openResults}
                 className="rounded-lg border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-slate-200"
               >
                 VIEW
-              </a>
+              </button>
             </div>
           ) : (
             <div className="mt-3 flex items-center gap-2">
-              <a
-                href={job.resultsHref || '/screener'}
+              <button
+                onClick={openResults}
                 className="rounded-lg border border-emerald-600 px-2.5 py-1 text-[10px] font-bold tracking-wider text-emerald-300 hover:bg-emerald-500/10"
               >
                 OPEN RESULTS
-              </a>
+              </button>
               <button
                 onClick={() => {
                   if (job.id) setDismissedId(job.id);
