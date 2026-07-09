@@ -1,0 +1,150 @@
+# TradeEdge Autopilot — Sprint Status
+
+**Branch:** `feature/autopilot-paper-mode`  
+**Scope:** Paper Mode v1.0  
+**Last Updated:** 2026-07-02  
+**Current Phase:** Milestone A Complete ✅  
+**Next Objective:** Milestone B — Decision Engine
+
+## Current Development Rule
+
+Autopilot must learn to make explainable, portfolio-aware recommendations before it is allowed to create paper trades.
+
+**No paper execution until the Decision Engine produces ranked recommendations with complete reasoning.**
+
+## Definition of Done
+
+A sprint is not complete until all required items are true:
+
+- [x] Code written
+- [x] Documentation updated
+- [x] Changes committed and pushed
+- [x] Vercel build passes
+- [x] Sprint review completed
+- [ ] Endpoint smoke tests pass when network access allows
+
+## Sprint Tracker
+
+| Sprint | Name | Status | Build | Deploy | Smoke Test | Review |
+|---|---|---:|---:|---:|---:|---:|
+| 1A | Core Infrastructure | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
+| 1B | Framework | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
+| 2 | Decision Engine | Next | ⬜ | ⬜ | ⬜ | ⬜ |
+| 3 | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 5 | Candidate Discovery | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 6 | Scheduler | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 7 | Dashboard | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 8 | Configuration | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 9 | Analytics | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| 10 | Paper Beta | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+
+## Build History
+
+| Sprint | Build Result | Notes |
+|---|---:|---|
+| 1A | ✅ Passed | Core infrastructure compiled in Vercel. |
+| 1B | ✅ Passed | Framework build passed after TypeScript date-guard fix. |
+| 2 | ⬜ | Pending. |
+| 3 | ⬜ | Pending. |
+| 4 | ⬜ | Pending. |
+| 5 | ⬜ | Pending. |
+| 6 | ⬜ | Pending. |
+| 7 | ⬜ | Pending. |
+| 8 | ⬜ | Pending. |
+| 9 | ⬜ | Pending. |
+| 10 | ⬜ | Pending. |
+
+## Milestones
+
+### ✅ Milestone A — Framework Complete
+
+Completed:
+
+- Core infrastructure
+- Redis persistence
+- API framework
+- Dashboard shell
+- Decision Confidence framework
+- Opportunity Score framework
+- Net Edge utility
+- Dry-run runner
+- Telemetry
+- Run locking
+
+### ⬜ Milestone B — Decision Engine
+
+Goal: Autopilot can think.
+
+Output: ranked recommendations with complete acceptance/rejection reasoning.
+
+Constraint: no paper trades.
+
+### ⬜ Milestone C — Paper Trading
+
+Goal: Autopilot can execute simulated trades.
+
+### ⬜ Milestone D — Position Management
+
+Goal: Autopilot can autonomously manage paper positions.
+
+### ⬜ Milestone E — Paper Beta
+
+Goal: entire paper-trading lifecycle validated.
+
+### ⬜ Milestone F — Live Readiness Review
+
+Goal: independent review confirms readiness for live-mode implementation. No live trading work starts before this review.
+
+---
+
+# Sprint Reviews
+
+## Sprint 1A — Core Infrastructure Review
+
+**Result:** Completed. Build passed in Vercel. Endpoint smoke tests remain deferred because preview access is blocked by network restrictions.
+
+**Built:**
+
+- Autopilot planning trackers: `SPRINT_STATUS.md` and `DECISIONS.md`
+- Config defaults and validation module
+- Redis persistence helpers
+- Paper account store
+- Decision log store
+- Config audit store
+- Server auth helper
+- Safe infrastructure API routes for health, config, paper account, decisions, state, and status
+
+**Safety:**
+
+- No live-order capability added.
+- No candidate scanning added.
+- No paper trade execution added.
+- No position management added.
+
+## Sprint 1B — Framework Review
+
+**Result:** Completed. Vercel build passed after a TypeScript narrowing fix in `lib/autopilot/scoring/confidence.ts`.
+
+**Built:**
+
+- Decision Confidence framework using the v1 four-factor model.
+- Opportunity Score framework using edge, goal alignment, risk penalty, and posture multiplier.
+- Net Edge utility using the approved theta/gamma formula.
+- Redis-backed run-locking shell.
+- Telemetry persistence and API route.
+- Manual and cron dry-run endpoints.
+- `/autopilot` dashboard shell.
+
+**Safety:**
+
+- Manual run is dry-run only.
+- Cron run is dry-run only and requires secret authorization.
+- No candidate scanning was added.
+- No paper trades can be created.
+- No live-order path was added.
+
+**Known Follow-Up:**
+
+- Endpoint smoke tests remain deferred until preview/local access is available.
+- Sprint 2 must produce recommendations only; no paper execution.

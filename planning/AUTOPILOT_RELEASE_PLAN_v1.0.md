@@ -1,316 +1,407 @@
-# TradeEdge Autopilot --- Release Plan (Paper Mode v1.0)
+# TradeEdge Autopilot — Release Plan v1.0
+
+**Scope:** Paper Mode v1.0  
+**Branch:** `feature/autopilot-paper-mode`  
+**Current Phase:** Milestone A Complete ✅  
+**Next Objective:** Milestone B — Decision Engine
 
 ## Overview
 
-This document defines the implementation roadmap for the **TradeEdge
-Autopilot** paper-mode feature. Each sprint is independently deployable,
-reviewable, and testable.
+This document defines the implementation roadmap for the TradeEdge Autopilot paper-mode feature.
 
-------------------------------------------------------------------------
+Each sprint must be independently deployable, reviewable, testable, and rollback-safe. No sprint may introduce live-trading behavior.
 
-# Sprint 1 --- Foundation
+## Project Rule
 
-**Goal:** Create the Autopilot infrastructure without trading logic.
+Autopilot must learn to make high-quality, explainable, portfolio-aware decisions before it is allowed to create paper trades.
 
-## Deliverables
+Therefore:
 
--   `lib/autopilot` folder structure
--   Core TypeScript types
--   Default config
--   Config validation/sanitization
--   Redis persistence layer
--   Paper account model
--   Paper position model
--   Decision log model
--   Decision Confidence engine
--   Opportunity Score shell
--   Net Edge utility
--   API shell
--   Dashboard shell
--   Cron endpoint shell
--   Run locking shell
+- Sprints 1A and 1B establish framework and controls.
+- Sprint 2 produces ranked recommendations only.
+- Sprint 3 is the first sprint allowed to create paper positions.
+- Live trading remains out of scope for Paper Mode v1.0.
 
-## Exit Criteria
+---
 
--   App builds successfully
--   `/autopilot` page loads
--   Config can be read/written
--   Paper account initializes
--   Decision logs persist
--   Cron endpoint responds safely
--   No paper trades are created
+# Completed Sprints
 
-------------------------------------------------------------------------
+## Sprint 1A — Core Infrastructure ✅
 
-# Sprint 2 --- Scoring & Risk Engine
+**Goal:** Create the Autopilot backend foundation with no UI behavior, no cron execution, no candidate scanning, and no trading logic.
 
-**Goal:** Build the decision brain.
+### Delivered
 
-## Deliverables
+- `lib/autopilot/` structure
+- Core TypeScript models
+- Config defaults and validation
+- Redis persistence helpers
+- Paper account store
+- Decision log store
+- Config audit store
+- Health/status/state/config API routes
 
--   Opportunity Score implementation
--   Decision Confidence implementation
--   Regime-aware delta bands
--   Net Edge calculation
--   Per-trade max-loss gate
--   Buying-power utilization gate
--   Single-ticker concentration gate
--   Sector concentration gate
--   Daily/weekly entry limits
--   Drawdown circuit breaker
--   Macro-event gate
--   Liquidity-stress gate
--   Correlation gate placeholder
+### Result
 
-## Exit Criteria
+Vercel build passed.
 
--   Candidates are scored
--   Candidates are approved/rejected/suppressed
--   Every rejection is logged
--   No entries executed yet
+### Safety
 
-------------------------------------------------------------------------
+No live orders, no paper trades, no candidate scanning, no position management.
 
-# Sprint 3 --- Candidate Engine
+---
 
-**Goal:** Discover and rank candidates.
+## Sprint 1B — Framework ✅
 
-## Deliverables
+**Goal:** Add the non-trading framework around the Sprint 1A infrastructure.
 
--   Candidate discovery
--   BPS evaluator
--   BCS evaluator
--   IC evaluator
--   CSP evaluator
--   CC evaluator
--   Entry validation
--   Candidate ranking
--   Candidate queue API
--   Candidate queue UI
--   Rejection explanations
+### Delivered
 
-## Exit Criteria
+- Decision Confidence framework
+- Opportunity Score framework
+- Net Edge utility
+- Redis run-locking
+- Telemetry persistence
+- Framework dry-run runner
+- Manual dry-run endpoint
+- Cron dry-run endpoint
+- Telemetry endpoint
+- `/autopilot` dashboard shell
 
--   Candidates are scanned
--   Ranked by score
--   Displayed in UI
--   Still no paper trades
+### Result
 
-------------------------------------------------------------------------
+Vercel build passed after TypeScript date-guard fix.
 
-# Sprint 4 --- Paper Execution Engine
+### Safety
 
-**Goal:** Execute paper-only entries.
+Manual and cron routes are dry-run only. No candidate scanning, no paper execution, no live order path.
+
+---
+
+# Sprint 2 — Decision Engine
+
+**Goal:** Teach Autopilot to think before it can act.
+
+Sprint 2 produces ranked recommendations with complete acceptance/rejection reasoning. It does not create paper positions.
 
 ## Deliverables
 
--   Paper fill simulator
--   Paper trade creation
--   Position sizing
--   Max-loss enforcement
--   Open position persistence
--   Paper account updates
--   Entry decision logs
--   Manual "Run Autopilot" action
--   Paper-only safety lock
+- Portfolio state builder
+- Market state interface
+- Watchlist/candidate input contract
+- Candidate evaluation pipeline
+- Opportunity Score integration
+- Decision Confidence integration
+- Net Edge integration
+- Risk gate evaluation
+- Buying-power gate evaluation
+- Concentration gate evaluation
+- Correlation gate placeholder or implementation
+- Macro/liquidity/volatility gate integration
+- Candidate rejection reasons
+- Ranked recommendation output
+- Decision log generation for accepted and rejected recommendations
+- Recommendation API route
+- Recommendation display shell on `/autopilot`
 
 ## Exit Criteria
 
--   Paper positions created
--   No live orders
--   Full audit trail
--   Risk gates enforced
+- Autopilot can evaluate supplied/mock candidates.
+- Every candidate receives a score, confidence value, and final recommendation status.
+- Every rejected candidate includes explicit rule reasons.
+- Recommendations are ranked.
+- Decision logs capture accepted/rejected decisions.
+- No paper trades are created.
+- Vercel build passes.
 
-------------------------------------------------------------------------
+## Smoke Tests
 
-# Sprint 5 --- Position Management
+- Run recommendation endpoint with mock candidates.
+- Confirm ranked recommendations return JSON.
+- Confirm rejected candidates include rule names.
+- Confirm over-sized candidate is rejected.
+- Confirm low-confidence candidate is suppressed.
+- Confirm no open paper positions are created.
 
-**Goal:** Manage paper positions.
+---
+
+# Sprint 3 — Paper Execution Engine
+
+**Goal:** Convert approved recommendations into simulated paper positions.
 
 ## Deliverables
 
--   BPS/BCS/IC management
--   50% profit targets
--   21 DTE handling
--   Net Edge management
--   CSP assignment-aware logic
--   CC management
--   Goal-mode roll logic
--   Thesis-break escalation
--   Unlock Shares
--   Management decision logs
+- Paper order creation
+- Fill simulator
+- Position sizing
+- Max-loss enforcement
+- Paper buying-power accounting
+- Paper cash accounting
+- Paper equity curve updates
+- Paper P/L framework
+- Entry decision logs
+- Manual paper-run action
+- Paper-mode-only safety lock
 
 ## Exit Criteria
 
--   Existing positions managed automatically
--   Roll/close actions simulated
--   CSP handled correctly
--   CC never auto-sells shares except assignment
+- Paper positions can be created from approved recommendations.
+- No live order path exists.
+- Paper account state updates correctly.
+- Every paper fill has full audit trail.
+- Risk gates are enforced before paper execution.
 
-------------------------------------------------------------------------
+---
 
-# Sprint 6 --- Scheduler
+# Sprint 4 — Position Management
 
-**Goal:** Fully automate paper mode.
+**Goal:** Manage open paper positions.
 
 ## Deliverables
 
--   Vercel Cron
--   Scheduled runner
--   Run locking
--   Duplicate-run prevention
--   Kill switch
--   Run history
--   Last/next run display
--   Error recovery
+- BPS/BCS/IC management logic
+- 50% profit target logic
+- 21 DTE management
+- Net Edge fade management
+- CSP assignment-aware management
+- CC short-call management
+- CC goal-mode roll logic
+- Thesis-break escalation handling
+- Unlock Shares action
+- Management decision logs
 
 ## Exit Criteria
 
--   Cron executes safely
--   No overlapping runs
--   Kill switch works
--   Failed runs logged
+- Open paper positions are evaluated every run.
+- Existing positions can be closed or rolled in paper mode.
+- CSPs are not incorrectly forced closed at 21 DTE.
+- CC shares are never auto-sold except assignment.
+- Unlock Shares closes only the short call.
 
-------------------------------------------------------------------------
+---
 
-# Sprint 7 --- Dashboard
+# Sprint 5 — Candidate Discovery
 
-**Goal:** Deliver the user experience.
+**Goal:** Replace mock/supplied candidate input with real app-integrated discovery.
 
 ## Deliverables
 
--   Dashboard
--   Paper account summary
--   Equity curve
--   Open positions
--   Closed positions
--   Candidate queue
--   Decision history
--   Opportunity Score
--   Decision Confidence
--   Risk status
--   Kill switch
--   Unlock Shares
--   Manual Run
+- Screener/watchlist integration
+- Strategy-specific filters
+- Duplicate suppression
+- Portfolio-aware candidate selection
+- Existing position awareness
+- Earnings-aware candidate suppression
+- Sector/industry metadata integration
+- Candidate queue UI
 
 ## Exit Criteria
 
--   Decisions are transparent
--   User can inspect and control Autopilot
+- Autopilot can discover candidates from TradeEdge data.
+- Candidates are ranked and explained.
+- Duplicate or conflicting candidates are suppressed.
+- Discovery still cannot bypass portfolio risk gates.
 
-------------------------------------------------------------------------
+---
 
-# Sprint 8 --- Configuration
+# Sprint 6 — Scheduler
 
-**Goal:** Make behavior configurable.
+**Goal:** Fully automate paper-mode evaluation safely.
 
 ## Deliverables
 
--   Configuration editor
--   Strategy goal editor
--   Portfolio posture editor
--   Threshold controls
--   Save/reset
--   Config audit log
--   Validation
--   Non-editable strategy identity rules
+- Vercel Cron configuration
+- Scheduled runner
+- Run locking
+- Duplicate-run prevention
+- Kill switch enforcement
+- Run history
+- Last-run and next-run display
+- Error logging
+- Recovery behavior after failed run
 
 ## Exit Criteria
 
--   Thresholds editable without deployment
--   Invalid values rejected
--   Changes audited
+- Cron runs safely.
+- Overlapping runs are blocked.
+- Kill switch stops all activity.
+- Failed runs are logged without corrupting state.
 
-------------------------------------------------------------------------
+---
 
-# Sprint 9 --- Analytics
+# Sprint 7 — Dashboard
 
-**Goal:** Measure performance.
+**Goal:** Make Autopilot observable and usable.
 
 ## Deliverables
 
--   Win rate
--   Profit factor
--   Expectancy
--   Average winner/loser
--   Drawdown
--   Strategy P&L
--   Regime analysis
--   Decision Confidence analytics
--   Opportunity Score analytics
--   Rule rejection metrics
--   Config impact metrics
+- Paper account summary
+- Equity curve
+- Open paper positions
+- Closed paper positions
+- Candidate queue
+- Decision history
+- Rejection explanations
+- Opportunity Score display
+- Decision Confidence display
+- Portfolio risk status
+- Manual run button
+- Kill switch UI
+- Unlock Shares button
 
 ## Exit Criteria
 
--   Paper performance measurable
--   Data-driven tuning possible
+- User can understand what Autopilot did and why.
+- User can stop Autopilot instantly.
+- User can manually run Autopilot.
+- User can inspect every decision.
 
-------------------------------------------------------------------------
+---
 
-# Sprint 10 --- Hardening & Paper Beta
+# Sprint 8 — Configuration
 
-**Goal:** Production-quality paper mode.
+**Goal:** Make thresholds editable without redeploying.
 
 ## Deliverables
 
--   Edge-case handling
--   API resilience
--   Redis failure handling
--   Market closed behavior
--   Stale quote handling
--   Regression testing
--   Build verification
--   UX polish
+- Config editor
+- Strategy goal editor
+- Portfolio posture editor
+- Threshold controls
+- Save/reset behavior
+- Config audit log UI
+- Validation errors
+- Read-only display of non-overridable rules
 
 ## Exit Criteria
 
--   Safe daily operation
--   No known state corruption
--   No live trading path
--   Ready for merge into `main`
+- All spec thresholds are editable.
+- Invalid values are rejected.
+- Config changes are logged.
+- CC stock-management mechanism is not reduced to a simple editable threshold.
 
-------------------------------------------------------------------------
+---
+
+# Sprint 9 — Analytics
+
+**Goal:** Make paper results measurable.
+
+## Deliverables
+
+- Win rate
+- Profit factor
+- Expectancy
+- Average winner/loser
+- Max drawdown
+- Strategy-level P&L
+- Regime-level P&L
+- Decision Confidence outcome tracking
+- Opportunity Score outcome tracking
+- Rule rejection frequency tracking
+- Config-change impact tracking
+
+## Exit Criteria
+
+- Paper performance is measurable.
+- Rule tuning can be driven by data instead of opinion.
+
+---
+
+# Sprint 10 — Paper Beta
+
+**Goal:** Prepare for daily paper-mode operation.
+
+## Deliverables
+
+- Edge-case handling
+- Empty-state handling
+- API error hardening
+- Redis failure handling
+- Market-closed behavior
+- Stale quote behavior
+- Bad data handling
+- Regression testing
+- Build verification
+- UX polish
+
+## Exit Criteria
+
+- Feature is safe for daily paper-mode use.
+- No known state-corruption bugs.
+- No accidental live-trading path.
+- Ready to merge into `main`.
+
+---
 
 # Milestones
 
-## Milestone A --- Foundation Complete
+## ✅ Milestone A — Framework Complete
 
-**Sprints 1--2**
+Completed by Sprint 1A and Sprint 1B.
 
-Infrastructure, scoring, and risk engine complete.
+Includes:
 
-## Milestone B --- Paper Entry Complete
+- Core infrastructure
+- Persistence
+- API framework
+- Dashboard shell
+- Scoring framework
+- Dry-run engine
+- Telemetry
+- Run locking
 
-**Sprints 3--4**
+## ⬜ Milestone B — Decision Engine
 
-Paper trade entry operational.
+Goal: Autopilot can think.
 
-## Milestone C --- Paper Management Complete
+Output: ranked recommendation list with complete reasoning.
 
-**Sprints 5--6**
+Constraint: no paper trades.
 
-Autonomous paper management operational.
+## ⬜ Milestone C — Paper Trading
 
-## Milestone D --- User-Ready Dashboard
+Goal: Autopilot can execute simulated trades.
 
-**Sprints 7--8**
+## ⬜ Milestone D — Position Management
 
-Configurable, observable, and user-friendly.
+Goal: Autopilot can autonomously manage paper positions.
 
-## Milestone E --- Paper Beta
+## ⬜ Milestone E — Paper Beta
 
-**Sprints 9--10**
+Goal: entire paper trading lifecycle validated.
 
-Stable, measurable, and ready for merge.
+## ⬜ Milestone F — Live Readiness Review
 
-------------------------------------------------------------------------
+Goal: independent review confirms readiness for live-mode implementation.
+
+No live trading implementation starts before this review.
+
+---
+
+# Build History
+
+| Sprint | Build Result | Notes |
+|---|---:|---|
+| Sprint 1A | ✅ | Core infrastructure compiled in Vercel. |
+| Sprint 1B | ✅ | Framework compiled after TypeScript date-guard fix. |
+| Sprint 2 | ⬜ | Pending. |
+| Sprint 3 | ⬜ | Pending. |
+| Sprint 4 | ⬜ | Pending. |
+| Sprint 5 | ⬜ | Pending. |
+| Sprint 6 | ⬜ | Pending. |
+| Sprint 7 | ⬜ | Pending. |
+| Sprint 8 | ⬜ | Pending. |
+| Sprint 9 | ⬜ | Pending. |
+| Sprint 10 | ⬜ | Pending. |
+
+---
 
 # Success Criteria
 
--   Deterministic execution
--   Complete audit trail
--   No live-order capability
--   Config-driven behavior
--   Incremental deployability
--   Production-quality architecture
+- Deterministic execution
+- Complete audit trail
+- No live-order capability
+- Config-driven behavior
+- Incremental deployability
+- Production-quality architecture
+- Decisions validated before execution
