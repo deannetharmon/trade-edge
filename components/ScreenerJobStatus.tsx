@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import {
   clearScreenerJob,
@@ -44,6 +44,8 @@ function latestResultTimestamp(): { ts: number; href: string; label: string } | 
 export function ScreenerJobStatus() {
   const job = useScreenerJobState();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { dispatch } = useCommandBus();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -90,8 +92,15 @@ export function ScreenerJobStatus() {
     ? Math.min(100, Math.round((job.progressCurrent / job.progressTotal) * 100))
     : null;
 
+  const targetHref = job.resultsHref || '/screener?mode=rank';
+  const currentMode = searchParams.get('mode');
+  const sameResultsView = pathname === '/screener' && (
+    (targetHref.includes('mode=rank') && currentMode === 'rank') ||
+    (!targetHref.includes('mode=') && !currentMode)
+  );
+
   const openResults = () => {
-    router.push(job.resultsHref || '/screener?mode=rank');
+    router.push(targetHref);
   };
 
   const handleStop = async () => {
@@ -105,6 +114,11 @@ export function ScreenerJobStatus() {
     } finally {
       setStopping(false);
     }
+  };
+
+  const dismiss = () => {
+    if (job.id) setDismissedId(job.id);
+    else clearScreenerJob();
   };
 
   return (
@@ -144,26 +158,27 @@ export function ScreenerJobStatus() {
               >
                 {stopping ? 'STOPPING...' : 'STOP SCAN'}
               </button>
-              <button
-                onClick={openResults}
-                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-slate-200"
-              >
-                VIEW
-              </button>
+              {!sameResultsView && (
+                <button
+                  onClick={openResults}
+                  className="rounded-lg border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-slate-200"
+                >
+                  VIEW
+                </button>
+              )}
             </div>
           ) : (
             <div className="mt-3 flex items-center gap-2">
+              {!sameResultsView && (
+                <button
+                  onClick={openResults}
+                  className="rounded-lg border border-emerald-600 px-2.5 py-1 text-[10px] font-bold tracking-wider text-emerald-300 hover:bg-emerald-500/10"
+                >
+                  OPEN RESULTS
+                </button>
+              )}
               <button
-                onClick={openResults}
-                className="rounded-lg border border-emerald-600 px-2.5 py-1 text-[10px] font-bold tracking-wider text-emerald-300 hover:bg-emerald-500/10"
-              >
-                OPEN RESULTS
-              </button>
-              <button
-                onClick={() => {
-                  if (job.id) setDismissedId(job.id);
-                  else clearScreenerJob();
-                }}
+                onClick={dismiss}
                 className="rounded-lg border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-slate-200"
               >
                 DISMISS
