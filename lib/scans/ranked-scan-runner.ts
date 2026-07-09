@@ -1,12 +1,10 @@
 // lib/scans/ranked-scan-runner.ts
 //
 // Standalone rank-only scan orchestration, extracted to run as a
-// TaskManager-owned background task (TE-0005A). This mirrors the rank-mode
-// branch of runScreen() in app/screener/page.tsx exactly — see
-// docs/reviews/TE-0005A-Implementation-Report.md for the line-by-line
-// mapping. Behavior is preserved; only the host changed (page-local state
-// -> background task). Filter/Targeted modes are NOT handled here and
-// remain entirely inside runScreen()/runTargetedScan() in page.tsx.
+// TaskManager-owned background task (TE-0005A). TE-0002B also runs this same
+// runner from the Redis-backed server job engine; in that path the browser
+// must pass a TastyTrade access token because server code cannot read
+// sessionStorage/localStorage/window.
 
 import type { RulesType } from './constants';
 import { RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX } from './constants';
@@ -22,6 +20,7 @@ export interface RankedScanInput {
   sLabel?: string;
   eLabel?: string;
   rankConfig: RankConfig;
+  accessToken?: string;
 }
 
 export interface RankedScanResult {
@@ -35,7 +34,7 @@ export interface RankedScanProgress {
   total: number;
 }
 
-export type RankedScanProgressCallback = (progress: RankedScanProgress) => void;
+export type RankedScanProgressCallback = (progress: RankedScanProgress) => void | Promise<void>;
 
 /**
  * Cooperative-cancellation marker per ADR-0003: thrown when the caller's
@@ -60,12 +59,12 @@ export async function runRankedScan(
     throw new Error('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
   }
 
-  onProgress?.({ label: 'Getting access token...', completed: 0, total: activeSymbols.length });
-  const token = await getAccessToken();
+  await onProgress?.({ label: 'Getting access token...', completed: 0, total: activeSymbols.length });
+  const token = input.accessToken || await getAccessToken();
 
   const allSymbols = Array.from(new Set(activeSymbols));
 
-  onProgress?.({ label: 'Fetching market metrics...', completed: 0, total: activeSymbols.length });
+  await onProgress?.({ label: 'Fetching market metrics...', completed: 0, total: activeSymbols.length });
   const metricsArray = await getMarketMetrics(allSymbols, token);
 
   const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
@@ -93,7 +92,7 @@ export async function runRankedScan(
     if (signal?.aborted) throw new RankedScanCancelledError();
 
     const symbol = activeSymbols[i];
-    onProgress?.({ label: `Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`, completed: i, total: activeSymbols.length });
+    await onProgress?.({ label: `Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`, completed: i, total: activeSymbols.length });
     const classification = await classifyUnderlying(symbol, token);
     const isEtfTicker = classification === 'index' || classification === 'etf';
     let trendResult: TrendResult | undefined;
@@ -124,8 +123,7 @@ export async function runRankedScan(
     return sB - sA;
   });
 
-  onProgress?.({ label: 'Complete', completed: activeSymbols.length, total: activeSymbols.length });
+  await onProgress?.({ label: 'Complete', completed: activeSymbols.length, total: activeSymbols.length });
 
   return { results: uniqueResults, rawScanCache: scanCache };
 }
-
