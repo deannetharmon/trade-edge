@@ -41,8 +41,15 @@ let currentState: ScreenerJobState = DEFAULT_STATE;
 let didHydrateFromStorage = false;
 const listeners = new Set<() => void>();
 
-function normalizeState(parsed: Partial<ScreenerJobState>): ScreenerJobState {
+function normalizeState(parsed: Partial<ScreenerJobState>, fromStorage = false): ScreenerJobState {
   const next = { ...DEFAULT_STATE, ...parsed };
+
+  // Completed/error/stopped cards are transient UI. They should survive normal
+  // in-app navigation through the in-memory store, but they should not resurrect
+  // after a hard reload from localStorage.
+  if (fromStorage && next.phase !== 'running') {
+    return DEFAULT_STATE;
+  }
 
   // A full reload cannot reconnect an in-browser async scan. Mark an old
   // in-flight job as stopped rather than leaving a permanent spinner.
@@ -65,7 +72,10 @@ function hydrateFromStorageOnce(): void {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    currentState = normalizeState(JSON.parse(raw) as Partial<ScreenerJobState>);
+    currentState = normalizeState(JSON.parse(raw) as Partial<ScreenerJobState>, true);
+    if (currentState.phase === 'idle') {
+      try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
+    }
   } catch {
     currentState = DEFAULT_STATE;
   }
@@ -73,7 +83,10 @@ function hydrateFromStorageOnce(): void {
 
 function persist(next: ScreenerJobState): void {
   if (typeof window === 'undefined') return;
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+  try {
+    if (next.phase === 'idle') window.localStorage.removeItem(STORAGE_KEY);
+    else window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {}
 }
 
 function notify(): void {
@@ -100,7 +113,7 @@ export function subscribeScreenerJob(listener: () => void): () => void {
     if (event.key !== STORAGE_KEY) return;
     try {
       currentState = event.newValue
-        ? normalizeState(JSON.parse(event.newValue) as Partial<ScreenerJobState>)
+        ? normalizeState(JSON.parse(event.newValue) as Partial<ScreenerJobState>, true)
         : DEFAULT_STATE;
     } catch {
       currentState = DEFAULT_STATE;
