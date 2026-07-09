@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import {
   clearScreenerJob,
@@ -41,14 +41,18 @@ function latestResultTimestamp(): { ts: number; href: string; label: string } | 
   return newest;
 }
 
+function getCurrentLocation(): { pathname: string; search: string } {
+  if (typeof window === 'undefined') return { pathname: '', search: '' };
+  return { pathname: window.location.pathname, search: window.location.search };
+}
+
 export function ScreenerJobStatus() {
   const job = useScreenerJobState();
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { dispatch } = useCommandBus();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [location, setLocation] = useState(() => getCurrentLocation());
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -63,6 +67,7 @@ export function ScreenerJobStatus() {
 
     const check = () => {
       if (!mountedRef.current) return;
+      setLocation(getCurrentLocation());
       const lastSeen = readNumber(LAST_SEEN_KEY) ?? 0;
       const newest = latestResultTimestamp();
 
@@ -75,10 +80,12 @@ export function ScreenerJobStatus() {
       });
     };
 
-    const timer = window.setInterval(check, 1500);
+    const timer = window.setInterval(check, 750);
+    window.addEventListener('popstate', check);
     return () => {
       mountedRef.current = false;
       window.clearInterval(timer);
+      window.removeEventListener('popstate', check);
     };
   }, []);
 
@@ -93,14 +100,15 @@ export function ScreenerJobStatus() {
     : null;
 
   const targetHref = job.resultsHref || '/screener?mode=rank';
-  const currentMode = searchParams.get('mode');
-  const sameResultsView = pathname === '/screener' && (
+  const currentMode = new URLSearchParams(location.search).get('mode');
+  const sameResultsView = location.pathname === '/screener' && (
     (targetHref.includes('mode=rank') && currentMode === 'rank') ||
     (!targetHref.includes('mode=') && !currentMode)
   );
 
   const openResults = () => {
     router.push(targetHref);
+    window.setTimeout(() => setLocation(getCurrentLocation()), 0);
   };
 
   const handleStop = async () => {
