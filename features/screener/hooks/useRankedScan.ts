@@ -1,10 +1,13 @@
 // features/screener/hooks/useRankedScan.ts
 //
-// Ranked Scan orchestration. TE-0002B moves execution off the browser tab and
-// into the Redis-backed server job engine. The page only starts/polls the job
-// and mirrors completed results into the existing Screener state.
+// Ranked Scan orchestration, extracted from app/screener/page.tsx (RF-0001).
+// Restored to the browser/TaskManager execution path after the experimental
+// server-side TastyTrade scan path hit authorization failures from Vercel.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useCommandBus } from '@/hooks/useCommandBus';
+import { useTaskManager } from '@/hooks/useTaskManager';
+import { useTask } from '@/hooks/useTask';
 import {
   completeScreenerJob,
   failScreenerJob,
@@ -12,20 +15,10 @@ import {
   stopScreenerJob,
   updateScreenerJob,
 } from '@/lib/screener/screenerJobStore';
-import { getAccessToken } from '@/lib/scans/tastytrade-client';
 import type { RulesType } from '@/lib/scans/constants';
 import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
-import type { ServerJobRecord } from '@/lib/jobs/types';
+import type { StartRankedScanResult } from '@/lib/commands/command-handlers';
 import type { UseRankedScanParams, UseRankedScanResult } from '../types';
-
-const ACTIVE_RANKED_JOB_KEY = 'trade-edge-active-ranked-scan-job-id';
-
-async function fetchJob(jobId: string): Promise<ServerJobRecord<RankedScanInput, RankedScanResult>> {
-  const res = await fetch(`/api/jobs/status/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? 'Failed to load ranked scan job');
-  return json.job as ServerJobRecord<RankedScanInput, RankedScanResult>;
-}
 
 export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult {
   const {
@@ -34,101 +27,63 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
     setLoading, setStatus, setError,
   } = params;
 
-  const [rankedScanJobId, setRankedScanJobId] = useState<string | null>(null);
+  const { dispatch } = useCommandBus();
+  const { tasks: allTasks } = useTaskManager();
+  const [rankedScanTaskId, setRankedScanTaskId] = useState<string | null>(null);
 
-  // Reconnect after navigation/remount. The job lives in Redis, not the page,
-  // so the Screener can safely come and go while the server continues scanning.
   useEffect(() => {
     if (screenMode !== 'rank') return;
-    if (rankedScanJobId) return;
-    try {
-      const existing = window.localStorage.getItem(ACTIVE_RANKED_JOB_KEY);
-      if (existing) setRankedScanJobId(existing);
-    } catch {}
-  }, [screenMode, rankedScanJobId]);
+    if (rankedScanTaskId) return;
+    const rankedTasks = allTasks.filter(t => t.kind === 'ranked-scan');
+    if (rankedTasks.length === 0) return;
+    const latest = rankedTasks.reduce((a, b) => (new Date(b.createdAt) > new Date(a.createdAt) ? b : a));
+    setRankedScanTaskId(latest.id);
+  }, [screenMode, allTasks, rankedScanTaskId]);
+
+  const rankedScanTask = useTask(rankedScanTaskId);
 
   useEffect(() => {
-    if (!rankedScanJobId || screenMode !== 'rank') return;
-
-    let cancelled = false;
-    let timer: number | null = null;
-
-    const poll = async () => {
-      try {
-        const job = await fetchJob(rankedScanJobId);
-        if (cancelled) return;
-
-        if (job.status === 'queued' || job.status === 'running') {
-          setLoading(true);
-          setStatus(job.progressLabel || 'Running ranked scan...');
-          setError('');
-          updateScreenerJob({
-            id: job.id,
-            phase: 'running',
-            kind: 'rank',
-            label: 'Ranked screener scan',
-            status: job.progressLabel || 'Running ranked scan...',
-            progressCurrent: job.progressPct,
-            progressTotal: 100,
-            resultsHref: '/screener?mode=rank',
-          });
-          timer = window.setTimeout(poll, 1500);
-          return;
-        }
-
-        if (job.status === 'completed') {
-          setLoading(false);
-          setStatus('');
-          const result = job.result;
-          if (result) {
-            setResults(result.results);
-            setRawScanCache(result.rawScanCache);
-            setResultsCachedAt(job.completedAt ? new Date(job.completedAt).getTime() : Date.now());
-            try { window.localStorage.removeItem(ACTIVE_RANKED_JOB_KEY); } catch {}
-            completeScreenerJob({
-              resultCount: result.results.length,
-              status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
-              resultsHref: '/screener?mode=rank',
-            });
-          } else {
-            completeScreenerJob({ status: 'Ranked scan complete', resultsHref: '/screener?mode=rank' });
-          }
-          return;
-        }
-
-        if (job.status === 'failed') {
-          setLoading(false);
-          setStatus('');
-          setError(job.error ?? 'Ranked scan failed');
-          try { window.localStorage.removeItem(ACTIVE_RANKED_JOB_KEY); } catch {}
-          failScreenerJob(job.error ?? 'Ranked scan failed');
-          return;
-        }
-
-        if (job.status === 'cancelled') {
-          setLoading(false);
-          setStatus('');
-          try { window.localStorage.removeItem(ACTIVE_RANKED_JOB_KEY); } catch {}
-          stopScreenerJob('Ranked scan cancelled');
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setLoading(false);
-        setStatus('');
-        const msg = err instanceof Error ? err.message : 'Failed to poll ranked scan job';
-        setError(msg);
-        failScreenerJob(msg);
+    if (!rankedScanTask || screenMode !== 'rank') return;
+    if (rankedScanTask.status === 'queued' || rankedScanTask.status === 'running') {
+      setLoading(true);
+      setStatus(rankedScanTask.progressLabel ?? 'Running...');
+      setError('');
+      updateScreenerJob({
+        id: rankedScanTask.id,
+        phase: 'running',
+        kind: 'rank',
+        label: 'Ranked screener scan',
+        status: rankedScanTask.progressLabel ?? 'Running ranked scan...',
+        resultsHref: '/screener?mode=rank',
+      });
+    } else if (rankedScanTask.status === 'completed') {
+      setLoading(false);
+      setStatus('');
+      const result = rankedScanTask.result as RankedScanResult | undefined;
+      if (result) {
+        setResults(result.results);
+        setRawScanCache(result.rawScanCache);
+        setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
+        completeScreenerJob({
+          resultCount: result.results.length,
+          status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=rank',
+        });
+      } else {
+        completeScreenerJob({ status: 'Ranked scan complete', resultsHref: '/screener?mode=rank' });
       }
-    };
-
-    poll();
-
-    return () => {
-      cancelled = true;
-      if (timer != null) window.clearTimeout(timer);
-    };
+    } else if (rankedScanTask.status === 'failed') {
+      setLoading(false);
+      setStatus('');
+      setError(rankedScanTask.error ?? 'Ranked scan failed');
+      failScreenerJob(rankedScanTask.error ?? 'Ranked scan failed');
+    } else if (rankedScanTask.status === 'cancelled') {
+      setLoading(false);
+      setStatus('');
+      stopScreenerJob('Ranked scan cancelled');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rankedScanJobId, screenMode]);
+  }, [rankedScanTask, screenMode]);
 
   const startRankedScan = useCallback(async (
     sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string
@@ -138,7 +93,6 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setError('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
       return;
     }
-
     setError('');
     setResults([]);
     setResultsCachedAt(null);
@@ -147,33 +101,26 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
     startScreenerJob({
       kind: 'rank',
       label: 'Ranked screener scan',
-      total: 100,
+      total: activeSymbols.length,
       status: 'Starting ranked scan...',
       resultsHref: '/screener?mode=rank',
     });
+    setRankedScanTaskId(null);
 
-    try {
-      setStatus('Getting access token...');
-      const accessToken = await getAccessToken();
-      const input: RankedScanInput = { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, accessToken };
+    const res = await dispatch<RankedScanInput, StartRankedScanResult>({
+      type: 'START_RANKED_SCAN',
+      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig },
+    });
 
-      const res = await fetch('/api/jobs/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ranked-scan', input }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json?.jobId) throw new Error(json?.error ?? 'Failed to start ranked scan');
-      try { window.localStorage.setItem(ACTIVE_RANKED_JOB_KEY, json.jobId); } catch {}
-      setRankedScanJobId(json.jobId);
-    } catch (err) {
+    if (res.handled && res.result?.taskId) {
+      setRankedScanTaskId(res.result.taskId);
+    } else {
       setLoading(false);
       setStatus('');
-      const msg = err instanceof Error ? err.message : 'Failed to start ranked scan';
-      setError(msg);
-      failScreenerJob(msg);
+      setError(res.error ?? 'Failed to start ranked scan');
+      failScreenerJob(res.error ?? 'Failed to start ranked scan');
     }
-  }, [tickers, rankConfig]);
+  }, [tickers, rankConfig, dispatch]);
 
   return { startRankedScan };
 }
