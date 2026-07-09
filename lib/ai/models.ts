@@ -4,8 +4,8 @@
 
 export type AiProfile = 'analysis' | 'chat' | 'summary' | 'fast' | 'search';
 
-const DEFAULT_ANALYSIS_MODEL = 'gpt-4o';
-const DEFAULT_CHAT_MODEL = 'gpt-4o';
+const DEFAULT_ANALYSIS_MODEL = 'gpt-4o-mini';
+const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
 const DEFAULT_SUMMARY_MODEL = 'gpt-4o-mini';
 const DEFAULT_FAST_MODEL = 'gpt-4o-mini';
 const DEFAULT_SEARCH_MODEL = 'gpt-4o';
