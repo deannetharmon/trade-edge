@@ -1,16 +1,18 @@
 # TradeEdge Autopilot — Sprint Status
 
-**Branch:** `feature/autopilot-paper-mode`  
-**Scope:** Paper Mode v1.0  
-**Last Updated:** 2026-07-02  
-**Current Phase:** Milestone A Complete ✅  
-**Next Objective:** Milestone B — Decision Engine
+**Branch:** `main`  
+**Scope:** Background Screener + Autopilot Foundation  
+**Last Updated:** 2026-07-09  
+**Current Phase:** TE-0001 / TE-0005A stabilization  
+**Next Objective:** Finish Cancel Scan, refresh/reconnect behavior, then move to Portfolio Intelligence
 
 ## Current Development Rule
 
 Autopilot must learn to make explainable, portfolio-aware recommendations before it is allowed to create paper trades.
 
 **No paper execution until the Decision Engine produces ranked recommendations with complete reasoning.**
+
+For the current screener sprint, keep TastyTrade scan execution browser-owned/client-authenticated. Do not reintroduce Vercel server-side TastyTrade scan execution until server auth is explicitly solved.
 
 ## Definition of Done
 
@@ -23,12 +25,27 @@ A sprint is not complete until all required items are true:
 - [x] Sprint review completed
 - [ ] Endpoint smoke tests pass when network access allows
 
+## Active Sprint — Background Ranked Screener Stabilization
+
+| Item | Status | Notes |
+|---|---:|---|
+| Ranked scan works on Screener page | ✅ | Restored stable client TaskManager path after server worker 401 failure. |
+| Scan status survives in-app navigation | ✅ | Root-level task mirror mounted in app providers. |
+| Duplicate completion popups removed | ✅ | Generic TaskStatusBar removed from global shell. |
+| Completed cards do not resurrect after hard reload | ✅ | Non-running cards are not restored from localStorage. |
+| Open Results behavior | ✅ | Hidden when already on target results view. |
+| Earnings/follow-up badge polish | ✅ | DTE pill hidden; scheduled badges nowrap. |
+| Cancel Scan | ⬜ | Next implementation target; see ADR-0003. |
+| Refresh/reconnect while running | ⬜ | Decide reconnect vs mark stale/stopped. |
+| Regression test | ⬜ | Test navigation, completion, reload, cancel. |
+
 ## Sprint Tracker
 
 | Sprint | Name | Status | Build | Deploy | Smoke Test | Review |
 |---|---|---:|---:|---:|---:|---:|
 | 1A | Core Infrastructure | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
 | 1B | Framework | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
+| TE-0001 / TE-0005A | Background Ranked Screener Stabilization | Active | ⬜ | ⬜ | ⬜ | ⬜ |
 | 2 | Decision Engine | Next | ⬜ | ⬜ | ⬜ | ⬜ |
 | 3 | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -45,6 +62,7 @@ A sprint is not complete until all required items are true:
 |---|---:|---|
 | 1A | ✅ Passed | Core infrastructure compiled in Vercel. |
 | 1B | ✅ Passed | Framework build passed after TypeScript date-guard fix. |
+| TE-0001 / TE-0005A | ⬜ | Await latest Vercel confirmation after handoff doc updates. |
 | 2 | ⬜ | Pending. |
 | 3 | ⬜ | Pending. |
 | 4 | ⬜ | Pending. |
@@ -71,6 +89,25 @@ Completed:
 - Dry-run runner
 - Telemetry
 - Run locking
+
+### 🟡 TE-0001 / TE-0005A — Background Ranked Screener Stabilization
+
+Goal: Ranked scan behaves like an app-level workflow rather than page-local UI.
+
+Completed:
+
+- Stable ranked scan path restored.
+- Global progress/completion card works across in-app navigation.
+- Duplicate notifications removed.
+- Stale completed cards no longer restore on hard refresh.
+- AI model fallback and centralized model defaults added.
+- Screener badge polish applied.
+
+Remaining:
+
+- Cancel Scan.
+- Refresh/reconnect behavior.
+- Regression testing.
 
 ### ⬜ Milestone B — Decision Engine
 
