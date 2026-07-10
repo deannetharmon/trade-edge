@@ -1865,6 +1865,12 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
   const currentBids: Record<string, number> = {};
   const currentAsks: Record<string, number> = {};
   const unpriceableSymbols = new Set<string>();
+  // Legs with no real two-sided market (missing bid or ask). currentBids/Asks
+  // fall back to mark for these so the mid-based P&L (currentValue) still
+  // works, but that fallback must NOT feed closeValue — "Close now
+  // (marketable)" is only meaningful when it's actually built from a real
+  // ask (short leg) / bid (long leg), not a mark masquerading as both.
+  const oneSidedSymbols = new Set<string>();
   const thetaMap: Record<string, number> = {};
   const gammaMap: Record<string, number> = {};
   const deltaMap: Record<string, number> = {};
@@ -1887,6 +1893,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
           currentBids[sym] = twoSided ? bid : mark > 0 ? mark : 0;
           currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : 0;
           if (!twoSided && mark <= 0) unpriceableSymbols.add(sym);
+          if (!twoSided) oneSidedSymbols.add(sym);
           const theta = parseFloat(item.theta ?? 'NaN');
           const gamma = parseFloat(item.gamma ?? 'NaN');
           const delta = parseFloat(item.delta ?? 'NaN');
@@ -2259,10 +2266,16 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     // Marketable "if I closed now" value — same convention as fetchCloseQuote:
     // Buy to Close (short leg) fills at ask; Sell to Close (long leg) fills at bid.
     // This is the number that should match the close/cut-losses modal exactly.
+    // Requires a REAL two-sided market on every leg — currentAsks/currentBids
+    // fall back to mark when a leg is one-sided (see population above), and
+    // using that fallback here would silently turn "marketable" into "mid,"
+    // which can make it equal to or even better than Buyback (mid). Better to
+    // show '—' than a close-now number that isn't actually a worse-case fill.
     let closeValue = 0; let hasCloseValue = true;
     for (const leg of legs) {
       const qty = parseInt(leg['quantity'] ?? '1', 10);
       const sym = leg.symbol?.replace(/\s+/g, '');
+      if (oneSidedSymbols.has(sym)) { hasCloseValue = false; break; }
       const isShort = leg['quantity-direction'] === 'Short';
       const price = isShort ? currentAsks[sym] : currentBids[sym];
       if (price == null || price <= 0) { hasCloseValue = false; break; }
@@ -7923,28 +7936,39 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     ? { action: mapAiRecommendationToAction(analysis.recommendation), detail: analysis.summary }
     : getRecommendation(pos, trend);
 
-  // ── 50%-target projection (theta-only, all-else-equal) ──
-  // pos.theta is per-share net theta with contract qty ALREADY applied (see assembly).
-  // $/d = pos.theta * 100. Do NOT multiply by qty again.
+  // ── 50%-target projection (√time value-decay model) ──
+  // An OTM spread's buyback value is mostly extrinsic (time) value, which
+  // scales roughly with √(days remaining) — slow early, faster as expiry
+  // nears. Solving directly for the day that value ratio crosses the 50%
+  // target (rather than linearly extrapolating today's theta, which is at
+  // its slowest early in the trade) avoids systematically over-projecting
+  // "unlikely before 21-DTE" on healthy trades that are simply early.
   const projection = (() => {
-    if (pos.theta == null || pos.theta <= 0) return null;
-    if (pos.currentValue == null) return null;
-    const dailyDecay = pos.theta * 100;                 // $/d buyback erosion
+    if (pos.currentValue == null || pos.currentValue <= 0) return null;
+    if (pos.dte == null || pos.dte <= 0) return null;
     const distToTarget = pos.currentValue - pos.targetPrice; // $ left to fall
     if (distToTarget <= 0) {
-      return { dailyDecay, status: 'hit' as const, dateLabel: null as string | null };
+      return { status: 'hit' as const, dateLabel: null as string | null };
     }
-    const rawDays = distToTarget / dailyDecay;
+    // Gate: once the short strike is tight to/through the money, a real
+    // chunk of value is intrinsic and won't melt away with time the way
+    // extrinsic value does — the √time model isn't meaningful there.
+    if (pos.buffer != null && pos.buffer < 3) return null;
+
+    const targetRatio = pos.targetPrice / pos.currentValue; // in (0,1) — distToTarget>0 guarantees this
+    const daysRemainingAtTarget = pos.dte * targetRatio * targetRatio;
+    const daysToTarget = Math.max(0, pos.dte - daysRemainingAtTarget);
+
     const proj = new Date();
-    proj.setDate(proj.getDate() + Math.round(rawDays));
+    proj.setDate(proj.getDate() + Math.round(daysToTarget));
     // 21-DTE management line
     const dte21 = new Date(`${pos.expDate}T00:00:00`);
     dte21.setDate(dte21.getDate() - 21);
     const fmt = (d: Date) => `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
     if (proj > dte21) {
-      return { dailyDecay, status: 'unlikely' as const, dateLabel: fmt(dte21) };
+      return { status: 'unlikely' as const, dateLabel: fmt(dte21) };
     }
-    return { dailyDecay, status: 'ontrack' as const, dateLabel: fmt(proj) };
+    return { status: 'ontrack' as const, dateLabel: fmt(proj) };
   })();
 
   const shortPuts  = pos.legs.filter(l => l.optionType === 'P' && l.direction === 'Short');
