@@ -5843,6 +5843,13 @@ function TakeProfitScale({
               </span>
             );
           })()}
+          <button
+            type="button"
+            onClick={() => onChange(parseFloat(Math.max(span, 0.01).toFixed(2)))}
+            title="Rests at your entry credit — flat P&L if it fills, but not a guaranteed instant fill like Snap to fill"
+            className="text-[9px] px-2 py-0.5 rounded border border-slate-500/50 text-slate-300 hover:bg-slate-500/10 font-bold whitespace-nowrap">
+            Snap to breakeven
+          </button>
           {ask != null && (
             <button
               type="button"
