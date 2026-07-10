@@ -5978,6 +5978,7 @@ export default function Home() {
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' ? (
                     <>
+                      <span className="text-amber-400 tracking-widest">⬢ FILTERED —</span>
                       <span className="text-emerald-500">{qualified.length} QUALIFIED</span>
                       <span className={th.textFaint}>{disqualified.length} DISQUALIFIED</span>
                     </>

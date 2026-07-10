@@ -120,6 +120,9 @@ interface Position {
   popAtEntry?: number | null;
   deltaAtEntry?: number | null;
   thetaAtEntry?: number | null;
+  gammaAtEntry?: number | null;
+  vegaAtEntry?: number | null;
+  stockPriceAtEntry?: number | null;
   otmAtEntry?: number | null;
   dteAtEntry?: number | null;
   accountNumber: string;
@@ -1023,6 +1026,9 @@ interface EntrySnapshot {
   popAtEntry: number | null;
   deltaAtEntry: number | null;
   thetaAtEntry: number | null;
+  gammaAtEntry: number | null;
+  vegaAtEntry: number | null;
+  stockPriceAtEntry: number | null;
   otmAtEntry: number | null;
   dteAtEntry: number | null;
 }
@@ -1121,6 +1127,9 @@ async function attachEntrySnapshots(positions: Position[]): Promise<Position[]> 
         popAtEntry: getCurrentPop(pos),
         deltaAtEntry: pos.netDelta ?? null,
         thetaAtEntry: pos.theta ?? null,
+        gammaAtEntry: pos.gamma ?? null,
+        vegaAtEntry: pos.netVega ?? null,
+        stockPriceAtEntry: pos.stockPrice ?? null,
         otmAtEntry: pos.buffer ?? null,
         dteAtEntry: pos.entryDte ?? pos.dte ?? null,
       };
@@ -1137,6 +1146,9 @@ async function attachEntrySnapshots(positions: Position[]): Promise<Position[]> 
       popAtEntry: snap.popAtEntry ?? null,
       deltaAtEntry: snap.deltaAtEntry ?? null,
       thetaAtEntry: snap.thetaAtEntry ?? null,
+      gammaAtEntry: snap.gammaAtEntry ?? null,
+      vegaAtEntry: snap.vegaAtEntry ?? null,
+      stockPriceAtEntry: snap.stockPriceAtEntry ?? null,
       otmAtEntry: snap.otmAtEntry ?? null,
       dteAtEntry: snap.dteAtEntry ?? pos.entryDte ?? null,
     };
@@ -2848,11 +2860,12 @@ ${supportText}
 GREEKS (net position):
 Delta: ${pos.netDelta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.deltaAtEntry != null && pos.netDelta != null ? `${pos.deltaAtEntry.toFixed(4)} → ${pos.netDelta.toFixed(4)}` : 'unknown'})
 Theta: ${pos.theta?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.thetaAtEntry != null && pos.theta != null ? `${pos.thetaAtEntry.toFixed(4)} → ${pos.theta.toFixed(4)}` : 'unknown'})
-Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (gamma's DOLLAR cost scales with the underlying's daily dollar move squared — it can be material even far OTM on large-notional names like SPX/NDX where a 1-sigma day is hundreds of points. Do NOT assume gamma is negligible just because the buffer is wide; see NET DAILY EDGE below for the actual theta-vs-gamma economics.)
-Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (short vega — IV rises inflate buyback as paper loss, not directional danger)
+Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.gammaAtEntry != null && pos.gamma != null ? `${pos.gammaAtEntry.toFixed(4)} → ${pos.gamma.toFixed(4)}` : 'unknown'}) (gamma's DOLLAR cost scales with the underlying's daily dollar move squared — it can be material even far OTM on large-notional names like SPX/NDX where a 1-sigma day is hundreds of points. Do NOT assume gamma is negligible just because the buffer is wide; see NET DAILY EDGE below for the actual theta-vs-gamma economics.)
+Vega: ${pos.netVega?.toFixed(4) ?? 'unknown'} (entry/now: ${pos.vegaAtEntry != null && pos.netVega != null ? `${pos.vegaAtEntry.toFixed(4)} → ${pos.netVega.toFixed(4)}` : 'unknown'}) (short vega — IV rises inflate buyback as paper loss, not directional danger)
 
 NET DAILY EDGE (theta vs gamma economics):
 Net edge: ${netEdge != null ? `$${netEdge.toFixed(0)}/day` : 'unknown'}${thetaDollars != null && gammaCostDollars != null ? ` (collecting $${thetaDollars.toFixed(0)}/d theta minus ~$${gammaCostDollars.toFixed(0)}/d expected gamma cost)` : ''}
+Net edge entry/now: ${(() => { const e = netEdgeAtEntry(pos); const n = netEdge; return e != null && n != null ? `$${e.toFixed(0)}/day → $${n.toFixed(0)}/day` : 'unknown (older snapshot may be missing gamma/stock price at entry)'; })()}
 Peak net edge (this position, tracked): ${netEdgePk != null ? `$${netEdgePk.toFixed(0)}/day` : 'unknown'}${netEdgeOffPeakPct != null ? ` — currently ${netEdgeOffPeakPct >= 0 ? 'at/near' : `${Math.abs(netEdgeOffPeakPct).toFixed(0)}% below`} peak` : ''}
 What this means: net edge estimates whether the remaining premium still justifies the gamma risk of holding. It is a RISK/REWARD measure, NOT a current loss — a profitable, deep-OTM position can have negative net edge and still be worth holding if breach risk is genuinely low.
 How to use it (conservative posture — preserve capital first):
@@ -3313,6 +3326,23 @@ function fmtEntryNowDte(entry: number | null | undefined, current: number | null
   return `${entry.toFixed(0)}→${current.toFixed(0)}d`;
 }
 
+function fmtEntryNowGamma(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  return `${Math.abs(entry).toFixed(3)}→${Math.abs(current).toFixed(3)}`;
+}
+
+function fmtEntryNowVega(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  const sign = (v: number) => (v >= 0 ? '+' : '-');
+  return `${sign(entry)}${Math.abs(entry).toFixed(2)}→${sign(current)}${Math.abs(current).toFixed(2)}`;
+}
+
+function fmtEntryNowNetEdge(entry: number | null | undefined, current: number | null | undefined): string {
+  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
+  const sign = (v: number) => (v >= 0 ? '+' : '-');
+  return `${sign(entry)}$${Math.abs(entry).toFixed(0)}→${sign(current)}$${Math.abs(current).toFixed(0)}/d`;
+}
+
 
 function normalizePercentValue(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
@@ -3465,8 +3495,11 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `IV entry → now: ${fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}`,
     `Delta entry → now: ${fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}`,
     `Theta/day entry → now: ${fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}`,
+    `Gamma entry → now: ${fmtEntryNowGamma(pos.gammaAtEntry, pos.gamma)}`,
+    `Vega entry → now: ${fmtEntryNowVega(pos.vegaAtEntry, pos.netVega)}`,
+    `Net edge entry → now: ${fmtEntryNowNetEdge(netEdgeAtEntry(pos), netEdgeLive(pos))}`,
     `OTM buffer entry → now: ${fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}`,
-    `DTE entry → now: ${fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}`,
+    `DTE entry → now: ${fmtEntryNowDte(pos.dteAtEntry ?? pos.entryDte, pos.dte)}${entryBaselineCaveat(pos)}`,
     `HV30: ${fmtPct(pos.hv30, 0)}`,
     `IV edge (IV - HV30): ${fmtPct(ivEdge)}`,
     `Beta: ${fmtNum(pos.beta, 2)}`,
@@ -7419,6 +7452,13 @@ function netEdgeLive(pos: Position): number | null {
   return netEdgeFrom(pos.theta, pos.gamma, pos.iv, pos.stockPrice);
 }
 
+// Requires all four at-entry values (theta/gamma/iv/stockPrice) — older
+// snapshots captured before this fix won't have gamma/stockPrice at entry,
+// so this correctly returns null rather than a partial/misleading figure.
+function netEdgeAtEntry(pos: Position): number | null {
+  return netEdgeFrom(pos.thetaAtEntry ?? null, pos.gammaAtEntry ?? null, pos.ivAtEntry ?? null, pos.stockPriceAtEntry ?? null);
+}
+
 // Net edge over this position's snapshot history, oldest-first, nulls dropped.
 function netEdgeSeries(pos: Position): { date: string; value: number }[] {
   const hist = pos.snapshotHistory ?? [];
@@ -8477,6 +8517,32 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
                 <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>
                   Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(
+                  pos.gammaAtEntry != null ? Math.abs(pos.gammaAtEntry) : null,
+                  pos.gamma != null ? Math.abs(pos.gamma) : null,
+                  true, th.textFaint
+                )}>
+                  Γ {fmtEntryNowGamma(pos.gammaAtEntry, pos.gamma)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(
+                  pos.vegaAtEntry != null ? Math.abs(pos.vegaAtEntry) : null,
+                  pos.netVega != null ? Math.abs(pos.netVega) : null,
+                  true, th.textFaint
+                )}>
+                  V {fmtEntryNowVega(pos.vegaAtEntry, pos.netVega)}
+                </span>
+              </p>
+
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={entryChangeColor(netEdgeAtEntry(pos), netEdgeLive(pos), false, th.textFaint)}>
+                  Edge {fmtEntryNowNetEdge(netEdgeAtEntry(pos), netEdgeLive(pos))}
                 </span>
               </p>
 
