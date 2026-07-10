@@ -2831,7 +2831,7 @@ MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%${pos.buffer != null && pos.buffer >= 5 ? ` — SAFE BY GEOMETRY: short strike is ${pos.buffer.toFixed(1)}% away, so breach/assignment is unlikely and a paper loss here is not danger. Do NOT cite breach proximity as a close reason. HOWEVER, a genuinely negative NET DAILY EDGE (see below) IS a valid economic close/roll reason even at a wide buffer — thin premium for the gamma risk carried is about risk/reward, not breach. Frame any close as either the 21-DTE recycling rule or weak net-edge economics, not as breach danger.` : pos.buffer != null && pos.buffer < 2 ? ` — TIGHT: under 2% buffer, genuine breach risk; defensive posture warranted.` : ''}
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
-DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}${entryBaselineCaveat(pos)}
 IVR: ${pos.ivr ?? 'unknown'}
 IVR entry/now: ${pos.ivrAtEntry ?? 'unknown'} → ${pos.ivr ?? 'unknown'}
 POP entry/now: ${pos.popAtEntry != null ? `${pos.popAtEntry.toFixed(0)}%` : 'unknown'} → ${getCurrentPop(pos) != null ? `${getCurrentPop(pos)!.toFixed(0)}%` : 'unknown'}
@@ -3177,7 +3177,7 @@ Current profit target: ${Math.round(pos.profitTarget * 100)}%
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
-DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}${entryBaselineCaveat(pos)}
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 GTC working: ${pos.hasGtc ? 'Yes' : 'No'}
@@ -6429,7 +6429,7 @@ MARKET DATA:
 Stock price: ${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
 OTM buffer at entry / first tracked: ${pos.otmAtEntry != null ? `${pos.otmAtEntry.toFixed(1)}%` : 'unknown'}
-DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}
+DTE entry/now: ${pos.dteAtEntry ?? pos.entryDte ?? 'unknown'} → ${pos.dte}${entryBaselineCaveat(pos)}
 IVR: ${pos.ivr ?? 'unknown'} | IV: ${pos.iv ?? 'unknown'}% | HV30: ${pos.hv30 ?? 'unknown'}%
 Theta/d: ${pos.theta?.toFixed(4) ?? 'unknown'} | Gamma: ${pos.gamma?.toFixed(4) ?? 'unknown'}
 Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'YES — ' + pos.earningsDate : 'None'}
@@ -7820,6 +7820,22 @@ function entrySnapshotAgeLabel(pos: Position): string {
   return days === 0 ? 'captured today' : `captured ${days}d ago`;
 }
 
+// Fires when the Trade Evolution baseline was captured recently but the
+// trade itself is meaningfully older — meaning "entry" here is really
+// "first time we started tracking," not the trade's true entry-day
+// Greeks. Without this caveat, an unchanged-looking entry→now read (e.g.
+// "POP 76→76%") reads to an AI model as confirmed stability; the honest
+// read is "not enough elapsed time to know yet." Same threshold logic as
+// the inline "(new baseline)" UI badge, kept in one place so they can't
+// drift out of sync with each other.
+function entryBaselineCaveat(pos: Position): string {
+  if (!pos.entrySnapshotCreatedAt) return '';
+  const days = Math.max(0, Math.round((Date.now() - new Date(pos.entrySnapshotCreatedAt).getTime()) / 86400000));
+  const tradeAgeDays = pos.entryDte != null ? Math.max(0, pos.entryDte - pos.dte) : null;
+  if (days > 1 || (tradeAgeDays != null && tradeAgeDays <= days + 1)) return '';
+  return `\nCAVEAT — entry/now baseline: this trade is ~${tradeAgeDays ?? '?'}d old but its Trade Evolution baseline was only captured ${days === 0 ? 'today' : `${days}d ago`} (this app has no historical data before that point). Any "entry → now" field above that looks unchanged reflects insufficient elapsed time to show drift, NOT confirmed stability — do not cite it as evidence nothing has moved.`;
+}
+
 // ── Buffer Color Helpers ──────────────────────────────────────────────────
 function bufferColor(buffer: number | null, dte: number): string {
   if (buffer == null) return 'text-[#808080]';
@@ -8367,7 +8383,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             {pos.closeNowPnl != null && (
               <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>P/L if closed now</p>
+                <p className={`text-[9px] ${th.textFaint}`}>Emergency Close P/L</p>
                 <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                   {pos.closeNowPnl >= 0 ? '+' : ''}${pos.closeNowPnl.toFixed(2)}
                 </p>
@@ -8426,7 +8442,25 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
 
             <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
-              <p className={`text-[9px] ${th.textFaint}`}>Trade Evolution</p>
+              <p className={`text-[9px] ${th.textFaint} flex items-center gap-1`}>
+                Trade Evolution
+                {(() => {
+                  const days = pos.entrySnapshotCreatedAt
+                    ? Math.max(0, Math.round((Date.now() - new Date(pos.entrySnapshotCreatedAt).getTime()) / 86400000))
+                    : null;
+                  // Baseline set very recently relative to how old the actual
+                  // trade is — flag it inline so identical-looking entry/now
+                  // values read as "not enough time yet," not "nothing moved."
+                  if (days == null) return null;
+                  const tradeAgeDays = pos.entryDte != null ? Math.max(0, pos.entryDte - pos.dte) : null;
+                  if (days > 1 || (tradeAgeDays != null && tradeAgeDays <= days + 1)) return null;
+                  return (
+                    <span className="text-amber-400 font-semibold normal-case" title="Entry baseline was just captured — this trade is older than its Trade Evolution history">
+                      (new baseline)
+                    </span>
+                  );
+                })()}
+              </p>
 
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
                 <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), true, th.textFaint)}>
