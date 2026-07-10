@@ -8054,7 +8054,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 70px 60px 110px 70px 70px 80px 70px 45px 145px 45px 45px 55px 60px 90px 60px 75px 150px 210px', gap: '0 12px', alignItems: 'start', minWidth: '1930px' }}>
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '72px 120px 70px 60px 110px 70px 70px 80px 70px 45px 100px 90px 70px 55px 60px 65px 60px 75px 150px 210px', gap: '0 12px', alignItems: 'start', minWidth: '1930px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
