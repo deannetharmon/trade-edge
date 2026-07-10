@@ -5077,10 +5077,15 @@ function TargetedScanResultsPanel({
       {/* ── Sticky filter header ─────────────────────────────────────────── */}
       <div className={`sticky top-0 z-20 pb-3 pt-1 space-y-2 ${th.bg} border-b ${th.border}`}>
 
+        {/* Scan title — deliberately larger/bolder than the controls below it, so the
+            active scan mode is unmistakable even at a glance (small inline badges were
+            too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
+        <p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
+
         {/* Row 1: count + sort + show top */}
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-[9px] text-teal-400 tracking-widest font-medium shrink-0">
-            ⊕ TARGETED — {display.length} of {totalVisible} SHOWN
+            {display.length} of {totalVisible} SHOWN
           </p>
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-[9px] ${th.textFaint}`}>Sort</span>
@@ -5974,11 +5979,13 @@ export default function Home() {
 
           {(results.length > 0 || targetedResults.length > 0) && (
             <div className="space-y-4">
+              {screenMode === 'filter' && (
+                <p className="text-sm font-bold tracking-wide text-amber-400">⬢ FILTERED SCAN</p>
+              )}
               <div className="flex items-center justify-between">
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' ? (
                     <>
-                      <span className="text-amber-400 tracking-widest">⬢ FILTERED —</span>
                       <span className="text-emerald-500">{qualified.length} QUALIFIED</span>
                       <span className={th.textFaint}>{disqualified.length} DISQUALIFIED</span>
                     </>
@@ -6127,9 +6134,10 @@ export default function Home() {
 
                 return (
                 <div>
+                  <p className="text-sm font-bold tracking-wide text-purple-400 mb-2">⬡ RANKED SCAN</p>
                   <div className="flex items-center gap-3 mb-2 flex-wrap">
                     <p className="text-[9px] text-purple-400 tracking-widest font-medium shrink-0">
-                      ⬡ RANKED — {display.length} of {filtered.length} SHOWN
+                      {display.length} of {filtered.length} SHOWN
                     </p>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textFaint}`}>Show top</span>
