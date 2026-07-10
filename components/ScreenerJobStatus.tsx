@@ -5,41 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import {
   clearScreenerJob,
-  completeScreenerJob,
   stopScreenerJob,
   useScreenerJobState,
 } from '@/lib/screener/screenerJobStore';
-
-const RESULT_KEYS = [
-  { key: 'hunter-results-cache-at', href: '/screener', label: 'Screener scan complete' },
-  { key: 'hunter-targeted-results-cache-at', href: '/screener?mode=targeted', label: 'Targeted scan complete' },
-] as const;
-
-const LAST_SEEN_KEY = 'trade-edge-last-seen-screener-results-at';
-
-function readNumber(key: string): number | null {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function latestResultTimestamp(): { ts: number; href: string; label: string } | null {
-  let newest: { ts: number; href: string; label: string } | null = null;
-
-  for (const item of RESULT_KEYS) {
-    const ts = readNumber(item.key);
-    if (ts && (!newest || ts > newest.ts)) {
-      newest = { ts, href: item.href, label: item.label };
-    }
-  }
-
-  return newest;
-}
 
 function getCurrentLocation(): { pathname: string; search: string } {
   if (typeof window === 'undefined') return { pathname: '', search: '' };
@@ -57,34 +25,22 @@ export function ScreenerJobStatus() {
 
   useEffect(() => {
     mountedRef.current = true;
-
-    if (readNumber(LAST_SEEN_KEY) == null) {
-      const latest = latestResultTimestamp();
-      if (latest) {
-        try { window.localStorage.setItem(LAST_SEEN_KEY, String(latest.ts)); } catch {}
-      }
-    }
-
+    // Job completion is now reported directly by each scan (runScreen,
+    // runTargetedScan, runPMCCScan, runCspScan, and RankedScanTaskMirror
+    // for Rank mode) via completeScreenerJob() the instant it finishes,
+    // with an accurate result count and status message. This used to also
+    // poll localStorage cache timestamps as a fallback detector, but that
+    // path only ever knew "a scan of some kind finished" — no count, no
+    // real mode awareness — and its 750ms interval would fire shortly
+    // after the accurate direct call and clobber it with generic text.
+    // Kept only to track the current URL for the same-view check below.
     const check = () => {
       if (!mountedRef.current) return;
       setLocation(getCurrentLocation());
-      const lastSeen = readNumber(LAST_SEEN_KEY) ?? 0;
-      const newest = latestResultTimestamp();
-
-      if (!newest || newest.ts <= lastSeen) return;
-      try { window.localStorage.setItem(LAST_SEEN_KEY, String(newest.ts)); } catch {}
-      completeScreenerJob({
-        status: newest.label,
-        resultsHref: newest.href,
-        resultCount: null,
-      });
     };
-
-    const timer = window.setInterval(check, 750);
     window.addEventListener('popstate', check);
     return () => {
       mountedRef.current = false;
-      window.clearInterval(timer);
       window.removeEventListener('popstate', check);
     };
   }, []);
@@ -100,11 +56,16 @@ export function ScreenerJobStatus() {
     : null;
 
   const targetHref = job.resultsHref || '/screener?mode=rank';
+  // Generic mode comparison — the old version only special-cased 'rank' and
+  // "no mode param," so Open Results silently did nothing whenever you were
+  // already on targeted/filter/pmcc/csp results (router.push to the exact
+  // same URL is a no-op), because sameResultsView incorrectly evaluated to
+  // false and the button rendered (and appeared clickable) when it should
+  // have been hidden — or conversely could hide when it shouldn't. This
+  // covers every mode by construction instead of enumerating them.
+  const targetMode = new URLSearchParams(targetHref.split('?')[1] || '').get('mode');
   const currentMode = new URLSearchParams(location.search).get('mode');
-  const sameResultsView = location.pathname === '/screener' && (
-    (targetHref.includes('mode=rank') && currentMode === 'rank') ||
-    (!targetHref.includes('mode=') && !currentMode)
-  );
+  const sameResultsView = location.pathname === '/screener' && targetMode === currentMode;
 
   const openResults = () => {
     router.push(targetHref);
