@@ -4998,6 +4998,8 @@ function TargetedScanResultsPanel({
   const [hiddenSymbols, setHiddenSymbols]       = useState<string[]>([]);
   const [showTopN, setShowTopN]                 = useState<number>(50);
   const [activePopMin, setActivePopMin]         = useState<number>(popMin);
+  const [activeOtmMin, setActiveOtmMin]         = useState<number>(0);
+  const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
   const [activeSort, setActiveSort]             = useState(sortBy);
@@ -5011,6 +5013,8 @@ function TargetedScanResultsPanel({
   const [resetKey, setResetKey] = useState(0);
   useEffect(() => {
     setActivePopMin(popMin);
+    setActiveOtmMin(0);
+    setActiveCreditRatioMin(0);
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
@@ -5036,6 +5040,13 @@ function TargetedScanResultsPanel({
   if (hiddenSymbols.length > 0) pool = pool.filter(e => !hiddenSymbols.includes(e.symbol));
   // 2. POP floor
   pool = pool.filter(e => e.pop >= activePopMin);
+  // 2b. OTM floor
+  if (activeOtmMin > 0) pool = pool.filter(e => {
+    const otm = calcTargetedEntryOtmPct(e);
+    return otm != null && otm >= activeOtmMin;
+  });
+  // 2c. credit ratio floor
+  if (activeCreditRatioMin > 0) pool = pool.filter(e => ((e.candidate.creditRatio ?? 0) * 100) >= activeCreditRatioMin);
   // 3. strategy filter
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
@@ -5127,6 +5138,34 @@ function TargetedScanResultsPanel({
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
                 {v}%
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
+            {[0, 4, 8, 12, 16].map(v => (
+              <button key={v} onClick={() => setActiveOtmMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeOtmMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : `${v}%`}
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
+            {[0, 15, 20, 25, 33].map(v => (
+              <button key={v} onClick={() => setActiveCreditRatioMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeCreditRatioMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : `${v}%`}
               </button>
             ))}
           </div>
@@ -5351,6 +5390,10 @@ export default function Home() {
   const [rankStrategies, setRankStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const toggleRankStrategy = (s: string) =>
     setRankStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
+  // Per-ticker breakdown/toggle -- same pattern as Targeted mode's ticker chips.
+  const [rankHiddenSymbols, setRankHiddenSymbols] = useState<string[]>([]);
+  const toggleRankSymbol = (sym: string) =>
+    setRankHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
 
   // ── Targeted Scan state ────────────────────────────────────────────────────
   const [targetedDteMin, setTargetedDteMin] = useState<number>(21);
@@ -5779,8 +5822,45 @@ export default function Home() {
     }
   };
 
+  // Post-scan, client-side filters for Filter mode -- same pattern as
+  // Rank/Targeted, layered on top of (not replacing) the qualify/disqualify
+  // grading: these chips narrow which qualified/disqualified cards show,
+  // they never change qualification status or trigger a rescan.
+  const [filterPopMin, setFilterPopMin] = useState<number>(0);
+  const [filterOtmMin, setFilterOtmMin] = useState<number>(0);
+  const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
+  const [filterStrategies, setFilterStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
+  const toggleFilterStrategy = (s: string) =>
+    setFilterStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
+  const [filterHiddenSymbols, setFilterHiddenSymbols] = useState<string[]>([]);
+  const toggleFilterSymbol = (sym: string) =>
+    setFilterHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
+
+  const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
+    if (filterHiddenSymbols.includes(r.symbol)) return false;
+    if (!filterStrategies.includes(r.strategy)) return false;
+    const c = r.bestCandidate;
+    if (c) {
+      if ((c.pop ?? 0) < filterPopMin) return false;
+      if ((c.creditRatio ?? 0) * 100 < filterCreditRatioMin) return false;
+      if (filterOtmMin > 0) {
+        const price = r.price;
+        if (price == null || price <= 0) return false;
+        const otmPct = c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
+          : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
+          : c.strategy === 'IC' && c.shortCallStrike != null
+            ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
+            : null;
+        if (otmPct == null || otmPct < filterOtmMin) return false;
+      }
+    }
+    return true;
+  });
+
   const qualified = results.filter(r => r.qualified);
   const disqualified = results.filter(r => !r.qualified);
+  const filteredQualified = applyFilterModeChips(qualified);
+  const filteredDisqualified = applyFilterModeChips(disqualified);
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -5986,8 +6066,8 @@ export default function Home() {
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' ? (
                     <>
-                      <span className="text-emerald-500">{qualified.length} QUALIFIED</span>
-                      <span className={th.textFaint}>{disqualified.length} DISQUALIFIED</span>
+                      <span className="text-emerald-500">{filteredQualified.length} of {qualified.length} QUALIFIED</span>
+                      <span className={th.textFaint}>{filteredDisqualified.length} of {disqualified.length} DISQUALIFIED</span>
                     </>
                   ) : screenMode === 'targeted' ? (
                     <>
@@ -6061,13 +6141,103 @@ export default function Home() {
                   existingPositions={existingPositions}
                   onTrade={setTradeResult}
                 />
-              ) : screenMode === 'filter' ? (
+              ) : screenMode === 'filter' ? (() => {
+                const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
+                return (
                 <>
-                  {qualified.length > 0 && (
+                  {/* Filter row -- POP / OTM / Credit Ratio / Strategy, same pattern as Rank/Targeted */}
+                  <div className="flex items-center gap-3 mb-3 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
+                      {[0, 50, 60, 70, 80].map(v => (
+                        <button key={v} onClick={() => setFilterPopMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            filterPopMin === v
+                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
+                      {[0, 4, 8, 12, 16].map(v => (
+                        <button key={v} onClick={() => setFilterOtmMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            filterOtmMin === v
+                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
+                      {[0, 15, 20, 25, 33].map(v => (
+                        <button key={v} onClick={() => setFilterCreditRatioMin(v)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            filterCreditRatioMin === v
+                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                          }`}>
+                          {v === 0 ? 'Any' : `${v}%`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
+                      {(['BPS', 'BCS', 'IC'] as const).map(s => {
+                        const on = filterStrategies.includes(s);
+                        const c  = s === 'BPS' ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
+                                 : s === 'BCS' ? 'border-red-600 text-red-400 bg-red-500/10'
+                                 :               'border-blue-600 text-blue-400 bg-blue-500/10';
+                        return (
+                          <button key={s} onClick={() => toggleFilterStrategy(s)}
+                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                              on ? c : `${th.border} ${th.textFaint} opacity-40`
+                            }`}>
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {allFilterSymbols.length > 1 && (
+                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Tickers</span>
+                      {allFilterSymbols.map(sym => {
+                        const hidden = filterHiddenSymbols.includes(sym);
+                        return (
+                          <button key={sym} onClick={() => toggleFilterSymbol(sym)}
+                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                              hidden
+                                ? `${th.border} ${th.textFaint} line-through opacity-40`
+                                : 'border-amber-600 text-amber-300 bg-amber-500/10'
+                            }`}>
+                            {sym} <span className="opacity-60">({results.filter(r => r.symbol === sym).length})</span>
+                          </button>
+                        );
+                      })}
+                      {filterHiddenSymbols.length > 0 && (
+                        <button onClick={() => setFilterHiddenSymbols([])}
+                          className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
+                          Show all
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {filteredQualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
                       <div className="space-y-2">
-                        {qualified.map(r => (
+                        {filteredQualified.map(r => (
                           <ResultCard 
                             key={`${r.symbol}-${r.strategy}`} 
                             result={r} 
@@ -6083,11 +6253,11 @@ export default function Home() {
                       </div>
                     </div>
                   )}
-                  {disqualified.length > 0 && (
+                  {filteredDisqualified.length > 0 && (
                     <div>
                       <p className={`text-[9px] ${th.textFaint} tracking-widest mb-2 font-medium`}>DISQUALIFIED</p>
                       <div className="space-y-2">
-                        {disqualified.map(r => (
+                        {filteredDisqualified.map(r => (
                           <ResultCard 
                             key={`${r.symbol}-${r.strategy}`} 
                             result={r} 
@@ -6104,12 +6274,14 @@ export default function Home() {
                     </div>
                   )}
                 </>
-              ) : (() => {
+                );
+              })() : (() => {
                 // Post-scan, client-side filters over the already-fetched `results`
                 // array — same approach Targeted mode uses, so loosening a filter
                 // never requires a rescan. Order: DTE -> strategy -> POP -> OTM ->
                 // credit ratio, then slice to the Show-top count.
                 const filtered = results.filter(r => {
+                  if (rankHiddenSymbols.includes(r.symbol)) return false;
                   const dte = r.bestCandidate?.dte ?? 0;
                   if (dte < rankDteMin || dte > rankDteMax) return false;
                   if (!rankStrategies.includes(r.strategy)) return false;
@@ -6235,6 +6407,36 @@ export default function Home() {
                       })}
                     </div>
                   </div>
+
+                  {/* Filter row 3 -- per-ticker breakdown/toggle, same pattern as Targeted mode */}
+                  {(() => {
+                    const allRankSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
+                    if (allRankSymbols.length <= 1) return null;
+                    return (
+                      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                        <span className={`text-[9px] ${th.textFaint} shrink-0`}>Tickers</span>
+                        {allRankSymbols.map(sym => {
+                          const hidden = rankHiddenSymbols.includes(sym);
+                          return (
+                            <button key={sym} onClick={() => toggleRankSymbol(sym)}
+                              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                                hidden
+                                  ? `${th.border} ${th.textFaint} line-through opacity-40`
+                                  : 'border-purple-600 text-purple-300 bg-purple-500/10'
+                              }`}>
+                              {sym} <span className="opacity-60">({results.filter(r => r.symbol === sym).length})</span>
+                            </button>
+                          );
+                        })}
+                        {rankHiddenSymbols.length > 0 && (
+                          <button onClick={() => setRankHiddenSymbols([])}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-purple-500/50`}>
+                            Show all
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="space-y-2">
                     {display.map((r, i) => (
