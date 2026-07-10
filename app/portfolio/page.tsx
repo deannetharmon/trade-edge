@@ -5767,13 +5767,21 @@ function TakeProfitScale({
   const mid = quote?.netMid ?? null;
   const bid = quote?.netBid ?? null;
   const ask = quote?.netAsk ?? null;
-  const pivot = Math.min(Math.max(mid ?? span / 2, 0.01), span - 0.01 > 0 ? span - 0.01 : span / 2);
+  // The scale's left boundary is normally entry (span) — 0% captured. But
+  // when the marketable ask actually costs MORE than entry (a real loss —
+  // common once the bid-ask spread is wide relative to remaining credit),
+  // that price falls outside [0, span] and used to get clamped straight
+  // back onto the entry position, making the ask/handle marker collapse
+  // onto "entry" instead of showing where it actually sits. Extending the
+  // domain to include ask (and the current limit) keeps the marker honest.
+  const domainMax = Math.max(span, ask ?? 0, limit, 0.01);
+  const pivot = Math.min(Math.max(mid ?? domainMax / 2, 0.01), domainMax - 0.01 > 0 ? domainMax - 0.01 : domainMax / 2);
 
   const toX = (price: number) => {
-    const p = Math.min(span, Math.max(0, price));
+    const p = Math.min(domainMax, Math.max(0, price));
     if (p >= pivot) {
-      const denom = span - pivot;
-      const t = denom > 0 ? (span - p) / denom : 0;
+      const denom = domainMax - pivot;
+      const t = denom > 0 ? (domainMax - p) / denom : 0;
       return Math.min(0.5, Math.max(0, t * 0.5));
     } else {
       const t = pivot > 0 ? (pivot - p) / pivot : 0;
@@ -5784,7 +5792,7 @@ function TakeProfitScale({
     const xc = Math.min(1, Math.max(0, x));
     if (xc <= 0.5) {
       const t = xc / 0.5;
-      return parseFloat((span - t * (span - pivot)).toFixed(2));
+      return parseFloat((domainMax - t * (domainMax - pivot)).toFixed(2));
     } else {
       const t = (xc - 0.5) / 0.5;
       return parseFloat((pivot * (1 - t)).toFixed(2));
@@ -5881,6 +5889,13 @@ function TakeProfitScale({
         <div className="absolute top-0 bottom-0 w-px bg-blue-400/70" style={{ left: pct(toX(targetPrice)) }}
              title={`50% target $${targetPrice.toFixed(2)}`} />
 
+        {/* entry marker — only visually distinct from the left edge once a
+            worse-than-entry ask has extended the domain (see domainMax above) */}
+        {domainMax > span + 0.001 && (
+          <div className="absolute top-0 bottom-0 w-px bg-red-400/60" style={{ left: pct(toX(span)) }}
+               title={`Entry credit $${span.toFixed(2)} — even money`} />
+        )}
+
         {/* current mid marker */}
         {mid != null && (
           <div className="absolute top-0 bottom-0 w-px bg-slate-300/70" style={{ left: pct(toX(mid)) }}
@@ -5894,7 +5909,9 @@ function TakeProfitScale({
       </div>
 
       <div className="flex items-center justify-between mt-1">
-        <span className={`text-[8px] ${th.textFaint}`}>entry ${span.toFixed(2)} · 0%</span>
+        <span className={`text-[8px] ${th.textFaint}`}>
+          {domainMax > span + 0.001 ? `$${domainMax.toFixed(2)} · loss` : `entry $${span.toFixed(2)} · 0%`}
+        </span>
         <span className={`text-[8px] ${th.textFaint}`}>
           {marketable ? 'fills now' : 'waits for decay'}
         </span>
