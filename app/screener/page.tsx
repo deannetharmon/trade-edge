@@ -36,6 +36,9 @@ import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarning
 import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
+import {
+  startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
+} from '@/lib/screener/screenerJobStore';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -4687,9 +4690,18 @@ async function runTargetedScan(
   try { localStorage.removeItem(LS_TARGETED_RESULTS_CACHE_AT); } catch {}
   cancelRef.current = false;
 
+  startScreenerJob({
+    kind: 'targeted', label: 'Targeted screener scan', total: strategyMap.length,
+    status: 'Starting targeted scan...', resultsHref: '/screener?mode=targeted',
+  });
+  // Bridges progress into the app-level job store (survives navigating off
+  // this page — see RankedScanTaskMirror for the same pattern on Rank mode)
+  // in addition to the local status text this page already renders.
+  const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+
   try {
     const token = await getAccessToken();
-    setStatus('Fetching market metrics...');
+    pushStatus('Fetching market metrics...');
     const metricsArray = await getMarketMetrics(allSymbols, token);
     const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
@@ -4697,11 +4709,11 @@ async function runTargetedScan(
 
     for (let i = 0; i < strategyMap.length; i++) {
       if (cancelRef.current) {
-        setStatus(`Stopped — ${entries.length} results loaded`);
+        pushStatus(`Stopped — ${entries.length} results loaded`);
         break;
       }
       const { symbol, primary } = strategyMap[i];
-      setStatus(`Scanning ${symbol} (${i + 1}/${strategyMap.length})...`);
+      pushStatus(`Scanning ${symbol} (${i + 1}/${strategyMap.length})...`);
       try {
         const classification = await classifyUnderlying(symbol, token);
         const isEtf = classification === 'index' || classification === 'etf';
@@ -4927,8 +4939,14 @@ async function runTargetedScan(
     setTargetedResultsCachedAt(cacheTs);
     idbSet(IDB_TARGETED_RESULTS_KEY, entries);
     try { localStorage.setItem(LS_TARGETED_RESULTS_CACHE_AT, String(cacheTs)); } catch {}
+    completeScreenerJob({
+      resultCount: entries.length,
+      status: `${entries.length} targeted result${entries.length === 1 ? '' : 's'} ready`,
+      resultsHref: '/screener?mode=targeted',
+    });
   } catch (e: any) {
     setError(e.message);
+    failScreenerJob(e.message);
   } finally {
     setStatus(''); setLoading(false);
   }
@@ -5479,13 +5497,22 @@ export default function Home() {
     setRuntimeEtfRules(eRules);
     setLoading(true);
 
+    // Rank mode now runs through startRankedScan (useRankedScan) with its own
+    // task-manager-backed job tracking; this function's only live caller path
+    // today is Filter mode, so the job is tagged 'filter' here.
+    startScreenerJob({
+      kind: 'filter', label: 'Screener scan', total: activeSymbols.length,
+      status: 'Starting scan...', resultsHref: '/screener?mode=filter',
+    });
+    const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+
     try {
-      setStatus('Getting access token...');
+      pushStatus('Getting access token...');
       const token = await getAccessToken();
 
       const allSymbols = Array.from(new Set(activeSymbols));
 
-      setStatus('Fetching market metrics...');
+      pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(allSymbols, token);
 
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
@@ -5515,7 +5542,7 @@ export default function Home() {
       const isRankMode = (modeOverride ?? screenMode) === 'rank';
       for (let i = 0; i < activeSymbols.length; i++) {
         const symbol = activeSymbols[i];
-        setStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
+        pushStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
         const classification = await classifyUnderlying(symbol, token);
         const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
@@ -5582,8 +5609,14 @@ export default function Home() {
       try {
         localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
       } catch {}
+      completeScreenerJob({
+        resultCount: uniqueResults.length,
+        status: `${uniqueResults.length} result${uniqueResults.length === 1 ? '' : 's'} ready`,
+        resultsHref: '/screener?mode=filter',
+      });
     } catch (e: any) {
       setError(e.message);
+      failScreenerJob(e.message);
     } finally {
       setStatus('');
       setLoading(false);
@@ -5601,11 +5634,16 @@ export default function Home() {
     }
     setError('');
     setLoading(true);
+    startScreenerJob({
+      kind: 'pmcc', label: 'PMCC scan', total: pmcc.length,
+      status: 'Starting PMCC scan...', resultsHref: '/screener?mode=filter',
+    });
+    const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
     try {
-      setStatus('Getting access token...');
+      pushStatus('Getting access token...');
       const token = await getAccessToken();
 
-      setStatus('Fetching market metrics...');
+      pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(pmcc, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
@@ -5618,7 +5656,7 @@ export default function Home() {
 
       const pmccResults: ScreenResult[] = [];
       for (const symbol of pmcc) {
-        setStatus(`Scanning PMCC ${symbol}...`);
+        pushStatus(`Scanning PMCC ${symbol}...`);
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
@@ -5641,8 +5679,14 @@ export default function Home() {
         } catch {}
         return merged;
       });
+      completeScreenerJob({
+        resultCount: pmccResults.length,
+        status: `${pmccResults.length} PMCC result${pmccResults.length === 1 ? '' : 's'} ready`,
+        resultsHref: '/screener?mode=filter',
+      });
     } catch (e: any) {
       setError(e.message);
+      failScreenerJob(e.message);
     } finally {
       setStatus('');
       setLoading(false);
@@ -5661,17 +5705,22 @@ export default function Home() {
     }
     setError('');
     setLoading(true);
+    startScreenerJob({
+      kind: 'csp', label: 'CSP scan', total: csp.length,
+      status: 'Starting CSP scan...', resultsHref: '/screener?mode=filter',
+    });
+    const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
     try {
-      setStatus('Getting access token...');
+      pushStatus('Getting access token...');
       const token = await getAccessToken();
 
-      setStatus('Checking available cash...');
+      pushStatus('Checking available cash...');
       const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
       const availableCash = Number.isFinite(manualCash as number)
         ? (manualCash as number)
         : await getAvailableCash(token);
 
-      setStatus('Fetching market metrics...');
+      pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(csp, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
@@ -5684,7 +5733,7 @@ export default function Home() {
 
       const cspResults: ScreenResult[] = [];
       for (const symbol of csp) {
-        setStatus(`Scanning CSP ${symbol}...`);
+        pushStatus(`Scanning CSP ${symbol}...`);
         try {
           const classification = await classifyUnderlying(symbol, token);
           const isEtf = classification === 'index' || classification === 'etf';
@@ -5711,8 +5760,14 @@ export default function Home() {
         } catch {}
         return merged;
       });
+      completeScreenerJob({
+        resultCount: cspResults.length,
+        status: `${cspResults.length} CSP result${cspResults.length === 1 ? '' : 's'} ready`,
+        resultsHref: '/screener?mode=filter',
+      });
     } catch (e: any) {
       setError(e.message);
+      failScreenerJob(e.message);
     } finally {
       setStatus('');
       setLoading(false);
