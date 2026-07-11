@@ -7,6 +7,7 @@ import type {
   CandidatePipelineResult,
   CandidatePortfolioContext,
   CandidateValidationIssue,
+  DuplicateCandidateRecord,
   PipelineCandidate,
 } from './candidatePipelineTypes';
 
@@ -214,9 +215,13 @@ function buildPipelineCandidate(
   };
 }
 
-function dedupeCandidates(candidates: PipelineCandidate[]): PipelineCandidate[] {
-  const seen = new Set<string>();
+function dedupeCandidates(candidates: PipelineCandidate[]): {
+  deduped: PipelineCandidate[];
+  duplicates: DuplicateCandidateRecord[];
+} {
+  const retainedByKey = new Map<string, PipelineCandidate>();
   const deduped: PipelineCandidate[] = [];
+  const duplicates: DuplicateCandidateRecord[] = [];
 
   for (const candidate of candidates) {
     const key = [
@@ -227,12 +232,22 @@ function dedupeCandidates(candidates: PipelineCandidate[]): PipelineCandidate[] 
         .join('|'),
     ].join('::');
 
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const retained = retainedByKey.get(key);
+    if (retained) {
+      duplicates.push({
+        droppedCandidateId: candidate.normalized.id,
+        retainedCandidateId: retained.normalized.id,
+        dedupeKey: key,
+        reason: 'duplicate_candidate',
+      });
+      continue;
+    }
+
+    retainedByKey.set(key, candidate);
     deduped.push(candidate);
   }
 
-  return deduped;
+  return { deduped, duplicates };
 }
 
 export function runCandidatePipeline(
@@ -242,7 +257,7 @@ export function runCandidatePipeline(
     buildPipelineCandidate(candidate, input),
   );
 
-  const deduped = dedupeCandidates(processed);
+  const { deduped, duplicates } = dedupeCandidates(processed);
 
   const accepted = deduped.filter((candidate) => candidate.isValid);
   const rejected = deduped.filter((candidate) => !candidate.isValid);
@@ -250,8 +265,10 @@ export function runCandidatePipeline(
   return {
     accepted,
     rejected,
+    duplicates,
     totalReceived: input.candidates.length,
     totalAccepted: accepted.length,
     totalRejected: rejected.length,
+    totalDuplicates: duplicates.length,
   };
 }

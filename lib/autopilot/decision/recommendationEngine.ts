@@ -412,6 +412,7 @@ export async function runRecommendationEngine(
         rejectedCount: 0,
         suppressedCount: 0,
         recommendations: [],
+        duplicates: [],
         killSwitchActive: true,
       };
     }
@@ -537,6 +538,7 @@ export async function runRecommendationEngine(
       rejectedCount: ranked.filter((item) => item.recommendation.status === 'not_recommended').length,
       suppressedCount: ranked.filter((item) => item.recommendation.status === 'conditional').length,
       recommendations: ranked,
+      duplicates: pipeline.duplicates,
       killSwitchActive: false,
     };
   } finally {

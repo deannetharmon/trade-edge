@@ -17,6 +17,18 @@ export interface CandidateValidationIssue {
   severity: 'warning' | 'block';
 }
 
+// Emitted for every candidate the pipeline drops as a duplicate of one
+// already seen in the same batch. A duplicate never reaches validation or
+// the shared Decision Engine -- it does not get a DecisionAnalysis -- but it
+// must still be inspectable: which candidate was dropped, which one was kept
+// in its place, and the exact key that made them collide.
+export interface DuplicateCandidateRecord {
+  droppedCandidateId: string;
+  retainedCandidateId: string;
+  dedupeKey: string;
+  reason: 'duplicate_candidate';
+}
+
 export interface CandidatePipelineMetadata {
   pipelineId: string;
   source: CandidateSource;
@@ -44,9 +56,14 @@ export interface PipelineCandidate {
 export interface CandidatePipelineResult {
   accepted: PipelineCandidate[];
   rejected: PipelineCandidate[];
+  duplicates: DuplicateCandidateRecord[];
   totalReceived: number;
   totalAccepted: number;
   totalRejected: number;
+  // totalReceived === totalAccepted + totalRejected + totalDuplicates always
+  // holds -- every candidate that comes in is accounted for exactly once as
+  // accepted, rejected, or a recorded duplicate. Never silently dropped.
+  totalDuplicates: number;
 }
 
 export interface CandidatePipelineInput {

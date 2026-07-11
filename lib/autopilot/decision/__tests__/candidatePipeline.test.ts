@@ -118,6 +118,72 @@ describe('duplicate handling', () => {
     });
     expect(result.totalReceived).toBe(2);
     expect(result.totalAccepted + result.totalRejected).toBe(1);
+    expect(result.totalDuplicates).toBe(1);
+  });
+
+  it('records a structured DuplicateCandidateRecord instead of silently dropping', () => {
+    const candidate = makeCandidate({ id: 'dup-1' });
+    const duplicate = makeCandidate({ id: 'dup-2' });
+    const result = runCandidatePipeline({
+      candidates: [candidate, duplicate],
+      portfolio: makePortfolioState(),
+      source: 'manual',
+    });
+
+    expect(result.duplicates).toHaveLength(1);
+    const record = result.duplicates[0];
+    expect(record.droppedCandidateId).toBe('dup-2');
+    expect(record.retainedCandidateId).toBe('dup-1');
+    expect(record.reason).toBe('duplicate_candidate');
+    expect(typeof record.dedupeKey).toBe('string');
+    expect(record.dedupeKey.length).toBeGreaterThan(0);
+  });
+
+  it('a duplicate is inspectable without requiring a full DecisionAnalysis', () => {
+    // Duplicates never reach the shared Decision Engine -- they don't carry
+    // recommendation/confidence/evidence/etc, only the four required
+    // tracking fields. This test guards against someone later "upgrading"
+    // a DuplicateCandidateRecord into something that quietly duplicates
+    // Decision Engine reasoning.
+    const result = runCandidatePipeline({
+      candidates: [makeCandidate({ id: 'dup-1' }), makeCandidate({ id: 'dup-2' })],
+      portfolio: makePortfolioState(),
+      source: 'manual',
+    });
+    const record = result.duplicates[0];
+    expect(Object.keys(record).sort()).toEqual(
+      ['dedupeKey', 'droppedCandidateId', 'reason', 'retainedCandidateId'].sort(),
+    );
+  });
+
+  it('records one entry per extra duplicate when three candidates collide', () => {
+    const result = runCandidatePipeline({
+      candidates: [
+        makeCandidate({ id: 'a' }),
+        makeCandidate({ id: 'b' }),
+        makeCandidate({ id: 'c' }),
+      ],
+      portfolio: makePortfolioState(),
+      source: 'manual',
+    });
+    expect(result.totalDuplicates).toBe(2);
+    expect(result.duplicates.map((d) => d.droppedCandidateId).sort()).toEqual(['b', 'c']);
+    expect(result.duplicates.every((d) => d.retainedCandidateId === 'a')).toBe(true);
+  });
+
+  it('count reconciliation is always exact: totalReceived === accepted + rejected + duplicates', () => {
+    const result = runCandidatePipeline({
+      candidates: [
+        makeCandidate({ id: 'valid-1', symbol: 'AMD' }),
+        makeCandidate({ id: 'valid-1-dup', symbol: 'AMD' }), // duplicate of valid-1
+        makeCandidate({ id: 'invalid-1', symbol: '' }), // fails validation
+        makeCandidate({ id: 'valid-2', symbol: 'NVDA' }),
+      ],
+      portfolio: makePortfolioState(),
+      source: 'manual',
+    });
+    expect(result.totalReceived).toBe(4);
+    expect(result.totalAccepted + result.totalRejected + result.totalDuplicates).toBe(result.totalReceived);
   });
 
   it('does not deduplicate candidates that differ by strike (different legs)', () => {
@@ -129,6 +195,7 @@ describe('duplicate handling', () => {
       source: 'manual',
     });
     expect(result.totalAccepted).toBe(2);
+    expect(result.totalDuplicates).toBe(0);
   });
 
   it('does not deduplicate the same symbol across different strategies', () => {
@@ -140,6 +207,7 @@ describe('duplicate handling', () => {
       source: 'manual',
     });
     expect(result.totalAccepted).toBe(2);
+    expect(result.totalDuplicates).toBe(0);
   });
 
   it('assigns each surviving candidate a unique pipelineId', () => {

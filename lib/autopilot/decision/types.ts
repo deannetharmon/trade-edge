@@ -2,6 +2,7 @@
 
 import type { AutopilotConfig, AutopilotStrategy, PaperAccount } from '../types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
+import type { DuplicateCandidateRecord } from './candidatePipelineTypes';
 
 export interface PortfolioStateSummary {
   userId: string;
@@ -49,6 +50,11 @@ export interface RecommendationRunResult {
   rejectedCount: number;
   suppressedCount: number;
   recommendations: DecisionAnalysis[];
+  // Candidates dropped as duplicates within this run's input batch. Never
+  // silently dropped -- each entry is inspectable (dropped id, retained id,
+  // dedupe key, reason) even though a duplicate never gets a full
+  // DecisionAnalysis. See DuplicateCandidateRecord / candidatePipeline.ts.
+  duplicates: DuplicateCandidateRecord[];
   // True when this run was short-circuited by AutopilotConfig.killSwitchEnabled
   // before any candidate was evaluated. When true, candidatesScanned is 0 and
   // recommendations is empty regardless of how many candidates were supplied

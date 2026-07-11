@@ -129,6 +129,26 @@ describe('duplicate handling at orchestration level', () => {
     const result = await runRecommendationEngine('test-user', { candidates: [a, b], source: 'manual' });
     expect(result.recommendations).toHaveLength(1);
   });
+
+  it('surfaces the dropped duplicate as a structured record on the run result, not silently', async () => {
+    const a = makeCandidate({ id: 'a', symbol: 'AMD' });
+    const b = makeCandidate({ id: 'b', symbol: 'AMD' });
+    const result = await runRecommendationEngine('test-user', { candidates: [a, b], source: 'manual' });
+
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.duplicates[0].droppedCandidateId).toBe('b');
+    expect(result.duplicates[0].retainedCandidateId).toBe('a');
+    expect(result.duplicates[0].reason).toBe('duplicate_candidate');
+  });
+
+  it('duplicates is an empty array (not undefined) when the kill switch blocks the run', async () => {
+    mockConfig = makeConfig({ killSwitchEnabled: true });
+    const result = await runRecommendationEngine('test-user', {
+      candidates: [makeCandidate({ id: 'a' }), makeCandidate({ id: 'b' })],
+      source: 'manual',
+    });
+    expect(result.duplicates).toEqual([]);
+  });
 });
 
 describe('decision logging', () => {

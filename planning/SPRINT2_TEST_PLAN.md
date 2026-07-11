@@ -38,18 +38,26 @@ Status: ✅ Automated, 7 tests, passing.
 
 ## 3. Strategy recommendation scenarios
 
-**File:** `lib/decision-engine/__tests__/evaluateSingleCandidate.test.ts` → `describe('strategy recommendation scenarios')`
+**File:** `lib/decision-engine/__tests__/evaluateSingleCandidate.test.ts` → `describe('strategy recommendation scenarios')` and `describe('IC scenario (deterministic fixture)')`
 
 Deterministic fixtures (`test/fixtures/autopilotFixtures.ts`) for:
 - **CSP** → `SELL_CSP`, recommended
 - **BPS** → `OPEN_BPS`, recommended
 - **BCS** → `OPEN_BCS`, recommended
+- **IC** → `OPEN_IC`, recommended (closed 2026-07-11 — see below)
 - **WAIT** — two independent triggers tested: low opportunity score + uncertain market bias; confidence below configured minimum
 - **AVOID** — three independent triggers tested: earnings inside expiry, insufficient buying power, CSP proposed against an unwilling-to-own preference
 
-Each fixture includes portfolio state, market assumptions, the candidate, and asserts the expected `recommendation.action` / `recommendation.status`. IC was not given a dedicated scenario — `evaluateSingleCandidate` treats IC identically to BPS/BCS through `actionForStrategy()`, so an IC-specific test would be redundant with the BPS/BCS coverage. **Recommended next step:** add one IC fixture anyway once IC-specific evidence/concern logic (if any) is added, to guard against future divergence.
+Each fixture includes portfolio state, market assumptions, the candidate, and asserts the expected `recommendation.action` / `recommendation.status`.
 
-Status: ✅ Automated, 8 tests, passing.
+**Gap closed (2026-07-11): Iron Condor fixture.** IC previously had no dedicated scenario — it happened to route through the same `actionForStrategy()` logic as BPS/BCS, so risk was low, but there was no fixture guarding against future divergence. A 4-leg IC fixture (short put, long put, short call, long call on AMD) now has its own `describe` block covering:
+- `OPEN_IC` action, `recommended` status, `recommendation.strategy === 'IC'`
+- Full `DecisionAnalysis` shape (all required top-level fields present, confidence sub-dimensions present)
+- Explanation quality (rationale is not a bare score statement, is ≥8 words, names the candidate's symbol)
+- Alternatives carry non-trivial reasons; review triggers carry non-trivial explanations
+- Both execution flags (`executionAllowed`, `paperExecutionAllowed`) remain `false` on both the recommended path and a forced-AVOID (earnings-block) path
+
+Status: ✅ Automated, 9 + 7 tests, passing.
 
 ---
 
@@ -104,17 +112,34 @@ Status: ✅ Automated, 7 tests, passing (was 5; two replaced, three added).
 
 ## 7. Autopilot orchestration
 
-**File:** `lib/autopilot/decision/__tests__/recommendationEngine.test.ts`
+**File:** `lib/autopilot/decision/__tests__/recommendationEngine.test.ts`, `lib/autopilot/decision/__tests__/candidatePipeline.test.ts`
 
 All Redis-backed persistence (`configStore`, `paperAccountStore`, `decisionLogStore`, `auditTrailStore`, `scheduler/locking`) is mocked with in-memory fakes via `vi.mock`, so these tests need no live Redis and are fully deterministic.
 
 - **Multiple candidates:** N candidates in → N `DecisionAnalysis` out (including validation-failure candidates).
 - **Deterministic ranking:** `recommended` sorts before `conditional` before `not_recommended`; two runs with identical inputs produce identical output ordering.
-- **Duplicate handling:** two candidates with identical symbol/strategy/legs collapse to one recommendation (this happens in `candidatePipeline.ts`'s `dedupeCandidates`, silently, before validation — worth knowing if you ever need per-duplicate visibility).
+- **Duplicate handling:** two candidates with identical symbol/strategy/legs collapse to one recommendation, and the dropped candidate is now recorded (see below), not silently discarded.
 - **Decision logging:** one log entry per processed candidate; recommended entries carry `paper_execution_disabled_until_sprint_3` in `rulesBlocked`.
 - **Audit logging:** one `recommendation_generated` event per candidate.
 
-Status: ✅ Automated, 12 tests, passing.
+**Gap closed (2026-07-11): duplicate candidates are now observable.** `candidatePipeline.ts`'s `dedupeCandidates()` previously dropped duplicates with zero record of what was dropped or why — only visible indirectly as `totalReceived > totalAccepted + totalRejected`. It now emits a `DuplicateCandidateRecord` per dropped candidate:
+
+```ts
+interface DuplicateCandidateRecord {
+  droppedCandidateId: string;
+  retainedCandidateId: string;
+  dedupeKey: string;
+  reason: 'duplicate_candidate';
+}
+```
+
+- `CandidatePipelineResult` gained `duplicates: DuplicateCandidateRecord[]` and `totalDuplicates: number`.
+- `RecommendationRunResult` gained `duplicates: DuplicateCandidateRecord[]`, wired through from the pipeline (empty array on the kill-switch short-circuit path, since no pipeline runs there).
+- **Count reconciliation is exact and tested:** `totalReceived === totalAccepted + totalRejected + totalDuplicates` always holds, including in a mixed batch (one duplicate pair, one validation failure, one clean candidate) — not just in the simple two-candidate case.
+- A duplicate does **not** get a full `DecisionAnalysis` (it never reaches the shared Decision Engine — that's still owned entirely by `lib/decision-engine`), only the four tracking fields above. A test explicitly locks this shape down so nobody later "upgrades" a duplicate record into something that duplicates Decision Engine reasoning.
+- With three candidates colliding on the same key, the first is retained and the other two are each recorded as separate duplicates pointing at the same `retainedCandidateId` — tested.
+
+Status: ✅ Automated, 16 + 18 tests, passing (was 12 + 14; net +4 orchestration, +4 pipeline).
 
 ---
 
@@ -154,26 +179,23 @@ Manual validation checklist — these are existing runtime features that this Sp
 
 ## Summary
 
-**Tests implemented:** 93 automated tests across 6 files (`evaluateSingleCandidate.test.ts`, `riskValidation.test.ts`, `confidence.test.ts`, `riskGateEngine.test.ts`, `candidatePipeline.test.ts`, `recommendationEngine.test.ts`), plus one shared fixture module. (Was 89 at initial delivery; +4 net from closing the two gaps below — 2 gap-documenting tests replaced with 6 real-behavior tests.)
+**Tests implemented:** 107 automated tests across 6 files (`evaluateSingleCandidate.test.ts`, `riskValidation.test.ts`, `confidence.test.ts`, `riskGateEngine.test.ts`, `candidatePipeline.test.ts`, `recommendationEngine.test.ts`), plus one shared fixture module.
 
-**Tests passing:** 93 / 93, verified locally with `npx vitest run` against this branch. `npx tsc --noEmit` also passes clean, including the new/changed files.
+**Tests passing:** 107 / 107, verified locally with `npx vitest run` against this branch. `npx tsc --noEmit` clean. `npx next build` succeeds (all static/dynamic routes generate, including `/autopilot`).
 
-**Tests requiring manual verification:**
-- Vercel preview build (item 1)
-- All of item 9 (Regression) — requires a running server + auth + TastyTrade context
-- Re-confirming no execution code path exists, before every merge to `main` (item 8)
+**Gaps closed (all four Product Owner closure items, 2026-07-11):**
+1. ✅ **Kill switch enforcement.** `runRecommendationEngine()` checks `killSwitchEnabled` before any candidate reaches the pipeline; when on, zero recommendations, zero decision-log entries, one `autopilot_paused` audit event, `duplicates: []`, `killSwitchActive: true`.
+2. ✅ **Per-candidate rationale.** Built from data the shared engine already computes (concerns, alternatives, confidence, opportunity score) — no new reasoning path.
+3. ✅ **Iron Condor fixture.** Dedicated 4-leg IC scenario covering `OPEN_IC`, full contract shape, explanation quality, alternatives/review triggers, and both execution flags false on both a recommended and an AVOID path.
+4. ✅ **Observable duplicate handling.** `DuplicateCandidateRecord` (dropped id, retained id, dedupe key, `reason: 'duplicate_candidate'`) emitted per dropped candidate; `totalDuplicates` on the pipeline result and `duplicates[]` on `RecommendationRunResult`; count reconciliation (`totalReceived === accepted + rejected + duplicates`) tested exact, including mixed batches.
 
-**Gaps closed (2026-07-11):**
-1. ✅ `AutopilotConfig.killSwitchEnabled` is now enforced. `runRecommendationEngine()` checks it before any candidate reaches the pipeline; when on, the run returns immediately with `killSwitchActive: true`, zero recommendations, zero decision-log entries, and one `autopilot_paused` audit event. See item 8 above for detail.
-2. ✅ `DecisionAnalysis.rationale` is now per-candidate narrative text, built from data the shared engine already computes (concerns, alternatives, confidence, opportunity score) — not a new reasoning path. See item 6 above for detail.
+Also carried forward from the prior session: kill-switch UI toggle on `/autopilot` (status badge + toggle, reading/writing through the full config to avoid clobbering other settings).
 
-**Remaining known gaps:**
-1. No IC (iron condor) fixture — IC currently behaves identically to BPS/BCS through `actionForStrategy()`, so this is low-risk today but should get its own fixture once/if IC gets distinct evidence or concern logic.
-2. `dedupeCandidates()` in `candidatePipeline.ts` silently drops duplicates before validation runs — there's no way for a caller to see *which* duplicate was dropped or why, only that `totalReceived > totalAccepted + totalRejected`.
-3. `killSwitchActive` is not yet surfaced anywhere in the UI (`app/autopilot/page.tsx` doesn't read it). The backend enforcement is real and tested; the trader has no visual confirmation "Autopilot is paused" yet if they set the switch via the API directly. There is also no UI control to set `killSwitchEnabled` at all yet — it's currently only reachable via `POST /api/autopilot/config`.
+**No new functionality was added beyond these four items** — no audit-trail viewer, no paper execution, no additional dashboard UX, no live execution. Canonical architecture unchanged: `lib/decision-engine` still owns single-candidate reasoning and `DecisionAnalysis`; `lib/autopilot/decision` still owns validation/orchestration/ranking/persistence/audit only; `executionAllowed`/`paperExecutionAllowed` remain hard-coded `false` everywhere, including on duplicate records (which don't get a `DecisionAnalysis` at all) and the IC path.
 
-**Recommended next steps before Sprint 3:**
-1. Wire this test suite into CI (or at minimum run `npm test` locally before every push) alongside the existing Vercel-build-is-the-TypeScript-check convention.
-2. Add the IC fixture (#1 above) opportunistically when touching IC logic next.
-3. Add a kill-switch toggle to `app/autopilot/page.tsx` (or wherever Autopilot settings live) and surface `killSwitchActive` from `/api/autopilot/status` and from run results, now that the backend actually does something with it.
-4. Consider whether `dedupeCandidates()` (#2 above) should retain a `duplicateOf` pointer for traceability, low priority.
+**Manual validation checklist (the only items not covered by the automated suite):**
+- [ ] Vercel preview build for this branch is green (local `next build` already confirmed clean; this is the platform-level check)
+- [ ] `/autopilot` page loads in a browser with an authenticated session; Kill Switch badge shows the correct live state and the toggle actually flips it end-to-end (not just against mocks)
+- [ ] Existing Autopilot API endpoints still respond as before: `GET /api/autopilot/status`, `GET /api/autopilot/state`, `GET /api/autopilot/decisions`, `POST /api/autopilot/config`, `POST /api/autopilot/paper-account`
+- [ ] `POST /api/autopilot/recommendations` still converts `ScreenResult[]` → candidates and returns a `RecommendationRunResult` with the new `duplicates` field present (even if empty) and `success: true`
+- [ ] No regression on Portfolio, Screener, Repeat Trades, Pending Orders, or background task status — none of this branch's changes touch those files, but this needs a running server + TastyTrade session to confirm, which unit tests can't reach

@@ -181,6 +181,26 @@ describe('strategy recommendation scenarios', () => {
     expect(analysis.recommendation.status).toBe('recommended');
   });
 
+  it('recommends OPEN_IC for a clean Iron Condor candidate', () => {
+    const context = makeContext({
+      candidate: makeCandidate({
+        strategy: 'IC',
+        theoreticalMaxLoss: 500,
+        legs: [
+          { symbol: 'AMD  260821P00150000', underlyingSymbol: 'AMD', assetType: 'option', direction: 'short', optionType: 'put', strike: 150, quantity: 1, bid: 1.9, ask: 2.0, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+          { symbol: 'AMD  260821P00145000', underlyingSymbol: 'AMD', assetType: 'option', direction: 'long', optionType: 'put', strike: 145, quantity: 1, bid: 1.2, ask: 1.3, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+          { symbol: 'AMD  260821C00170000', underlyingSymbol: 'AMD', assetType: 'option', direction: 'short', optionType: 'call', strike: 170, quantity: 1, bid: 1.7, ask: 1.8, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+          { symbol: 'AMD  260821C00175000', underlyingSymbol: 'AMD', assetType: 'option', direction: 'long', optionType: 'call', strike: 175, quantity: 1, bid: 1.0, ask: 1.1, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+        ],
+      }),
+    });
+    const analysis = evaluateSingleCandidate(context);
+
+    expect(analysis.recommendation.action).toBe('OPEN_IC');
+    expect(analysis.recommendation.status).toBe('recommended');
+    expect(analysis.recommendation.strategy).toBe('IC');
+  });
+
   it('recommends WAIT when opportunity score is low and market bias is uncertain', () => {
     const context = makeContext({
       market: { bias: 'uncertain', earningsWithinExpiration: false, macroRiskElevated: false, volatilityStable: true },
@@ -248,6 +268,101 @@ describe('strategy recommendation scenarios', () => {
 
     expect(analysis.recommendation.action).toBe('AVOID');
     expect(analysis.concerns.some((c) => c.id === 'assignment-intent')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Iron Condor deterministic fixture (Sprint 2 closure item 1). IC routes
+// through the same actionForStrategy()/buildConcerns()/buildAlternatives()
+// paths as every other strategy, so this exists to guard against future
+// divergence -- not because IC is expected to behave differently today.
+// ---------------------------------------------------------------------------
+describe('IC scenario (deterministic fixture)', () => {
+  const icLegs = [
+    { symbol: 'AMD  260821P00150000', underlyingSymbol: 'AMD', assetType: 'option' as const, direction: 'short' as const, optionType: 'put' as const, strike: 150, quantity: 1, bid: 1.9, ask: 2.0, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+    { symbol: 'AMD  260821P00145000', underlyingSymbol: 'AMD', assetType: 'option' as const, direction: 'long' as const, optionType: 'put' as const, strike: 145, quantity: 1, bid: 1.2, ask: 1.3, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+    { symbol: 'AMD  260821C00170000', underlyingSymbol: 'AMD', assetType: 'option' as const, direction: 'short' as const, optionType: 'call' as const, strike: 170, quantity: 1, bid: 1.7, ask: 1.8, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+    { symbol: 'AMD  260821C00175000', underlyingSymbol: 'AMD', assetType: 'option' as const, direction: 'long' as const, optionType: 'call' as const, strike: 175, quantity: 1, bid: 1.0, ask: 1.1, quoteTimestamp: '2026-07-11T13:00:00.000Z' },
+  ];
+
+  function icContext(overrides: Partial<SingleCandidateDecisionContext> = {}): SingleCandidateDecisionContext {
+    return makeContext({
+      candidate: makeCandidate({ strategy: 'IC', theoreticalMaxLoss: 500, legs: icLegs }),
+      ...overrides,
+    });
+  }
+
+  it('recommends OPEN_IC with status recommended', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis.recommendation.action).toBe('OPEN_IC');
+    expect(analysis.recommendation.status).toBe('recommended');
+    expect(analysis.recommendation.strategy).toBe('IC');
+  });
+
+  it('produces the full DecisionAnalysis shape', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis).toHaveProperty('recommendation');
+    expect(analysis).toHaveProperty('confidence');
+    expect(analysis).toHaveProperty('rationale');
+    expect(analysis).toHaveProperty('supportingEvidence');
+    expect(analysis).toHaveProperty('concerns');
+    expect(analysis).toHaveProperty('alternatives');
+    expect(analysis).toHaveProperty('reviewTriggers');
+    expect(analysis).toHaveProperty('expectedOutcome');
+    expect(analysis).toHaveProperty('metadata');
+    expect(Array.isArray(analysis.supportingEvidence)).toBe(true);
+    expect(Array.isArray(analysis.concerns)).toBe(true);
+    expect(Array.isArray(analysis.alternatives)).toBe(true);
+    expect(Array.isArray(analysis.reviewTriggers)).toBe(true);
+    expect(analysis.confidence).toEqual(
+      expect.objectContaining({
+        overall: expect.any(Number),
+        market: expect.any(Number),
+        portfolio: expect.any(Number),
+        execution: expect.any(Number),
+        income: expect.any(Number),
+        risk: expect.any(Number),
+      }),
+    );
+  });
+
+  it('rationale meets explanation-quality bar: not a bare score statement, names the symbol', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis.rationale).not.toMatch(/^score is (high|low|good|bad)\.?$/i);
+    expect(analysis.rationale.split(' ').length).toBeGreaterThanOrEqual(8);
+    expect(analysis.rationale).toContain('AMD');
+  });
+
+  it('carries alternatives with non-trivial reasons', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis.alternatives.length).toBeGreaterThan(0);
+    for (const alt of analysis.alternatives) {
+      expect(alt.reasons.length).toBeGreaterThan(0);
+      expect(alt.reasons[0].length).toBeGreaterThan(5);
+    }
+  });
+
+  it('carries review triggers with non-trivial explanations', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis.reviewTriggers.length).toBeGreaterThan(0);
+    for (const trigger of analysis.reviewTriggers) {
+      expect(trigger.explanation.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('both execution flags remain false on the recommended path', () => {
+    const analysis = evaluateSingleCandidate(icContext());
+    expect(analysis.metadata.executionAllowed).toBe(false);
+    expect(analysis.metadata.paperExecutionAllowed).toBe(false);
+  });
+
+  it('both execution flags remain false on a non-recommended IC path too (earnings block)', () => {
+    const analysis = evaluateSingleCandidate(
+      icContext({ market: { bias: 'bullish', earningsWithinExpiration: true, macroRiskElevated: false, volatilityStable: true } }),
+    );
+    expect(analysis.recommendation.action).toBe('AVOID');
+    expect(analysis.metadata.executionAllowed).toBe(false);
+    expect(analysis.metadata.paperExecutionAllowed).toBe(false);
   });
 });
 
