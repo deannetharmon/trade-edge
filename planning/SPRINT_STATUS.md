@@ -1,16 +1,18 @@
 # TradeEdge Autopilot — Sprint Status
 
-**Branch:** `main`  
-**Scope:** Background Screener + Autopilot Foundation  
-**Last Updated:** 2026-07-09  
-**Current Phase:** TE-0001 / TE-0005A stabilization  
-**Next Objective:** Finish Cancel Scan, refresh/reconnect behavior, then move to Portfolio Intelligence
+**Branch:** `feature/portfolio-intelligence`
+**Scope:** Portfolio Intelligence (Sprint 3, PI-0001 first slice)
+**Last Updated:** 2026-07-11
+**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0001 Portfolio Objective Engine
+**Next Objective:** Product Owner review of PI-0001, then scope the next Portfolio Intelligence slice
 
 ## Current Development Rule
 
 Autopilot must learn to make explainable, portfolio-aware recommendations before it is allowed to create paper trades.
 
 **No paper execution until the Decision Engine produces ranked recommendations with complete reasoning.**
+
+Sprint 2 (Decision Engine) is complete and merged to `main`; Sprint 3 (Portfolio Intelligence) builds on top of it. Sprint 3 remains recommendation-only: no paper execution, no live execution, no order submission, no position mutation.
 
 For the current screener sprint, keep TastyTrade scan execution browser-owned/client-authenticated. Do not reintroduce Vercel server-side TastyTrade scan execution until server auth is explicitly solved.
 
@@ -25,29 +27,16 @@ A sprint is not complete until all required items are true:
 - [x] Sprint review completed
 - [ ] Endpoint smoke tests pass when network access allows
 
-## Active Sprint — Background Ranked Screener Stabilization
-
-| Item | Status | Notes |
-|---|---:|---|
-| Ranked scan works on Screener page | ✅ | Restored stable client TaskManager path after server worker 401 failure. |
-| Scan status survives in-app navigation | ✅ | Root-level task mirror mounted in app providers. |
-| Duplicate completion popups removed | ✅ | Generic TaskStatusBar removed from global shell. |
-| Completed cards do not resurrect after hard reload | ✅ | Non-running cards are not restored from localStorage. |
-| Open Results behavior | ✅ | Hidden when already on target results view. |
-| Earnings/follow-up badge polish | ✅ | DTE pill hidden; scheduled badges nowrap. |
-| Cancel Scan | ⬜ | Next implementation target; see ADR-0003. |
-| Refresh/reconnect while running | ⬜ | Decide reconnect vs mark stale/stopped. |
-| Regression test | ⬜ | Test navigation, completion, reload, cancel. |
-
 ## Sprint Tracker
 
 | Sprint | Name | Status | Build | Deploy | Smoke Test | Review |
 |---|---|---:|---:|---:|---:|---:|
 | 1A | Core Infrastructure | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
 | 1B | Framework | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
-| TE-0001 / TE-0005A | Background Ranked Screener Stabilization | Active | ⬜ | ⬜ | ⬜ | ⬜ |
-| 2 | Decision Engine | Next | ⬜ | ⬜ | ⬜ | ⬜ |
-| 3 | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
+| TE-0001 / TE-0005A | Background Ranked Screener Stabilization | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
+| 2 | Decision Engine | Completed ✅ | ✅ | ✅ | Manual (kill switch verified live) | ✅ |
+| 3 (PI-0001) | Portfolio Intelligence — Portfolio Objective Engine | Active | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (Paper Execution) | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 5 | Candidate Discovery | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 6 | Scheduler | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -62,9 +51,9 @@ A sprint is not complete until all required items are true:
 |---|---:|---|
 | 1A | ✅ Passed | Core infrastructure compiled in Vercel. |
 | 1B | ✅ Passed | Framework build passed after TypeScript date-guard fix. |
-| TE-0001 / TE-0005A | ⬜ | Await latest Vercel confirmation after handoff doc updates. |
-| 2 | ⬜ | Pending. |
-| 3 | ⬜ | Pending. |
+| TE-0001 / TE-0005A | ✅ Passed | Confirmed via subsequent Vercel deploys. |
+| 2 | ✅ Passed | 107 tests passing, `tsc --noEmit` clean, confirmed live in production (kill switch verified end-to-end). |
+| 3 (PI-0001) | ✅ local | 132 tests passing repo-wide (25 new), `tsc --noEmit` clean, `next build` clean locally. Vercel preview confirmation pending. |
 | 4 | ⬜ | Pending. |
 | 5 | ⬜ | Pending. |
 | 6 | ⬜ | Pending. |
@@ -109,13 +98,25 @@ Remaining:
 - Refresh/reconnect behavior.
 - Regression testing.
 
-### ⬜ Milestone B — Decision Engine
+### ✅ Milestone B — Decision Engine
 
 Goal: Autopilot can think.
 
 Output: ranked recommendations with complete acceptance/rejection reasoning.
 
 Constraint: no paper trades.
+
+Completed 2026-07-11: shared `lib/decision-engine` (single-candidate reasoning) plus `lib/autopilot/decision` orchestration, 107 tests passing, kill switch enforcement, per-candidate rationale, observable duplicate handling, IC fixture. Merged to `main`; confirmed live in production.
+
+### 🟡 Milestone B2 — Portfolio Intelligence
+
+Goal: Autopilot can see the whole portfolio, not just one candidate at a time.
+
+Output: ranked `PortfolioObjective[]` explaining what deserves attention today.
+
+Constraint: no paper trades, no live trades, no position mutation.
+
+In progress: PI-0001 Portfolio Objective Engine (`lib/portfolio-intelligence/`) complete and locally verified (132 repo-wide tests, 25 new). See `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` for full scope and later-item backlog.
 
 ### ⬜ Milestone C — Paper Trading
 
@@ -185,3 +186,48 @@ Goal: independent review confirms readiness for live-mode implementation. No liv
 
 - Endpoint smoke tests remain deferred until preview/local access is available.
 - Sprint 2 must produce recommendations only; no paper execution.
+
+## Sprint 2 — Decision Engine Review
+
+**Result:** Completed. 107 automated tests passing, `tsc --noEmit` clean, `next build` clean. Merged to `main` and confirmed live in production, including an end-to-end verification of the kill switch toggle against real production infrastructure (not just mocks).
+
+**Built:**
+
+- `lib/decision-engine` — shared single-candidate reasoning, `evaluateSingleCandidate()`, full `DecisionAnalysis` contract.
+- `lib/autopilot/decision` — candidate pipeline (normalization, validation, deduplication), portfolio pre-gates, orchestration, ranking, decision-log and audit-trail persistence.
+- Sprint 2 validation suite: contract tests, CSP/BPS/BCS/IC/WAIT/AVOID scenarios, risk validation, Decision Confidence dimension tests, explanation-quality tests, orchestration tests, safety tests.
+- Kill switch enforcement (`AutopilotConfig.killSwitchEnabled` now actually blocks recommendation generation) plus a UI toggle on `/autopilot`.
+- Per-candidate rationale text (previously three fixed sentences, now composed from each candidate's actual concerns/alternatives/confidence/opportunity score).
+- Observable candidate deduplication (`DuplicateCandidateRecord` — dropped id, retained id, dedupe key, reason — with exact count reconciliation).
+
+**Safety:**
+
+- `executionAllowed: false` / `paperExecutionAllowed: false` on every `DecisionAnalysis`, verified across every recommendation path.
+- No paper trade execution, no live order path exists anywhere in `lib/autopilot/decision/` or `app/api/autopilot/*` — confirmed by inspection.
+- Kill switch, once found to be a no-op, now genuinely blocks a run before any candidate is evaluated.
+
+**Known Follow-Up:**
+
+- No IC-specific concern/evidence logic beyond the shared `actionForStrategy()` path (low risk, has its own fixture now).
+- No audit-trail viewer UI (out of scope by explicit Product Owner instruction).
+- `killSwitchActive` not yet surfaced from `/api/autopilot/status` as a distinct field from `killSwitchEnabled` (the UI toggle reads/writes `killSwitchEnabled` directly, which is sufficient for the current control).
+
+## Sprint 3 (PI-0001) — Portfolio Objective Engine Review
+
+**Result:** First slice complete and locally verified. 132 tests passing repo-wide (25 new for this slice), `tsc --noEmit` clean, `next build` clean locally. Vercel preview/production confirmation pending push.
+
+**Built:**
+
+- `lib/portfolio-intelligence/types.ts` — `PortfolioObjective` canonical contract, evaluation input contracts (`PortfolioIntelligenceContext`, position/order/market inputs, thresholds).
+- `lib/portfolio-intelligence/evaluatePortfolioObjectives.ts` — pure deterministic evaluator, ten rule categories, explainable three-key ranking (priority → category → urgency → confidence).
+- `lib/portfolio-intelligence/index.ts` — public exports.
+- Full PI-001 through PI-010 deterministic test scenarios plus a safety suite (execution flags, purity, no input mutation).
+- `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` — full scope document and later-item backlog.
+
+**Safety:**
+
+- `executionAllowed: false` / `paperExecutionAllowed: false` hard-coded on every objective.
+- No persistence, Redis, or broker/order-submission imports anywhere in `lib/portfolio-intelligence/` — there is no code path into execution from this layer.
+- Purity verified: identical input produces equivalent output; input context is never mutated.
+
+**Known Follow-Up:** see "Later Sprint 3 items" in `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` — portfolio health-dimension reconciliation with existing TE-0006A/B inline logic, objective-to-full-analysis expansion, decision history, Daily Briefing, Portfolio page presentation, and wiring `lib/autopilot` as a consumer are all explicitly deferred past this first slice.
