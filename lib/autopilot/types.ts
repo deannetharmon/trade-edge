@@ -56,6 +56,7 @@ export interface AutopilotLeg {
   bid?: number;
   ask?: number;
   mid?: number;
+  quoteTimestamp?: string; // ISO timestamp of when bid/ask/mid were actually fetched, if known
 }
 
 export interface AutopilotDecisionLogEntry {

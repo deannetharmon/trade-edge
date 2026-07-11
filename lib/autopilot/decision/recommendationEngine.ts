@@ -65,8 +65,6 @@ function createAuditEventId(): string {
 }
 
 function buildConfidenceLegs(candidate: AutopilotCandidate): ConfidenceInputLeg[] {
-  const now = new Date().toISOString();
-
   return candidate.legs.map((leg) => {
     const bid = Number.isFinite(leg.bid ?? NaN) ? Number(leg.bid) : undefined;
     const ask = Number.isFinite(leg.ask ?? NaN) ? Number(leg.ask) : undefined;
@@ -75,7 +73,16 @@ function buildConfidenceLegs(candidate: AutopilotCandidate): ConfidenceInputLeg[
     return {
       bidAskSpread: Math.max(0.01, spread),
       averageBidAskSpread20: Math.max(0.01, spread),
-      quoteTimestamp: now,
+      // Previously this always stamped `new Date().toISOString()` here,
+      // which made latency scoring tautological (a quote is always "just
+      // fetched" if you stamp the timestamp at evaluation time instead of
+      // fetch time). Now: use the leg's real quote timestamp when the
+      // candidate source supplied one (e.g. screenerCandidateAdapter.ts
+      // reads it from SpreadCandidate.quoteFetchedAt); otherwise leave it
+      // undefined so calculateDecisionConfidence's scoreLatency() correctly
+      // scores 0/20 with a "missing quote timestamps" note, rather than
+      // silently pretending the quote is fresh.
+      quoteTimestamp: leg.quoteTimestamp,
     };
   });
 }
