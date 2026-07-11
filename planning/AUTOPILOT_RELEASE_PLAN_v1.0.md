@@ -323,12 +323,17 @@ Sprint 2 produces ranked recommendations with complete acceptance/rejection reas
 - Regression testing
 - Build verification
 - UX polish
+- Update TradeEdge help documentation for all Autopilot and Decision Engine workflows delivered in Sprints 2–9
+- Add or revise user guidance for recommendations, confidence scores, rejection reasons, kill switch behavior, paper positions, position management, configuration, analytics, and known limitations
+- Verify help links and contextual guidance from the relevant application screens
 
 ## Exit Criteria
 
 - Feature is safe for daily paper-mode use.
 - No known state-corruption bugs.
 - No accidental live-trading path.
+- Help documentation accurately reflects the implemented Paper Mode workflows and safety boundaries.
+- Every major Autopilot screen has discoverable, current user guidance.
 - Ready to merge into `main`.
 
 ---
@@ -368,40 +373,8 @@ Goal: Autopilot can autonomously manage paper positions.
 
 ## ⬜ Milestone E — Paper Beta
 
-Goal: entire paper trading lifecycle validated.
+Goal: entire paper-trading lifecycle validated.
 
 ## ⬜ Milestone F — Live Readiness Review
 
-Goal: independent review confirms readiness for live-mode implementation.
-
-No live trading implementation starts before this review.
-
----
-
-# Build History
-
-| Sprint | Build Result | Notes |
-|---|---:|---|
-| Sprint 1A | ✅ | Core infrastructure compiled in Vercel. |
-| Sprint 1B | ✅ | Framework compiled after TypeScript date-guard fix. |
-| Sprint 2 | ⬜ | Pending. |
-| Sprint 3 | ⬜ | Pending. |
-| Sprint 4 | ⬜ | Pending. |
-| Sprint 5 | ⬜ | Pending. |
-| Sprint 6 | ⬜ | Pending. |
-| Sprint 7 | ⬜ | Pending. |
-| Sprint 8 | ⬜ | Pending. |
-| Sprint 9 | ⬜ | Pending. |
-| Sprint 10 | ⬜ | Pending. |
-
----
-
-# Success Criteria
-
-- Deterministic execution
-- Complete audit trail
-- No live-order capability
-- Config-driven behavior
-- Incremental deployability
-- Production-quality architecture
-- Decisions validated before execution
+Goal: independent review confirms readiness for live-mode implementation. No live trading work starts before this review.
