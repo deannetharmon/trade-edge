@@ -118,6 +118,44 @@ function mapSourceToDecisionSource(
   }
 }
 
+function deriveMarketBias(
+  trend: AutopilotCandidate['marketTrend'],
+): SingleCandidateDecisionContext['market']['bias'] {
+  switch (trend) {
+    case 'uptrend':
+      return 'bullish';
+    case 'downtrend':
+      return 'bearish';
+    case 'sideways':
+      return 'neutral';
+    case 'unknown':
+    case undefined:
+    default:
+      // Genuinely unknown trend now maps to 'uncertain' rather than the old
+      // hardcoded 'neutral' default. This is an intentional behavior change:
+      // evaluateSingleCandidate() treats bias === 'uncertain' as a WAIT
+      // trigger, so a candidate with no real trend data now correctly gets
+      // a conditional recommendation instead of silently being treated as
+      // "trend is fine, proceed." Missing data should not read as a
+      // positive signal.
+      return 'uncertain';
+  }
+}
+
+function deriveEarningsWithinExpiration(candidate: AutopilotCandidate): boolean {
+  if (!candidate.earningsDate) return false; // unknown -- can't gate on it, same as pre-Phase-2 behavior
+  const earningsMs = new Date(candidate.earningsDate).getTime();
+  if (!Number.isFinite(earningsMs)) return false;
+
+  const expirationTimes = candidate.legs
+    .map((leg) => (leg.expiration ? new Date(leg.expiration).getTime() : NaN))
+    .filter((ms) => Number.isFinite(ms));
+  if (!expirationTimes.length) return false;
+
+  const latestExpiration = Math.max(...expirationTimes);
+  return earningsMs <= latestExpiration;
+}
+
 function buildDecisionContext(args: {
   candidate: AutopilotCandidate;
   config: AutopilotConfig;
@@ -151,13 +189,14 @@ function buildDecisionContext(args: {
       maxSectorPct: config.thresholds.sectorMaxPct,
     },
     market: {
-      // No market/earnings/macro data source is wired into the Autopilot
-      // layer yet. These defaults preserve pre-reconciliation behavior
-      // (riskGateEngine never gated on earnings/macro/volatility either)
-      // rather than silently introducing new blocking behavior with
-      // fabricated inputs. Flagged as a known gap, not a hidden assumption.
-      bias: 'neutral',
-      earningsWithinExpiration: false,
+      // Phase 2: bias and earnings now derive from real candidate data
+      // (screenerCandidateAdapter.ts populates marketTrend/earningsDate from
+      // ScreenResult). macroRiskElevated and volatilityStable still have no
+      // data source anywhere in the codebase (no VIX/macro-calendar feed
+      // exists yet) -- these remain honest placeholders, not fabricated
+      // signal, until that data source exists.
+      bias: deriveMarketBias(candidate.marketTrend),
+      earningsWithinExpiration: deriveEarningsWithinExpiration(candidate),
       macroRiskElevated: false,
       volatilityStable: true,
     },

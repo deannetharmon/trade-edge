@@ -130,6 +130,8 @@ export interface AutopilotCandidate {
   concentrationPenalty?: number;
   betaWeightedDelta?: number;
   sector?: string;
+  earningsDate?: string; // ISO date, from ScreenResult.earningsDate when known
+  marketTrend?: 'uptrend' | 'downtrend' | 'sideways' | 'unknown'; // from ScreenResult.trendResult.trend
   notes?: string[];
 }
 

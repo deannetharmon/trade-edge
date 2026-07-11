@@ -184,6 +184,8 @@ export function screenResultsToAutopilotCandidates(
       // single most direct fix for technicalFit defaulting to a flat 50.
       technicalFit: result.trendResult?.scores?.total ?? undefined,
       sector: undefined, // not tracked by the screener today -- same gap as before
+      earningsDate: result.earningsDate ?? undefined,
+      marketTrend: result.trendResult?.trend,
       notes: result.failReasons?.length ? [`Screener notes: ${result.failReasons.join('; ')}`] : undefined,
     });
   }
