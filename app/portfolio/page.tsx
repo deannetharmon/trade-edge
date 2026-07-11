@@ -8503,7 +8503,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               </p>
 
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), true, th.textFaint)}>
+                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), false, th.textFaint)}>
                   POP {fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}
                 </span>
               </p>
