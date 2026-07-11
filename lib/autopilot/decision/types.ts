@@ -1,15 +1,7 @@
 // lib/autopilot/decision/types.ts
 
-import type {
-  AutopilotCandidate,
-  AutopilotConfig,
-  AutopilotStrategy,
-  DecisionConfidenceBreakdown,
-  OpportunityScoreBreakdown,
-  PaperAccount,
-} from '../types';
-
-export type RecommendationStatus = 'approved' | 'rejected' | 'suppressed';
+import type { AutopilotConfig, AutopilotStrategy, PaperAccount } from '../types';
+import type { DecisionAnalysis } from '@/lib/decision-engine';
 
 export interface PortfolioStateSummary {
   userId: string;
@@ -25,6 +17,11 @@ export interface PortfolioStateSummary {
   generatedAt: string;
 }
 
+// Still used for the narrow set of portfolio-discipline pre-gates
+// (drawdown circuit breaker, per-trade max-loss %, correlation) that are not
+// yet represented in lib/decision-engine's SingleCandidateDecisionContext.
+// See recommendationEngine.ts PORTFOLIO_PRE_GATE_RULES for which rules from
+// this result are actually treated as blocking post-reconciliation.
 export interface RiskGateResult {
   passed: boolean;
   rule: string;
@@ -32,17 +29,11 @@ export interface RiskGateResult {
   severity: 'info' | 'warning' | 'block';
 }
 
-export interface AutopilotRecommendation {
-  id: string;
-  candidate: AutopilotCandidate;
-  status: RecommendationStatus;
-  rank: number | null;
-  opportunity: OpportunityScoreBreakdown;
-  confidence: DecisionConfidenceBreakdown;
-  riskGates: RiskGateResult[];
-  reasons: string[];
-  createdAt: string;
-}
+// NOTE: AutopilotRecommendation (the pre-reconciliation output model) has been
+// removed. lib/decision-engine's DecisionAnalysis is now the canonical
+// recommendation output contract for both Autopilot and every other TradeEdge
+// surface (Portfolio, Screener, Hunter, Repeat Trades, Pending Orders). See
+// docs/design/DR-0002-TradeEdge-Decision-Engine-v1.md.
 
 export interface RecommendationRunResult {
   runId: string;
@@ -57,5 +48,5 @@ export interface RecommendationRunResult {
   approvedCount: number;
   rejectedCount: number;
   suppressedCount: number;
-  recommendations: AutopilotRecommendation[];
+  recommendations: DecisionAnalysis[];
 }

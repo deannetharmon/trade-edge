@@ -7,11 +7,13 @@ export interface FrameworkRunOptions {
   source: 'manual' | 'cron';
 }
 
-// Sprint 2: the dry-run stub is retired. This now calls the real recommendation
-// engine (candidate pipeline -> risk gates -> scoring -> ranking -> audit trail).
-// No candidate source (screener/watchlist) is wired into the cron/manual run yet,
-// so this currently always evaluates zero candidates -- but the path is real, not
-// a stub, and starts emitting audit events as soon as a candidate source is added.
+// Sprint 2 + decision-engine reconciliation (DR-0002): calls the real
+// recommendation engine, which now delegates candidate-level reasoning to
+// lib/decision-engine's evaluateSingleCandidate(). No candidate source
+// (screener/watchlist) is wired into the cron/manual run yet, so this
+// currently always evaluates zero candidates -- but the path is real, not a
+// stub, and starts emitting audit events as soon as a candidate source is
+// added.
 export async function runAutopilotFrameworkDryRun(
   userId: string,
   options: FrameworkRunOptions,
@@ -21,19 +23,19 @@ export async function runAutopilotFrameworkDryRun(
     candidates: [],
   });
 
-  const decisions = result.recommendations.map((recommendation) => ({
-    id: recommendation.id,
-    timestamp: recommendation.createdAt,
-    strategy: recommendation.candidate.strategy,
-    symbol: recommendation.candidate.symbol,
-    action: recommendation.status === 'approved' ? ('no_action' as const) : ('suppress_entry' as const),
-    opportunityScore: recommendation.opportunity.total,
-    decisionConfidence: recommendation.confidence.total,
-    reason: recommendation.reasons[0] ?? 'Sprint 2 recommendation evaluated.',
-    rulesTriggered: [recommendation.status],
-    rulesBlocked: recommendation.riskGates.filter((gate) => !gate.passed).map((gate) => gate.rule),
+  const decisions = result.recommendations.map((analysis) => ({
+    id: analysis.id,
+    timestamp: analysis.createdAt,
+    strategy: analysis.recommendation.strategy,
+    symbol: analysis.subject.symbol,
+    action: analysis.recommendation.status === 'recommended' ? ('no_action' as const) : ('suppress_entry' as const),
+    opportunityScore: analysis.opportunityScore?.total,
+    decisionConfidence: analysis.confidence.overall,
+    reason: analysis.rationale,
+    rulesTriggered: [analysis.recommendation.status],
+    rulesBlocked: analysis.metadata.rulesBlocked,
     configSnapshot: result.config,
-    metadata: { recommendationId: recommendation.id, rank: recommendation.rank },
+    metadata: { decisionAnalysisId: analysis.id, action: analysis.recommendation.action },
   }));
 
   return {
