@@ -80,11 +80,12 @@ export default function KillSwitchControl() {
   }, [killSwitchEnabled]);
 
   const isOn = killSwitchEnabled;
+  const isKnown = loadState === 'ready';
 
   return (
     <section
       className={`rounded-2xl border p-6 transition-colors ${
-        isOn
+        isKnown && isOn
           ? 'border-rose-500/40 bg-rose-950/20'
           : 'border-slate-800 bg-slate-900/70'
       }`}
@@ -94,7 +95,7 @@ export default function KillSwitchControl() {
           <div className="flex items-center gap-3">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                loadState === 'loading'
+                !isKnown
                   ? 'bg-slate-500'
                   : isOn
                     ? 'bg-rose-400'
@@ -104,14 +105,14 @@ export default function KillSwitchControl() {
             <h2 className="text-lg font-semibold text-white">Kill Switch</h2>
             <span
               className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${
-                loadState === 'loading'
+                !isKnown
                   ? 'bg-slate-800 text-slate-400'
                   : isOn
                     ? 'bg-rose-500/20 text-rose-200'
                     : 'bg-emerald-500/20 text-emerald-200'
               }`}
             >
-              {loadState === 'loading' ? 'Loading' : isOn ? 'Paused' : 'Active'}
+              {loadState === 'loading' ? 'Loading' : loadState === 'error' ? 'Unknown' : isOn ? 'Paused' : 'Active'}
             </span>
           </div>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
@@ -138,14 +139,14 @@ export default function KillSwitchControl() {
         <button
           type="button"
           onClick={toggleKillSwitch}
-          disabled={loadState === 'loading' || pending}
+          disabled={!isKnown || pending}
           className={`inline-flex shrink-0 items-center justify-center rounded-lg px-5 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            isOn
+            isKnown && isOn
               ? 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400'
               : 'bg-rose-500 text-rose-950 hover:bg-rose-400'
           }`}
         >
-          {pending ? 'Saving...' : isOn ? 'Turn Off (Resume)' : 'Turn On (Pause)'}
+          {pending ? 'Saving...' : isKnown && isOn ? 'Turn Off (Resume)' : 'Turn On (Pause)'}
         </button>
       </div>
     </section>
