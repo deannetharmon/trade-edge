@@ -19,3 +19,7 @@ export function decisionLogKey(userId: string): string {
 export function runLockKey(userId: string): string {
   return `autopilot:run-lock:${userId}`;
 }
+
+export function auditEventsKey(userId: string): string {
+  return `autopilot:audit-events:${userId}`;
+}
