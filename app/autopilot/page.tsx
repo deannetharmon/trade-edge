@@ -1,6 +1,7 @@
 // app/autopilot/page.tsx
 
 import Link from 'next/link';
+import KillSwitchControl from './KillSwitchControl';
 
 const cards = [
   {
@@ -55,6 +56,10 @@ export default function AutopilotPage() {
           >
             Back to TradeEdge
           </Link>
+        </div>
+
+        <div className="mb-8">
+          <KillSwitchControl />
         </div>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
