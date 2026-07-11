@@ -277,11 +277,76 @@ function buildReviewTriggers(context: SingleCandidateDecisionContext): DecisionR
   return triggers;
 }
 
+function describeConcern(concern: DecisionConcern): string {
+  return `${concern.label.toLowerCase()} (${concern.explanation})`;
+}
+
+// Summarizes the strongest alternative Autopilot actually weighed, so
+// rationale can address "why not the alternatives" without duplicating the
+// reasoning already captured in buildAlternatives() -- this just narrates it.
+function topAlternativeSummary(alternatives: DecisionAlternative[]): string | undefined {
+  const candidate = alternatives.find((alt) => alt.disposition !== 'not_available');
+  if (!candidate) return undefined;
+  const label = candidate.action.replaceAll('_', ' ').toLowerCase();
+  const reason = (candidate.reasons[0] ?? 'no stated advantage over this trade').toLowerCase().replace(/\.$/, '');
+  return `The next-best alternative, ${label}, was ${candidate.disposition} because ${reason}`;
+}
+
+function buildRationale(args: {
+  action: DecisionAction;
+  status: DecisionAnalysis['recommendation']['status'];
+  candidate: SingleCandidateDecisionContext['candidate'];
+  concerns: DecisionConcern[];
+  alternatives: DecisionAlternative[];
+  confidence: number;
+  minimumConfidence: number;
+  marketBias: SingleCandidateDecisionContext['market']['bias'];
+  opportunityTotal: number;
+}): string {
+  const { action, status, candidate, concerns, alternatives, confidence, minimumConfidence, marketBias, opportunityTotal } = args;
+  const altSummary = topAlternativeSummary(alternatives);
+  const actionLabel = action.replaceAll('_', ' ');
+
+  if (status === 'not_recommended') {
+    const blocking = concerns.filter((c) => c.severity === 'critical');
+    const lead = blocking.length
+      ? `${actionLabel} ${candidate.symbol}: blocked because ${blocking.map(describeConcern).join('; and ')}.`
+      : `${actionLabel} ${candidate.symbol}: not recommended today.`;
+    const altText = altSummary ? ` ${altSummary}.` : '';
+    return `${lead}${altText} This holds regardless of opportunity score (${opportunityTotal.toFixed(0)}) -- no sizing or timing adjustment resolves it, so wait for the underlying condition to change.`;
+  }
+
+  if (status === 'conditional') {
+    const highs = concerns.filter((c) => c.severity === 'high');
+    const reasons: string[] = [];
+    if (confidence < minimumConfidence) {
+      reasons.push(`decision confidence is ${confidence.toFixed(0)}, below the ${minimumConfidence.toFixed(0)} minimum required`);
+    }
+    if (marketBias === 'uncertain') {
+      reasons.push('the underlying market bias is uncertain rather than clearly bullish or bearish');
+    }
+    if (highs.length) {
+      reasons.push(highs.map(describeConcern).join('; and '));
+    }
+    const reasonText = reasons.length ? reasons.join('; and ') : 'current conditions are not strong enough to clear the bar';
+    const altText = altSummary ? `, and ${altSummary.toLowerCase()}` : '';
+    return `Wait on ${candidate.strategy} ${candidate.symbol} for now: ${reasonText}. The setup itself (opportunity score ${opportunityTotal.toFixed(0)}) may still be reasonable${altText} -- revisit once the blocking condition above resolves.`;
+  }
+
+  // recommended
+  const positives = concerns.length === 0
+    ? 'no concerns of any severity were found'
+    : 'only low-severity concerns were found, none of which block the trade';
+  const altText = altSummary ? ` ${altSummary}, so this remains the strongest option today.` : '';
+  return `${actionLabel} ${candidate.symbol} clears the current checks: confidence is ${confidence.toFixed(0)} (at or above the ${minimumConfidence.toFixed(0)} minimum) and opportunity score is ${opportunityTotal.toFixed(0)}, and ${positives}.${altText}`;
+}
+
 export function evaluateSingleCandidate(
   context: SingleCandidateDecisionContext,
 ): DecisionAnalysis {
   const { candidate, confidenceInput, opportunityScore, preferences, market } = context;
   const concerns = buildConcerns(context);
+  const alternatives = buildAlternatives(context);
   const criticalConcern = concerns.some((concern) => concern.severity === 'critical');
   const highConcern = concerns.some((concern) => concern.severity === 'high');
   const confidence = clamp(confidenceInput.framework.total);
@@ -333,15 +398,20 @@ export function evaluateSingleCandidate(
       framework: confidenceInput.framework,
     },
     priority: criticalConcern ? 'high' : status === 'recommended' ? 'normal' : 'low',
-    rationale:
-      status === 'recommended'
-        ? `The ${candidate.strategy} aligns with the stated objective and cleared the current confidence and portfolio checks.`
-        : status === 'conditional'
-          ? 'The setup may be valid, but current confidence or portfolio conditions are not strong enough for a recommendation.'
-          : 'One or more hard constraints conflict with opening this trade.',
+    rationale: buildRationale({
+      action,
+      status,
+      candidate,
+      concerns,
+      alternatives,
+      confidence,
+      minimumConfidence: preferences.minimumConfidence,
+      marketBias: market.bias,
+      opportunityTotal: opportunityScore.total,
+    }),
     supportingEvidence: buildEvidence(context),
     concerns,
-    alternatives: buildAlternatives(context),
+    alternatives,
     reviewTriggers: buildReviewTriggers(context),
     expectedOutcome: {
       intent: context.objective,

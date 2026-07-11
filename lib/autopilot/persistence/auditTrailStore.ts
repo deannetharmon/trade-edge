@@ -9,7 +9,8 @@ export type AuditEventType =
   | 'submit_pressed'
   | 'broker_ack'
   | 'order_accepted'
-  | 'order_rejected';
+  | 'order_rejected'
+  | 'autopilot_paused';
 
 export interface AuditEvent {
   id: string;

@@ -49,4 +49,9 @@ export interface RecommendationRunResult {
   rejectedCount: number;
   suppressedCount: number;
   recommendations: DecisionAnalysis[];
+  // True when this run was short-circuited by AutopilotConfig.killSwitchEnabled
+  // before any candidate was evaluated. When true, candidatesScanned is 0 and
+  // recommendations is empty regardless of how many candidates were supplied
+  // -- see runRecommendationEngine() in recommendationEngine.ts.
+  killSwitchActive: boolean;
 }

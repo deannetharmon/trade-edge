@@ -299,17 +299,33 @@ describe('explanation quality', () => {
     }
   });
 
-  it('FLAGS A GAP: rationale does not distinctly address "why now" per-candidate', () => {
-    // KNOWN GAP (see SPRINT2_TEST_PLAN.md): evaluateSingleCandidate's
-    // `rationale` is a single fixed sentence per status bucket (recommended /
-    // conditional / not_recommended) rather than a per-candidate narrative
-    // that separately addresses "why this action", "why now", and "why not
-    // the alternatives". Evidence/concerns/alternatives/review-triggers
-    // collectively cover the content, but rationale itself is not yet
-    // candidate-specific prose. This test documents the gap rather than
-    // silently passing.
+  it('produces different rationale text for different candidates in the same status bucket (per-candidate narrative)', () => {
+    // GAP CLOSED: rationale used to be one of three fixed sentences per
+    // status bucket. It now interpolates the candidate's symbol, the actual
+    // triggering concern(s), confidence/opportunity numbers, and the
+    // strongest alternative considered, so two different candidates landing
+    // in the same status no longer produce identical text.
     const a = evaluateSingleCandidate(makeContext({ candidate: makeCandidate({ id: 'a', symbol: 'AMD' }) }));
     const b = evaluateSingleCandidate(makeContext({ candidate: makeCandidate({ id: 'b', symbol: 'NVDA' }) }));
-    expect(a.rationale).toBe(b.rationale); // documents current (shared, non-per-candidate) behavior
+    expect(a.rationale).not.toBe(b.rationale);
+    expect(a.rationale).toContain('AMD');
+    expect(b.rationale).toContain('NVDA');
+  });
+
+  it('rationale for a not_recommended candidate names the specific blocking concern', () => {
+    const analysis = evaluateSingleCandidate(
+      makeContext({ market: { bias: 'bullish', earningsWithinExpiration: true, macroRiskElevated: false, volatilityStable: true } }),
+    );
+    expect(analysis.recommendation.status).toBe('not_recommended');
+    expect(analysis.rationale.toLowerCase()).toContain('earnings');
+  });
+
+  it('rationale for a conditional candidate names the specific reason it is waiting', () => {
+    const analysis = evaluateSingleCandidate(
+      makeContext({ preferences: { willingToOwn: true, preferDefinedRisk: false, minimumConfidence: 90 }, confidenceInput: { framework: makeCleanConfidenceFramework({ total: 60 }) } }),
+    );
+    expect(analysis.recommendation.status).toBe('conditional');
+    expect(analysis.rationale).toContain('60');
+    expect(analysis.rationale).toContain('90');
   });
 });

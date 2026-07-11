@@ -88,10 +88,17 @@ Status: ✅ Automated, 19 tests, passing.
 - Asserts every `concern.explanation` is substantive (not just a rule name).
 - Asserts every `alternative.reasons` entry is non-trivial (covers "why not the alternatives").
 - Asserts every `reviewTrigger.explanation` is substantive (covers "what would change the recommendation").
+- Asserts two different candidates landing in the same status bucket produce **different** rationale text, each naming its own symbol.
+- Asserts a `not_recommended` rationale names the specific blocking concern (e.g. "earnings"), and a `conditional` rationale names the specific confidence/threshold numbers that triggered the wait.
 
-**Known gap (documented, not silently passed):** `rationale` is currently one of exactly three fixed sentences (`recommended` / `conditional` / `not_recommended`), not a per-candidate narrative. Two different candidates that land in the same status bucket get byte-identical rationale text. This satisfies "why this action" and partially "why now" only in the generic sense — it does not read as candidate-specific reasoning. A test (`FLAGS A GAP: ...`) asserts this current behavior explicitly so it can't regress silently *or* be "fixed" without someone noticing the assertion needs updating.
+**Gap closed (2026-07-11):** `rationale` was previously one of exactly three fixed sentences (`recommended` / `conditional` / `not_recommended`), with no per-candidate detail beyond an interpolated strategy name. It's now built by a `buildRationale()` helper inside `evaluateSingleCandidate.ts` that composes the *already-computed* concerns, alternatives, confidence, and opportunity score into candidate-specific prose — no new reasoning logic was added, this is purely textifying data the function already derives. It now:
+- Names the candidate's symbol and action.
+- For `not_recommended`: names the specific critical concern(s) that blocked it.
+- For `conditional`: names the specific reason (confidence below minimum, uncertain market bias, or a specific high-severity concern) and the actual numbers involved.
+- For `recommended`: cites the confidence and opportunity-score numbers and confirms no blocking concerns.
+- All three paths reference the strongest alternative actually considered (`topAlternativeSummary()`), addressing "why not the alternatives" directly in the rationale text itself rather than only in the separate `alternatives` array.
 
-Status: ✅ Automated, 5 tests, passing (1 of which documents a gap rather than proving correctness).
+Status: ✅ Automated, 7 tests, passing (was 5; two replaced, three added).
 
 ---
 
@@ -119,9 +126,15 @@ Status: ✅ Automated, 12 tests, passing.
 - `RecommendationRunResult.mode === 'paper'` and `liveTradingEnabled === false` are hard-coded, not conditional.
 - A recommendation run does not add/remove open paper positions or change `currentBalance` as a side effect (the mocked account is asserted unchanged except for `lastRunAt`).
 - **No live orders submitted:** there is currently no code path in `lib/autopilot/decision/` or the `app/api/autopilot/*` routes that calls the TastyTrade order-submission client at all — this was confirmed by inspection (`grep` for order-submission calls returned nothing in this branch), not by a runtime test, since there's no execution code to exercise. Documented here as a **manual verification item**: re-run this grep before every merge to `main` to catch any future addition of execution code on this branch.
-- **Kill switch — KNOWN GAP:** `AutopilotConfig.killSwitchEnabled` is persisted, sanitized on save, and surfaced by `GET /api/autopilot/status`, but it is **never read** by `runRecommendationEngine()` or by `app/api/autopilot/run/route.ts` / `app/api/autopilot/recommendations/route.ts`. Setting the kill switch today has no effect on whether a recommendation run executes. A test documents this explicitly (`KNOWN GAP: killSwitchEnabled=true does not currently block a recommendation run`) so it fails loudly (by design, as a reminder) rather than silently passing once someone wires up the enforcement — at that point, update the test to assert the new blocking behavior.
 
-Status: ✅ Automated, 5 tests, passing (1 documents a real gap, not a false-positive pass).
+**Gap closed (2026-07-11): kill switch enforcement.** `AutopilotConfig.killSwitchEnabled` was previously persisted, sanitized on save, and surfaced by `GET /api/autopilot/status`, but never read anywhere in the recommendation-generation path. `runRecommendationEngine()` now checks it first, before the candidate pipeline or the shared decision engine ever run:
+- When `killSwitchEnabled` is `true`, the function returns immediately with `killSwitchActive: true`, `recommendations: []`, `candidatesScanned: 0`, and **zero** decision log entries (no candidate reasoning ran, so there's nothing to log per-candidate). Exactly one `autopilot_paused` audit event is written instead, recording how many candidates were supplied but not evaluated.
+- This is the single enforcement point — deliberately not duplicated in `app/api/autopilot/run/route.ts` or `app/api/autopilot/recommendations/route.ts`, both of which just relay whatever `runRecommendationEngine()` returns. That keeps the "don't duplicate reasoning logic" constraint intact: there's exactly one place that can let a run through when the switch is on.
+- The run lock is still correctly acquired and released on the kill-switch path (verified — a stuck lock would have silently blocked all future runs for that user).
+- `RecommendationRunResult` gained a new field, `killSwitchActive: boolean`, so callers (eventually the UI) can distinguish "ran and found nothing" from "didn't run because you paused it." Additive, non-breaking change to the existing type.
+- **Not yet done:** no UI surfaces `killSwitchActive` today (`app/autopilot/page.tsx` is a minimal 119-line status view that doesn't read it). Recommended as a small follow-up, not done here to keep this change scoped to the Decision Engine / Autopilot orchestration layer per the sprint's stated boundaries.
+
+Status: ✅ Automated, 8 tests, passing (was 5; 1 replaced with 3 that assert real enforcement).
 
 ---
 
@@ -141,23 +154,26 @@ Manual validation checklist — these are existing runtime features that this Sp
 
 ## Summary
 
-**Tests implemented:** 89 automated tests across 6 files (`evaluateSingleCandidate.test.ts`, `riskValidation.test.ts`, `confidence.test.ts`, `riskGateEngine.test.ts`, `candidatePipeline.test.ts`, `recommendationEngine.test.ts`), plus one shared fixture module.
+**Tests implemented:** 93 automated tests across 6 files (`evaluateSingleCandidate.test.ts`, `riskValidation.test.ts`, `confidence.test.ts`, `riskGateEngine.test.ts`, `candidatePipeline.test.ts`, `recommendationEngine.test.ts`), plus one shared fixture module. (Was 89 at initial delivery; +4 net from closing the two gaps below — 2 gap-documenting tests replaced with 6 real-behavior tests.)
 
-**Tests passing:** 89 / 89, verified locally with `npx vitest run` against this branch. `npx tsc --noEmit` also passes clean, including the new test files.
+**Tests passing:** 93 / 93, verified locally with `npx vitest run` against this branch. `npx tsc --noEmit` also passes clean, including the new/changed files.
 
 **Tests requiring manual verification:**
 - Vercel preview build (item 1)
 - All of item 9 (Regression) — requires a running server + auth + TastyTrade context
 - Re-confirming no execution code path exists, before every merge to `main` (item 8)
 
-**Known gaps (found during this validation pass, not pre-existing knowledge):**
-1. `AutopilotConfig.killSwitchEnabled` is stored and displayed but never enforced anywhere in the recommendation-generation path.
-2. `DecisionAnalysis.rationale` is one of three fixed, non-candidate-specific sentences rather than a true per-candidate narrative — it satisfies the letter of "why this action" but not "why now" as distinct, candidate-specific text. Evidence/concerns/alternatives/review-triggers do carry candidate-specific detail, so the *information* exists, just not consolidated into `rationale` itself.
-3. No dedicated IC (iron condor) fixture — IC currently behaves identically to BPS/BCS through `actionForStrategy()`, so this is low-risk today but should get its own fixture once/if IC gets distinct evidence or concern logic.
-4. `dedupeCandidates()` in `candidatePipeline.ts` silently drops duplicates before validation runs — there's no way for a caller to see *which* duplicate was dropped or why, only that `totalReceived > totalAccepted + totalRejected`.
+**Gaps closed (2026-07-11):**
+1. ✅ `AutopilotConfig.killSwitchEnabled` is now enforced. `runRecommendationEngine()` checks it before any candidate reaches the pipeline; when on, the run returns immediately with `killSwitchActive: true`, zero recommendations, zero decision-log entries, and one `autopilot_paused` audit event. See item 8 above for detail.
+2. ✅ `DecisionAnalysis.rationale` is now per-candidate narrative text, built from data the shared engine already computes (concerns, alternatives, confidence, opportunity score) — not a new reasoning path. See item 6 above for detail.
+
+**Remaining known gaps:**
+1. No IC (iron condor) fixture — IC currently behaves identically to BPS/BCS through `actionForStrategy()`, so this is low-risk today but should get its own fixture once/if IC gets distinct evidence or concern logic.
+2. `dedupeCandidates()` in `candidatePipeline.ts` silently drops duplicates before validation runs — there's no way for a caller to see *which* duplicate was dropped or why, only that `totalReceived > totalAccepted + totalRejected`.
+3. `killSwitchActive` is not yet surfaced anywhere in the UI (`app/autopilot/page.tsx` doesn't read it). The backend enforcement is real and tested; the trader has no visual confirmation "Autopilot is paused" yet if they set the switch via the API directly. There is also no UI control to set `killSwitchEnabled` at all yet — it's currently only reachable via `POST /api/autopilot/config`.
 
 **Recommended next steps before Sprint 3:**
-1. Decide whether the kill switch gap (#1 above) needs to close before Sprint 3, since Sprint 3 is where paper execution presumably gets added — a kill switch that doesn't switch anything off is a meaningfully bigger problem once there's something to execute.
-2. Wire this test suite into CI (or at minimum run `npm test` locally before every push) alongside the existing Vercel-build-is-the-TypeScript-check convention.
-3. Add the IC fixture (#3) opportunistically when touching IC logic next.
-4. Consider whether `rationale` should become per-candidate narrative text before Sprint 3's UI surfaces it more prominently to the trader — right now it's the least informative field in an otherwise thorough contract.
+1. Wire this test suite into CI (or at minimum run `npm test` locally before every push) alongside the existing Vercel-build-is-the-TypeScript-check convention.
+2. Add the IC fixture (#1 above) opportunistically when touching IC logic next.
+3. Add a kill-switch toggle to `app/autopilot/page.tsx` (or wherever Autopilot settings live) and surface `killSwitchActive` from `/api/autopilot/status` and from run results, now that the backend actually does something with it.
+4. Consider whether `dedupeCandidates()` (#2 above) should retain a `duplicateOf` pointer for traceability, low priority.

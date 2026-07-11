@@ -378,6 +378,44 @@ export async function runRecommendationEngine(
     const config = await getAutopilotConfig(userId);
     let account = await getPaperAccount(userId);
     const portfolioState = buildPortfolioState(userId, account);
+
+    // Kill switch: a full pause on recommendation generation, checked before
+    // any candidate reaches the pipeline or the shared decision engine. This
+    // is the only enforcement point -- deliberately not duplicated in the
+    // API routes -- so there is exactly one place that can ever let a run
+    // through when the switch is on.
+    if (config.killSwitchEnabled) {
+      await appendAuditEvent(userId, {
+        id: createAuditEventId(),
+        eventType: 'autopilot_paused',
+        positionId: undefined,
+        orderId: undefined,
+        payload: {
+          reason: 'kill_switch_enabled',
+          candidatesSupplied: (options.candidates ?? []).length,
+          source: options.source ?? 'manual',
+        },
+        createdAt: timestamp,
+      });
+
+      return {
+        runId: lock.lockId || createRunId(),
+        timestamp,
+        userId,
+        mode: 'paper',
+        liveTradingEnabled: false,
+        config,
+        portfolioState,
+        account,
+        candidatesScanned: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+        suppressedCount: 0,
+        recommendations: [],
+        killSwitchActive: true,
+      };
+    }
+
     const candidates = options.candidates ?? [];
     const pipeline = runCandidatePipeline({
       candidates,
@@ -499,6 +537,7 @@ export async function runRecommendationEngine(
       rejectedCount: ranked.filter((item) => item.recommendation.status === 'not_recommended').length,
       suppressedCount: ranked.filter((item) => item.recommendation.status === 'conditional').length,
       recommendations: ranked,
+      killSwitchActive: false,
     };
   } finally {
     await releaseAutopilotRunLock(userId, lock.lockId);

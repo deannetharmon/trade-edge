@@ -186,17 +186,32 @@ describe('safety', () => {
     expect(mockAccount.currentBalance).toBe(before);
   });
 
-  it('KNOWN GAP: killSwitchEnabled=true does not currently block a recommendation run', async () => {
-    // See SPRINT2_TEST_PLAN.md "Known gaps": AutopilotConfig.killSwitchEnabled
-    // is persisted and surfaced by /api/autopilot/status but is never read
-    // by runRecommendationEngine() or any route in app/api/autopilot. This
-    // test documents that a kill-switch flag currently has no effect on
-    // recommendation generation, rather than silently assuming it works.
+  it('GAP CLOSED: killSwitchEnabled=true blocks a recommendation run before any candidate is evaluated', async () => {
     mockConfig = makeConfig({ killSwitchEnabled: true });
+    const candidates = [makeCandidate({ id: 'a' }), makeCandidate({ id: 'b', symbol: 'NVDA' })];
+    const result = await runRecommendationEngine('test-user', { candidates, source: 'manual' });
+
+    expect(result.killSwitchActive).toBe(true);
+    expect(result.recommendations).toHaveLength(0);
+    expect(result.candidatesScanned).toBe(0);
+    expect(result.approvedCount).toBe(0);
+    // No candidate reasoning ran at all -- no decision log entries, only the
+    // single audit event recording the pause itself.
+    expect(decisionLogEntries).toHaveLength(0);
+    expect(auditEvents).toHaveLength(1);
+    expect((auditEvents[0] as any).eventType).toBe('autopilot_paused');
+  });
+
+  it('killSwitchActive is explicitly false on a normal run (not just absent)', async () => {
+    mockConfig = makeConfig({ killSwitchEnabled: false });
     const result = await runRecommendationEngine('test-user', { candidates: [makeCandidate()], source: 'manual' });
-    // If this ever starts failing (i.e. the engine starts short-circuiting
-    // or throwing when the kill switch is on), that means the gap has been
-    // closed -- update this test to assert the new, correct behavior.
-    expect(result.recommendations.length).toBeGreaterThan(0);
+    expect(result.killSwitchActive).toBe(false);
+  });
+
+  it('the run lock is still released when the kill switch short-circuits a run', async () => {
+    mockConfig = makeConfig({ killSwitchEnabled: true });
+    const locking = await import('@/lib/autopilot/scheduler/locking');
+    await runRecommendationEngine('test-user', { candidates: [makeCandidate()], source: 'manual' });
+    expect(locking.releaseAutopilotRunLock).toHaveBeenCalled();
   });
 });
