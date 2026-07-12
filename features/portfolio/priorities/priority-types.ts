@@ -1,6 +1,7 @@
 // features/portfolio/priorities/priority-types.ts
 
 import type { PortfolioRecommendation, PortfolioRecommendationUrgency } from '../recommendations/recommendation-types';
+import type { PortfolioObjective } from '@/lib/portfolio-intelligence';
 
 // A single ranked entry in the Daily Priority List. Everything here is
 // derived deterministically from existing recommendation + health data plus
@@ -19,7 +20,8 @@ export interface PriorityItem {
 
 // Minimal shape the priority engine needs from each enriched position. The
 // Portfolio page's Position objects already satisfy this after
-// attachSnapshotHistory() attaches healthScore + recommendation.
+// attachSnapshotHistory() attaches healthScore + recommendation + (PI-0002)
+// portfolioObjective.
 export interface PriorityPositionInput {
   key: string;
   symbol: string;
@@ -30,4 +32,9 @@ export interface PriorityPositionInput {
   earningsDate?: string | null;
   healthScore?: { score: number } | null;
   recommendation?: PortfolioRecommendation | null;
+  // PI-0003: ranking now comes from the canonical PortfolioObjective via
+  // prioritizePortfolioObjectives(), not this module's own composite-score
+  // algorithm. Positions without one are excluded from ranking (nothing to
+  // prioritize) -- see priority-engine.ts.
+  objective?: PortfolioObjective | null;
 }
