@@ -22,9 +22,10 @@
 - TE-0006B — Portfolio Recommendation Rules (consolidated into `lib/portfolio-intelligence` in PI-0002, now produces canonical `PortfolioObjective[]`)
 - Sprint 2 — Decision Engine (`lib/decision-engine`, `lib/autopilot/decision`) — merged to `main`, live in production
 - Sprint 3, PI-0001 — Portfolio Objective Engine (`lib/portfolio-intelligence`) — first slice, locally verified, pending Vercel confirmation
-- Sprint 3, PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved out of `features/portfolio/` into the canonical model, `app/portfolio/page.tsx` now a consumer, stable rule IDs introduced, locally verified, pending Vercel confirmation
+- Sprint 3, PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved out of `features/portfolio/` into the canonical model, `app/portfolio/page.tsx` now a consumer, stable rule IDs introduced
+- Sprint 3, PI-0003 — Canonical Portfolio Priority Engine — risk policy separation, 15 fine-grained rule IDs, TE-0006C (Daily Priority List) consolidated into the canonical `prioritizePortfolioObjectives()`, `evaluatePortfolioObjectives()` given its first production consumer, locally verified, pending Vercel confirmation
 
-Note: `features/portfolio/priorities/` (TE-0006C, Daily Priority List) still has its own separate ranking logic, not yet reconciled with `PortfolioObjective`. See `planning/SPRINT3_PI0002_PLAN.md` "Later items" for this and other explicitly deferred reconciliation work.
+Note: `evaluatePortfolioObjectives()`'s output is wired into the Portfolio page's state but not yet rendered anywhere. Portfolio-level financial aggregates (net liquidity, buying power, drawdown, concentration, income) aren't yet read from the Balances tab, so those specific objective rules don't fire from production data yet. See `planning/SPRINT3_PI0003_PLAN.md` "Later items".
 
 ## Current Planning Focus
 
@@ -38,7 +39,7 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 
 ## Near-Term Roadmap
 
-1. Portfolio Intelligence — next slice(s) beyond PI-0002 (see "Later items" in `planning/SPRINT3_PI0002_PLAN.md` and `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md`)
+1. Portfolio Intelligence — next slice(s) beyond PI-0003 (see "Later items" in `planning/SPRINT3_PI0003_PLAN.md`, `planning/SPRINT3_PI0002_PLAN.md`, and `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md`)
 2. TE-0006C — Daily Priority List
 3. TE-0006D — Position Advisor Cards
 4. TE-0006E — Recommendation Explanation Panel
@@ -105,7 +106,7 @@ Exit criteria for the future implementation:
 ## Core Product Engines
 
 1. Opportunity Engine — Where should my next dollar go?
-2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 complete)
+2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 + PI-0003 complete)
 3. Risk Engine — What could hurt me?
 4. Income Engine — Am I producing enough recurring income?
 5. Execution Engine — What do I actually need to do today?

@@ -1,39 +1,40 @@
 // lib/portfolio-intelligence/ruleIds.ts
 //
-// PI-0002: stable rule IDs. Every PortfolioObjective, from any producer
-// (the portfolio-level evaluatePortfolioObjectives batch evaluator, or the
-// per-position evaluatePositionObjective consolidated from TE-0006B), gets
-// its ruleId from this single mapping. Deliberately a pure function of
-// `type` -- not a proliferation of one ID per fine-grained trigger
-// condition. Finer distinctions (e.g. "roll-soon" vs "place-gtc" vs "watch",
-// all folded into MANAGE_POSITION) live in the objective's title/rationale/
-// rulesTriggered, not in a separate rule ID. Future consumers (Decision
-// History, Daily Briefing, Analytics, Autopilot, AI Advisor) can rely on
-// these ten IDs being exhaustive and stable.
+// PI-0003: expanded from PI-0002's one-rule-ID-per-objective-type scheme.
+// Rule IDs now describe WHY an objective fired; Objective Types describe
+// WHAT kind of objective it is. Multiple rule IDs can map to the same
+// objective type (e.g. OBJ-ASSIGNMENT-RISK, OBJ-EARNINGS-RISK, and
+// OBJ-CLOSE-LOSER are all REVIEW_THREATENED_POSITION). Each objective
+// producer sets its own ruleId explicitly per triggering branch -- there is
+// no longer a single type->id lookup, since that was exactly the "not
+// expressive enough" problem PI-0003 called out.
+//
+// RULE_ID_OBJECTIVE_TYPE is the reverse mapping (rule ID -> the one type it
+// belongs to), used for validation/tests and by any consumer that needs to
+// know an objective's type from its rule ID alone. The
+// PortfolioObjectiveRuleId type itself lives in types.ts (it's a field on
+// PortfolioObjective), imported here rather than redeclared.
 
-import type { PortfolioObjectiveType } from './types';
+import type { PortfolioObjectiveRuleId, PortfolioObjectiveType } from './types';
 
-export type PortfolioObjectiveRuleId =
-  | 'OBJ-CLOSE-FOR-PROFIT'
-  | 'OBJ-MANAGE-21-DTE'
-  | 'OBJ-REVIEW-THREATENED-POSITION'
-  | 'OBJ-ROLL-POSITION'
-  | 'OBJ-DEPLOY-IDLE-CASH'
-  | 'OBJ-INCREASE-INCOME'
-  | 'OBJ-REDUCE-CONCENTRATION'
-  | 'OBJ-PRESERVE-BUYING-POWER'
-  | 'OBJ-REVIEW-PENDING-ORDER'
-  | 'OBJ-WAIT';
-
-export const OBJECTIVE_RULE_ID: Record<PortfolioObjectiveType, PortfolioObjectiveRuleId> = {
-  CLOSE_FOR_PROFIT: 'OBJ-CLOSE-FOR-PROFIT',
-  MANAGE_POSITION: 'OBJ-MANAGE-21-DTE',
-  REVIEW_THREATENED_POSITION: 'OBJ-REVIEW-THREATENED-POSITION',
-  ROLL_POSITION: 'OBJ-ROLL-POSITION',
-  DEPLOY_IDLE_CASH: 'OBJ-DEPLOY-IDLE-CASH',
-  INCREASE_INCOME: 'OBJ-INCREASE-INCOME',
-  REDUCE_CONCENTRATION: 'OBJ-REDUCE-CONCENTRATION',
-  PRESERVE_BUYING_POWER: 'OBJ-PRESERVE-BUYING-POWER',
-  REVIEW_PENDING_ORDER: 'OBJ-REVIEW-PENDING-ORDER',
-  WAIT: 'OBJ-WAIT',
+export const RULE_ID_OBJECTIVE_TYPE: Record<PortfolioObjectiveRuleId, PortfolioObjectiveType> = {
+  'OBJ-CLOSE-FOR-PROFIT': 'CLOSE_FOR_PROFIT',
+  'OBJ-MANAGE-21-DTE': 'MANAGE_POSITION',
+  'OBJ-PLACE-GTC': 'MANAGE_POSITION',
+  'OBJ-LET-EXPIRE': 'MANAGE_POSITION',
+  'OBJ-WATCH-POSITION': 'MANAGE_POSITION',
+  'OBJ-ROLL-POSITION': 'ROLL_POSITION',
+  'OBJ-ASSIGNMENT-RISK': 'REVIEW_THREATENED_POSITION',
+  'OBJ-EARNINGS-RISK': 'REVIEW_THREATENED_POSITION',
+  'OBJ-CLOSE-LOSER': 'REVIEW_THREATENED_POSITION',
+  'OBJ-DEPLOY-IDLE-CASH': 'DEPLOY_IDLE_CASH',
+  'OBJ-INCREASE-INCOME': 'INCREASE_INCOME',
+  'OBJ-REDUCE-CONCENTRATION': 'REDUCE_CONCENTRATION',
+  'OBJ-PRESERVE-BUYING-POWER': 'PRESERVE_BUYING_POWER',
+  'OBJ-REVIEW-PENDING-ORDER': 'REVIEW_PENDING_ORDER',
+  'OBJ-WAIT': 'WAIT',
 };
+
+export function isRuleIdConsistentWithType(ruleId: PortfolioObjectiveRuleId, type: PortfolioObjectiveType): boolean {
+  return RULE_ID_OBJECTIVE_TYPE[ruleId] === type;
+}

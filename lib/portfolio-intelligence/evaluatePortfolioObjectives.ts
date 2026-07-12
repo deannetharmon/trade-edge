@@ -19,13 +19,14 @@ import type {
   PortfolioObjectiveEvidence,
   PortfolioObjectivePriority,
   PortfolioObjectiveReviewTrigger,
+  PortfolioObjectiveRuleId,
   PortfolioObjectiveSubject,
   PortfolioObjectiveType,
   PortfolioObjectiveUrgency,
   PortfolioPositionInput,
   PortfolioStateInput,
 } from './types';
-import { OBJECTIVE_RULE_ID } from './ruleIds';
+import { prioritizePortfolioObjectives } from './prioritizePortfolioObjectives';
 
 function clamp(value: number, min = 0, max = 100): number {
   if (!Number.isFinite(value)) return min;
@@ -53,6 +54,9 @@ const NEUTRAL_IMPACT: ObjectiveImpact = {
 
 interface ObjectiveDraft {
   type: PortfolioObjectiveType;
+  // PI-0003: each rule function sets its own fine-grained ruleId explicitly
+  // -- no more single type->id lookup. See ruleIds.ts.
+  ruleId: PortfolioObjectiveRuleId;
   title: string;
   summary: string;
   priority: PortfolioObjectivePriority;
@@ -78,7 +82,7 @@ function finalize(draft: ObjectiveDraft, rulesEvaluated: string[], createdAt: st
     createdAt,
     version: 'portfolio-objective-v1',
     type: draft.type,
-    ruleId: OBJECTIVE_RULE_ID[draft.type],
+    ruleId: draft.ruleId,
     title: draft.title,
     summary: draft.summary,
     priority: draft.priority,
@@ -151,6 +155,7 @@ function evaluateThreatenedPosition(
 
   return {
     type: 'REVIEW_THREATENED_POSITION',
+    ruleId: (materialLoss || flaggedBreach) ? 'OBJ-CLOSE-LOSER' : 'OBJ-EARNINGS-RISK',
     title: `Review threatened position: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) needs review: ${concerns.map((c) => c.label.toLowerCase()).join(', ')}.`,
     priority: critical ? 'critical' : 'high',
@@ -195,6 +200,7 @@ function evaluateCloseForProfit(
 
   return {
     type: 'CLOSE_FOR_PROFIT',
+    ruleId: 'OBJ-CLOSE-FOR-PROFIT',
     title: `Close for profit: ${position.symbol}`,
     summary: `${position.symbol} has captured ${captured.toFixed(0)}% of max profit, at or above the ${thresholds.profitTargetPct}% target.`,
     priority: critical ? 'critical' : 'high',
@@ -240,6 +246,7 @@ function evaluateDteManagement(
   if (position.strategy === 'CSP' && position.assignmentIntent === 'willing') {
     return {
       type: 'MANAGE_POSITION',
+      ruleId: 'OBJ-WATCH-POSITION',
       title: `Monitor CSP toward assignment: ${position.symbol}`,
       summary: `${position.symbol} CSP is at ${dte} DTE; assignment is the stated goal, so this is a monitoring note, not a forced close.`,
       priority: 'low',
@@ -272,6 +279,7 @@ function evaluateDteManagement(
 
   return {
     type,
+    ruleId: rollReview ? 'OBJ-ROLL-POSITION' : 'OBJ-MANAGE-21-DTE',
     title: `${rollReview ? 'Review roll candidate' : 'Manage position'}: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) is at ${dte} DTE, at or inside the ${thresholds.dteReviewThreshold}-DTE review threshold.`,
     priority: nearTerm ? 'high' : 'medium',
@@ -317,6 +325,7 @@ function evaluateDeployIdleCash(
 
   return {
     type: 'DEPLOY_IDLE_CASH',
+    ruleId: 'OBJ-DEPLOY-IDLE-CASH',
     title: 'Deploy idle cash',
     summary: `Idle cash is ${portfolio.idleCashPct.toFixed(1)}% of net liquidity, above the ${thresholds.idleCashThresholdPct}% threshold, with room to deploy.`,
     priority: materiallyHigh ? 'high' : 'medium',
@@ -352,6 +361,7 @@ function evaluateIncreaseIncome(
 
   return {
     type: 'INCREASE_INCOME',
+    ruleId: 'OBJ-INCREASE-INCOME',
     title: 'Increase recurring income',
     summary: `Current income is ${deficitPct.toFixed(0)}% below the recurring-income target.`,
     priority: 'medium',
@@ -386,6 +396,7 @@ function evaluateConcentration(
     const materially = pct >= portfolio.maxSymbolConcentrationPct * 1.5;
     drafts.push({
       type: 'REDUCE_CONCENTRATION',
+      ruleId: 'OBJ-REDUCE-CONCENTRATION',
       title: `Reduce concentration: ${symbol}`,
       summary: `${symbol} is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`,
       priority: materially ? 'high' : 'medium',
@@ -410,6 +421,7 @@ function evaluateConcentration(
     const materially = pct >= portfolio.maxSectorConcentrationPct * 1.5;
     drafts.push({
       type: 'REDUCE_CONCENTRATION',
+      ruleId: 'OBJ-REDUCE-CONCENTRATION',
       title: `Reduce concentration: ${sector} sector`,
       summary: `${sector} sector is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSectorConcentrationPct}% sector limit.`,
       priority: materially ? 'high' : 'medium',
@@ -443,6 +455,7 @@ function evaluatePreserveBuyingPower(
 
   return {
     type: 'PRESERVE_BUYING_POWER',
+    ruleId: 'OBJ-PRESERVE-BUYING-POWER',
     title: 'Preserve buying power',
     summary: drawdownBreach
       ? `Drawdown of ${portfolio.currentDrawdownPct.toFixed(1)}% has reached the defensive threshold.`
@@ -488,6 +501,7 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
 
   return {
     type: 'REVIEW_PENDING_ORDER',
+    ruleId: 'OBJ-REVIEW-PENDING-ORDER',
     title: `Review pending order: ${order.symbol}`,
     summary: `${order.symbol} ${order.strategyAction} order needs review (${order.status}, ${order.ageMinutes}m old${offMarket ? `, ${(order.fillDistancePct as number).toFixed(1)}% from fill` : ''}).`,
     priority: veryStale || flagged ? 'high' : 'medium',
@@ -517,56 +531,10 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
 }
 
 // ---------------------------------------------------------------------------
-// Ranking
+// Ranking now lives in prioritizePortfolioObjectives.ts (PI-0003) -- this is
+// the ONE ranking engine, reused by this function and by any external
+// caller combining objectives from multiple sources.
 // ---------------------------------------------------------------------------
-
-const PRIORITY_RANK: Record<PortfolioObjectivePriority, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  informational: 4,
-};
-
-const URGENCY_RANK: Record<PortfolioObjectiveUrgency, number> = {
-  now: 0,
-  today: 1,
-  this_week: 2,
-  monitor: 3,
-  none: 4,
-};
-
-// Category order mirrors the stated general priority order:
-//   protect capital / critical risk -> time-sensitive existing positions ->
-//   harvest earned profit -> resolve pending-order problems -> improve
-//   portfolio construction -> deploy capital / generate new income -> wait
-const CATEGORY_RANK: Record<PortfolioObjectiveType, number> = {
-  REVIEW_THREATENED_POSITION: 0,
-  MANAGE_POSITION: 1,
-  ROLL_POSITION: 1,
-  CLOSE_FOR_PROFIT: 2,
-  REVIEW_PENDING_ORDER: 3,
-  REDUCE_CONCENTRATION: 4,
-  PRESERVE_BUYING_POWER: 4,
-  DEPLOY_IDLE_CASH: 5,
-  INCREASE_INCOME: 5,
-  WAIT: 6,
-};
-
-function rankObjectives(objectives: PortfolioObjective[]): PortfolioObjective[] {
-  return [...objectives].sort((a, b) => {
-    const priorityDelta = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-    if (priorityDelta !== 0) return priorityDelta;
-
-    const categoryDelta = CATEGORY_RANK[a.type] - CATEGORY_RANK[b.type];
-    if (categoryDelta !== 0) return categoryDelta;
-
-    const urgencyDelta = URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency];
-    if (urgencyDelta !== 0) return urgencyDelta;
-
-    return b.confidence - a.confidence;
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -614,30 +582,10 @@ export function evaluatePortfolioObjectives(context: PortfolioIntelligenceContex
   const increaseIncome = evaluateIncreaseIncome(context.portfolio);
   if (increaseIncome) drafts.push(increaseIncome);
 
-  if (drafts.length === 0) {
-    drafts.push({
-      type: 'WAIT',
-      title: 'No action required',
-      summary: 'No position, order, or portfolio-level condition currently justifies action.',
-      priority: 'informational',
-      urgency: 'none',
-      confidence: 90,
-      source: 'portfolio_state',
-      subject: { type: 'portfolio', label: 'Portfolio' },
-      rationale: 'No open position is threatened, past its profit target, or past its DTE review threshold; no pending order needs review; concentration, buying-power utilization, drawdown, idle cash, and income are all within configured ranges. Waiting is the correct action today -- there is nothing to force.',
-      supportingEvidence: [],
-      concerns: [],
-      portfolioImpact: NEUTRAL_IMPACT,
-      incomeImpact: NEUTRAL_IMPACT,
-      riskImpact: NEUTRAL_IMPACT,
-      capitalImpact: NEUTRAL_IMPACT,
-      reviewTriggers: [
-        { id: 'next-evaluation', label: 'Next portfolio evaluation', triggerType: 'manual', explanation: 'Re-evaluate on the next scheduled portfolio review or when portfolio/position/order data changes.' },
-      ],
-      rulesTriggered: ['no_conditions_met'],
-    });
-  }
-
+  // PI-0003: WAIT synthesis is now centralized in prioritizePortfolioObjectives
+  // (synthesizeWaitObjective) so every caller -- this function called
+  // standalone, or an external adapter combining multiple objective sources
+  // -- gets identical "nothing to do" behavior from one place.
   const objectives = drafts.map((draft) => finalize(draft, RULES_EVALUATED, context.generatedAt));
-  return rankObjectives(objectives);
+  return prioritizePortfolioObjectives(objectives, context.generatedAt);
 }

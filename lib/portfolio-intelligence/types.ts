@@ -101,14 +101,20 @@ export interface ObjectiveImpact {
   estimatedDollarValue?: number;
 }
 
-// PI-0002: stable rule ID, one per objective type, mechanically derived --
-// see ruleIds.ts for the mapping and rationale. Distinct from `id`, which is
-// a per-run, non-deterministic runtime identifier.
+// PI-0003: stable, fine-grained rule IDs. Multiple rule IDs can map to the
+// same objective `type` -- rule IDs describe WHY an objective fired,
+// `type` describes WHAT kind of objective it is. See ruleIds.ts for the
+// rule-id -> type reverse mapping and validation helper.
 export type PortfolioObjectiveRuleId =
   | 'OBJ-CLOSE-FOR-PROFIT'
   | 'OBJ-MANAGE-21-DTE'
-  | 'OBJ-REVIEW-THREATENED-POSITION'
+  | 'OBJ-PLACE-GTC'
+  | 'OBJ-LET-EXPIRE'
+  | 'OBJ-WATCH-POSITION'
   | 'OBJ-ROLL-POSITION'
+  | 'OBJ-ASSIGNMENT-RISK'
+  | 'OBJ-EARNINGS-RISK'
+  | 'OBJ-CLOSE-LOSER'
   | 'OBJ-DEPLOY-IDLE-CASH'
   | 'OBJ-INCREASE-INCOME'
   | 'OBJ-REDUCE-CONCENTRATION'

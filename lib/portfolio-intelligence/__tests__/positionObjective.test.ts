@@ -38,7 +38,7 @@ describe('PI-002: assignment-risk parity', () => {
     expect(legacyRecommendation.label).toBe('Assignment Risk');
     expect(objective).not.toBeNull();
     expect(objective!.type).toBe('REVIEW_THREATENED_POSITION');
-    expect(objective!.ruleId).toBe('OBJ-REVIEW-THREATENED-POSITION');
+    expect(objective!.ruleId).toBe('OBJ-ASSIGNMENT-RISK');
     expect(objective!.priority).toBe('critical');
   });
 });
@@ -50,7 +50,7 @@ describe('PI-002: close-loser parity', () => {
     expect(legacyRecommendation.urgency).toBe('critical');
     expect(legacyRecommendation.confidence).toBe(91);
     expect(objective!.priority).toBe('critical');
-    expect(objective!.ruleId).toBe('OBJ-REVIEW-THREATENED-POSITION');
+    expect(objective!.ruleId).toBe('OBJ-CLOSE-LOSER');
   });
 
   it('fires close-loser (high) at -50% combined with health score < 50', () => {
@@ -183,20 +183,35 @@ describe('PI-002: hold parity and the deliberate objective:null change', () => {
   });
 });
 
-describe('PI-002: stable rule IDs', () => {
-  it('every non-null objective carries the ruleId matching its type', () => {
+describe('PI-002/PI-003: stable rule IDs', () => {
+  it('every non-null objective carries the correct fine-grained ruleId (PI-0003)', () => {
+    const expectations: [PositionObjectiveInput, string][] = [
+      [baseInput({ dte: 5, buffer: 1.5 }), 'OBJ-ASSIGNMENT-RISK'],
+      [baseInput({ pnlPct: -110 }), 'OBJ-CLOSE-LOSER'],
+      [baseInput({ pnlPct: 55, dte: 25 }), 'OBJ-CLOSE-FOR-PROFIT'],
+      [baseInput({ dte: 18, pnlPct: 10 }), 'OBJ-MANAGE-21-DTE'],
+      [baseInput({ dte: 25, pnlPct: 25, hasGtc: false }), 'OBJ-PLACE-GTC'],
+    ];
+    for (const [input, expectedRuleId] of expectations) {
+      const { objective } = evaluatePositionObjective(input, NOW);
+      expect(objective).not.toBeNull();
+      expect(objective!.ruleId).toBe(expectedRuleId);
+    }
+  });
+
+  it('every produced ruleId is consistent with its objective type (isRuleIdConsistentWithType)', async () => {
+    const { isRuleIdConsistentWithType } = await import('@/lib/portfolio-intelligence');
     const scenarios: PositionObjectiveInput[] = [
-      baseInput({ dte: 5, buffer: 1.5 }), // assignment-risk -> REVIEW_THREATENED_POSITION
-      baseInput({ pnlPct: -110 }), // close-loser -> REVIEW_THREATENED_POSITION
-      baseInput({ pnlPct: 55, dte: 25 }), // close-winner -> CLOSE_FOR_PROFIT
-      baseInput({ dte: 18, pnlPct: 10 }), // roll-soon -> MANAGE_POSITION
+      baseInput({ dte: 5, buffer: 1.5 }),
+      baseInput({ pnlPct: -110 }),
+      baseInput({ pnlPct: 55, dte: 25 }),
+      baseInput({ dte: 18, pnlPct: 10 }),
+      baseInput({ dte: 25, pnlPct: 25, hasGtc: false }),
     ];
     for (const input of scenarios) {
       const { objective } = evaluatePositionObjective(input, NOW);
       expect(objective).not.toBeNull();
-      if (objective!.type === 'REVIEW_THREATENED_POSITION') expect(objective!.ruleId).toBe('OBJ-REVIEW-THREATENED-POSITION');
-      if (objective!.type === 'CLOSE_FOR_PROFIT') expect(objective!.ruleId).toBe('OBJ-CLOSE-FOR-PROFIT');
-      if (objective!.type === 'MANAGE_POSITION') expect(objective!.ruleId).toBe('OBJ-MANAGE-21-DTE');
+      expect(isRuleIdConsistentWithType(objective!.ruleId, objective!.type)).toBe(true);
     }
   });
 

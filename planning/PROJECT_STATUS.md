@@ -1,14 +1,14 @@
 # TradeEdge Autopilot — Project Status
 
 **Branch:** `feature/portfolio-intelligence`  
-**Scope:** Portfolio Intelligence (Sprint 3, PI-0002 — Portfolio Engine Consolidation)  
+**Scope:** Portfolio Intelligence (Sprint 3, PI-0003 — Canonical Portfolio Priority Engine)  
 **Last Updated:** 2026-07-11
 
 ## Executive Summary
 
 Autopilot has completed the Decision Engine milestone: `lib/decision-engine` (single-candidate reasoning) and `lib/autopilot/decision` (orchestration) are built, tested (107 tests), and merged to `main` — confirmed live in production, including an end-to-end kill switch verification. No paper or live execution exists anywhere in the codebase.
 
-Sprint 3 has begun: Portfolio Intelligence answers a different question than the Decision Engine. Instead of "is this candidate a good trade?", it answers "given the entire portfolio, what deserves the trader's attention today?" The first slice, PI-0001 (Portfolio Objective Engine), is complete — a pure, deterministic evaluator that converts portfolio state into ranked, explainable `PortfolioObjective[]`. The second slice, PI-0002 (Portfolio Engine Consolidation), is also complete: the pre-existing TE-0006A (Portfolio Health) and TE-0006B (Portfolio Recommendation Rules) modules — which turned out to already be separately extracted into `features/portfolio/`, not inline in the page as originally assumed — are now consolidated into `lib/portfolio-intelligence`, with `app/portfolio/page.tsx` consuming the canonical engine directly and zero user-visible behavior change (verified by 23 new parity tests).
+Sprint 3 has begun: Portfolio Intelligence answers a different question than the Decision Engine. Instead of "is this candidate a good trade?", it answers "given the entire portfolio, what deserves the trader's attention today?" The first slice, PI-0001 (Portfolio Objective Engine), is complete — a pure, deterministic evaluator that converts portfolio state into ranked, explainable `PortfolioObjective[]`. The second slice, PI-0002 (Portfolio Engine Consolidation), consolidated the pre-existing TE-0006A/B modules into `lib/portfolio-intelligence`, with `app/portfolio/page.tsx` consuming the canonical engine directly and zero user-visible behavior change. The third slice, PI-0003 (Canonical Portfolio Priority Engine), is now also complete: explicit risk-policy separation, 15 fine-grained rule IDs, TE-0006C's ranking consolidated into one canonical prioritizer, and `evaluatePortfolioObjectives()` given its first real production consumer (wired into the Portfolio page's state, not yet rendered).
 
 ## Current Phase
 
@@ -40,13 +40,13 @@ Constraint:
 
 ## Current Sprint
 
-**Sprint 3 (PI-0002) — Portfolio Engine Consolidation**
+**Sprint 3 (PI-0003) — Canonical Portfolio Priority Engine**
 
-Status: Complete, locally verified. Vercel preview/production confirmation pending push. See `planning/SPRINT3_PI0002_PLAN.md` for full scope, including the design decisions made under judgment and what's explicitly deferred.
+Status: Complete, locally verified. Vercel preview/production confirmation pending push. See `planning/SPRINT3_PI0003_PLAN.md` for full scope, including the design decisions made under judgment and what's explicitly deferred.
 
 ## Last Successful Build
 
-**Sprint 3 (PI-0002), local:** 155 tests passing repo-wide (23 new), `tsc --noEmit` clean, `next build` clean including `/portfolio`. Vercel is still the authoritative build validator — this reflects local verification pending push confirmation.
+**Sprint 3 (PI-0003), local:** 179 tests passing repo-wide (24 new), `tsc --noEmit` clean, `next build` clean including `/portfolio` (99 kB). Vercel is still the authoritative build validator — this reflects local verification pending push confirmation.
 
 **Sprint 2, production:** 107 tests passing, `tsc --noEmit` clean, confirmed live and working end-to-end on `options-screener-dun.vercel.app`.
 
@@ -58,7 +58,7 @@ Status: Complete, locally verified. Vercel preview/production confirmation pendi
 | Paper execution | Disabled ✅ |
 | Candidate scanning | Live (screener bridge), recommendation-only ✅ |
 | Decision Engine | Complete, live in production ✅ |
-| Portfolio Intelligence (PI-0001, PI-0002) | Complete, locally verified, not yet deployed ✅ |
+| Portfolio Intelligence (PI-0001, PI-0002, PI-0003) | Complete, locally verified, not yet deployed ✅ |
 | Kill switch | Enforced and UI-controllable, verified live ✅ |
 | Dry-run route | Enabled ✅ |
 | Cron route | Dry-run only ✅ |
@@ -87,6 +87,7 @@ Status: Complete, locally verified. Vercel preview/production confirmation pendi
 - `feature/portfolio-intelligence` branch created from updated `main`.
 - PI-0001 Portfolio Objective Engine built: canonical `PortfolioObjective` contract, ten-rule deterministic evaluator, explainable ranking, full PI-001–PI-010 test coverage plus safety tests.
 - PI-0002 Portfolio Engine Consolidation built: TE-0006A moved verbatim (byte-identical) into `lib/portfolio-intelligence/health/`; TE-0006B consolidated into `evaluatePositionObjective()`, producing canonical `PortfolioObjective[]` instead of a bespoke model, with 16 parity tests proving zero behavior change against the original nine trigger branches; stable rule IDs added to the contract; `app/portfolio/page.tsx` now consumes `lib/portfolio-intelligence` directly.
+- PI-0003 Canonical Portfolio Priority Engine built: explicit `PositionManagementPolicy`/`PortfolioRiskPolicy` objects; 15 fine-grained rule IDs (up from 10); TE-0006C consolidated into a shim over the new canonical `prioritizePortfolioObjectives()`; `evaluatePortfolioObjectives()` given its first real production consumer via a combining adapter merging position/portfolio/pending-order objectives, wired into the Portfolio page's state (not rendered).
 
 ## Upcoming Work
 

@@ -42,9 +42,9 @@
 // threshold sets into one is explicitly deferred -- see
 // planning/SPRINT3_PI0002_PLAN.md "Later items".
 
-import type { PortfolioObjective, PortfolioObjectiveConcern, PortfolioObjectiveEvidence } from '../types';
-import { OBJECTIVE_RULE_ID } from '../ruleIds';
+import type { PortfolioObjective, PortfolioObjectiveConcern, PortfolioObjectiveEvidence, PortfolioObjectiveRuleId } from '../types';
 import type { PositionHealthScore } from '../health/types';
+import { DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
 
 export type PortfolioRecommendationKind =
   | 'hold'
@@ -188,12 +188,28 @@ const KIND_TO_TYPE: Record<Exclude<PortfolioRecommendationKind, 'hold'>, Portfol
   watch: 'MANAGE_POSITION',
 };
 
+// PI-0003: each legacy kind now gets its own fine-grained rule ID, instead
+// of collapsing to one ID per type (PI-0002's interim approach, which this
+// resolves -- see PI-0002 plan doc "OBJ-MANAGE-21-DTE now covers some
+// non-DTE-driven cases" for the naming tension this fixes).
+const KIND_TO_RULE_ID: Record<Exclude<PortfolioRecommendationKind, 'hold'>, PortfolioObjectiveRuleId> = {
+  'assignment-risk': 'OBJ-ASSIGNMENT-RISK',
+  'close-loser': 'OBJ-CLOSE-LOSER',
+  'earnings-risk': 'OBJ-EARNINGS-RISK',
+  'close-winner': 'OBJ-CLOSE-FOR-PROFIT',
+  'roll-soon': 'OBJ-MANAGE-21-DTE',
+  'place-gtc': 'OBJ-PLACE-GTC',
+  'let-expire': 'OBJ-LET-EXPIRE',
+  watch: 'OBJ-WATCH-POSITION',
+};
+
 function buildObjective(
   input: PositionObjectiveInput,
   legacy: PortfolioRecommendation,
   now: Date,
 ): PortfolioObjective {
   const type = KIND_TO_TYPE[legacy.kind as Exclude<PortfolioRecommendationKind, 'hold'>];
+  const ruleId = KIND_TO_RULE_ID[legacy.kind as Exclude<PortfolioRecommendationKind, 'hold'>];
   const concerns: PortfolioObjectiveConcern[] = [
     {
       id: legacy.kind,
@@ -215,7 +231,7 @@ function buildObjective(
     createdAt: now.toISOString(),
     version: 'portfolio-objective-v1',
     type,
-    ruleId: OBJECTIVE_RULE_ID[type],
+    ruleId,
     title: `${legacy.label}: ${input.symbol}`,
     summary: legacy.primaryReason,
     priority: URGENCY_TO_PRIORITY[legacy.urgency],
@@ -284,14 +300,14 @@ export function evaluatePositionObjective(
       'Review assignment, close, or roll plan before adding new risk.',
       supportingReasons, now,
     );
-  } else if (pnlPct != null && pnlPct <= -100) {
+  } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct) {
     legacy = makeLegacyRecommendation(
       input, 'close-loser', 'Close Loser', 'critical', 91,
       `Loss is near or beyond 1x credit (${pnlPct.toFixed(0)}%).`,
       'Review closing or rolling defensively.',
       supportingReasons, now,
     );
-  } else if (pnlPct != null && pnlPct <= -50 && healthScore != null && healthScore < 50) {
+  } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct && healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold) {
     legacy = makeLegacyRecommendation(
       input, 'close-loser', 'Close Loser', 'high', 84,
       `Material loss with weak health score (${healthScore}).`,
@@ -305,14 +321,14 @@ export function evaluatePositionObjective(
       'Decide whether to close, reduce risk, or intentionally hold through earnings.',
       supportingReasons, now,
     );
-  } else if (input.hitTarget || hasHealthFactor(input, 'profit-target') || (pnlPct != null && pnlPct >= 50)) {
+  } else if (input.hitTarget || hasHealthFactor(input, 'profit-target') || (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct)) {
     legacy = makeLegacyRecommendation(
       input, 'close-winner', 'Close Winner', 'high', 90,
       pnlPct != null ? `Profit target reached at approximately ${pnlPct.toFixed(0)}% of credit.` : 'Profit target reached.',
       'Take profit or confirm the GTC target order is working.',
       supportingReasons, now,
     );
-  } else if (dte != null && dte <= 21 && dte > 7 && shortPremium) {
+  } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium) {
     legacy = makeLegacyRecommendation(
       input, 'roll-soon', 'Roll Soon', 'medium', 80,
       `${dte} DTE is inside the standard management window.`,
@@ -326,14 +342,14 @@ export function evaluatePositionObjective(
       'Place or verify a profit-target GTC order.',
       supportingReasons, now,
     );
-  } else if (dte != null && dte <= 3 && healthScore != null && healthScore >= 75 && !itmOrCriticalBuffer) {
+  } else if (dte != null && dte <= 3 && healthScore != null && healthScore >= DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold && !itmOrCriticalBuffer) {
     legacy = makeLegacyRecommendation(
       input, 'let-expire', 'Let Expire', 'low', 72,
       `${dte} DTE with healthy score and no critical buffer flag.`,
       'Monitor through expiration only if assignment risk is acceptable.',
       supportingReasons, now,
     );
-  } else if ((healthScore != null && healthScore < 75) || (buffer != null && buffer < 5)) {
+  } else if ((healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold) || (buffer != null && buffer < 5)) {
     legacy = makeLegacyRecommendation(
       input, 'watch', 'Watch', 'medium', 70,
       healthScore != null ? `Health score is ${healthScore}.` : 'One or more risk factors deserve attention.',

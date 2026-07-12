@@ -1,4 +1,9 @@
 // features/portfolio/priorities/priority-sort.ts
+//
+// PI-0003: no longer used by priority-engine.ts, which now delegates
+// ranking to the canonical prioritizePortfolioObjectives(). Left in place
+// (not deleted) since it has no other consumers and isn't incorrect --
+// just superseded. Candidate for physical removal in a later cleanup pass.
 
 import type { PriorityItem } from './priority-types';
 import type { PortfolioRecommendationUrgency } from '../recommendations/recommendation-types';

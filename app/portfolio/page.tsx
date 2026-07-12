@@ -9,8 +9,8 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective } from '@/lib/portfolio-intelligence';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
@@ -9395,6 +9395,27 @@ export default function PortfolioPage() {
   };
 
   useEffect(() => { fetchPositions(); }, []);
+
+  // PI-0003: first real production wiring of evaluatePortfolioObjectives()
+  // (previously zero consumers anywhere in the app). Combines per-position
+  // objectives (already computed via scorePortfolioPositionObjective) with
+  // portfolio-level and pending-order objectives into one canonical ranked
+  // list. Not rendered anywhere yet -- explicitly out of scope for this
+  // slice ("no new Portfolio UI") -- but the page is now a genuine
+  // production caller, not just a library with no consumer. KNOWN GAP: the
+  // financial snapshot below is empty because net liquidity/cash/buying
+  // power/drawdown aren't computed anywhere on this page today (they live
+  // only in the Balances tab); portfolio-level rules (concentration,
+  // buying power, idle cash, income) will not fire until that's wired in a
+  // later slice. Position-level and pending-order objectives are
+  // unaffected by this gap.
+  const [canonicalPriorities, setCanonicalPriorities] = useState<CanonicalPortfolioPriorities | null>(null);
+  useEffect(() => {
+    if (positions.length === 0 && pendingOrders.length === 0) { setCanonicalPriorities(null); return; }
+    const positionInputs = positions.map(p => ({ ...p, positionId: p.key, healthScore: p.healthScore ?? null }));
+    const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
+    setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, {}, rawPendingOrders));
+  }, [positions, pendingOrders]);
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
