@@ -8,12 +8,13 @@ export type { PortfolioObjectiveRuleId } from './types';
 // PI-0003: the combining adapter -- Position + Portfolio + Pending Order
 // objectives into one canonical ranked list. First real production wiring
 // of evaluatePortfolioObjectives(), which previously had zero consumers.
+// PI-0003.5: financial data now flows in through PortfolioFinancialContext
+// (optional fields, "unavailable" genuinely distinct from "zero") instead
+// of the always-empty snapshot PI-0003 shipped with.
 export { buildPortfolioIntelligenceContext, computeCanonicalPortfolioPriorities } from './adapters/portfolioIntelligenceAdapter';
-export type {
-  CanonicalPortfolioPriorities,
-  PortfolioFinancialSnapshot,
-  RawPendingOrderLike,
-} from './adapters/portfolioIntelligenceAdapter';
+export type { CanonicalPortfolioPriorities, RawPendingOrderLike } from './adapters/portfolioIntelligenceAdapter';
+export { buildPortfolioFinancialContext, toFiniteNumber, derivePositionConcentration } from './adapters/balancesNormalization';
+export type { PortfolioFinancialContext, PositionExposureInput } from './adapters/balancesNormalization';
 
 // Policies (PI-0003): explicit position-management vs portfolio-risk policy
 // objects, replacing bare magic numbers scattered across the evaluators.

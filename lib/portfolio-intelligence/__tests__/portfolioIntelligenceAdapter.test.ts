@@ -16,7 +16,8 @@ const NOW = new Date('2026-07-12T13:00:00.000Z');
 describe('PI-0003: buildPortfolioIntelligenceContext', () => {
   it('builds a valid context from a financial snapshot and raw pending orders', () => {
     const context = buildPortfolioIntelligenceContext(
-      { netLiquidity: 100000, idleCashPct: 20, buyingPowerUtilizationPct: 30 },
+      { netLiquidity: 100000, cashBalance: 20000, availableBuyingPower: 30000 },
+      [],
       [{ id: 'order_1', symbol: 'AMD', strategy: 'OPEN_BPS', createdAt: '2026-07-12T10:00:00.000Z', status: 'working' }],
       NOW,
     );
@@ -26,16 +27,18 @@ describe('PI-0003: buildPortfolioIntelligenceContext', () => {
     expect(context.pendingOrders[0].ageMinutes).toBe(180); // 3 hours
   });
 
-  it('applies conservative zero defaults when no financial data is supplied', () => {
-    const context = buildPortfolioIntelligenceContext({}, [], NOW);
+  it('unavailable financial data safely defaults to inert zero at the PortfolioStateInput boundary (never fabricates a trigger)', () => {
+    const context = buildPortfolioIntelligenceContext({}, [], [], NOW);
     expect(context.portfolio.netLiquidity).toBe(0);
     expect(context.portfolio.idleCashPct).toBe(0);
     expect(context.portfolio.buyingPowerUtilizationPct).toBe(0);
+    expect(context.portfolio.symbolConcentrationPct).toEqual({});
   });
 
   it('flags a pending order as review_required when its raw status mentions stale/review', () => {
     const context = buildPortfolioIntelligenceContext(
       {},
+      [],
       [{ id: 'order_1', symbol: 'AMD', strategy: 'OPEN_BPS', createdAt: NOW.toISOString(), status: 'Stale - needs review' }],
       NOW,
     );
@@ -50,7 +53,8 @@ describe('PI-0003: computeCanonicalPortfolioPriorities (portfolio evaluator inte
       [
         { positionId: 'pos_1', symbol: 'AMD', strategy: 'BPS', dte: 25, pnlPct: 55, buffer: 8, hasGtc: true }, // close-winner
       ],
-      { idleCashPct: 25, buyingPowerUtilizationPct: 30, currentDrawdownPct: 1 }, // triggers DEPLOY_IDLE_CASH
+      { netLiquidity: 100000, cashBalance: 25000, availableBuyingPower: 70000 }, // 25% idle cash -> triggers DEPLOY_IDLE_CASH
+      [{ symbol: 'AMD', maxRisk: 1000 }],
       [{ id: 'order_1', symbol: 'NVDA', strategy: 'OPEN_BPS', createdAt: new Date(NOW.getTime() - 300 * 60_000).toISOString(), status: 'working' }], // stale
       NOW,
     );
@@ -75,6 +79,7 @@ describe('PI-0003: computeCanonicalPortfolioPriorities (portfolio evaluator inte
       [{ positionId: 'pos_1', symbol: 'AMD', strategy: 'BPS', dte: 25, pnlPct: 55, buffer: 8, hasGtc: true }],
       {},
       [],
+      [],
       NOW,
     );
     const profitObjectives = result.objectives.filter((o) => o.type === 'CLOSE_FOR_PROFIT');
@@ -84,7 +89,8 @@ describe('PI-0003: computeCanonicalPortfolioPriorities (portfolio evaluator inte
   it('a critical threatened position outranks a simultaneous idle-cash deployment opportunity in the combined list', () => {
     const result = computeCanonicalPortfolioPriorities(
       [{ positionId: 'pos_threatened', symbol: 'NVDA', strategy: 'CSP', dte: 5, buffer: 1.5, pnlPct: 10, hasGtc: true }], // assignment-risk, critical
-      { idleCashPct: 30, buyingPowerUtilizationPct: 20, currentDrawdownPct: 1 }, // triggers DEPLOY_IDLE_CASH
+      { netLiquidity: 100000, cashBalance: 30000, availableBuyingPower: 70000 }, // 30% idle cash -> triggers DEPLOY_IDLE_CASH
+      [],
       [],
       NOW,
     );
@@ -95,7 +101,7 @@ describe('PI-0003: computeCanonicalPortfolioPriorities (portfolio evaluator inte
   });
 
   it('returns a single WAIT objective when nothing qualifies across all three sources', () => {
-    const result = computeCanonicalPortfolioPriorities([], {}, [], NOW);
+    const result = computeCanonicalPortfolioPriorities([], {}, [], [], NOW);
     expect(result.objectives).toHaveLength(1);
     expect(result.objectives[0].type).toBe('WAIT');
   });
@@ -106,7 +112,8 @@ describe('PI-0003: computeCanonicalPortfolioPriorities (portfolio evaluator inte
         { positionId: 'pos_1', symbol: 'AMD', strategy: 'BPS', dte: 25, pnlPct: 55, buffer: 8, hasGtc: true },
         { positionId: 'pos_2', symbol: 'NVDA', strategy: 'CSP', dte: 5, buffer: 1.5, pnlPct: 10, hasGtc: true },
       ],
-      { idleCashPct: 25, buyingPowerUtilizationPct: 30 },
+      { netLiquidity: 100000, cashBalance: 25000, availableBuyingPower: 70000 },
+      [{ symbol: 'AMD', maxRisk: 1000 }, { symbol: 'NVDA', maxRisk: 5000 }],
       [{ id: 'order_1', symbol: 'MU', strategy: 'OPEN_BPS', createdAt: new Date(NOW.getTime() - 300 * 60_000).toISOString(), status: 'working' }],
       NOW,
     );

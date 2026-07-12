@@ -1,10 +1,10 @@
 # TradeEdge Autopilot — Sprint Status
 
 **Branch:** `feature/portfolio-intelligence`
-**Scope:** Portfolio Intelligence (Sprint 3, PI-0003 — Canonical Portfolio Priority Engine)
+**Scope:** Portfolio Intelligence (Sprint 3, PI-0003.5 — Real Financial Data Wiring)
 **Last Updated:** 2026-07-11
-**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0003 Canonical Portfolio Priority Engine
-**Next Objective:** Product Owner review of PI-0003, then scope the next Portfolio Intelligence slice
+**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0003.5 Real Financial Data Wiring
+**Next Objective:** Product Owner review of PI-0003.5, then scope PI-0004
 
 ## Current Development Rule
 
@@ -37,7 +37,8 @@ A sprint is not complete until all required items are true:
 | 2 | Decision Engine | Completed ✅ | ✅ | ✅ | Manual (kill switch verified live) | ✅ |
 | 3 (PI-0001) | Portfolio Intelligence — Portfolio Objective Engine | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (PI-0002) | Portfolio Intelligence — Portfolio Engine Consolidation | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
-| 3 (PI-0003) | Portfolio Intelligence — Canonical Portfolio Priority Engine | Active | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (PI-0003) | Portfolio Intelligence — Canonical Portfolio Priority Engine | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (PI-0003.5) | Portfolio Intelligence — Real Financial Data Wiring | Active | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (Paper Execution) | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 5 | Candidate Discovery | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -58,6 +59,7 @@ A sprint is not complete until all required items are true:
 | 3 (PI-0001) | ✅ local | 132 tests passing repo-wide (25 new), `tsc --noEmit` clean, `next build` clean locally. Vercel preview confirmation pending. |
 | 3 (PI-0002) | ✅ local | 155 tests passing repo-wide (23 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles. Vercel preview confirmation pending. |
 | 3 (PI-0003) | ✅ local | 179 tests passing repo-wide (24 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles (99 kB). Vercel preview confirmation pending. |
+| 3 (PI-0003.5) | ✅ local | 206 tests passing repo-wide (27 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles (99.6 kB). Vercel preview confirmation pending. |
 | 4 | ⬜ | Pending. |
 | 5 | ⬜ | Pending. |
 | 6 | ⬜ | Pending. |
@@ -257,3 +259,17 @@ Goal: independent review confirms readiness for live-mode implementation. No liv
 **Safety:** `executionAllowed: false` / `paperExecutionAllowed: false` verified across the full combined (position + portfolio + pending-order) objective list. No execution, mutation, or Autopilot-integration code added.
 
 **Known Follow-Up:** see "Later items" in `planning/SPRINT3_PI0003_PLAN.md` — wiring real Balances-tab financial data into the adapter (currently an empty snapshot, so portfolio-level rules don't yet fire in production), surfacing the canonical priorities in the UI, and candidate-risk policy enforcement all remain open.
+
+## Sprint 3 (PI-0003.5) — Real Financial Data Wiring Review
+
+**Result:** Complete, locally verified. 206 tests passing repo-wide (27 new for this slice), `tsc --noEmit` clean, `next build` clean locally including `/portfolio` (99.6 kB). Vercel preview/production confirmation pending push.
+
+**Found:** no single canonical balances source existed to reuse — `components/BalancesTab.tsx` and `app/engine/page.tsx` each independently fetch and parse the same TastyTrade `/accounts/{account}/balances` endpoint, neither connected to the Portfolio page, and between them cover only `net-liquidating-value`, `cash-balance`, and buying power. No income-tracking or drawdown-history concept exists anywhere in the app.
+
+**Built:** `lib/portfolio-intelligence/adapters/balancesNormalization.ts` — a single, pure normalization point (`toFiniteNumber`, `buildPortfolioFinancialContext`, `derivePositionConcentration`) with a genuinely optional-field `PortfolioFinancialContext` type, so "unavailable" never silently becomes `0` at that layer. `app/portfolio/page.tsx` gained a `loadAccountBalances()` function (reusing the page's existing auth/fetch pattern) and now passes real financial data + per-position exposure into the combining adapter (rewritten to accept the richer context). Three of four target objectives are now fully operational from real data: `DEPLOY_IDLE_CASH`, `REDUCE_CONCENTRATION` (using real net liquidity as the denominator), and `PRESERVE_BUYING_POWER`'s utilization branch. `INCREASE_INCOME` remains structurally silent by design — no income source exists to wire.
+
+**Key judgment call:** bridging the optional-field `PortfolioFinancialContext` into PI-0001's existing required-number `PortfolioStateInput` maps "unavailable" to `0` at that one boundary point — proven safe because every rule this feeds is a "fires when value >= threshold" check where `0` is the inert "everything's fine" value for that specific rule. Documented explicitly in the adapter rather than left as an implicit assumption.
+
+**Safety:** `executionAllowed: false` / `paperExecutionAllowed: false` verified across the full combined list, same as every prior slice. No execution, mutation, or UI changes.
+
+**Known Follow-Up:** see "Known remaining gaps" in `planning/SPRINT3_PI0003_5_PLAN.md` — the `maintenance-requirement` field's presence in the live balance payload has not been verified against a real API call (no live access in this session); recommend a one-line `console.log` check before fully trusting `PRESERVE_BUYING_POWER` in production. Income and drawdown-history sources still don't exist. `BalancesTab.tsx`/`app/engine/page.tsx` still have their own separate, unconsolidated balance-parsing logic.

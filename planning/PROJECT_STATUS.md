@@ -1,7 +1,7 @@
 # TradeEdge Autopilot — Project Status
 
 **Branch:** `feature/portfolio-intelligence`  
-**Scope:** Portfolio Intelligence (Sprint 3, PI-0003 — Canonical Portfolio Priority Engine)  
+**Scope:** Portfolio Intelligence (Sprint 3, PI-0003.5 — Real Financial Data Wiring)  
 **Last Updated:** 2026-07-11
 
 ## Executive Summary
@@ -40,13 +40,13 @@ Constraint:
 
 ## Current Sprint
 
-**Sprint 3 (PI-0003) — Canonical Portfolio Priority Engine**
+**Sprint 3 (PI-0003.5) — Real Financial Data Wiring**
 
-Status: Complete, locally verified. Vercel preview/production confirmation pending push. See `planning/SPRINT3_PI0003_PLAN.md` for full scope, including the design decisions made under judgment and what's explicitly deferred.
+Status: Complete, locally verified. Vercel preview/production confirmation pending push. See `planning/SPRINT3_PI0003_5_PLAN.md` for full scope, formulas, and known gaps.
 
 ## Last Successful Build
 
-**Sprint 3 (PI-0003), local:** 179 tests passing repo-wide (24 new), `tsc --noEmit` clean, `next build` clean including `/portfolio` (99 kB). Vercel is still the authoritative build validator — this reflects local verification pending push confirmation.
+**Sprint 3 (PI-0003.5), local:** 206 tests passing repo-wide (27 new), `tsc --noEmit` clean, `next build` clean including `/portfolio` (99.6 kB). Vercel is still the authoritative build validator — this reflects local verification pending push confirmation.
 
 **Sprint 2, production:** 107 tests passing, `tsc --noEmit` clean, confirmed live and working end-to-end on `options-screener-dun.vercel.app`.
 
@@ -58,7 +58,7 @@ Status: Complete, locally verified. Vercel preview/production confirmation pendi
 | Paper execution | Disabled ✅ |
 | Candidate scanning | Live (screener bridge), recommendation-only ✅ |
 | Decision Engine | Complete, live in production ✅ |
-| Portfolio Intelligence (PI-0001, PI-0002, PI-0003) | Complete, locally verified, not yet deployed ✅ |
+| Portfolio Intelligence (PI-0001, PI-0002, PI-0003, PI-0003.5) | Complete, locally verified, not yet deployed ✅ |
 | Kill switch | Enforced and UI-controllable, verified live ✅ |
 | Dry-run route | Enabled ✅ |
 | Cron route | Dry-run only ✅ |

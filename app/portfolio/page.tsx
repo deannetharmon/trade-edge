@@ -9,8 +9,8 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities } from '@/lib/portfolio-intelligence';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
@@ -2455,6 +2455,24 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     return a.dte - b.dte;
   });
   return { positions, pendingOrders };
+}
+
+// PI-0003.5: reuses the exact same account-lookup pattern as loadPositions()
+// above and app/engine/page.tsx's capital calculator -- same endpoint
+// (/accounts/{account}/balances) both of those already call independently.
+// Parsing is delegated entirely to buildPortfolioFinancialContext() (pure,
+// testable, lives in lib/portfolio-intelligence) so this function is just
+// "fetch the raw payload, hand it to the parser."
+async function loadAccountBalances(): Promise<PortfolioFinancialContext> {
+  const token = await getAccessToken();
+  const accountsData = await ttFetch('/customers/me/accounts', token);
+  const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
+    ?? accountsData?.data?.items?.[0];
+  const accountNumber = account?.account?.['account-number'];
+  if (!accountNumber) throw new Error('No account found');
+
+  const balData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
+  return buildPortfolioFinancialContext(balData?.data ?? {});
 }
 
 // ── Recommendation Engine ──────────────────────────────────────────────────
@@ -9396,26 +9414,36 @@ export default function PortfolioPage() {
 
   useEffect(() => { fetchPositions(); }, []);
 
+  // PI-0003.5: real account balances, fetched in parallel with positions
+  // (non-blocking -- if it fails, canonical priorities simply computes with
+  // financial data unavailable, same as before this slice; positions still
+  // render normally either way).
+  const [balances, setBalances] = useState<PortfolioFinancialContext | null>(null);
+  useEffect(() => {
+    loadAccountBalances()
+      .then(setBalances)
+      .catch(e => console.error('Balance fetch failed (non-blocking):', e));
+  }, []);
+
   // PI-0003: first real production wiring of evaluatePortfolioObjectives()
   // (previously zero consumers anywhere in the app). Combines per-position
   // objectives (already computed via scorePortfolioPositionObjective) with
   // portfolio-level and pending-order objectives into one canonical ranked
   // list. Not rendered anywhere yet -- explicitly out of scope for this
   // slice ("no new Portfolio UI") -- but the page is now a genuine
-  // production caller, not just a library with no consumer. KNOWN GAP: the
-  // financial snapshot below is empty because net liquidity/cash/buying
-  // power/drawdown aren't computed anywhere on this page today (they live
-  // only in the Balances tab); portfolio-level rules (concentration,
-  // buying power, idle cash, income) will not fire until that's wired in a
-  // later slice. Position-level and pending-order objectives are
-  // unaffected by this gap.
+  // production caller, not just a library with no consumer.
+  // PI-0003.5: financial data now comes from real account balances (see
+  // loadAccountBalances above) instead of an always-empty snapshot. Fields
+  // with no real source yet (income, drawdown history) stay genuinely
+  // undefined rather than fabricated -- see balancesNormalization.ts.
   const [canonicalPriorities, setCanonicalPriorities] = useState<CanonicalPortfolioPriorities | null>(null);
   useEffect(() => {
     if (positions.length === 0 && pendingOrders.length === 0) { setCanonicalPriorities(null); return; }
     const positionInputs = positions.map(p => ({ ...p, positionId: p.key, healthScore: p.healthScore ?? null }));
+    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({ symbol: p.symbol, maxRisk: p.maxRisk }));
     const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
-    setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, {}, rawPendingOrders));
-  }, [positions, pendingOrders]);
+    setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, balances ?? {}, positionsForConcentration, rawPendingOrders));
+  }, [positions, pendingOrders, balances]);
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
