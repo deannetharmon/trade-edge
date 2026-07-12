@@ -101,11 +101,30 @@ export interface ObjectiveImpact {
   estimatedDollarValue?: number;
 }
 
+// PI-0002: stable rule ID, one per objective type, mechanically derived --
+// see ruleIds.ts for the mapping and rationale. Distinct from `id`, which is
+// a per-run, non-deterministic runtime identifier.
+export type PortfolioObjectiveRuleId =
+  | 'OBJ-CLOSE-FOR-PROFIT'
+  | 'OBJ-MANAGE-21-DTE'
+  | 'OBJ-REVIEW-THREATENED-POSITION'
+  | 'OBJ-ROLL-POSITION'
+  | 'OBJ-DEPLOY-IDLE-CASH'
+  | 'OBJ-INCREASE-INCOME'
+  | 'OBJ-REDUCE-CONCENTRATION'
+  | 'OBJ-PRESERVE-BUYING-POWER'
+  | 'OBJ-REVIEW-PENDING-ORDER'
+  | 'OBJ-WAIT';
+
 export interface PortfolioObjective {
   id: string;
   createdAt: string;
   version: 'portfolio-objective-v1';
   type: PortfolioObjectiveType;
+  // Stable, deterministic rule identifier -- see PortfolioObjectiveRuleId.
+  // Always OBJECTIVE_RULE_ID[type]; present on every objective from every
+  // producer (portfolio-level and per-position).
+  ruleId: PortfolioObjectiveRuleId;
   title: string;
   summary: string;
   priority: PortfolioObjectivePriority;

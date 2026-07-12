@@ -1,10 +1,10 @@
 # TradeEdge Autopilot — Sprint Status
 
 **Branch:** `feature/portfolio-intelligence`
-**Scope:** Portfolio Intelligence (Sprint 3, PI-0001 first slice)
+**Scope:** Portfolio Intelligence (Sprint 3, PI-0002 — Portfolio Engine Consolidation)
 **Last Updated:** 2026-07-11
-**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0001 Portfolio Objective Engine
-**Next Objective:** Product Owner review of PI-0001, then scope the next Portfolio Intelligence slice
+**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0002 Portfolio Engine Consolidation
+**Next Objective:** Product Owner review of PI-0002, then scope the next Portfolio Intelligence slice
 
 ## Current Development Rule
 
@@ -35,7 +35,8 @@ A sprint is not complete until all required items are true:
 | 1B | Framework | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
 | TE-0001 / TE-0005A | Background Ranked Screener Stabilization | Completed ✅ | ✅ | ✅ | Deferred | ✅ |
 | 2 | Decision Engine | Completed ✅ | ✅ | ✅ | Manual (kill switch verified live) | ✅ |
-| 3 (PI-0001) | Portfolio Intelligence — Portfolio Objective Engine | Active | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (PI-0001) | Portfolio Intelligence — Portfolio Objective Engine | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (PI-0002) | Portfolio Intelligence — Portfolio Engine Consolidation | Active | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (Paper Execution) | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 5 | Candidate Discovery | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -54,6 +55,7 @@ A sprint is not complete until all required items are true:
 | TE-0001 / TE-0005A | ✅ Passed | Confirmed via subsequent Vercel deploys. |
 | 2 | ✅ Passed | 107 tests passing, `tsc --noEmit` clean, confirmed live in production (kill switch verified end-to-end). |
 | 3 (PI-0001) | ✅ local | 132 tests passing repo-wide (25 new), `tsc --noEmit` clean, `next build` clean locally. Vercel preview confirmation pending. |
+| 3 (PI-0002) | ✅ local | 155 tests passing repo-wide (23 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles. Vercel preview confirmation pending. |
 | 4 | ⬜ | Pending. |
 | 5 | ⬜ | Pending. |
 | 6 | ⬜ | Pending. |
@@ -116,7 +118,7 @@ Output: ranked `PortfolioObjective[]` explaining what deserves attention today.
 
 Constraint: no paper trades, no live trades, no position mutation.
 
-In progress: PI-0001 Portfolio Objective Engine (`lib/portfolio-intelligence/`) complete and locally verified (132 repo-wide tests, 25 new). See `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` for full scope and later-item backlog.
+In progress: PI-0001 Portfolio Objective Engine (`lib/portfolio-intelligence/`) complete (132 repo-wide tests). PI-0002 Portfolio Engine Consolidation also complete (155 repo-wide tests, 23 new) -- TE-0006A/B moved out of `features/portfolio/` and consolidated into the canonical model, `app/portfolio/page.tsx` now consumes `lib/portfolio-intelligence` directly, stable rule IDs added. See `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` and `planning/SPRINT3_PI0002_PLAN.md` for full scope and later-item backlogs.
 
 ### ⬜ Milestone C — Paper Trading
 
@@ -231,3 +233,13 @@ Goal: independent review confirms readiness for live-mode implementation. No liv
 - Purity verified: identical input produces equivalent output; input context is never mutated.
 
 **Known Follow-Up:** see "Later Sprint 3 items" in `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` — portfolio health-dimension reconciliation with existing TE-0006A/B inline logic, objective-to-full-analysis expansion, decision history, Daily Briefing, Portfolio page presentation, and wiring `lib/autopilot` as a consumer are all explicitly deferred past this first slice.
+
+## Sprint 3 (PI-0002) — Portfolio Engine Consolidation Review
+
+**Result:** Complete, locally verified. 155 tests passing repo-wide (23 new for this slice), `tsc --noEmit` clean, `next build` clean locally including `/portfolio` (91.7 kB, negligible increase). Vercel preview/production confirmation pending push.
+
+**Built:** TE-0006A (Portfolio Health) moved verbatim into `lib/portfolio-intelligence/health/` (confirmed byte-identical via diff). TE-0006B (Portfolio Recommendation Rules) consolidated into `lib/portfolio-intelligence/objectives/positionObjective.ts`, now producing canonical `PortfolioObjective[]` instead of its own bespoke model, while preserving exact legacy output (`legacyRecommendation`) for the three existing UI consumers (`PositionRecommendationBadge`, `DailyPriorityList`, priorities engine) so none of them needed to change. Stable rule IDs (`OBJ-CLOSE-FOR-PROFIT` etc.) added to the `PortfolioObjective` contract and populated by both objective producers. `app/portfolio/page.tsx` now imports directly from `lib/portfolio-intelligence` — the old `features/portfolio/{health,recommendations}/*` files are zero-logic re-export shims.
+
+**Safety:** `executionAllowed: false` / `paperExecutionAllowed: false` verified on every objective produced by the new position-level evaluator, across all branches. No new execution paths — this slice is a pure refactor/consolidation.
+
+**Known Follow-Up:** see "Later items" in `planning/SPRINT3_PI0002_PLAN.md` — physically deleting the now-empty shim files, reconciling `features/portfolio/priorities/` (TE-0006C) with `PortfolioObjective`, reconciling the two differently-tuned material-loss thresholds (portfolio-level batch default vs. position-level parity-preserved default), and wiring the portfolio-level batch evaluator into an actual consumer all remain open.

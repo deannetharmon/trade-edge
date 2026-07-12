@@ -9,10 +9,8 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
-import type { PositionHealthScore } from '@/features/portfolio/health/health-types';
-import { calculatePositionHealthScore } from '@/features/portfolio/health/health-score';
-import type { PortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-types';
-import { calculatePortfolioRecommendation } from '@/features/portfolio/recommendations/recommendation-engine';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 
@@ -146,6 +144,12 @@ interface Position {
   earningsDate: string | null; // next earnings only if on/before option expiration
   healthScore?: PositionHealthScore;
   recommendation?: PortfolioRecommendation;
+  // PI-0002: canonical objective, computed alongside `recommendation` from
+  // the same evaluatePositionObjective() call. Not rendered anywhere yet
+  // (no UI change in this slice) -- wired through so a future slice can
+  // consume it without another data-plumbing pass. Null when the position
+  // needs no action (the old system's "hold" case).
+  portfolioObjective?: PortfolioObjective | null;
 }
 
 // ── Pending Orders ───────────────────────────────────────────────────────
@@ -209,18 +213,23 @@ function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
   });
 }
 
-function scorePortfolioRecommendation(pos: Position): PortfolioRecommendation {
+// PI-0002: single canonical evaluation call. Returns both the legacy-shaped
+// recommendation (unchanged output, for existing badges/priority list) and
+// the new canonical objective (not yet rendered, wired through for later).
+function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
       : undefined
   );
 
-  return calculatePortfolioRecommendation({
+  const { objective, legacyRecommendation } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
   });
+
+  return { recommendation: legacyRecommendation, objective };
 }
 
 function todayLocalDateString(): string {
@@ -289,7 +298,8 @@ function attachSnapshotHistory(
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    return { ...withHealth, recommendation: scorePortfolioRecommendation(withHealth) };
+    const { recommendation, objective } = scorePortfolioPositionObjective(withHealth);
+    return { ...withHealth, recommendation, portfolioObjective: objective };
   });
 }
 

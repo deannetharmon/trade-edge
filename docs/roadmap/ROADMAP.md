@@ -18,12 +18,13 @@
 
 ## Completed Trader Intelligence
 
-- TE-0006A — Portfolio Health Scoring Framework
-- TE-0006B — Portfolio Recommendation Rules
+- TE-0006A — Portfolio Health Scoring Framework (consolidated into `lib/portfolio-intelligence` in PI-0002)
+- TE-0006B — Portfolio Recommendation Rules (consolidated into `lib/portfolio-intelligence` in PI-0002, now produces canonical `PortfolioObjective[]`)
 - Sprint 2 — Decision Engine (`lib/decision-engine`, `lib/autopilot/decision`) — merged to `main`, live in production
 - Sprint 3, PI-0001 — Portfolio Objective Engine (`lib/portfolio-intelligence`) — first slice, locally verified, pending Vercel confirmation
+- Sprint 3, PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved out of `features/portfolio/` into the canonical model, `app/portfolio/page.tsx` now a consumer, stable rule IDs introduced, locally verified, pending Vercel confirmation
 
-Note: TE-0006A/B are page-local logic inside `app/portfolio/page.tsx` and are not yet reconciled with the newer `lib/portfolio-intelligence` canonical model. See `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md` for the open reconciliation item.
+Note: `features/portfolio/priorities/` (TE-0006C, Daily Priority List) still has its own separate ranking logic, not yet reconciled with `PortfolioObjective`. See `planning/SPRINT3_PI0002_PLAN.md` "Later items" for this and other explicitly deferred reconciliation work.
 
 ## Current Planning Focus
 
@@ -37,7 +38,7 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 
 ## Near-Term Roadmap
 
-1. Portfolio Intelligence — next slice(s) beyond PI-0001 (see "Later Sprint 3 items" in `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md`)
+1. Portfolio Intelligence — next slice(s) beyond PI-0002 (see "Later items" in `planning/SPRINT3_PI0002_PLAN.md` and `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md`)
 2. TE-0006C — Daily Priority List
 3. TE-0006D — Position Advisor Cards
 4. TE-0006E — Recommendation Explanation Panel
@@ -104,7 +105,7 @@ Exit criteria for the future implementation:
 ## Core Product Engines
 
 1. Opportunity Engine — Where should my next dollar go?
-2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 in progress)
+2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 complete)
 3. Risk Engine — What could hurt me?
 4. Income Engine — Am I producing enough recurring income?
 5. Execution Engine — What do I actually need to do today?

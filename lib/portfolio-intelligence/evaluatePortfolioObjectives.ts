@@ -25,6 +25,7 @@ import type {
   PortfolioPositionInput,
   PortfolioStateInput,
 } from './types';
+import { OBJECTIVE_RULE_ID } from './ruleIds';
 
 function clamp(value: number, min = 0, max = 100): number {
   if (!Number.isFinite(value)) return min;
@@ -77,6 +78,7 @@ function finalize(draft: ObjectiveDraft, rulesEvaluated: string[], createdAt: st
     createdAt,
     version: 'portfolio-objective-v1',
     type: draft.type,
+    ruleId: OBJECTIVE_RULE_ID[draft.type],
     title: draft.title,
     summary: draft.summary,
     priority: draft.priority,
