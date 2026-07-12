@@ -1,10 +1,10 @@
 # TradeEdge Autopilot — Sprint Status
 
 **Branch:** `feature/portfolio-intelligence`
-**Scope:** Portfolio Intelligence (Sprint 3, PI-0003.5 — Real Financial Data Wiring)
+**Scope:** Portfolio Intelligence Experience (Sprint 4, PI-0004A — Today's Priorities)
 **Last Updated:** 2026-07-11
-**Current Phase:** Sprint 3 — Portfolio Intelligence, PI-0003.5 Real Financial Data Wiring
-**Next Objective:** Product Owner review of PI-0003.5, then scope PI-0004
+**Current Phase:** Sprint 4 — Portfolio Intelligence Experience, PI-0004A Today's Priorities
+**Next Objective:** Product Owner review of PI-0004A, then scope PI-0004B
 
 ## Current Development Rule
 
@@ -38,7 +38,8 @@ A sprint is not complete until all required items are true:
 | 3 (PI-0001) | Portfolio Intelligence — Portfolio Objective Engine | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (PI-0002) | Portfolio Intelligence — Portfolio Engine Consolidation | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (PI-0003) | Portfolio Intelligence — Canonical Portfolio Priority Engine | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
-| 3 (PI-0003.5) | Portfolio Intelligence — Real Financial Data Wiring | Active | ✅ local | ⬜ | ⬜ | ⬜ |
+| 3 (PI-0003.5) | Portfolio Intelligence — Real Financial Data Wiring | Completed ✅ | ✅ local | ⬜ | ⬜ | ⬜ |
+| 4 (PI-0004A) | Portfolio Intelligence Experience — Today's Priorities | Active | ✅ local | ⬜ | ⬜ | ⬜ |
 | 3 (Paper Execution) | Paper Execution Engine | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 4 | Position Management | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
 | 5 | Candidate Discovery | Not Started | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -60,6 +61,7 @@ A sprint is not complete until all required items are true:
 | 3 (PI-0002) | ✅ local | 155 tests passing repo-wide (23 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles. Vercel preview confirmation pending. |
 | 3 (PI-0003) | ✅ local | 179 tests passing repo-wide (24 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles (99 kB). Vercel preview confirmation pending. |
 | 3 (PI-0003.5) | ✅ local | 206 tests passing repo-wide (27 new), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles (99.6 kB). Vercel preview confirmation pending. |
+| 4 (PI-0004A) | ✅ local | 226 tests passing repo-wide (20 new, first component tests in the repo), `tsc --noEmit` clean, `next build` clean locally, `/portfolio` compiles (102 kB). Vercel preview confirmation pending. |
 | 4 | ⬜ | Pending. |
 | 5 | ⬜ | Pending. |
 | 6 | ⬜ | Pending. |
@@ -273,3 +275,15 @@ Goal: independent review confirms readiness for live-mode implementation. No liv
 **Safety:** `executionAllowed: false` / `paperExecutionAllowed: false` verified across the full combined list, same as every prior slice. No execution, mutation, or UI changes.
 
 **Known Follow-Up:** see "Known remaining gaps" in `planning/SPRINT3_PI0003_5_PLAN.md` — the `maintenance-requirement` field's presence in the live balance payload has not been verified against a real API call (no live access in this session); recommend a one-line `console.log` check before fully trusting `PRESERVE_BUYING_POWER` in production. Income and drawdown-history sources still don't exist. `BalancesTab.tsx`/`app/engine/page.tsx` still have their own separate, unconsolidated balance-parsing logic.
+
+## Sprint 4 (PI-0004A) — Today's Priorities Review
+
+**Result:** Complete, locally verified. 226 tests passing repo-wide (20 new — the first component/UI tests in this repo), `tsc --noEmit` clean, `next build` clean locally including `/portfolio` (102 kB). Vercel preview/production confirmation pending push.
+
+**Built:** `features/portfolio/components/TodaysPriorities.tsx` — a pure rendering layer over the already-computed `canonicalPriorities` state (PI-0003/0003.5). No evaluation, ranking, or scoring happens in this component; verified by a test that inspects the component's own source for any evaluation-function import. Collapsed cards show title/recommendation-type/priority/urgency/rule ID/summary; expanded cards render the canonical rationale, evidence, concerns, review triggers, and the four impact dimensions (mapped to "Expected Outcome," since `PortfolioObjective` has no dedicated field by that name). Empty state renders the canonical `WAIT` objective's own title/rationale rather than invented copy. Reuses the page's existing three-theme system (`th` prop, matching `SummaryBar`/`AuditLogPanel`'s established pattern) rather than hardcoding dark-only styling.
+
+**Infrastructure added:** this repo had no component-testing setup before this slice — added `@testing-library/react`, `jest-dom`, `user-event`, `jsdom`, and `@vitejs/plugin-react`, scoped via `environmentMatchGlobs` so the existing 206 `.test.ts` files stay on the unchanged `node` environment.
+
+**Safety:** no interactive element beyond expand/collapse; `executionAllowed`/`paperExecutionAllowed` are never surfaced as actionable controls. No new business logic, no execution capability.
+
+**Known Follow-Up:** see "Known gaps" in `planning/SPRINT4_PI0004A_PLAN.md` — no visual/screenshot verification yet (DOM-assertion tests only), priority cards don't yet link back to their corresponding position cards, and the older unused `DailyPriorityList`/TE-0006C shim remains unreconciled.

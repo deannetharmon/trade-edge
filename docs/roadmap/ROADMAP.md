@@ -24,7 +24,8 @@
 - Sprint 3, PI-0001 — Portfolio Objective Engine (`lib/portfolio-intelligence`) — first slice, locally verified, pending Vercel confirmation
 - Sprint 3, PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved out of `features/portfolio/` into the canonical model, `app/portfolio/page.tsx` now a consumer, stable rule IDs introduced
 - Sprint 3, PI-0003 — Canonical Portfolio Priority Engine — risk policy separation, 15 fine-grained rule IDs, TE-0006C (Daily Priority List) consolidated into the canonical `prioritizePortfolioObjectives()`, `evaluatePortfolioObjectives()` given its first production consumer
-- Sprint 3, PI-0003.5 — Real Financial Data Wiring — `DEPLOY_IDLE_CASH`, `REDUCE_CONCENTRATION`, and `PRESERVE_BUYING_POWER`'s utilization branch now fire from real account balances via a new single normalization point, locally verified, pending Vercel confirmation
+- Sprint 3, PI-0003.5 — Real Financial Data Wiring — `DEPLOY_IDLE_CASH`, `REDUCE_CONCENTRATION`, and `PRESERVE_BUYING_POWER`'s utilization branch now fire from real account balances via a new single normalization point
+- Sprint 4, PI-0004A — Today's Priorities — first UI surface for canonical Portfolio Intelligence: renders the existing ranked `PortfolioObjective[]` with expand/collapse, no new business logic, locally verified, pending Vercel confirmation
 
 Note: `evaluatePortfolioObjectives()`'s output is wired into the Portfolio page's state but not yet rendered anywhere. Portfolio-level financial aggregates (net liquidity, buying power, drawdown, concentration, income) aren't yet read from the Balances tab, so those specific objective rules don't fire from production data yet. See `planning/SPRINT3_PI0003_PLAN.md` "Later items".
 

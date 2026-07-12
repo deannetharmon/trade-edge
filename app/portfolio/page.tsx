@@ -13,6 +13,7 @@ import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, 
 import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
+import { TodaysPriorities } from '@/features/portfolio/components/TodaysPriorities';
 
 
 // Inject accent CSS variable style
@@ -9701,6 +9702,11 @@ export default function PortfolioPage() {
       )}
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
+
+      {/* PI-0004A: renders the canonical Portfolio Intelligence priority list
+          computed above (canonicalPriorities) -- this component performs no
+          evaluation, ranking, or scoring of its own. */}
+      <TodaysPriorities objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex items-center justify-center h-64">
