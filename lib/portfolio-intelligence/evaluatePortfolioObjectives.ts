@@ -53,6 +53,27 @@ const NEUTRAL_IMPACT: ObjectiveImpact = {
   explanation: 'No material effect on this dimension.',
 };
 
+// PI-0006A: "Replace raw minute/hour durations with readable values" (e.g.
+// 3649m -> 3 days, 51h -> 2 days). Used wherever this file previously
+// rendered order.ageMinutes as a raw "Xm" string -- the underlying
+// PendingOrderInput.ageMinutes field itself is unchanged (still the exact
+// number the thresholds compare against), this only affects how it's
+// displayed in title/summary/rationale/evidence text.
+function humanizeMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes < 0) return `${minutes}m`;
+  if (minutes < 60) {
+    const whole = Math.round(minutes);
+    return `${whole} minute${whole === 1 ? '' : 's'}`;
+  }
+  const hours = minutes / 60;
+  if (hours < 24) {
+    const whole = Math.round(hours);
+    return `${whole} hour${whole === 1 ? '' : 's'}`;
+  }
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
 interface ObjectiveDraft {
   type: PortfolioObjectiveType;
   // PI-0003: each rule function sets its own fine-grained ruleId explicitly
@@ -170,11 +191,17 @@ function evaluateThreatenedPosition(
   }
 
   const critical = materialLoss || flaggedBreach;
+  // PI-0006A: one decisive primary recommendation per objective. A material
+  // loss or a flagged technical/stop breach is objective evidence the
+  // position should be exited; when the only concern is earnings risk (no
+  // loss, no flag), the decisive call is to review the earnings plan rather
+  // than a generic "review" -- matches the ticket's own example exactly.
+  const primaryLabel = critical ? 'Exit Position' : 'Review Earnings Plan';
 
   return {
     type: 'REVIEW_THREATENED_POSITION',
     ruleId: (materialLoss || flaggedBreach) ? 'OBJ-CLOSE-LOSER' : 'OBJ-EARNINGS-RISK',
-    title: `Review threatened position: ${position.symbol}`,
+    title: `${primaryLabel}: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) needs review: ${concerns.map((c) => c.label.toLowerCase()).join(', ')}.`,
     priority: critical ? 'critical' : 'high',
     urgency: critical ? 'now' : 'today',
@@ -187,6 +214,10 @@ function evaluateThreatenedPosition(
         ? { id: 'open-pl', label: 'Open P/L', value: `${(position.openPlPct as number).toFixed(0)}%`, tone: (position.openPlPct as number) < 0 ? 'negative' : 'positive' }
         : undefined,
       { id: 'current-risk', label: 'Current risk', value: position.currentRisk, tone: 'warning' },
+      // PI-0006A: guaranteed second evidence bullet (existing field, no new
+      // calculation) so this objective always carries at least two bullets
+      // even when openPlPct isn't finite (e.g. a pure flagged-breach case).
+      { id: 'theoretical-max-loss', label: 'Theoretical max loss', value: position.theoreticalMaxLoss, tone: 'neutral' },
     ].filter(Boolean) as PortfolioObjectiveEvidence[],
     concerns,
     portfolioImpact: impact('negative', critical ? 'high' : 'medium', 'An unmanaged threatened position increases portfolio-level risk exposure.'),
@@ -219,7 +250,7 @@ function evaluateCloseForProfit(
   return {
     type: 'CLOSE_FOR_PROFIT',
     ruleId: 'OBJ-CLOSE-FOR-PROFIT',
-    title: `Close for profit: ${position.symbol}`,
+    title: `Take Profit: ${position.symbol}`,
     summary: `${position.symbol} has captured ${captured.toFixed(0)}% of max profit, at or above the ${thresholds.profitTargetPct}% target.`,
     priority: critical ? 'critical' : 'high',
     urgency: critical ? 'now' : 'today',
@@ -230,6 +261,9 @@ function evaluateCloseForProfit(
     supportingEvidence: [
       { id: 'profit-captured', label: 'Max profit captured', value: `${captured.toFixed(0)}%`, tone: 'positive' },
       ...(Number.isFinite(position.dte ?? NaN) ? [{ id: 'dte', label: 'Days to expiration', value: position.dte as number, tone: (position.dte as number) <= 7 ? 'warning' : 'neutral' } as PortfolioObjectiveEvidence] : []),
+      // PI-0006A: guaranteed second evidence bullet (existing field) for the
+      // case where dte isn't finite.
+      { id: 'capital-at-risk', label: 'Capital at risk', value: position.theoreticalMaxLoss, tone: 'neutral' },
     ],
     concerns: critical
       ? [{ id: 'time-sensitive-close', label: 'Time-sensitive', severity: 'high', explanation: position.earningsWithinExpiration ? 'Earnings risk makes delaying the close inadvisable.' : 'Very few days remain before expiration.' }]
@@ -265,7 +299,10 @@ function evaluateDteManagement(
     return {
       type: 'MANAGE_POSITION',
       ruleId: 'OBJ-WATCH-POSITION',
-      title: `Monitor CSP toward assignment: ${position.symbol}`,
+      // PI-0006A: assignment is the intended outcome here, and nothing about
+      // the position is actually threatened -- "Hold Position" is the
+      // decisive call, not a generic "monitor" note.
+      title: `Hold Position: ${position.symbol}`,
       summary: `${position.symbol} CSP is at ${dte} DTE; assignment is the stated goal, so this is a monitoring note, not a forced close.`,
       priority: 'low',
       urgency: 'monitor',
@@ -294,11 +331,18 @@ function evaluateDteManagement(
   const rollReview = position.managementFlags.includes('roll_review');
   const type: PortfolioObjectiveType = rollReview ? 'ROLL_POSITION' : 'MANAGE_POSITION';
   const nearTerm = dte <= 7;
+  // PI-0006A: rollReview is objective evidence (an explicit management flag)
+  // that rolling specifically is the intended action, so this is the one
+  // DTE-driven case that keeps a roll-specific decisive label -- "Roll
+  // Position", not the retired "Roll Soon"/"candidate" framing. Without that
+  // flag there is no evidence rolling (vs. closing or holding) is preferred,
+  // so the decisive call is "Review Position" per PI-0006A #3.
+  const primaryLabel = rollReview ? 'Roll Position' : 'Review Position';
 
   return {
     type,
     ruleId: rollReview ? 'OBJ-ROLL-POSITION' : 'OBJ-MANAGE-21-DTE',
-    title: `${rollReview ? 'Review roll candidate' : 'Manage position'}: ${position.symbol}`,
+    title: `${primaryLabel}: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) is at ${dte} DTE, at or inside the ${thresholds.dteReviewThreshold}-DTE review threshold.`,
     priority: nearTerm ? 'high' : 'medium',
     urgency: nearTerm ? 'now' : 'today',
@@ -309,6 +353,9 @@ function evaluateDteManagement(
     supportingEvidence: [
       { id: 'dte', label: 'Days to expiration', value: dte, tone: nearTerm ? 'warning' : 'neutral' },
       ...(Number.isFinite(position.openPlPct ?? NaN) ? [{ id: 'open-pl', label: 'Open P/L', value: `${(position.openPlPct as number).toFixed(0)}%`, tone: (position.openPlPct as number) >= 0 ? 'positive' : 'negative' } as PortfolioObjectiveEvidence] : []),
+      // PI-0006A: guaranteed second evidence bullet (existing field) for the
+      // case where openPlPct isn't finite.
+      { id: 'current-risk', label: 'Current risk', value: position.currentRisk, tone: 'neutral' },
     ],
     concerns: nearTerm ? [{ id: 'near-term-expiration', label: 'Near-term expiration', severity: 'medium', explanation: `Only ${dte} days remain, narrowing the window to act.` }] : [],
     portfolioImpact: impact('neutral', 'medium', 'Time-based review of an existing position; outcome depends on the management decision made.'),
@@ -316,7 +363,7 @@ function evaluateDteManagement(
     riskImpact: impact('neutral', 'medium', 'Gamma risk typically increases as DTE shrinks; review reduces the chance of an unmanaged outcome.'),
     capitalImpact: impact('neutral', 'low', 'No capital change from the review itself.', position.theoreticalMaxLoss),
     reviewTriggers: [
-      { id: 'dte-threshold', label: 'DTE threshold reached', triggerType: 'dte', threshold: thresholds.dteReviewThreshold, explanation: 'This objective was generated because the position reached the configured DTE review threshold.' },
+      { id: 'dte-threshold', label: 'Next DTE management threshold reached', triggerType: 'dte', threshold: thresholds.dteReviewThreshold, explanation: 'This objective was generated because the position reached the configured DTE review threshold.' },
     ],
     linkedDecisionAnalysis: position.linkedDecisionAnalysis,
     rulesTriggered: [rollReview ? 'dte_threshold_roll_review' : 'dte_threshold_management_review'],
@@ -344,7 +391,7 @@ function evaluateDeployIdleCash(
   return {
     type: 'DEPLOY_IDLE_CASH',
     ruleId: 'OBJ-DEPLOY-IDLE-CASH',
-    title: 'Deploy idle cash',
+    title: 'Deploy Idle Cash',
     summary: `Idle cash is ${portfolio.idleCashPct.toFixed(1)}% of net liquidity, above the ${thresholds.idleCashThresholdPct}% threshold, with room to deploy.`,
     priority: materiallyHigh ? 'high' : 'medium',
     urgency: 'this_week',
@@ -380,7 +427,7 @@ function evaluateIncreaseIncome(
   return {
     type: 'INCREASE_INCOME',
     ruleId: 'OBJ-INCREASE-INCOME',
-    title: 'Increase recurring income',
+    title: 'Increase Income',
     summary: `Current income is ${deficitPct.toFixed(0)}% below the recurring-income target.`,
     priority: 'medium',
     urgency: 'this_week',
@@ -434,7 +481,7 @@ function evaluateConcentration(
     drafts.push({
       type: 'REDUCE_CONCENTRATION',
       ruleId: 'OBJ-REDUCE-CONCENTRATION',
-      title: `Reduce concentration: ${symbol}`,
+      title: `Reduce Concentration: ${symbol}`,
       summary: wheelManaged
         ? `${symbol} is ${pct.toFixed(1)}% of net liquidity (Wheel-managed), above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`
         : `${symbol} is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`,
@@ -444,7 +491,12 @@ function evaluateConcentration(
       source: 'portfolio_state',
       subject: { type: 'symbol', symbol, label: `${symbol} exposure` },
       rationale,
-      supportingEvidence: [{ id: 'symbol-concentration', label: 'Current vs. limit', value: `${pct.toFixed(1)}% / ${portfolio.maxSymbolConcentrationPct}%`, tone: materially ? 'negative' : 'warning' }],
+      supportingEvidence: [
+        { id: 'symbol-concentration', label: 'Current vs. limit', value: `${pct.toFixed(1)}% / ${portfolio.maxSymbolConcentrationPct}%`, tone: materially ? 'negative' : 'warning' },
+        // PI-0006A: guaranteed second evidence bullet, reusing the excess
+        // already computed for the concern's explanation text below.
+        { id: 'excess-points', label: 'Over limit by', value: `${(pct - portfolio.maxSymbolConcentrationPct).toFixed(1)} pts`, tone: materially ? 'negative' : 'warning' },
+      ],
       concerns: [{ id: 'single-ticker-concentration', label: 'Single-ticker concentration', severity: materially ? 'high' : 'medium', explanation: `Exposure exceeds the configured limit by ${(pct - portfolio.maxSymbolConcentrationPct).toFixed(1)} percentage points.` }],
       portfolioImpact: wheelManaged
         ? impact('negative', materially ? 'high' : 'medium', 'Elevated single-name concentration increases portfolio-level tail risk, though it is currently the accepted cost of an intentional Wheel position rather than an unmanaged one.')
@@ -463,7 +515,7 @@ function evaluateConcentration(
     drafts.push({
       type: 'REDUCE_CONCENTRATION',
       ruleId: 'OBJ-REDUCE-CONCENTRATION',
-      title: `Reduce concentration: ${sector} sector`,
+      title: `Reduce Concentration: ${sector} sector`,
       summary: `${sector} sector is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSectorConcentrationPct}% sector limit.`,
       priority: materially ? 'high' : 'medium',
       urgency: 'this_week',
@@ -471,7 +523,10 @@ function evaluateConcentration(
       source: 'portfolio_state',
       subject: { type: 'sector', label: `${sector} sector exposure` },
       rationale: `${sector} sector exposure is ${pct.toFixed(1)}% of net liquidity, above the configured ${portfolio.maxSectorConcentrationPct}% sector limit. Sector-level concentration compounds single-name risk across correlated names.`,
-      supportingEvidence: [{ id: 'sector-concentration', label: 'Current vs. limit', value: `${pct.toFixed(1)}% / ${portfolio.maxSectorConcentrationPct}%`, tone: materially ? 'negative' : 'warning' }],
+      supportingEvidence: [
+        { id: 'sector-concentration', label: 'Current vs. limit', value: `${pct.toFixed(1)}% / ${portfolio.maxSectorConcentrationPct}%`, tone: materially ? 'negative' : 'warning' },
+        { id: 'excess-points', label: 'Over limit by', value: `${(pct - portfolio.maxSectorConcentrationPct).toFixed(1)} pts`, tone: materially ? 'negative' : 'warning' },
+      ],
       concerns: [{ id: 'sector-concentration', label: 'Sector concentration', severity: materially ? 'high' : 'medium', explanation: `Exposure exceeds the configured limit by ${(pct - portfolio.maxSectorConcentrationPct).toFixed(1)} percentage points.` }],
       portfolioImpact: impact('negative', materially ? 'high' : 'medium', 'Elevated sector concentration increases exposure to correlated moves across the sector.'),
       incomeImpact: NEUTRAL_IMPACT,
@@ -497,7 +552,7 @@ function evaluatePreserveBuyingPower(
   return {
     type: 'PRESERVE_BUYING_POWER',
     ruleId: 'OBJ-PRESERVE-BUYING-POWER',
-    title: 'Preserve buying power',
+    title: 'Preserve Buying Power',
     summary: drawdownBreach
       ? `Drawdown of ${portfolio.currentDrawdownPct.toFixed(1)}% has reached the defensive threshold.`
       : `Buying-power utilization of ${portfolio.buyingPowerUtilizationPct.toFixed(0)}% exceeds the configured limit.`,
@@ -539,21 +594,34 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
   if (!stale && !offMarket && !flagged) return null;
 
   const veryStale = order.ageMinutes > thresholds.stalePendingOrderMinutes * 2;
+  // PI-0006A: human-friendly durations everywhere this rule previously
+  // rendered a raw minute count (e.g. "3649m" -> "3 days"). order.ageMinutes
+  // itself, and the threshold comparisons above, are unchanged -- this only
+  // affects display text.
+  const ageHuman = humanizeMinutes(order.ageMinutes);
+  const thresholdHuman = humanizeMinutes(thresholds.stalePendingOrderMinutes);
 
   return {
     type: 'REVIEW_PENDING_ORDER',
     ruleId: 'OBJ-REVIEW-PENDING-ORDER',
-    title: `Review pending order: ${order.symbol}`,
-    summary: `${order.symbol} ${order.strategyAction} order needs review (${order.status}, ${order.ageMinutes}m old${offMarket ? `, ${(order.fillDistancePct as number).toFixed(1)}% from fill` : ''}).`,
+    // PI-0006A: matches the ticket's own example verbatim -- a stale, off-
+    // market, or explicitly flagged working order's decisive call is to
+    // replace it (cancel and resubmit at a workable price), not a generic
+    // "review".
+    title: `Replace Working Order: ${order.symbol}`,
+    summary: `${order.symbol} ${order.strategyAction} order needs review (${order.status}, ${ageHuman} old${offMarket ? `, ${(order.fillDistancePct as number).toFixed(1)}% from fill` : ''}).`,
     priority: veryStale || flagged ? 'high' : 'medium',
     urgency: veryStale ? 'today' : 'this_week',
     confidence: 75,
     source: 'pending_order',
     subject: { type: 'pending_order', id: order.id, symbol: order.symbol, label: `${order.symbol} pending ${order.strategyAction}` },
-    rationale: `The pending ${order.strategyAction} order on ${order.symbol} has been working for ${order.ageMinutes} minutes${offMarket ? ` and is ${(order.fillDistancePct as number).toFixed(1)}% away from a fill` : ''}, status ${order.status}. Review whether to cancel, reprice, or continue waiting -- this objective does not itself cancel or resubmit the order.`,
+    rationale: `The pending ${order.strategyAction} order on ${order.symbol} has been working for ${ageHuman}${offMarket ? ` and is ${(order.fillDistancePct as number).toFixed(1)}% away from a fill` : ''}, status ${order.status}. Review whether to cancel, reprice, or continue waiting -- this objective does not itself cancel or resubmit the order.`,
     supportingEvidence: [
-      { id: 'order-age', label: 'Order age', value: `${order.ageMinutes}m`, tone: stale ? 'warning' : 'neutral' },
+      { id: 'order-age', label: 'Order age', value: ageHuman, tone: stale ? 'warning' : 'neutral' },
       ...(Number.isFinite(order.fillDistancePct ?? NaN) ? [{ id: 'fill-distance', label: 'Fill distance', value: `${(order.fillDistancePct as number).toFixed(1)}%`, tone: offMarket ? 'warning' : 'neutral' } as PortfolioObjectiveEvidence] : []),
+      // PI-0006A: guaranteed second evidence bullet (existing field) for the
+      // case where fillDistancePct isn't finite.
+      { id: 'order-status', label: 'Order status', value: order.status, tone: flagged ? 'warning' : 'neutral' },
     ],
     concerns: flagged ? [{ id: 'order-flagged', label: 'Order explicitly flagged', severity: 'medium', explanation: `Order status is ${order.status}.` }] : [],
     portfolioImpact: NEUTRAL_IMPACT,
@@ -561,7 +629,7 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
     riskImpact: impact('neutral', 'low', 'An unfilled order carries no position risk, but ties up intent and possibly buying-power reservation.'),
     capitalImpact: NEUTRAL_IMPACT,
     reviewTriggers: [
-      { id: 'order-age-recheck', label: 'Order age re-check', triggerType: 'order_age', threshold: `${thresholds.stalePendingOrderMinutes}m`, explanation: 'Re-evaluate if the order fills, is cancelled, or ages further.' },
+      { id: 'order-age-recheck', label: 'Order age re-check', triggerType: 'order_age', threshold: thresholdHuman, explanation: 'Re-evaluate if the order fills, is cancelled, or ages further.' },
     ],
     rulesTriggered: [
       ...(stale ? ['pending_order_stale'] : []),

@@ -35,7 +35,7 @@ describe('PI-002: assignment-risk parity', () => {
     expect(legacyRecommendation.kind).toBe('assignment-risk');
     expect(legacyRecommendation.urgency).toBe('critical');
     expect(legacyRecommendation.confidence).toBe(94);
-    expect(legacyRecommendation.label).toBe('Assignment Risk');
+    expect(legacyRecommendation.label).toBe('Exit Position');
     expect(objective).not.toBeNull();
     expect(objective!.type).toBe('REVIEW_THREATENED_POSITION');
     expect(objective!.ruleId).toBe('OBJ-ASSIGNMENT-RISK');
@@ -174,7 +174,7 @@ describe('PI-002: hold parity and the deliberate objective:null change', () => {
     expect(legacyRecommendation.kind).toBe('hold');
     expect(legacyRecommendation.urgency).toBe('low');
     expect(legacyRecommendation.confidence).toBe(76);
-    expect(legacyRecommendation.label).toBe('Hold');
+    expect(legacyRecommendation.label).toBe('Hold Position');
     // Deliberate PI-0002 design decision: unlike the old system (which always
     // returned a recommendation object), the canonical objective is null for
     // "nothing to act on" -- consistent with evaluatePortfolioObjectives'

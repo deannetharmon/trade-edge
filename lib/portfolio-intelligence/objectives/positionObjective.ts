@@ -109,6 +109,35 @@ export interface PositionObjectiveInput {
   assignmentPreference?: AssignmentPreference | null;
 }
 
+// PI-0006A: "Remove premature tactical recommendations... produce one
+// decisive primary recommendation, supported by 2-4 concise evidence
+// bullets." `kind` (above) remains the stable internal trigger identifier --
+// unchanged, so ruleId/type/actionability/management-choices mappings keyed
+// off it are untouched. `label` is the user-facing decisive call: this is
+// the one place that changed. Two premature-tactical labels are retired
+// here specifically because PI-0006A calls them out by name:
+//   - 'Roll Soon' (roll-soon kind): this branch fires purely from the DTE
+//     window, with no management flag or other evidence that rolling
+//     specifically (vs. closing or holding) is the preferred action -- so
+//     per PI-0006A #3 it becomes 'Review Position', not a roll call.
+//     (Contrast with evaluatePortfolioObjectives.ts's ROLL_POSITION type,
+//     which only fires when a position is explicitly flagged
+//     'roll_review' -- that IS objective evidence rolling was the intended
+//     path, so that one keeps a roll-specific label.)
+//   - 'Watch' (watch kind): equivalent to the "Monitor" example PI-0006A's
+//     Problem section calls out as too generic -- becomes 'Review Position'.
+const LABEL_BY_KIND: Record<PortfolioRecommendationKind, string> = {
+  hold: 'Hold Position',
+  watch: 'Review Position',
+  'close-winner': 'Take Profit',
+  'close-loser': 'Exit Position',
+  'roll-soon': 'Review Position',
+  'place-gtc': 'Take Profit',
+  'let-expire': 'Hold Position',
+  'earnings-risk': 'Review Earnings Plan',
+  'assignment-risk': 'Exit Position',
+};
+
 // -- helpers, moved verbatim from recommendation-rules.ts (behavior-critical, unchanged) --
 
 function normalizePositionObjectivePct(value: number | null | undefined): number | null {
@@ -157,7 +186,6 @@ function isShortPremiumStrategy(strategy: string | null | undefined): boolean {
 function makeLegacyRecommendation(
   input: PositionObjectiveInput,
   kind: PortfolioRecommendationKind,
-  label: string,
   urgency: PortfolioRecommendationUrgency,
   confidence: number,
   primaryReason: string,
@@ -169,7 +197,9 @@ function makeLegacyRecommendation(
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
     symbol: input.symbol,
     kind,
-    label,
+    // PI-0006A: decisive, user-facing label -- see LABEL_BY_KIND above for
+    // the one-per-kind mapping and the rationale for each choice.
+    label: LABEL_BY_KIND[kind],
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
     primaryReason,
@@ -279,7 +309,7 @@ function buildReviewTriggers(
       }];
     case 'roll-soon':
       return [{
-        id: 'dte-review-window', label: 'Review as DTE decreases', triggerType: 'dte',
+        id: 'dte-review-window', label: 'Next DTE management threshold reached', triggerType: 'dte',
         threshold: DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold,
         explanation: 'Finalize the close, roll, or hold decision as DTE continues to decrease toward the near-term management window.',
       }];
@@ -423,6 +453,27 @@ export interface PositionObjectiveResult {
   legacyRecommendation: PortfolioRecommendation;
 }
 
+// PI-0006A: builds 2-4 concise evidence bullets from data this function
+// already has in scope -- health-score factors first (most specific),
+// padded out with the already-normalized dte/pnlPct/buffer/healthScore
+// values when health factors are sparse or absent. No new fields, no new
+// calculations -- these are the exact values every branch below already
+// reads to decide which recommendation fires.
+function buildSupportingReasons(
+  input: PositionObjectiveInput,
+  dte: number | null,
+  pnlPct: number | null,
+  buffer: number | null,
+  healthScore: number | null,
+): string[] {
+  const reasons = input.healthScore?.factors?.slice(0, 3).map((f) => `${f.label}: ${f.message}`) ?? [];
+  if (reasons.length < 2 && dte != null) reasons.push(`Days to expiration: ${dte}.`);
+  if (reasons.length < 2 && pnlPct != null) reasons.push(`Open P/L: ${pnlPct.toFixed(0)}% of credit.`);
+  if (reasons.length < 2 && buffer != null) reasons.push(`Strike buffer: ${buffer.toFixed(1)}%.`);
+  if (reasons.length < 2 && healthScore != null) reasons.push(`Health score: ${healthScore}.`);
+  return reasons.slice(0, 4);
+}
+
 // The single canonical evaluator for per-position recommendations. Trigger
 // order and thresholds below are preserved EXACTLY from the original
 // calculatePortfolioRecommendation() (TE-0006B) for parity -- do not
@@ -439,8 +490,14 @@ export function evaluatePositionObjective(
   const strategy = String(input.strategy ?? '').toUpperCase();
   const shortPremium = isShortPremiumStrategy(strategy);
 
-  const supportingReasons =
-    input.healthScore?.factors?.slice(0, 3).map((f) => `${f.label}: ${f.message}`) ?? [];
+  // PI-0006A: "support every recommendation" with 2-4 concise evidence
+  // bullets, using existing engine data only -- no new calculations. Health
+  // factors are the richest source when present; when there are fewer than
+  // two (including the common case of no healthScore at all), fall back to
+  // the same dte/pnlPct/buffer/healthScore values this function already
+  // derived above, which is exactly what drove the primaryReason text for
+  // whichever branch fires below.
+  const supportingReasons = buildSupportingReasons(input, dte, pnlPct, buffer, healthScore);
 
   const criticalExpiration = dte != null && dte <= 7;
   const itmOrCriticalBuffer =
@@ -450,70 +507,70 @@ export function evaluatePositionObjective(
 
   if (shortPremium && criticalExpiration && itmOrCriticalBuffer) {
     legacy = makeLegacyRecommendation(
-      input, 'assignment-risk', 'Assignment Risk', 'critical', 94,
+      input, 'assignment-risk', 'critical', 94,
       dte != null ? `${dte} DTE with tight or ITM strike buffer.` : 'Tight or ITM strike buffer near expiration.',
       'Review assignment, close, or roll plan before adding new risk.',
       supportingReasons, now,
     );
   } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct) {
     legacy = makeLegacyRecommendation(
-      input, 'close-loser', 'Close Loser', 'critical', 91,
+      input, 'close-loser', 'critical', 91,
       `Loss is near or beyond 1x credit (${pnlPct.toFixed(0)}%).`,
       'Review closing or rolling defensively.',
       supportingReasons, now,
     );
   } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct && healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold) {
     legacy = makeLegacyRecommendation(
-      input, 'close-loser', 'Close Loser', 'high', 84,
+      input, 'close-loser', 'high', 84,
       `Material loss with weak health score (${healthScore}).`,
       'Review whether the thesis still holds; close or roll if risk is no longer acceptable.',
       supportingReasons, now,
     );
   } else if (isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now)) {
     legacy = makeLegacyRecommendation(
-      input, 'earnings-risk', 'Earnings Risk', 'high', 86,
+      input, 'earnings-risk', 'high', 86,
       `Upcoming earnings before expiration (${input.earningsDate}).`,
       'Decide whether to close, reduce risk, or intentionally hold through earnings.',
       supportingReasons, now,
     );
   } else if (input.hitTarget || hasHealthFactor(input, 'profit-target') || (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct)) {
     legacy = makeLegacyRecommendation(
-      input, 'close-winner', 'Close Winner', 'high', 90,
+      input, 'close-winner', 'high', 90,
       pnlPct != null ? `Profit target reached at approximately ${pnlPct.toFixed(0)}% of credit.` : 'Profit target reached.',
       'Take profit or confirm the GTC target order is working.',
       supportingReasons, now,
     );
   } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium) {
     legacy = makeLegacyRecommendation(
-      input, 'roll-soon', 'Roll Soon', 'medium', 80,
+      input, 'roll-soon', 'medium', 80,
       `${dte} DTE is inside the standard management window.`,
       'Review close, roll, or let-decay plan.',
       supportingReasons, now,
     );
   } else if (shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14) {
     legacy = makeLegacyRecommendation(
-      input, 'place-gtc', 'Place GTC', 'medium', 78,
+      input, 'place-gtc', 'medium', 78,
       `Position has profit (${pnlPct.toFixed(0)}%) but no working GTC detected.`,
       'Place or verify a profit-target GTC order.',
       supportingReasons, now,
     );
   } else if (dte != null && dte <= 3 && healthScore != null && healthScore >= DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold && !itmOrCriticalBuffer) {
     legacy = makeLegacyRecommendation(
-      input, 'let-expire', 'Let Expire', 'low', 72,
+      input, 'let-expire', 'low', 72,
       `${dte} DTE with healthy score and no critical buffer flag.`,
       'Monitor through expiration only if assignment risk is acceptable.',
       supportingReasons, now,
     );
   } else if ((healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold) || (buffer != null && buffer < 5)) {
     legacy = makeLegacyRecommendation(
-      input, 'watch', 'Watch', 'medium', 70,
+      input, 'watch', 'medium', 70,
       healthScore != null ? `Health score is ${healthScore}.` : 'One or more risk factors deserve attention.',
       'Monitor closely and avoid adding correlated risk.',
       supportingReasons, now,
     );
   } else {
     legacy = makeLegacyRecommendation(
-      input, 'hold', 'Hold', 'low', 76,
+      input, 'hold', 'low', 76,
       healthScore != null ? `Health score is ${healthScore}; no primary action rule triggered.` : 'No primary action rule triggered.',
       'Leave position alone unless market conditions or thesis change.',
       supportingReasons, now,

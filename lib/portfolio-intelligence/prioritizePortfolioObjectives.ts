@@ -83,7 +83,7 @@ export function synthesizeWaitObjective(generatedAt: string): PortfolioObjective
     version: 'portfolio-objective-v1',
     type: 'WAIT',
     ruleId: 'OBJ-WAIT',
-    title: 'No action required',
+    title: 'No Action Required',
     summary: 'No position, order, or portfolio-level condition currently justifies action.',
     priority: 'informational',
     urgency: 'none',
