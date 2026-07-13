@@ -29,6 +29,15 @@ export interface PositionManagementPolicy {
   // Health score below this represents more severe concern than "watch".
   // Reserved for future use (no rule currently branches on this alone).
   actionHealthScoreThreshold: number;
+  // PI-0004B: centralized earnings-actionability review window, replacing
+  // the old "earnings before expiration always surfaces" behavior. Earnings
+  // more than this many days out are real but not yet actionable (MONITOR);
+  // once inside this window they promote to REVIEW_SOON and surface in
+  // Today's Priorities. No trading-calendar utility exists anywhere in this
+  // repo (confirmed by search), so this is expressed in calendar days, not
+  // trading days -- centralized here specifically so it can be swapped to a
+  // trading-day calculation later without touching rule implementations.
+  earningsReviewWindowDays: number;
 }
 
 // Portfolio Risk Policy: should ADDITIONAL portfolio risk be accepted right

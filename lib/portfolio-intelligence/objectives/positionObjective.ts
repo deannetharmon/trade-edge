@@ -42,9 +42,20 @@
 // threshold sets into one is explicitly deferred -- see
 // planning/SPRINT3_PI0002_PLAN.md "Later items".
 
-import type { PortfolioObjective, PortfolioObjectiveConcern, PortfolioObjectiveEvidence, PortfolioObjectiveRuleId } from '../types';
+import type {
+  ObjectiveImpact,
+  PortfolioObjective,
+  PortfolioObjectiveActionability,
+  PortfolioObjectiveConcern,
+  PortfolioObjectiveEvidence,
+  PortfolioObjectiveReviewTrigger,
+  PortfolioObjectiveRuleId,
+  PositionStrategy,
+  AssignmentPreference,
+} from '../types';
 import type { PositionHealthScore } from '../health/types';
 import { DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
+import { defaultActionabilityForPriority } from '../actionability';
 
 export type PortfolioRecommendationKind =
   | 'hold'
@@ -88,6 +99,14 @@ export interface PositionObjectiveInput {
   earningsDate?: string | null;
   expDate?: string | null;
   healthScore?: PositionHealthScore | null;
+  // PI-0004B: optional, independent fields -- see PositionStrategy /
+  // AssignmentPreference doc comments in types.ts. Not yet read by any
+  // branch in this file (Wheel-awareness for PI-0004B lives in the
+  // portfolio-level concentration rule, not per-position evaluation --
+  // see evaluatePortfolioObjectives.ts's evaluateConcentration()); accepted
+  // here for type-level consistency and forward extension.
+  positionStrategy?: PositionStrategy | null;
+  assignmentPreference?: AssignmentPreference | null;
 }
 
 // -- helpers, moved verbatim from recommendation-rules.ts (behavior-critical, unchanged) --
@@ -203,13 +222,149 @@ const KIND_TO_RULE_ID: Record<Exclude<PortfolioRecommendationKind, 'hold'>, Port
   watch: 'OBJ-WATCH-POSITION',
 };
 
+// PI-0004B: earnings-risk is the one branch with dedicated actionability
+// logic -- "earnings before expiration" is a true fact the moment it's
+// detected, but it isn't worth the trader's attention until it's inside the
+// centralized review window (DEFAULT_POSITION_MANAGEMENT_POLICY.
+// earningsReviewWindowDays). Everything else defaults to a priority-derived
+// actionability (see actionability.ts's doc comment for why that's a
+// sufficient proxy for every other branch).
+function computeActionability(
+  kind: Exclude<PortfolioRecommendationKind, 'hold'>,
+  priority: PortfolioObjective['priority'],
+  input: PositionObjectiveInput,
+  now: Date,
+): PortfolioObjectiveActionability {
+  if (kind === 'earnings-risk') {
+    const daysUntilEarnings = daysUntil(input.earningsDate, now);
+    if (daysUntilEarnings != null && daysUntilEarnings <= DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays) {
+      return 'REVIEW_SOON';
+    }
+    return 'MONITOR';
+  }
+  return defaultActionabilityForPriority(priority);
+}
+
+// PI-0004B: "Remove generic review triggers... replace with meaningful
+// triggers when available" -- every branch below derives its trigger from
+// the actual condition that fired it (the same fields/policy values already
+// used to evaluate that branch), instead of the old one-size-fits-all
+// "re-check on next portfolio refresh" text.
+function buildReviewTriggers(
+  kind: Exclude<PortfolioRecommendationKind, 'hold'>,
+  input: PositionObjectiveInput,
+): PortfolioObjectiveReviewTrigger[] {
+  switch (kind) {
+    case 'assignment-risk':
+      return [{
+        id: 'assignment-or-buffer-recovery', label: 'Assignment or buffer recovery', triggerType: 'risk',
+        explanation: 'Re-evaluate upon assignment, or if the strike buffer recovers above the critical threshold before expiration.',
+      }];
+    case 'close-loser':
+      return [{
+        id: 'position-managed', label: 'Position closed or rolled', triggerType: 'risk',
+        explanation: 'Re-evaluate once the position is closed, rolled, or the loss no longer meets the loss-stop threshold.',
+      }];
+    case 'earnings-risk':
+      return [{
+        id: 'review-before-earnings', label: 'Review before earnings', triggerType: 'earnings',
+        threshold: input.earningsDate ?? undefined,
+        explanation: 'Decide whether to close, reduce risk, or intentionally hold through earnings before the earnings date arrives.',
+      }];
+    case 'close-winner':
+      return [{
+        id: 'close-or-gtc-fill', label: 'Close confirmed or GTC fills', triggerType: 'profit_target',
+        threshold: `${DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct}%`,
+        explanation: 'Re-evaluate once the position is closed or the profit-target GTC order fills.',
+      }];
+    case 'roll-soon':
+      return [{
+        id: 'dte-review-window', label: 'Review as DTE decreases', triggerType: 'dte',
+        threshold: DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold,
+        explanation: 'Finalize the close, roll, or hold decision as DTE continues to decrease toward the near-term management window.',
+      }];
+    case 'place-gtc':
+      return [{
+        id: 'gtc-confirmed', label: 'GTC order confirmed working', triggerType: 'manual',
+        explanation: 'Re-evaluate once a profit-target GTC order is placed and confirmed working.',
+      }];
+    case 'let-expire':
+      return [{
+        id: 'strike-buffer-below-policy', label: 'Strike buffer falls below policy', triggerType: 'price',
+        threshold: '2%',
+        explanation: 'Re-evaluate if the strike buffer erodes toward the critical threshold before expiration.',
+      }];
+    case 'watch':
+      return [{
+        id: 'health-score-threshold', label: 'Health score crosses policy threshold', triggerType: 'risk',
+        threshold: DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold,
+        explanation: 'Re-evaluate if the health score moves back above the watch threshold, or deteriorates further.',
+      }];
+  }
+}
+
+// PI-0004B: portfolioImpact/incomeImpact were previously identical
+// boilerplate across every branch ("Consolidated from the per-position
+// recommendation engine..." / "No direct income impact modeled..."). Each
+// kind now gets an impact statement grounded in what that specific
+// recommendation actually means -- riskImpact/capitalImpact were already
+// reasonably kind-aware and are left as-is.
+function buildPortfolioAndIncomeImpact(
+  kind: Exclude<PortfolioRecommendationKind, 'hold'>,
+): { portfolioImpact: ObjectiveImpact; incomeImpact: ObjectiveImpact } {
+  switch (kind) {
+    case 'assignment-risk':
+      return {
+        portfolioImpact: { direction: 'negative', magnitude: 'high', explanation: 'Leaving this unreviewed risks an unplanned assignment or a breach beyond the strike buffer before expiration.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'Income effect depends on how assignment, close, or roll is resolved -- not yet determined.' },
+      };
+    case 'close-loser':
+      return {
+        portfolioImpact: { direction: 'negative', magnitude: 'high', explanation: 'The loss is already incurred whether or not it is closed -- reviewing now limits further downside from an unmanaged position.' },
+        incomeImpact: { direction: 'negative', magnitude: 'medium', explanation: 'Closing or rolling at a loss reduces net income for the period.' },
+      };
+    case 'earnings-risk':
+      return {
+        portfolioImpact: { direction: 'negative', magnitude: 'medium', explanation: 'An earnings gap before expiration adds event risk beyond normal theta decay.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income change from monitoring alone; effect depends on whether the position is closed, reduced, or intentionally held through earnings.' },
+      };
+    case 'close-winner':
+      return {
+        portfolioImpact: { direction: 'positive', magnitude: 'medium', explanation: 'Closing locks in the captured gain and frees the allocated capital and risk budget for redeployment.' },
+        incomeImpact: { direction: 'positive', magnitude: 'medium', explanation: 'Realizes the premium already earned on this position.' },
+      };
+    case 'roll-soon':
+      return {
+        portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'Time-based review of an existing position; outcome depends on whether it is closed, rolled, or held to expiration.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'Rolling can extend income collection and closing realizes it now -- no income change from the review itself.' },
+      };
+    case 'place-gtc':
+      return {
+        portfolioImpact: { direction: 'neutral', magnitude: 'low', explanation: 'Placing a GTC order does not change the position itself, only how the existing profit target gets captured.' },
+        incomeImpact: { direction: 'positive', magnitude: 'low', explanation: 'Protects the profit already accrued from being given back if the position reverses before it is otherwise managed.' },
+      };
+    case 'let-expire':
+      return {
+        portfolioImpact: { direction: 'neutral', magnitude: 'low', explanation: 'Letting a healthy, near-expiration position decay to zero is the intended outcome here, not a risk needing intervention.' },
+        incomeImpact: { direction: 'positive', magnitude: 'low', explanation: 'Full remaining premium is retained if the position expires as expected.' },
+      };
+    case 'watch':
+      return {
+        portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'No immediate action is required, but the flagged factors are worth monitoring before they compound.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income change from monitoring alone.' },
+      };
+  }
+}
+
 function buildObjective(
   input: PositionObjectiveInput,
   legacy: PortfolioRecommendation,
   now: Date,
 ): PortfolioObjective {
-  const type = KIND_TO_TYPE[legacy.kind as Exclude<PortfolioRecommendationKind, 'hold'>];
-  const ruleId = KIND_TO_RULE_ID[legacy.kind as Exclude<PortfolioRecommendationKind, 'hold'>];
+  const kind = legacy.kind as Exclude<PortfolioRecommendationKind, 'hold'>;
+  const type = KIND_TO_TYPE[kind];
+  const ruleId = KIND_TO_RULE_ID[kind];
+  const priority = URGENCY_TO_PRIORITY[legacy.urgency];
   const concerns: PortfolioObjectiveConcern[] = [
     {
       id: legacy.kind,
@@ -225,6 +380,7 @@ function buildObjective(
     tone: 'neutral',
     explanation: reason,
   }));
+  const { portfolioImpact, incomeImpact } = buildPortfolioAndIncomeImpact(kind);
 
   return {
     id: `objective_${now.getTime().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
@@ -234,8 +390,9 @@ function buildObjective(
     ruleId,
     title: `${legacy.label}: ${input.symbol}`,
     summary: legacy.primaryReason,
-    priority: URGENCY_TO_PRIORITY[legacy.urgency],
+    priority,
     urgency: URGENCY_TO_OBJECTIVE_URGENCY[legacy.urgency],
+    actionability: computeActionability(kind, priority, input, now),
     confidence: legacy.confidence,
     status: 'active',
     source: 'position',
@@ -243,17 +400,15 @@ function buildObjective(
     rationale: `${legacy.primaryReason} ${legacy.suggestedAction}`,
     supportingEvidence,
     concerns,
-    portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'Consolidated from the per-position recommendation engine (TE-0006B).' },
-    incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No direct income impact modeled at the per-position level.' },
+    portfolioImpact,
+    incomeImpact,
     riskImpact: {
       direction: legacy.kind === 'close-winner' ? 'positive' : legacy.urgency === 'critical' || legacy.urgency === 'high' ? 'negative' : 'neutral',
       magnitude: legacy.urgency === 'critical' ? 'high' : legacy.urgency === 'high' ? 'medium' : 'low',
       explanation: legacy.primaryReason,
     },
     capitalImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No capital change from generating this objective alone.' },
-    reviewTriggers: [
-      { id: 'legacy-recheck', label: 'Re-check on next portfolio refresh', triggerType: 'manual', explanation: 'Re-evaluate the next time position data refreshes.' },
-    ],
+    reviewTriggers: buildReviewTriggers(kind, input),
     metadata: {
       executionAllowed: false,
       paperExecutionAllowed: false,

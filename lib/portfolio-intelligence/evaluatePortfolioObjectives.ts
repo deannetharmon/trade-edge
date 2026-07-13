@@ -27,6 +27,7 @@ import type {
   PortfolioStateInput,
 } from './types';
 import { prioritizePortfolioObjectives } from './prioritizePortfolioObjectives';
+import { defaultActionabilityForPriority } from './actionability';
 
 function clamp(value: number, min = 0, max = 100): number {
   if (!Number.isFinite(value)) return min;
@@ -87,6 +88,13 @@ function finalize(draft: ObjectiveDraft, rulesEvaluated: string[], createdAt: st
     summary: draft.summary,
     priority: draft.priority,
     urgency: draft.urgency,
+    // PI-0004B: every producer in this file uses the priority-derived
+    // default -- none of these rules have a dedicated "not yet actionable"
+    // gate the way positionObjective.ts's earnings-risk branch does (see
+    // evaluateThreatenedPosition's doc comment below for the one rule here
+    // that's earnings-adjacent, and why it doesn't get the same date-based
+    // gating this slice).
+    actionability: defaultActionabilityForPriority(draft.priority),
     confidence: clamp(draft.confidence),
     status: draft.type === 'WAIT' ? 'informational' : 'active',
     source: draft.source,
@@ -121,6 +129,16 @@ function evaluateThreatenedPosition(
 
   const materialLoss = Number.isFinite(position.openPlPct ?? NaN) && (position.openPlPct as number) <= thresholds.materialLossPct;
   const flaggedBreach = position.managementFlags.some((f) => f === 'technical_breach' || f === 'stop_triggered');
+  // PI-0004B note: this function's earnings signal is a pre-computed boolean
+  // (earningsWithinExpiration), not a date, so it cannot be gated against
+  // DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays the way
+  // positionObjective.ts's date-driven earnings-risk branch is. This is
+  // unchanged, low-risk to leave as-is: per PI-0003's adapter, the
+  // production Today's Priorities feed always calls this function with
+  // positions: [] (see portfolioIntelligenceAdapter.ts's module doc), so
+  // this branch is not production-reachable today -- the actual AMD-style
+  // fix lives in positionObjective.ts, the function that is wired to
+  // Today's Priorities. Documented here rather than silently diverging.
   const earningsRisk = position.earningsWithinExpiration && position.status === 'open';
 
   if (!materialLoss && !flaggedBreach && !earningsRisk) return null;
@@ -393,26 +411,49 @@ function evaluateConcentration(
 
   for (const [symbol, pct] of Object.entries(portfolio.symbolConcentrationPct)) {
     if (pct <= portfolio.maxSymbolConcentrationPct) continue;
+    // "Materially" over the limit is this rule's existing hard-breach tier
+    // (1.5x the configured limit) -- PI-0004B reuses it as the "existing
+    // hard portfolio risk rule" the brief says should still force a
+    // reduction recommendation even for a Wheel position. Below that tier,
+    // a symbol whose concentration is primarily Wheel-intentional (strategy
+    // WHEEL, assignment preference PREFER) gets Wheel-aware wording instead
+    // of a plain "trim this" recommendation -- the concern and the
+    // objective itself still fire either way; only the guidance changes.
     const materially = pct >= portfolio.maxSymbolConcentrationPct * 1.5;
+    const wheelDominance = portfolio.symbolWheelDominance?.[symbol] ?? 0;
+    const wheelManaged = !materially && wheelDominance >= 0.5;
+
+    const rationale = wheelManaged
+      ? `${symbol} exposure is ${pct.toFixed(1)}% of net liquidity, above the configured ${portfolio.maxSymbolConcentrationPct}% single-ticker limit, and is primarily driven by a position managed as a Wheel with assignment preferred. Assignment is the stated goal for that position, so this does not recommend reducing or abandoning it. Instead: continue managing the Wheel as planned, avoid opening additional ${symbol} exposure while concentration remains elevated, and direct future deployments to other symbols to diversify.`
+      : `${symbol} exposure is ${pct.toFixed(1)}% of net liquidity, above the configured ${portfolio.maxSymbolConcentrationPct}% single-ticker limit. Concentration risk compounds quickly on a single-name adverse move; consider trimming, avoiding new entries on this symbol, or diversifying additional deployment elsewhere.`;
+
+    const reviewTriggers: PortfolioObjectiveReviewTrigger[] = wheelManaged
+      ? [{ id: 'wheel-concentration-recheck', label: 'New exposure or hard risk-rule breach', triggerType: 'concentration', threshold: `${portfolio.maxSymbolConcentrationPct}%`, explanation: `Re-evaluate if additional ${symbol} exposure is added, the Wheel position is closed or assigned, or exposure crosses the ${(portfolio.maxSymbolConcentrationPct * 1.5).toFixed(1)}% hard-breach tier.` }]
+      : [{ id: 'concentration-limit', label: 'Concentration limit', triggerType: 'concentration', threshold: `${portfolio.maxSymbolConcentrationPct}%`, explanation: 'Re-evaluate once exposure is reduced back under the configured limit.' }];
+
     drafts.push({
       type: 'REDUCE_CONCENTRATION',
       ruleId: 'OBJ-REDUCE-CONCENTRATION',
       title: `Reduce concentration: ${symbol}`,
-      summary: `${symbol} is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`,
+      summary: wheelManaged
+        ? `${symbol} is ${pct.toFixed(1)}% of net liquidity (Wheel-managed), above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`
+        : `${symbol} is ${pct.toFixed(1)}% of net liquidity, above the ${portfolio.maxSymbolConcentrationPct}% single-ticker limit.`,
       priority: materially ? 'high' : 'medium',
       urgency: 'this_week',
       confidence: 85,
       source: 'portfolio_state',
       subject: { type: 'symbol', symbol, label: `${symbol} exposure` },
-      rationale: `${symbol} exposure is ${pct.toFixed(1)}% of net liquidity, above the configured ${portfolio.maxSymbolConcentrationPct}% single-ticker limit. Concentration risk compounds quickly on a single-name adverse move; consider trimming, avoiding new entries on this symbol, or diversifying additional deployment elsewhere.`,
+      rationale,
       supportingEvidence: [{ id: 'symbol-concentration', label: 'Current vs. limit', value: `${pct.toFixed(1)}% / ${portfolio.maxSymbolConcentrationPct}%`, tone: materially ? 'negative' : 'warning' }],
       concerns: [{ id: 'single-ticker-concentration', label: 'Single-ticker concentration', severity: materially ? 'high' : 'medium', explanation: `Exposure exceeds the configured limit by ${(pct - portfolio.maxSymbolConcentrationPct).toFixed(1)} percentage points.` }],
-      portfolioImpact: impact('negative', materially ? 'high' : 'medium', 'Elevated single-name concentration increases portfolio-level tail risk.'),
+      portfolioImpact: wheelManaged
+        ? impact('negative', materially ? 'high' : 'medium', 'Elevated single-name concentration increases portfolio-level tail risk, though it is currently the accepted cost of an intentional Wheel position rather than an unmanaged one.')
+        : impact('negative', materially ? 'high' : 'medium', 'Elevated single-name concentration increases portfolio-level tail risk.'),
       incomeImpact: NEUTRAL_IMPACT,
       riskImpact: impact('negative', materially ? 'high' : 'medium', 'A single adverse move in this symbol has outsized portfolio impact at this concentration.'),
       capitalImpact: NEUTRAL_IMPACT,
-      reviewTriggers: [{ id: 'concentration-limit', label: 'Concentration limit', triggerType: 'concentration', threshold: `${portfolio.maxSymbolConcentrationPct}%`, explanation: 'Re-evaluate once exposure is reduced back under the configured limit.' }],
-      rulesTriggered: ['symbol_concentration_exceeded'],
+      reviewTriggers,
+      rulesTriggered: wheelManaged ? ['symbol_concentration_exceeded', 'wheel_assignment_preferred_exception'] : ['symbol_concentration_exceeded'],
     });
   }
 

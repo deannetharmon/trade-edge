@@ -35,6 +35,38 @@ export type PortfolioObjectivePriority = 'critical' | 'high' | 'medium' | 'low' 
 
 export type PortfolioObjectiveUrgency = 'now' | 'today' | 'this_week' | 'monitor' | 'none';
 
+// PI-0004B: Actionability answers a different question than priority/urgency
+// do. Priority/urgency describe how severe or time-sensitive a *true* fact
+// is; Actionability answers whether that fact deserves the trader's
+// attention *today*. A position can have a real, correctly-detected
+// condition (e.g. earnings before expiration) that simply isn't actionable
+// yet -- MONITOR -- until some condition (a review window opening, a
+// threshold being crossed) promotes it. MONITOR objectives are still
+// produced and still carry their full priority/urgency/rationale -- they are
+// just excluded from the surfaced Today's Priorities list by the combining
+// adapter (see adapters/portfolioIntelligenceAdapter.ts). This keeps
+// "is this true" (priority/urgency, unchanged) separate from "does this
+// belong in front of the trader right now" (actionability, new).
+export type PortfolioObjectiveActionability = 'MONITOR' | 'REVIEW_SOON' | 'ACTION_NEEDED' | 'CRITICAL';
+
+// PI-0004B: Position Strategy -- the trader's declared management plan for a
+// position. Deliberately small (three values): WHEEL (CSP/CC intentionally
+// cycling toward and through assignment), INCOME (pure premium harvesting,
+// assignment is a failure mode to avoid), ACQUIRE (a one-shot acquisition
+// CSP -- assignment is welcome, but there's no intent to keep writing calls
+// against the shares the way WHEEL does). Optional and independent of
+// AssignmentPreference below -- a position with no PositionStrategy set is
+// legacy/unclassified, not silently assumed to be any particular strategy.
+export type PositionStrategy = 'WHEEL' | 'INCOME' | 'ACQUIRE';
+
+// PI-0004B: Assignment Preference -- independent of PositionStrategy by
+// design (the brief is explicit: a WHEEL position and its assignment
+// preference are two separate questions). AVOID: assignment is an unwanted
+// outcome to manage away from. ACCEPT: assignment is a neutral, tolerable
+// outcome. PREFER: assignment is the desired outcome -- the position was
+// opened wanting it to happen.
+export type AssignmentPreference = 'AVOID' | 'ACCEPT' | 'PREFER';
+
 // This first slice is a pure, stateless evaluator with no persistence layer
 // -- every call re-derives objectives from scratch, so only 'active' and
 // 'informational' are ever produced here. 'resolved' / 'dismissed' are
@@ -135,6 +167,11 @@ export interface PortfolioObjective {
   summary: string;
   priority: PortfolioObjectivePriority;
   urgency: PortfolioObjectiveUrgency;
+  // PI-0004B: whether this objective belongs in front of the trader today.
+  // Always present, on every objective from every producer (position-level,
+  // portfolio-level, WAIT) -- see PortfolioObjectiveActionability's doc
+  // comment for why this is distinct from priority/urgency.
+  actionability: PortfolioObjectiveActionability;
   confidence: number; // 0-100
   status: PortfolioObjectiveStatus;
   source: PortfolioObjectiveSource;
@@ -191,6 +228,14 @@ export interface PortfolioStateInput {
   idleCashPct: number;
   recurringIncomeTarget: number;
   currentIncomeProduced: number;
+  // PI-0004B: per-symbol fraction (0-1) of that symbol's concentration
+  // attributable to positions with PositionStrategy WHEEL and
+  // AssignmentPreference PREFER, as derived by
+  // adapters/balancesNormalization.ts's deriveWheelDominance(). Optional --
+  // absent (or a symbol simply missing from the map) means "no Wheel data
+  // available for this symbol", which evaluateConcentration() treats
+  // identically to "not Wheel-managed" (existing behavior, unchanged).
+  symbolWheelDominance?: Record<string, number>;
 }
 
 export interface PortfolioPositionInput {
@@ -209,6 +254,12 @@ export interface PortfolioPositionInput {
   assignmentIntent: 'willing' | 'unwilling' | 'neutral';
   earningsWithinExpiration: boolean;
   managementFlags: string[]; // e.g. 'technical_breach', 'stop_triggered', 'roll_review'
+  // PI-0004B: optional, independent fields -- see PositionStrategy /
+  // AssignmentPreference doc comments above. Absent on legacy/unclassified
+  // positions; never defaulted to 'WHEEL' automatically (see PI-0004B brief:
+  // "do not silently convert all ACQUIRE positions into WHEEL").
+  positionStrategy?: PositionStrategy;
+  assignmentPreference?: AssignmentPreference;
   linkedDecisionAnalysis?: DecisionAnalysis;
 }
 

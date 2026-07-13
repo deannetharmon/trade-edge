@@ -18,6 +18,12 @@ export const DEFAULT_POSITION_MANAGEMENT_POLICY: PositionManagementPolicy = {
   weakHealthScoreThreshold: 50,
   watchHealthScoreThreshold: 75,
   actionHealthScoreThreshold: 40,
+  // PI-0004B: new policy value, not a pre-existing magic number formalized --
+  // 10 calendar days is chosen to sit comfortably inside the existing
+  // 21-DTE management window (so a trader already reviewing a position for
+  // DTE reasons around then also sees earnings context) while staying well
+  // outside "not imminent" territory for a healthy position.
+  earningsReviewWindowDays: 10,
 };
 
 // Matches AutopilotThresholds defaults (bpUtilizationMaxPct: 65,

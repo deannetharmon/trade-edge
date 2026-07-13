@@ -11,6 +11,8 @@
 // "unknown" state), and conflating the two would make objective rules fire
 // (or fail to fire) based on data that was never actually observed.
 
+import type { AssignmentPreference, PositionStrategy } from '../types';
+
 export interface PortfolioFinancialContext {
   netLiquidity?: number;
   cashBalance?: number;
@@ -84,6 +86,11 @@ export interface PositionExposureInput {
   // Theoretical max loss for the position -- Position.maxRisk on the
   // Portfolio page already provides this for every open position.
   maxRisk: number;
+  // PI-0004B: optional, independent fields -- see PositionStrategy /
+  // AssignmentPreference in ../types.ts. Absent on legacy/unclassified
+  // positions; only used by deriveWheelDominance() below.
+  positionStrategy?: PositionStrategy | null;
+  assignmentPreference?: AssignmentPreference | null;
 }
 
 // Concentration numerator (per-symbol exposure, summed across positions in
@@ -110,4 +117,35 @@ export function derivePositionConcentration(
     concentration[symbol] = (exposure / netLiquidity) * 100;
   }
   return concentration;
+}
+
+// PI-0004B: per-symbol fraction (0-1) of that symbol's total exposure
+// attributable to positions with PositionStrategy WHEEL and
+// AssignmentPreference PREFER, feeding PortfolioStateInput.symbolWheelDominance
+// (see evaluatePortfolioObjectives.ts's evaluateConcentration() for how it's
+// used). Unlike derivePositionConcentration(), this needs no net-liquidity
+// denominator -- it's a ratio within a symbol's own exposure, not a share of
+// the portfolio. A symbol with no Wheel+Prefer exposure is simply absent
+// from the result (not 0), matching this module's "missing stays missing"
+// convention. Never mutates the input array.
+export function deriveWheelDominance(positions: PositionExposureInput[]): Record<string, number> {
+  const totalBySymbol: Record<string, number> = {};
+  const wheelBySymbol: Record<string, number> = {};
+
+  for (const position of positions) {
+    const risk = Number.isFinite(position.maxRisk) ? position.maxRisk : 0;
+    totalBySymbol[position.symbol] = (totalBySymbol[position.symbol] ?? 0) + risk;
+    if (position.positionStrategy === 'WHEEL' && position.assignmentPreference === 'PREFER') {
+      wheelBySymbol[position.symbol] = (wheelBySymbol[position.symbol] ?? 0) + risk;
+    }
+  }
+
+  const dominance: Record<string, number> = {};
+  for (const [symbol, wheelExposure] of Object.entries(wheelBySymbol)) {
+    const total = totalBySymbol[symbol];
+    if (total > 0) {
+      dominance[symbol] = wheelExposure / total;
+    }
+  }
+  return dominance;
 }

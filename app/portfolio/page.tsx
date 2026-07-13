@@ -10,7 +10,7 @@ import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPriorities } from '@/features/portfolio/components/TodaysPriorities';
@@ -9440,8 +9440,19 @@ export default function PortfolioPage() {
   const [canonicalPriorities, setCanonicalPriorities] = useState<CanonicalPortfolioPriorities | null>(null);
   useEffect(() => {
     if (positions.length === 0 && pendingOrders.length === 0) { setCanonicalPriorities(null); return; }
-    const positionInputs = positions.map(p => ({ ...p, positionId: p.key, healthScore: p.healthScore ?? null }));
-    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({ symbol: p.symbol, maxRisk: p.maxRisk }));
+    // PI-0004B: assignmentPreference derives deterministically from the
+    // existing per-position `intent` field (already live-wired to every
+    // position via /api/position-intent) -- 'acquisition' already means
+    // "assignment is success, not failure" in this codebase, i.e. PREFER.
+    // positionStrategy is deliberately left unset for every real position:
+    // WHEEL is a new concept with no existing data source, and the PI-0004B
+    // brief is explicit that ACQUIRE-shaped positions must not be silently
+    // reclassified as WHEEL. Wheel-aware concentration recommendations are
+    // fully implemented and tested (see lib/portfolio-intelligence), but
+    // won't activate in production until a control to set positionStrategy
+    // exists -- tracked as a PI-0004C follow-up.
+    const positionInputs = positions.map(p => ({ ...p, positionId: p.key, healthScore: p.healthScore ?? null, assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent) }));
+    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({ symbol: p.symbol, maxRisk: p.maxRisk, assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent) }));
     const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
     setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, balances ?? {}, positionsForConcentration, rawPendingOrders));
   }, [positions, pendingOrders, balances]);

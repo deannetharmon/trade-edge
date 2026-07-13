@@ -24,6 +24,7 @@ function makeObjective(overrides: Partial<PortfolioObjective> = {}): PortfolioOb
     summary: 'AMD has captured 55% of max profit.',
     priority: 'high',
     urgency: 'today',
+    actionability: 'ACTION_NEEDED',
     confidence: 85,
     status: 'active',
     source: 'position',

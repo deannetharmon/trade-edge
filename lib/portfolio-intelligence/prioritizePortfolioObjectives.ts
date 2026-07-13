@@ -87,6 +87,7 @@ export function synthesizeWaitObjective(generatedAt: string): PortfolioObjective
     summary: 'No position, order, or portfolio-level condition currently justifies action.',
     priority: 'informational',
     urgency: 'none',
+    actionability: 'MONITOR',
     confidence: 90,
     status: 'informational',
     source: 'portfolio_state',

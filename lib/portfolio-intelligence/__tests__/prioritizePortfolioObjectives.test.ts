@@ -21,6 +21,7 @@ function makeObjective(overrides: Partial<PortfolioObjective>): PortfolioObjecti
     summary: 'Test',
     priority: 'medium',
     urgency: 'this_week',
+    actionability: 'ACTION_NEEDED',
     confidence: 70,
     status: 'active',
     source: 'portfolio_state',

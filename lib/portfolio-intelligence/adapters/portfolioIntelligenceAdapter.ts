@@ -39,10 +39,10 @@ import type { PositionObjectiveInput } from '../objectives/positionObjective';
 import { prioritizePortfolioObjectives } from '../prioritizePortfolioObjectives';
 import { DEFAULT_PORTFOLIO_RISK_POLICY, DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
 import type { PendingOrderInput, PortfolioIntelligenceContext, PortfolioObjective, PortfolioStateInput } from '../types';
-import { derivePositionConcentration, type PortfolioFinancialContext, type PositionExposureInput } from './balancesNormalization';
+import { derivePositionConcentration, deriveWheelDominance, type PortfolioFinancialContext, type PositionExposureInput } from './balancesNormalization';
 
 export type { PortfolioFinancialContext, PositionExposureInput } from './balancesNormalization';
-export { buildPortfolioFinancialContext, toFiniteNumber, derivePositionConcentration } from './balancesNormalization';
+export { buildPortfolioFinancialContext, toFiniteNumber, derivePositionConcentration, deriveWheelDominance } from './balancesNormalization';
 
 export interface RawPendingOrderLike {
   id: string;
@@ -59,6 +59,12 @@ export function buildPortfolioIntelligenceContext(
   now: Date = new Date(),
 ): PortfolioIntelligenceContext {
   const symbolConcentrationPct = derivePositionConcentration(positionsForConcentration, financial.netLiquidity);
+  // PI-0004B: derived independently of netLiquidity (it's a within-symbol
+  // ratio, not a share of the portfolio) -- see deriveWheelDominance()'s doc
+  // comment. Empty object when no position carries WHEEL+PREFER, which is
+  // exactly today's production reality until PositionStrategy is wired to a
+  // real input source (see positionStrategyDefaults.ts's doc comment).
+  const symbolWheelDominance = deriveWheelDominance(positionsForConcentration);
 
   // Idle cash %: cash sitting uninvested as a share of net liquidity. A real,
   // confirmable formula from two fields we actually have -- not derived from
@@ -79,6 +85,7 @@ export function buildPortfolioIntelligenceContext(
     currentDrawdownPct: financial.drawdownPct ?? 0,
     riskPosture: 'steady',
     symbolConcentrationPct,
+    symbolWheelDominance,
     sectorConcentrationPct: {}, // no sector data exists anywhere in the app yet
     maxSymbolConcentrationPct: DEFAULT_PORTFOLIO_RISK_POLICY.maxSymbolConcentrationPct,
     maxSectorConcentrationPct: DEFAULT_PORTFOLIO_RISK_POLICY.maxSectorConcentrationPct,
@@ -151,9 +158,18 @@ export function computeCanonicalPortfolioPriorities(
   rawPendingOrders: RawPendingOrderLike[],
   now: Date = new Date(),
 ): CanonicalPortfolioPriorities {
+  // PI-0004B: this is where Actionability actually gates Today's Priorities.
+  // MONITOR objectives (e.g. earnings before expiration but outside the
+  // review window -- see positionObjective.ts's computeActionability()) are
+  // real and still fully computed, just excluded from the surfaced
+  // canonical list here -- "MONITOR items remain available internally but
+  // are not surfaced" (PI-0004B brief). No other objective source
+  // (portfolio-level, pending-order) currently produces MONITOR, so this
+  // filter is a no-op for them today.
   const positionObjectives = positionInputs
     .map((input) => evaluatePositionObjective(input, now).objective)
-    .filter((o): o is PortfolioObjective => o !== null);
+    .filter((o): o is PortfolioObjective => o !== null)
+    .filter((o) => o.actionability !== 'MONITOR');
 
   const context = buildPortfolioIntelligenceContext(financial, positionsForConcentration, rawPendingOrders, now);
   const portfolioLevelResult = evaluatePortfolioObjectives(context).filter((o) => o.type !== 'WAIT');
