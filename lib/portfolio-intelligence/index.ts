@@ -13,8 +13,14 @@ export type { PortfolioObjectiveRuleId } from './types';
 // of the always-empty snapshot PI-0003 shipped with.
 export { buildPortfolioIntelligenceContext, computeCanonicalPortfolioPriorities } from './adapters/portfolioIntelligenceAdapter';
 export type { CanonicalPortfolioPriorities, RawPendingOrderLike } from './adapters/portfolioIntelligenceAdapter';
-export { buildPortfolioFinancialContext, toFiniteNumber, derivePositionConcentration } from './adapters/balancesNormalization';
+export { buildPortfolioFinancialContext, toFiniteNumber, derivePositionConcentration, deriveWheelDominance } from './adapters/balancesNormalization';
 export type { PortfolioFinancialContext, PositionExposureInput } from './adapters/balancesNormalization';
+
+// PI-0004B: Actionability (first-class gating for Today's Priorities) and
+// Position Strategy / Assignment Preference (Wheel-aware recommendations).
+export { defaultActionabilityForPriority } from './actionability';
+export { deriveAssignmentPreferenceFromIntent } from './positionStrategyDefaults';
+export type { PortfolioObjectiveActionability, PositionStrategy, AssignmentPreference } from './types';
 
 // Policies (PI-0003): explicit position-management vs portfolio-risk policy
 // objects, replacing bare magic numbers scattered across the evaluators.
