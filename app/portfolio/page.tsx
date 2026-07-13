@@ -13,7 +13,7 @@ import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, 
 import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
-import { TodaysPriorities } from '@/features/portfolio/components/TodaysPriorities';
+import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 
 
 // Inject accent CSS variable style
@@ -9351,7 +9351,11 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
 }
 
 export default function PortfolioPage() {
-  const [activeTab, setActiveTab] = useState<'positions' | 'balances'>('positions');
+  // PI-0004C: 'priorities' added as a Portfolio subpage alongside the
+  // existing 'positions'/'balances' tabs -- Today's Priorities no longer
+  // renders inline above Positions (see the sub-tab bar and its render
+  // block below).
+  const [activeTab, setActiveTab] = useState<'positions' | 'priorities' | 'balances'>('positions');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9675,8 +9679,9 @@ export default function PortfolioPage() {
         <div className="flex gap-0">
           {([
             { key: 'positions', label: 'Positions', icon: '◈' },
+            { key: 'priorities', label: "Today's Priorities", icon: '⚑' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'positions' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'positions' | 'priorities' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9691,6 +9696,15 @@ export default function PortfolioPage() {
       </div>
 
       {activeTab === 'balances' && <BalancesTab />}
+
+      {/* PI-0004C: Today's Priorities is now its own Portfolio subpage --
+          it still consumes the exact same canonicalPriorities state computed
+          above (no duplicated Portfolio Intelligence state, no evaluation
+          logic here), just rendered on its own tab instead of inline above
+          Positions. */}
+      {activeTab === 'priorities' && (
+        <TodaysPrioritiesWorkflow objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+      )}
 
       {activeTab === 'positions' && (<>
 
@@ -9713,11 +9727,6 @@ export default function PortfolioPage() {
       )}
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
-
-      {/* PI-0004A: renders the canonical Portfolio Intelligence priority list
-          computed above (canonicalPriorities) -- this component performs no
-          evaluation, ranking, or scoring of its own. */}
-      <TodaysPriorities objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex items-center justify-center h-64">

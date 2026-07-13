@@ -29,7 +29,7 @@
 
 'use client';
 
-import { useCallback, useState, memo } from 'react';
+import { useCallback, useState, memo, type ReactNode } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import type {
   ObjectiveImpact,
@@ -107,25 +107,33 @@ const PriorityCard = memo(function PriorityCard({
   expanded,
   onToggle,
   th,
+  renderAction,
 }: {
   objective: PortfolioObjective;
   expanded: boolean;
   onToggle: (id: string) => void;
   th: typeof THEMES[Theme];
+  // PI-0004C: optional per-card action slot (e.g. Mark Complete / Reopen in
+  // the Today's Priorities workflow subpage). Omitted entirely by default --
+  // existing callers that don't pass this get byte-identical markup to
+  // before, one <button> per card, same as always.
+  renderAction?: (objective: PortfolioObjective) => ReactNode;
 }) {
   const style = PRIORITY_STYLE[objective.priority];
   const panelId = `priority-panel-${objective.id}`;
   const buttonId = `priority-toggle-${objective.id}`;
+  const action = renderAction?.(objective);
 
   return (
     <div className={`rounded-xl border ${th.border} ${th.card} overflow-hidden`}>
+      <div className="flex w-full items-start gap-2 p-4">
       <button
         type="button"
         id={buttonId}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={() => onToggle(objective.id)}
-        className={`flex w-full items-start gap-3 p-4 text-left transition-colors motion-safe:duration-150 hover:${th.cardQualified}`}
+        className={`flex flex-1 min-w-0 items-start gap-3 text-left transition-colors motion-safe:duration-150 hover:${th.cardQualified}`}
       >
         <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
 
@@ -153,6 +161,8 @@ const PriorityCard = memo(function PriorityCard({
           &#9660;
         </span>
       </button>
+      {action && <div className="mt-1 shrink-0">{action}</div>}
+      </div>
 
       <div
         id={panelId}
@@ -238,9 +248,18 @@ export interface TodaysPrioritiesProps {
   objectives: PortfolioObjective[] | null;
   loading: boolean;
   th: typeof THEMES[Theme];
+  // PI-0004C: both optional, both default to today's exact existing
+  // behavior when omitted. `title` lets a caller reuse this component for a
+  // differently-labeled section (e.g. "Open Priorities" / "Completed
+  // Priorities" in the workflow subpage) without duplicating any rendering
+  // logic; `renderAction` lets a caller add a per-card action button (e.g.
+  // Mark Complete / Reopen) without this component knowing anything about
+  // workflow state.
+  title?: string;
+  renderAction?: (objective: PortfolioObjective) => ReactNode;
 }
 
-export function TodaysPriorities({ objectives, loading, th }: TodaysPrioritiesProps) {
+export function TodaysPriorities({ objectives, loading, th, title = "Today's Priorities", renderAction }: TodaysPrioritiesProps) {
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
 
   const handleToggle = useCallback((id: string) => {
@@ -254,8 +273,8 @@ export function TodaysPriorities({ objectives, loading, th }: TodaysPrioritiesPr
   if (objectives === null) {
     if (!loading) return null;
     return (
-      <section className="mx-6 mt-4" aria-label="Today's Priorities">
-        <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint} mb-3`}>Today&apos;s Priorities</h2>
+      <section className="mx-6 mt-4" aria-label={title}>
+        <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint} mb-3`}>{title}</h2>
         <div className={`rounded-xl border ${th.border} ${th.card} p-6 text-center`}>
           <p className={`text-[11px] ${th.textFaint}`}>Loading priorities&hellip;</p>
         </div>
@@ -266,9 +285,9 @@ export function TodaysPriorities({ objectives, loading, th }: TodaysPrioritiesPr
   const isWaitOnly = objectives.length === 1 && objectives[0].type === 'WAIT';
 
   return (
-    <section className="mx-6 mt-4" aria-label="Today's Priorities">
+    <section className="mx-6 mt-4" aria-label={title}>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint}`}>Today&apos;s Priorities</h2>
+        <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint}`}>{title}</h2>
         {!isWaitOnly && <span className={`text-[9px] ${th.textFaint}`}>{objectives.length} item{objectives.length !== 1 ? 's' : ''}</span>}
       </div>
 
@@ -286,6 +305,7 @@ export function TodaysPriorities({ objectives, loading, th }: TodaysPrioritiesPr
               expanded={expandedIds.has(objective.id)}
               onToggle={handleToggle}
               th={th}
+              renderAction={renderAction}
             />
           ))}
         </div>
