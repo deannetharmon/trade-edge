@@ -15,6 +15,7 @@ import { PositionRecommendationBadge } from '@/features/portfolio/components/Pos
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
+import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/PositionIntelligencePanel';
 
 
 // Inject accent CSS variable style
@@ -7978,6 +7979,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
   const [showChart, setShowChart] = useState(false);
   const [sparkData, setSparkData] = useState(null as number[] | null);
   const [sparkLoading, setSparkLoading] = useState(false);
@@ -8786,9 +8788,25 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           )}
         </div>
 
+        {/* PI-0005: Position Intelligence -- explains pos.recommendation /
+            pos.portfolioObjective (already computed, PI-0002). No new
+            evaluation here, just a toggle for the panel below. */}
+        {pos.recommendation && (
+          <button
+            onClick={e => { e.stopPropagation(); setShowIntelligence(v => !v); }}
+            className={`text-[10px] px-3 py-1 border rounded-lg transition-colors font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap ml-auto ${
+              showIntelligence
+                ? 'border-blue-500 text-blue-300 bg-blue-500/10'
+                : 'border-blue-800 text-blue-500 hover:border-blue-600 hover:text-blue-400'
+            }`}>
+            <span>◎</span>
+            <span>{showIntelligence ? 'Hide Intelligence' : 'Position Intelligence'}</span>
+          </button>
+        )}
+
         <button
           onClick={e => { e.stopPropagation(); if (analysis || analysisLoading) { setShowAnalysis(v => !v); } else { handleAnalyze(); } }}
-          className={`text-[10px] px-3 py-1 border rounded-lg transition-colors font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap ml-auto ${
+          className={`text-[10px] px-3 py-1 border rounded-lg transition-colors font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap ${pos.recommendation ? '' : 'ml-auto'} ${
             showAnalysis && analysis
               ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
               : analysis
@@ -8824,6 +8842,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             ))}
           </div>
         </div>
+      )}
+
+      {/* PI-0005: Position Intelligence panel -- renders pos.recommendation /
+          pos.portfolioObjective as-is; classifyPositionLifecycle(pos) is the
+          same classifier PositionSection already uses for sorting. */}
+      {showIntelligence && pos.recommendation && (
+        <PositionIntelligencePanel
+          recommendation={pos.recommendation}
+          objective={pos.portfolioObjective ?? null}
+          lifecycleType={classifyPositionLifecycle(pos).type}
+          th={th}
+        />
       )}
 
       {/* AI analysis panel */}
