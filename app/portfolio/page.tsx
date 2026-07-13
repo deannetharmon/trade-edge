@@ -14,6 +14,7 @@ import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonic
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
+import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
 
 
 // Inject accent CSS variable style
@@ -9355,7 +9356,10 @@ export default function PortfolioPage() {
   // existing 'positions'/'balances' tabs -- Today's Priorities no longer
   // renders inline above Positions (see the sub-tab bar and its render
   // block below).
-  const [activeTab, setActiveTab] = useState<'positions' | 'priorities' | 'balances'>('positions');
+  // PI-0004D: 'briefing' added as the default subpage -- the Daily Portfolio
+  // Briefing is the primary "what do I need to know before the market
+  // opens?" view, so it opens first instead of Positions.
+  const [activeTab, setActiveTab] = useState<'briefing' | 'positions' | 'priorities' | 'balances'>('briefing');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9678,10 +9682,11 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
+            { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
             { key: 'priorities', label: "Today's Priorities", icon: '⚑' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'positions' | 'priorities' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'briefing' | 'positions' | 'priorities' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9696,6 +9701,15 @@ export default function PortfolioPage() {
       </div>
 
       {activeTab === 'balances' && <BalancesTab />}
+
+      {/* PI-0004D: Daily Portfolio Briefing -- the default subpage. Consumes
+          the exact same canonicalPriorities state computed above; no new
+          fetch, no new Portfolio Intelligence call, no duplicated
+          Today's Priorities logic (it renders TodaysPrioritiesWorkflow
+          directly). */}
+      {activeTab === 'briefing' && (
+        <DailyPortfolioBriefing objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+      )}
 
       {/* PI-0004C: Today's Priorities is now its own Portfolio subpage --
           it still consumes the exact same canonicalPriorities state computed
