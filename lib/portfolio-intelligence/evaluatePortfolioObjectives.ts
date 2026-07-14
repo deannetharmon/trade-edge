@@ -28,6 +28,45 @@ import type {
 } from './types';
 import { prioritizePortfolioObjectives } from './prioritizePortfolioObjectives';
 import { defaultActionabilityForPriority } from './actionability';
+import {
+  selectManagementIntent,
+  type ManagementIntentContext,
+  type ManagementIntentEvidence,
+  type ManagementIntentResult,
+} from './managementIntent';
+
+// PI-0006B: classifies a portfolio-level position into the intent engine's
+// relevant-set context. Strategy here is the narrow PortfolioIntelligenceStrategy
+// enum (not positionObjective.ts's free-text string), so this is a small,
+// separate classifier rather than a shared function -- same idea, different
+// input shape.
+function classifyPositionIntentContext(position: PortfolioPositionInput): ManagementIntentContext {
+  if (position.positionStrategy === 'WHEEL') {
+    return position.strategy === 'CC' ? 'covered-call' : 'wheel-csp';
+  }
+  if (position.strategy === 'CSP') return 'wheel-csp';
+  if (position.strategy === 'CC') return 'covered-call';
+  if (position.strategy === 'BPS' || position.strategy === 'BCS' || position.strategy === 'IC') return 'credit-spread';
+  return 'other-position';
+}
+
+// PI-0006B: appends an intent's supporting reasons as additional evidence
+// bullets, ahead of the rule's own existing evidence -- reuses the exact
+// reason strings selectManagementIntent() already produced (no new
+// calculations), capped at 4 total same as the rest of this file's evidence
+// arrays.
+function withIntentEvidence(
+  intentResult: ManagementIntentResult,
+  existing: PortfolioObjectiveEvidence[],
+): PortfolioObjectiveEvidence[] {
+  const intentEvidence: PortfolioObjectiveEvidence[] = intentResult.reasons.map((reason, index) => ({
+    id: `intent-reason-${index}`,
+    label: 'Why',
+    tone: 'neutral',
+    explanation: reason,
+  }));
+  return [...intentEvidence, ...existing].slice(0, 4);
+}
 
 function clamp(value: number, min = 0, max = 100): number {
   if (!Number.isFinite(value)) return min;
@@ -96,6 +135,11 @@ interface ObjectiveDraft {
   reviewTriggers: PortfolioObjectiveReviewTrigger[];
   linkedDecisionAnalysis?: PortfolioObjective['linkedDecisionAnalysis'];
   rulesTriggered: string[];
+  // PI-0006B: set by producers that route their label through the canonical
+  // intent selector (see managementIntent.ts). Omitted by REDUCE_CONCENTRATION,
+  // PRESERVE_BUYING_POWER, and INCREASE_INCOME -- none of which are part of
+  // the ticket's canonical management-intent vocabulary.
+  managementIntent?: ManagementIntentResult;
 }
 
 function finalize(draft: ObjectiveDraft, rulesEvaluated: string[], createdAt: string): PortfolioObjective {
@@ -129,6 +173,7 @@ function finalize(draft: ObjectiveDraft, rulesEvaluated: string[], createdAt: st
     capitalImpact: draft.capitalImpact,
     reviewTriggers: draft.reviewTriggers,
     linkedDecisionAnalysis: draft.linkedDecisionAnalysis,
+    managementIntent: draft.managementIntent,
     metadata: {
       executionAllowed: false,
       paperExecutionAllowed: false,
@@ -191,17 +236,33 @@ function evaluateThreatenedPosition(
   }
 
   const critical = materialLoss || flaggedBreach;
-  // PI-0006A: one decisive primary recommendation per objective. A material
-  // loss or a flagged technical/stop breach is objective evidence the
-  // position should be exited; when the only concern is earnings risk (no
-  // loss, no flag), the decisive call is to review the earnings plan rather
-  // than a generic "review" -- matches the ticket's own example exactly.
-  const primaryLabel = critical ? 'Exit Position' : 'Review Earnings Plan';
+
+  // PI-0006B: one canonical intent selector, same as positionObjective.ts.
+  // A material loss or a flagged technical/stop breach is objective
+  // evidence favoring Cut Losses; a Wheel CSP with assignment preferred can
+  // still resolve to Accept Assignment, but only when there's no material
+  // loss forcing the issue (ticket #7's "hard-risk policy" carve-out --
+  // materialLoss/flaggedBreach outscore the assignment-preference bonus).
+  // When the only concern is earnings risk (no loss, no flag), the intent
+  // selector resolves to whichever of Hold Position / Cut Losses / Reduce
+  // Risk the rest of the evidence supports (ticket's AMD scenario) rather
+  // than stopping at a generic "review earnings" label.
+  const intentResult = selectManagementIntent({
+    context: classifyPositionIntentContext(position),
+    dte: Number.isFinite(position.dte ?? NaN) ? (position.dte as number) : null,
+    pnlPct: Number.isFinite(position.openPlPct ?? NaN) ? (position.openPlPct as number) : null,
+    materialLoss: materialLoss || flaggedBreach,
+    earningsActionable: earningsRisk ? true : null,
+    rollFlagged: position.managementFlags.includes('roll_review'),
+    assignmentIntent: position.assignmentIntent,
+    assignmentPreference: position.assignmentPreference,
+    positionStrategy: position.positionStrategy,
+  });
 
   return {
     type: 'REVIEW_THREATENED_POSITION',
     ruleId: (materialLoss || flaggedBreach) ? 'OBJ-CLOSE-LOSER' : 'OBJ-EARNINGS-RISK',
-    title: `${primaryLabel}: ${position.symbol}`,
+    title: `${intentResult.label}: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) needs review: ${concerns.map((c) => c.label.toLowerCase()).join(', ')}.`,
     priority: critical ? 'critical' : 'high',
     urgency: critical ? 'now' : 'today',
@@ -209,7 +270,7 @@ function evaluateThreatenedPosition(
     source: 'position',
     subject: { type: 'position', id: position.id, symbol: position.symbol, label: `${position.symbol} ${position.strategy} position` },
     rationale: `${position.symbol} is flagged for review because ${concerns.map((c) => c.explanation).join(' ')} This takes priority over new-income or portfolio-construction objectives regardless of their opportunity quality.`,
-    supportingEvidence: [
+    supportingEvidence: withIntentEvidence(intentResult, [
       Number.isFinite(position.openPlPct ?? NaN)
         ? { id: 'open-pl', label: 'Open P/L', value: `${(position.openPlPct as number).toFixed(0)}%`, tone: (position.openPlPct as number) < 0 ? 'negative' : 'positive' }
         : undefined,
@@ -218,7 +279,7 @@ function evaluateThreatenedPosition(
       // calculation) so this objective always carries at least two bullets
       // even when openPlPct isn't finite (e.g. a pure flagged-breach case).
       { id: 'theoretical-max-loss', label: 'Theoretical max loss', value: position.theoreticalMaxLoss, tone: 'neutral' },
-    ].filter(Boolean) as PortfolioObjectiveEvidence[],
+    ].filter(Boolean) as PortfolioObjectiveEvidence[]),
     concerns,
     portfolioImpact: impact('negative', critical ? 'high' : 'medium', 'An unmanaged threatened position increases portfolio-level risk exposure.'),
     incomeImpact: NEUTRAL_IMPACT,
@@ -228,6 +289,7 @@ function evaluateThreatenedPosition(
       { id: 'risk-recheck', label: 'Re-check after management action', triggerType: 'risk', explanation: 'Re-evaluate once the position is closed, rolled, or the flagged condition is resolved.' },
     ],
     linkedDecisionAnalysis: position.linkedDecisionAnalysis,
+    managementIntent: intentResult,
     rulesTriggered: [
       ...(materialLoss ? ['material_loss_stop'] : []),
       ...(flaggedBreach ? ['management_flag_breach'] : []),
@@ -247,10 +309,20 @@ function evaluateCloseForProfit(
   const captured = position.pctOfMaxProfitCaptured as number;
   const critical = position.earningsWithinExpiration || (Number.isFinite(position.dte ?? NaN) && (position.dte as number) <= 2);
 
+  // PI-0006B: routed through the same canonical selector as every other
+  // rule for consistency (ticket #3) -- profitTargetReached is unambiguous
+  // here (this function only runs once the threshold is already met), so
+  // this always resolves to Take Profit; no behavior change from PI-0006A.
+  const intentResult = selectManagementIntent({
+    context: classifyPositionIntentContext(position),
+    dte: Number.isFinite(position.dte ?? NaN) ? (position.dte as number) : null,
+    profitTargetReached: true,
+  });
+
   return {
     type: 'CLOSE_FOR_PROFIT',
     ruleId: 'OBJ-CLOSE-FOR-PROFIT',
-    title: `Take Profit: ${position.symbol}`,
+    title: `${intentResult.label}: ${position.symbol}`,
     summary: `${position.symbol} has captured ${captured.toFixed(0)}% of max profit, at or above the ${thresholds.profitTargetPct}% target.`,
     priority: critical ? 'critical' : 'high',
     urgency: critical ? 'now' : 'today',
@@ -258,13 +330,13 @@ function evaluateCloseForProfit(
     source: 'position',
     subject: { type: 'position', id: position.id, symbol: position.symbol, label: `${position.symbol} ${position.strategy} position` },
     rationale: `${position.symbol} has reached ${captured.toFixed(0)}% of max profit, clearing the ${thresholds.profitTargetPct}% profit-target convention.${critical ? ' Closing is time-sensitive because ' + (position.earningsWithinExpiration ? 'an earnings event is inside the remaining expiration window.' : `only ${position.dte} DTE remain.`) : ' There is no immediate time pressure, but the captured gain is a legitimate reason to bank it rather than hold for marginal additional decay.'}`,
-    supportingEvidence: [
+    supportingEvidence: withIntentEvidence(intentResult, [
       { id: 'profit-captured', label: 'Max profit captured', value: `${captured.toFixed(0)}%`, tone: 'positive' },
       ...(Number.isFinite(position.dte ?? NaN) ? [{ id: 'dte', label: 'Days to expiration', value: position.dte as number, tone: (position.dte as number) <= 7 ? 'warning' : 'neutral' } as PortfolioObjectiveEvidence] : []),
       // PI-0006A: guaranteed second evidence bullet (existing field) for the
       // case where dte isn't finite.
       { id: 'capital-at-risk', label: 'Capital at risk', value: position.theoreticalMaxLoss, tone: 'neutral' },
-    ],
+    ]),
     concerns: critical
       ? [{ id: 'time-sensitive-close', label: 'Time-sensitive', severity: 'high', explanation: position.earningsWithinExpiration ? 'Earnings risk makes delaying the close inadvisable.' : 'Very few days remain before expiration.' }]
       : [],
@@ -272,6 +344,7 @@ function evaluateCloseForProfit(
     incomeImpact: impact('positive', 'low', 'Realizes the premium already earned on this position.', position.theoreticalMaxLoss),
     riskImpact: impact('positive', 'medium', 'Removes this position\'s remaining risk from the portfolio once closed.', position.currentRisk),
     capitalImpact: impact('positive', 'medium', 'Frees capital currently allocated to this position for redeployment.', position.theoreticalMaxLoss),
+    managementIntent: intentResult,
     reviewTriggers: [
       { id: 'profit-target', label: 'Profit target reached', triggerType: 'profit_target', threshold: `${thresholds.profitTargetPct}%`, explanation: 'This objective was generated because the configured profit-target threshold was met or exceeded.' },
     ],
@@ -329,20 +402,27 @@ function evaluateDteManagement(
   }
 
   const rollReview = position.managementFlags.includes('roll_review');
-  const type: PortfolioObjectiveType = rollReview ? 'ROLL_POSITION' : 'MANAGE_POSITION';
   const nearTerm = dte <= 7;
-  // PI-0006A: rollReview is objective evidence (an explicit management flag)
-  // that rolling specifically is the intended action, so this is the one
-  // DTE-driven case that keeps a roll-specific decisive label -- "Roll
-  // Position", not the retired "Roll Soon"/"candidate" framing. Without that
-  // flag there is no evidence rolling (vs. closing or holding) is preferred,
-  // so the decisive call is "Review Position" per PI-0006A #3.
-  const primaryLabel = rollReview ? 'Roll Position' : 'Review Position';
+
+  // PI-0006B: rollReview (an explicit management flag) is the one form of
+  // roll-specific evidence this codebase has -- it's what lets this case
+  // alone resolve to Roll Position. Without it, DTE alone is never enough
+  // to win Roll (ticket #5); the intent selector instead picks from
+  // Hold Position / Cut Losses / Reduce Risk using whatever P/L evidence is
+  // available (ticket's SOXL BPS scenario), landing on Hold Position when,
+  // as here, no loss/technical/net-edge evidence is available at all.
+  const intentResult = selectManagementIntent({
+    context: classifyPositionIntentContext(position),
+    dte,
+    pnlPct: Number.isFinite(position.openPlPct ?? NaN) ? (position.openPlPct as number) : null,
+    rollFlagged: rollReview,
+  });
+  const type: PortfolioObjectiveType = intentResult.intent === 'ROLL_POSITION' ? 'ROLL_POSITION' : 'MANAGE_POSITION';
 
   return {
     type,
-    ruleId: rollReview ? 'OBJ-ROLL-POSITION' : 'OBJ-MANAGE-21-DTE',
-    title: `${primaryLabel}: ${position.symbol}`,
+    ruleId: intentResult.intent === 'ROLL_POSITION' ? 'OBJ-ROLL-POSITION' : 'OBJ-MANAGE-21-DTE',
+    title: `${intentResult.label}: ${position.symbol}`,
     summary: `${position.symbol} (${position.strategy}) is at ${dte} DTE, at or inside the ${thresholds.dteReviewThreshold}-DTE review threshold.`,
     priority: nearTerm ? 'high' : 'medium',
     urgency: nearTerm ? 'now' : 'today',
@@ -350,13 +430,13 @@ function evaluateDteManagement(
     source: 'position',
     subject: { type: 'position', id: position.id, symbol: position.symbol, label: `${position.symbol} ${position.strategy} position` },
     rationale: `${position.symbol} has reached ${dte} DTE, at or inside the ${thresholds.dteReviewThreshold}-DTE time-stop convention.${rollReview ? ' The position is explicitly flagged for roll review, so rolling should be evaluated as a candidate action.' : ' Review whether to close, hold, or manage the position given remaining time value and risk.'} This is a recommendation only -- no roll, close, or other position mutation is executed by this objective.`,
-    supportingEvidence: [
+    supportingEvidence: withIntentEvidence(intentResult, [
       { id: 'dte', label: 'Days to expiration', value: dte, tone: nearTerm ? 'warning' : 'neutral' },
       ...(Number.isFinite(position.openPlPct ?? NaN) ? [{ id: 'open-pl', label: 'Open P/L', value: `${(position.openPlPct as number).toFixed(0)}%`, tone: (position.openPlPct as number) >= 0 ? 'positive' : 'negative' } as PortfolioObjectiveEvidence] : []),
       // PI-0006A: guaranteed second evidence bullet (existing field) for the
       // case where openPlPct isn't finite.
       { id: 'current-risk', label: 'Current risk', value: position.currentRisk, tone: 'neutral' },
-    ],
+    ]),
     concerns: nearTerm ? [{ id: 'near-term-expiration', label: 'Near-term expiration', severity: 'medium', explanation: `Only ${dte} days remain, narrowing the window to act.` }] : [],
     portfolioImpact: impact('neutral', 'medium', 'Time-based review of an existing position; outcome depends on the management decision made.'),
     incomeImpact: NEUTRAL_IMPACT,
@@ -366,6 +446,7 @@ function evaluateDteManagement(
       { id: 'dte-threshold', label: 'Next DTE management threshold reached', triggerType: 'dte', threshold: thresholds.dteReviewThreshold, explanation: 'This objective was generated because the position reached the configured DTE review threshold.' },
     ],
     linkedDecisionAnalysis: position.linkedDecisionAnalysis,
+    managementIntent: intentResult,
     rulesTriggered: [rollReview ? 'dte_threshold_roll_review' : 'dte_threshold_management_review'],
   };
 }
@@ -388,10 +469,19 @@ function evaluateDeployIdleCash(
   const materiallyHigh = portfolio.idleCashPct >= thresholds.idleCashThresholdPct * 2;
   const idleDollarEstimate = portfolio.netLiquidity * (portfolio.idleCashPct / 100);
 
+  // PI-0006B: routed through the canonical selector for consistency (ticket
+  // #3) -- idleCashDeployable is unambiguous here (this function only
+  // returns once every gating condition above is satisfied), so this always
+  // resolves to Deploy Idle Cash; no behavior change from PI-0006A.
+  const intentResult = selectManagementIntent({
+    context: 'idle-cash',
+    idleCashDeployable: true,
+  });
+
   return {
     type: 'DEPLOY_IDLE_CASH',
     ruleId: 'OBJ-DEPLOY-IDLE-CASH',
-    title: 'Deploy Idle Cash',
+    title: intentResult.label,
     summary: `Idle cash is ${portfolio.idleCashPct.toFixed(1)}% of net liquidity, above the ${thresholds.idleCashThresholdPct}% threshold, with room to deploy.`,
     priority: materiallyHigh ? 'high' : 'medium',
     urgency: 'this_week',
@@ -408,6 +498,7 @@ function evaluateDeployIdleCash(
     incomeImpact: impact('positive', 'medium', 'Additional deployed capital is the primary lever for increasing recurring income.', idleDollarEstimate),
     riskImpact: impact('neutral', 'low', 'No risk change until an actual candidate is selected and opened.'),
     capitalImpact: impact('neutral', 'medium', 'No capital is committed by this objective alone.', idleDollarEstimate),
+    managementIntent: intentResult,
     reviewTriggers: [
       { id: 'idle-cash-threshold', label: 'Idle cash threshold', triggerType: 'buying_power', threshold: `${thresholds.idleCashThresholdPct}%`, explanation: 'Re-evaluate if idle cash drops back below the threshold or a qualifying candidate is deployed.' },
     ],
@@ -601,14 +692,19 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
   const ageHuman = humanizeMinutes(order.ageMinutes);
   const thresholdHuman = humanizeMinutes(thresholds.stalePendingOrderMinutes);
 
+  // PI-0006B: routed through the canonical selector for consistency (ticket
+  // #3) -- orderNeedsReplacement is unambiguous here (this function only
+  // returns once stale/off-market/flagged is already true), so this always
+  // resolves to Replace Working Order; no behavior change from PI-0006A.
+  const intentResult = selectManagementIntent({
+    context: 'pending-order',
+    orderNeedsReplacement: true,
+  });
+
   return {
     type: 'REVIEW_PENDING_ORDER',
     ruleId: 'OBJ-REVIEW-PENDING-ORDER',
-    // PI-0006A: matches the ticket's own example verbatim -- a stale, off-
-    // market, or explicitly flagged working order's decisive call is to
-    // replace it (cancel and resubmit at a workable price), not a generic
-    // "review".
-    title: `Replace Working Order: ${order.symbol}`,
+    title: `${intentResult.label}: ${order.symbol}`,
     summary: `${order.symbol} ${order.strategyAction} order needs review (${order.status}, ${ageHuman} old${offMarket ? `, ${(order.fillDistancePct as number).toFixed(1)}% from fill` : ''}).`,
     priority: veryStale || flagged ? 'high' : 'medium',
     urgency: veryStale ? 'today' : 'this_week',
@@ -628,6 +724,7 @@ function evaluatePendingOrder(order: PendingOrderInput, thresholds: PortfolioInt
     incomeImpact: NEUTRAL_IMPACT,
     riskImpact: impact('neutral', 'low', 'An unfilled order carries no position risk, but ties up intent and possibly buying-power reservation.'),
     capitalImpact: NEUTRAL_IMPACT,
+    managementIntent: intentResult,
     reviewTriggers: [
       { id: 'order-age-recheck', label: 'Order age re-check', triggerType: 'order_age', threshold: thresholdHuman, explanation: 'Re-evaluate if the order fills, is cancelled, or ages further.' },
     ],

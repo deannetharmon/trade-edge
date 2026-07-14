@@ -226,10 +226,28 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
       : undefined
   );
 
+  // PI-0006B: Net Edge decline vs. this position's own tracked peak is one of
+  // the Scope-listed evidence sources for the intent engine (managementIntent.ts's
+  // netEdgeDeclinePct / netEdgeNegative fields). Both netEdgeLive/netEdgePeak
+  // already exist below in this file and are synchronous (pos.snapshotHistory
+  // is attached before this function runs -- see attachSnapshotHistory), so no
+  // new fetch/integration is needed to compute them here. technicalAlignment
+  // is deliberately NOT wired in this slice: trend (getTrend/TrendResult) is
+  // fetched asynchronously per-card and isn't available at this synchronous
+  // call site -- left as an accepted, documented gap for a future slice.
+  const liveEdge = netEdgeLive(pos);
+  const peakEdge = netEdgePeak(pos);
+  const netEdgeDeclinePct = liveEdge != null && peakEdge != null && peakEdge > 0
+    ? ((liveEdge - peakEdge) / peakEdge) * 100
+    : null;
+  const netEdgeNegative = liveEdge != null ? liveEdge <= 0 : null;
+
   const { objective, legacyRecommendation } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
+    netEdgeDeclinePct,
+    netEdgeNegative,
   });
 
   return { recommendation: legacyRecommendation, objective };

@@ -52,6 +52,19 @@ export type {
   PositionObjectiveResult,
 } from './objectives/positionObjective';
 
+// PI-0006B: canonical intent-selection engine -- the single selector behind
+// every producer's `title`/`managementIntent` field in both
+// objectives/positionObjective.ts and evaluatePortfolioObjectives.ts.
+export { selectManagementIntent, MANAGEMENT_INTENT_LABEL } from './managementIntent';
+export type {
+  ManagementIntent,
+  ManagementIntentCandidate,
+  ManagementIntentContext,
+  ManagementIntentEvidence,
+  ManagementIntentResult,
+  TechnicalAlignment,
+} from './managementIntent';
+
 export type {
   MarketContextInput,
   MarketRegime,
