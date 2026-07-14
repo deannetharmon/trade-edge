@@ -59,9 +59,11 @@ export { selectManagementIntent, MANAGEMENT_INTENT_LABEL } from './managementInt
 export type {
   ManagementIntent,
   ManagementIntentCandidate,
+  ManagementIntentConfidenceTier,
   ManagementIntentContext,
   ManagementIntentEvidence,
   ManagementIntentResult,
+  ScoreContribution,
   TechnicalAlignment,
 } from './managementIntent';
 

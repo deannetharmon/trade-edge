@@ -14,9 +14,9 @@
 
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
-import type { PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
 import { deriveManagementChoices } from './managementChoices';
 import { deriveNextLifecycleEvent } from './nextLifecycleEvent';
@@ -33,6 +33,87 @@ function Section({ title, th, children }: { title: string; th: typeof THEMES[The
     <div>
       <h4 className={`text-[10px] uppercase tracking-widest ${th.textFaint} mb-1.5`}>{title}</h4>
       {children}
+    </div>
+  );
+}
+
+// PI-0007A: collapsed-by-default developer/debug section exposing the
+// canonical intent selector's full working -- every relevant candidate, its
+// total score, and every recorded score contribution (captured at the exact
+// `bump()` call site in managementIntent.ts, not reconstructed here), plus
+// the winner/runner-up/margin/confidence-tier summary. Purely diagnostic:
+// this component computes nothing and cannot influence which intent won --
+// it only renders `recommendation.managementIntent`, the same object the
+// position-objective evaluator already attached in PI-0006B. Renders
+// nothing when `managementIntent` is absent (e.g. older fixtures/tests that
+// predate PI-0006B/PI-0007A), same fallback posture as the rest of this
+// panel.
+function DecisionScorecard({ managementIntent, th }: { managementIntent: ManagementIntentResult; th: typeof THEMES[Theme] }) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = 'decision-scorecard-panel';
+  const buttonId = 'decision-scorecard-toggle';
+
+  return (
+    <div className={`border-t ${th.border} pt-3`}>
+      <button
+        type="button"
+        id={buttonId}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <span className={`text-[10px] uppercase tracking-widest ${th.textFaint}`}>Decision Scorecard</span>
+        <span
+          className={`text-xs ${th.textFaint} transition-transform motion-safe:duration-150 ${expanded ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        >
+          &#9660;
+        </span>
+      </button>
+
+      <div id={panelId} role="region" aria-labelledby={buttonId} hidden={!expanded} className="mt-2">
+        {expanded && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+              <span className={th.textMuted}>
+                <span className="font-semibold">Winner:</span> {managementIntent.label}
+              </span>
+              <span className={th.textMuted}>
+                <span className="font-semibold">Confidence:</span> {managementIntent.confidenceTier}
+              </span>
+              <span className={th.textMuted}>
+                <span className="font-semibold">Margin:</span> {managementIntent.margin}
+              </span>
+            </div>
+
+            <ul className="space-y-1.5">
+              {managementIntent.candidates.map((candidate) => (
+                <li key={candidate.intent} className={`rounded border px-2 py-1.5 ${th.border}`}>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className={`font-semibold ${th.text}`}>
+                      {candidate.label}
+                      {candidate.isWinner ? ' (winner)' : ''}
+                    </span>
+                    <span className={`font-mono text-[10px] ${th.textFaint}`}>{candidate.score}</span>
+                  </div>
+                  {candidate.contributions.length > 0 && (
+                    <ul className="mt-1 space-y-0.5">
+                      {candidate.contributions.map((contribution) => (
+                        <li key={contribution.id} className={`text-[10px] ${th.textFaint}`}>
+                          <span className="font-mono">{contribution.points >= 0 ? `+${contribution.points}` : contribution.points}</span>
+                          {' '}
+                          {contribution.label}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -118,6 +199,10 @@ export function PositionIntelligencePanel({ recommendation, objective, lifecycle
           ))}
         </div>
       </Section>
+
+      {recommendation.managementIntent && (
+        <DecisionScorecard managementIntent={recommendation.managementIntent} th={th} />
+      )}
     </div>
   );
 }

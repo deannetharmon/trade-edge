@@ -3,11 +3,11 @@
 // PI-0005: component-level coverage for the Position Intelligence panel.
 
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
 import { PositionIntelligencePanel } from '../PositionIntelligencePanel';
-import type { PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 
 function makeRecommendation(overrides: Partial<PortfolioRecommendation> = {}): PortfolioRecommendation {
   return {
@@ -110,6 +110,88 @@ describe('PI-0005: PositionIntelligencePanel -- null objective (hold case)', () 
   it('falls back to the "next portfolio evaluation" review trigger', () => {
     render(<PositionIntelligencePanel recommendation={holdRecommendation} objective={null} lifecycleType="SPREAD" th={THEMES.dark} />);
     expect(screen.getByText('Next portfolio evaluation')).toBeInTheDocument();
+  });
+});
+
+function makeManagementIntent(overrides: Partial<ManagementIntentResult> = {}): ManagementIntentResult {
+  const cutLosses = {
+    intent: 'CUT_LOSSES' as const,
+    label: 'Cut Losses',
+    score: 112,
+    reasons: ['Loss has reached the policy loss-stop threshold.'],
+    contributions: [
+      { id: 'material-loss', label: 'Material loss threshold breached', points: 100, explanation: 'Loss has reached the policy loss-stop threshold.', evidenceField: 'materialLoss' },
+      { id: 'weak-health-loss', label: 'Weak health confirmation', points: 12, explanation: 'Loss is material and the health score is weak.', evidenceField: 'weakHealthLoss' },
+    ],
+    isWinner: true,
+  };
+  const reduceRisk = {
+    intent: 'REDUCE_RISK' as const,
+    label: 'Reduce Risk',
+    score: 70,
+    reasons: [],
+    contributions: [
+      { id: 'net-edge-decline', label: 'Net Edge declined from peak', points: 40, explanation: 'Net edge has declined 40% from its peak.', evidenceField: 'netEdgeDeclinePct' },
+      { id: 'tight-buffer-reduce-risk', label: 'Tight strike buffer', points: 30, explanation: 'Strike buffer is tight or the position is in the money.', evidenceField: 'itmOrCriticalBuffer' },
+    ],
+    isWinner: false,
+  };
+  return {
+    intent: 'CUT_LOSSES',
+    label: 'Cut Losses',
+    reasons: cutLosses.reasons,
+    alternatives: [reduceRisk],
+    candidates: [cutLosses, reduceRisk],
+    winnerScore: 112,
+    runnerUpIntent: 'REDUCE_RISK',
+    runnerUpScore: 70,
+    margin: 42,
+    confidenceTier: 'High',
+    ...overrides,
+  };
+}
+
+describe('PI-0007A: Decision Scorecard (collapsed debug section)', () => {
+  it('does not render the scorecard when recommendation.managementIntent is absent', () => {
+    render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.queryByText('Decision Scorecard')).not.toBeInTheDocument();
+  });
+
+  it('renders a collapsed "Decision Scorecard" toggle when managementIntent is present', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Collapsed: winner/margin/candidate detail is not yet in the DOM output.
+    expect(screen.queryByText(/Margin:/)).not.toBeInTheDocument();
+  });
+
+  it('expands on click to show winner, confidence, margin, ranked candidates, and their contributions', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+
+    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Confidence:/)).toBeInTheDocument();
+    expect(screen.getByText(/High/)).toBeInTheDocument();
+    expect(screen.getByText(/Margin:/)).toBeInTheDocument();
+    expect(screen.getByText(/42/)).toBeInTheDocument();
+    expect(screen.getByText(/Cut Losses \(winner\)/)).toBeInTheDocument();
+    expect(screen.getByText('Reduce Risk')).toBeInTheDocument();
+    expect(screen.getByText(/Material loss threshold breached/)).toBeInTheDocument();
+    expect(screen.getByText(/Net Edge declined from peak/)).toBeInTheDocument();
+  });
+
+  it('collapses again on a second click', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/Margin:/)).not.toBeInTheDocument();
   });
 });
 

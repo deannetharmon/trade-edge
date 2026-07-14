@@ -35,6 +35,20 @@
 //   - REDUCE_RISK is the "something needs de-risking but this isn't
 //     necessarily a full exit" bucket -- tight/ITM buffer and net-edge decay
 //     land here, distinct from CUT_LOSSES per requirement #6.
+//
+// PI-0007A: Recommendation Scorecard (observability only -- see that ticket's
+// planning doc). Every `bump()` call below now records a structured
+// `ScoreContribution` (stable id, human label, signed points, explanation,
+// source evidence field when known) at the exact moment it adds points, so
+// the Decision Scorecard never has to reconstruct "why" after the fact.
+// `selectManagementIntent()`'s return value grows a full ranked `candidates`
+// list (every intent in the current context's relevant set that scored above
+// zero, each carrying its own contributions and an `isWinner` flag) plus
+// `winnerScore` / `runnerUpIntent` / `runnerUpScore` / `margin` /
+// `confidenceTier`. None of this changes which intent wins: `intent`,
+// `label`, `reasons`, and `alternatives` are computed by the exact same
+// filter/sort/slice logic as before PI-0007A -- the additions are purely
+// supplemental fields on the same result object.
 
 import type { AssignmentPreference, PositionStrategy } from './types';
 
@@ -139,12 +153,37 @@ export interface ManagementIntentEvidence {
   idleCashDeployable?: boolean;
 }
 
+// PI-0007A: one recorded score contribution, captured at the exact `bump()`
+// call site that added it -- never reconstructed later from `reasons` text.
+export interface ScoreContribution {
+  id: string;
+  label: string;
+  points: number;
+  explanation: string;
+  // The ManagementIntentEvidence field this contribution reacted to, when
+  // there is a single clear source. Omitted for baseline contributions
+  // (there is no evidence field for "no evidence at all").
+  evidenceField?: string;
+}
+
 export interface ManagementIntentCandidate {
   intent: ManagementIntent;
   label: string;
   score: number;
   reasons: string[];
+  // PI-0007A: every contribution that built this candidate's score, in the
+  // order they were applied. contributions.reduce((s, c) => s + c.points, 0)
+  // always equals `score`.
+  contributions: ScoreContribution[];
+  // PI-0007A: true only for the single candidate selectManagementIntent()
+  // returned as `intent`.
+  isWinner: boolean;
 }
+
+// PI-0007A: observability-only confidence label derived from the decision
+// margin (winnerScore - runnerUpScore). Display metadata -- never fed back
+// into scoring or intent selection.
+export type ManagementIntentConfidenceTier = 'High' | 'Medium' | 'Low';
 
 export interface ManagementIntentResult {
   intent: ManagementIntent;
@@ -153,17 +192,59 @@ export interface ManagementIntentResult {
   // Ranked, excludes the winner. Always includes Roll Position when it was
   // part of the relevant set and didn't win (ticket #5).
   alternatives: ManagementIntentCandidate[];
+  // PI-0007A: every intent from the current context's relevant set that
+  // scored above zero, ranked winner-first via the exact same sort as
+  // `intent`/`alternatives` (total score descending, then the existing
+  // tie-break order). This is the full Decision Scorecard data set -- for
+  // display only, does not change which intent is selected.
+  candidates: ManagementIntentCandidate[];
+  winnerScore: number;
+  runnerUpIntent: ManagementIntent | null;
+  runnerUpScore: number;
+  // winnerScore - runnerUpScore (0 when there is no runner-up, so margin
+  // simply equals winnerScore -- a lone baseline winner is correctly Low
+  // confidence, not undefined/High).
+  margin: number;
+  confidenceTier: ManagementIntentConfidenceTier;
 }
 
 interface ScoreEntry {
   score: number;
   reasons: string[];
+  contributions: ScoreContribution[];
 }
 
-function bump(scores: Partial<Record<ManagementIntent, ScoreEntry>>, intent: ManagementIntent, points: number, reason?: string): void {
-  const current = scores[intent] ?? { score: 0, reasons: [] };
+// PI-0007A: `contribution.explanation` is always recorded on the entry's
+// `contributions` list. It is additionally pushed onto `reasons` (the array
+// that ultimately becomes the winning intent's user-facing supporting
+// reasons) unless `includeInReasons` is explicitly `false` -- used for the
+// small number of "linked" bumps below that piggyback on evidence another
+// bump already put into `reasons` (e.g. a tight buffer's secondary nudge to
+// Cut Losses), preserving PI-0006B's exact `reasons` output byte-for-byte.
+function bump(
+  scores: Partial<Record<ManagementIntent, ScoreEntry>>,
+  intent: ManagementIntent,
+  points: number,
+  contribution: {
+    id: string;
+    label: string;
+    explanation: string;
+    evidenceField?: string;
+    includeInReasons?: boolean;
+  },
+): void {
+  const current = scores[intent] ?? { score: 0, reasons: [], contributions: [] };
   current.score += points;
-  if (reason) current.reasons.push(reason);
+  current.contributions.push({
+    id: contribution.id,
+    label: contribution.label,
+    points,
+    explanation: contribution.explanation,
+    evidenceField: contribution.evidenceField,
+  });
+  if (contribution.includeInReasons !== false) {
+    current.reasons.push(contribution.explanation);
+  }
   scores[intent] = current;
 }
 
@@ -174,52 +255,134 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // relevant to this context) are present as candidates even with zero
   // confirming evidence, so Hold wins by default and Roll always surfaces
   // as an alternative rather than disappearing entirely.
-  bump(scores, 'HOLD_POSITION', 10);
+  bump(scores, 'HOLD_POSITION', 10, {
+    id: 'baseline-hold', label: 'Baseline', explanation: 'Baseline', includeInReasons: false,
+  });
   if (RELEVANT_INTENTS[evidence.context].includes('ROLL_POSITION')) {
-    bump(scores, 'ROLL_POSITION', 5);
+    bump(scores, 'ROLL_POSITION', 5, {
+      id: 'baseline-roll', label: 'Baseline', explanation: 'Baseline', includeInReasons: false,
+    });
   }
 
   if (evidence.profitTargetReached) {
-    bump(scores, 'TAKE_PROFIT', 100, 'Profit target has been reached.');
+    bump(scores, 'TAKE_PROFIT', 100, {
+      id: 'profit-target-reached',
+      label: 'Profit target reached',
+      explanation: 'Profit target has been reached.',
+      evidenceField: 'profitTargetReached',
+    });
   } else if (evidence.meaningfulUnprotectedProfit) {
-    bump(scores, 'TAKE_PROFIT', 40, 'Position has meaningful profit but no working profit-target order.');
+    bump(scores, 'TAKE_PROFIT', 40, {
+      id: 'unprotected-profit',
+      label: 'Unprotected profit',
+      explanation: 'Position has meaningful profit but no working profit-target order.',
+      evidenceField: 'meaningfulUnprotectedProfit',
+    });
   }
 
   if (evidence.materialLoss) {
-    bump(scores, 'CUT_LOSSES', 100, 'Loss has reached the policy loss-stop threshold.');
+    bump(scores, 'CUT_LOSSES', 100, {
+      id: 'material-loss',
+      label: 'Material loss threshold breached',
+      explanation: 'Loss has reached the policy loss-stop threshold.',
+      evidenceField: 'materialLoss',
+    });
   } else if (evidence.weakHealthLoss) {
-    bump(scores, 'CUT_LOSSES', 70, 'Loss is material and the health score is weak.');
+    bump(scores, 'CUT_LOSSES', 70, {
+      id: 'weak-health-loss',
+      label: 'Weak health confirmation',
+      explanation: 'Loss is material and the health score is weak.',
+      evidenceField: 'weakHealthLoss',
+    });
   }
 
   if (evidence.itmOrCriticalBuffer) {
-    bump(scores, 'REDUCE_RISK', 60, 'Strike buffer is tight or the position is in the money.');
-    bump(scores, 'CUT_LOSSES', 20);
+    bump(scores, 'REDUCE_RISK', 60, {
+      id: 'tight-buffer-reduce-risk',
+      label: 'Tight strike buffer',
+      explanation: 'Strike buffer is tight or the position is in the money.',
+      evidenceField: 'itmOrCriticalBuffer',
+    });
+    bump(scores, 'CUT_LOSSES', 20, {
+      id: 'tight-buffer-cut-losses',
+      label: 'Tight/ITM buffer',
+      explanation: 'Strike buffer is tight or the position is in the money, which also elevates loss risk.',
+      evidenceField: 'itmOrCriticalBuffer',
+      includeInReasons: false,
+    });
   }
 
   if (evidence.netEdgeDeclinePct != null && evidence.netEdgeDeclinePct <= -25) {
-    bump(scores, 'REDUCE_RISK', 40, `Net edge has declined ${Math.abs(evidence.netEdgeDeclinePct).toFixed(0)}% from its peak.`);
+    bump(scores, 'REDUCE_RISK', 40, {
+      id: 'net-edge-decline',
+      label: 'Net Edge declined from peak',
+      explanation: `Net edge has declined ${Math.abs(evidence.netEdgeDeclinePct).toFixed(0)}% from its peak.`,
+      evidenceField: 'netEdgeDeclinePct',
+    });
   }
   if (evidence.netEdgeNegative) {
-    bump(scores, 'REDUCE_RISK', 30, 'Net edge is negative -- remaining premium no longer compensates for gamma risk.');
-    bump(scores, 'CUT_LOSSES', 15);
+    bump(scores, 'REDUCE_RISK', 30, {
+      id: 'net-edge-negative-reduce-risk',
+      label: 'Net edge negative',
+      explanation: 'Net edge is negative -- remaining premium no longer compensates for gamma risk.',
+      evidenceField: 'netEdgeNegative',
+    });
+    bump(scores, 'CUT_LOSSES', 15, {
+      id: 'net-edge-negative-cut-losses',
+      label: 'Net edge negative',
+      explanation: 'Net edge is negative, which also elevates loss risk.',
+      evidenceField: 'netEdgeNegative',
+      includeInReasons: false,
+    });
   }
 
   if (evidence.technicalAlignment === 'against') {
-    bump(scores, 'CUT_LOSSES', 30, 'Recent technical trend is running against the position.');
-    bump(scores, 'REDUCE_RISK', 20);
+    bump(scores, 'CUT_LOSSES', 30, {
+      id: 'technical-against-cut-losses',
+      label: 'Technical trend against',
+      explanation: 'Recent technical trend is running against the position.',
+      evidenceField: 'technicalAlignment',
+    });
+    bump(scores, 'REDUCE_RISK', 20, {
+      id: 'technical-against-reduce-risk',
+      label: 'Technical trend against',
+      explanation: 'Recent technical trend is running against the position, which also supports reducing exposure.',
+      evidenceField: 'technicalAlignment',
+      includeInReasons: false,
+    });
   } else if (evidence.technicalAlignment === 'aligned') {
-    bump(scores, 'HOLD_POSITION', 30, 'Recent technical trend confirms the position.');
+    bump(scores, 'HOLD_POSITION', 30, {
+      id: 'technical-aligned-hold',
+      label: 'Technical trend confirms position',
+      explanation: 'Recent technical trend confirms the position.',
+      evidenceField: 'technicalAlignment',
+    });
   }
 
   if (evidence.rollFlagged) {
-    bump(scores, 'ROLL_POSITION', 100, 'Position is explicitly flagged for roll review.');
+    bump(scores, 'ROLL_POSITION', 100, {
+      id: 'roll-flagged',
+      label: 'Flagged for roll review',
+      explanation: 'Position is explicitly flagged for roll review.',
+      evidenceField: 'rollFlagged',
+    });
   }
 
   if (evidence.orderNeedsReplacement) {
-    bump(scores, 'REPLACE_WORKING_ORDER', 100, 'The working order is stale, off-market, or explicitly flagged for review.');
+    bump(scores, 'REPLACE_WORKING_ORDER', 100, {
+      id: 'order-needs-replacement',
+      label: 'Working order stale or flagged',
+      explanation: 'The working order is stale, off-market, or explicitly flagged for review.',
+      evidenceField: 'orderNeedsReplacement',
+    });
   }
   if (evidence.idleCashDeployable) {
-    bump(scores, 'DEPLOY_IDLE_CASH', 100, 'Idle cash is above the deployment threshold and risk conditions allow deploying more.');
+    bump(scores, 'DEPLOY_IDLE_CASH', 100, {
+      id: 'idle-cash-deployable',
+      label: 'Idle cash above threshold',
+      explanation: 'Idle cash is above the deployment threshold and risk conditions allow deploying more.',
+      evidenceField: 'idleCashDeployable',
+    });
   }
 
   // Strategy awareness (ticket #7): assignment preference/intent can promote
@@ -228,7 +391,12 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // the "hard-risk policy" exception the ticket's NVDA scenario allows for.
   if (evidence.context === 'wheel-csp' || evidence.context === 'covered-call') {
     if (evidence.assignmentPreference === 'PREFER' || evidence.assignmentIntent === 'willing') {
-      bump(scores, 'ACCEPT_ASSIGNMENT', 90, 'Assignment is the stated goal for this position.');
+      bump(scores, 'ACCEPT_ASSIGNMENT', 90, {
+        id: 'assignment-preferred',
+        label: 'Assignment preferred',
+        explanation: 'Assignment is the stated goal for this position.',
+        evidenceField: evidence.assignmentPreference === 'PREFER' ? 'assignmentPreference' : 'assignmentIntent',
+      });
     }
   }
 
@@ -239,7 +407,12 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   if (evidence.earningsActionable) {
     const leader = (Object.entries(scores) as [ManagementIntent, ScoreEntry][])
       .sort((a, b) => b[1].score - a[1].score)[0]?.[0] ?? 'HOLD_POSITION';
-    bump(scores, leader, 0, 'Earnings fall before expiration, inside the review window.');
+    bump(scores, leader, 0, {
+      id: 'earnings-inside-window',
+      label: 'Earnings inside review window',
+      explanation: 'Earnings fall before expiration, inside the review window.',
+      evidenceField: 'earningsActionable',
+    });
   }
 
   return scores;
@@ -259,12 +432,24 @@ const INTENT_TIE_BREAK_ORDER: ManagementIntent[] = [
   'HOLD_POSITION',
 ];
 
+// PI-0007A: confidence tier from decision margin only -- display metadata,
+// per the ticket's recommended boundaries. Never consulted by the selection
+// logic above.
+function confidenceTierForMargin(margin: number): ManagementIntentConfidenceTier {
+  if (margin >= 30) return 'High';
+  if (margin >= 15) return 'Medium';
+  return 'Low';
+}
+
 // The one canonical selector (ticket #3). Pure and deterministic: same
 // evidence always produces the same winner, same reasons, same alternatives.
 export function selectManagementIntent(evidence: ManagementIntentEvidence): ManagementIntentResult {
   const relevant = RELEVANT_INTENTS[evidence.context];
   const scored = scoreCandidates(evidence);
 
+  // PI-0007A: unchanged filter/sort from PI-0006B -- `candidates` below is
+  // simply this same ranked list exposed in full (previously only `winner`
+  // and a 3-item slice of the rest were returned).
   const candidates: ManagementIntentCandidate[] = relevant
     .filter((intent) => (scored[intent]?.score ?? 0) > 0)
     .map((intent) => ({
@@ -272,6 +457,8 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
       label: MANAGEMENT_INTENT_LABEL[intent],
       score: scored[intent]!.score,
       reasons: scored[intent]!.reasons,
+      contributions: scored[intent]!.contributions,
+      isWinner: false,
     }));
 
   candidates.sort((a, b) => {
@@ -280,11 +467,22 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
   });
 
   const [winner, ...alternatives] = candidates;
+  winner.isWinner = true;
+
+  const runnerUp = alternatives[0] ?? null;
+  const runnerUpScore = runnerUp?.score ?? 0;
+  const margin = winner.score - runnerUpScore;
 
   return {
     intent: winner.intent,
     label: winner.label,
     reasons: winner.reasons.slice(0, 4),
     alternatives: alternatives.slice(0, 3),
+    candidates,
+    winnerScore: winner.score,
+    runnerUpIntent: runnerUp?.intent ?? null,
+    runnerUpScore,
+    margin,
+    confidenceTier: confidenceTierForMargin(margin),
   };
 }
