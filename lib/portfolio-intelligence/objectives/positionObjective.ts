@@ -175,7 +175,12 @@ function classifyIntentContext(
 
 // -- helpers, moved verbatim from recommendation-rules.ts (behavior-critical, unchanged) --
 
-function normalizePositionObjectivePct(value: number | null | undefined): number | null {
+// PI-0008A: exported alongside daysUntil()/isUpcomingBeforeExpiration() above
+// -- remainingOpportunity.ts's caller (app/portfolio/page.tsx) needs the same
+// fraction-vs-percent normalization this module already applies to pnlPct/
+// buffer before evaluating its own trigger branches, so evidence handed to
+// calculateRemainingOpportunity() is normalized exactly the same way.
+export function normalizePositionObjectivePct(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.abs(value) <= 1 ? value * 100 : value;
 }
@@ -184,7 +189,11 @@ function hasHealthFactor(input: PositionObjectiveInput, key: string): boolean {
   return Boolean(input.healthScore?.factors?.some((f) => f.key === key));
 }
 
-function daysUntil(dateString: string | null | undefined, now: Date = new Date()): number | null {
+// PI-0008A: exported (previously module-private) so remainingOpportunity.ts
+// can reuse the exact same earnings-date math instead of duplicating it.
+// Pure date arithmetic, not part of the recommendation/scoring logic --
+// exporting it changes nothing about how this module's own branches behave.
+export function daysUntil(dateString: string | null | undefined, now: Date = new Date()): number | null {
   if (!dateString) return null;
   const target = new Date(`${dateString}T00:00:00`);
   if (Number.isNaN(target.getTime())) return null;
@@ -194,7 +203,8 @@ function daysUntil(dateString: string | null | undefined, now: Date = new Date()
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
-function isUpcomingBeforeExpiration(
+// PI-0008A: exported alongside daysUntil() above, for the same reason.
+export function isUpcomingBeforeExpiration(
   dateString: string | null | undefined,
   expDate: string | null | undefined,
   now: Date = new Date(),

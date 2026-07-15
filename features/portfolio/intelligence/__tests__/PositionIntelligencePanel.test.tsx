@@ -195,6 +195,46 @@ describe('PI-0007A: Decision Scorecard (collapsed debug section)', () => {
   });
 });
 
+describe('PI-0008A: Remaining Opportunity section', () => {
+  it('does not render when remainingOpportunity is absent', () => {
+    render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.queryByText('Remaining Opportunity')).not.toBeInTheDocument();
+  });
+
+  it('does not render when remainingOpportunityPct is null (no credit basis)', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{ opportunityCapturedPct: null, remainingOpportunityPct: null, reasons: ['No credit basis is available to measure remaining opportunity.'] }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.queryByText('Remaining Opportunity')).not.toBeInTheDocument();
+  });
+
+  it('renders both percentages and reasons when present', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{
+          opportunityCapturedPct: 30,
+          remainingOpportunityPct: 38,
+          reasons: ['Only 15 DTE remain, inside the 21-day management window.'],
+        }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.getByText('Remaining Opportunity')).toBeInTheDocument();
+    expect(screen.getByText('38% remaining')).toBeInTheDocument();
+    expect(screen.getByText('30% captured')).toBeInTheDocument();
+    expect(screen.getByText(/Only 15 DTE remain/)).toBeInTheDocument();
+  });
+});
+
 describe('PI-0005: does not duplicate Portfolio Intelligence logic', () => {
   it('does not import any Portfolio Intelligence evaluation function', async () => {
     const fs = await import('node:fs/promises');

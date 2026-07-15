@@ -10,7 +10,7 @@ import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
@@ -216,6 +216,22 @@ function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
   });
 }
 
+// PI-0006B: Net Edge decline vs. this position's own tracked peak, extracted
+// as a shared helper since PI-0008A's Remaining Opportunity Engine reuses the
+// exact same evidence (see its module doc: "no new calculations"). Both
+// netEdgeLive/netEdgePeak already exist below in this file and are
+// synchronous (pos.snapshotHistory is attached before either caller runs --
+// see attachSnapshotHistory), so no new fetch/integration is needed.
+function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | null; netEdgeNegative: boolean | null } {
+  const liveEdge = netEdgeLive(pos);
+  const peakEdge = netEdgePeak(pos);
+  const netEdgeDeclinePct = liveEdge != null && peakEdge != null && peakEdge > 0
+    ? ((liveEdge - peakEdge) / peakEdge) * 100
+    : null;
+  const netEdgeNegative = liveEdge != null ? liveEdge <= 0 : null;
+  return { netEdgeDeclinePct, netEdgeNegative };
+}
+
 // PI-0002: single canonical evaluation call. Returns both the legacy-shaped
 // recommendation (unchanged output, for existing badges/priority list) and
 // the new canonical objective (not yet rendered, wired through for later).
@@ -226,21 +242,11 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
       : undefined
   );
 
-  // PI-0006B: Net Edge decline vs. this position's own tracked peak is one of
-  // the Scope-listed evidence sources for the intent engine (managementIntent.ts's
-  // netEdgeDeclinePct / netEdgeNegative fields). Both netEdgeLive/netEdgePeak
-  // already exist below in this file and are synchronous (pos.snapshotHistory
-  // is attached before this function runs -- see attachSnapshotHistory), so no
-  // new fetch/integration is needed to compute them here. technicalAlignment
-  // is deliberately NOT wired in this slice: trend (getTrend/TrendResult) is
-  // fetched asynchronously per-card and isn't available at this synchronous
-  // call site -- left as an accepted, documented gap for a future slice.
-  const liveEdge = netEdgeLive(pos);
-  const peakEdge = netEdgePeak(pos);
-  const netEdgeDeclinePct = liveEdge != null && peakEdge != null && peakEdge > 0
-    ? ((liveEdge - peakEdge) / peakEdge) * 100
-    : null;
-  const netEdgeNegative = liveEdge != null ? liveEdge <= 0 : null;
+  // technicalAlignment is deliberately NOT wired in this slice: trend
+  // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
+  // available at this synchronous call site -- left as an accepted,
+  // documented gap for a future slice.
+  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
 
   const { objective, legacyRecommendation } = evaluatePositionObjective({
     ...pos,
@@ -251,6 +257,32 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
   });
 
   return { recommendation: legacyRecommendation, objective };
+}
+
+// PI-0008A: Remaining Opportunity Engine -- a parallel, independent
+// calculation from scorePortfolioPositionObjective above (not part of the
+// Decision Engine; see remainingOpportunity.ts's module doc). Computed fresh
+// at render time from the same already-available fields, the same way
+// classifyPositionLifecycle(pos) already is at this file's Position
+// Intelligence call site -- nothing is persisted onto Position.
+function scorePortfolioRemainingOpportunity(pos: Position) {
+  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
+  return calculateRemainingOpportunity({
+    creditReceived: pos.creditReceived,
+    // Same fraction-vs-percent normalization evaluatePositionObjective()
+    // already applies to these two fields before using them -- keeps this
+    // metric's captured/remaining percentages consistent with the
+    // recommendation engine's own reading of the same position.
+    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    dte: pos.dte,
+    buffer: normalizePositionObjectivePct(pos.buffer),
+    healthScore: pos.healthScore?.score ?? null,
+    earningsDate: pos.earningsDate,
+    expDate: pos.expDate,
+    netEdgeDeclinePct,
+    netEdgeNegative,
+    lifecycleType: classifyPositionLifecycle(pos).type,
+  });
 }
 
 function todayLocalDateString(): string {
@@ -8870,6 +8902,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           recommendation={pos.recommendation}
           objective={pos.portfolioObjective ?? null}
           lifecycleType={classifyPositionLifecycle(pos).type}
+          remainingOpportunity={scorePortfolioRemainingOpportunity(pos)}
           th={th}
         />
       )}

@@ -16,7 +16,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
-import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation, RemainingOpportunityResult } from '@/lib/portfolio-intelligence';
 import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
 import { deriveManagementChoices } from './managementChoices';
 import { deriveNextLifecycleEvent } from './nextLifecycleEvent';
@@ -25,6 +25,10 @@ export interface PositionIntelligencePanelProps {
   recommendation: PortfolioRecommendation;
   objective: PortfolioObjective | null;
   lifecycleType: PositionLifecycleType;
+  // PI-0008A: optional so existing callers/tests that predate the Remaining
+  // Opportunity Engine keep rendering unchanged -- the section below simply
+  // doesn't render when this is absent.
+  remainingOpportunity?: RemainingOpportunityResult | null;
   th: typeof THEMES[Theme];
 }
 
@@ -118,7 +122,7 @@ function DecisionScorecard({ managementIntent, th }: { managementIntent: Managem
   );
 }
 
-export function PositionIntelligencePanel({ recommendation, objective, lifecycleType, th }: PositionIntelligencePanelProps) {
+export function PositionIntelligencePanel({ recommendation, objective, lifecycleType, remainingOpportunity, th }: PositionIntelligencePanelProps) {
   const choices = deriveManagementChoices(recommendation.kind);
   const nextEvent = deriveNextLifecycleEvent(lifecycleType, recommendation.kind);
 
@@ -141,6 +145,30 @@ export function PositionIntelligencePanel({ recommendation, objective, lifecycle
       <Section title="Current Recommendation" th={th}>
         <p className={`text-[13px] font-bold ${th.text}`}>{recommendation.label}</p>
       </Section>
+
+      {/* PI-0008A: Remaining Opportunity Engine -- a parallel, independent
+          metric from the recommendation above (see remainingOpportunity.ts's
+          module doc). Renders nothing when null (e.g. no credit basis to
+          measure against) or absent (older callers/tests). */}
+      {remainingOpportunity && remainingOpportunity.remainingOpportunityPct != null && (
+        <Section title="Remaining Opportunity" th={th}>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+            <span className={`text-[13px] font-bold ${th.text}`}>
+              {remainingOpportunity.remainingOpportunityPct}% remaining
+            </span>
+            <span className={`text-[11px] ${th.textMuted}`}>
+              {remainingOpportunity.opportunityCapturedPct}% captured
+            </span>
+          </div>
+          {remainingOpportunity.reasons.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {remainingOpportunity.reasons.map((reason, i) => (
+                <li key={i} className={`text-[10px] ${th.textFaint}`}>{reason}</li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
 
       <Section title="Why" th={th}>
         <p className={`text-[11px] ${th.textMuted} mb-1.5`}>{whyLead}</p>
