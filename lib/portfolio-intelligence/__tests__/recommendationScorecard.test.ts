@@ -89,9 +89,14 @@ describe('Scorecard: excluded intents never appear, even in the full candidate l
 
 // ---------------------------------------------------------------------------
 // Decision margin + confidence tier -- exact values at/near the documented
-// boundaries (High >= 30, Medium 15-29, Low < 15). Every score weight in this
-// engine is a multiple of 5, so margins land on multiples of 5 too; these
-// scenarios were chosen to hit 0, 10, 15, 20, and 30 exactly.
+// boundaries (High >= 30, Medium 15-29, Low < 15).
+//
+// PI-0008B: the exact winnerScore/runnerUpScore/margin values below were
+// recomputed against decisionQualityMatrix.ts's weights (several of which
+// changed as part of that ticket -- Net Edge, technical-against, and Health
+// Score's one direct input all moved). The *tiers* these scenarios land on
+// are exactly what they document (Low/Medium/High), which is the point of
+// this test file; only the underlying numbers producing them changed.
 // ---------------------------------------------------------------------------
 
 describe('Scorecard: decision margin and confidence tier', () => {
@@ -111,25 +116,35 @@ describe('Scorecard: decision margin and confidence tier', () => {
     expect(result.confidenceTier).toBe('Low');
   });
 
-  it('margin 10 is Low confidence (just below the 15 threshold)', () => {
+  it('margin 12 is Low confidence (just below the 15 threshold)', () => {
+    // PI-0008B: technical-against weights increased (Cut Losses 30->38,
+    // Reduce Risk 20->26) -- still a Low-confidence margin, just a wider one.
     const result = selectManagementIntent({ context: 'credit-spread', technicalAlignment: 'against' });
     expect(result.intent).toBe('CUT_LOSSES');
-    expect(result.winnerScore).toBe(30);
-    expect(result.runnerUpScore).toBe(20);
-    expect(result.margin).toBe(10);
+    expect(result.winnerScore).toBe(38);
+    expect(result.runnerUpScore).toBe(26);
+    expect(result.margin).toBe(12);
     expect(result.confidenceTier).toBe('Low');
   });
 
-  it('margin 15 is Medium confidence (the lower boundary, inclusive)', () => {
+  it('margin 21 is Medium confidence', () => {
+    // PI-0008B: Net Edge negative weights increased (Reduce Risk 30->42, the
+    // Cut Losses nudge 15->21) as part of increasing Net Edge deterioration's
+    // influence.
     const result = selectManagementIntent({ context: 'credit-spread', netEdgeNegative: true });
     expect(result.intent).toBe('REDUCE_RISK');
-    expect(result.winnerScore).toBe(30);
-    expect(result.runnerUpScore).toBe(15);
-    expect(result.margin).toBe(15);
+    expect(result.winnerScore).toBe(42);
+    expect(result.runnerUpScore).toBe(21);
+    expect(result.margin).toBe(21);
     expect(result.confidenceTier).toBe('Medium');
   });
 
-  it('margin 20 is Medium confidence', () => {
+  it('margin 35 is High confidence -- a concrete example of Health Score becoming supporting evidence, not a dominant driver', () => {
+    // Before PI-0008B, this exact evidence combination (weakHealthLoss at the
+    // old weight of 70) produced a margin of only 20 (Medium) against
+    // assignment preference. Reducing weakHealthLoss to 55 -- Health Score's
+    // one direct scoring input -- now lets an explicit, stated assignment
+    // preference win with clearly High confidence instead of a close contest.
     const result = selectManagementIntent({
       context: 'wheel-csp',
       assignmentPreference: 'PREFER',
@@ -137,17 +152,20 @@ describe('Scorecard: decision margin and confidence tier', () => {
     });
     expect(result.intent).toBe('ACCEPT_ASSIGNMENT');
     expect(result.winnerScore).toBe(90);
-    expect(result.runnerUpScore).toBe(70);
-    expect(result.margin).toBe(20);
-    expect(result.confidenceTier).toBe('Medium');
+    expect(result.runnerUpScore).toBe(55);
+    expect(result.margin).toBe(35);
+    expect(result.confidenceTier).toBe('High');
   });
 
-  it('margin 30 is High confidence (the upper boundary, inclusive)', () => {
+  it('margin 40 is High confidence', () => {
+    // PI-0008B: Net Edge decline weight increased 40->50 (Net Edge
+    // deterioration's influence), so this now clears the High threshold with
+    // more room than the old exact-30 boundary case.
     const result = selectManagementIntent({ context: 'credit-spread', netEdgeDeclinePct: -25 });
     expect(result.intent).toBe('REDUCE_RISK');
-    expect(result.winnerScore).toBe(40);
+    expect(result.winnerScore).toBe(50);
     expect(result.runnerUpScore).toBe(10);
-    expect(result.margin).toBe(30);
+    expect(result.margin).toBe(40);
     expect(result.confidenceTier).toBe('High');
   });
 

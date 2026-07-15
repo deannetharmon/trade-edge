@@ -77,6 +77,13 @@ export type {
   RemainingOpportunityResult,
 } from './remainingOpportunity';
 
+// PI-0008B: the one centralized table of recommendation-weighting values
+// used by managementIntent.ts's scoreCandidates(). Exported so weighting is
+// inspectable (and, per the Decision Engine Constitution, retunable in one
+// place) without reaching into managementIntent.ts's internals.
+export { DECISION_QUALITY_WEIGHTS } from './decisionQualityMatrix';
+export type { DecisionQualityWeights } from './decisionQualityMatrix';
+
 export type {
   MarketContextInput,
   MarketRegime,

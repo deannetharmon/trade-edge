@@ -144,6 +144,13 @@ export interface PositionObjectiveInput {
   // here so a future slice, or a direct caller/test, can supply it without
   // another type change.
   technicalAlignment?: TechnicalAlignment | null;
+  // PI-0008B: Remaining Opportunity (PI-0008A), 0-100, already computed
+  // wherever the caller also computes Position Intelligence's own Remaining
+  // Opportunity display (see app/portfolio/page.tsx's
+  // scorePortfolioRemainingOpportunity). Threaded through to intent
+  // selection here for the first time -- see managementIntent.ts's doc
+  // comment for how it's used.
+  remainingOpportunityPct?: number | null;
 }
 
 // PI-0006B: `kind` (above) remains the stable internal trigger identifier --
@@ -597,6 +604,14 @@ export function evaluatePositionObjective(
   const earningsActionable = earningsUpcoming
     ? daysUntilEarnings != null && daysUntilEarnings <= DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays
     : null;
+  // PI-0008B: how close, within the review window, earnings actually falls --
+  // 0 at the window's outer edge, 1 the day of. Computed here (where the
+  // policy threshold already lives) rather than in managementIntent.ts,
+  // which does not read policy thresholds itself. Only meaningful when
+  // earningsActionable is true.
+  const earningsProximityFraction = earningsActionable && daysUntilEarnings != null
+    ? Math.max(0, Math.min(1, (DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays - daysUntilEarnings) / DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays))
+    : null;
   const rollFlagged = Boolean(input.managementFlags?.includes('roll_review'));
   const intentContext = classifyIntentContext(strategy, input.positionStrategy);
 
@@ -610,12 +625,14 @@ export function evaluatePositionObjective(
     profitTargetReached,
     meaningfulUnprotectedProfit,
     earningsActionable,
+    earningsProximityFraction,
     rollFlagged,
     assignmentPreference: input.assignmentPreference,
     positionStrategy: input.positionStrategy,
     netEdgeDeclinePct: input.netEdgeDeclinePct,
     netEdgeNegative: input.netEdgeNegative,
     technicalAlignment: input.technicalAlignment,
+    remainingOpportunityPct: input.remainingOpportunityPct,
   };
   const intentResult = selectManagementIntent(intentEvidence);
 

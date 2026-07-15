@@ -248,12 +248,30 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
   // documented gap for a future slice.
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
 
+  // PI-0008B: reuses PI-0008A's Remaining Opportunity calculation (the exact
+  // same inputs scorePortfolioRemainingOpportunity below already assembles)
+  // so intent selection sees the same number Position Intelligence displays,
+  // computed fresh at render time -- nothing new persisted onto Position.
+  const { remainingOpportunityPct } = calculateRemainingOpportunity({
+    creditReceived: pos.creditReceived,
+    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    dte: pos.dte,
+    buffer: normalizePositionObjectivePct(pos.buffer),
+    healthScore: healthScore?.score ?? null,
+    earningsDate: pos.earningsDate,
+    expDate: pos.expDate,
+    netEdgeDeclinePct,
+    netEdgeNegative,
+    lifecycleType: classifyPositionLifecycle(pos).type,
+  });
+
   const { objective, legacyRecommendation } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
     netEdgeDeclinePct,
     netEdgeNegative,
+    remainingOpportunityPct,
   });
 
   return { recommendation: legacyRecommendation, objective };

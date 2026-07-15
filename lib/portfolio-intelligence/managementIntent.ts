@@ -49,8 +49,27 @@
 // `label`, `reasons`, and `alternatives` are computed by the exact same
 // filter/sort/slice logic as before PI-0007A -- the additions are purely
 // supplemental fields on the same result object.
+//
+// PI-0008B: Decision Quality V1. Every point value scoreCandidates() uses is
+// now sourced from decisionQualityMatrix.ts -- the one centralized table --
+// instead of being an inline literal. Several values changed as part of this
+// ticket (Net Edge deterioration, technical trend against the position, and
+// gamma/DTE risk carry more weight; Health Score's one direct input,
+// weakHealthLoss, carries less); see that file's doc comments for the
+// reasoning behind each one. Three new evidence-driven contributions were
+// added: gamma/DTE risk (scaled continuously from the existing `dte` field),
+// Remaining Opportunity (PI-0008A's previously-unused-here metric), and a
+// real (rather than fixed-zero) weight on earnings proximity. This module's
+// selection logic, tie-break order, and confidence-tier derivation are
+// otherwise unchanged -- see planning/DECISION_ENGINE_CONSTITUTION.md for the
+// governing principles this reweighting was done under.
 
 import type { AssignmentPreference, PositionStrategy } from './types';
+import {
+  DECISION_QUALITY_WEIGHTS as W,
+  gammaDteFraction,
+  scaleWeight,
+} from './decisionQualityMatrix';
 
 export type ManagementIntent =
   | 'HOLD_POSITION'
@@ -145,6 +164,23 @@ export interface ManagementIntentEvidence {
   netEdgeDeclinePct?: number | null; // % below peak net edge, e.g. -30 = 30% off peak
   netEdgeNegative?: boolean | null;
   technicalAlignment?: TechnicalAlignment | null;
+
+  // PI-0008A/PI-0008B: Remaining Opportunity, 0-100 -- how much of a
+  // position's risk-adjusted upside genuinely remains (see
+  // remainingOpportunity.ts). Optional: not every caller has computed it
+  // (see evaluatePortfolioObjectives.ts's per-position rules, which do not
+  // wire this through in this V1 -- absence simply means no contribution,
+  // never a negative signal).
+  remainingOpportunityPct?: number | null;
+
+  // PI-0008B: 0 (just inside the earnings review window) to 1 (earnings is
+  // effectively today) -- the caller's own proximity-within-window
+  // computation, not a raw date (this module still does not read policy
+  // thresholds or do date math itself). Only meaningful when
+  // earningsActionable is true; ignored otherwise. When earningsActionable
+  // is true but this is omitted, a fixed moderate fallback fraction is used
+  // (see decisionQualityMatrix.ts's EARNINGS_PROXIMITY_FALLBACK_FRACTION).
+  earningsProximityFraction?: number | null;
 
   // Pending-order / idle-cash contexts: the caller's existing trigger has
   // already fired by the time this runs (these rules are only invoked when
@@ -255,24 +291,24 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // relevant to this context) are present as candidates even with zero
   // confirming evidence, so Hold wins by default and Roll always surfaces
   // as an alternative rather than disappearing entirely.
-  bump(scores, 'HOLD_POSITION', 10, {
+  bump(scores, 'HOLD_POSITION', W.holdBaseline, {
     id: 'baseline-hold', label: 'Baseline', explanation: 'Baseline', includeInReasons: false,
   });
   if (RELEVANT_INTENTS[evidence.context].includes('ROLL_POSITION')) {
-    bump(scores, 'ROLL_POSITION', 5, {
+    bump(scores, 'ROLL_POSITION', W.rollBaseline, {
       id: 'baseline-roll', label: 'Baseline', explanation: 'Baseline', includeInReasons: false,
     });
   }
 
   if (evidence.profitTargetReached) {
-    bump(scores, 'TAKE_PROFIT', 100, {
+    bump(scores, 'TAKE_PROFIT', W.profitTargetReached, {
       id: 'profit-target-reached',
       label: 'Profit target reached',
       explanation: 'Profit target has been reached.',
       evidenceField: 'profitTargetReached',
     });
   } else if (evidence.meaningfulUnprotectedProfit) {
-    bump(scores, 'TAKE_PROFIT', 40, {
+    bump(scores, 'TAKE_PROFIT', W.unprotectedProfit, {
       id: 'unprotected-profit',
       label: 'Unprotected profit',
       explanation: 'Position has meaningful profit but no working profit-target order.',
@@ -280,15 +316,20 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
 
+  // PI-0008B: MATERIAL_LOSS stays a hard, undiminished policy-breach signal
+  // (see decisionQualityMatrix.ts). WEAK_HEALTH_LOSS -- the one bump keyed
+  // directly on Health Score -- carries less weight than before, per this
+  // ticket's brief that Health Score become supporting evidence rather than
+  // a dominant driver.
   if (evidence.materialLoss) {
-    bump(scores, 'CUT_LOSSES', 100, {
+    bump(scores, 'CUT_LOSSES', W.materialLoss, {
       id: 'material-loss',
       label: 'Material loss threshold breached',
       explanation: 'Loss has reached the policy loss-stop threshold.',
       evidenceField: 'materialLoss',
     });
   } else if (evidence.weakHealthLoss) {
-    bump(scores, 'CUT_LOSSES', 70, {
+    bump(scores, 'CUT_LOSSES', W.weakHealthLoss, {
       id: 'weak-health-loss',
       label: 'Weak health confirmation',
       explanation: 'Loss is material and the health score is weak.',
@@ -297,13 +338,13 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   }
 
   if (evidence.itmOrCriticalBuffer) {
-    bump(scores, 'REDUCE_RISK', 60, {
+    bump(scores, 'REDUCE_RISK', W.tightBufferReduceRisk, {
       id: 'tight-buffer-reduce-risk',
       label: 'Tight strike buffer',
       explanation: 'Strike buffer is tight or the position is in the money.',
       evidenceField: 'itmOrCriticalBuffer',
     });
-    bump(scores, 'CUT_LOSSES', 20, {
+    bump(scores, 'CUT_LOSSES', W.tightBufferCutLossesNudge, {
       id: 'tight-buffer-cut-losses',
       label: 'Tight/ITM buffer',
       explanation: 'Strike buffer is tight or the position is in the money, which also elevates loss risk.',
@@ -312,8 +353,9 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
 
+  // PI-0008B: Net Edge deterioration -- increased influence per the brief.
   if (evidence.netEdgeDeclinePct != null && evidence.netEdgeDeclinePct <= -25) {
-    bump(scores, 'REDUCE_RISK', 40, {
+    bump(scores, 'REDUCE_RISK', W.netEdgeDeclineReduceRisk, {
       id: 'net-edge-decline',
       label: 'Net Edge declined from peak',
       explanation: `Net edge has declined ${Math.abs(evidence.netEdgeDeclinePct).toFixed(0)}% from its peak.`,
@@ -321,13 +363,13 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
   if (evidence.netEdgeNegative) {
-    bump(scores, 'REDUCE_RISK', 30, {
+    bump(scores, 'REDUCE_RISK', W.netEdgeNegativeReduceRisk, {
       id: 'net-edge-negative-reduce-risk',
       label: 'Net edge negative',
       explanation: 'Net edge is negative -- remaining premium no longer compensates for gamma risk.',
       evidenceField: 'netEdgeNegative',
     });
-    bump(scores, 'CUT_LOSSES', 15, {
+    bump(scores, 'CUT_LOSSES', W.netEdgeNegativeCutLossesNudge, {
       id: 'net-edge-negative-cut-losses',
       label: 'Net edge negative',
       explanation: 'Net edge is negative, which also elevates loss risk.',
@@ -336,14 +378,17 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
 
+  // PI-0008B: technical trend -- increased influence in the risk-detection
+  // (against) direction only; the confirming (aligned) direction is
+  // unchanged (see decisionQualityMatrix.ts for why).
   if (evidence.technicalAlignment === 'against') {
-    bump(scores, 'CUT_LOSSES', 30, {
+    bump(scores, 'CUT_LOSSES', W.technicalAgainstCutLosses, {
       id: 'technical-against-cut-losses',
       label: 'Technical trend against',
       explanation: 'Recent technical trend is running against the position.',
       evidenceField: 'technicalAlignment',
     });
-    bump(scores, 'REDUCE_RISK', 20, {
+    bump(scores, 'REDUCE_RISK', W.technicalAgainstReduceRisk, {
       id: 'technical-against-reduce-risk',
       label: 'Technical trend against',
       explanation: 'Recent technical trend is running against the position, which also supports reducing exposure.',
@@ -351,7 +396,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
       includeInReasons: false,
     });
   } else if (evidence.technicalAlignment === 'aligned') {
-    bump(scores, 'HOLD_POSITION', 30, {
+    bump(scores, 'HOLD_POSITION', W.technicalAlignedHold, {
       id: 'technical-aligned-hold',
       label: 'Technical trend confirms position',
       explanation: 'Recent technical trend confirms the position.',
@@ -359,8 +404,84 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
 
+  // PI-0008B: gamma/DTE risk -- new. Reuses the existing `dte` field, scaled
+  // continuously from 0 at the 21-day management-window edge to the maximum
+  // at/past expiration -- "gamma risk as DTE decreases" from the brief.
+  // Reduce Risk gets the primary contribution; Cut Losses gets a smaller
+  // nudge (half the max), matching every other de-risking signal in this
+  // file (see decisionQualityMatrix.ts's "Reduce Risk vs. Cut Losses" note).
+  if (evidence.dte != null && evidence.dte <= W.gammaDteWindowDays) {
+    const fraction = gammaDteFraction(evidence.dte);
+    const reduceRiskPoints = scaleWeight(fraction, W.gammaDteReduceRiskMax);
+    const cutLossesPoints = scaleWeight(fraction, W.gammaDteCutLossesMax);
+    if (reduceRiskPoints > 0) {
+      bump(scores, 'REDUCE_RISK', reduceRiskPoints, {
+        id: 'gamma-dte-reduce-risk',
+        label: 'Gamma risk rising as expiration nears',
+        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration.`,
+        evidenceField: 'dte',
+      });
+    }
+    if (cutLossesPoints > 0) {
+      bump(scores, 'CUT_LOSSES', cutLossesPoints, {
+        id: 'gamma-dte-cut-losses',
+        label: 'Gamma risk rising as expiration nears',
+        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration, which also elevates loss risk.`,
+        evidenceField: 'dte',
+        includeInReasons: false,
+      });
+    }
+  }
+
+  // PI-0008B: Remaining Opportunity -- new. Reuses PI-0008A's
+  // remainingOpportunityPct, previously computed but never consumed by any
+  // recommendation. Low remaining opportunity supports Take Profit when the
+  // position is already profitable (bank what's left) or Reduce Risk
+  // otherwise (little recoverable upside justifies less exposure -- Cut
+  // Losses still requires its own harder evidence). High remaining
+  // opportunity supports Hold Position (don't act prematurely on genuine
+  // upside).
+  if (evidence.remainingOpportunityPct != null) {
+    const pct = evidence.remainingOpportunityPct;
+    if (pct <= W.remainingOpportunityLowThresholdPct) {
+      const fraction = (W.remainingOpportunityLowThresholdPct - pct) / W.remainingOpportunityLowThresholdPct;
+      if (evidence.pnlPct != null && evidence.pnlPct > 0) {
+        const points = scaleWeight(fraction, W.remainingOpportunityLowTakeProfitMax);
+        if (points > 0) {
+          bump(scores, 'TAKE_PROFIT', points, {
+            id: 'remaining-opportunity-low-take-profit',
+            label: 'Little remaining opportunity',
+            explanation: `Only ${pct}% of risk-adjusted opportunity remains -- most of the achievable gain is already captured.`,
+            evidenceField: 'remainingOpportunityPct',
+          });
+        }
+      } else {
+        const points = scaleWeight(fraction, W.remainingOpportunityLowReduceRiskMax);
+        if (points > 0) {
+          bump(scores, 'REDUCE_RISK', points, {
+            id: 'remaining-opportunity-low-reduce-risk',
+            label: 'Little remaining opportunity',
+            explanation: `Only ${pct}% of risk-adjusted opportunity remains -- little recoverable upside justifies the current exposure.`,
+            evidenceField: 'remainingOpportunityPct',
+          });
+        }
+      }
+    } else if (pct >= W.remainingOpportunityHighThresholdPct) {
+      const fraction = (pct - W.remainingOpportunityHighThresholdPct) / (100 - W.remainingOpportunityHighThresholdPct);
+      const points = scaleWeight(fraction, W.remainingOpportunityHighHoldMax);
+      if (points > 0) {
+        bump(scores, 'HOLD_POSITION', points, {
+          id: 'remaining-opportunity-high-hold',
+          label: 'Substantial remaining opportunity',
+          explanation: `${pct}% of risk-adjusted opportunity remains -- genuine upside is still on the table.`,
+          evidenceField: 'remainingOpportunityPct',
+        });
+      }
+    }
+  }
+
   if (evidence.rollFlagged) {
-    bump(scores, 'ROLL_POSITION', 100, {
+    bump(scores, 'ROLL_POSITION', W.rollFlagged, {
       id: 'roll-flagged',
       label: 'Flagged for roll review',
       explanation: 'Position is explicitly flagged for roll review.',
@@ -369,7 +490,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   }
 
   if (evidence.orderNeedsReplacement) {
-    bump(scores, 'REPLACE_WORKING_ORDER', 100, {
+    bump(scores, 'REPLACE_WORKING_ORDER', W.orderNeedsReplacement, {
       id: 'order-needs-replacement',
       label: 'Working order stale or flagged',
       explanation: 'The working order is stale, off-market, or explicitly flagged for review.',
@@ -377,7 +498,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
   if (evidence.idleCashDeployable) {
-    bump(scores, 'DEPLOY_IDLE_CASH', 100, {
+    bump(scores, 'DEPLOY_IDLE_CASH', W.idleCashDeployable, {
       id: 'idle-cash-deployable',
       label: 'Idle cash above threshold',
       explanation: 'Idle cash is above the deployment threshold and risk conditions allow deploying more.',
@@ -391,7 +512,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // the "hard-risk policy" exception the ticket's NVDA scenario allows for.
   if (evidence.context === 'wheel-csp' || evidence.context === 'covered-call') {
     if (evidence.assignmentPreference === 'PREFER' || evidence.assignmentIntent === 'willing') {
-      bump(scores, 'ACCEPT_ASSIGNMENT', 90, {
+      bump(scores, 'ACCEPT_ASSIGNMENT', W.assignmentPreferred, {
         id: 'assignment-preferred',
         label: 'Assignment preferred',
         explanation: 'Assignment is the stated goal for this position.',
@@ -403,11 +524,16 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // Earnings context never gets its own intent -- it raises the stakes on
   // whichever intent the evidence above already supports (or Hold Position
   // via baseline if nothing else does), and always attaches an explanatory
-  // reason so the trader knows earnings is a live factor.
+  // reason so the trader knows earnings is a live factor. PI-0008B: this now
+  // adds real weight (scaled by proximity within the review window) instead
+  // of a fixed 0, so earnings proximity can genuinely tip a close contest,
+  // not just narrate one.
   if (evidence.earningsActionable) {
     const leader = (Object.entries(scores) as [ManagementIntent, ScoreEntry][])
       .sort((a, b) => b[1].score - a[1].score)[0]?.[0] ?? 'HOLD_POSITION';
-    bump(scores, leader, 0, {
+    const proximityFraction = evidence.earningsProximityFraction ?? W.earningsProximityFallbackFraction;
+    const points = scaleWeight(proximityFraction, W.earningsProximityMax);
+    bump(scores, leader, points, {
       id: 'earnings-inside-window',
       label: 'Earnings inside review window',
       explanation: 'Earnings fall before expiration, inside the review window.',
