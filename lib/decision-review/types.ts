@@ -139,13 +139,16 @@ export interface DecisionReview {
 export type DecisionReviewStore = Record<string, DecisionReview>;
 
 // Decision History view filters (ticket #6). ALL is the unfiltered view.
+// PI-0008D adds NEEDS_FOLLOW_UP -- a reminder-only filter, see
+// reviewsNeedingFollowUp() in decisionReview.ts.
 export type DecisionHistoryFilter =
   | 'ALL'
   | 'PENDING'
   | 'FAVORABLE'
   | 'UNFAVORABLE'
   | 'FOLLOWED'
-  | 'NOT_FOLLOWED';
+  | 'NOT_FOLLOWED'
+  | 'NEEDS_FOLLOW_UP';
 
 export const DECISION_HISTORY_FILTER_LABEL: Record<DecisionHistoryFilter, string> = {
   ALL: 'All',
@@ -154,4 +157,5 @@ export const DECISION_HISTORY_FILTER_LABEL: Record<DecisionHistoryFilter, string
   UNFAVORABLE: 'Unfavorable',
   FOLLOWED: 'Followed',
   NOT_FOLLOWED: 'Did Not Follow',
+  NEEDS_FOLLOW_UP: 'Needs Follow-Up',
 };

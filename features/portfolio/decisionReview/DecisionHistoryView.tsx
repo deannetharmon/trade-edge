@@ -6,6 +6,11 @@
 // this view only displays what was already recorded (see
 // lib/decision-review/decisionReview.ts's filterDecisionReviews(), which
 // this component calls rather than reimplementing filtering logic).
+//
+// PI-0008D: adds the "Needs Follow-Up" filter and per-row badge -- reminder
+// only. isReviewNeedingFollowUp() is a mechanical read of outcomeStatus vs.
+// the caller-supplied open-position set; nothing here infers Favorable/
+// Unfavorable/Neutral, computes realized P/L, or touches Autopilot/Trade Log.
 
 'use client';
 
@@ -14,18 +19,24 @@ import { THEMES, Theme } from '@/lib/theme';
 import {
   allReviewsByRecency,
   filterDecisionReviews,
+  isReviewNeedingFollowUp,
   TRADER_ACTION_LABEL,
   DECISION_OUTCOME_STATUS_LABEL,
   DECISION_HISTORY_FILTER_LABEL,
 } from '@/lib/decision-review';
-import type { DecisionHistoryFilter, DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
+import type { DecisionHistoryFilter, DecisionReview, DecisionReviewStore, PositionIdSet } from '@/lib/decision-review';
 
 export interface DecisionHistoryViewProps {
   reviews: DecisionReviewStore;
+  // PI-0008D: the trader's current open-position ids. Defaults to empty --
+  // with no open-position set supplied, every Pending review is treated as
+  // needing follow-up (the safe default; see decisionReview.ts's doc
+  // comment on filterDecisionReviews()).
+  openPositionIds?: PositionIdSet;
   th: typeof THEMES[Theme];
 }
 
-const FILTERS: DecisionHistoryFilter[] = ['ALL', 'PENDING', 'FAVORABLE', 'UNFAVORABLE', 'FOLLOWED', 'NOT_FOLLOWED'];
+const FILTERS: DecisionHistoryFilter[] = ['ALL', 'PENDING', 'FAVORABLE', 'UNFAVORABLE', 'FOLLOWED', 'NOT_FOLLOWED', 'NEEDS_FOLLOW_UP'];
 
 function outcomeToneClass(status: DecisionReview['outcomeStatus']): string {
   switch (status) {
@@ -50,11 +61,14 @@ function formatPnl(pnl: number | null): string {
   return `${sign}${pnl.toFixed(2)}`;
 }
 
-export function DecisionHistoryView({ reviews, th }: DecisionHistoryViewProps) {
+export function DecisionHistoryView({ reviews, openPositionIds = [], th }: DecisionHistoryViewProps) {
   const [filter, setFilter] = useState<DecisionHistoryFilter>('ALL');
 
   const sorted = useMemo(() => allReviewsByRecency(reviews), [reviews]);
-  const filtered = useMemo(() => filterDecisionReviews(sorted, filter), [sorted, filter]);
+  const filtered = useMemo(
+    () => filterDecisionReviews(sorted, filter, openPositionIds),
+    [sorted, filter, openPositionIds],
+  );
 
   return (
     <div className="space-y-4">
@@ -101,6 +115,11 @@ export function DecisionHistoryView({ reviews, th }: DecisionHistoryViewProps) {
                   </td>
                   <td className={`text-[12px] px-3 py-2 whitespace-nowrap font-semibold ${outcomeToneClass(review.outcomeStatus)}`}>
                     {DECISION_OUTCOME_STATUS_LABEL[review.outcomeStatus]}
+                    {isReviewNeedingFollowUp(review, openPositionIds) && (
+                      <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded border border-amber-500/60 bg-amber-500/10 text-amber-400 font-bold whitespace-nowrap">
+                        Needs Follow-Up
+                      </span>
+                    )}
                   </td>
                   <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`} style={{ fontFamily: "'DM Mono', monospace" }}>
                     {formatPnl(review.realizedPnl)}

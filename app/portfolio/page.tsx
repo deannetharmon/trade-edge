@@ -9870,7 +9870,11 @@ export default function PortfolioPage() {
           filters. No charts or analytics; renders decisionReviews as-is. */}
       {activeTab === 'history' && (
         <div className="p-6">
-          <DecisionHistoryView reviews={decisionReviews} th={th} />
+          {/* PI-0008D: current open-position ids, so Decision History can
+              flag Pending reviews whose position has since closed. Derived
+              directly from the same `positions` state every other tab
+              already renders from -- no new fetch. */}
+          <DecisionHistoryView reviews={decisionReviews} openPositionIds={positions.map(p => p.key)} th={th} />
         </div>
       )}
 

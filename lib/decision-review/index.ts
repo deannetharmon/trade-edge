@@ -14,8 +14,10 @@ export {
   latestReviewForPosition,
   allReviewsByRecency,
   filterDecisionReviews,
+  reviewsNeedingFollowUp,
+  isReviewNeedingFollowUp,
 } from './decisionReview';
-export type { CreateDecisionReviewInput, DecisionReviewPatch } from './decisionReview';
+export type { CreateDecisionReviewInput, DecisionReviewPatch, PositionIdSet } from './decisionReview';
 
 export {
   TRADER_ACTIONS,

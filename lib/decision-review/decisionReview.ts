@@ -19,6 +19,15 @@ import type {
   TraderAction,
 } from './types';
 
+// A stable identifier set, however the caller happens to have it (Array or
+// Set) -- accepting both avoids forcing every call site to construct a Set
+// just to call this function.
+export type PositionIdSet = Set<string> | string[];
+
+function hasPositionId(openPositionIds: PositionIdSet, positionId: string): boolean {
+  return Array.isArray(openPositionIds) ? openPositionIds.includes(positionId) : openPositionIds.has(positionId);
+}
+
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -186,12 +195,20 @@ export function allReviewsByRecency(store: DecisionReviewStore): DecisionReview[
   return Object.values(store).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-// Ticket #6's five filters. "Followed" / "Did Not Follow" are read directly
-// off the trader's own logged action (FOLLOWED_RECOMMENDATION vs. any other
-// non-null action) -- a mechanical read of what the trader recorded, never
-// a comparison against the recommended intent, per this ticket's explicit
-// "do not determine correctness automatically."
-export function filterDecisionReviews(reviews: DecisionReview[], filter: DecisionHistoryFilter): DecisionReview[] {
+// Ticket #6's five filters, plus PI-0008D's NEEDS_FOLLOW_UP. "Followed" /
+// "Did Not Follow" are read directly off the trader's own logged action
+// (FOLLOWED_RECOMMENDATION vs. any other non-null action) -- a mechanical
+// read of what the trader recorded, never a comparison against the
+// recommended intent, per this ticket's explicit "do not determine
+// correctness automatically." `openPositionIds` is only consulted for
+// NEEDS_FOLLOW_UP and defaults to empty (every Pending review would count as
+// needing follow-up if the caller doesn't supply the open-position set,
+// which is the safe default -- never silently hiding a reminder).
+export function filterDecisionReviews(
+  reviews: DecisionReview[],
+  filter: DecisionHistoryFilter,
+  openPositionIds: PositionIdSet = [],
+): DecisionReview[] {
   switch (filter) {
     case 'ALL':
       return reviews;
@@ -205,5 +222,29 @@ export function filterDecisionReviews(reviews: DecisionReview[], filter: Decisio
       return reviews.filter((r) => r.traderAction === 'FOLLOWED_RECOMMENDATION');
     case 'NOT_FOLLOWED':
       return reviews.filter((r) => r.traderAction != null && r.traderAction !== 'FOLLOWED_RECOMMENDATION');
+    case 'NEEDS_FOLLOW_UP':
+      return reviews.filter((r) => r.outcomeStatus === 'PENDING' && !hasPositionId(openPositionIds, r.positionId));
   }
+}
+
+// PI-0008D: Decision Review Follow-Up Reminder.
+//
+// Reminder-only, by design (see this ticket's constraints): this never sets
+// or infers outcomeStatus, realizedPnl, or anything about whether the
+// recommendation was correct. It only answers a mechanical question -- is
+// this review still Pending while its position is no longer open? -- using
+// two facts that already exist (the review's own outcomeStatus, and the
+// caller's current open-position id set). Nothing here reads Autopilot's
+// decision log, Trade Log, or any P/L data.
+export function reviewsNeedingFollowUp(store: DecisionReviewStore, openPositionIds: PositionIdSet): DecisionReview[] {
+  return Object.values(store).filter(
+    (review) => review.outcomeStatus === 'PENDING' && !hasPositionId(openPositionIds, review.positionId),
+  );
+}
+
+// Same predicate as reviewsNeedingFollowUp(), for a single already-in-hand
+// review -- what the Decision History view uses to mark individual rows
+// without re-deriving the whole list.
+export function isReviewNeedingFollowUp(review: DecisionReview, openPositionIds: PositionIdSet): boolean {
+  return review.outcomeStatus === 'PENDING' && !hasPositionId(openPositionIds, review.positionId);
 }

@@ -1,6 +1,8 @@
 // lib/decision-review/__tests__/decisionReview.test.ts
 //
 // PI-0008C: Decision Outcome Tracking V1 -- pure logic tests.
+// PI-0008D: Decision Review Follow-Up Reminder -- see the tests near the
+// bottom of this file for reviewsNeedingFollowUp()/isReviewNeedingFollowUp().
 
 import { describe, expect, it } from 'vitest';
 import type { PortfolioRecommendation } from '@/lib/portfolio-intelligence';
@@ -13,6 +15,8 @@ import {
   latestReviewForPosition,
   allReviewsByRecency,
   filterDecisionReviews,
+  reviewsNeedingFollowUp,
+  isReviewNeedingFollowUp,
 } from '../decisionReview';
 import type { DecisionReview, DecisionReviewStore } from '../types';
 
@@ -367,6 +371,77 @@ describe('filterDecisionReviews', () => {
 
   it('NOT_FOLLOWED returns reviews with a logged action other than Followed Recommendation, excluding un-logged ones', () => {
     expect(filterDecisionReviews(reviews, 'NOT_FOLLOWED').map((r) => r.id)).toEqual(['r3', 'r5']);
+  });
+
+  it('NEEDS_FOLLOW_UP returns only Pending reviews whose position is not in the open set', () => {
+    const mixed: DecisionReview[] = [
+      review({ id: 'f1', positionId: 'pos_open', outcomeStatus: 'PENDING' }),
+      review({ id: 'f2', positionId: 'pos_closed', outcomeStatus: 'PENDING' }),
+      review({ id: 'f3', positionId: 'pos_closed_but_done', outcomeStatus: 'FAVORABLE' }),
+    ];
+    expect(filterDecisionReviews(mixed, 'NEEDS_FOLLOW_UP', ['pos_open']).map((r) => r.id)).toEqual(['f2']);
+  });
+
+  it('NEEDS_FOLLOW_UP treats every Pending review as needing follow-up when no open-position set is supplied', () => {
+    expect(filterDecisionReviews(reviews, 'NEEDS_FOLLOW_UP').map((r) => r.id)).toEqual(['r1', 'r5']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PI-0008D: Decision Review Follow-Up Reminder
+// ---------------------------------------------------------------------------
+
+describe('reviewsNeedingFollowUp', () => {
+  function review(positionId: string, outcomeStatus: DecisionReview['outcomeStatus'], id: string): DecisionReview {
+    const base = createDecisionReview(
+      { positionId, symbol: 'X', strategy: 'BPS', recommendation: makeRecommendation() },
+      NOW,
+    );
+    return { ...base, id, outcomeStatus };
+  }
+
+  it('does not flag a pending review whose position is still open', () => {
+    const store: DecisionReviewStore = upsertDecisionReview({}, review('pos_open', 'PENDING', 'r1'));
+    expect(reviewsNeedingFollowUp(store, ['pos_open'])).toEqual([]);
+    expect(isReviewNeedingFollowUp(store['r1'], ['pos_open'])).toBe(false);
+  });
+
+  it('flags a pending review whose position is closed/missing from the open set', () => {
+    const r = review('pos_closed', 'PENDING', 'r1');
+    const store: DecisionReviewStore = upsertDecisionReview({}, r);
+    expect(reviewsNeedingFollowUp(store, ['pos_open']).map((x) => x.id)).toEqual(['r1']);
+    expect(isReviewNeedingFollowUp(r, ['pos_open'])).toBe(true);
+  });
+
+  it('never flags a completed (non-Pending) review, regardless of open-position state', () => {
+    const favorable = review('pos_closed', 'FAVORABLE', 'r1');
+    const unfavorable = review('pos_closed', 'UNFAVORABLE', 'r2');
+    const neutral = review('pos_closed', 'NEUTRAL', 'r3');
+    const insufficient = review('pos_closed', 'INSUFFICIENT_DATA', 'r4');
+    const store: DecisionReviewStore = [favorable, unfavorable, neutral, insufficient].reduce(upsertDecisionReview, {});
+    expect(reviewsNeedingFollowUp(store, [])).toEqual([]);
+    for (const r of [favorable, unfavorable, neutral, insufficient]) {
+      expect(isReviewNeedingFollowUp(r, [])).toBe(false);
+    }
+  });
+
+  it('accepts a Set as well as an array for openPositionIds', () => {
+    const r = review('pos_closed', 'PENDING', 'r1');
+    const store: DecisionReviewStore = upsertDecisionReview({}, r);
+    expect(reviewsNeedingFollowUp(store, new Set(['pos_open']))).toHaveLength(1);
+    expect(reviewsNeedingFollowUp(store, new Set(['pos_closed']))).toHaveLength(0);
+  });
+
+  it('returns an empty array for an empty store', () => {
+    expect(reviewsNeedingFollowUp({}, ['pos_open'])).toEqual([]);
+  });
+
+  it('returns an empty array when every pending position is still open', () => {
+    const store: DecisionReviewStore = [
+      review('pos_a', 'PENDING', 'r1'),
+      review('pos_b', 'PENDING', 'r2'),
+    ].reduce(upsertDecisionReview, {});
+    expect(reviewsNeedingFollowUp(store, ['pos_a', 'pos_b'])).toEqual([]);
   });
 });
 

@@ -120,3 +120,52 @@ describe('DecisionHistoryView: filtering', () => {
     expect(screen.getByText('NVDA')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// PI-0008D: Decision Review Follow-Up Reminder
+// ---------------------------------------------------------------------------
+
+describe('DecisionHistoryView: Needs Follow-Up (PI-0008D)', () => {
+  // buildStore()'s only Pending review is pos_1/SOXL; the other two already
+  // have a completed outcome and must never be flagged regardless of
+  // open-position state.
+  it('marks a Pending review whose position is not open as Needs Follow-Up', () => {
+    render(<DecisionHistoryView reviews={buildStore()} openPositionIds={['pos_2', 'pos_3']} th={THEMES.dark} />);
+    const soxlRow = screen.getByText('SOXL').closest('tr')!;
+    expect(within(soxlRow).getByText('Needs Follow-Up')).toBeInTheDocument();
+  });
+
+  it('does not mark a Pending review whose position is still open', () => {
+    render(<DecisionHistoryView reviews={buildStore()} openPositionIds={['pos_1', 'pos_2', 'pos_3']} th={THEMES.dark} />);
+    const soxlRow = screen.getByText('SOXL').closest('tr')!;
+    expect(within(soxlRow).queryByText('Needs Follow-Up')).not.toBeInTheDocument();
+  });
+
+  it('never marks completed (non-Pending) reviews, even when their position is closed', () => {
+    render(<DecisionHistoryView reviews={buildStore()} openPositionIds={[]} th={THEMES.dark} />);
+    const amdRow = screen.getByText('AMD').closest('tr')!;
+    const nvdaRow = screen.getByText('NVDA').closest('tr')!;
+    expect(within(amdRow).queryByText('Needs Follow-Up')).not.toBeInTheDocument();
+    expect(within(nvdaRow).queryByText('Needs Follow-Up')).not.toBeInTheDocument();
+  });
+
+  it('the Needs Follow-Up filter shows only flagged records', () => {
+    render(<DecisionHistoryView reviews={buildStore()} openPositionIds={['pos_2', 'pos_3']} th={THEMES.dark} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Needs Follow-Up' }));
+    expect(screen.getByText('SOXL')).toBeInTheDocument();
+    expect(screen.queryByText('AMD')).not.toBeInTheDocument();
+    expect(screen.queryByText('NVDA')).not.toBeInTheDocument();
+  });
+
+  it('the Needs Follow-Up filter shows the empty-state message when nothing needs follow-up', () => {
+    render(<DecisionHistoryView reviews={buildStore()} openPositionIds={['pos_1', 'pos_2', 'pos_3']} th={THEMES.dark} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Needs Follow-Up' }));
+    expect(screen.getByText(/no decision reviews match/i)).toBeInTheDocument();
+  });
+
+  it('treats every Pending review as needing follow-up when openPositionIds is omitted entirely', () => {
+    render(<DecisionHistoryView reviews={buildStore()} th={THEMES.dark} />);
+    const soxlRow = screen.getByText('SOXL').closest('tr')!;
+    expect(within(soxlRow).getByText('Needs Follow-Up')).toBeInTheDocument();
+  });
+});
