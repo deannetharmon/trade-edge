@@ -18,8 +18,10 @@ import { useState, type ReactNode } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation, RemainingOpportunityResult } from '@/lib/portfolio-intelligence';
 import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
+import type { DecisionReview } from '@/lib/decision-review';
 import { deriveManagementChoices } from './managementChoices';
 import { deriveNextLifecycleEvent } from './nextLifecycleEvent';
+import { DecisionReviewSection } from '../decisionReview/DecisionReviewSection';
 
 export interface PositionIntelligencePanelProps {
   recommendation: PortfolioRecommendation;
@@ -29,6 +31,15 @@ export interface PositionIntelligencePanelProps {
   // Opportunity Engine keep rendering unchanged -- the section below simply
   // doesn't render when this is absent.
   remainingOpportunity?: RemainingOpportunityResult | null;
+  // PI-0008C: Decision Outcome Tracking. `strategy` is separate from
+  // `recommendation` (which has no strategy field); `decisionReview` is the
+  // existing review for this position if one has been saved, or
+  // null/undefined otherwise. The section only renders when `onSaveDecisionReview`
+  // is provided, so existing callers/tests that predate this ticket keep
+  // rendering unchanged.
+  strategy?: string;
+  decisionReview?: DecisionReview | null;
+  onSaveDecisionReview?: (review: DecisionReview) => void;
   th: typeof THEMES[Theme];
 }
 
@@ -122,7 +133,7 @@ function DecisionScorecard({ managementIntent, th }: { managementIntent: Managem
   );
 }
 
-export function PositionIntelligencePanel({ recommendation, objective, lifecycleType, remainingOpportunity, th }: PositionIntelligencePanelProps) {
+export function PositionIntelligencePanel({ recommendation, objective, lifecycleType, remainingOpportunity, strategy, decisionReview, onSaveDecisionReview, th }: PositionIntelligencePanelProps) {
   const choices = deriveManagementChoices(recommendation.kind);
   const nextEvent = deriveNextLifecycleEvent(lifecycleType, recommendation.kind);
 
@@ -230,6 +241,21 @@ export function PositionIntelligencePanel({ recommendation, objective, lifecycle
 
       {recommendation.managementIntent && (
         <DecisionScorecard managementIntent={recommendation.managementIntent} th={th} />
+      )}
+
+      {/* PI-0008C: Decision Outcome Tracking -- records what happened, never
+          influences the recommendation above. Only renders when the caller
+          has wired up persistence (onSaveDecisionReview). */}
+      {onSaveDecisionReview && (
+        <DecisionReviewSection
+          positionId={recommendation.positionId}
+          symbol={recommendation.symbol}
+          strategy={strategy ?? ''}
+          recommendation={recommendation}
+          review={decisionReview ?? null}
+          onSave={onSaveDecisionReview}
+          th={th}
+        />
       )}
     </div>
   );

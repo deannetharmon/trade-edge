@@ -16,6 +16,9 @@ import { PositionHealthBadge } from '@/features/portfolio/components/PositionHea
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
 import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/PositionIntelligencePanel';
+import { DecisionHistoryView } from '@/features/portfolio/decisionReview/DecisionHistoryView';
+import { upsertDecisionReview, latestReviewForPosition } from '@/lib/decision-review';
+import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
 
 
 // Inject accent CSS variable style
@@ -8030,7 +8033,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, decisionReview, onSaveDecisionReview }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -8038,6 +8041,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   onProfitTargetChange: (key: string, value: number) => void;
   onIntentChange: (key: string, intent: PositionIntent) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  // PI-0008C: Decision Outcome Tracking -- the existing review for this
+  // position (or null), and the save callback. Optional so any other caller
+  // of PositionCard that predates this ticket keeps compiling unchanged;
+  // PositionIntelligencePanel itself only renders its Decision Review
+  // section when onSaveDecisionReview is provided.
+  decisionReview?: DecisionReview | null;
+  onSaveDecisionReview?: (review: DecisionReview) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [trend, setTrend] = useState<TrendResult | null>(null);
@@ -8921,6 +8931,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           objective={pos.portfolioObjective ?? null}
           lifecycleType={classifyPositionLifecycle(pos).type}
           remainingOpportunity={scorePortfolioRemainingOpportunity(pos)}
+          strategy={pos.strategy}
+          decisionReview={decisionReview ?? null}
+          onSaveDecisionReview={onSaveDecisionReview}
           th={th}
         />
       )}
@@ -9156,7 +9169,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, decisionReviews, onSaveDecisionReview }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -9164,6 +9177,10 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   onIntentChange: (key: string, intent: PositionIntent) => void;
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  // PI-0008C: Decision Outcome Tracking -- optional so any other caller of
+  // PositionSection that predates this ticket keeps compiling unchanged.
+  decisionReviews?: DecisionReviewStore;
+  onSaveDecisionReview?: (review: DecisionReview) => void;
 }) {
   const lifecycleRank: Record<string, number> = {
     CSP: 1,
@@ -9204,7 +9221,12 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
       </div>
       <div className="space-y-2">
         {sortedPositions.map(p => (
-          <PositionCard key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle} onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute} />
+          <PositionCard
+            key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle}
+            onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
+            decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
+            onSaveDecisionReview={onSaveDecisionReview}
+          />
         ))}
       </div>
     </div>
@@ -9458,7 +9480,7 @@ export default function PortfolioPage() {
   // PI-0004D: 'briefing' added as the default subpage -- the Daily Portfolio
   // Briefing is the primary "what do I need to know before the market
   // opens?" view, so it opens first instead of Positions.
-  const [activeTab, setActiveTab] = useState<'briefing' | 'positions' | 'priorities' | 'balances'>('briefing');
+  const [activeTab, setActiveTab] = useState<'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('briefing');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9532,6 +9554,29 @@ export default function PortfolioPage() {
       .then(setBalances)
       .catch(e => console.error('Balance fetch failed (non-blocking):', e));
   }, []);
+
+  // PI-0008C: Decision Outcome Tracking -- fetched independently and
+  // non-blocking, same pattern as balances above. `decisionReviews` is the
+  // full per-user store (keyed by review id, see
+  // app/api/decision-reviews/route.ts); Position Intelligence looks up the
+  // latest review per position via latestReviewForPosition(), and the
+  // Decision History tab renders the whole store directly.
+  const [decisionReviews, setDecisionReviews] = useState<DecisionReviewStore>({});
+  useEffect(() => {
+    fetch('/api/decision-reviews')
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`decision-reviews fetch ${res.status}`))))
+      .then(data => setDecisionReviews(data?.reviews ?? {}))
+      .catch(e => console.error('Decision review fetch failed (non-blocking):', e));
+  }, []);
+
+  const handleSaveDecisionReview = (review: DecisionReview) => {
+    setDecisionReviews(prev => upsertDecisionReview(prev, review));
+    fetch('/api/decision-reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review }),
+    }).catch(e => console.error('Decision review save failed (non-blocking):', e));
+  };
 
   // PI-0003: first real production wiring of evaluatePortfolioObjectives()
   // (previously zero consumers anywhere in the app). Combines per-position
@@ -9784,8 +9829,9 @@ export default function PortfolioPage() {
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
             { key: 'priorities', label: "Today's Priorities", icon: '⚑' },
+            { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'briefing' | 'positions' | 'priorities' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9817,6 +9863,15 @@ export default function PortfolioPage() {
           Positions. */}
       {activeTab === 'priorities' && (
         <TodaysPrioritiesWorkflow objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+      )}
+
+      {/* PI-0008C: Decision History -- ticket #6's basic Portfolio subpage
+          listing every saved Decision Review with simple status/follow
+          filters. No charts or analytics; renders decisionReviews as-is. */}
+      {activeTab === 'history' && (
+        <div className="p-6">
+          <DecisionHistoryView reviews={decisionReviews} th={th} />
+        </div>
       )}
 
       {activeTab === 'positions' && (<>
@@ -9883,6 +9938,7 @@ export default function PortfolioPage() {
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
+                        decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                       />
                     )}
                   </>
