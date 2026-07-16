@@ -35,9 +35,15 @@ import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 // consume state this page already computes (positions[].portfolioObjective,
 // canonicalPriorities, decisionReviews) -- no new Portfolio Intelligence or
 // Decision Engine calls are introduced here.
-import { buildTodaysPrioritiesDashboard } from '@/lib/todaysPriorities';
+import { buildTodaysPrioritiesDashboard, selectTopPriority } from '@/lib/todaysPriorities';
 import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput, CoveredCallOpportunityInput } from '@/lib/todaysPriorities';
 import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
+// PI-0011A: Portfolio Mission Control -- orchestrates the Briefing tab's own
+// Portfolio Health/Summary derivations plus PI-0010A/B's Today's Priorities
+// dashboard and its new selectTopPriority() into one landing view. No new
+// Portfolio Intelligence/Decision Engine calls here either -- see
+// MissionControl.tsx's own module doc for the full source list.
+import { MissionControl } from '@/features/portfolio/missionControl/MissionControl';
 
 
 // Inject accent CSS variable style
@@ -9565,7 +9571,13 @@ export default function PortfolioPage() {
   // Monitor / Opportunities from the same objective/decision-review state
   // every other tab already consumes. 'briefing' and 'priorities' are left
   // fully intact and reachable via their own tabs.
-  const [activeTab, setActiveTab] = useState<'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('today');
+  // PI-0011A: 'mission-control' added and made the new default landing
+  // subpage, superseding 'today' as the entry point -- Mission Control
+  // orchestrates Today's Priorities (reused wholesale) plus the Briefing
+  // tab's own Portfolio Health/Summary derivations and a new Top Priority
+  // highlight into one higher-level view. 'today' itself is untouched and
+  // still reachable on its own tab as a detailed drill-down.
+  const [activeTab, setActiveTab] = useState<'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('mission-control');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9809,6 +9821,11 @@ export default function PortfolioPage() {
     [todaysPrioritiesInput],
   );
 
+  // PI-0011A: Mission Control's Top Priority section -- the single highest
+  // Priority Score entry across the dashboard above, already sorted per
+  // bucket; selectTopPriority() just takes the max of already-sorted heads.
+  const topPriority = useMemo(() => selectTopPriority(todaysPrioritiesDashboard), [todaysPrioritiesDashboard]);
+
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
     try {
@@ -10026,6 +10043,7 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
+            { key: 'mission-control', label: 'Mission Control', icon: '◎' },
             { key: 'today', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
@@ -10035,7 +10053,7 @@ export default function PortfolioPage() {
             { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -10051,10 +10069,27 @@ export default function PortfolioPage() {
 
       {activeTab === 'balances' && <BalancesTab />}
 
-      {/* PI-0010A: Today's Priorities Dashboard -- the new default subpage.
-          Pure orchestration over state this page already computes; see
-          todaysPrioritiesInput above for exactly which existing outputs feed
-          each of the four sections. */}
+      {/* PI-0011A: Portfolio Mission Control -- the new default subpage,
+          superseding 'today'. Orchestrates canonicalPriorities.objectives
+          (Portfolio Summary/Health, reusing the Briefing tab's own
+          derivation functions), todaysPrioritiesDashboard (Today's Work
+          Queue, reused wholesale), and topPriority (selectTopPriority's
+          output) into one landing view. No new computation happens in
+          MissionControl.tsx itself -- see its own module doc. */}
+      {activeTab === 'mission-control' && (
+        <MissionControl
+          objectives={canonicalPriorities?.objectives ?? null}
+          dashboard={todaysPrioritiesDashboard}
+          topPriority={topPriority}
+          loading={loading}
+          th={th}
+        />
+      )}
+
+      {/* PI-0010A: Today's Priorities Dashboard -- still its own subpage,
+          reachable as a detailed drill-down. Pure orchestration over state
+          this page already computes; see todaysPrioritiesInput above for
+          exactly which existing outputs feed each of the four sections. */}
       {activeTab === 'today' && (
         <div className="p-6">
           <TodaysPrioritiesDashboard dashboard={todaysPrioritiesDashboard} th={th} />

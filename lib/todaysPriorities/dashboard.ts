@@ -262,3 +262,28 @@ export function buildTodaysPrioritiesDashboard(input: TodaysPrioritiesInput): To
     },
   };
 }
+
+// PI-0011A: Portfolio Mission Control's "Top Priority" section needs a
+// single answer to "what's the most urgent thing across the whole
+// dashboard" -- every bucket above is already scored and sorted highest-
+// first, so this just takes each bucket's own [0] (already the bucket's
+// highest-scoring entry) and picks the overall max. No new scoring, no new
+// ranking rule: this is strictly a max-of-already-sorted-heads selection
+// over output buildTodaysPrioritiesDashboard already produced. Monitor and
+// Covered Call/Screener opportunities are excluded from consideration the
+// same way they're excluded from scoring itself (see the module doc above)
+// -- they're not backed by a scored PortfolioObjective.
+export function selectTopPriority(dashboard: TodaysPrioritiesDashboard): PrioritizedObjective | null {
+  const candidateHeads = [
+    dashboard.immediateAction[0],
+    dashboard.reviewToday.mediumPriority[0],
+    dashboard.reviewToday.earningsReviews[0],
+    dashboard.reviewToday.expiringPositions[0],
+    dashboard.opportunities.cspOpportunities[0],
+    dashboard.opportunities.rollOpportunities[0],
+  ].filter((entry): entry is PrioritizedObjective => entry != null);
+
+  if (candidateHeads.length === 0) return null;
+
+  return candidateHeads.reduce((best, entry) => (entry.score > best.score ? entry : best));
+}

@@ -10,7 +10,7 @@
 // unwrap `.objective`; new tests cover score attachment and sort order.
 
 import { describe, expect, it } from 'vitest';
-import { buildTodaysPrioritiesDashboard } from '../dashboard';
+import { buildTodaysPrioritiesDashboard, selectTopPriority } from '../dashboard';
 import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput } from '../dashboard';
 import type { PortfolioObjective, PortfolioObjectiveReviewTrigger, ManagementIntentResult, ObjectiveImpact } from '@/lib/portfolio-intelligence';
 import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
@@ -282,5 +282,46 @@ describe('buildTodaysPrioritiesDashboard: Priority Score', () => {
     const entry = result.opportunities.cspOpportunities[0];
     expect(entry.score).toBeGreaterThanOrEqual(0);
     expect(entry.score).toBeLessThanOrEqual(100);
+  });
+});
+
+// PI-0011A: Portfolio Mission Control's "Top Priority" section.
+describe('selectTopPriority', () => {
+  it('returns null when there is nothing actionable anywhere', () => {
+    const result = buildTodaysPrioritiesDashboard(baseInput());
+    expect(selectTopPriority(result)).toBeNull();
+  });
+
+  it('returns the single highest-scoring entry across every actionable bucket', () => {
+    // A CRITICAL objective with weak scoring signals vs. a lower-actionability
+    // (ACTION_NEEDED) objective with maximal scoring signals -- selectTopPriority
+    // must pick by score, not by which bucket ("Immediate Action" vs.
+    // "Review Today") the objective landed in.
+    const weakCritical = makeObjective({
+      actionability: 'CRITICAL',
+      confidence: 1,
+      subject: { type: 'position', id: 'pos_weak', label: 'WEAK' } as any,
+    });
+    const strongActionNeeded = makeObjective({
+      actionability: 'ACTION_NEEDED',
+      confidence: 99,
+      managementIntent: makeManagementIntent({ intent: 'CUT_LOSSES' as any }),
+      subject: { type: 'position', id: 'pos_strong', label: 'STRONG' } as any,
+    });
+    const weakPosition = makePosition({ key: 'pos_weak', dte: 30, healthScore: 100, remainingOpportunityPct: 100 });
+    const strongPosition = makePosition({ key: 'pos_strong', dte: 0, healthScore: 5, netEdgeNegative: true, hasPendingDecisionReview: true });
+    const result = buildTodaysPrioritiesDashboard(
+      baseInput({ objectives: [weakCritical, strongActionNeeded], positions: [weakPosition, strongPosition] }),
+    );
+    const top = selectTopPriority(result);
+    expect(top?.objective.id).toBe(strongActionNeeded.id);
+  });
+
+  it('ignores Monitor and Covered Call/Screener buckets (not scored)', () => {
+    const monitored = makePosition({ key: 'pos_monitor', objective: makeObjective({ actionability: 'MONITOR' }) });
+    const result = buildTodaysPrioritiesDashboard(
+      baseInput({ positions: [monitored], coveredCallOpportunities: [{ key: 'pos_cc', symbol: 'CC', shares: 100 }] }),
+    );
+    expect(selectTopPriority(result)).toBeNull();
   });
 });

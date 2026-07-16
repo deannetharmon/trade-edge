@@ -54,18 +54,21 @@ const IMPACT_DIRECTION_ARROW: Record<'positive' | 'negative' | 'neutral', string
   neutral: '→',
 };
 
-function PriorityRankedList({
+// PI-0011A: exported so Portfolio Mission Control can reuse the exact same
+// card renderer for its own "Top Priority" section (a single-item list)
+// instead of re-implementing the score/tier/impact/reason card markup.
+export function PriorityRankedList({
   items,
   th,
   title,
 }: {
   items: PrioritizedObjective[];
   th: typeof THEMES[Theme];
-  title: string;
+  title?: string;
 }) {
   return (
     <div>
-      <h3 className={`mb-1.5 text-[10px] uppercase tracking-widest ${th.textFaint}`}>{title}</h3>
+      {title && <h3 className={`mb-1.5 text-[10px] uppercase tracking-widest ${th.textFaint}`}>{title}</h3>}
       <div className="space-y-2">
         {items.map(({ objective, score, tier, reasons }) => {
           const tierStyle = TIER_STYLE[tier];
