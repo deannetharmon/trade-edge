@@ -12,9 +12,14 @@
 //      the same <PriorityRankedList> card PI-0010B already built.
 //   3. Today's Work Queue  -- the full, unmodified <TodaysPrioritiesDashboard>
 //      component from PI-0010A/B, reused wholesale.
-//   4. Portfolio Health    -- derivePortfolioHealth() (PI-0004D,
-//      features/portfolio/briefing/portfolioHealth.ts), reused verbatim,
-//      same status banner styling as the Daily Portfolio Briefing.
+//   4. Portfolio Health    -- PI-0011B's calculatePortfolioHealthScore()
+//      result (lib/portfolioHealth), computed by the caller from data this
+//      page already has (Today's Priorities counts, per-position health/
+//      confidence, real account balances) and passed in as `health` below.
+//      This supersedes the PI-0004D three-color banner (still used,
+//      unmodified, by the Daily Portfolio Briefing tab) with a real 0-100
+//      score, status, and top positive/negative contributors -- the same
+//      section, richer content, not a new section.
 //   5. Opportunity Summary -- a compact count readout over the same
 //      `dashboard.opportunities` object Today's Work Queue already renders
 //      in full detail below it.
@@ -30,13 +35,13 @@ import { THEMES, Theme } from '@/lib/theme';
 import type { PortfolioObjective } from '@/lib/portfolio-intelligence';
 import type { TodaysPrioritiesDashboard as TodaysPrioritiesDashboardData, PrioritizedObjective } from '@/lib/todaysPriorities';
 import { TodaysPrioritiesDashboard, PriorityRankedList } from '../dashboard/TodaysPrioritiesDashboard';
-import { derivePortfolioHealth, type PortfolioHealthLevel } from '../briefing/portfolioHealth';
 import { derivePortfolioSummary } from '../briefing/portfolioSummary';
+import type { PortfolioHealthResult, PortfolioHealthStatus } from '@/lib/portfolioHealth';
 
-const HEALTH_STYLE: Record<PortfolioHealthLevel, { border: string; bg: string; text: string }> = {
-  healthy: { border: 'border-emerald-600/50', bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
-  attention: { border: 'border-amber-600/50', bg: 'bg-amber-500/10', text: 'text-amber-400' },
-  action: { border: 'border-red-600/50', bg: 'bg-red-500/10', text: 'text-red-400' },
+const HEALTH_STATUS_STYLE: Record<PortfolioHealthStatus, { border: string; bg: string; text: string }> = {
+  Healthy: { border: 'border-emerald-600/50', bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
+  'Needs Attention': { border: 'border-amber-600/50', bg: 'bg-amber-500/10', text: 'text-amber-400' },
+  'Action Required': { border: 'border-red-600/50', bg: 'bg-red-500/10', text: 'text-red-400' },
 };
 
 function SectionHeader({ label, th }: { label: string; th: typeof THEMES[Theme] }) {
@@ -70,11 +75,14 @@ export interface MissionControlProps {
   // produce `topPriority` below.
   dashboard: TodaysPrioritiesDashboardData;
   topPriority: PrioritizedObjective | null;
+  // PI-0011B: the Portfolio Health Engine's result -- computed by the
+  // caller (see app/portfolio/page.tsx) from data this page already has.
+  health: PortfolioHealthResult;
   loading: boolean;
   th: typeof THEMES[Theme];
 }
 
-export function MissionControl({ objectives, dashboard, topPriority, loading, th }: MissionControlProps) {
+export function MissionControl({ objectives, dashboard, topPriority, health, loading, th }: MissionControlProps) {
   if (objectives === null && loading) {
     return (
       <div className="mx-6 mt-4">
@@ -85,8 +93,7 @@ export function MissionControl({ objectives, dashboard, topPriority, loading, th
     );
   }
 
-  const health = derivePortfolioHealth(objectives);
-  const healthStyle = HEALTH_STYLE[health.level];
+  const healthStyle = HEALTH_STATUS_STYLE[health.status];
   const summary = derivePortfolioSummary(objectives);
   const { opportunities } = dashboard;
 
@@ -121,9 +128,36 @@ export function MissionControl({ objectives, dashboard, topPriority, loading, th
       {/* 4. Portfolio Health */}
       <section aria-label="Portfolio Health">
         <SectionHeader label="Portfolio Health" th={th} />
-        <div className={`flex items-center gap-3 rounded-xl border p-4 ${healthStyle.border} ${healthStyle.bg}`}>
-          <span className="text-2xl leading-none" aria-hidden="true">{health.emoji}</span>
-          <p className={`text-sm font-bold tracking-wide ${healthStyle.text}`}>{health.label}</p>
+        <div className={`rounded-xl border p-4 ${healthStyle.border} ${healthStyle.bg}`}>
+          <div className="flex items-center gap-3">
+            <span className={`text-3xl font-bold leading-none ${healthStyle.text}`}>{health.score}</span>
+            <p className={`text-sm font-bold tracking-wide ${healthStyle.text}`}>{health.status}</p>
+          </div>
+
+          {(health.positiveContributors.length > 0 || health.negativeContributors.length > 0) && (
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {health.positiveContributors.length > 0 && (
+                <div>
+                  <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textFaint}`}>Top Positive Contributors</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {health.positiveContributors.map((c) => (
+                      <li key={c.id} className={`text-[11px] ${th.textMuted}`}>&bull; {c.label}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {health.negativeContributors.length > 0 && (
+                <div>
+                  <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textFaint}`}>Top Negative Contributors</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {health.negativeContributors.map((c) => (
+                      <li key={c.id} className={`text-[11px] ${th.textMuted}`}>&bull; {c.label}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

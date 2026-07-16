@@ -10,7 +10,7 @@ import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
@@ -44,6 +44,12 @@ import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/Todays
 // Portfolio Intelligence/Decision Engine calls here either -- see
 // MissionControl.tsx's own module doc for the full source list.
 import { MissionControl } from '@/features/portfolio/missionControl/MissionControl';
+// PI-0011B: Portfolio Health Engine -- a deterministic 0-100 score computed
+// from data this page already has (see the healthInput useMemo below for
+// exactly which existing values feed it). No new Portfolio Intelligence or
+// Decision Engine calls, no new market data.
+import { calculatePortfolioHealthScore } from '@/lib/portfolioHealth';
+import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
 
 
 // Inject accent CSS variable style
@@ -9826,6 +9832,71 @@ export default function PortfolioPage() {
   // bucket; selectTopPriority() just takes the max of already-sorted heads.
   const topPriority = useMemo(() => selectTopPriority(todaysPrioritiesDashboard), [todaysPrioritiesDashboard]);
 
+  // PI-0011B: Portfolio Health Engine input -- every field here is a value
+  // this page already has or already computes elsewhere:
+  //   - immediateActionsCount / decisionReviewsNeedingFollowUpCount come
+  //     straight off todaysPrioritiesDashboard (PI-0010A/B), zero new work.
+  //   - criticalPositionsCount/earningsExposedPositionsCount/averagePosition
+  //     Health/averageDecisionConfidence are derived from the same full,
+  //     unfiltered per-position objective list (positions[].portfolioObjective)
+  //     the Today's Priorities dashboard input already uses.
+  //   - buyingPowerUsedPct/cashBalance/netLiquidity come straight off the
+  //     same `balances` (PortfolioFinancialContext) state already fetched
+  //     for canonicalPriorities above -- no new balance fetch.
+  //   - maxSymbolConcentrationPct reuses derivePositionConcentration(), the
+  //     exact same pure function computeCanonicalPortfolioPriorities already
+  //     calls internally, over the same positionsForConcentration shape
+  //     built the same way as in the canonicalPriorities effect above.
+  const healthInput: PortfolioHealthInput = useMemo(() => {
+    const positionObjectives = positions
+      .map(p => p.portfolioObjective)
+      .filter((o): o is PortfolioObjective => o != null);
+
+    const criticalPositionKeys = new Set(
+      positions.filter(p => p.portfolioObjective?.priority === 'critical').map(p => p.key),
+    );
+    const earningsExposedPositionsCount = positions.filter(
+      p => p.portfolioObjective?.reviewTriggers.some(t => t.triggerType === 'earnings'),
+    ).length;
+
+    const positionHealthScores = positions
+      .map(p => p.healthScore?.score)
+      .filter((s): s is number => s != null);
+    const averagePositionHealth = positionHealthScores.length > 0
+      ? positionHealthScores.reduce((sum, s) => sum + s, 0) / positionHealthScores.length
+      : null;
+
+    const confidences = positionObjectives.map(o => o.confidence);
+    const averageDecisionConfidence = confidences.length > 0
+      ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
+      : null;
+
+    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({
+      symbol: p.symbol,
+      maxRisk: p.maxRisk,
+      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
+    }));
+    const concentrationBySymbol = derivePositionConcentration(positionsForConcentration, balances?.netLiquidity);
+    const concentrationValues = Object.values(concentrationBySymbol);
+    const maxSymbolConcentrationPct = concentrationValues.length > 0 ? Math.max(...concentrationValues) : null;
+
+    return {
+      immediateActionsCount: todaysPrioritiesDashboard.immediateAction.length,
+      criticalPositionsCount: criticalPositionKeys.size,
+      totalPositionsCount: positions.length,
+      earningsExposedPositionsCount,
+      buyingPowerUsedPct: balances?.buyingPowerUsedPct ?? null,
+      cashBalance: balances?.cashBalance ?? null,
+      netLiquidity: balances?.netLiquidity ?? null,
+      maxSymbolConcentrationPct,
+      averagePositionHealth,
+      averageDecisionConfidence,
+      decisionReviewsNeedingFollowUpCount: todaysPrioritiesDashboard.reviewToday.needsFollowUp.length,
+    };
+  }, [positions, balances, todaysPrioritiesDashboard]);
+
+  const portfolioHealth = useMemo(() => calculatePortfolioHealthScore(healthInput), [healthInput]);
+
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
     try {
@@ -10071,16 +10142,18 @@ export default function PortfolioPage() {
 
       {/* PI-0011A: Portfolio Mission Control -- the new default subpage,
           superseding 'today'. Orchestrates canonicalPriorities.objectives
-          (Portfolio Summary/Health, reusing the Briefing tab's own
-          derivation functions), todaysPrioritiesDashboard (Today's Work
-          Queue, reused wholesale), and topPriority (selectTopPriority's
-          output) into one landing view. No new computation happens in
-          MissionControl.tsx itself -- see its own module doc. */}
+          (Portfolio Summary, reusing the Briefing tab's own derivation
+          function), todaysPrioritiesDashboard (Today's Work Queue, reused
+          wholesale), topPriority (selectTopPriority's output), and
+          portfolioHealth (PI-0011B's score) into one landing view. No new
+          computation happens in MissionControl.tsx itself -- see its own
+          module doc. */}
       {activeTab === 'mission-control' && (
         <MissionControl
           objectives={canonicalPriorities?.objectives ?? null}
           dashboard={todaysPrioritiesDashboard}
           topPriority={topPriority}
+          health={portfolioHealth}
           loading={loading}
           th={th}
         />
