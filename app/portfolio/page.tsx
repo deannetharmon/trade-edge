@@ -3,7 +3,7 @@
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import BalancesTab from '@/components/BalancesTab';
 import {
@@ -30,6 +30,14 @@ import type { PositionSnapshotInput, PositionSnapshotStore as LifecycleSnapshotS
 // which are a completely separate store (see fetchSnapshotStore above).
 import { readCache as readTradeLogCache } from '@/lib/tradeLog/reconstructTrades';
 import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
+// PI-0010A: Today's Priorities Dashboard -- pure orchestration layer
+// (buildTodaysPrioritiesDashboard) plus its presentation component. Both
+// consume state this page already computes (positions[].portfolioObjective,
+// canonicalPriorities, decisionReviews) -- no new Portfolio Intelligence or
+// Decision Engine calls are introduced here.
+import { buildTodaysPrioritiesDashboard } from '@/lib/todaysPriorities';
+import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput, CoveredCallOpportunityInput } from '@/lib/todaysPriorities';
+import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
 
 
 // Inject accent CSS variable style
@@ -9552,7 +9560,12 @@ export default function PortfolioPage() {
   // PI-0004D: 'briefing' added as the default subpage -- the Daily Portfolio
   // Briefing is the primary "what do I need to know before the market
   // opens?" view, so it opens first instead of Positions.
-  const [activeTab, setActiveTab] = useState<'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('briefing');
+  // PI-0010A: 'today' added and made the new default landing subpage --
+  // Today's Priorities orchestrates Immediate Action / Review Today /
+  // Monitor / Opportunities from the same objective/decision-review state
+  // every other tab already consumes. 'briefing' and 'priorities' are left
+  // fully intact and reachable via their own tabs.
+  const [activeTab, setActiveTab] = useState<'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('today');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9711,6 +9724,65 @@ export default function PortfolioPage() {
     const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
     setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, balances ?? {}, positionsForConcentration, rawPendingOrders));
   }, [positions, pendingOrders, balances]);
+
+  // PI-0010A: Today's Priorities Dashboard input. `objectives` deliberately
+  // combines two different existing sources rather than reusing
+  // canonicalPriorities.objectives alone:
+  //   - per-position objectives come from positions[].portfolioObjective
+  //     (already computed by attachSnapshotHistory/scorePortfolioPositionObjective
+  //     for every position, INCLUDING MONITOR-tier ones) -- needed because
+  //     computeCanonicalPortfolioPriorities() intentionally filters MONITOR
+  //     out of its own per-position objectives (see its doc comment), and
+  //     this dashboard's own Monitor section needs exactly those.
+  //   - portfolio-level + pending-order objectives (concentration, buying
+  //     power, idle cash, income, stale orders) come from
+  //     canonicalPriorities.objectives, filtered to source !== 'position' so
+  //     the position-level ones already included above aren't duplicated.
+  const todaysPrioritiesInput: TodaysPrioritiesInput = useMemo(() => {
+    const positionObjectives = positions
+      .map(p => p.portfolioObjective)
+      .filter((o): o is PortfolioObjective => o != null);
+    const portfolioLevelObjectives = (canonicalPriorities?.objectives ?? []).filter(o => o.source !== 'position');
+    const objectives = [...positionObjectives, ...portfolioLevelObjectives];
+
+    const positionInputsForDashboard: TodaysPrioritiesPositionInput[] = positions.map(p => ({
+      key: p.key,
+      symbol: p.symbol,
+      strategy: p.strategy,
+      dte: p.dte,
+      healthScore: p.healthScore?.score ?? null,
+      objective: p.portfolioObjective ?? null,
+    }));
+
+    // Covered Call opportunities: uncovered stock left over from an
+    // assignment (classifyPositionLifecycle already identifies this as
+    // 'ASSIGNED_STOCK' everywhere else in this file) -- no existing
+    // PortfolioObjective type represents "sell a covered call here" yet, so
+    // this reuses the lifecycle classifier's own `.shares` field rather than
+    // fabricating a new one.
+    const coveredCallOpportunities: CoveredCallOpportunityInput[] = positions.reduce<CoveredCallOpportunityInput[]>((acc, p) => {
+      const lifecycle = classifyPositionLifecycle(p);
+      if (lifecycle.type === 'ASSIGNED_STOCK') acc.push({ key: p.key, symbol: p.symbol, shares: lifecycle.shares });
+      return acc;
+    }, []);
+
+    return {
+      objectives,
+      positions: positionInputsForDashboard,
+      decisionReviews,
+      openPositionIds: positions.map(p => p.key),
+      coveredCallOpportunities,
+      // V1 scope: no persisted Screener scan output exists anywhere to reuse
+      // (Screener runs a live-only scan) -- an honest `false` rather than
+      // triggering or duplicating that scan here.
+      screenerCandidatesAvailable: false,
+    };
+  }, [positions, canonicalPriorities, decisionReviews]);
+
+  const todaysPrioritiesDashboard = useMemo(
+    () => buildTodaysPrioritiesDashboard(todaysPrioritiesInput),
+    [todaysPrioritiesInput],
+  );
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
@@ -9929,12 +10001,16 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
+            { key: 'today', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
-            { key: 'priorities', label: "Today's Priorities", icon: '⚑' },
+            // PI-0010A: relabeled from "Today's Priorities" (now the new
+            // 'today' tab's name) to disambiguate -- same component
+            // (TodaysPrioritiesWorkflow), same data, unchanged otherwise.
+            { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9949,6 +10025,16 @@ export default function PortfolioPage() {
       </div>
 
       {activeTab === 'balances' && <BalancesTab />}
+
+      {/* PI-0010A: Today's Priorities Dashboard -- the new default subpage.
+          Pure orchestration over state this page already computes; see
+          todaysPrioritiesInput above for exactly which existing outputs feed
+          each of the four sections. */}
+      {activeTab === 'today' && (
+        <div className="p-6">
+          <TodaysPrioritiesDashboard dashboard={todaysPrioritiesDashboard} th={th} />
+        </div>
+      )}
 
       {/* PI-0004D: Daily Portfolio Briefing -- the default subpage. Consumes
           the exact same canonicalPriorities state computed above; no new
