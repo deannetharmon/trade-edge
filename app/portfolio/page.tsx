@@ -19,6 +19,11 @@ import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/Pos
 import { DecisionHistoryView } from '@/features/portfolio/decisionReview/DecisionHistoryView';
 import { upsertDecisionReview, latestReviewForPosition } from '@/lib/decision-review';
 import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
+// PI-0009A: Position Snapshot Engine -- event-driven (detection/
+// recommendation-change/close), separate from the daily Greeks-snapshot
+// store below. See lib/position-snapshot/snapshotEngine.ts.
+import { planLifecycleSnapshots } from '@/lib/position-snapshot';
+import type { PositionSnapshotInput, PositionSnapshotStore as LifecycleSnapshotStore } from '@/lib/position-snapshot';
 
 
 // Inject accent CSS variable style
@@ -379,6 +384,67 @@ function attachSnapshotHistory(
 
 async function clearSnapshotHistory(): Promise<void> {
   await fetch('/api/position-snapshots', { method: 'DELETE' });
+}
+
+// PI-0009A: Position Snapshot Engine ────────────────────────────────────────
+// Maps a live Position (with recommendation/healthScore/netEdge already
+// attached by attachSnapshotHistory) into the engine's lean, page-agnostic
+// input shape. Reuses scorePortfolioRemainingOpportunity/netEdgeLive/
+// isUpcomingEarningsRisk exactly as already computed elsewhere in this file
+// -- no new calculations.
+function toPositionSnapshotInput(pos: Position): PositionSnapshotInput {
+  const { remainingOpportunityPct } = scorePortfolioRemainingOpportunity(pos);
+  const earningsUpcoming = isUpcomingEarningsRisk(pos.earningsDate, pos.expDate);
+  return {
+    key: pos.key,
+    symbol: pos.symbol,
+    strategy: pos.strategy,
+    dte: pos.dte,
+    creditReceived: pos.creditReceived,
+    closeValue: pos.closeValue,
+    delta: pos.netDelta,
+    pop: pos.pop,
+    netEdge: netEdgeLive(pos),
+    healthScore: pos.healthScore?.score ?? null,
+    remainingOpportunityPct,
+    recommendationLabel: pos.recommendation?.label ?? null,
+    confidence: pos.recommendation?.confidence ?? null,
+    primaryReason: pos.recommendation?.primaryReason ?? null,
+    supportingReasons: pos.recommendation?.supportingReasons ?? [],
+    earningsStatus: pos.earningsDate == null ? 'NONE' : (earningsUpcoming ? 'UPCOMING' : 'NONE'),
+    earningsDate: pos.earningsDate,
+  };
+}
+
+async function fetchLifecycleSnapshotStore(): Promise<LifecycleSnapshotStore> {
+  const res = await fetch('/api/position-lifecycle-snapshots');
+  if (!res.ok) throw new Error(`lifecycle snapshot fetch ${res.status}`);
+  const data = await res.json();
+  return (data?.snapshots ?? {}) as LifecycleSnapshotStore;
+}
+
+// Fire-and-forget, same non-blocking pattern as captureSnapshotsIfNeeded
+// above: fetches the current store, asks the pure engine what (if anything)
+// needs capturing this cycle, and POSTs only that. Called once per Portfolio
+// page load, right after recommendation/healthScore/netEdge are attached to
+// positions (see fetchPositions() below) -- that's the one place all the
+// fields planLifecycleSnapshots needs are simultaneously available.
+async function captureLifecycleSnapshotsIfNeeded(positions: Position[]): Promise<void> {
+  if (positions.length === 0) return;
+  try {
+    const store = await fetchLifecycleSnapshotStore();
+    const inputs = positions.map(toPositionSnapshotInput);
+    const { toAppend } = planLifecycleSnapshots(inputs, store);
+    if (toAppend.length === 0) return;
+    const entries = toAppend.map(snapshot => ({ positionKey: snapshot.positionKey, snapshot }));
+    await fetch('/api/position-lifecycle-snapshots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+  } catch (e) {
+    console.error('Lifecycle snapshot capture failed (non-blocking):', e);
+  }
 }
 
 interface PositionAnalysis {
@@ -9534,7 +9600,15 @@ export default function PortfolioPage() {
       // Load snapshot history and attach it to positions (non-blocking; if it
       // fails the cards simply render without peak/trend context).
       fetchSnapshotStore()
-        .then(store => setPositions(prev => attachSnapshotHistory(prev, store)))
+        .then(store => {
+          setPositions(prev => {
+            const updated = attachSnapshotHistory(prev, store);
+            // PI-0009A: fire-and-forget, after recommendation/healthScore/
+            // netEdge are attached -- doesn't block or affect this render.
+            captureLifecycleSnapshotsIfNeeded(updated);
+            return updated;
+          });
+        })
         .catch(e => console.error('Snapshot history fetch failed (non-blocking):', e));
     } catch (e: any) {
       if (e.message === 'Not authenticated' || e.message === 'Session expired') { window.location.href = '/login'; return; }
