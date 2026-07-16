@@ -1,9 +1,12 @@
 // components/CspRiskCell.tsx
 //
-// Table cell for the Cash-Secured Put "Max Loss" column: shows the 2-sigma
-// "Realistic Loss" as the primary value, with the old theoretical
+// Table cell for the Cash-Secured Put "Max Loss" column: shows the "2σ
+// Scenario Loss" as the primary value -- the loss under one modeled
+// downside scenario (a 2-standard-deviation implied-volatility move), not a
+// prediction or maximum expected loss -- with the existing theoretical
 // "Capital at Risk" (stock -> $0) as a smaller, muted secondary value, plus
-// a hover tooltip explaining the difference.
+// a hover tooltip explaining the difference. Renamed from "Realistic Loss"
+// for terminology accuracy; no calculation changes.
 
 'use client';
 
@@ -30,7 +33,7 @@ export function CspRiskCell({
   premiumCollected,
   contracts,
 }: CspRiskCellProps) {
-  const { realisticLoss, capitalAtRisk, expectedLowPrice } = calculateCspRisk({
+  const { scenarioLoss, capitalAtRisk } = calculateCspRisk({
     impliedVolatility,
     daysToExpiration,
     currentStockPrice,
@@ -42,7 +45,8 @@ export function CspRiskCell({
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-1">
-        <span className="text-sm font-bold text-red-400">{formatMoney(realisticLoss)}</span>
+        <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">2σ Scenario Loss</span>
+        <span className="text-sm font-bold text-red-400">{formatMoney(scenarioLoss)}</span>
 
         {/* Info icon + CSS-only hover tooltip -- no extra dependency */}
         <span className="group relative inline-flex items-center">
@@ -62,10 +66,13 @@ export function CspRiskCell({
             role="tooltip"
             className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-64 -translate-x-1/2 rounded-md border border-gray-700 bg-gray-900 p-2 text-xs text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
           >
-            <span className="font-semibold text-red-400">Realistic Loss</span> estimates the loss if the stock
-            falls to a 2-sigma expected low of {formatMoney(expectedLowPrice)}, based on implied volatility.{' '}
-            <span className="font-semibold text-gray-400">Capital at Risk</span> is the theoretical worst case if
-            the stock fell all the way to $0 -- useful for buying-power purposes, but rarely realistic.
+            <span className="font-semibold text-red-400">2σ Scenario Loss</span> estimates the loss if the
+            underlying declines by two implied-volatility standard deviations by expiration. It is a modeled
+            scenario, not a prediction or maximum expected loss.
+            <br />
+            <br />
+            <span className="font-semibold text-gray-400">Capital at Risk</span> assumes the underlying falls to $0
+            and represents the theoretical worst-case loss used for buying-power purposes.
           </span>
         </span>
       </div>
