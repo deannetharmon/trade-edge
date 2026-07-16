@@ -2,35 +2,115 @@
 //
 // PI-0010A: Today's Priorities Dashboard, V1 -- the presentation layer for
 // lib/todaysPriorities/dashboard.ts's pure bucketing output.
+// PI-0010B: Intelligent Prioritization -- every objective-bearing bucket is
+// now a PrioritizedObjective[] (already sorted highest Priority Score first
+// by the pure module), rendered here via the new <PriorityRankedList>
+// instead of the PI-0004A <TodaysPriorities> component. <TodaysPriorities>
+// is still used elsewhere (the Briefing and Priority List tabs) and is
+// deliberately left untouched -- it doesn't know about Priority Score, and
+// this ticket's brief is "only improve prioritization", not redesign that
+// shared component. <PriorityRankedList> is new, local to this dashboard,
+// and displays exactly the four things the brief asks for on each card:
+// Priority Score, tier (Critical/High/Medium/Low), Expected Portfolio
+// Impact (objective.portfolioImpact -- already computed, not recalculated
+// here), and the concise Reason bullets calculatePriorityScore() produced.
 //
-// This component computes nothing. Every objective-bearing subsection
-// (Immediate Action; Review Today's medium-priority / earnings / expiring
-// buckets; the CSP-opportunity bucket) is rendered by re-using the existing
-// <TodaysPriorities> component (features/portfolio/components/TodaysPriorities.tsx,
-// PI-0004A) unchanged -- same cards, same priority/urgency/type badges, same
-// expand-for-evidence interaction. That component already IS the established
-// "badge/theme styling convention" for a PortfolioObjective list, so this
-// dashboard reuses it four times (once per objective bucket that needs it)
-// instead of re-implementing card/badge markup.
-//
-// The remaining three subsections -- Monitor entries, Decision Reviews
-// needing follow-up, and the roll/covered-call opportunity lists -- are not
-// PortfolioObjectives, so they get small, compact rows built from the same
-// theme tokens (th.border/th.card/th.textFaint/th.textMuted) rather than a
-// new visual language.
+// The remaining subsections -- Monitor entries, Decision Reviews needing
+// follow-up, and the covered-call opportunity list -- are not
+// PortfolioObjectives (Monitor is explicitly "no action needed", and
+// Covered Call opportunities have no backing objective to score), so they
+// keep their PI-0010A compact rows, unchanged, built from the same theme
+// tokens (th.border/th.card/th.textFaint/th.textMuted).
 
 'use client';
 
 import { useState } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
-import { TodaysPriorities } from '../components/TodaysPriorities';
 import type {
   TodaysPrioritiesDashboard as TodaysPrioritiesDashboardData,
   TodaysPrioritiesMonitorEntry,
   CoveredCallOpportunityInput,
+  PrioritizedObjective,
 } from '@/lib/todaysPriorities';
 import type { DecisionReview } from '@/lib/decision-review';
 import { DECISION_OUTCOME_STATUS_LABEL } from '@/lib/decision-review';
+import type { PriorityTier } from '@/lib/priorityScore';
+
+// Mirrors (does not import -- that map is module-private to
+// features/portfolio/components/TodaysPriorities.tsx) the same red/orange/
+// amber/slate priority color convention already established there, applied
+// to this ticket's own Critical/High/Medium/Low Priority Score tier instead
+// of PortfolioObjective['priority']. Same visual language, new dimension.
+const TIER_STYLE: Record<PriorityTier, { border: string; bg: string; text: string }> = {
+  Critical: { border: 'border-red-500/60', bg: 'bg-red-500/10', text: 'text-red-300' },
+  High: { border: 'border-orange-500/60', bg: 'bg-orange-500/10', text: 'text-orange-300' },
+  Medium: { border: 'border-amber-500/60', bg: 'bg-amber-500/10', text: 'text-amber-300' },
+  Low: { border: 'border-slate-500/60', bg: 'bg-slate-500/10', text: 'text-slate-300' },
+};
+
+const IMPACT_DIRECTION_ARROW: Record<'positive' | 'negative' | 'neutral', string> = {
+  positive: '↑',
+  negative: '↓',
+  neutral: '→',
+};
+
+function PriorityRankedList({
+  items,
+  th,
+  title,
+}: {
+  items: PrioritizedObjective[];
+  th: typeof THEMES[Theme];
+  title: string;
+}) {
+  return (
+    <div>
+      <h3 className={`mb-1.5 text-[10px] uppercase tracking-widest ${th.textFaint}`}>{title}</h3>
+      <div className="space-y-2">
+        {items.map(({ objective, score, tier, reasons }) => {
+          const tierStyle = TIER_STYLE[tier];
+          const impact = objective.portfolioImpact;
+          return (
+            <div key={objective.id} className={`rounded-xl border ${th.border} ${th.card} p-3`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className={`text-[12px] font-bold ${th.text}`}>{objective.title}</p>
+                  <p className={`mt-0.5 text-[11px] ${th.textMuted}`}>{objective.summary}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${tierStyle.border} ${tierStyle.bg} ${tierStyle.text}`}>
+                    {tier}
+                  </span>
+                  <span className={`text-[13px] font-bold ${th.text}`} title="Priority Score">{score}</span>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Expected Portfolio Impact</span>
+                <span className={`text-[11px] font-semibold ${impact.direction === 'positive' ? 'text-emerald-400' : impact.direction === 'negative' ? 'text-red-400' : th.textMuted}`}>
+                  {IMPACT_DIRECTION_ARROW[impact.direction]} {impact.magnitude}
+                  {impact.estimatedDollarValue != null ? ` (~$${Math.abs(impact.estimatedDollarValue).toFixed(0)})` : ''}
+                </span>
+              </div>
+              {impact.explanation && <p className={`mt-0.5 text-[10px] ${th.textFaint}`}>{impact.explanation}</p>}
+
+              {reasons.length > 0 && (
+                <div className="mt-2">
+                  <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Reason</span>
+                  <ul className="mt-0.5 space-y-0.5">
+                    {reasons.map((reason) => (
+                      <li key={reason} className={`text-[10px] ${th.textMuted}`}>&bull; {reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function SectionHeader({ label, count, th }: { label: string; count?: number; th: typeof THEMES[Theme] }) {
   return (
@@ -119,7 +199,7 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         {immediateAction.length === 0 ? (
           <EmptyState label="Nothing needs immediate action right now." th={th} />
         ) : (
-          <TodaysPriorities objectives={immediateAction} loading={false} th={th} title="Immediate Action" />
+          <PriorityRankedList items={immediateAction} th={th} title="Immediate Action" />
         )}
       </section>
 
@@ -131,13 +211,13 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         ) : (
           <div className="space-y-5">
             {reviewToday.earningsReviews.length > 0 && (
-              <TodaysPriorities objectives={reviewToday.earningsReviews} loading={false} th={th} title="Earnings Reviews" />
+              <PriorityRankedList items={reviewToday.earningsReviews} th={th} title="Earnings Reviews" />
             )}
             {reviewToday.expiringPositions.length > 0 && (
-              <TodaysPriorities objectives={reviewToday.expiringPositions} loading={false} th={th} title="Expiring Positions" />
+              <PriorityRankedList items={reviewToday.expiringPositions} th={th} title="Expiring Positions" />
             )}
             {reviewToday.mediumPriority.length > 0 && (
-              <TodaysPriorities objectives={reviewToday.mediumPriority} loading={false} th={th} title="Medium Priority" />
+              <PriorityRankedList items={reviewToday.mediumPriority} th={th} title="Medium Priority" />
             )}
             {reviewToday.needsFollowUp.length > 0 && (
               <div>
@@ -186,10 +266,10 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         ) : (
           <div className="space-y-5">
             {opportunities.rollOpportunities.length > 0 && (
-              <TodaysPriorities objectives={opportunities.rollOpportunities} loading={false} th={th} title="Roll Opportunities" />
+              <PriorityRankedList items={opportunities.rollOpportunities} th={th} title="Roll Opportunities" />
             )}
             {opportunities.cspOpportunities.length > 0 && (
-              <TodaysPriorities objectives={opportunities.cspOpportunities} loading={false} th={th} title="CSP Opportunities" />
+              <PriorityRankedList items={opportunities.cspOpportunities} th={th} title="CSP Opportunities" />
             )}
             {opportunities.coveredCallOpportunities.length > 0 && (
               <div>

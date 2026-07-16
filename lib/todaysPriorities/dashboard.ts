@@ -48,14 +48,36 @@
 // pattern): inputs are plain data the caller has already assembled, not
 // live `Position`/`RollSuggestion` types from app/portfolio/page.tsx, so this
 // module has no dependency on that file and stays independently testable.
+//
+// PI-0010B: Intelligent Prioritization -- every actionable objective bucket
+// (Immediate Action; Review Today's three objective subsections; the CSP and
+// Roll Opportunities buckets) is now additionally run through
+// lib/priorityScore's calculatePriorityScore() and sorted highest-score
+// first, so "what's on this list" (PI-0010A's job, unchanged above) and
+// "what order should I work through it in" (this ticket's job) stay cleanly
+// separated. Monitor and the lifecycle-classified Covered Call/Screener
+// buckets are deliberately NOT scored -- Monitor is explicitly "requires no
+// action", and Covered Call/Screener opportunities aren't backed by a
+// PortfolioObjective (no confidence/managementIntent/reviewTriggers to score
+// against) the way CSP/Roll opportunities are.
 
 import type { PortfolioObjective } from '@/lib/portfolio-intelligence';
 import type { DecisionReview, DecisionReviewStore, PositionIdSet } from '@/lib/decision-review';
 import { reviewsNeedingFollowUp } from '@/lib/decision-review';
+import { calculatePriorityScore, DEFAULT_PRIORITY_SCORE_CONFIG } from '@/lib/priorityScore';
+import type { PriorityScoreConfig, PriorityScorePositionContext, PriorityTier } from '@/lib/priorityScore';
 
 // A position with no PortfolioObjective at all, or whose objective is
 // MONITOR-tier, is "healthy, requires no action" -- the ticket's Monitor
 // section. Only the fields the Monitor view needs are carried here.
+//
+// PI-0010B: the five fields after `objective` are the per-position context
+// Priority Score needs that the objective itself doesn't carry (see
+// lib/priorityScore/priorityScore.ts's PriorityScorePositionContext) --
+// every one of them is a value app/portfolio/page.tsx already computes
+// elsewhere for other purposes (net edge evidence, remaining opportunity,
+// max risk, decision review lookup); nothing new is fetched or scored to
+// populate them.
 export interface TodaysPrioritiesPositionInput {
   key: string;
   symbol: string;
@@ -63,6 +85,22 @@ export interface TodaysPrioritiesPositionInput {
   dte: number;
   healthScore: number | null;
   objective: PortfolioObjective | null;
+  netEdgeDeclinePct: number | null;
+  netEdgeNegative: boolean;
+  remainingOpportunityPct: number | null;
+  capitalAtRisk: number | null;
+  hasPendingDecisionReview: boolean;
+}
+
+// An objective paired with its Priority Score -- the presentation layer
+// reads `objective` for everything it already rendered (title, type badge,
+// rationale, evidence, impacts, etc.) and `score`/`tier`/`reasons` for the
+// new priority card fields this ticket adds.
+export interface PrioritizedObjective {
+  objective: PortfolioObjective;
+  score: number;
+  tier: PriorityTier;
+  reasons: string[];
 }
 
 // Lifecycle-classified by the caller via classifyPositionLifecycle(pos).type
@@ -97,12 +135,18 @@ export interface TodaysPrioritiesInput {
   // dashboard just points the trader at Screener instead of fabricating
   // candidates.
   screenerCandidatesAvailable: boolean;
+  // PI-0010B: overrides the default Priority Score weighting (see
+  // lib/priorityScore/config.ts's own doc comment on why this lives in one
+  // centralized place). Omitted in every real caller today -- present so a
+  // future settings screen can pass a trader-tuned config through this same
+  // orchestration layer without this module's bucketing logic changing.
+  priorityScoreConfig?: PriorityScoreConfig;
 }
 
 export interface TodaysPrioritiesReviewToday {
-  mediumPriority: PortfolioObjective[];
-  earningsReviews: PortfolioObjective[];
-  expiringPositions: PortfolioObjective[];
+  mediumPriority: PrioritizedObjective[];
+  earningsReviews: PrioritizedObjective[];
+  expiringPositions: PrioritizedObjective[];
   needsFollowUp: DecisionReview[];
 }
 
@@ -115,14 +159,14 @@ export interface TodaysPrioritiesMonitorEntry {
 }
 
 export interface TodaysPrioritiesOpportunities {
-  rollOpportunities: PortfolioObjective[];
+  rollOpportunities: PrioritizedObjective[];
   coveredCallOpportunities: CoveredCallOpportunityInput[];
-  cspOpportunities: PortfolioObjective[];
+  cspOpportunities: PrioritizedObjective[];
   screenerCandidatesAvailable: boolean;
 }
 
 export interface TodaysPrioritiesDashboard {
-  immediateAction: PortfolioObjective[];
+  immediateAction: PrioritizedObjective[];
   reviewToday: TodaysPrioritiesReviewToday;
   monitor: TodaysPrioritiesMonitorEntry[];
   opportunities: TodaysPrioritiesOpportunities;
@@ -132,7 +176,56 @@ function hasTrigger(objective: PortfolioObjective, triggerType: string): boolean
   return objective.reviewTriggers.some(t => t.triggerType === triggerType);
 }
 
+// PI-0010B: matches an objective back to the position that produced it (via
+// `subject.id`, which every position-sourced objective sets to the same
+// position key app/portfolio/page.tsx already uses everywhere else -- see
+// evaluatePositionObjective()'s `subject: { id: legacy.positionId, ... }`).
+// Portfolio-level objectives (DEPLOY_IDLE_CASH, concentration, buying power,
+// etc.) have no single backing position and correctly get `null` here --
+// calculatePriorityScore() falls back to each factor's configured neutral
+// default in that case rather than fabricating position context.
+function positionContextFor(
+  objective: PortfolioObjective,
+  positionsByKey: ReadonlyMap<string, TodaysPrioritiesPositionInput>,
+): PriorityScorePositionContext | null {
+  if (objective.subject.type !== 'position' || !objective.subject.id) return null;
+  const position = positionsByKey.get(objective.subject.id);
+  if (!position) return null;
+  return {
+    dte: position.dte,
+    healthScore: position.healthScore,
+    netEdgeDeclinePct: position.netEdgeDeclinePct,
+    netEdgeNegative: position.netEdgeNegative,
+    remainingOpportunityPct: position.remainingOpportunityPct,
+    capitalAtRisk: position.capitalAtRisk,
+    hasPendingDecisionReview: position.hasPendingDecisionReview,
+  };
+}
+
+// Scores every objective in `objectives` and returns them sorted highest
+// Priority Score first (ties broken by the objectives' own existing order,
+// since Array.prototype.sort is a stable sort).
+function prioritize(
+  objectives: PortfolioObjective[],
+  positionsByKey: ReadonlyMap<string, TodaysPrioritiesPositionInput>,
+  config: PriorityScoreConfig,
+): PrioritizedObjective[] {
+  return objectives
+    .map((objective) => {
+      const { score, tier, reasons } = calculatePriorityScore(
+        { objective, position: positionContextFor(objective, positionsByKey) },
+        config,
+      );
+      return { objective, score, tier, reasons };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
 export function buildTodaysPrioritiesDashboard(input: TodaysPrioritiesInput): TodaysPrioritiesDashboard {
+  const config = input.priorityScoreConfig ?? DEFAULT_PRIORITY_SCORE_CONFIG;
+  const positionsByKey = new Map(input.positions.map((p) => [p.key, p] as const));
+  const rank = (objectives: PortfolioObjective[]) => prioritize(objectives, positionsByKey, config);
+
   const surfaced = input.objectives.filter(o => o.actionability !== 'MONITOR');
 
   const immediateAction = surfaced.filter(o => o.actionability === 'CRITICAL');
@@ -153,13 +246,18 @@ export function buildTodaysPrioritiesDashboard(input: TodaysPrioritiesInput): To
   const rollOpportunities = input.objectives.filter(o => o.managementIntent?.intent === 'ROLL_POSITION');
 
   return {
-    immediateAction,
-    reviewToday: { mediumPriority, earningsReviews, expiringPositions, needsFollowUp },
+    immediateAction: rank(immediateAction),
+    reviewToday: {
+      mediumPriority: rank(mediumPriority),
+      earningsReviews: rank(earningsReviews),
+      expiringPositions: rank(expiringPositions),
+      needsFollowUp,
+    },
     monitor,
     opportunities: {
-      rollOpportunities,
+      rollOpportunities: rank(rollOpportunities),
       coveredCallOpportunities: input.coveredCallOpportunities,
-      cspOpportunities,
+      cspOpportunities: rank(cspOpportunities),
       screenerCandidatesAvailable: input.screenerCandidatesAvailable,
     },
   };

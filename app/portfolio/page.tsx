@@ -9738,6 +9738,21 @@ export default function PortfolioPage() {
   //     power, idle cash, income, stale orders) come from
   //     canonicalPriorities.objectives, filtered to source !== 'position' so
   //     the position-level ones already included above aren't duplicated.
+  //
+  // PI-0010B: five extra per-position fields feed Priority Score (see
+  // lib/priorityScore/priorityScore.ts) -- every one of them is a value this
+  // file already computes elsewhere for an existing purpose, just read again
+  // here rather than recomputed or fetched anew:
+  //   - netEdgeDeclinePct/netEdgeNegative: computeNetEdgeEvidence(pos), the
+  //     same call scorePortfolioPositionObjective() already makes per
+  //     position for the Decision Engine's own net-edge evidence.
+  //   - remainingOpportunityPct: scorePortfolioRemainingOpportunity(pos),
+  //     the same Remaining Opportunity Engine call (PI-0008A) already wired
+  //     into the Position Intelligence panel.
+  //   - capitalAtRisk: pos.maxRisk, already displayed elsewhere on the page.
+  //   - hasPendingDecisionReview: latestReviewForPosition (PI-0008C, already
+  //     imported) against the same decisionReviews store Decision History
+  //     already renders from.
   const todaysPrioritiesInput: TodaysPrioritiesInput = useMemo(() => {
     const positionObjectives = positions
       .map(p => p.portfolioObjective)
@@ -9745,14 +9760,24 @@ export default function PortfolioPage() {
     const portfolioLevelObjectives = (canonicalPriorities?.objectives ?? []).filter(o => o.source !== 'position');
     const objectives = [...positionObjectives, ...portfolioLevelObjectives];
 
-    const positionInputsForDashboard: TodaysPrioritiesPositionInput[] = positions.map(p => ({
-      key: p.key,
-      symbol: p.symbol,
-      strategy: p.strategy,
-      dte: p.dte,
-      healthScore: p.healthScore?.score ?? null,
-      objective: p.portfolioObjective ?? null,
-    }));
+    const positionInputsForDashboard: TodaysPrioritiesPositionInput[] = positions.map(p => {
+      const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(p);
+      const { remainingOpportunityPct } = scorePortfolioRemainingOpportunity(p);
+      const latestReview = latestReviewForPosition(decisionReviews, p.key);
+      return {
+        key: p.key,
+        symbol: p.symbol,
+        strategy: p.strategy,
+        dte: p.dte,
+        healthScore: p.healthScore?.score ?? null,
+        objective: p.portfolioObjective ?? null,
+        netEdgeDeclinePct,
+        netEdgeNegative: netEdgeNegative ?? false,
+        remainingOpportunityPct,
+        capitalAtRisk: p.maxRisk ?? null,
+        hasPendingDecisionReview: latestReview?.outcomeStatus === 'PENDING',
+      };
+    });
 
     // Covered Call opportunities: uncovered stock left over from an
     // assignment (classifyPositionLifecycle already identifies this as

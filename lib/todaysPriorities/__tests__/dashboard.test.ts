@@ -4,14 +4,20 @@
 // bucketing logic: actionability-tier mapping, earnings/dte/generic
 // sub-grouping within Review Today, Monitor inclusion, and pass-through
 // reuse of roll/covered-call/CSP/needs-follow-up data.
+// PI-0010B: Intelligent Prioritization -- every objective-bearing bucket now
+// returns PrioritizedObjective[] (objective + score/tier/reasons), sorted
+// highest score first. Bucketing-assertion tests below were updated to
+// unwrap `.objective`; new tests cover score attachment and sort order.
 
 import { describe, expect, it } from 'vitest';
 import { buildTodaysPrioritiesDashboard } from '../dashboard';
 import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput } from '../dashboard';
-import type { PortfolioObjective, PortfolioObjectiveReviewTrigger, ManagementIntentResult } from '@/lib/portfolio-intelligence';
+import type { PortfolioObjective, PortfolioObjectiveReviewTrigger, ManagementIntentResult, ObjectiveImpact } from '@/lib/portfolio-intelligence';
 import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
 
 let objectiveCounter = 0;
+
+const NEUTRAL_IMPACT: ObjectiveImpact = { direction: 'neutral', magnitude: 'low', explanation: '' };
 
 function makeTrigger(triggerType: PortfolioObjectiveReviewTrigger['triggerType']): PortfolioObjectiveReviewTrigger {
   return { id: `trig_${triggerType}`, label: triggerType, triggerType, explanation: '' };
@@ -37,10 +43,10 @@ function makeObjective(overrides: Partial<PortfolioObjective> = {}): PortfolioOb
     rationale: 'test rationale',
     supportingEvidence: [],
     concerns: [],
-    portfolioImpact: 'neutral' as any,
-    incomeImpact: 'neutral' as any,
-    riskImpact: 'neutral' as any,
-    capitalImpact: 'neutral' as any,
+    portfolioImpact: NEUTRAL_IMPACT,
+    incomeImpact: NEUTRAL_IMPACT,
+    riskImpact: NEUTRAL_IMPACT,
+    capitalImpact: NEUTRAL_IMPACT,
     reviewTriggers: [],
     metadata: { executionAllowed: false, paperExecutionAllowed: false, rulesEvaluated: [], rulesTriggered: [] },
     ...overrides,
@@ -55,6 +61,11 @@ function makePosition(overrides: Partial<TodaysPrioritiesPositionInput> = {}): T
     dte: 21,
     healthScore: 80,
     objective: null,
+    netEdgeDeclinePct: 0,
+    netEdgeNegative: false,
+    remainingOpportunityPct: 70,
+    capitalAtRisk: 0,
+    hasPendingDecisionReview: false,
     ...overrides,
   };
 }
@@ -113,7 +124,7 @@ describe('buildTodaysPrioritiesDashboard: actionability bucketing', () => {
   it('puts CRITICAL objectives in Immediate Action', () => {
     const critical = makeObjective({ actionability: 'CRITICAL' });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [critical] }));
-    expect(result.immediateAction).toEqual([critical]);
+    expect(result.immediateAction.map(p => p.objective)).toEqual([critical]);
     expect(result.reviewToday.mediumPriority).toHaveLength(0);
   });
 
@@ -139,7 +150,7 @@ describe('buildTodaysPrioritiesDashboard: Review Today sub-grouping by trigger',
   it('routes objectives with an earnings review trigger to earningsReviews', () => {
     const earningsObjective = makeObjective({ actionability: 'REVIEW_SOON', reviewTriggers: [makeTrigger('earnings')] });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [earningsObjective] }));
-    expect(result.reviewToday.earningsReviews).toEqual([earningsObjective]);
+    expect(result.reviewToday.earningsReviews.map(p => p.objective)).toEqual([earningsObjective]);
     expect(result.reviewToday.mediumPriority).toHaveLength(0);
     expect(result.reviewToday.expiringPositions).toHaveLength(0);
   });
@@ -147,14 +158,14 @@ describe('buildTodaysPrioritiesDashboard: Review Today sub-grouping by trigger',
   it('routes objectives with a dte trigger (no earnings) to expiringPositions', () => {
     const dteObjective = makeObjective({ actionability: 'ACTION_NEEDED', reviewTriggers: [makeTrigger('dte')] });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [dteObjective] }));
-    expect(result.reviewToday.expiringPositions).toEqual([dteObjective]);
+    expect(result.reviewToday.expiringPositions.map(p => p.objective)).toEqual([dteObjective]);
     expect(result.reviewToday.mediumPriority).toHaveLength(0);
   });
 
   it('an objective with both earnings and dte triggers counts as an earnings review, not expiring', () => {
     const both = makeObjective({ actionability: 'REVIEW_SOON', reviewTriggers: [makeTrigger('earnings'), makeTrigger('dte')] });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [both] }));
-    expect(result.reviewToday.earningsReviews).toEqual([both]);
+    expect(result.reviewToday.earningsReviews.map(p => p.objective)).toEqual([both]);
     expect(result.reviewToday.expiringPositions).toHaveLength(0);
   });
 });
@@ -206,7 +217,7 @@ describe('buildTodaysPrioritiesDashboard: Opportunities', () => {
     const rollWinner = makeObjective({ managementIntent: makeManagementIntent({ intent: 'ROLL_POSITION' as any }) });
     const holdOnly = makeObjective({ managementIntent: makeManagementIntent({ intent: 'HOLD_POSITION' as any }) });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [rollWinner, holdOnly] }));
-    expect(result.opportunities.rollOpportunities).toEqual([rollWinner]);
+    expect(result.opportunities.rollOpportunities.map(p => p.objective)).toEqual([rollWinner]);
   });
 
   it('does not surface an objective with no managementIntent at all as a roll opportunity', () => {
@@ -218,14 +229,58 @@ describe('buildTodaysPrioritiesDashboard: Opportunities', () => {
   it('surfaces a DEPLOY_IDLE_CASH objective as a CSP opportunity', () => {
     const idleCash = makeObjective({ type: 'DEPLOY_IDLE_CASH', actionability: 'ACTION_NEEDED' });
     const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [idleCash] }));
-    expect(result.opportunities.cspOpportunities).toEqual([idleCash]);
+    expect(result.opportunities.cspOpportunities.map(p => p.objective)).toEqual([idleCash]);
     // Also still appears in Review Today via the normal actionability bucketing --
     // this module doesn't hide it from one section to show it in another.
-    expect(result.reviewToday.mediumPriority).toEqual([idleCash]);
+    expect(result.reviewToday.mediumPriority.map(p => p.objective)).toEqual([idleCash]);
   });
 
   it('passes through screenerCandidatesAvailable unchanged', () => {
     const result = buildTodaysPrioritiesDashboard(baseInput({ screenerCandidatesAvailable: true }));
     expect(result.opportunities.screenerCandidatesAvailable).toBe(true);
+  });
+});
+
+// PI-0010B: Intelligent Prioritization -- score/tier/reasons attachment and
+// descending sort order within a bucket.
+describe('buildTodaysPrioritiesDashboard: Priority Score', () => {
+  it('attaches a numeric score, a tier, and a reasons array to every prioritized objective', () => {
+    const objective = makeObjective({ actionability: 'CRITICAL', confidence: 90 });
+    const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [objective] }));
+    const [entry] = result.immediateAction;
+    expect(typeof entry.score).toBe('number');
+    expect(['Critical', 'High', 'Medium', 'Low']).toContain(entry.tier);
+    expect(Array.isArray(entry.reasons)).toBe(true);
+  });
+
+  it('sorts a bucket highest score first', () => {
+    // Both objectives have no earnings/dte trigger, so both land in the same
+    // mediumPriority bucket -- only their scores should determine order.
+    const lowUrgency = makeObjective({
+      actionability: 'ACTION_NEEDED',
+      confidence: 5,
+      subject: { type: 'position', id: 'pos_low', label: 'LOW' } as any,
+    });
+    const highUrgency = makeObjective({
+      actionability: 'ACTION_NEEDED',
+      confidence: 95,
+      managementIntent: makeManagementIntent({ intent: 'CUT_LOSSES' as any }),
+      subject: { type: 'position', id: 'pos_high', label: 'HIGH' } as any,
+    });
+    const lowPosition = makePosition({ key: 'pos_low', dte: 30, healthScore: 95, remainingOpportunityPct: 95 });
+    const highPosition = makePosition({ key: 'pos_high', dte: 0, healthScore: 20, netEdgeNegative: true, hasPendingDecisionReview: true });
+    const result = buildTodaysPrioritiesDashboard(
+      baseInput({ objectives: [lowUrgency, highUrgency], positions: [lowPosition, highPosition] }),
+    );
+    expect(result.reviewToday.mediumPriority.map(p => p.objective.id)).toEqual([highUrgency.id, lowUrgency.id]);
+    expect(result.reviewToday.mediumPriority[0].score).toBeGreaterThan(result.reviewToday.mediumPriority[1].score);
+  });
+
+  it('falls back to neutral position-context defaults for a portfolio-level objective with no matching position', () => {
+    const idleCash = makeObjective({ type: 'DEPLOY_IDLE_CASH', actionability: 'ACTION_NEEDED', subject: { type: 'portfolio', label: 'Portfolio' } as any });
+    const result = buildTodaysPrioritiesDashboard(baseInput({ objectives: [idleCash] }));
+    const entry = result.opportunities.cspOpportunities[0];
+    expect(entry.score).toBeGreaterThanOrEqual(0);
+    expect(entry.score).toBeLessThanOrEqual(100);
   });
 });
