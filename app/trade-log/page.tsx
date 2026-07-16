@@ -15,221 +15,18 @@ if (typeof document !== 'undefined') {
   }
 }
 
-const BASE       = 'https://api.tastytrade.com';
-const CLIENT_ID  = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-const LS_DEVICE  = 'hunter-device-id';
-const LS_TL_1W   = 'hunter-tradelog-1w';
-const LS_TL_2W   = 'hunter-tradelog-2w';
-const LS_TL_1M   = 'hunter-tradelog-1m';
-const LS_TL_3M   = 'hunter-tradelog-3m';
-const LS_TL_6M   = 'hunter-tradelog-6m';
-const LS_TL_12M  = 'hunter-tradelog-12m';
-const CACHE_VERSION = 'v3'; // bump to invalidate stale caches
-
-type TimeRange = '1w' | '2w' | '1m' | '3m' | '6m' | '12m';
-type Outcome  = 'WIN' | 'LOSS' | 'SCRATCH' | 'OPEN';
-import { ExitType, classifyExit } from '@/lib/classifyExit';
+// PI-0008E: reconstruction (fetch, transaction matching, partial-close and
+// assignment/exercise handling, caching) now lives in one shared module used
+// by both this page and app/performance/page.tsx. See
+// lib/tradeLog/reconstructTrades.ts for the implementation.
+import type { ExitType } from '@/lib/classifyExit';
+import type { TimeRange, Outcome, ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
+import { fetchAndReconstructTrades, readCache, writeCache, getDeviceId } from '@/lib/tradeLog/reconstructTrades';
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
 type SortDir = 'asc' | 'desc';
 type GroupBy = 'none' | 'symbol' | 'outcome';
 
-interface ClosedTrade {
-  id: string;
-  symbol: string;
-  strategy: 'BPS' | 'BCS' | 'IC' | 'SPREAD' | 'OTHER';
-  openDate: string;
-  closeDate: string;
-  openTime: string;   // HH:MM local
-  openDow: number;    // 0=Sun..6=Sat
-  expiry: string;
-  holdDays: number;
-  strikes: string;
-  creditReceived: number;
-  closePrice: number;
-  pnl: number;
-  pnlPct: number;
-  outcome: Outcome;
-  quantity: number;
-  fees: number;
-  excluded?: boolean;  // user-toggled: excluded from reporting
-  dteAtClose: number;    // days remaining to expiry when closed
-  dteAtEntry: number;    // estimated DTE when trade was opened
-  exitType: ExitType;
-}
-
-interface CacheEntry { trades: ClosedTrade[]; fetchedAt: number; deviceId: string; range: TimeRange; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
-
-async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }) });
-  if (!res.ok) { sessionStorage.removeItem('tt_access_token'); localStorage.removeItem('tt_refresh_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
-  sessionStorage.setItem('tt_access_token', token);
-  if (data.refresh_token && data.refresh_token !== refreshToken) localStorage.setItem('tt_refresh_token', data.refresh_token);
-  return token;
-}
-async function ttFetch(path: string, token: string) {
-  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' });
-  if (res.status === 401) { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  if (!res.ok) { const text = await res.text(); throw new Error(`${path} failed (${res.status}): ${text.slice(0, 120)}`); }
-  return res.json();
-}
-function getDeviceId(): string {
-  try { let id = localStorage.getItem(LS_DEVICE); if (!id) { id = crypto.randomUUID(); localStorage.setItem(LS_DEVICE, id); } return id; } catch { return 'unknown'; }
-}
-const LS_KEY: Record<TimeRange, string> = { '1w': LS_TL_1W, '2w': LS_TL_2W, '1m': LS_TL_1M, '3m': LS_TL_3M, '6m': LS_TL_6M, '12m': LS_TL_12M };
-function readCache(range: TimeRange): CacheEntry | null {
-  try {
-    const raw = localStorage.getItem(LS_KEY[range]);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CacheEntry & { version?: string };
-    if (parsed.version !== CACHE_VERSION) return null; // stale schema
-    return parsed;
-  } catch { return null; }
-}
-function writeCache(range: TimeRange, trades: ClosedTrade[]) {
-  try { localStorage.setItem(LS_KEY[range], JSON.stringify({ trades, fetchedAt: Date.now(), deviceId: getDeviceId(), range, version: CACHE_VERSION })); } catch {}
-}
-
-function parseOccSymbol(occ: string): { symbol: string; expiry: string; optionType: 'P' | 'C' | null; strike: number } {
-  const cleaned = occ.replace(/\s+/g, '');
-  const m = cleaned.match(/^([A-Z]+)(\d{6})([CP])(\d{8})$/);
-  if (!m) return { symbol: occ, expiry: '', optionType: null, strike: 0 };
-  const y = '20' + m[2].slice(0, 2), mo = m[2].slice(2, 4), d = m[2].slice(4, 6);
-  return { symbol: m[1], expiry: `${y}-${mo}-${d}`, optionType: m[3] as 'P' | 'C', strike: parseInt(m[4], 10) / 1000 };
-}
-function rangeStartDate(range: TimeRange): string {
-  const d = new Date();
-  if      (range === '1w')  d.setDate(d.getDate() - 7);
-  else if (range === '2w')  d.setDate(d.getDate() - 14);
-  else if (range === '1m')  d.setMonth(d.getMonth() - 1);
-  else if (range === '3m')  d.setMonth(d.getMonth() - 3);
-  else if (range === '6m')  d.setMonth(d.getMonth() - 6);
-  else                      d.setFullYear(d.getFullYear() - 1);
-  return d.toISOString().split('T')[0];
-}
-
-
-
-async function fetchAndReconstructTrades(range: TimeRange): Promise<ClosedTrade[]> {
-  const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
-  const startDate = rangeStartDate(range);
-  let allTx: any[] = [];
-  let page = 1;
-  while (true) {
-    const data = await ttFetch(`/accounts/${accountNumber}/transactions?start-date=${startDate}&per-page=250&page-offset=${(page - 1) * 250}`, token);
-    const items: any[] = data?.data?.items ?? [];
-    allTx = [...allTx, ...items];
-    if (!data?.pagination || items.length < 250 || allTx.length >= data.pagination['total-items']) break;
-    page++;
-  }
-  // Log a sample transaction to check field names
-  const optionTx = allTx.filter(tx => tx['transaction-type'] === 'Trade' && tx.symbol && parseOccSymbol(tx.symbol).optionType !== null);
-  const txTypes = allTx.map(tx => tx['transaction-type']).filter((v, i, a) => a.indexOf(v) === i);
-  // Log action-description values present in optionTx
-  const byOptionSymbol: Record<string, any[]> = {};
-  for (const tx of optionTx) {
-    const sym = tx.symbol.replace(/\s+/g, '');
-    if (!byOptionSymbol[sym]) byOptionSymbol[sym] = [];
-    byOptionSymbol[sym].push(tx);
-  }
-  const legPairs: any[] = [];
-  for (const [sym, txList] of Object.entries(byOptionSymbol)) {
-    const parsed = parseOccSymbol(sym);
-    if (!parsed.optionType) continue;
-    const getTimestamp = (tx: any) => tx['executed-at'] ?? tx['transaction-date'] ?? tx['settled-at'] ?? '';
-    const opens  = txList.filter((tx: any) => tx['transaction-sub-type'] === 'Sell to Open' || tx['transaction-sub-type'] === 'Buy to Open');
-    const closes = txList.filter((tx: any) => tx['transaction-sub-type'] === 'Buy to Close' || tx['transaction-sub-type'] === 'Sell to Close');
-    const openQueue  = [...opens].sort((a, b) => getTimestamp(a).localeCompare(getTimestamp(b)));
-    const closeQueue = [...closes].sort((a, b) => getTimestamp(a).localeCompare(getTimestamp(b)));
-    for (const openTx of openQueue) {
-      const openQty = Math.abs(parseFloat(openTx.quantity ?? '1'));
-      const matchIdx = closeQueue.findIndex((c: any) => Math.abs(parseFloat(c.quantity ?? '1')) === openQty && getTimestamp(c) > getTimestamp(openTx));
-      if (matchIdx === -1) continue;
-      const closeTx = closeQueue.splice(matchIdx, 1)[0];
-      const fees = ['regulatory-fees','clearing-fees','commission'].reduce((s: number, k: string) => s + Math.abs(parseFloat(openTx[k] ?? '0')) + Math.abs(parseFloat(closeTx[k] ?? '0')), 0);
-      legPairs.push({ sym, underlying: openTx['underlying-symbol'], expiry: parsed.expiry, optionType: parsed.optionType, strike: parsed.strike, openTx, closeTx, qty: openQty, openPrice: Math.abs(parseFloat(openTx.price ?? '0')), closePrice: Math.abs(parseFloat(closeTx.price ?? '0')), fees });
-    }
-  }
-  const spreadMap: Record<string, any[]> = {};
-  for (const pair of legPairs) {
-    const getTs2 = (tx: any) => tx['executed-at'] ?? tx['transaction-date'] ?? tx['settled-at'] ?? '';
-    const openTs = getTs2(pair.openTx);
-    const key = `${pair.underlying}::${pair.expiry}::${openTs.slice(0, 10)}`;
-    if (!spreadMap[key]) spreadMap[key] = [];
-    spreadMap[key].push(pair);
-  }
-  const trades: ClosedTrade[] = [];
-  for (const [key, pairs] of Object.entries(spreadMap)) {
-    const [underlying, expiry, openDay] = key.split('::');
-    const putPairs  = pairs.filter((p: any) => p.optionType === 'P');
-    const callPairs = pairs.filter((p: any) => p.optionType === 'C');
-    let strategy: ClosedTrade['strategy'] = 'SPREAD';
-    if (putPairs.length >= 2 && callPairs.length === 0) strategy = 'BPS';
-    else if (callPairs.length >= 2 && putPairs.length === 0) strategy = 'BCS';
-    else if (putPairs.length >= 2 && callPairs.length >= 2) strategy = 'IC';
-    else if (pairs.length > 0) strategy = 'OTHER';
-    const sortedPuts  = putPairs.map((p: any) => p.strike).sort((a: number, b: number) => b - a);
-    const sortedCalls = callPairs.map((p: any) => p.strike).sort((a: number, b: number) => a - b);
-    let strikes = '';
-    if (strategy === 'BPS' && sortedPuts.length >= 2) strikes = `${sortedPuts[0]}P/${sortedPuts[1]}P`;
-    else if (strategy === 'BCS' && sortedCalls.length >= 2) strikes = `${sortedCalls[0]}C/${sortedCalls[1]}C`;
-    else if (strategy === 'IC' && sortedPuts.length >= 2 && sortedCalls.length >= 2) strikes = `${sortedPuts[0]}P/${sortedPuts[1]}P · ${sortedCalls[0]}C/${sortedCalls[1]}C`;
-    else strikes = pairs.map((p: any) => `${p.strike}${p.optionType}`).join('/');
-    let totalOpenValue = 0, totalCloseValue = 0, totalFees = 0;
-    for (const p of pairs) {
-      const isShort = p.openTx['transaction-sub-type'] === 'Sell to Open';
-      totalOpenValue  += p.openPrice  * p.qty * 100 * (isShort ?  1 : -1);
-      totalCloseValue += p.closePrice * p.qty * 100 * (isShort ? -1 :  1);
-      totalFees += p.fees;
-    }
-    const creditReceived = totalOpenValue;
-    const closePrice     = -totalCloseValue;
-    const pnl     = creditReceived + totalCloseValue - totalFees;
-    const pnlPct  = creditReceived !== 0 ? (pnl / Math.abs(creditReceived)) * 100 : 0;
-    const getTxTs = (tx: any) => tx['executed-at'] ?? tx['transaction-date'] ?? tx['settled-at'] ?? '';
-    const closeDate = pairs.map((p: any) => getTxTs(p.closeTx).slice(0, 10)).filter(Boolean).sort().reverse()[0] ?? openDay;
-    const holdDays  = Math.round((new Date(closeDate).getTime() - new Date(openDay).getTime()) / 86400000);
-    const outcome: Outcome = pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'SCRATCH';
-    // Entry time metadata — use the earliest open leg timestamp
-    // TastyTrade uses 'executed-at'; fall back to other timestamp fields if missing
-    const getTs = (tx: any) => tx['executed-at'] ?? tx['transaction-date'] ?? tx['settled-at'] ?? '';
-    const earliestOpen = pairs.map((p: any) => getTs(p.openTx)).filter(Boolean).sort()[0] ?? '';
-    let openTime = '';
-    let openDow  = -1;
-    if (earliestOpen) {
-      // Parse as ET — market hours are always Eastern regardless of user's local timezone
-      try {
-        const etStr = new Date(earliestOpen).toLocaleString('en-US', { timeZone: 'America/New_York' });
-        const etDt  = new Date(etStr);
-        openTime = `${String(etDt.getHours()).padStart(2,'0')}:${String(etDt.getMinutes()).padStart(2,'0')}`;
-        openDow  = etDt.getDay();
-      } catch {
-        const fallback = new Date(earliestOpen);
-        openTime = `${String(fallback.getHours()).padStart(2,'0')}:${String(fallback.getMinutes()).padStart(2,'0')}`;
-        openDow  = fallback.getDay();
-      }
-    }
-    // DTE calculations
-    // Add T12:00:00Z to force UTC noon — prevents timezone day-shift on date-only strings
-    const dteAtClose = Math.max(0, Math.round((new Date(expiry + 'T12:00:00Z').getTime() - new Date(closeDate + 'T12:00:00Z').getTime()) / 86400000));
-    const dteAtEntry = holdDays + dteAtClose;
-    const exitType   = classifyExit(pnl, creditReceived, holdDays, dteAtClose, dteAtEntry);
-    trades.push({ id: `${underlying}-${openDay}-${expiry}`, symbol: underlying, strategy, openDate: openDay, closeDate, openTime, openDow, expiry, holdDays, dteAtClose, dteAtEntry, exitType, strikes, creditReceived, closePrice, pnl, pnlPct, outcome, quantity: strategy === 'IC' ? Math.min(putPairs.length, callPairs.length) : Math.max(putPairs.length, callPairs.length, 1), fees: totalFees });
-  }
-  trades.sort((a, b) => b.closeDate.localeCompare(a.closeDate));
-  return trades;
-}
 
 // ── AI ────────────────────────────────────────────────────────────────────
 const AI_SYSTEM_PROMPT = `You are a brutally honest options trading coach reviewing a trader's actual closed trade history. Your job is to find real patterns, call out mistakes without softening them, and give specific actionable advice.
@@ -749,7 +546,15 @@ export default function TradeLogPage() {
     } else { setStatus('Refreshing from TastyTrade...'); }
     setLoading(true); setError('');
     try {
-      const fetched = await fetchAndReconstructTrades(r);
+      const { trades: fetched, unmatchedClosures } = await fetchAndReconstructTrades(r);
+      if (unmatchedClosures.length > 0) {
+        // PI-0008E: closing/assignment/exercise transactions that couldn't be
+        // matched to any open lot within this window (most likely opened
+        // before the lookback start date). Not fabricated into rows -- see
+        // lib/tradeLog/reconstructTrades.ts. Logged so the gap is visible
+        // without a dedicated UI for it yet (out of scope for this ticket).
+        console.warn(`Trade Log: ${unmatchedClosures.length} closing transaction(s) could not be matched to an open lot`, unmatchedClosures);
+      }
       setTrades(fetched); writeCache(r, fetched); setCachedAt(Date.now()); setIsNewDevice(false);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); setStatus(''); }
