@@ -11,6 +11,14 @@
 // only. isReviewNeedingFollowUp() is a mechanical read of outcomeStatus vs.
 // the caller-supplied open-position set; nothing here infers Favorable/
 // Unfavorable/Neutral, computes realized P/L, or touches Autopilot/Trade Log.
+//
+// PI-0009B: adds a compact, read-only "Analysis" column -- the automatic
+// recommendation-accuracy evaluation from lib/decision-review/
+// outcomeAnalysis.ts, computed fresh from whatever closedTrades/snapshotStore
+// the caller supplies (both optional; with neither, this column just shows
+// "—" for every row, identical to before this ticket). This is entirely
+// separate from the Outcome column above -- that remains the trader's own
+// manual FAVORABLE/UNFAVORABLE/NEUTRAL judgment, untouched by this.
 
 'use client';
 
@@ -20,11 +28,15 @@ import {
   allReviewsByRecency,
   filterDecisionReviews,
   isReviewNeedingFollowUp,
+  analyzeAllDecisionOutcomes,
+  DECISION_OUTCOME_ACCURACY_LABEL,
   TRADER_ACTION_LABEL,
   DECISION_OUTCOME_STATUS_LABEL,
   DECISION_HISTORY_FILTER_LABEL,
 } from '@/lib/decision-review';
-import type { DecisionHistoryFilter, DecisionReview, DecisionReviewStore, PositionIdSet } from '@/lib/decision-review';
+import type { DecisionHistoryFilter, DecisionReview, DecisionReviewStore, PositionIdSet, DecisionOutcomeAccuracy } from '@/lib/decision-review';
+import type { PositionSnapshotStore } from '@/lib/position-snapshot';
+import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 
 export interface DecisionHistoryViewProps {
   reviews: DecisionReviewStore;
@@ -33,7 +45,19 @@ export interface DecisionHistoryViewProps {
   // needing follow-up (the safe default; see decisionReview.ts's doc
   // comment on filterDecisionReviews()).
   openPositionIds?: PositionIdSet;
+  // PI-0009B: optional -- if either is omitted, the Analysis column simply
+  // has nothing to match against and shows "—" for every row.
+  closedTrades?: ClosedTrade[];
+  snapshotStore?: PositionSnapshotStore;
   th: typeof THEMES[Theme];
+}
+
+function accuracyToneClass(accuracy: DecisionOutcomeAccuracy): string {
+  switch (accuracy) {
+    case 'CORRECT': return 'text-emerald-400 border-emerald-600 bg-emerald-500/10';
+    case 'INCORRECT': return 'text-red-400 border-red-600 bg-red-500/10';
+    default: return 'text-slate-400 border-slate-600 bg-slate-500/10';
+  }
 }
 
 const FILTERS: DecisionHistoryFilter[] = ['ALL', 'PENDING', 'FAVORABLE', 'UNFAVORABLE', 'FOLLOWED', 'NOT_FOLLOWED', 'NEEDS_FOLLOW_UP'];
@@ -61,13 +85,19 @@ function formatPnl(pnl: number | null): string {
   return `${sign}${pnl.toFixed(2)}`;
 }
 
-export function DecisionHistoryView({ reviews, openPositionIds = [], th }: DecisionHistoryViewProps) {
+export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrades = [], snapshotStore = {}, th }: DecisionHistoryViewProps) {
   const [filter, setFilter] = useState<DecisionHistoryFilter>('ALL');
 
   const sorted = useMemo(() => allReviewsByRecency(reviews), [reviews]);
   const filtered = useMemo(
     () => filterDecisionReviews(sorted, filter, openPositionIds),
     [sorted, filter, openPositionIds],
+  );
+  // PI-0009B: recomputed whenever the inputs change; nothing here is
+  // persisted -- see outcomeAnalysis.ts's module doc.
+  const outcomeAnalyses = useMemo(
+    () => analyzeAllDecisionOutcomes(reviews, snapshotStore, closedTrades),
+    [reviews, snapshotStore, closedTrades],
   );
 
   return (
@@ -102,6 +132,7 @@ export function DecisionHistoryView({ reviews, openPositionIds = [], th }: Decis
                 <th className={`text-[10px] uppercase tracking-widest ${th.textFaint} px-3 py-2 font-semibold`}>Trader Action</th>
                 <th className={`text-[10px] uppercase tracking-widest ${th.textFaint} px-3 py-2 font-semibold`}>Outcome</th>
                 <th className={`text-[10px] uppercase tracking-widest ${th.textFaint} px-3 py-2 font-semibold`}>Realized P/L</th>
+                <th className={`text-[10px] uppercase tracking-widest ${th.textFaint} px-3 py-2 font-semibold`}>Analysis</th>
                 <th className={`text-[10px] uppercase tracking-widest ${th.textFaint} px-3 py-2 font-semibold`}>Date</th>
               </tr>
             </thead>
@@ -123,6 +154,18 @@ export function DecisionHistoryView({ reviews, openPositionIds = [], th }: Decis
                   </td>
                   <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`} style={{ fontFamily: "'DM Mono', monospace" }}>
                     {formatPnl(review.realizedPnl)}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {outcomeAnalyses[review.id] ? (
+                      <span
+                        title={outcomeAnalyses[review.id].explanation}
+                        className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${accuracyToneClass(outcomeAnalyses[review.id].recommendationAccuracy)}`}
+                      >
+                        {DECISION_OUTCOME_ACCURACY_LABEL[outcomeAnalyses[review.id].recommendationAccuracy]}
+                      </span>
+                    ) : (
+                      <span className={`text-[11px] ${th.textFaint}`}>—</span>
+                    )}
                   </td>
                   <td className={`text-[11px] ${th.textFaint} px-3 py-2 whitespace-nowrap`}>{formatDate(review.createdAt)}</td>
                 </tr>

@@ -34,3 +34,16 @@ export type {
   DecisionReviewStore,
   DecisionHistoryFilter,
 } from './types';
+
+// PI-0009B: Decision Outcome Analysis -- computed fresh, never persisted.
+export {
+  findClosedTradeForReview,
+  analyzeDecisionOutcome,
+  analyzeAllDecisionOutcomes,
+  DECISION_OUTCOME_ACCURACY_LABEL,
+} from './outcomeAnalysis';
+export type {
+  DirectionalOutcome,
+  DecisionOutcomeAccuracy,
+  DecisionOutcomeAnalysis,
+} from './outcomeAnalysis';

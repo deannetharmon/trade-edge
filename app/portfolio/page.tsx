@@ -24,6 +24,12 @@ import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review'
 // store below. See lib/position-snapshot/snapshotEngine.ts.
 import { planLifecycleSnapshots } from '@/lib/position-snapshot';
 import type { PositionSnapshotInput, PositionSnapshotStore as LifecycleSnapshotStore } from '@/lib/position-snapshot';
+// PI-0009B: Decision Outcome Analysis -- reuses Trade Log's own client-side
+// cache (readCache) rather than a fresh TastyTrade fetch. Aliased to avoid
+// any ambiguity with this file's own daily-snapshot fetch/cache helpers,
+// which are a completely separate store (see fetchSnapshotStore above).
+import { readCache as readTradeLogCache } from '@/lib/tradeLog/reconstructTrades';
+import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 
 
 // Inject accent CSS variable style
@@ -9643,6 +9649,29 @@ export default function PortfolioPage() {
       .catch(e => console.error('Decision review fetch failed (non-blocking):', e));
   }, []);
 
+  // PI-0009B: Decision Outcome Analysis -- the Decision History view needs
+  // its own copy of the lifecycle snapshot store and whatever Trade Log has
+  // already reconstructed and cached, to match closed reviews against real
+  // trades (see lib/decision-review/outcomeAnalysis.ts). Fetched
+  // independently and non-blocking, same pattern as balances/decisionReviews
+  // above. Neither is a new fetch pipeline: the lifecycle store already
+  // exists (PI-0009A), and the closed trades come from Trade Log's own
+  // client-side cache (readCache) rather than a fresh TastyTrade call --
+  // if the trader has never opened Trade Log/Performance, this is simply
+  // empty and the Analysis column shows "—" until they do.
+  const [lifecycleSnapshots, setLifecycleSnapshots] = useState<LifecycleSnapshotStore>({});
+  useEffect(() => {
+    fetchLifecycleSnapshotStore()
+      .then(setLifecycleSnapshots)
+      .catch(e => console.error('Lifecycle snapshot store fetch failed (non-blocking):', e));
+  }, []);
+
+  const [closedTradesForOutcomeAnalysis, setClosedTradesForOutcomeAnalysis] = useState<ClosedTrade[]>([]);
+  useEffect(() => {
+    const cached = readTradeLogCache('12m');
+    if (cached) setClosedTradesForOutcomeAnalysis(cached.trades);
+  }, []);
+
   const handleSaveDecisionReview = (review: DecisionReview) => {
     setDecisionReviews(prev => upsertDecisionReview(prev, review));
     fetch('/api/decision-reviews', {
@@ -9948,7 +9977,13 @@ export default function PortfolioPage() {
               flag Pending reviews whose position has since closed. Derived
               directly from the same `positions` state every other tab
               already renders from -- no new fetch. */}
-          <DecisionHistoryView reviews={decisionReviews} openPositionIds={positions.map(p => p.key)} th={th} />
+          <DecisionHistoryView
+            reviews={decisionReviews}
+            openPositionIds={positions.map(p => p.key)}
+            closedTrades={closedTradesForOutcomeAnalysis}
+            snapshotStore={lifecycleSnapshots}
+            th={th}
+          />
         </div>
       )}
 
