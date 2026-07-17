@@ -7,11 +7,11 @@
 
 ## Current State
 
-Portfolio Intelligence implementation through PI-0013 is complete and merged into `main`.
+Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`. PI-0013 remains the last capability merged into `main`.
 
-There is no active implementation sprint.
+**PI-0014 — Marketable Pricing for Risk-Gating, Phase 1** has been implemented, recovered after an out-of-band `main` reset lost it from all reachable refs, reviewed by the Product Owner (required refactor completed), and corrected through a Corrective Closeout sprint (documentation drift, missing-marketable-data test coverage, invalid-quote test coverage, unknown-liquidity classification fix, generated-artifact cleanup). It lives on `feature/marketable-pricing` and is **pending Product Owner acceptance and merge** — it is not merged into `main` and must not be treated as complete until that review and merge happen. See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account (Process Note, Product Owner Addendum, Corrective Closeout Addendum) and validation results.
 
-The next sprint has not been approved. Before new implementation begins, the Product Owner must review real-world Portfolio Review and Daily Briefing behavior, unresolved follow-ups, and the roadmap, then recommend one frozen sprint.
+This is the active sprint. It is not closed until Product Owner review completes and the branch is merged (or the Product Owner directs otherwise). No further implementation sprint should begin before that happens.
 
 ## Governance
 
@@ -38,11 +38,12 @@ For TastyTrade scans, execution remains browser-owned and client-authenticated. 
 
 Verified 2026-07-17:
 
-- Local branches: `main`, `feature/autopilot`
+- Local branches: `main`, `feature/autopilot`, `feature/marketable-pricing`
 - Remote branches: `origin/main`, `origin/feature/autopilot`
-- `main` synchronized with `origin/main`
-- `feature/autopilot` synchronized with `origin/feature/autopilot`
-- Working tree clean
+- `main` synchronized with `origin/main`, unchanged throughout PI-0014's recovery and corrective closeout
+- `feature/autopilot` synchronized with `origin/feature/autopilot`, untouched by PI-0014 work
+- `feature/marketable-pricing` — PI-0014's corrective-closeout branch, holding the recovered and corrected implementation. Not yet pushed to origin as of this writing; not yet reviewed/merged by the Product Owner. Not a stale or completed branch — active and pending acceptance.
+- Working tree clean apart from PI-0014's own in-progress corrective-closeout changes on `feature/marketable-pricing`
 - No stale backup branches
 - No stale completed feature branches
 
@@ -97,6 +98,8 @@ The most recently documented Portfolio Intelligence baseline before PI-0012A/PI-
 - Production build attempts subject to the established five-minute environment limit
 
 PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, multi-session acceptance validation of the combined Portfolio Review and Daily Briefing workflow remains pending.
+
+**PI-0014 (not yet merged)** validation results as of the Corrective Closeout pass: see `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md`'s Corrective Closeout Addendum for targeted-test, full-suite, `tsc --noEmit`, and production-build results. Not part of the merged baseline above until Product Owner acceptance and merge.
 
 ## Current Milestones
 
@@ -181,6 +184,8 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 - Regression testing
 
 ## Next Sprint Decision Gate
+
+This gate applies once PI-0014 is accepted and merged (or the Product Owner otherwise closes it out). No next sprint is selected or recommended in this document.
 
 Do not start another feature merely because PI-0013 is merged.
 

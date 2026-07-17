@@ -56,6 +56,13 @@ import type {
 import type { PositionHealthScore } from '../health/types';
 import { DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
 import { defaultActionabilityForPriority } from '../actionability';
+// PI-0014 follow-up (Product Owner review): the Decision Engine is the
+// correct owner of "did execution reality invalidate this recommendation,"
+// not lib/positionValuation (which stays purely observational -- see that
+// module's types.ts doc). This is the one new dependency this file takes on:
+// LiquidityTier is a plain, dependency-free type, imported here as one more
+// piece of input evidence, the same way marketablePnlPct already is.
+import type { LiquidityTier } from '@/lib/positionValuation';
 import {
   selectManagementIntent,
   type ManagementIntentContext,
@@ -107,6 +114,24 @@ export interface PositionObjectiveInput {
   pnlPct?: number | null;
   pnl?: number | null;
   creditReceived?: number | null;
+  // PI-0014: marketable/executable pnl% -- same normalization convention as
+  // pnlPct (a fraction or already-a-percent, run through
+  // normalizePositionObjectivePct), but derived from the position's
+  // marketable "if I closed now" value instead of mid. Null when marketable
+  // pricing is unavailable (e.g. a one-sided market on some leg) -- never
+  // fabricated from mid. Widens materialLoss/weakHealthLoss/
+  // profitTargetReached below; every other branch (assignment-risk,
+  // earnings-risk, roll-soon, watch, health scoring) is unchanged and still
+  // reads mid pricing only. See lib/positionValuation and
+  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  marketablePnlPct?: number | null;
+  // PI-0014 follow-up: this position's liquidity classification (see
+  // lib/positionValuation's PositionValuation.liquidityTier), supplied so
+  // this function -- not the valuation module -- can decide whether
+  // marketable evidence promoting/vetoing a recommendation also counts as a
+  // "liquidity trap" (see PositionObjectiveResult.liquidityTrapTriggered
+  // below). Null when valuation is unavailable.
+  liquidityTier?: LiquidityTier | null;
   hitTarget?: boolean | null;
   needsClose?: boolean | null;
   hasGtc?: boolean | null;
@@ -529,6 +554,18 @@ function buildObjective(
 export interface PositionObjectiveResult {
   objective: PortfolioObjective | null;
   legacyRecommendation: PortfolioRecommendation;
+  // PI-0014: true when marketable evidence alone changed materialLoss,
+  // weakHealthLoss, or profitTargetReached relative to what mid pricing
+  // alone would have produced.
+  executionRealityPromoted: boolean;
+  // PI-0014 follow-up (Product Owner review): true only when
+  // executionRealityPromoted is true AND the caller-supplied liquidityTier
+  // is 'LIQUIDITY_TRAP'. This is a decision-engine property, not a
+  // valuation property -- a position can be LIQUIDITY_TRAP tier
+  // (lib/positionValuation's own, purely observational classification) and
+  // still have this false if the recommendation would have been the same
+  // either way. False (never fabricated true) when liquidityTier is absent.
+  liquidityTrapTriggered: boolean;
 }
 
 // PI-0006A: builds 2-4 concise evidence bullets from data this function
@@ -563,6 +600,8 @@ export function evaluatePositionObjective(
 ): PositionObjectiveResult {
   const dte = Number.isFinite(input.dte ?? NaN) ? Number(input.dte) : null;
   const pnlPct = normalizePositionObjectivePct(input.pnlPct);
+  // PI-0014: see PositionObjectiveInput.marketablePnlPct doc comment above.
+  const marketablePnlPct = normalizePositionObjectivePct(input.marketablePnlPct);
   const buffer = normalizePositionObjectivePct(input.buffer);
   const healthScore = input.healthScore?.score ?? null;
   const strategy = String(input.strategy ?? '').toUpperCase();
@@ -590,13 +629,46 @@ export function evaluatePositionObjective(
   // Assignment when it's a Wheel CSP with assignment preferred -- the
   // trigger-detection chain below is unchanged, only the label is now
   // evidence-driven rather than a static 1:1 lookup.
-  const materialLoss = pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
-  const weakHealthLoss =
+  // PI-0014: Execution Reality gate. materialLoss/weakHealthLoss fire on
+  // EITHER mid or marketable evidence breaching its threshold -- marketable
+  // pricing can only make these fire *more* often, never less, so an
+  // already-conservative mid-based verdict is never weakened. profitTargetReached
+  // still fires on mid evidence (unchanged), but is vetoed when marketable
+  // data is available and contradicts it; a vetoed profit target simply
+  // falls through to whichever branch the cascade below reaches next
+  // (roll-soon / watch / hold) -- no separate demotion logic needed, the
+  // existing if/else-if priority order already produces the correct
+  // "Take Profit -> Hold/Manage/Cut Losses" behavior once this input is
+  // corrected. See docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  const midMaterialLoss = pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
+  const marketableMaterialLoss =
+    marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
+  const materialLoss = midMaterialLoss || marketableMaterialLoss;
+
+  const midWeakHealthLoss =
     pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
     healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
-  const profitTargetReached =
+  const marketableWeakHealthLoss =
+    marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
+    healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
+  const weakHealthLoss = midWeakHealthLoss || marketableWeakHealthLoss;
+
+  const midProfitTargetReached =
     Boolean(input.hitTarget) || hasHealthFactor(input, 'profit-target') ||
     (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct);
+  const marketableContradictsProfitTarget =
+    marketablePnlPct != null && marketablePnlPct < DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct;
+  const profitTargetReached = midProfitTargetReached && !marketableContradictsProfitTarget;
+
+  // Did marketable evidence alone change any of the three outcomes above?
+  // Feeds both the explainability bullet appended after the cascade below
+  // and the executionRealityPromoted flag this function returns (which
+  // callers combine with lib/positionValuation's liquidityTier to set
+  // PositionValuation.liquidityTrapTriggered).
+  const executionRealityPromoted =
+    (!midMaterialLoss && marketableMaterialLoss) ||
+    (!midWeakHealthLoss && marketableWeakHealthLoss) ||
+    (midProfitTargetReached && !profitTargetReached);
   const meaningfulUnprotectedProfit =
     shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14;
   const earningsUpcoming = isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now);
@@ -710,7 +782,28 @@ export function evaluatePositionObjective(
     );
   }
 
+  // PI-0014: explainability -- a recommendation must be reconstructable from
+  // its stated evidence alone. When marketable pricing actually changed the
+  // outcome, say so explicitly and put it first, rather than letting the
+  // divergence stay invisible inside a single reused pnlPct-style number.
+  if (executionRealityPromoted && marketablePnlPct != null && pnlPct != null) {
+    legacy = {
+      ...legacy,
+      supportingReasons: [
+        `Executable pricing is materially worse than mid: ${marketablePnlPct.toFixed(0)}% vs ${pnlPct.toFixed(0)}% of credit -- wide bid/ask changed this recommendation.`,
+        ...legacy.supportingReasons,
+      ].slice(0, 4),
+    };
+  }
+
   const objective = legacy.kind === 'hold' ? null : buildObjective(input, legacy, now);
 
-  return { objective, legacyRecommendation: legacy };
+  // PI-0014 follow-up (Product Owner review): liquidityTrapTriggered is a
+  // decision-engine property, owned here, not by lib/positionValuation's
+  // PositionValuation (which stays purely observational -- see that
+  // module's types.ts doc). Never fabricated true when liquidityTier is
+  // absent.
+  const liquidityTrapTriggered = executionRealityPromoted && input.liquidityTier === 'LIQUIDITY_TRAP';
+
+  return { objective, legacyRecommendation: legacy, executionRealityPromoted, liquidityTrapTriggered };
 }

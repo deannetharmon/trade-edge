@@ -11,6 +11,11 @@ import {
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
 import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
+// PI-0014: Marketable Pricing for Risk-Gating (Phase 1) -- see
+// docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md. Pure valuation
+// math only; this page computes the raw mid/marketable/maxRisk inputs
+// (already had all three) and calls into this module, never the reverse.
+import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
@@ -195,6 +200,18 @@ interface Position {
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
   healthScore?: PositionHealthScore;
+  // PI-0014: purely observational mid vs. marketable valuation evidence
+  // (slippage cost, liquidity tier). Null when currentValue or closeValue is
+  // unavailable (same "never fabricate absent data" convention those two
+  // fields already follow) -- see lib/positionValuation and
+  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  valuation?: PositionValuation | null;
+  // PI-0014 follow-up (Product Owner review): whether marketable evidence
+  // actually changed this position's recommendation, decided by
+  // evaluatePositionObjective() (a decision-engine property -- see that
+  // function's PositionObjectiveResult doc, and lib/positionValuation's
+  // types.ts doc for why this deliberately does NOT live on `valuation`).
+  liquidityTrapTriggered?: boolean;
   recommendation?: PortfolioRecommendation;
   // PI-0002: canonical objective, computed alongside `recommendation` from
   // the same evaluatePositionObjective() call. Not rendered anywhere yet
@@ -281,10 +298,42 @@ function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | nu
   return { netEdgeDeclinePct, netEdgeNegative };
 }
 
+// PI-0014: marketable/executable pnl% -- same null-safe convention pnlPct
+// itself already uses, but reads pos.closeNowPnl (credit - marketable
+// buyback) instead of pos.pnl (credit - mid buyback). Null when closeValue
+// is unavailable (one-sided market on some leg) -- never fabricated from
+// mid. See lib/positionValuation and
+// docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+function computeMarketablePnlPct(pos: Position): number | null {
+  return pos.closeNowPnl != null && pos.creditReceived !== 0
+    ? (pos.closeNowPnl / pos.creditReceived) * 100
+    : null;
+}
+
+// PI-0014: purely observational mid/marketable valuation evidence -- see
+// lib/positionValuation's types.ts doc. Whether marketable evidence changed
+// a recommendation (liquidityTrapTriggered) is owned by evaluatePositionObjective()
+// instead (PI-0014 follow-up, Product Owner review), not by this object.
+// Null when currentValue or closeValue is unavailable, same convention
+// those two fields already follow.
+function computeRawPositionValuation(pos: Position) {
+  if (pos.currentValue == null || pos.closeValue == null) return null;
+  return computePositionValuation({
+    creditReceived: pos.creditReceived,
+    midValue: pos.currentValue,
+    marketableValue: pos.closeValue,
+    maxRisk: pos.maxRisk,
+  });
+}
+
 // PI-0002: single canonical evaluation call. Returns both the legacy-shaped
 // recommendation (unchanged output, for existing badges/priority list) and
 // the new canonical objective (not yet rendered, wired through for later).
-function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null } {
+// PI-0014: also returns `valuation` -- the purely observational mid/marketable
+// evidence object -- and `liquidityTrapTriggered`, owned by
+// evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
+// review: this is a decision-engine property, not a valuation property).
+function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
@@ -314,16 +363,25 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
     lifecycleType: classifyPositionLifecycle(pos).type,
   });
 
-  const { objective, legacyRecommendation } = evaluatePositionObjective({
+  // PI-0014: computed here (not inside evaluatePositionObjective) because
+  // this file already owns pos.closeNowPnl/pos.currentValue/pos.closeValue --
+  // the Decision Engine only ever sees the already-normalized percentage,
+  // never raw prices, matching how pnlPct itself is passed through today.
+  const marketablePnlPct = computeMarketablePnlPct(pos);
+  const valuation = computeRawPositionValuation(pos);
+
+  const { objective, legacyRecommendation, liquidityTrapTriggered } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
     netEdgeDeclinePct,
     netEdgeNegative,
     remainingOpportunityPct,
+    marketablePnlPct,
+    liquidityTier: valuation?.liquidityTier ?? null,
   });
 
-  return { recommendation: legacyRecommendation, objective };
+  return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered };
 }
 
 // PI-0008A: Remaining Opportunity Engine -- a parallel, independent
@@ -418,8 +476,8 @@ function attachSnapshotHistory(
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    const { recommendation, objective } = scorePortfolioPositionObjective(withHealth);
-    return { ...withHealth, recommendation, portfolioObjective: objective };
+    const { recommendation, objective, valuation, liquidityTrapTriggered } = scorePortfolioPositionObjective(withHealth);
+    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered };
   });
 }
 
@@ -2672,13 +2730,30 @@ function getRecommendation(pos: Position, trend: TrendResult | null): Recommenda
   const shortDate = isShortDateEntry(pos);
   const breached = pos.buffer != null && pos.buffer <= 0;
   const criticalBuffer = pos.buffer != null && pos.buffer < 2;
-  const veryLargeLoss = pnlPct <= -200;
+  // PI-0014: marketable/executable pnl% -- see computeMarketablePnlPct's
+  // doc comment above. Null when closeValue is unavailable.
+  const marketablePnlPct = computeMarketablePnlPct(pos);
+  // Emergency exit: fires on EITHER mid or marketable evidence -- marketable
+  // pricing can only make this fire more often, never less, so an
+  // already-conservative mid-based verdict is never weakened. See
+  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  const veryLargeLoss = pnlPct <= -200 || (marketablePnlPct != null && marketablePnlPct <= -200);
   const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
   // stopLossPrice is a per-spread/per-contract option price (e.g. 1.56 = $156 per contract).
   // currentValue is the total buyback value for the whole position, so scale the stop by contracts.
-  const stopLossBreached = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
+  // PI-0014: stop-loss detection now checks EITHER the mid buyback value or
+  // the marketable/executable buyback value -- a stop-loss is an execution
+  // order, so it must be evaluated against execution reality, not just the
+  // theoretical mark. This can only make the stop fire more often, never
+  // less (an already-breached mid stop is never un-breached by marketable
+  // pricing).
+  const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
     ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
     : false;
+  const stopLossBreachedMarketable = pos.stopLossPrice != null && pos.closeValue != null && shortQty > 0
+    ? pos.closeValue >= (pos.stopLossPrice * 100 * shortQty)
+    : false;
+  const stopLossBreached = stopLossBreachedMid || stopLossBreachedMarketable;
 
   // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this
   if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
@@ -2767,11 +2842,20 @@ function isActionRelevant(pos: Position, action: ActionType, override?: Recommen
   }
   if (action === 'CUT_LOSSES') {
     const breached = pos.buffer != null && pos.buffer <= 0;
-    const atExtremeLoss = pnlPct != null && pnlPct <= -200;
+    // PI-0014: marketable evidence can only widen this gate, never narrow
+    // it -- same OR-with-mid convention as getRecommendation()'s own
+    // stopLossBreached/veryLargeLoss above. See
+    // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+    const marketablePnlPct = computeMarketablePnlPct(pos);
+    const atExtremeLoss = (pnlPct != null && pnlPct <= -200) || (marketablePnlPct != null && marketablePnlPct <= -200);
     const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
-    const stopLossBreached = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
+    const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
       ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
       : false;
+    const stopLossBreachedMarketable = pos.stopLossPrice != null && pos.closeValue != null && shortQty > 0
+      ? pos.closeValue >= (pos.stopLossPrice * 100 * shortQty)
+      : false;
+    const stopLossBreached = stopLossBreachedMid || stopLossBreachedMarketable;
     return breached || atExtremeLoss || stopLossBreached || rec.action === 'CUT_LOSSES';
   }
   if (action === 'PLACE_GTC') {
