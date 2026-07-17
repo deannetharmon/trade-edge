@@ -251,7 +251,7 @@ describe('PI-008: review pending order', () => {
     expect(objective).toBeDefined();
     expect(objective!.subject.type).toBe('pending_order');
     expect(objective!.subject.id).toBe('order_stale');
-    expect(objective!.rationale).toContain('300 minutes');
+    expect(objective!.rationale).toContain('5 hours');
     expect(objective!.metadata.executionAllowed).toBe(false);
   });
 

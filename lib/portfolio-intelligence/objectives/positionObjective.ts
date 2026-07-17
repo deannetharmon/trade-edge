@@ -56,6 +56,13 @@ import type {
 import type { PositionHealthScore } from '../health/types';
 import { DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
 import { defaultActionabilityForPriority } from '../actionability';
+import {
+  selectManagementIntent,
+  type ManagementIntentContext,
+  type ManagementIntentEvidence,
+  type ManagementIntentResult,
+  type TechnicalAlignment,
+} from '../managementIntent';
 
 export type PortfolioRecommendationKind =
   | 'hold'
@@ -81,6 +88,14 @@ export interface PortfolioRecommendation {
   supportingReasons: string[];
   suggestedAction: string;
   computedAt: string;
+  // PI-0006B: the canonical intent-selection result behind `label` -- the
+  // winning ManagementIntent, its supporting reasons, and the alternatives
+  // considered (including Roll Position when relevant but not chosen). See
+  // ../managementIntent.ts. Optional only for type-level back-compat with
+  // any external construction of a PortfolioRecommendation fixture that
+  // predates PI-0006B; every value returned by evaluatePositionObjective()
+  // always populates it.
+  managementIntent?: ManagementIntentResult;
 }
 
 export interface PositionObjectiveInput {
@@ -100,18 +115,79 @@ export interface PositionObjectiveInput {
   expDate?: string | null;
   healthScore?: PositionHealthScore | null;
   // PI-0004B: optional, independent fields -- see PositionStrategy /
-  // AssignmentPreference doc comments in types.ts. Not yet read by any
-  // branch in this file (Wheel-awareness for PI-0004B lives in the
-  // portfolio-level concentration rule, not per-position evaluation --
-  // see evaluatePortfolioObjectives.ts's evaluateConcentration()); accepted
-  // here for type-level consistency and forward extension.
+  // AssignmentPreference doc comments in types.ts. Read by PI-0006B's intent
+  // selection for Wheel/assignment-preference awareness (ticket #7) --
+  // still not read by any of this file's own trigger-detection branches,
+  // which are unchanged from PI-0002/TE-0006B.
   positionStrategy?: PositionStrategy | null;
   assignmentPreference?: AssignmentPreference | null;
+  // PI-0006B: optional evidence for intent selection (see
+  // ../managementIntent.ts's doc comment for why each is optional and what
+  // "absent" means for each). None of these are read by the trigger-
+  // detection branches below -- only by the intent-selection pass that runs
+  // after a branch has already fired.
+  //
+  // managementFlags mirrors evaluatePortfolioObjectives.ts's
+  // PortfolioPositionInput field of the same name -- 'roll_review' is the
+  // one form of roll-specific evidence this codebase has.
+  managementFlags?: string[] | null;
+  // % decline off peak net edge (negative = below peak) and whether net
+  // edge is currently negative -- both already computed on the Portfolio
+  // page (see netEdgePeak/netEdgeLive in app/portfolio/page.tsx) and passed
+  // through here where available; this module performs no net-edge math of
+  // its own.
+  netEdgeDeclinePct?: number | null;
+  netEdgeNegative?: boolean | null;
+  // Existing "trend vs. strategy" alignment (see TrendResult/trendAgainst/
+  // trendAligns in app/portfolio/page.tsx). Not yet wired through from the
+  // Portfolio page in this V1 (see PI-0006B implementation report) -- accepted
+  // here so a future slice, or a direct caller/test, can supply it without
+  // another type change.
+  technicalAlignment?: TechnicalAlignment | null;
+  // PI-0008B: Remaining Opportunity (PI-0008A), 0-100, already computed
+  // wherever the caller also computes Position Intelligence's own Remaining
+  // Opportunity display (see app/portfolio/page.tsx's
+  // scorePortfolioRemainingOpportunity). Threaded through to intent
+  // selection here for the first time -- see managementIntent.ts's doc
+  // comment for how it's used.
+  remainingOpportunityPct?: number | null;
+}
+
+// PI-0006B: `kind` (above) remains the stable internal trigger identifier --
+// unchanged, so ruleId/type/actionability/management-choices mappings keyed
+// off it are untouched. `label` is now sourced from the canonical
+// ManagementIntent selector (../managementIntent.ts) instead of PI-0006A's
+// static per-kind lookup table: the same trigger (e.g. 'roll-soon',
+// 'watch', 'assignment-risk') can resolve to different decisive labels
+// depending on evidence -- a material loss resolves to Cut Losses, a tight
+// buffer without a loss resolves to Reduce Risk, a Wheel CSP with assignment
+// preferred resolves to Accept Assignment, and so on. See
+// classifyIntentContext() below and the evidence-assembly block inside
+// evaluatePositionObjective().
+function classifyIntentContext(
+  strategyUpper: string,
+  positionStrategy: PositionStrategy | null | undefined,
+): ManagementIntentContext {
+  if (positionStrategy === 'WHEEL') {
+    // A Wheel cycles between a CSP leg and a covered-call leg -- both get
+    // assignment-aware handling, just against slightly different relevant
+    // intent sets (see managementIntent.ts's RELEVANT_INTENTS).
+    return strategyUpper.includes('CALL') || strategyUpper.includes('COVERED') ? 'covered-call' : 'wheel-csp';
+  }
+  if (strategyUpper.includes('CSP') || strategyUpper === 'PUT') return 'wheel-csp';
+  if (strategyUpper.includes('COVERED') || (strategyUpper === 'CALL' && positionStrategy !== 'ACQUIRE')) return 'covered-call';
+  if (['BPS', 'BCS', 'IC'].includes(strategyUpper) || strategyUpper.includes('SPREAD')) return 'credit-spread';
+  return 'other-position';
 }
 
 // -- helpers, moved verbatim from recommendation-rules.ts (behavior-critical, unchanged) --
 
-function normalizePositionObjectivePct(value: number | null | undefined): number | null {
+// PI-0008A: exported alongside daysUntil()/isUpcomingBeforeExpiration() above
+// -- remainingOpportunity.ts's caller (app/portfolio/page.tsx) needs the same
+// fraction-vs-percent normalization this module already applies to pnlPct/
+// buffer before evaluating its own trigger branches, so evidence handed to
+// calculateRemainingOpportunity() is normalized exactly the same way.
+export function normalizePositionObjectivePct(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.abs(value) <= 1 ? value * 100 : value;
 }
@@ -120,7 +196,11 @@ function hasHealthFactor(input: PositionObjectiveInput, key: string): boolean {
   return Boolean(input.healthScore?.factors?.some((f) => f.key === key));
 }
 
-function daysUntil(dateString: string | null | undefined, now: Date = new Date()): number | null {
+// PI-0008A: exported (previously module-private) so remainingOpportunity.ts
+// can reuse the exact same earnings-date math instead of duplicating it.
+// Pure date arithmetic, not part of the recommendation/scoring logic --
+// exporting it changes nothing about how this module's own branches behave.
+export function daysUntil(dateString: string | null | undefined, now: Date = new Date()): number | null {
   if (!dateString) return null;
   const target = new Date(`${dateString}T00:00:00`);
   if (Number.isNaN(target.getTime())) return null;
@@ -130,7 +210,8 @@ function daysUntil(dateString: string | null | undefined, now: Date = new Date()
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
-function isUpcomingBeforeExpiration(
+// PI-0008A: exported alongside daysUntil() above, for the same reason.
+export function isUpcomingBeforeExpiration(
   dateString: string | null | undefined,
   expDate: string | null | undefined,
   now: Date = new Date(),
@@ -157,25 +238,37 @@ function isShortPremiumStrategy(strategy: string | null | undefined): boolean {
 function makeLegacyRecommendation(
   input: PositionObjectiveInput,
   kind: PortfolioRecommendationKind,
-  label: string,
   urgency: PortfolioRecommendationUrgency,
   confidence: number,
   primaryReason: string,
   suggestedAction: string,
   supportingReasons: string[] = [],
   now: Date = new Date(),
+  intentResult?: ManagementIntentResult,
 ): PortfolioRecommendation {
+  // PI-0006B: intentResult's own reasons (the specific evidence that won it
+  // the recommendation) lead; PI-0006A's dte/pnlPct/buffer/healthScore
+  // bullets follow as supporting context. Capped at 4 total, same as
+  // buildSupportingReasons already did on its own.
+  const mergedReasons = intentResult
+    ? [...intentResult.reasons, ...supportingReasons].slice(0, 4)
+    : supportingReasons;
+
   return {
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
     symbol: input.symbol,
     kind,
-    label,
+    // PI-0006B: decisive, user-facing label sourced from the canonical
+    // intent selector -- see classifyIntentContext() above and
+    // selectManagementIntent() in ../managementIntent.ts.
+    label: intentResult?.label ?? kind,
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
     primaryReason,
-    supportingReasons,
+    supportingReasons: mergedReasons,
     suggestedAction,
     computedAt: now.toISOString(),
+    managementIntent: intentResult,
   };
 }
 
@@ -279,7 +372,7 @@ function buildReviewTriggers(
       }];
     case 'roll-soon':
       return [{
-        id: 'dte-review-window', label: 'Review as DTE decreases', triggerType: 'dte',
+        id: 'dte-review-window', label: 'Next DTE management threshold reached', triggerType: 'dte',
         threshold: DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold,
         explanation: 'Finalize the close, roll, or hold decision as DTE continues to decrease toward the near-term management window.',
       }];
@@ -311,7 +404,21 @@ function buildReviewTriggers(
 // reasonably kind-aware and are left as-is.
 function buildPortfolioAndIncomeImpact(
   kind: Exclude<PortfolioRecommendationKind, 'hold'>,
+  intent?: ManagementIntentResult['intent'],
 ): { portfolioImpact: ObjectiveImpact; incomeImpact: ObjectiveImpact } {
+  // PI-0006B: assignment-risk previously always described assignment as an
+  // unplanned risk to avoid -- no longer accurate once the intent selector
+  // has resolved this to Accept Assignment (a Wheel position where
+  // assignment is the stated goal, ticket #7). Every other kind's impact
+  // text is unchanged from PI-0006A/PI-0002 (see "Follow-ups" in the
+  // PI-0006B implementation report -- a full per-intent impact rewrite is
+  // deferred as broader than this ticket's scope).
+  if (kind === 'assignment-risk' && intent === 'ACCEPT_ASSIGNMENT') {
+    return {
+      portfolioImpact: { direction: 'neutral', magnitude: 'low', explanation: 'Assignment is the stated goal for this position -- proceeding is the intended outcome, not a risk to manage away from.' },
+      incomeImpact: { direction: 'positive', magnitude: 'low', explanation: 'Assignment converts the position as planned; a Wheel position typically continues with a covered call against the resulting shares.' },
+    };
+  }
   switch (kind) {
     case 'assignment-risk':
       return {
@@ -380,7 +487,7 @@ function buildObjective(
     tone: 'neutral',
     explanation: reason,
   }));
-  const { portfolioImpact, incomeImpact } = buildPortfolioAndIncomeImpact(kind);
+  const { portfolioImpact, incomeImpact } = buildPortfolioAndIncomeImpact(kind, legacy.managementIntent?.intent);
 
   return {
     id: `objective_${now.getTime().toString(36)}_${Math.random().toString(36).slice(2, 9)}`,
@@ -409,6 +516,7 @@ function buildObjective(
     },
     capitalImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No capital change from generating this objective alone.' },
     reviewTriggers: buildReviewTriggers(kind, input),
+    managementIntent: legacy.managementIntent,
     metadata: {
       executionAllowed: false,
       paperExecutionAllowed: false,
@@ -421,6 +529,27 @@ function buildObjective(
 export interface PositionObjectiveResult {
   objective: PortfolioObjective | null;
   legacyRecommendation: PortfolioRecommendation;
+}
+
+// PI-0006A: builds 2-4 concise evidence bullets from data this function
+// already has in scope -- health-score factors first (most specific),
+// padded out with the already-normalized dte/pnlPct/buffer/healthScore
+// values when health factors are sparse or absent. No new fields, no new
+// calculations -- these are the exact values every branch below already
+// reads to decide which recommendation fires.
+function buildSupportingReasons(
+  input: PositionObjectiveInput,
+  dte: number | null,
+  pnlPct: number | null,
+  buffer: number | null,
+  healthScore: number | null,
+): string[] {
+  const reasons = input.healthScore?.factors?.slice(0, 3).map((f) => `${f.label}: ${f.message}`) ?? [];
+  if (reasons.length < 2 && dte != null) reasons.push(`Days to expiration: ${dte}.`);
+  if (reasons.length < 2 && pnlPct != null) reasons.push(`Open P/L: ${pnlPct.toFixed(0)}% of credit.`);
+  if (reasons.length < 2 && buffer != null) reasons.push(`Strike buffer: ${buffer.toFixed(1)}%.`);
+  if (reasons.length < 2 && healthScore != null) reasons.push(`Health score: ${healthScore}.`);
+  return reasons.slice(0, 4);
 }
 
 // The single canonical evaluator for per-position recommendations. Trigger
@@ -439,84 +568,145 @@ export function evaluatePositionObjective(
   const strategy = String(input.strategy ?? '').toUpperCase();
   const shortPremium = isShortPremiumStrategy(strategy);
 
-  const supportingReasons =
-    input.healthScore?.factors?.slice(0, 3).map((f) => `${f.label}: ${f.message}`) ?? [];
+  // PI-0006A: "support every recommendation" with 2-4 concise evidence
+  // bullets, using existing engine data only -- no new calculations. Health
+  // factors are the richest source when present; when there are fewer than
+  // two (including the common case of no healthScore at all), fall back to
+  // the same dte/pnlPct/buffer/healthScore values this function already
+  // derived above, which is exactly what drove the primaryReason text for
+  // whichever branch fires below.
+  const supportingReasons = buildSupportingReasons(input, dte, pnlPct, buffer, healthScore);
 
   const criticalExpiration = dte != null && dte <= 7;
   const itmOrCriticalBuffer =
     hasHealthFactor(input, 'itm') || hasHealthFactor(input, 'buffer-critical') || (buffer != null && buffer < 2);
 
+  // PI-0006B: independent evidence computation for intent selection --
+  // these mirror the exact conditions the branches below use to fire, but
+  // are computed once, up front, regardless of which single branch ends up
+  // winning the if/else-if chain. This is what lets e.g. a position that
+  // triggers 'assignment-risk' (tight buffer near expiration) still resolve
+  // to Cut Losses when it *also* has a material loss, or to Accept
+  // Assignment when it's a Wheel CSP with assignment preferred -- the
+  // trigger-detection chain below is unchanged, only the label is now
+  // evidence-driven rather than a static 1:1 lookup.
+  const materialLoss = pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
+  const weakHealthLoss =
+    pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
+    healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
+  const profitTargetReached =
+    Boolean(input.hitTarget) || hasHealthFactor(input, 'profit-target') ||
+    (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct);
+  const meaningfulUnprotectedProfit =
+    shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14;
+  const earningsUpcoming = isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now);
+  const daysUntilEarnings = daysUntil(input.earningsDate, now);
+  const earningsActionable = earningsUpcoming
+    ? daysUntilEarnings != null && daysUntilEarnings <= DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays
+    : null;
+  // PI-0008B: how close, within the review window, earnings actually falls --
+  // 0 at the window's outer edge, 1 the day of. Computed here (where the
+  // policy threshold already lives) rather than in managementIntent.ts,
+  // which does not read policy thresholds itself. Only meaningful when
+  // earningsActionable is true.
+  const earningsProximityFraction = earningsActionable && daysUntilEarnings != null
+    ? Math.max(0, Math.min(1, (DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays - daysUntilEarnings) / DEFAULT_POSITION_MANAGEMENT_POLICY.earningsReviewWindowDays))
+    : null;
+  const rollFlagged = Boolean(input.managementFlags?.includes('roll_review'));
+  const intentContext = classifyIntentContext(strategy, input.positionStrategy);
+
+  const intentEvidence: ManagementIntentEvidence = {
+    context: intentContext,
+    dte,
+    pnlPct,
+    materialLoss,
+    weakHealthLoss,
+    itmOrCriticalBuffer,
+    profitTargetReached,
+    meaningfulUnprotectedProfit,
+    earningsActionable,
+    earningsProximityFraction,
+    rollFlagged,
+    assignmentPreference: input.assignmentPreference,
+    positionStrategy: input.positionStrategy,
+    netEdgeDeclinePct: input.netEdgeDeclinePct,
+    netEdgeNegative: input.netEdgeNegative,
+    technicalAlignment: input.technicalAlignment,
+    remainingOpportunityPct: input.remainingOpportunityPct,
+  };
+  const intentResult = selectManagementIntent(intentEvidence);
+
   let legacy: PortfolioRecommendation;
 
   if (shortPremium && criticalExpiration && itmOrCriticalBuffer) {
     legacy = makeLegacyRecommendation(
-      input, 'assignment-risk', 'Assignment Risk', 'critical', 94,
+      input, 'assignment-risk', 'critical', 94,
       dte != null ? `${dte} DTE with tight or ITM strike buffer.` : 'Tight or ITM strike buffer near expiration.',
       'Review assignment, close, or roll plan before adding new risk.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
-  } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct) {
+  } else if (materialLoss) {
     legacy = makeLegacyRecommendation(
-      input, 'close-loser', 'Close Loser', 'critical', 91,
-      `Loss is near or beyond 1x credit (${pnlPct.toFixed(0)}%).`,
+      input, 'close-loser', 'critical', 91,
+      `Loss is near or beyond 1x credit (${pnlPct!.toFixed(0)}%).`,
       'Review closing or rolling defensively.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
-  } else if (pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct && healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold) {
+  } else if (weakHealthLoss) {
     legacy = makeLegacyRecommendation(
-      input, 'close-loser', 'Close Loser', 'high', 84,
+      input, 'close-loser', 'high', 84,
       `Material loss with weak health score (${healthScore}).`,
       'Review whether the thesis still holds; close or roll if risk is no longer acceptable.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
-  } else if (isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now)) {
+  } else if (earningsUpcoming) {
     legacy = makeLegacyRecommendation(
-      input, 'earnings-risk', 'Earnings Risk', 'high', 86,
+      input, 'earnings-risk', 'high', 86,
       `Upcoming earnings before expiration (${input.earningsDate}).`,
       'Decide whether to close, reduce risk, or intentionally hold through earnings.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
-  } else if (input.hitTarget || hasHealthFactor(input, 'profit-target') || (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct)) {
+  } else if (profitTargetReached) {
     legacy = makeLegacyRecommendation(
-      input, 'close-winner', 'Close Winner', 'high', 90,
+      input, 'close-winner', 'high', 90,
       pnlPct != null ? `Profit target reached at approximately ${pnlPct.toFixed(0)}% of credit.` : 'Profit target reached.',
       'Take profit or confirm the GTC target order is working.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
   } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium) {
     legacy = makeLegacyRecommendation(
-      input, 'roll-soon', 'Roll Soon', 'medium', 80,
+      input, 'roll-soon', 'medium', 80,
       `${dte} DTE is inside the standard management window.`,
       'Review close, roll, or let-decay plan.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
-  } else if (shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14) {
+  } else if (meaningfulUnprotectedProfit) {
     legacy = makeLegacyRecommendation(
-      input, 'place-gtc', 'Place GTC', 'medium', 78,
-      `Position has profit (${pnlPct.toFixed(0)}%) but no working GTC detected.`,
+      input, 'place-gtc', 'medium', 78,
+      `Position has profit (${pnlPct!.toFixed(0)}%) but no working GTC detected.`,
       'Place or verify a profit-target GTC order.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
   } else if (dte != null && dte <= 3 && healthScore != null && healthScore >= DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold && !itmOrCriticalBuffer) {
     legacy = makeLegacyRecommendation(
-      input, 'let-expire', 'Let Expire', 'low', 72,
+      input, 'let-expire', 'low', 72,
       `${dte} DTE with healthy score and no critical buffer flag.`,
       'Monitor through expiration only if assignment risk is acceptable.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
   } else if ((healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold) || (buffer != null && buffer < 5)) {
     legacy = makeLegacyRecommendation(
-      input, 'watch', 'Watch', 'medium', 70,
+      input, 'watch', 'medium', 70,
       healthScore != null ? `Health score is ${healthScore}.` : 'One or more risk factors deserve attention.',
       'Monitor closely and avoid adding correlated risk.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
   } else {
     legacy = makeLegacyRecommendation(
-      input, 'hold', 'Hold', 'low', 76,
+      input, 'hold', 'low', 76,
       healthScore != null ? `Health score is ${healthScore}; no primary action rule triggered.` : 'No primary action rule triggered.',
       'Leave position alone unless market conditions or thesis change.',
-      supportingReasons, now,
+      supportingReasons, now, intentResult,
     );
   }
 

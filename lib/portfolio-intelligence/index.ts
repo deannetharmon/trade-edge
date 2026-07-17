@@ -43,7 +43,7 @@ export type {
 // TE-0006B, consolidated (PI-0002). Produces canonical PortfolioObjective;
 // `legacyRecommendation` exists solely for the Portfolio page's existing
 // UI (badges, priority list) to keep working unchanged.
-export { evaluatePositionObjective } from './objectives/positionObjective';
+export { evaluatePositionObjective, normalizePositionObjectivePct } from './objectives/positionObjective';
 export type {
   PortfolioRecommendation,
   PortfolioRecommendationKind,
@@ -51,6 +51,38 @@ export type {
   PositionObjectiveInput,
   PositionObjectiveResult,
 } from './objectives/positionObjective';
+
+// PI-0006B: canonical intent-selection engine -- the single selector behind
+// every producer's `title`/`managementIntent` field in both
+// objectives/positionObjective.ts and evaluatePortfolioObjectives.ts.
+export { selectManagementIntent, MANAGEMENT_INTENT_LABEL } from './managementIntent';
+export type {
+  ManagementIntent,
+  ManagementIntentCandidate,
+  ManagementIntentConfidenceTier,
+  ManagementIntentContext,
+  ManagementIntentEvidence,
+  ManagementIntentResult,
+  ScoreContribution,
+  TechnicalAlignment,
+} from './managementIntent';
+
+// PI-0008A: Remaining Opportunity Engine -- a parallel, independent metric
+// (not part of the Decision Engine / selectManagementIntent()). See
+// remainingOpportunity.ts's module doc.
+export { calculateRemainingOpportunity } from './remainingOpportunity';
+export type {
+  RemainingOpportunityInput,
+  RemainingOpportunityLifecycle,
+  RemainingOpportunityResult,
+} from './remainingOpportunity';
+
+// PI-0008B: the one centralized table of recommendation-weighting values
+// used by managementIntent.ts's scoreCandidates(). Exported so weighting is
+// inspectable (and, per the Decision Engine Constitution, retunable in one
+// place) without reaching into managementIntent.ts's internals.
+export { DECISION_QUALITY_WEIGHTS } from './decisionQualityMatrix';
+export type { DecisionQualityWeights } from './decisionQualityMatrix';
 
 export type {
   MarketContextInput,

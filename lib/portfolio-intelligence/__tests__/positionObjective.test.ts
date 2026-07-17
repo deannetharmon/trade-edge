@@ -35,7 +35,14 @@ describe('PI-002: assignment-risk parity', () => {
     expect(legacyRecommendation.kind).toBe('assignment-risk');
     expect(legacyRecommendation.urgency).toBe('critical');
     expect(legacyRecommendation.confidence).toBe(94);
-    expect(legacyRecommendation.label).toBe('Assignment Risk');
+    // PI-0006B: `label` is now sourced from the canonical intent selector
+    // rather than PI-0006A's static per-kind lookup ('Exit Position'). This
+    // fixture has a tight/ITM buffer with no material loss and no roll
+    // evidence -- that's Reduce Risk evidence, not a loss-stop breach, so the
+    // decisive label is 'Reduce Risk'. `kind`/`ruleId`/`type` (asserted
+    // below) are unchanged, per ticket requirement #8.
+    expect(legacyRecommendation.label).toBe('Reduce Risk');
+    expect(legacyRecommendation.managementIntent?.intent).toBe('REDUCE_RISK');
     expect(objective).not.toBeNull();
     expect(objective!.type).toBe('REVIEW_THREATENED_POSITION');
     expect(objective!.ruleId).toBe('OBJ-ASSIGNMENT-RISK');
@@ -174,7 +181,7 @@ describe('PI-002: hold parity and the deliberate objective:null change', () => {
     expect(legacyRecommendation.kind).toBe('hold');
     expect(legacyRecommendation.urgency).toBe('low');
     expect(legacyRecommendation.confidence).toBe(76);
-    expect(legacyRecommendation.label).toBe('Hold');
+    expect(legacyRecommendation.label).toBe('Hold Position');
     // Deliberate PI-0002 design decision: unlike the old system (which always
     // returned a recommendation object), the canonical objective is null for
     // "nothing to act on" -- consistent with evaluatePortfolioObjectives'

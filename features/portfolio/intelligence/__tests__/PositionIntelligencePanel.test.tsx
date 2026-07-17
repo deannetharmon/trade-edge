@@ -7,7 +7,7 @@ import { render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
 import { PositionIntelligencePanel } from '../PositionIntelligencePanel';
-import type { PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 
 function makeRecommendation(overrides: Partial<PortfolioRecommendation> = {}): PortfolioRecommendation {
   return {
@@ -54,16 +54,45 @@ function makeObjective(overrides: Partial<PortfolioObjective> = {}): PortfolioOb
   };
 }
 
-describe('PI-0005: PositionIntelligencePanel -- objective present', () => {
-  it('renders Current Recommendation from recommendation.label', () => {
+describe('UX Polish: Suggested Action card', () => {
+  it('elevates label, suggested action, confidence, and urgency onto the top card', () => {
     render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.getByText('Suggested Action')).toBeInTheDocument();
     expect(screen.getByText('Earnings Risk')).toBeInTheDocument();
+    expect(screen.getByText('Decide whether to close, reduce risk, or intentionally hold through earnings.')).toBeInTheDocument();
+    expect(screen.getByText('86% confidence')).toBeInTheDocument();
+    expect(screen.getByText('high')).toBeInTheDocument();
   });
 
+  it('surfaces the confidence tier when managementIntent is present', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.getByText('(High)')).toBeInTheDocument();
+  });
+
+  it('surfaces top supporting evidence and remaining opportunity as compact metrics', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{ opportunityCapturedPct: 30, remainingOpportunityPct: 38, reasons: [] }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.getByText('38% opportunity remaining')).toBeInTheDocument();
+  });
+});
+
+describe('PI-0005: PositionIntelligencePanel -- objective present', () => {
   it('renders Why from the objective\'s rationale and supporting evidence', () => {
     render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
     expect(screen.getByText('Decide whether to close, reduce risk, or hold through earnings.')).toBeInTheDocument();
-    expect(screen.getByText('Earnings date')).toBeInTheDocument();
+    // "Earnings date" is also surfaced as a compact metric on the Suggested
+    // Action card above (see UX Polish describe block), so this is scoped to
+    // the Why section specifically rather than a page-wide getByText.
+    const whySection = screen.getByText('Why').closest('div')!;
+    expect(within(whySection).getByText('Earnings date')).toBeInTheDocument();
   });
 
   it('renders Current Concerns from the objective', () => {
@@ -110,6 +139,115 @@ describe('PI-0005: PositionIntelligencePanel -- null objective (hold case)', () 
   it('falls back to the "next portfolio evaluation" review trigger', () => {
     render(<PositionIntelligencePanel recommendation={holdRecommendation} objective={null} lifecycleType="SPREAD" th={THEMES.dark} />);
     expect(screen.getByText('Next portfolio evaluation')).toBeInTheDocument();
+  });
+});
+
+function makeManagementIntent(overrides: Partial<ManagementIntentResult> = {}): ManagementIntentResult {
+  const cutLosses = {
+    intent: 'CUT_LOSSES' as const,
+    label: 'Cut Losses',
+    score: 112,
+    reasons: ['Loss has reached the policy loss-stop threshold.'],
+    contributions: [
+      { id: 'material-loss', label: 'Material loss threshold breached', points: 100, explanation: 'Loss has reached the policy loss-stop threshold.', evidenceField: 'materialLoss' },
+      { id: 'weak-health-loss', label: 'Weak health confirmation', points: 12, explanation: 'Loss is material and the health score is weak.', evidenceField: 'weakHealthLoss' },
+    ],
+    isWinner: true,
+  };
+  const reduceRisk = {
+    intent: 'REDUCE_RISK' as const,
+    label: 'Reduce Risk',
+    score: 70,
+    reasons: [],
+    contributions: [
+      { id: 'net-edge-decline', label: 'Net Edge declined from peak', points: 40, explanation: 'Net edge has declined 40% from its peak.', evidenceField: 'netEdgeDeclinePct' },
+      { id: 'tight-buffer-reduce-risk', label: 'Tight strike buffer', points: 30, explanation: 'Strike buffer is tight or the position is in the money.', evidenceField: 'itmOrCriticalBuffer' },
+    ],
+    isWinner: false,
+  };
+  return {
+    intent: 'CUT_LOSSES',
+    label: 'Cut Losses',
+    reasons: cutLosses.reasons,
+    alternatives: [reduceRisk],
+    candidates: [cutLosses, reduceRisk],
+    winnerScore: 112,
+    runnerUpIntent: 'REDUCE_RISK',
+    runnerUpScore: 70,
+    margin: 42,
+    confidenceTier: 'High',
+    ...overrides,
+  };
+}
+
+describe('UX Polish: Decision Scorecard hidden pending redesign', () => {
+  // The scorecard component and its accordion/contributions rendering are
+  // unchanged (see DecisionScorecard in PositionIntelligencePanel.tsx) --
+  // only gated off at the render layer via SHOW_DECISION_SCORECARD, so it
+  // can come back in one line. No standalone unit test remains for its
+  // internal accordion behavior while it's hidden; re-add if it's
+  // re-enabled with a real design pass.
+  it('does not render even when recommendation.managementIntent is present', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.queryByText('Decision Scorecard')).not.toBeInTheDocument();
+  });
+});
+
+describe('UX Polish: Decision Review hidden pending redesign', () => {
+  it('does not render even when onSaveDecisionReview is provided', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        strategy="CSP"
+        decisionReview={null}
+        onSaveDecisionReview={() => {}}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.queryByText('Decision Review')).not.toBeInTheDocument();
+  });
+});
+
+describe('PI-0008A: Remaining Opportunity section', () => {
+  it('does not render when remainingOpportunity is absent', () => {
+    render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.queryByText('Remaining Opportunity')).not.toBeInTheDocument();
+  });
+
+  it('does not render when remainingOpportunityPct is null (no credit basis)', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{ opportunityCapturedPct: null, remainingOpportunityPct: null, reasons: ['No credit basis is available to measure remaining opportunity.'] }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.queryByText('Remaining Opportunity')).not.toBeInTheDocument();
+  });
+
+  it('renders both percentages and reasons when present', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{
+          opportunityCapturedPct: 30,
+          remainingOpportunityPct: 38,
+          reasons: ['Only 15 DTE remain, inside the 21-day management window.'],
+        }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.getByText('Remaining Opportunity')).toBeInTheDocument();
+    expect(screen.getByText('38% remaining')).toBeInTheDocument();
+    expect(screen.getByText('30% captured')).toBeInTheDocument();
+    expect(screen.getByText(/Only 15 DTE remain/)).toBeInTheDocument();
   });
 });
 

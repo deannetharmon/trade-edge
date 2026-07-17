@@ -3,19 +3,68 @@
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
 import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/PositionIntelligencePanel';
+import { DecisionHistoryView } from '@/features/portfolio/decisionReview/DecisionHistoryView';
+import { upsertDecisionReview, latestReviewForPosition } from '@/lib/decision-review';
+import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
+// PI-0009A: Position Snapshot Engine -- event-driven (detection/
+// recommendation-change/close), separate from the daily Greeks-snapshot
+// store below. See lib/position-snapshot/snapshotEngine.ts.
+import { planLifecycleSnapshots } from '@/lib/position-snapshot';
+import type { PositionSnapshotInput, PositionSnapshotStore as LifecycleSnapshotStore } from '@/lib/position-snapshot';
+// PI-0009B: Decision Outcome Analysis -- reuses Trade Log's own client-side
+// cache (readCache) rather than a fresh TastyTrade fetch. Aliased to avoid
+// any ambiguity with this file's own daily-snapshot fetch/cache helpers,
+// which are a completely separate store (see fetchSnapshotStore above).
+import { readCache as readTradeLogCache } from '@/lib/tradeLog/reconstructTrades';
+import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
+// PI-0010A: Today's Priorities Dashboard -- pure orchestration layer
+// (buildTodaysPrioritiesDashboard) plus its presentation component. Both
+// consume state this page already computes (positions[].portfolioObjective,
+// canonicalPriorities, decisionReviews) -- no new Portfolio Intelligence or
+// Decision Engine calls are introduced here.
+import { buildTodaysPrioritiesDashboard, selectTopPriority } from '@/lib/todaysPriorities';
+import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput, CoveredCallOpportunityInput } from '@/lib/todaysPriorities';
+import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
+// PI-0011A: Portfolio Mission Control -- orchestrates the Briefing tab's own
+// Portfolio Health/Summary derivations plus PI-0010A/B's Today's Priorities
+// dashboard and its new selectTopPriority() into one landing view. No new
+// Portfolio Intelligence/Decision Engine calls here either -- see
+// MissionControl.tsx's own module doc for the full source list.
+import { MissionControl } from '@/features/portfolio/missionControl/MissionControl';
+// PI-0011B: Portfolio Health Engine -- a deterministic 0-100 score computed
+// from data this page already has (see the healthInput useMemo below for
+// exactly which existing values feed it). No new Portfolio Intelligence or
+// Decision Engine calls, no new market data.
+import { calculatePortfolioHealthScore } from '@/lib/portfolioHealth';
+import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
+// PI-0012A: Portfolio Review, Phase 1 -- a thin composition layer over
+// Portfolio Health (above), the canonical objective list, and Today's
+// Priorities' already-scored dashboard. No new score, no new ranking, no
+// new recommendation logic -- see lib/portfolioReview's own module docs and
+// docs/design/PI-0012-Portfolio-Review-Architecture.md.
+import { buildPortfolioReview } from '@/lib/portfolioReview';
+import type { PortfolioReviewInput, PortfolioReviewPositionInput } from '@/lib/portfolioReview';
+import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReviewCard';
+// PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
+// Review (above) and Today's Priorities' dashboard. No new score, no new
+// ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
+// module docs and docs/reviews/PI-0013-Daily-Briefing-Implementation-Report.md.
+import { buildDailyBriefing } from '@/lib/dailyBriefing';
+import type { DailyBriefingInput } from '@/lib/dailyBriefing';
+import { DailyBriefingCard } from '@/features/portfolio/dailyBriefing/DailyBriefingCard';
 
 
 // Inject accent CSS variable style
@@ -216,6 +265,22 @@ function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
   });
 }
 
+// PI-0006B: Net Edge decline vs. this position's own tracked peak, extracted
+// as a shared helper since PI-0008A's Remaining Opportunity Engine reuses the
+// exact same evidence (see its module doc: "no new calculations"). Both
+// netEdgeLive/netEdgePeak already exist below in this file and are
+// synchronous (pos.snapshotHistory is attached before either caller runs --
+// see attachSnapshotHistory), so no new fetch/integration is needed.
+function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | null; netEdgeNegative: boolean | null } {
+  const liveEdge = netEdgeLive(pos);
+  const peakEdge = netEdgePeak(pos);
+  const netEdgeDeclinePct = liveEdge != null && peakEdge != null && peakEdge > 0
+    ? ((liveEdge - peakEdge) / peakEdge) * 100
+    : null;
+  const netEdgeNegative = liveEdge != null ? liveEdge <= 0 : null;
+  return { netEdgeDeclinePct, netEdgeNegative };
+}
+
 // PI-0002: single canonical evaluation call. Returns both the legacy-shaped
 // recommendation (unchanged output, for existing badges/priority list) and
 // the new canonical objective (not yet rendered, wired through for later).
@@ -226,13 +291,65 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
       : undefined
   );
 
+  // technicalAlignment is deliberately NOT wired in this slice: trend
+  // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
+  // available at this synchronous call site -- left as an accepted,
+  // documented gap for a future slice.
+  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
+
+  // PI-0008B: reuses PI-0008A's Remaining Opportunity calculation (the exact
+  // same inputs scorePortfolioRemainingOpportunity below already assembles)
+  // so intent selection sees the same number Position Intelligence displays,
+  // computed fresh at render time -- nothing new persisted onto Position.
+  const { remainingOpportunityPct } = calculateRemainingOpportunity({
+    creditReceived: pos.creditReceived,
+    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    dte: pos.dte,
+    buffer: normalizePositionObjectivePct(pos.buffer),
+    healthScore: healthScore?.score ?? null,
+    earningsDate: pos.earningsDate,
+    expDate: pos.expDate,
+    netEdgeDeclinePct,
+    netEdgeNegative,
+    lifecycleType: classifyPositionLifecycle(pos).type,
+  });
+
   const { objective, legacyRecommendation } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
+    netEdgeDeclinePct,
+    netEdgeNegative,
+    remainingOpportunityPct,
   });
 
   return { recommendation: legacyRecommendation, objective };
+}
+
+// PI-0008A: Remaining Opportunity Engine -- a parallel, independent
+// calculation from scorePortfolioPositionObjective above (not part of the
+// Decision Engine; see remainingOpportunity.ts's module doc). Computed fresh
+// at render time from the same already-available fields, the same way
+// classifyPositionLifecycle(pos) already is at this file's Position
+// Intelligence call site -- nothing is persisted onto Position.
+function scorePortfolioRemainingOpportunity(pos: Position) {
+  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
+  return calculateRemainingOpportunity({
+    creditReceived: pos.creditReceived,
+    // Same fraction-vs-percent normalization evaluatePositionObjective()
+    // already applies to these two fields before using them -- keeps this
+    // metric's captured/remaining percentages consistent with the
+    // recommendation engine's own reading of the same position.
+    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    dte: pos.dte,
+    buffer: normalizePositionObjectivePct(pos.buffer),
+    healthScore: pos.healthScore?.score ?? null,
+    earningsDate: pos.earningsDate,
+    expDate: pos.expDate,
+    netEdgeDeclinePct,
+    netEdgeNegative,
+    lifecycleType: classifyPositionLifecycle(pos).type,
+  });
 }
 
 function todayLocalDateString(): string {
@@ -308,6 +425,67 @@ function attachSnapshotHistory(
 
 async function clearSnapshotHistory(): Promise<void> {
   await fetch('/api/position-snapshots', { method: 'DELETE' });
+}
+
+// PI-0009A: Position Snapshot Engine ────────────────────────────────────────
+// Maps a live Position (with recommendation/healthScore/netEdge already
+// attached by attachSnapshotHistory) into the engine's lean, page-agnostic
+// input shape. Reuses scorePortfolioRemainingOpportunity/netEdgeLive/
+// isUpcomingEarningsRisk exactly as already computed elsewhere in this file
+// -- no new calculations.
+function toPositionSnapshotInput(pos: Position): PositionSnapshotInput {
+  const { remainingOpportunityPct } = scorePortfolioRemainingOpportunity(pos);
+  const earningsUpcoming = isUpcomingEarningsRisk(pos.earningsDate, pos.expDate);
+  return {
+    key: pos.key,
+    symbol: pos.symbol,
+    strategy: pos.strategy,
+    dte: pos.dte,
+    creditReceived: pos.creditReceived,
+    closeValue: pos.closeValue,
+    delta: pos.netDelta,
+    pop: pos.pop,
+    netEdge: netEdgeLive(pos),
+    healthScore: pos.healthScore?.score ?? null,
+    remainingOpportunityPct,
+    recommendationLabel: pos.recommendation?.label ?? null,
+    confidence: pos.recommendation?.confidence ?? null,
+    primaryReason: pos.recommendation?.primaryReason ?? null,
+    supportingReasons: pos.recommendation?.supportingReasons ?? [],
+    earningsStatus: pos.earningsDate == null ? 'NONE' : (earningsUpcoming ? 'UPCOMING' : 'NONE'),
+    earningsDate: pos.earningsDate,
+  };
+}
+
+async function fetchLifecycleSnapshotStore(): Promise<LifecycleSnapshotStore> {
+  const res = await fetch('/api/position-lifecycle-snapshots');
+  if (!res.ok) throw new Error(`lifecycle snapshot fetch ${res.status}`);
+  const data = await res.json();
+  return (data?.snapshots ?? {}) as LifecycleSnapshotStore;
+}
+
+// Fire-and-forget, same non-blocking pattern as captureSnapshotsIfNeeded
+// above: fetches the current store, asks the pure engine what (if anything)
+// needs capturing this cycle, and POSTs only that. Called once per Portfolio
+// page load, right after recommendation/healthScore/netEdge are attached to
+// positions (see fetchPositions() below) -- that's the one place all the
+// fields planLifecycleSnapshots needs are simultaneously available.
+async function captureLifecycleSnapshotsIfNeeded(positions: Position[]): Promise<void> {
+  if (positions.length === 0) return;
+  try {
+    const store = await fetchLifecycleSnapshotStore();
+    const inputs = positions.map(toPositionSnapshotInput);
+    const { toAppend } = planLifecycleSnapshots(inputs, store);
+    if (toAppend.length === 0) return;
+    const entries = toAppend.map(snapshot => ({ positionKey: snapshot.positionKey, snapshot }));
+    await fetch('/api/position-lifecycle-snapshots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+  } catch (e) {
+    console.error('Lifecycle snapshot capture failed (non-blocking):', e);
+  }
 }
 
 interface PositionAnalysis {
@@ -2930,6 +3108,10 @@ Flags: ${[
   (isCspLike || pos.strategy === 'BPS') && support?.verdict === 'CAUTION' ? 'ℹ Support check CAUTION — strike is near support or trend confirmation is mixed' : '',
   isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `⚠ Upcoming earnings ${pos.earningsDate}` : '',
 ].filter(Boolean).join(', ') || 'None'}
+
+RULE ENGINE'S EXISTING CALL (the trader already sees this on screen -- do not restate it or reword its stated reason):
+${pos.recommendation ? `${pos.recommendation.label} — ${pos.recommendation.confidence}% confidence, ${pos.recommendation.urgency} urgency. Its stated reason: "${pos.recommendation.primaryReason}"` : 'No rule-engine recommendation is available for this position yet.'}
+Your job here is different from the rule engine's: explain WHY this call is (or isn't) appropriate using the live market/greeks/trend/support data below -- the texture and judgment a fixed rule can't apply -- rather than summarizing the same reason in different words. If you agree with the call, say specifically what in the data below confirms it. If you'd go further, less far, or disagree, say so plainly and explain why using that data. Do not simply restate "${pos.recommendation ? pos.recommendation.primaryReason : 'the rule engine’s reason'}" in your own words.
 
 EXPERT DECISION CHECKLIST:
 Before giving the recommendation, evaluate all of these:
@@ -7962,7 +8144,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, decisionReview, onSaveDecisionReview }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -7970,6 +8152,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   onProfitTargetChange: (key: string, value: number) => void;
   onIntentChange: (key: string, intent: PositionIntent) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  // PI-0008C: Decision Outcome Tracking -- the existing review for this
+  // position (or null), and the save callback. Optional so any other caller
+  // of PositionCard that predates this ticket keeps compiling unchanged;
+  // PositionIntelligencePanel itself only renders its Decision Review
+  // section when onSaveDecisionReview is provided.
+  decisionReview?: DecisionReview | null;
+  onSaveDecisionReview?: (review: DecisionReview) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [trend, setTrend] = useState<TrendResult | null>(null);
@@ -8852,6 +9041,10 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           recommendation={pos.recommendation}
           objective={pos.portfolioObjective ?? null}
           lifecycleType={classifyPositionLifecycle(pos).type}
+          remainingOpportunity={scorePortfolioRemainingOpportunity(pos)}
+          strategy={pos.strategy}
+          decisionReview={decisionReview ?? null}
+          onSaveDecisionReview={onSaveDecisionReview}
           th={th}
         />
       )}
@@ -9087,7 +9280,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, decisionReviews, onSaveDecisionReview }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -9095,6 +9288,10 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   onIntentChange: (key: string, intent: PositionIntent) => void;
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  // PI-0008C: Decision Outcome Tracking -- optional so any other caller of
+  // PositionSection that predates this ticket keeps compiling unchanged.
+  decisionReviews?: DecisionReviewStore;
+  onSaveDecisionReview?: (review: DecisionReview) => void;
 }) {
   const lifecycleRank: Record<string, number> = {
     CSP: 1,
@@ -9135,7 +9332,12 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
       </div>
       <div className="space-y-2">
         {sortedPositions.map(p => (
-          <PositionCard key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle} onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute} />
+          <PositionCard
+            key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle}
+            onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
+            decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
+            onSaveDecisionReview={onSaveDecisionReview}
+          />
         ))}
       </div>
     </div>
@@ -9389,7 +9591,18 @@ export default function PortfolioPage() {
   // PI-0004D: 'briefing' added as the default subpage -- the Daily Portfolio
   // Briefing is the primary "what do I need to know before the market
   // opens?" view, so it opens first instead of Positions.
-  const [activeTab, setActiveTab] = useState<'briefing' | 'positions' | 'priorities' | 'balances'>('briefing');
+  // PI-0010A: 'today' added and made the new default landing subpage --
+  // Today's Priorities orchestrates Immediate Action / Review Today /
+  // Monitor / Opportunities from the same objective/decision-review state
+  // every other tab already consumes. 'briefing' and 'priorities' are left
+  // fully intact and reachable via their own tabs.
+  // PI-0011A: 'mission-control' added and made the new default landing
+  // subpage, superseding 'today' as the entry point -- Mission Control
+  // orchestrates Today's Priorities (reused wholesale) plus the Briefing
+  // tab's own Portfolio Health/Summary derivations and a new Top Priority
+  // highlight into one higher-level view. 'today' itself is untouched and
+  // still reachable on its own tab as a detailed drill-down.
+  const [activeTab, setActiveTab] = useState<'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('mission-control');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9443,7 +9656,15 @@ export default function PortfolioPage() {
       // Load snapshot history and attach it to positions (non-blocking; if it
       // fails the cards simply render without peak/trend context).
       fetchSnapshotStore()
-        .then(store => setPositions(prev => attachSnapshotHistory(prev, store)))
+        .then(store => {
+          setPositions(prev => {
+            const updated = attachSnapshotHistory(prev, store);
+            // PI-0009A: fire-and-forget, after recommendation/healthScore/
+            // netEdge are attached -- doesn't block or affect this render.
+            captureLifecycleSnapshotsIfNeeded(updated);
+            return updated;
+          });
+        })
         .catch(e => console.error('Snapshot history fetch failed (non-blocking):', e));
     } catch (e: any) {
       if (e.message === 'Not authenticated' || e.message === 'Session expired') { window.location.href = '/login'; return; }
@@ -9463,6 +9684,52 @@ export default function PortfolioPage() {
       .then(setBalances)
       .catch(e => console.error('Balance fetch failed (non-blocking):', e));
   }, []);
+
+  // PI-0008C: Decision Outcome Tracking -- fetched independently and
+  // non-blocking, same pattern as balances above. `decisionReviews` is the
+  // full per-user store (keyed by review id, see
+  // app/api/decision-reviews/route.ts); Position Intelligence looks up the
+  // latest review per position via latestReviewForPosition(), and the
+  // Decision History tab renders the whole store directly.
+  const [decisionReviews, setDecisionReviews] = useState<DecisionReviewStore>({});
+  useEffect(() => {
+    fetch('/api/decision-reviews')
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`decision-reviews fetch ${res.status}`))))
+      .then(data => setDecisionReviews(data?.reviews ?? {}))
+      .catch(e => console.error('Decision review fetch failed (non-blocking):', e));
+  }, []);
+
+  // PI-0009B: Decision Outcome Analysis -- the Decision History view needs
+  // its own copy of the lifecycle snapshot store and whatever Trade Log has
+  // already reconstructed and cached, to match closed reviews against real
+  // trades (see lib/decision-review/outcomeAnalysis.ts). Fetched
+  // independently and non-blocking, same pattern as balances/decisionReviews
+  // above. Neither is a new fetch pipeline: the lifecycle store already
+  // exists (PI-0009A), and the closed trades come from Trade Log's own
+  // client-side cache (readCache) rather than a fresh TastyTrade call --
+  // if the trader has never opened Trade Log/Performance, this is simply
+  // empty and the Analysis column shows "—" until they do.
+  const [lifecycleSnapshots, setLifecycleSnapshots] = useState<LifecycleSnapshotStore>({});
+  useEffect(() => {
+    fetchLifecycleSnapshotStore()
+      .then(setLifecycleSnapshots)
+      .catch(e => console.error('Lifecycle snapshot store fetch failed (non-blocking):', e));
+  }, []);
+
+  const [closedTradesForOutcomeAnalysis, setClosedTradesForOutcomeAnalysis] = useState<ClosedTrade[]>([]);
+  useEffect(() => {
+    const cached = readTradeLogCache('12m');
+    if (cached) setClosedTradesForOutcomeAnalysis(cached.trades);
+  }, []);
+
+  const handleSaveDecisionReview = (review: DecisionReview) => {
+    setDecisionReviews(prev => upsertDecisionReview(prev, review));
+    fetch('/api/decision-reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review }),
+    }).catch(e => console.error('Decision review save failed (non-blocking):', e));
+  };
 
   // PI-0003: first real production wiring of evaluatePortfolioObjectives()
   // (previously zero consumers anywhere in the app). Combines per-position
@@ -9494,6 +9761,227 @@ export default function PortfolioPage() {
     const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
     setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, balances ?? {}, positionsForConcentration, rawPendingOrders));
   }, [positions, pendingOrders, balances]);
+
+  // PI-0010A: Today's Priorities Dashboard input. `objectives` deliberately
+  // combines two different existing sources rather than reusing
+  // canonicalPriorities.objectives alone:
+  //   - per-position objectives come from positions[].portfolioObjective
+  //     (already computed by attachSnapshotHistory/scorePortfolioPositionObjective
+  //     for every position, INCLUDING MONITOR-tier ones) -- needed because
+  //     computeCanonicalPortfolioPriorities() intentionally filters MONITOR
+  //     out of its own per-position objectives (see its doc comment), and
+  //     this dashboard's own Monitor section needs exactly those.
+  //   - portfolio-level + pending-order objectives (concentration, buying
+  //     power, idle cash, income, stale orders) come from
+  //     canonicalPriorities.objectives, filtered to source !== 'position' so
+  //     the position-level ones already included above aren't duplicated.
+  //
+  // PI-0010B: five extra per-position fields feed Priority Score (see
+  // lib/priorityScore/priorityScore.ts) -- every one of them is a value this
+  // file already computes elsewhere for an existing purpose, just read again
+  // here rather than recomputed or fetched anew:
+  //   - netEdgeDeclinePct/netEdgeNegative: computeNetEdgeEvidence(pos), the
+  //     same call scorePortfolioPositionObjective() already makes per
+  //     position for the Decision Engine's own net-edge evidence.
+  //   - remainingOpportunityPct: scorePortfolioRemainingOpportunity(pos),
+  //     the same Remaining Opportunity Engine call (PI-0008A) already wired
+  //     into the Position Intelligence panel.
+  //   - capitalAtRisk: pos.maxRisk, already displayed elsewhere on the page.
+  //   - hasPendingDecisionReview: latestReviewForPosition (PI-0008C, already
+  //     imported) against the same decisionReviews store Decision History
+  //     already renders from.
+  const todaysPrioritiesInput: TodaysPrioritiesInput = useMemo(() => {
+    const positionObjectives = positions
+      .map(p => p.portfolioObjective)
+      .filter((o): o is PortfolioObjective => o != null);
+    const portfolioLevelObjectives = (canonicalPriorities?.objectives ?? []).filter(o => o.source !== 'position');
+    const objectives = [...positionObjectives, ...portfolioLevelObjectives];
+
+    const positionInputsForDashboard: TodaysPrioritiesPositionInput[] = positions.map(p => {
+      const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(p);
+      const { remainingOpportunityPct } = scorePortfolioRemainingOpportunity(p);
+      const latestReview = latestReviewForPosition(decisionReviews, p.key);
+      return {
+        key: p.key,
+        symbol: p.symbol,
+        strategy: p.strategy,
+        dte: p.dte,
+        healthScore: p.healthScore?.score ?? null,
+        objective: p.portfolioObjective ?? null,
+        netEdgeDeclinePct,
+        netEdgeNegative: netEdgeNegative ?? false,
+        remainingOpportunityPct,
+        capitalAtRisk: p.maxRisk ?? null,
+        hasPendingDecisionReview: latestReview?.outcomeStatus === 'PENDING',
+      };
+    });
+
+    // Covered Call opportunities: uncovered stock left over from an
+    // assignment (classifyPositionLifecycle already identifies this as
+    // 'ASSIGNED_STOCK' everywhere else in this file) -- no existing
+    // PortfolioObjective type represents "sell a covered call here" yet, so
+    // this reuses the lifecycle classifier's own `.shares` field rather than
+    // fabricating a new one.
+    const coveredCallOpportunities: CoveredCallOpportunityInput[] = positions.reduce<CoveredCallOpportunityInput[]>((acc, p) => {
+      const lifecycle = classifyPositionLifecycle(p);
+      if (lifecycle.type === 'ASSIGNED_STOCK') acc.push({ key: p.key, symbol: p.symbol, shares: lifecycle.shares });
+      return acc;
+    }, []);
+
+    return {
+      objectives,
+      positions: positionInputsForDashboard,
+      decisionReviews,
+      openPositionIds: positions.map(p => p.key),
+      coveredCallOpportunities,
+      // V1 scope: no persisted Screener scan output exists anywhere to reuse
+      // (Screener runs a live-only scan) -- an honest `false` rather than
+      // triggering or duplicating that scan here.
+      screenerCandidatesAvailable: false,
+    };
+  }, [positions, canonicalPriorities, decisionReviews]);
+
+  const todaysPrioritiesDashboard = useMemo(
+    () => buildTodaysPrioritiesDashboard(todaysPrioritiesInput),
+    [todaysPrioritiesInput],
+  );
+
+  // PI-0011A: Mission Control's Top Priority section -- the single highest
+  // Priority Score entry across the dashboard above, already sorted per
+  // bucket; selectTopPriority() just takes the max of already-sorted heads.
+  const topPriority = useMemo(() => selectTopPriority(todaysPrioritiesDashboard), [todaysPrioritiesDashboard]);
+
+  // PI-0011B: Portfolio Health Engine input -- every field here is a value
+  // this page already has or already computes elsewhere:
+  //   - immediateActionsCount / decisionReviewsNeedingFollowUpCount come
+  //     straight off todaysPrioritiesDashboard (PI-0010A/B), zero new work.
+  //   - criticalPositionsCount/earningsExposedPositionsCount/averagePosition
+  //     Health/averageDecisionConfidence are derived from the same full,
+  //     unfiltered per-position objective list (positions[].portfolioObjective)
+  //     the Today's Priorities dashboard input already uses.
+  //   - buyingPowerUsedPct/cashBalance/netLiquidity come straight off the
+  //     same `balances` (PortfolioFinancialContext) state already fetched
+  //     for canonicalPriorities above -- no new balance fetch.
+  //   - maxSymbolConcentrationPct reuses derivePositionConcentration(), the
+  //     exact same pure function computeCanonicalPortfolioPriorities already
+  //     calls internally, over the same positionsForConcentration shape
+  //     built the same way as in the canonicalPriorities effect above.
+  // PI-0013: lifted out of healthInput's useMemo below so this single
+  // reduction has exactly one call site -- healthInput and the new
+  // dailyBriefingInput (see below) both read this same value rather than
+  // each computing their own copy of "average position health."
+  const averagePositionHealth = useMemo(() => {
+    const positionHealthScores = positions
+      .map(p => p.healthScore?.score)
+      .filter((s): s is number => s != null);
+    return positionHealthScores.length > 0
+      ? positionHealthScores.reduce((sum, s) => sum + s, 0) / positionHealthScores.length
+      : null;
+  }, [positions]);
+
+  const healthInput: PortfolioHealthInput = useMemo(() => {
+    const positionObjectives = positions
+      .map(p => p.portfolioObjective)
+      .filter((o): o is PortfolioObjective => o != null);
+
+    const criticalPositionKeys = new Set(
+      positions.filter(p => p.portfolioObjective?.priority === 'critical').map(p => p.key),
+    );
+    const earningsExposedPositionsCount = positions.filter(
+      p => p.portfolioObjective?.reviewTriggers.some(t => t.triggerType === 'earnings'),
+    ).length;
+
+    const confidences = positionObjectives.map(o => o.confidence);
+    const averageDecisionConfidence = confidences.length > 0
+      ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
+      : null;
+
+    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({
+      symbol: p.symbol,
+      maxRisk: p.maxRisk,
+      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
+    }));
+    const concentrationBySymbol = derivePositionConcentration(positionsForConcentration, balances?.netLiquidity);
+    const concentrationValues = Object.values(concentrationBySymbol);
+    const maxSymbolConcentrationPct = concentrationValues.length > 0 ? Math.max(...concentrationValues) : null;
+
+    return {
+      immediateActionsCount: todaysPrioritiesDashboard.immediateAction.length,
+      criticalPositionsCount: criticalPositionKeys.size,
+      totalPositionsCount: positions.length,
+      earningsExposedPositionsCount,
+      buyingPowerUsedPct: balances?.buyingPowerUsedPct ?? null,
+      cashBalance: balances?.cashBalance ?? null,
+      netLiquidity: balances?.netLiquidity ?? null,
+      maxSymbolConcentrationPct,
+      averagePositionHealth,
+      averageDecisionConfidence,
+      decisionReviewsNeedingFollowUpCount: todaysPrioritiesDashboard.reviewToday.needsFollowUp.length,
+    };
+  }, [positions, balances, todaysPrioritiesDashboard, averagePositionHealth]);
+
+  const portfolioHealth = useMemo(() => calculatePortfolioHealthScore(healthInput), [healthInput]);
+
+  // PI-0012A: Portfolio Review, Phase 1 -- composes portfolioHealth (above,
+  // reused verbatim), canonicalPriorities.objectives (portfolio-level
+  // concentration/buying-power/idle-cash/income objectives, reused
+  // unfiltered -- buildPortfolioReview() filters by `type` itself),
+  // todaysPrioritiesDashboard (already-scored/sorted, for Top Risks), and a
+  // lean per-position shape for composition/concentration/Wheel-managed
+  // aggregation. positionStrategy stays null for every real position (same
+  // "no data source yet" limitation already documented on the
+  // canonicalPriorities effect above) -- assignmentPreference reuses the
+  // exact same deriveAssignmentPreferenceFromIntent(p.intent) call this file
+  // already makes in two other places. No new fetch, no new Portfolio
+  // Intelligence or Decision Engine call.
+  const portfolioReviewInput: PortfolioReviewInput = useMemo(() => {
+    const reviewPositions: PortfolioReviewPositionInput[] = positions.map(p => ({
+      symbol: p.symbol,
+      strategy: p.strategy,
+      maxRisk: p.maxRisk ?? null,
+      positionStrategy: null,
+      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
+    }));
+
+    return {
+      health: portfolioHealth,
+      objectives: canonicalPriorities?.objectives ?? [],
+      dashboard: todaysPrioritiesDashboard,
+      positions: reviewPositions,
+      netLiquidity: balances?.netLiquidity ?? null,
+    };
+  }, [positions, portfolioHealth, canonicalPriorities, todaysPrioritiesDashboard, balances]);
+
+  const portfolioReview = useMemo(
+    () => (positions.length === 0 && pendingOrders.length === 0 && !canonicalPriorities ? null : buildPortfolioReview(portfolioReviewInput)),
+    [portfolioReviewInput, positions, pendingOrders, canonicalPriorities],
+  );
+
+  // PI-0013: Daily Briefing Dashboard -- composes portfolioReview (above,
+  // reused verbatim: Portfolio Health, Top Risks, concentration/capital
+  // concerns), todaysPrioritiesDashboard (reused verbatim: DTE/earnings/
+  // follow-up buckets for Upcoming Events, opportunity buckets for
+  // Opportunity Summary, Immediate Action for Risk Summary),
+  // canonicalPriorities.objectives (consulted only for the existing
+  // OBJ-ASSIGNMENT-RISK ruleId tag), and averagePositionHealth/
+  // balances.buyingPowerUsedPct (both already computed above for Portfolio
+  // Health -- passed through, never recomputed). No new fetch, no new
+  // Portfolio Intelligence/Decision Engine call, no AI.
+  const dailyBriefingInput: DailyBriefingInput | null = useMemo(() => {
+    if (!portfolioReview) return null;
+    return {
+      portfolioReview,
+      dashboard: todaysPrioritiesDashboard,
+      objectives: canonicalPriorities?.objectives ?? [],
+      averagePositionHealth,
+      capitalDeploymentPct: balances?.buyingPowerUsedPct ?? null,
+    };
+  }, [portfolioReview, todaysPrioritiesDashboard, canonicalPriorities, averagePositionHealth, balances]);
+
+  const dailyBriefing = useMemo(
+    () => (dailyBriefingInput ? buildDailyBriefing(dailyBriefingInput) : null),
+    [dailyBriefingInput],
+  );
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
@@ -9712,11 +10200,17 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
+            { key: 'mission-control', label: 'Mission Control', icon: '◎' },
+            { key: 'today', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
-            { key: 'priorities', label: "Today's Priorities", icon: '⚑' },
+            // PI-0010A: relabeled from "Today's Priorities" (now the new
+            // 'today' tab's name) to disambiguate -- same component
+            // (TodaysPrioritiesWorkflow), same data, unchanged otherwise.
+            { key: 'priorities', label: 'Priority List', icon: '⚑' },
+            { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'briefing' | 'positions' | 'priorities' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9731,6 +10225,35 @@ export default function PortfolioPage() {
       </div>
 
       {activeTab === 'balances' && <BalancesTab />}
+
+      {/* PI-0011A: Portfolio Mission Control -- the new default subpage,
+          superseding 'today'. Orchestrates canonicalPriorities.objectives
+          (Portfolio Summary, reusing the Briefing tab's own derivation
+          function), todaysPrioritiesDashboard (Today's Work Queue, reused
+          wholesale), topPriority (selectTopPriority's output), and
+          portfolioHealth (PI-0011B's score) into one landing view. No new
+          computation happens in MissionControl.tsx itself -- see its own
+          module doc. */}
+      {activeTab === 'mission-control' && (
+        <MissionControl
+          objectives={canonicalPriorities?.objectives ?? null}
+          dashboard={todaysPrioritiesDashboard}
+          topPriority={topPriority}
+          health={portfolioHealth}
+          loading={loading}
+          th={th}
+        />
+      )}
+
+      {/* PI-0010A: Today's Priorities Dashboard -- still its own subpage,
+          reachable as a detailed drill-down. Pure orchestration over state
+          this page already computes; see todaysPrioritiesInput above for
+          exactly which existing outputs feed each of the four sections. */}
+      {activeTab === 'today' && (
+        <div className="p-6">
+          <TodaysPrioritiesDashboard dashboard={todaysPrioritiesDashboard} th={th} />
+        </div>
+      )}
 
       {/* PI-0004D: Daily Portfolio Briefing -- the default subpage. Consumes
           the exact same canonicalPriorities state computed above; no new
@@ -9748,6 +10271,25 @@ export default function PortfolioPage() {
           Positions. */}
       {activeTab === 'priorities' && (
         <TodaysPrioritiesWorkflow objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+      )}
+
+      {/* PI-0008C: Decision History -- ticket #6's basic Portfolio subpage
+          listing every saved Decision Review with simple status/follow
+          filters. No charts or analytics; renders decisionReviews as-is. */}
+      {activeTab === 'history' && (
+        <div className="p-6">
+          {/* PI-0008D: current open-position ids, so Decision History can
+              flag Pending reviews whose position has since closed. Derived
+              directly from the same `positions` state every other tab
+              already renders from -- no new fetch. */}
+          <DecisionHistoryView
+            reviews={decisionReviews}
+            openPositionIds={positions.map(p => p.key)}
+            closedTrades={closedTradesForOutcomeAnalysis}
+            snapshotStore={lifecycleSnapshots}
+            th={th}
+          />
+        </div>
       )}
 
       {activeTab === 'positions' && (<>
@@ -9771,6 +10313,21 @@ export default function PortfolioPage() {
       )}
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
+
+      {/* PI-0013: Daily Briefing Dashboard -- first card on the Portfolio
+          page, above Portfolio Review and the position list. Renders
+          lib/dailyBriefing's already-composed briefing; computes nothing
+          itself. */}
+      <div className="px-6 pt-4">
+        <DailyBriefingCard briefing={dailyBriefing} loading={loading} th={th} />
+      </div>
+
+      {/* PI-0012A: Portfolio Review, Phase 1 -- above the position list.
+          Renders lib/portfolioReview's already-composed snapshot; computes
+          nothing itself. */}
+      <div className="px-6">
+        <PortfolioReviewCard review={portfolioReview} loading={loading} th={th} />
+      </div>
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex items-center justify-center h-64">
@@ -9814,6 +10371,7 @@ export default function PortfolioPage() {
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
+                        decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                       />
                     )}
                   </>

@@ -14,6 +14,7 @@
 // portfolio-intelligence must never import from lib/autopilot.
 
 import type { DecisionAnalysis, EvidenceTone } from '@/lib/decision-engine';
+import type { ManagementIntentResult } from './managementIntent';
 
 // ---------------------------------------------------------------------------
 // PortfolioObjective contract
@@ -191,6 +192,12 @@ export interface PortfolioObjective {
   // linking to the highest-ranked candidate analysis is explicitly future
   // work (see plan doc), not implemented here.
   linkedDecisionAnalysis?: DecisionAnalysis;
+  // PI-0006B: the canonical intent-selection result behind `title` -- see
+  // lib/portfolio-intelligence/managementIntent.ts. Optional so existing
+  // fixtures/producers that don't yet set it (REDUCE_CONCENTRATION,
+  // PRESERVE_BUYING_POWER, INCREASE_INCOME, WAIT -- none of which are part
+  // of the ticket's canonical management-intent vocabulary) remain valid.
+  managementIntent?: ManagementIntentResult;
   metadata: {
     executionAllowed: false;
     paperExecutionAllowed: false;
