@@ -223,3 +223,164 @@ describe('PI-0014 supplementary: marketable pricing vetoes a false profit target
     expect(legacyRecommendation.supportingReasons[0]).toMatch(/Executable pricing is materially worse than mid/);
   });
 });
+
+// PI-0014 corrective closeout (3.2): missing marketable execution data must
+// preserve mid-only behavior exactly -- this is the real production
+// contract from app/portfolio/page.tsx's computeMarketablePnlPct()/
+// computeRawPositionValuation(): when pos.closeValue/pos.closeNowPnl are
+// unavailable (any leg one-sided, or a quote invalid -- see
+// hasCloseValue/oneSidedSymbols in that file), both are null, and null
+// flows straight into these inputs. No fabricated promotion, veto, or
+// trigger may result from that absence.
+//
+// Scope note (3.3): the leg-level quote-validity guard itself (rejecting
+// zero/negative/one-sided bid/ask quotes before closeValue is ever
+// computed) lives in app/portfolio/page.tsx, is pre-existing and untouched
+// by PI-0014, and is not exported for isolated unit testing -- duplicating
+// its bid/ask-direction logic here would mean testing a hand-rolled copy
+// instead of the real thing, which was explicitly out of scope for this
+// closeout. What IS verified here, directly, is the safety property that
+// actually matters regardless of *why* marketable data is unavailable
+// (missing vs. withheld upstream for an invalid quote): the Decision
+// Engine must fall back to mid-only behavior with zero fabrication.
+describe('PI-0014 corrective closeout: missing/invalid marketable data preserves mid-only behavior', () => {
+  it('a materially losing position on mid alone still triggers Cut Losses when marketable data is absent', () => {
+    const result = evaluatePositionObjective(
+      {
+        positionId: 'fixture-missing-1',
+        symbol: 'TEST',
+        strategy: 'BPS',
+        dte: 20,
+        buffer: 8,
+        hasGtc: true,
+        creditReceived: 500,
+        pnlPct: -150, // mid alone already breaches materialLossPct (-100)
+        marketablePnlPct: null,
+        liquidityTier: null,
+      },
+      NOW,
+    );
+    expect(result.legacyRecommendation.kind).toBe('close-loser');
+    expect(result.executionRealityPromoted).toBe(false);
+    expect(result.liquidityTrapTriggered).toBe(false);
+    expect(result.legacyRecommendation.supportingReasons.some((r) => r.includes('Executable pricing'))).toBe(false);
+  });
+
+  it('a comfortable mid position stays on hold when marketable data is absent -- no fabricated promotion', () => {
+    const result = evaluatePositionObjective(
+      {
+        positionId: 'fixture-missing-2',
+        symbol: 'TEST',
+        strategy: 'BCS',
+        dte: 30,
+        buffer: 15,
+        hasGtc: true,
+        creditReceived: 400,
+        pnlPct: 20, // comfortable, unremarkable
+        marketablePnlPct: null,
+        liquidityTier: null,
+      },
+      NOW,
+    );
+    expect(result.legacyRecommendation.kind).toBe('hold');
+    expect(result.executionRealityPromoted).toBe(false);
+    expect(result.liquidityTrapTriggered).toBe(false);
+  });
+
+  it('a real mid profit target still fires Take Profit when marketable data is absent -- no fabricated veto', () => {
+    const result = evaluatePositionObjective(
+      {
+        positionId: 'fixture-missing-3',
+        symbol: 'TEST',
+        strategy: 'BCS',
+        dte: 20,
+        buffer: 10,
+        hasGtc: true,
+        creditReceived: 600,
+        pnlPct: 53.3, // mid alone reaches the 50% target
+        marketablePnlPct: null,
+        liquidityTier: null,
+      },
+      NOW,
+    );
+    expect(result.legacyRecommendation.kind).toBe('close-winner');
+    expect(result.executionRealityPromoted).toBe(false);
+  });
+
+  it('undefined marketablePnlPct/liquidityTier (fields omitted entirely) behaves identically to explicit null', () => {
+    const withNull = evaluatePositionObjective(
+      {
+        positionId: 'fixture-missing-4a',
+        symbol: 'TEST',
+        strategy: 'PUT',
+        dte: 25,
+        buffer: 10,
+        hasGtc: true,
+        creditReceived: 300,
+        pnlPct: 33,
+        marketablePnlPct: null,
+        liquidityTier: null,
+      },
+      NOW,
+    );
+    const withOmitted = evaluatePositionObjective(
+      {
+        positionId: 'fixture-missing-4b',
+        symbol: 'TEST',
+        strategy: 'PUT',
+        dte: 25,
+        buffer: 10,
+        hasGtc: true,
+        creditReceived: 300,
+        pnlPct: 33,
+      },
+      NOW,
+    );
+    expect(withOmitted.legacyRecommendation.kind).toBe(withNull.legacyRecommendation.kind);
+    expect(withOmitted.executionRealityPromoted).toBe(withNull.executionRealityPromoted);
+    expect(withOmitted.liquidityTrapTriggered).toBe(withNull.liquidityTrapTriggered);
+  });
+});
+
+// PI-0014 corrective closeout (3.4 follow-through): a position can have
+// perfectly valid, usable marketablePnlPct evidence while its liquidityTier
+// is unknown (maxRisk missing/zero/negative) -- these are independent
+// pieces of evidence. The material-loss/weak-health-loss/profit-target-veto
+// gates must keep working from marketablePnlPct alone; only
+// liquidityTrapTriggered (which requires liquidityTier === 'LIQUIDITY_TRAP'
+// specifically) should read false when the tier itself is unknown.
+describe('PI-0014 corrective closeout: marketable evidence still gates when liquidityTier is unknown', () => {
+  it('promotes Cut Losses from marketable evidence alone even when liquidityTier is null (unknown maxRisk)', () => {
+    // Mirrors fixture 1's real SMH-shaped numbers, but with maxRisk missing
+    // -- computePositionValuation now classifies liquidityTier as null,
+    // not LIQUIDITY_TRAP, per the corrected classifier.
+    const valuation = computePositionValuation({
+      creditReceived: 500,
+      midValue: 629,
+      marketableValue: 1124,
+      maxRisk: null,
+    });
+    expect(valuation.liquidityTier).toBeNull();
+
+    const result = evaluatePositionObjective(
+      {
+        positionId: 'fixture-unknown-tier-1',
+        symbol: 'TEST',
+        strategy: 'BPS',
+        dte: 20,
+        buffer: 8,
+        hasGtc: true,
+        creditReceived: 500,
+        pnlPct: pctOf(500, 629),
+        marketablePnlPct: pctOf(500, 1124),
+        liquidityTier: valuation.liquidityTier,
+      },
+      NOW,
+    );
+    expect(result.legacyRecommendation.kind).toBe('close-loser');
+    expect(result.executionRealityPromoted).toBe(true);
+    // Correctly false: the gate that fired is materialLoss (from
+    // marketablePnlPct), not the liquidity-trap tier, which is unknown here.
+    expect(result.liquidityTrapTriggered).toBe(false);
+  });
+});

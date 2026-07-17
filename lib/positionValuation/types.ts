@@ -38,7 +38,18 @@ export interface PositionValuation {
   // balancesNormalization.ts already uses for its own percentage fields).
   slippagePercentOfMaxRisk: number;
 
-  liquidityTier: LiquidityTier;
+  // PI-0014 corrective closeout: null when maxRisk is missing, zero, or
+  // negative -- classification requires a valid denominator to mean
+  // anything. Deliberately NOT defaulted to 'LIQUID': a missing/invalid
+  // maxRisk is an absence of risk information, not evidence of a tight
+  // spread, and reporting 'LIQUID' in that case would be a falsely
+  // reassuring reading. Callers (see positionObjective.ts) already treat
+  // liquidityTier as optional/nullable -- this only tightens what null
+  // means (now includes "denominator unusable," not just "not supplied").
+  // Marketable P&L evidence (marketablePnlPct) is unaffected by this and
+  // continues to participate in materialLoss/weakHealthLoss/
+  // profitTargetReached regardless of whether the tier itself is known.
+  liquidityTier: LiquidityTier | null;
 }
 
 // Raw inputs a caller already has on hand -- creditReceived (positive,

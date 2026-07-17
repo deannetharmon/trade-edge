@@ -8,7 +8,14 @@
 
 import { LIQUIDITY_TIER_THRESHOLDS, type LiquidityTier, type PositionValuation, type PositionValuationInput } from './types';
 
-function classifyLiquidityTier(slippagePercentOfMaxRisk: number): LiquidityTier {
+// PI-0014 corrective closeout: hasValidMaxRisk gates classification itself,
+// not just the ratio feeding it. A missing/zero/negative maxRisk means the
+// denominator is unusable -- that is an absence of risk information, not
+// evidence of a tight spread, so it must not silently read as 'LIQUID'
+// (the best tier). Returns null (unknown) rather than inventing a
+// dollar-based fallback threshold.
+function classifyLiquidityTier(slippagePercentOfMaxRisk: number, hasValidMaxRisk: boolean): LiquidityTier | null {
+  if (!hasValidMaxRisk) return null;
   if (slippagePercentOfMaxRisk > LIQUIDITY_TIER_THRESHOLDS.liquidityTrapAt) return 'LIQUIDITY_TRAP';
   if (slippagePercentOfMaxRisk > LIQUIDITY_TIER_THRESHOLDS.wideSpreadAt) return 'WIDE_SPREAD';
   return 'LIQUID';
@@ -29,8 +36,13 @@ export function computePositionValuation(input: PositionValuationInput): Positio
   // uncommon edge case), there is no slippage cost to report, not a negative
   // one.
   const slippageCost = Math.max(0, midPnL - marketablePnL);
-  const slippagePercentOfMaxRisk = maxRisk != null && maxRisk > 0 ? slippageCost / maxRisk : 0;
-  const liquidityTier = classifyLiquidityTier(slippagePercentOfMaxRisk);
+  const hasValidMaxRisk = maxRisk != null && maxRisk > 0;
+  // slippagePercentOfMaxRisk itself stays 0 (never a divide-by-zero, never
+  // fabricated) when maxRisk is unusable -- unchanged from the original
+  // implementation. Only the tier classification derived from it (below)
+  // was corrected to distinguish "known to be tight" from "unknown."
+  const slippagePercentOfMaxRisk = hasValidMaxRisk ? slippageCost / maxRisk : 0;
+  const liquidityTier = classifyLiquidityTier(slippagePercentOfMaxRisk, hasValidMaxRisk);
 
   return { midValue, midPnL, marketableValue, marketablePnL, slippageCost, slippagePercentOfMaxRisk, liquidityTier };
 }

@@ -1,7 +1,8 @@
 # PI-0014 — Marketable Pricing for Risk-Gating (Phase 1) — Implementation Report
 
 Branch: `feature/marketable-pricing` (moved off `main` after the Process Note below; `main` was reset to match `origin/main`)
-Commit: `2d0aeb8` (amended once for the branch fix), plus one follow-up commit for the Product Owner's required refactor (see Addendum below)
+Commits: `2d0aeb8` (amended once for the branch fix), `88fa012` (Product Owner's required refactor — see Addendum below), plus one further corrective-closeout commit pending Dean's push (see Corrective Closeout Addendum at the end of this report)
+Status: **Pending Product Owner acceptance.** Not merged into `main`.
 
 ## Process Note — read before anything else
 
@@ -130,3 +131,71 @@ All 45 test files in the repo (30 in `lib/`, 15 in `features/`) were run this se
 - **Phase 5** — health scoring gains liquidity as an independent, additional dimension (e.g. `Health: 82, Execution: Dangerous, Liquidity: Poor`) rather than replacing the existing score.
 - Surfacing `PositionValuation` in the UI itself (a liquidity badge, an "if I closed now" secondary P/L figure) — the data now exists on every position; only the display is deferred.
 - Adding the Execution Reality Principle to `planning/DECISION_ENGINE_CONSTITUTION.md` — discussed during the external review rounds but not yet written into that file; a natural, low-risk follow-on.
+
+## Corrective Closeout Addendum
+
+Between the Product Owner's refactor (previous Addendum) and this pass, `feature/marketable-pricing` was unintentionally lost from all reachable Git refs during an unrelated `main` reset in a later session — recovered from dangling commits via `git fsck` and re-anchored to a new `feature/marketable-pricing` branch pointer at `88fa012` (the refactor commit). A pre-merge architecture review of the recovered branch then found real gaps, which this Corrective Closeout sprint fixes. `main` and `origin/main` were unaffected throughout (confirmed at `9dc98e0` before and after).
+
+### Branch/commit topology before this corrective commit
+
+- `main` / `origin/main`: `9dc98e0`, clean, unchanged.
+- `feature/marketable-pricing`: `88fa012` (two commits ahead of `main` — `2d0aeb8`, `88fa012`), recovered but not yet pushed to `origin` at the start of this pass.
+- `feature/autopilot`: untouched throughout.
+
+### Corrections made
+
+1. **Documentation drift.** The design doc's "Object shape" section and this report's earlier text were consistent with the refactor, but `docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md`'s scope-list bullet and `docs/HANDOFF.md`'s "Key files to know" entry still described the pre-refactor shape — `liquidityTrapTriggered` as part of `PositionValuation`, and a nonexistent `attachLiquidityTrapTrigger()` export. Both corrected to state plainly: `PositionValuation` is observational only and exports nothing but `computePositionValuation()`; `liquidityTrapTriggered`/`executionRealityPromoted` live on `PositionObjectiveResult` in the Decision Engine. `docs/HANDOFF.md`'s git-state section, ticket-history bullet, and loose-ends list were also updated to reflect the recovery/corrective-closeout history and current pending-acceptance status (items #20 and #21 are new).
+2. **Missing-marketable-data fallback coverage.** Added four new tests to `pi0014MarketablePricingFixtures.test.ts` proving `evaluatePositionObjective()` falls back cleanly to mid-only behavior when `marketablePnlPct`/`liquidityTier` are `null` or omitted: a materially-losing-on-mid position still triggers Cut Losses, a comfortable mid position still holds, a real mid profit target still fires Take Profit (no fabricated veto), and explicit-`null` behaves identically to the fields being omitted entirely.
+3. **Invalid-quote coverage — with a disclosed scope boundary.** The leg-level bid/ask quote-validity guard (rejecting zero/negative/one-sided quotes before `closeValue` is ever computed) lives in `app/portfolio/page.tsx`, is pre-existing, untouched by PI-0014, and is not exported for isolated unit testing; duplicating its direction logic inside a test was explicitly out of scope and was avoided. Instead, added a test proving the safety property that actually matters regardless of *why* marketable data is unavailable: `evaluatePositionObjective()` and `computePositionValuation()` never fabricate promotion, veto, or a liquidity-trap trigger when marketable evidence is absent — the same fallback coverage as item 2 above, which is agnostic to whether the absence came from a missing quote or an invalid one. This is a disclosed testing limitation, not a claim of full leg-level coverage.
+4. **Unknown-liquidity classification.** `computePositionValuation()` previously classified missing/zero/negative `maxRisk` as `'LIQUID'` (the best tier) because `slippagePercentOfMaxRisk` defaulted to 0. Corrected: `PositionValuation.liquidityTier` is now `LiquidityTier | null`, and `classifyLiquidityTier()` returns `null` (unknown) whenever `maxRisk` is unusable, rather than defaulting to a falsely reassuring reading. The 5%/15% thresholds are unchanged for valid `maxRisk` (regression-tested). `marketablePnlPct`-driven gates (`materialLoss`/`weakHealthLoss`/profit-target veto) are unaffected by `liquidityTier` and continue to fire correctly even when the tier is unknown — only `liquidityTrapTriggered` (which specifically requires `liquidityTier === 'LIQUIDITY_TRAP'`) reads `false` in that case, which is correct: the tier truly is unknown, not confirmed non-trap.
+5. **Generated artifact removed from branch diff.** `tsconfig.tsbuildinfo` (a build cache file, not source) was part of the original recovered diff; restored to `main`'s exact content so it carries no diff. Note: running `tsc`/`vitest`/`next build` during this session's validation regenerated the file as a side effect a second time; it was restored again immediately afterward and reconfirmed byte-identical to `main` (via `git hash-object` / `git rev-parse main:tsconfig.tsbuildinfo`) before this addendum was written. Dean should verify this is still true (`git diff main -- tsconfig.tsbuildinfo` should be empty) before committing, since any local `tsc`/build run between now and the commit could regenerate it again.
+6. **Operational documentation reconciled.** `planning/SPRINT_STATUS.md` updated: PI-0013 remains the last capability merged into `main`; PI-0014 is recorded as recovered and corrected on `feature/marketable-pricing`, pending Product Owner acceptance and merge (explicitly not stated as merged, and explicitly not stated as "no active sprint"); no PI-0015 or other next sprint is selected or recommended.
+
+### Files changed by this corrective pass
+
+- `docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md` — object-shape correction, scope-note correction, testing-section addendum.
+- `docs/HANDOFF.md` — key-files correction, git-state section rewrite, PI-0014 ticket-history bullet updated, two new loose-end items.
+- `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` — this addendum.
+- `planning/SPRINT_STATUS.md` — current-state, repository-state, validation-baseline, and next-sprint-gate sections updated.
+- `lib/positionValuation/types.ts` — `PositionValuation.liquidityTier` is now `LiquidityTier | null`; doc comments updated.
+- `lib/positionValuation/computePositionValuation.ts` — `classifyLiquidityTier()` takes a `hasValidMaxRisk` flag and returns `null` instead of defaulting to `'LIQUID'`.
+- `lib/positionValuation/__tests__/computePositionValuation.test.ts` — updated the existing missing/zero/negative-`maxRisk` test to drop its now-incorrect `'LIQUID'` assertion; added four new tests (null-tier on missing/zero/negative `maxRisk`, and a regression guard confirming valid-`maxRisk` thresholds are unchanged).
+- `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts` — added two new `describe` blocks (four missing-data-fallback tests, one unknown-liquidity-still-gates test).
+- `tsconfig.tsbuildinfo` — restored to `main`'s content (no functional diff).
+
+No changes to `app/portfolio/page.tsx` or `lib/portfolio-intelligence/objectives/positionObjective.ts` were needed for these corrections — both already treated `liquidityTier`/`marketablePnlPct` as nullable/optional, so the type tightening in `lib/positionValuation` required no downstream code changes.
+
+### Architecture verification (re-confirmed after this pass)
+
+`PositionValuation` remains pure, deterministic, and free of recommendation policy — `computePositionValuation()` is still the module's only exported function, and the `liquidityTier` correction only changes what a missing denominator produces (`null` instead of a wrong best-case label), not the module's responsibilities. `evaluatePositionObjective()` remains the sole owner of `executionRealityPromoted`/`liquidityTrapTriggered`. Mid pricing remains authoritative for analytics; marketable pricing remains scoped to the four approved execution-sensitive gates. No new recommendation rules, risk gates, scoring models, or UI were added.
+
+### Targeted-test results
+
+`lib/positionValuation` + `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts`: **2 files, 31 tests, all passing** (13 unit tests, up from 10 pre-closeout; 18 fixture tests, up from 13 pre-closeout).
+
+### Full-suite results
+
+All 45 test files in the repository, run in six batches (per this sandbox's per-command time budget — background processes do not persist across separate tool invocations here, confirmed empirically this session): **643 tests, 0 failures.** Includes `lib/autopilot`'s own 65 tests (untouched, confirming `feature/autopilot`'s isolation held), and the full, unmodified `lib/portfolio-intelligence` suite (210 tests including the corrected fixture file) and every `features/portfolio/*` component-test directory (166 tests across three batches).
+
+### TypeScript result
+
+`npx tsc --noEmit` — clean, exit 0, run once.
+
+### Production-build result
+
+`npx next build`, capped at 40 seconds (the maximum single bounded observation available in this sandbox): hung at the initial Next.js banner ("▲ Next.js 14.2.35 / Environments: .env.local") with no further progress, exit via `timeout` (124). This matches the identical, previously-documented limitation from every prior PI ticket in `docs/HANDOFF.md` (PI-0006A, the CSP ticket, UX Polish, PI-0012A, and PI-0014's own original pass) and is not treated as a regression given `tsc --noEmit` is clean and all 643 tests pass. Not investigated further, per the sprint's five-minute/no-further-investigation rule. **Vercel's build remains the authoritative check.**
+
+### Confirmations
+
+- `tsconfig.tsbuildinfo` is confirmed absent from the meaningful branch diff — its working-tree content is byte-identical to `main`'s (verified via `git hash-object` matching `git rev-parse main:tsconfig.tsbuildinfo`) immediately before this addendum was finalized.
+- `feature/autopilot` was not referenced, checked out, modified, merged, rebased, or pushed at any point in this pass.
+- `main`/`origin/main` remained at `9dc98e0`, unchanged, throughout.
+- No paper execution, live execution, order submission, new recommendation rule, new risk gate, or UI surface was added. This pass was strictly corrective (documentation accuracy, test coverage, one classification-safety fix, one generated-file cleanup).
+- Nothing was staged, committed, or pushed by the Implementation Engineer this pass, per explicit instruction — see this report's final section for the commands recommended for Dean to run from his own Terminal.
+
+### Known follow-ups not included in this sprint
+
+- Everything listed under "Deferred Enhancements" above (Phases 2–5, UI surfacing, Decision Engine Constitution update) remains deferred and out of scope.
+- `lib/autopilot`'s own risk-gate engines still read mid pricing only — a real, related gap, previously flagged, not part of this or the original PI-0014 scope.
+- Full leg-level bid/ask quote-validity testing (zero/negative/one-sided quotes at the point `closeValue` is constructed in `app/portfolio/page.tsx`) remains untested in isolation, since that logic is pre-existing, unexported, and out of scope to refactor for testability this pass. The downstream safety property (no fabrication when marketable data is absent) is covered; the upstream leg-level guard itself is not independently unit-tested.
+- The stale `.git/index.lock` / unlink-on-tracked-files behavior of this mounted folder (documented in `docs/HANDOFF.md` loose-end #21) remains an environment characteristic to work around, not something resolved this pass.
