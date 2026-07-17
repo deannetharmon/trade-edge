@@ -58,6 +58,13 @@ import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
 import { buildPortfolioReview } from '@/lib/portfolioReview';
 import type { PortfolioReviewInput, PortfolioReviewPositionInput } from '@/lib/portfolioReview';
 import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReviewCard';
+// PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
+// Review (above) and Today's Priorities' dashboard. No new score, no new
+// ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
+// module docs and docs/reviews/PI-0013-Daily-Briefing-Implementation-Report.md.
+import { buildDailyBriefing } from '@/lib/dailyBriefing';
+import type { DailyBriefingInput } from '@/lib/dailyBriefing';
+import { DailyBriefingCard } from '@/features/portfolio/dailyBriefing/DailyBriefingCard';
 
 
 // Inject accent CSS variable style
@@ -9859,6 +9866,19 @@ export default function PortfolioPage() {
   //     exact same pure function computeCanonicalPortfolioPriorities already
   //     calls internally, over the same positionsForConcentration shape
   //     built the same way as in the canonicalPriorities effect above.
+  // PI-0013: lifted out of healthInput's useMemo below so this single
+  // reduction has exactly one call site -- healthInput and the new
+  // dailyBriefingInput (see below) both read this same value rather than
+  // each computing their own copy of "average position health."
+  const averagePositionHealth = useMemo(() => {
+    const positionHealthScores = positions
+      .map(p => p.healthScore?.score)
+      .filter((s): s is number => s != null);
+    return positionHealthScores.length > 0
+      ? positionHealthScores.reduce((sum, s) => sum + s, 0) / positionHealthScores.length
+      : null;
+  }, [positions]);
+
   const healthInput: PortfolioHealthInput = useMemo(() => {
     const positionObjectives = positions
       .map(p => p.portfolioObjective)
@@ -9870,13 +9890,6 @@ export default function PortfolioPage() {
     const earningsExposedPositionsCount = positions.filter(
       p => p.portfolioObjective?.reviewTriggers.some(t => t.triggerType === 'earnings'),
     ).length;
-
-    const positionHealthScores = positions
-      .map(p => p.healthScore?.score)
-      .filter((s): s is number => s != null);
-    const averagePositionHealth = positionHealthScores.length > 0
-      ? positionHealthScores.reduce((sum, s) => sum + s, 0) / positionHealthScores.length
-      : null;
 
     const confidences = positionObjectives.map(o => o.confidence);
     const averageDecisionConfidence = confidences.length > 0
@@ -9905,7 +9918,7 @@ export default function PortfolioPage() {
       averageDecisionConfidence,
       decisionReviewsNeedingFollowUpCount: todaysPrioritiesDashboard.reviewToday.needsFollowUp.length,
     };
-  }, [positions, balances, todaysPrioritiesDashboard]);
+  }, [positions, balances, todaysPrioritiesDashboard, averagePositionHealth]);
 
   const portfolioHealth = useMemo(() => calculatePortfolioHealthScore(healthInput), [healthInput]);
 
@@ -9942,6 +9955,32 @@ export default function PortfolioPage() {
   const portfolioReview = useMemo(
     () => (positions.length === 0 && pendingOrders.length === 0 && !canonicalPriorities ? null : buildPortfolioReview(portfolioReviewInput)),
     [portfolioReviewInput, positions, pendingOrders, canonicalPriorities],
+  );
+
+  // PI-0013: Daily Briefing Dashboard -- composes portfolioReview (above,
+  // reused verbatim: Portfolio Health, Top Risks, concentration/capital
+  // concerns), todaysPrioritiesDashboard (reused verbatim: DTE/earnings/
+  // follow-up buckets for Upcoming Events, opportunity buckets for
+  // Opportunity Summary, Immediate Action for Risk Summary),
+  // canonicalPriorities.objectives (consulted only for the existing
+  // OBJ-ASSIGNMENT-RISK ruleId tag), and averagePositionHealth/
+  // balances.buyingPowerUsedPct (both already computed above for Portfolio
+  // Health -- passed through, never recomputed). No new fetch, no new
+  // Portfolio Intelligence/Decision Engine call, no AI.
+  const dailyBriefingInput: DailyBriefingInput | null = useMemo(() => {
+    if (!portfolioReview) return null;
+    return {
+      portfolioReview,
+      dashboard: todaysPrioritiesDashboard,
+      objectives: canonicalPriorities?.objectives ?? [],
+      averagePositionHealth,
+      capitalDeploymentPct: balances?.buyingPowerUsedPct ?? null,
+    };
+  }, [portfolioReview, todaysPrioritiesDashboard, canonicalPriorities, averagePositionHealth, balances]);
+
+  const dailyBriefing = useMemo(
+    () => (dailyBriefingInput ? buildDailyBriefing(dailyBriefingInput) : null),
+    [dailyBriefingInput],
   );
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
@@ -10275,10 +10314,18 @@ export default function PortfolioPage() {
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
 
-      {/* PI-0012A: Portfolio Review, Phase 1 -- first card on the Portfolio
-          page, above the position list. Renders lib/portfolioReview's
-          already-composed snapshot; computes nothing itself. */}
+      {/* PI-0013: Daily Briefing Dashboard -- first card on the Portfolio
+          page, above Portfolio Review and the position list. Renders
+          lib/dailyBriefing's already-composed briefing; computes nothing
+          itself. */}
       <div className="px-6 pt-4">
+        <DailyBriefingCard briefing={dailyBriefing} loading={loading} th={th} />
+      </div>
+
+      {/* PI-0012A: Portfolio Review, Phase 1 -- above the position list.
+          Renders lib/portfolioReview's already-composed snapshot; computes
+          nothing itself. */}
+      <div className="px-6">
         <PortfolioReviewCard review={portfolioReview} loading={loading} th={th} />
       </div>
 
