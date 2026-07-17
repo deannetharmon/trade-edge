@@ -3,7 +3,7 @@
 // PI-0005: component-level coverage for the Position Intelligence panel.
 
 import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
 import { PositionIntelligencePanel } from '../PositionIntelligencePanel';
@@ -54,16 +54,45 @@ function makeObjective(overrides: Partial<PortfolioObjective> = {}): PortfolioOb
   };
 }
 
-describe('PI-0005: PositionIntelligencePanel -- objective present', () => {
-  it('renders Current Recommendation from recommendation.label', () => {
+describe('UX Polish: Suggested Action card', () => {
+  it('elevates label, suggested action, confidence, and urgency onto the top card', () => {
     render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.getByText('Suggested Action')).toBeInTheDocument();
     expect(screen.getByText('Earnings Risk')).toBeInTheDocument();
+    expect(screen.getByText('Decide whether to close, reduce risk, or intentionally hold through earnings.')).toBeInTheDocument();
+    expect(screen.getByText('86% confidence')).toBeInTheDocument();
+    expect(screen.getByText('high')).toBeInTheDocument();
   });
 
+  it('surfaces the confidence tier when managementIntent is present', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+    expect(screen.getByText('(High)')).toBeInTheDocument();
+  });
+
+  it('surfaces top supporting evidence and remaining opportunity as compact metrics', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        remainingOpportunity={{ opportunityCapturedPct: 30, remainingOpportunityPct: 38, reasons: [] }}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.getByText('38% opportunity remaining')).toBeInTheDocument();
+  });
+});
+
+describe('PI-0005: PositionIntelligencePanel -- objective present', () => {
   it('renders Why from the objective\'s rationale and supporting evidence', () => {
     render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
     expect(screen.getByText('Decide whether to close, reduce risk, or hold through earnings.')).toBeInTheDocument();
-    expect(screen.getByText('Earnings date')).toBeInTheDocument();
+    // "Earnings date" is also surfaced as a compact metric on the Suggested
+    // Action card above (see UX Polish describe block), so this is scoped to
+    // the Why section specifically rather than a page-wide getByText.
+    const whySection = screen.getByText('Why').closest('div')!;
+    expect(within(whySection).getByText('Earnings date')).toBeInTheDocument();
   });
 
   it('renders Current Concerns from the objective', () => {
@@ -151,47 +180,34 @@ function makeManagementIntent(overrides: Partial<ManagementIntentResult> = {}): 
   };
 }
 
-describe('PI-0007A: Decision Scorecard (collapsed debug section)', () => {
-  it('does not render the scorecard when recommendation.managementIntent is absent', () => {
-    render(<PositionIntelligencePanel recommendation={makeRecommendation()} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
+describe('UX Polish: Decision Scorecard hidden pending redesign', () => {
+  // The scorecard component and its accordion/contributions rendering are
+  // unchanged (see DecisionScorecard in PositionIntelligencePanel.tsx) --
+  // only gated off at the render layer via SHOW_DECISION_SCORECARD, so it
+  // can come back in one line. No standalone unit test remains for its
+  // internal accordion behavior while it's hidden; re-add if it's
+  // re-enabled with a real design pass.
+  it('does not render even when recommendation.managementIntent is present', () => {
+    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
+    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
     expect(screen.queryByText('Decision Scorecard')).not.toBeInTheDocument();
   });
+});
 
-  it('renders a collapsed "Decision Scorecard" toggle when managementIntent is present', () => {
-    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
-    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
-    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // Collapsed: winner/margin/candidate detail is not yet in the DOM output.
-    expect(screen.queryByText(/Margin:/)).not.toBeInTheDocument();
-  });
-
-  it('expands on click to show winner, confidence, margin, ranked candidates, and their contributions', () => {
-    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
-    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
-
-    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
-    fireEvent.click(toggle);
-
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText(/Confidence:/)).toBeInTheDocument();
-    expect(screen.getByText(/High/)).toBeInTheDocument();
-    expect(screen.getByText(/Margin:/)).toBeInTheDocument();
-    expect(screen.getByText(/42/)).toBeInTheDocument();
-    expect(screen.getByText(/Cut Losses \(winner\)/)).toBeInTheDocument();
-    expect(screen.getByText('Reduce Risk')).toBeInTheDocument();
-    expect(screen.getByText(/Material loss threshold breached/)).toBeInTheDocument();
-    expect(screen.getByText(/Net Edge declined from peak/)).toBeInTheDocument();
-  });
-
-  it('collapses again on a second click', () => {
-    const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
-    render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
-    const toggle = screen.getByRole('button', { name: 'Decision Scorecard' });
-    fireEvent.click(toggle);
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText(/Margin:/)).not.toBeInTheDocument();
+describe('UX Polish: Decision Review hidden pending redesign', () => {
+  it('does not render even when onSaveDecisionReview is provided', () => {
+    render(
+      <PositionIntelligencePanel
+        recommendation={makeRecommendation()}
+        objective={makeObjective()}
+        lifecycleType="SPREAD"
+        strategy="CSP"
+        decisionReview={null}
+        onSaveDecisionReview={() => {}}
+        th={THEMES.dark}
+      />,
+    );
+    expect(screen.queryByText('Decision Review')).not.toBeInTheDocument();
   });
 });
 

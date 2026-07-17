@@ -3094,6 +3094,10 @@ Flags: ${[
   isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `⚠ Upcoming earnings ${pos.earningsDate}` : '',
 ].filter(Boolean).join(', ') || 'None'}
 
+RULE ENGINE'S EXISTING CALL (the trader already sees this on screen -- do not restate it or reword its stated reason):
+${pos.recommendation ? `${pos.recommendation.label} — ${pos.recommendation.confidence}% confidence, ${pos.recommendation.urgency} urgency. Its stated reason: "${pos.recommendation.primaryReason}"` : 'No rule-engine recommendation is available for this position yet.'}
+Your job here is different from the rule engine's: explain WHY this call is (or isn't) appropriate using the live market/greeks/trend/support data below -- the texture and judgment a fixed rule can't apply -- rather than summarizing the same reason in different words. If you agree with the call, say specifically what in the data below confirms it. If you'd go further, less far, or disagree, say so plainly and explain why using that data. Do not simply restate "${pos.recommendation ? pos.recommendation.primaryReason : 'the rule engine’s reason'}" in your own words.
+
 EXPERT DECISION CHECKLIST:
 Before giving the recommendation, evaluate all of these:
 

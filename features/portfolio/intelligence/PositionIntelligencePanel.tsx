@@ -16,12 +16,35 @@
 
 import { useState, type ReactNode } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
-import type { ManagementIntentResult, PortfolioObjective, PortfolioRecommendation, RemainingOpportunityResult } from '@/lib/portfolio-intelligence';
+import type {
+  ManagementIntentResult,
+  PortfolioObjective,
+  PortfolioRecommendation,
+  PortfolioRecommendationUrgency,
+  RemainingOpportunityResult,
+} from '@/lib/portfolio-intelligence';
 import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
 import type { DecisionReview } from '@/lib/decision-review';
 import { deriveManagementChoices } from './managementChoices';
 import { deriveNextLifecycleEvent } from './nextLifecycleEvent';
 import { DecisionReviewSection } from '../decisionReview/DecisionReviewSection';
+
+// UX Polish sprint: Decision Scorecard and Decision Review are real,
+// functioning features (PI-0006B/PI-0007A and PI-0008C respectively), but
+// they read as clutter -- mostly-empty forms/diagnostics -- in the
+// day-to-day expanded panel most traders look at. Hidden here at the
+// render layer only: no logic, data, or persistence removed, so either can
+// be flipped back on in one line once they get a proper treatment in this
+// panel's new layout.
+const SHOW_DECISION_SCORECARD = false;
+const SHOW_DECISION_REVIEW = false;
+
+const URGENCY_ACCENT: Record<PortfolioRecommendationUrgency, { border: string; bg: string; text: string; chip: string }> = {
+  low: { border: 'border-slate-500/50', bg: 'bg-slate-500/5', text: 'text-slate-300', chip: 'border-slate-600/60 text-slate-300' },
+  medium: { border: 'border-amber-500/50', bg: 'bg-amber-500/5', text: 'text-amber-300', chip: 'border-amber-600/60 text-amber-300' },
+  high: { border: 'border-orange-500/50', bg: 'bg-orange-500/5', text: 'text-orange-300', chip: 'border-orange-600/60 text-orange-300' },
+  critical: { border: 'border-red-500/50', bg: 'bg-red-500/5', text: 'text-red-300', chip: 'border-red-600/60 text-red-300' },
+};
 
 export interface PositionIntelligencePanelProps {
   recommendation: PortfolioRecommendation;
@@ -133,6 +156,65 @@ function DecisionScorecard({ managementIntent, th }: { managementIntent: Managem
   );
 }
 
+// Elevates the recommendation from a bare bold label (the old "Current
+// Recommendation" section) into the panel's visual entry point: the
+// decision itself, the confidence behind it, the concrete suggested
+// action, and a couple of the strongest supporting metrics -- so a trader
+// can act from this card alone and only read further for detail. Renders
+// nothing new: every field here already existed on `recommendation`
+// (PI-0002/PI-0006B) or `whyEvidence` (derived below from the same
+// objective/recommendation data the rest of the panel already used).
+function SuggestedActionCard({
+  recommendation,
+  topEvidence,
+  remainingOpportunity,
+  th,
+}: {
+  recommendation: PortfolioRecommendation;
+  topEvidence: { id: string; label: string }[];
+  remainingOpportunity?: RemainingOpportunityResult | null;
+  th: typeof THEMES[Theme];
+}) {
+  const accent = URGENCY_ACCENT[recommendation.urgency];
+  const confidenceTier = recommendation.managementIntent?.confidenceTier;
+
+  return (
+    <div className={`rounded-lg border ${accent.border} ${accent.bg} px-4 py-3.5`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className={`text-[9px] uppercase tracking-widest ${th.textFaint} mb-1`}>Suggested Action</p>
+          <p className={`text-base font-bold leading-tight ${accent.text}`}>{recommendation.label}</p>
+          <p className={`text-[12px] ${th.textMuted} mt-1`}>{recommendation.suggestedAction}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`text-[10px] px-2 py-0.5 border rounded font-bold uppercase tracking-wide ${accent.chip}`}>
+            {recommendation.urgency}
+          </span>
+          <span className={`text-[11px] font-semibold ${th.text}`}>
+            {recommendation.confidence}% confidence
+            {confidenceTier ? <span className={`font-normal ${th.textFaint}`}> ({confidenceTier})</span> : null}
+          </span>
+        </div>
+      </div>
+
+      {(topEvidence.length > 0 || (remainingOpportunity && remainingOpportunity.remainingOpportunityPct != null)) && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {remainingOpportunity && remainingOpportunity.remainingOpportunityPct != null && (
+            <span className={`text-[10px] px-2 py-0.5 border rounded ${th.borderLight} ${th.textMuted}`}>
+              {remainingOpportunity.remainingOpportunityPct}% opportunity remaining
+            </span>
+          )}
+          {topEvidence.slice(0, 3).map((e) => (
+            <span key={e.id} className={`text-[10px] px-2 py-0.5 border rounded ${th.borderLight} ${th.textMuted}`}>
+              {e.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PositionIntelligencePanel({ recommendation, objective, lifecycleType, remainingOpportunity, strategy, decisionReview, onSaveDecisionReview, th }: PositionIntelligencePanelProps) {
   const choices = deriveManagementChoices(recommendation.kind);
   const nextEvent = deriveNextLifecycleEvent(lifecycleType, recommendation.kind);
@@ -152,101 +234,115 @@ export function PositionIntelligencePanel({ recommendation, objective, lifecycle
   ];
 
   return (
-    <div className={`border-t ${th.border} px-4 py-4 space-y-4`} aria-label="Position Intelligence">
-      <Section title="Current Recommendation" th={th}>
-        <p className={`text-[13px] font-bold ${th.text}`}>{recommendation.label}</p>
-      </Section>
+    <div className={`border-t ${th.border} px-4 py-4 space-y-5`} aria-label="Position Intelligence">
+      <SuggestedActionCard
+        recommendation={recommendation}
+        topEvidence={whyEvidence}
+        remainingOpportunity={remainingOpportunity}
+        th={th}
+      />
 
-      {/* PI-0008A: Remaining Opportunity Engine -- a parallel, independent
-          metric from the recommendation above (see remainingOpportunity.ts's
-          module doc). Renders nothing when null (e.g. no credit basis to
-          measure against) or absent (older callers/tests). */}
-      {remainingOpportunity && remainingOpportunity.remainingOpportunityPct != null && (
-        <Section title="Remaining Opportunity" th={th}>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-            <span className={`text-[13px] font-bold ${th.text}`}>
-              {remainingOpportunity.remainingOpportunityPct}% remaining
-            </span>
-            <span className={`text-[11px] ${th.textMuted}`}>
-              {remainingOpportunity.opportunityCapturedPct}% captured
-            </span>
-          </div>
-          {remainingOpportunity.reasons.length > 0 && (
-            <ul className="mt-1 space-y-0.5">
-              {remainingOpportunity.reasons.map((reason, i) => (
-                <li key={i} className={`text-[10px] ${th.textFaint}`}>{reason}</li>
+      {/* Two-column on wide viewports: left is the narrative (why this call,
+          what's concerning); right is reference/next-step material (upside
+          left on the table, what would flip the call, what happens next,
+          the alternatives). Stacks to one column below `lg`. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-5">
+        <div className="space-y-5">
+          <Section title="Why" th={th}>
+            <p className={`text-[11px] ${th.textMuted} mb-1.5`}>{whyLead}</p>
+            {whyEvidence.length > 0 && (
+              <ul className="space-y-1">
+                {whyEvidence.map((e) => (
+                  <li key={e.id} className="text-[11px]">
+                    <span className={`font-semibold ${th.textMuted}`}>{e.label}</span>
+                    {e.detail && <span className={th.textFaint}> &mdash; {e.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section title="Current Concerns" th={th}>
+            {concerns.length > 0 ? (
+              <ul className="space-y-1.5">
+                {concerns.map((c) => (
+                  <li key={c.id} className={`rounded border px-2 py-1.5 text-[11px] ${th.border}`}>
+                    <span className="font-semibold">{c.label}</span>
+                    <span className="opacity-80"> &mdash; {c.explanation}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={`text-[11px] ${th.textFaint}`}>No current concerns.</p>
+            )}
+          </Section>
+        </div>
+
+        <div className="space-y-5">
+          {/* PI-0008A: Remaining Opportunity Engine -- a parallel, independent
+              metric from the recommendation above (see remainingOpportunity.ts's
+              module doc). Renders nothing when null (e.g. no credit basis to
+              measure against) or absent (older callers/tests). Summary already
+              surfaced on the Suggested Action card above; this is the detail view. */}
+          {remainingOpportunity && remainingOpportunity.remainingOpportunityPct != null && (
+            <Section title="Remaining Opportunity" th={th}>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+                <span className={`text-[13px] font-bold ${th.text}`}>
+                  {remainingOpportunity.remainingOpportunityPct}% remaining
+                </span>
+                <span className={`text-[11px] ${th.textMuted}`}>
+                  {remainingOpportunity.opportunityCapturedPct}% captured
+                </span>
+              </div>
+              {remainingOpportunity.reasons.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {remainingOpportunity.reasons.map((reason, i) => (
+                    <li key={i} className={`text-[10px] ${th.textFaint}`}>{reason}</li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          )}
+
+          <Section title="What Would Change This Recommendation?" th={th}>
+            <ul className="space-y-1">
+              {reviewTriggers.map((t) => (
+                <li key={t.id} className={`text-[11px] ${th.textMuted}`}>
+                  <span className="font-semibold">{t.label}</span>
+                  {'threshold' in t && t.threshold !== undefined && <span className={th.textFaint}> ({String(t.threshold)})</span>}
+                  <span className={th.textFaint}> &mdash; {t.explanation}</span>
+                </li>
               ))}
             </ul>
-          )}
-        </Section>
-      )}
+          </Section>
 
-      <Section title="Why" th={th}>
-        <p className={`text-[11px] ${th.textMuted} mb-1.5`}>{whyLead}</p>
-        {whyEvidence.length > 0 && (
-          <ul className="space-y-1">
-            {whyEvidence.map((e) => (
-              <li key={e.id} className="text-[11px]">
-                <span className={`font-semibold ${th.textMuted}`}>{e.label}</span>
-                {e.detail && <span className={th.textFaint}> &mdash; {e.detail}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+          <Section title="Next Expected Lifecycle Event" th={th}>
+            <p className={`text-[11px] ${th.textMuted}`}>{nextEvent}</p>
+          </Section>
 
-      <Section title="Current Concerns" th={th}>
-        {concerns.length > 0 ? (
-          <ul className="space-y-1.5">
-            {concerns.map((c) => (
-              <li key={c.id} className={`rounded border px-2 py-1.5 text-[11px] ${th.border}`}>
-                <span className="font-semibold">{c.label}</span>
-                <span className="opacity-80"> &mdash; {c.explanation}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className={`text-[11px] ${th.textFaint}`}>No current concerns.</p>
-        )}
-      </Section>
-
-      <Section title="What Would Change This Recommendation?" th={th}>
-        <ul className="space-y-1">
-          {reviewTriggers.map((t) => (
-            <li key={t.id} className={`text-[11px] ${th.textMuted}`}>
-              <span className="font-semibold">{t.label}</span>
-              {'threshold' in t && t.threshold !== undefined && <span className={th.textFaint}> ({String(t.threshold)})</span>}
-              <span className={th.textFaint}> &mdash; {t.explanation}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section title="Next Expected Lifecycle Event" th={th}>
-        <p className={`text-[11px] ${th.textMuted}`}>{nextEvent}</p>
-      </Section>
-
-      <Section title="Available Management Choices" th={th}>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`text-[10px] px-2 py-0.5 border rounded font-bold border-emerald-600/60 bg-emerald-500/10 text-emerald-400`}>
-            {choices.preferred} (preferred)
-          </span>
-          {choices.alternatives.map((alt) => (
-            <span key={alt} className={`text-[10px] px-2 py-0.5 border rounded ${th.border} ${th.textFaint}`}>
-              {alt}
-            </span>
-          ))}
+          <Section title="Available Management Choices" th={th}>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`text-[10px] px-2 py-0.5 border rounded font-bold border-emerald-600/60 bg-emerald-500/10 text-emerald-400`}>
+                {choices.preferred} (preferred)
+              </span>
+              {choices.alternatives.map((alt) => (
+                <span key={alt} className={`text-[10px] px-2 py-0.5 border rounded ${th.border} ${th.textFaint}`}>
+                  {alt}
+                </span>
+              ))}
+            </div>
+          </Section>
         </div>
-      </Section>
+      </div>
 
-      {recommendation.managementIntent && (
+      {SHOW_DECISION_SCORECARD && recommendation.managementIntent && (
         <DecisionScorecard managementIntent={recommendation.managementIntent} th={th} />
       )}
 
       {/* PI-0008C: Decision Outcome Tracking -- records what happened, never
-          influences the recommendation above. Only renders when the caller
-          has wired up persistence (onSaveDecisionReview). */}
-      {onSaveDecisionReview && (
+          influences the recommendation above. Hidden for now (UX polish
+          sprint, see SHOW_DECISION_REVIEW above); logic/persistence untouched. */}
+      {SHOW_DECISION_REVIEW && onSaveDecisionReview && (
         <DecisionReviewSection
           positionId={recommendation.positionId}
           symbol={recommendation.symbol}
