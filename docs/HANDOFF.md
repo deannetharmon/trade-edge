@@ -2,6 +2,14 @@
 
 Last updated: 2026-07-17 (post PI-0013 Daily Briefing Dashboard). Paste this file (or point Claude at its repo path) at the start of a new chat to resume with full context.
 
+## Governance
+
+All future implementation planning, sprint management, repository management, and release decisions shall conform to:
+
+planning/PROJECT_GOVERNANCE.md
+
+If this handoff document conflicts with PROJECT_GOVERNANCE.md, the governance document takes precedence until intentionally amended.
+
 ## Project
 
 Next.js/React options-trading dashboard (`options-screener`), deployed via Vercel. Repo: `/Users/deanharmon/Github/trade-edge` (this is Dean's selected/mounted folder — Claude reads and writes here directly).
