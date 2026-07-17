@@ -7,11 +7,11 @@
 
 ## Current State
 
-Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`. PI-0013 remains the last capability merged into `main`.
+Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`.
 
-**PI-0014 — Marketable Pricing for Risk-Gating, Phase 1** has been implemented, recovered after an out-of-band `main` reset lost it from all reachable refs, reviewed by the Product Owner (required refactor completed), and corrected through a Corrective Closeout sprint (documentation drift, missing-marketable-data test coverage, invalid-quote test coverage, unknown-liquidity classification fix, generated-artifact cleanup). It lives on `feature/marketable-pricing` and is **pending Product Owner acceptance and merge** — it is not merged into `main` and must not be treated as complete until that review and merge happen. See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account (Process Note, Product Owner Addendum, Corrective Closeout Addendum) and validation results.
+**PI-0014 — Marketable Pricing for Risk-Gating, Phase 1** is complete and merged into `main` (merge commit `2c79d5e`). It was implemented, recovered after an out-of-band `main` reset lost it from all reachable refs, reviewed by the Product Owner (required refactor completed), corrected through a Corrective Closeout sprint (documentation drift, missing-marketable-data test coverage, invalid-quote test coverage, unknown-liquidity classification fix, generated-artifact cleanup), accepted, and merged. The temporary branch (`feature/marketable-pricing`) was deleted locally and remotely per the standard short-lived-branch lifecycle. See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account (Process Note, Product Owner Addendum, Corrective Closeout Addendum) and validation results.
 
-This is the active sprint. It is not closed until Product Owner review completes and the branch is merged (or the Product Owner directs otherwise). No further implementation sprint should begin before that happens.
+**No sprint is currently active.** The next sprint has not been approved. Before new implementation begins, the Product Owner must review real-world Portfolio Review and Daily Briefing behavior, unresolved follow-ups, and the roadmap, then recommend one frozen sprint. No next sprint is selected or defined in this document.
 
 ## Governance
 
@@ -38,12 +38,12 @@ For TastyTrade scans, execution remains browser-owned and client-authenticated. 
 
 Verified 2026-07-17:
 
-- Local branches: `main`, `feature/autopilot`, `feature/marketable-pricing`
+- Local branches: `main`, `feature/autopilot`
 - Remote branches: `origin/main`, `origin/feature/autopilot`
-- `main` synchronized with `origin/main`, unchanged throughout PI-0014's recovery and corrective closeout
+- `main` synchronized with `origin/main`, both at `2c79d5e` (PI-0014 merge commit)
 - `feature/autopilot` synchronized with `origin/feature/autopilot`, untouched by PI-0014 work
-- `feature/marketable-pricing` — PI-0014's corrective-closeout branch, holding the recovered and corrected implementation. Not yet pushed to origin as of this writing; not yet reviewed/merged by the Product Owner. Not a stale or completed branch — active and pending acceptance.
-- Working tree clean apart from PI-0014's own in-progress corrective-closeout changes on `feature/marketable-pricing`
+- `feature/marketable-pricing` — deleted locally and remotely after PI-0014's accepted merge, per the standard short-lived-branch lifecycle. No longer exists.
+- Working tree clean
 - No stale backup branches
 - No stale completed feature branches
 
@@ -86,8 +86,9 @@ A sprint is complete only when all applicable items are true:
 | PI-0008A | Remaining Opportunity Engine | Complete ✅ | Opportunity Captured and Remaining Opportunity metrics |
 | PI-0012A | Portfolio Review Composition Layer | Complete ✅ | Composes existing health and objective engines; no new scoring or AI |
 | PI-0013 | Daily Briefing Dashboard | Complete ✅ | Deterministic priorities, snapshot, opportunities, and risks summary |
+| PI-0014 | Marketable Pricing for Risk-Gating, Phase 1 | Complete ✅ | Stop-loss, take-profit, emergency-exit, and Cut Losses gates now consider marketable (executable) pricing alongside mid; `PositionValuation` valuation layer; liquidity-tier classification |
 
-PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`).
+PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`). PI-0014 was merged to `main` in commit `2c79d5e` (`merge: PI-0014 marketable pricing for risk-gating`).
 
 ## Validation Baseline
 
@@ -99,7 +100,7 @@ The most recently documented Portfolio Intelligence baseline before PI-0012A/PI-
 
 PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, multi-session acceptance validation of the combined Portfolio Review and Daily Briefing workflow remains pending.
 
-**PI-0014 (not yet merged)** validation results as of the Corrective Closeout pass: see `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md`'s Corrective Closeout Addendum for targeted-test, full-suite, `tsc --noEmit`, and production-build results. Not part of the merged baseline above until Product Owner acceptance and merge.
+**PI-0014 (merged, commit `2c79d5e`)** validation results at merge: 643 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests — Vercel remains the authoritative build check). See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account, including the Corrective Closeout Addendum.
 
 ## Current Milestones
 
@@ -185,9 +186,9 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ## Next Sprint Decision Gate
 
-This gate applies once PI-0014 is accepted and merged (or the Product Owner otherwise closes it out). No next sprint is selected or recommended in this document.
+PI-0014 is now merged. No next sprint is selected, recommended, or defined in this document — that determination belongs to the Product Owner.
 
-Do not start another feature merely because PI-0013 is merged.
+Do not start another feature merely because PI-0013 and PI-0014 are merged.
 
 The Product Owner must first determine whether the highest-value next sprint is:
 
