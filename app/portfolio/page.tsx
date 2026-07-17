@@ -50,6 +50,14 @@ import { MissionControl } from '@/features/portfolio/missionControl/MissionContr
 // Decision Engine calls, no new market data.
 import { calculatePortfolioHealthScore } from '@/lib/portfolioHealth';
 import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
+// PI-0012A: Portfolio Review, Phase 1 -- a thin composition layer over
+// Portfolio Health (above), the canonical objective list, and Today's
+// Priorities' already-scored dashboard. No new score, no new ranking, no
+// new recommendation logic -- see lib/portfolioReview's own module docs and
+// docs/design/PI-0012-Portfolio-Review-Architecture.md.
+import { buildPortfolioReview } from '@/lib/portfolioReview';
+import type { PortfolioReviewInput, PortfolioReviewPositionInput } from '@/lib/portfolioReview';
+import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReviewCard';
 
 
 // Inject accent CSS variable style
@@ -9901,6 +9909,41 @@ export default function PortfolioPage() {
 
   const portfolioHealth = useMemo(() => calculatePortfolioHealthScore(healthInput), [healthInput]);
 
+  // PI-0012A: Portfolio Review, Phase 1 -- composes portfolioHealth (above,
+  // reused verbatim), canonicalPriorities.objectives (portfolio-level
+  // concentration/buying-power/idle-cash/income objectives, reused
+  // unfiltered -- buildPortfolioReview() filters by `type` itself),
+  // todaysPrioritiesDashboard (already-scored/sorted, for Top Risks), and a
+  // lean per-position shape for composition/concentration/Wheel-managed
+  // aggregation. positionStrategy stays null for every real position (same
+  // "no data source yet" limitation already documented on the
+  // canonicalPriorities effect above) -- assignmentPreference reuses the
+  // exact same deriveAssignmentPreferenceFromIntent(p.intent) call this file
+  // already makes in two other places. No new fetch, no new Portfolio
+  // Intelligence or Decision Engine call.
+  const portfolioReviewInput: PortfolioReviewInput = useMemo(() => {
+    const reviewPositions: PortfolioReviewPositionInput[] = positions.map(p => ({
+      symbol: p.symbol,
+      strategy: p.strategy,
+      maxRisk: p.maxRisk ?? null,
+      positionStrategy: null,
+      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
+    }));
+
+    return {
+      health: portfolioHealth,
+      objectives: canonicalPriorities?.objectives ?? [],
+      dashboard: todaysPrioritiesDashboard,
+      positions: reviewPositions,
+      netLiquidity: balances?.netLiquidity ?? null,
+    };
+  }, [positions, portfolioHealth, canonicalPriorities, todaysPrioritiesDashboard, balances]);
+
+  const portfolioReview = useMemo(
+    () => (positions.length === 0 && pendingOrders.length === 0 && !canonicalPriorities ? null : buildPortfolioReview(portfolioReviewInput)),
+    [portfolioReviewInput, positions, pendingOrders, canonicalPriorities],
+  );
+
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
     try {
@@ -10231,6 +10274,13 @@ export default function PortfolioPage() {
       )}
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
+
+      {/* PI-0012A: Portfolio Review, Phase 1 -- first card on the Portfolio
+          page, above the position list. Renders lib/portfolioReview's
+          already-composed snapshot; computes nothing itself. */}
+      <div className="px-6 pt-4">
+        <PortfolioReviewCard review={portfolioReview} loading={loading} th={th} />
+      </div>
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
         <div className="flex items-center justify-center h-64">
