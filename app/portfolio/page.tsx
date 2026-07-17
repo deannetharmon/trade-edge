@@ -15,7 +15,7 @@ import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonic
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md. Pure valuation
 // math only; this page computes the raw mid/marketable/maxRisk inputs
 // (already had all three) and calls into this module, never the reverse.
-import { computePositionValuation, attachLiquidityTrapTrigger, type PositionValuation } from '@/lib/positionValuation';
+import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
@@ -200,13 +200,18 @@ interface Position {
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
   healthScore?: PositionHealthScore;
-  // PI-0014: mid vs. marketable valuation evidence (slippage cost, liquidity
-  // tier, whether marketable pricing actually changed the recommendation).
-  // Null when currentValue or closeValue is unavailable (same "never
-  // fabricate absent data" convention those two fields already follow) --
-  // see lib/positionValuation and
+  // PI-0014: purely observational mid vs. marketable valuation evidence
+  // (slippage cost, liquidity tier). Null when currentValue or closeValue is
+  // unavailable (same "never fabricate absent data" convention those two
+  // fields already follow) -- see lib/positionValuation and
   // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
   valuation?: PositionValuation | null;
+  // PI-0014 follow-up (Product Owner review): whether marketable evidence
+  // actually changed this position's recommendation, decided by
+  // evaluatePositionObjective() (a decision-engine property -- see that
+  // function's PositionObjectiveResult doc, and lib/positionValuation's
+  // types.ts doc for why this deliberately does NOT live on `valuation`).
+  liquidityTrapTriggered?: boolean;
   recommendation?: PortfolioRecommendation;
   // PI-0002: canonical objective, computed alongside `recommendation` from
   // the same evaluatePositionObjective() call. Not rendered anywhere yet
@@ -305,10 +310,10 @@ function computeMarketablePnlPct(pos: Position): number | null {
     : null;
 }
 
-// PI-0014: raw mid/marketable valuation evidence -- everything except
-// liquidityTrapTriggered, which depends on whether the Decision Engine's
-// marketable-aware evaluation actually changed the outcome (see
-// scorePortfolioPositionObjective below, the one caller that knows that).
+// PI-0014: purely observational mid/marketable valuation evidence -- see
+// lib/positionValuation's types.ts doc. Whether marketable evidence changed
+// a recommendation (liquidityTrapTriggered) is owned by evaluatePositionObjective()
+// instead (PI-0014 follow-up, Product Owner review), not by this object.
 // Null when currentValue or closeValue is unavailable, same convention
 // those two fields already follow.
 function computeRawPositionValuation(pos: Position) {
@@ -324,11 +329,11 @@ function computeRawPositionValuation(pos: Position) {
 // PI-0002: single canonical evaluation call. Returns both the legacy-shaped
 // recommendation (unchanged output, for existing badges/priority list) and
 // the new canonical objective (not yet rendered, wired through for later).
-// PI-0014: also returns `valuation` -- the mid/marketable evidence object,
-// with liquidityTrapTriggered set from evaluatePositionObjective()'s own
-// executionRealityPromoted flag (this function is the one place both the
-// raw valuation and the promotion outcome are known together).
-function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null } {
+// PI-0014: also returns `valuation` -- the purely observational mid/marketable
+// evidence object -- and `liquidityTrapTriggered`, owned by
+// evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
+// review: this is a decision-engine property, not a valuation property).
+function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
@@ -363,9 +368,9 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
   // the Decision Engine only ever sees the already-normalized percentage,
   // never raw prices, matching how pnlPct itself is passed through today.
   const marketablePnlPct = computeMarketablePnlPct(pos);
-  const rawValuation = computeRawPositionValuation(pos);
+  const valuation = computeRawPositionValuation(pos);
 
-  const { objective, legacyRecommendation, executionRealityPromoted } = evaluatePositionObjective({
+  const { objective, legacyRecommendation, liquidityTrapTriggered } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
@@ -373,11 +378,10 @@ function scorePortfolioPositionObjective(pos: Position): { recommendation: Portf
     netEdgeNegative,
     remainingOpportunityPct,
     marketablePnlPct,
+    liquidityTier: valuation?.liquidityTier ?? null,
   });
 
-  const valuation = rawValuation ? attachLiquidityTrapTrigger(rawValuation, executionRealityPromoted) : null;
-
-  return { recommendation: legacyRecommendation, objective, valuation };
+  return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered };
 }
 
 // PI-0008A: Remaining Opportunity Engine -- a parallel, independent
@@ -472,8 +476,8 @@ function attachSnapshotHistory(
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    const { recommendation, objective, valuation } = scorePortfolioPositionObjective(withHealth);
-    return { ...withHealth, recommendation, portfolioObjective: objective, valuation };
+    const { recommendation, objective, valuation, liquidityTrapTriggered } = scorePortfolioPositionObjective(withHealth);
+    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered };
   });
 }
 

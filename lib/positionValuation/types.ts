@@ -5,15 +5,15 @@
 // rationale and the external architecture review this shape comes from
 // (TradeEdge_Final_Architecture_Rulings.md, Decision 2).
 //
-// This is a pure valuation module: it turns raw price/credit/risk numbers
-// into the PositionValuation evidence object. It does not decide anything --
-// it has no opinion on what recommendation a position should get. The one
-// decision-dependent field on this type, `liquidityTrapTriggered`, is set by
-// a second, tiny pure function (see computePositionValuation.ts's
-// `attachLiquidityTrapTrigger`) once a caller (evaluatePositionObjective(),
-// the canonical Decision Engine) has determined whether marketable evidence
-// actually changed the recommendation -- this module has no knowledge of
-// recommendations, thresholds, or the Decision Engine at all.
+// PI-0014 follow-up (Product Owner review): PositionValuation is purely
+// observational -- valuation arithmetic only, no opinion on recommendations,
+// thresholds, or the Decision Engine. Whether marketable evidence actually
+// changed a recommendation (`liquidityTrapTriggered`) is a decision-engine
+// property, not a valuation property, and now lives on
+// PositionObjectiveResult in lib/portfolio-intelligence/objectives/
+// positionObjective.ts, which imports LiquidityTier (below) as one more
+// piece of input evidence -- see that file's module doc for the full
+// dependency-flow rationale.
 
 // Fixed percentage-of-max-risk tiers (Decision 1 of the final ruling).
 // Display-only classification -- always computed, independent of whether it
@@ -39,12 +39,6 @@ export interface PositionValuation {
   slippagePercentOfMaxRisk: number;
 
   liquidityTier: LiquidityTier;
-  // True only when liquidityTier is 'LIQUIDITY_TRAP' AND marketable evidence
-  // actually promoted/vetoed a recommendation relative to what mid pricing
-  // alone would have produced. A position can be LIQUIDITY_TRAP tier and
-  // still have this false if the recommendation would have been identical
-  // either way -- see Decision 1 of the final ruling.
-  liquidityTrapTriggered: boolean;
 }
 
 // Raw inputs a caller already has on hand -- creditReceived (positive,

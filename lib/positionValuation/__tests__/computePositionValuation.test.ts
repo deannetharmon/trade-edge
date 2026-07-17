@@ -5,7 +5,7 @@
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
 
 import { describe, expect, it } from 'vitest';
-import { attachLiquidityTrapTrigger, computePositionValuation } from '../computePositionValuation';
+import { computePositionValuation } from '../computePositionValuation';
 
 describe('computePositionValuation', () => {
   it('computes midPnL/marketablePnL as credit minus each valuation', () => {
@@ -96,24 +96,10 @@ describe('computePositionValuation', () => {
     const negative = computePositionValuation({ creditReceived: 500, midValue: 400, marketableValue: 900, maxRisk: -50 });
     expect(negative.slippagePercentOfMaxRisk).toBe(0);
   });
-});
 
-describe('attachLiquidityTrapTrigger', () => {
-  it('sets liquidityTrapTriggered true only when tier is LIQUIDITY_TRAP AND marketable evidence promoted the verdict', () => {
-    const raw = computePositionValuation({ creditReceived: 500, midValue: 629, marketableValue: 1124, maxRisk: 644 });
-    expect(raw.liquidityTier).toBe('LIQUIDITY_TRAP');
-
-    const promoted = attachLiquidityTrapTrigger(raw, true);
-    expect(promoted.liquidityTrapTriggered).toBe(true);
-
-    const notPromoted = attachLiquidityTrapTrigger(raw, false);
-    expect(notPromoted.liquidityTrapTriggered).toBe(false);
-  });
-
-  it('never sets liquidityTrapTriggered true when tier is not LIQUIDITY_TRAP, even if promoted', () => {
-    const raw = computePositionValuation({ creditReceived: 500, midValue: 400, marketableValue: 410, maxRisk: 644 });
-    expect(raw.liquidityTier).toBe('LIQUID');
-    const result = attachLiquidityTrapTrigger(raw, true);
-    expect(result.liquidityTrapTriggered).toBe(false);
+  it('has no opinion on recommendations -- liquidityTrapTriggered is not part of this shape', () => {
+    const result = computePositionValuation({ creditReceived: 500, midValue: 629, marketableValue: 1124, maxRisk: 644 });
+    expect(result.liquidityTier).toBe('LIQUIDITY_TRAP');
+    expect('liquidityTrapTriggered' in result).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 # PI-0014 — Marketable Pricing for Risk-Gating (Phase 1) — Implementation Report
 
-Branch: `main`
-Commit: `9034dea` — committed locally, **not yet pushed** (see Process Note below)
+Branch: `feature/marketable-pricing` (moved off `main` after the Process Note below; `main` was reset to match `origin/main`)
+Commit: `2d0aeb8` (amended once for the branch fix), plus one follow-up commit for the Product Owner's required refactor (see Addendum below)
 
 ## Process Note — read before anything else
 
@@ -12,6 +12,16 @@ This ticket was implemented and committed **directly to `main`**, without checki
 - Per `PROJECT_GOVERNANCE.md`'s Branch Rules ("do not assume the user's locally checked-out branch... explicitly verify the intended active branch... before branch-sensitive work"), this session should have run `git branch --show-current` and read the two planning docs before writing any code. That didn't happen.
 
 The work itself is complete, tested, and does not touch execution/safety-gated capability — but whether to push this to `origin/main` as-is, route it through the Product Owner for retroactive review first, or handle it some other way is a repository-owner decision this report does not make. Flagged to Dean directly in-conversation rather than resolved unilaterally here.
+
+**Resolved**: Dean moved the commit to a new short-lived branch (`feature/marketable-pricing`, created off `origin/main`) and reset local `main` back to match `origin/main` exactly, per the documented branch lifecycle. `feature/marketable-pricing` was then reviewed by the Product Owner (see Addendum below).
+
+## Addendum — Product Owner review and required refactor
+
+The Product Owner reviewed this ticket on `feature/marketable-pricing` and accepted it with one required architectural change before merge: `PositionValuation.liquidityTrapTriggered` introduced an unnecessary coupling between valuation (purely observational) and recommendation evaluation (a decision-engine property). The field was moved off `PositionValuation` entirely and onto `PositionObjectiveResult` (the return type of `evaluatePositionObjective()`, the canonical Decision Engine), which now also accepts an optional `liquidityTier` input — one more piece of evidence, the same way `marketablePnlPct` already is. This is a genuinely new one-way dependency (`lib/portfolio-intelligence` now imports the dependency-free `LiquidityTier` type from `lib/positionValuation`), matching the dependency flow the Product Owner specified: `PositionValuation → Execution Evidence → Decision Engine → Recommendation`.
+
+No stop-loss, take-profit, emergency-exit, liquidity-tier-threshold, or recommendation behavior changed — this was strictly an ownership move, verified by the same 5-fixture regression suite (updated only to read `liquidityTrapTriggered` from the evaluation result instead of the valuation object) passing unchanged, plus the same 202+201 tests across the rest of `lib/`/`features/` passing with zero new failures.
+
+Files touched by the refactor: `lib/positionValuation/types.ts` (field removed), `lib/positionValuation/computePositionValuation.ts` (`attachLiquidityTrapTrigger()` removed — no longer needed, `computePositionValuation()` now returns the complete, purely-observational `PositionValuation` directly), `lib/positionValuation/index.ts` (export updated), `lib/positionValuation/__tests__/computePositionValuation.test.ts` (obsolete `attachLiquidityTrapTrigger` tests replaced with one assertion confirming the field is gone), `lib/portfolio-intelligence/objectives/positionObjective.ts` (`liquidityTier` added to `PositionObjectiveInput`, `liquidityTrapTriggered` added to `PositionObjectiveResult`, computed from `executionRealityPromoted && liquidityTier === 'LIQUIDITY_TRAP'`), `app/portfolio/page.tsx` (`Position` gains a sibling `liquidityTrapTriggered` field instead of it living inside `valuation`; wiring updated to pass `liquidityTier` into `evaluatePositionObjective()` and read `liquidityTrapTriggered` back out), `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts` (updated to match).
 
 ## Executive Summary
 
@@ -25,7 +35,7 @@ This followed two rounds of independent external architecture review (ChatGPT, G
 
 New:
 - `lib/positionValuation/types.ts` — `PositionValuation`, `PositionValuationInput`, `LiquidityTier`, tier thresholds.
-- `lib/positionValuation/computePositionValuation.ts` — `computePositionValuation()` (pure valuation math) and `attachLiquidityTrapTrigger()` (attaches the one decision-dependent field once a caller knows whether marketable evidence changed the outcome).
+- `lib/positionValuation/computePositionValuation.ts` — `computePositionValuation()` (pure valuation math). Originally shipped alongside a second function, `attachLiquidityTrapTrigger()`; removed by the Addendum's refactor once `liquidityTrapTriggered` moved off this module entirely.
 - `lib/positionValuation/index.ts` — public barrel.
 - `lib/positionValuation/__tests__/computePositionValuation.test.ts` — 10 unit tests (tier boundaries, slippage clamping, missing/zero/negative maxRisk).
 - `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts` — the 5-fixture regression suite plus one supplementary test, 13 tests total.
@@ -37,9 +47,10 @@ Modified:
 - `app/portfolio/page.tsx` — `Position` interface gains `valuation: PositionValuation | null`; new `computeMarketablePnlPct()`/`computeRawPositionValuation()` helpers; `scorePortfolioPositionObjective()` now computes and returns `valuation`, passing `marketablePnlPct` into `evaluatePositionObjective()`; `getRecommendation()`'s stop-loss check and emergency-exit (`veryLargeLoss`) check now consider marketable pricing (OR with mid); `isActionRelevant()`'s duplicate CUT_LOSSES stop-loss/extreme-loss check updated the same way for consistency.
 - `docs/HANDOFF.md` — session handoff updated with this ticket's completion.
 
-## Object Shape
+## Object Shape (updated per the Product Owner's required refactor — see Addendum)
 
 ```ts
+// lib/positionValuation — purely observational, no opinion on recommendations
 type LiquidityTier = 'LIQUID' | 'WIDE_SPREAD' | 'LIQUIDITY_TRAP';
 
 interface PositionValuation {
@@ -50,11 +61,18 @@ interface PositionValuation {
   slippageCost: number;               // max(0, midPnL - marketablePnL)
   slippagePercentOfMaxRisk: number;    // slippageCost / maxRisk, 0 if maxRisk unavailable
   liquidityTier: LiquidityTier;        // <5% / 5-15% / >15% of max risk
-  liquidityTrapTriggered: boolean;     // liquidityTier === 'LIQUIDITY_TRAP' AND marketable evidence changed the recommendation
+}
+
+// lib/portfolio-intelligence — the Decision Engine, which now decides this
+interface PositionObjectiveResult {
+  objective: PortfolioObjective | null;
+  legacyRecommendation: PortfolioRecommendation;
+  executionRealityPromoted: boolean;
+  liquidityTrapTriggered: boolean;      // executionRealityPromoted && liquidityTier === 'LIQUIDITY_TRAP'
 }
 ```
 
-Exactly the shape and field names from the final ruling's Decision 2 — no `isMarketable`, no generic `spreadWidth`/`spreadPercent`. `computePositionValuation()` is deliberately split from `attachLiquidityTrapTrigger()`: the former is pure valuation arithmetic with no knowledge of recommendations; the latter is a one-line pure function that attaches the single decision-dependent field once the caller (the Decision Engine) has determined whether a promotion actually happened. This keeps `lib/positionValuation` genuinely pure while still producing the exact object shape the ruling specified.
+Field names and semantics are otherwise exactly as the final ruling's Decision 2 specified — no `isMarketable`, no generic `spreadWidth`/`spreadPercent`. The one change from the original implementation: `liquidityTrapTriggered` no longer lives on `PositionValuation`. `computePositionValuation()` now returns the complete, purely-observational object directly (the earlier split with `attachLiquidityTrapTrigger()` is gone — it's no longer needed once the decision-dependent field has a proper home). `evaluatePositionObjective()` takes `liquidityTier` as one more optional input (alongside `marketablePnlPct`) and owns deciding whether it was actually triggered, since that determination depends on the recommendation cascade this function itself runs.
 
 ## Promotion Logic
 
@@ -63,7 +81,7 @@ Implements the final ruling's Decision 1 exactly:
 - `materialLoss` / `weakHealthLoss` (feed the Cut Losses / `close-loser` recommendation): fire if **either** mid or marketable pnl% breaches the threshold. Marketable evidence can only make these fire more often, never less — an already-conservative mid-based verdict is never weakened.
 - `profitTargetReached` (feeds Take Profit / `close-winner`): still fires on mid evidence, but is vetoed when marketable data is available and contradicts it. A vetoed profit target simply falls through to whichever branch the existing `evaluatePositionObjective()` cascade reaches next (roll-soon / watch / hold) — no separate demotion logic was needed; the existing if/else-if priority order already produces "Take Profit → Hold/Manage/Cut Losses" once the input evidence is corrected. Verified directly by the supplementary fixture test.
 - Stop-loss breach (`app/portfolio/page.tsx`'s mechanical price-vs-threshold check): fires if **either** the mid buyback value or the marketable buyback value crosses the stop price.
-- `liquidityTrapTriggered` is true only when the tier is `LIQUIDITY_TRAP` **and** one of the above promotions/vetoes actually changed the outcome — a position can be `WIDE_SPREAD` or even `LIQUIDITY_TRAP` tier and still have this flag false if the recommendation would have been the same regardless (fixture 4 exercises exactly this case: assignment-risk fires from a strike breach, independent of and prior to the marketable gate).
+- `liquidityTrapTriggered` (owned by `evaluatePositionObjective()`, per the Addendum) is true only when the caller-supplied `liquidityTier` is `LIQUIDITY_TRAP` **and** one of the above promotions/vetoes actually changed the outcome — a position can be `WIDE_SPREAD` or even `LIQUIDITY_TRAP` tier and still have this flag false if the recommendation would have been the same regardless (fixture 4 exercises exactly this case: assignment-risk fires from a strike breach, independent of and prior to the marketable gate).
 
 ## Explainability
 
@@ -77,7 +95,7 @@ Per the ruling's Final Implementation Contract: health scoring, portfolio rollup
 
 ## Testing
 
-`lib/positionValuation/__tests__/computePositionValuation.test.ts` — 10 tests: midPnL/marketablePnL arithmetic, the real SMH-shaped slippage-cost calculation, all three liquidity tier boundaries (including the exact 5% edge, confirmed `LIQUID` since the threshold is `>`), slippage-cost clamping to 0 when marketable is better than mid, missing/zero/negative `maxRisk` handling, and `attachLiquidityTrapTrigger`'s independence between tier and the promoted-verdict flag.
+`lib/positionValuation/__tests__/computePositionValuation.test.ts` — 9 tests (post-refactor; originally 10, see Addendum): midPnL/marketablePnL arithmetic, the real SMH-shaped slippage-cost calculation, all three liquidity tier boundaries (including the exact 5% edge, confirmed `LIQUID` since the threshold is `>`), slippage-cost clamping to 0 when marketable is better than mid, missing/zero/negative `maxRisk` handling, and confirmation that `liquidityTrapTriggered` is no longer part of this shape.
 
 `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts` — the permanent risk-first regression suite (5 fixtures, not property-based testing, per both external reviews), exercising `computePositionValuation()` and `evaluatePositionObjective()` together the way `app/portfolio/page.tsx` actually composes them:
 1. **Real production failure (SMH-shaped BPS)** — mid P/L −$129 looks survivable; marketable P/L −$624 is `LIQUIDITY_TRAP` tier and promotes the recommendation to `close-loser`/critical, with the evidence bullet present.

@@ -17,7 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
 import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
-import { attachLiquidityTrapTrigger, computePositionValuation } from '@/lib/positionValuation';
+import { computePositionValuation } from '@/lib/positionValuation';
 
 const NOW = new Date('2026-07-17T13:00:00.000Z');
 
@@ -36,7 +36,9 @@ interface Fixture {
 }
 
 function evaluate(fixture: Fixture) {
-  const rawValuation = computePositionValuation({
+  // Purely observational -- no liquidityTrapTriggered on this object (PI-0014
+  // follow-up, Product Owner review).
+  const valuation = computePositionValuation({
     creditReceived: fixture.creditReceived,
     midValue: fixture.midValue,
     marketableValue: fixture.marketableValue,
@@ -44,6 +46,9 @@ function evaluate(fixture: Fixture) {
   });
   const pnlPct = pctOf(fixture.creditReceived, fixture.midValue);
   const marketablePnlPct = pctOf(fixture.creditReceived, fixture.marketableValue);
+  // liquidityTrapTriggered is decided by evaluatePositionObjective() itself,
+  // given the valuation's own liquidityTier as one more piece of evidence --
+  // matches app/portfolio/page.tsx's scorePortfolioPositionObjective wiring.
   const result = evaluatePositionObjective(
     {
       positionId: 'fixture',
@@ -51,11 +56,11 @@ function evaluate(fixture: Fixture) {
       creditReceived: fixture.creditReceived,
       pnlPct,
       marketablePnlPct,
+      liquidityTier: valuation.liquidityTier,
       ...fixture.input,
     },
     NOW,
   );
-  const valuation = attachLiquidityTrapTrigger(rawValuation, result.executionRealityPromoted);
   return { valuation, pnlPct, marketablePnlPct, ...result };
 }
 
@@ -81,10 +86,10 @@ describe('PI-0014 fixture 1: real production failure (SMH-shaped BPS)', () => {
   });
 
   it('is classified LIQUIDITY_TRAP and promotes the recommendation to Cut Losses', () => {
-    const { valuation, legacyRecommendation, executionRealityPromoted } = evaluate(fixture);
+    const { valuation, legacyRecommendation, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
     expect(valuation.liquidityTier).toBe('LIQUIDITY_TRAP');
     expect(executionRealityPromoted).toBe(true);
-    expect(valuation.liquidityTrapTriggered).toBe(true);
+    expect(liquidityTrapTriggered).toBe(true);
     expect(legacyRecommendation.kind).toBe('close-loser');
     expect(legacyRecommendation.urgency).toBe('critical');
   });
@@ -114,10 +119,10 @@ describe('PI-0014 fixture 2: plain, tight-spread CSP', () => {
   });
 
   it('is LIQUID, does not promote, and holds', () => {
-    const { valuation, legacyRecommendation, executionRealityPromoted } = evaluate(fixture);
+    const { valuation, legacyRecommendation, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
     expect(valuation.liquidityTier).toBe('LIQUID');
     expect(executionRealityPromoted).toBe(false);
-    expect(valuation.liquidityTrapTriggered).toBe(false);
+    expect(liquidityTrapTriggered).toBe(false);
     expect(legacyRecommendation.kind).toBe('hold');
     expect(legacyRecommendation.supportingReasons.some((r) => r.includes('Executable pricing'))).toBe(false);
   });
@@ -161,17 +166,18 @@ describe('PI-0014 fixture 4: ITM / breached spread', () => {
   });
 
   it('assignment-risk fires from the strike breach itself, independent of the marketable gate', () => {
-    const { legacyRecommendation, executionRealityPromoted, valuation } = evaluate(fixture);
+    const { legacyRecommendation, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
     expect(legacyRecommendation.kind).toBe('assignment-risk');
     expect(legacyRecommendation.urgency).toBe('critical');
     // Neither pnlPct is anywhere near the -100%/-50% loss thresholds, so
     // marketable evidence never gets a chance to promote anything here --
-    // proving liquidityTier and liquidityTrapTriggered are independent
+    // proving liquidityTier (a valuation property) and liquidityTrapTriggered
+    // (a decision-engine property, PI-0014 follow-up) are independent
     // concepts, exactly as the final ruling specifies (a position can be
     // WIDE_SPREAD or even LIQUIDITY_TRAP tier and still not have the
     // promotion boolean fire).
     expect(executionRealityPromoted).toBe(false);
-    expect(valuation.liquidityTrapTriggered).toBe(false);
+    expect(liquidityTrapTriggered).toBe(false);
   });
 });
 
