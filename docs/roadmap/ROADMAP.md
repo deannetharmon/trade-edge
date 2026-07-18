@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `main` and `origin/main` are both at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`. Only `main` and `feature/autopilot` remain as current branches.
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch, untouched by ES-0001. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `main` and `origin/main` are both at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`. `feature/live-close-safety` (ES-0001, Live Close-Order Identity and Break-Even Safety) is a new branch, implemented and pushed, **not merged — pending Product Owner review**; see `docs/design/ES-0001-Live-Close-Order-Safety.md` and `docs/reviews/ES-0001-Implementation-Report.md`. `main`, `feature/autopilot`, and `feature/live-close-safety` are the current branches.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 

@@ -1,7 +1,7 @@
 # TradeEdge — Sprint Status
 
 **Status:** Active operational source of truth
-**Last Updated:** 2026-07-18 (PT-0001 documentation closeout)
+**Last Updated:** 2026-07-18 (ES-0001 implemented, pending Product Owner review — not merged)
 **Primary Branch:** `main`
 **Long-Lived Development Branch:** `feature/autopilot`
 
@@ -17,7 +17,9 @@ Portfolio Intelligence implementation through **PI-0013** is complete and merged
 
 **Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. **Manual paper simulation now exists (PT-0001, below); live execution and autonomous paper trading do not exist anywhere in this codebase.**
 
-**No sprint is currently active.** PT-0001 is accepted, complete, merged, and pushed (see above). **PT-0002 — Application-Wide Portfolio Mode Foundation remains queued in `docs/roadmap/ROADMAP.md`, not approved, and not started** — PT-0001's acceptance satisfies its dependency, but PT-0002 itself still requires explicit Product Owner approval and scoping before any implementation begins. PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001 or PT-0002. No next sprint is selected or approved in this document — that determination belongs to the Product Owner.
+**ES-0001 — Live Close-Order Identity and Break-Even Safety** is **implemented on `feature/live-close-safety`, pushed, and awaiting Product Owner review — not merged into `main`.** It investigates a real, live financial loss from a "Snap to Break Even" close-order action. Direct code investigation confirmed the leading hypothesis (position grouping too broad — `${symbol}::${expiration}` only, no strike/direction/quantity discriminator — could merge economically distinct spreads into one displayed `Position`) and found it was compounded by a broader systemic defect: at least seven independent call sites re-derived a stand-in "quantity" from an arbitrary single leg rather than a canonical value. Fixed via a new canonical module (`lib/portfolio/closeOrderSafety.ts`: quantity-consistent grouping, a canonical close-order identity, and a typed, hard-blocking safety gate), a new `Position.quantity` field, enhanced confirmation-modal disclosure, and 26 new regression tests. See `docs/design/ES-0001-Live-Close-Order-Safety.md` and `docs/reviews/ES-0001-Implementation-Report.md` for the full account. **Not merged; this document does not mark ES-0001 complete.**
+
+**No sprint is currently approved-and-active for new implementation work beyond ES-0001's pending review.** PT-0001 is accepted, complete, merged, and pushed (see above). **PT-0002 — Application-Wide Portfolio Mode Foundation remains queued in `docs/roadmap/ROADMAP.md`, not approved, and not started** — PT-0001's acceptance satisfies its dependency, but PT-0002 itself still requires explicit Product Owner approval and scoping before any implementation begins. PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001, PT-0002, or ES-0001. `feature/autopilot` remains untouched by ES-0001. No next sprint is selected or approved in this document — that determination belongs to the Product Owner.
 
 ## Governance
 
@@ -49,7 +51,8 @@ Verified 2026-07-18 (PT-0001 documentation closeout, post-merge):
 - `feature/autopilot` — the one remaining long-lived branch, untouched by PT-0001
 - Only `main` and `feature/autopilot` remain locally; `origin/main` and `origin/feature/autopilot` remotely
 - The temporary `feature/manual-paper-trading` branch has been **deleted, both locally and remotely**, per the standard short-lived-branch lifecycle
-- Working tree clean
+- Working tree clean on `main`
+- `feature/live-close-safety` is a new, separate, pushed branch carrying the implemented-but-unmerged ES-0001 work described above — `main` itself is unaffected by it until a Product Owner-approved merge
 
 ## Definition of Done
 
@@ -111,6 +114,8 @@ PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, mul
 **OE-0001 (merged, commit `c97a705`)** validation results at merge: 697 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests). Vercel validation remains unverified — no direct evidence (deployment URL, build log, or dashboard confirmation) has been supplied or confirmed. See `docs/reviews/OE-0001-Implementation-Report.md` for the full account, including the Corrective Round Addendum.
 
 **PT-0001 (accepted, merged into `main` at commit `05d0f31`; closeout finalized at `1ffc54a`)** validation results at acceptance: 182/182 targeted tests passing across 17 files (`lib/paper-trading`, `components/paper-trading`, `app/api/paper-trading`); 879/879 tests passing repo-wide across 66 test files, run as six verified non-overlapping shards; `tsc --noEmit` clean; `git diff --check` clean; local production build subject to the same documented environment limitation (hangs at the initial Next.js banner in this sandbox — not treated as a regression given clean TypeScript and passing tests; Vercel remains the authoritative build check). The temporary branch (`feature/manual-paper-trading`) was deleted locally and remotely. See `docs/reviews/PT-0001-Implementation-Report.md` for the full account, including all Product Owner correction rounds.
+
+**ES-0001 (implemented on `feature/live-close-safety`, pushed, NOT merged — pending Product Owner review)** validation results: 26/26 new targeted tests passing (`lib/portfolio/__tests__/closeOrderSafety.test.ts`); 973/973 tests passing repo-wide across all 67 test files (run in 7 batches by directory rather than one invocation, purely due to this sandbox's per-command execution-time ceiling — every test file in the repository was run and passed, 0 failures); `tsc --noEmit` clean. Local production build subject to the same documented environment limitation as PT-0001/PI-0014/OE-0001 (hangs at the initial Next.js banner in this sandbox, confirmed reproducible across three separate attempts including one process-detached retry — not treated as a regression given clean TypeScript and passing tests; Vercel remains the authoritative build check). See `docs/reviews/ES-0001-Implementation-Report.md` for the full account.
 
 ## Current Milestones
 

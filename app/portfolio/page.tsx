@@ -9,6 +9,21 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+// ES-0001: Live Close-Order Identity and Break-Even Safety -- see
+// docs/design/ES-0001-Live-Close-Order-Safety.md. Canonical single source
+// for quantity-consistent position grouping, per-contract entry economics,
+// and the pre-submit safety gate. Every close/roll/stop-loss/GTC call site
+// below must consume Position.quantity / these helpers instead of
+// re-deriving its own "quantity" from an arbitrary leg.
+import {
+  groupEconomicLegs,
+  buildCanonicalCloseIdentity,
+  computeBreakEvenLimitPrice,
+  runCloseOrderSafetyGate,
+  type RawEconomicLeg,
+  type CanonicalCloseIdentity,
+  type SafetyCheckResult,
+} from '@/lib/portfolio/closeOrderSafety';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
 import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
 // PI-0014: Marketable Pricing for Risk-Gating (Phase 1) -- see
@@ -149,6 +164,12 @@ interface Position {
   dte: number;
   strategy: string;
   legs: PositionLeg[];
+  // ES-0001: the single canonical quantity shared by every leg in this
+  // position, produced by groupEconomicLegs (lib/portfolio/closeOrderSafety).
+  // Grouping guarantees every leg's own quantity equals this value -- this
+  // is the ONLY quantity any close/roll/stop-loss/GTC/P&L computation should
+  // use. Do not re-derive quantity from `legs.find(...)` or `legs[0]`.
+  quantity: number;
   creditReceived: number;
   currentValue: number | null;
   closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
@@ -639,6 +660,13 @@ interface AuditEntry {
   estPnl?: number;
   closeProfitPct?: number;  // % profit captured on TAKE_PROFIT closes (e.g. 65 for 65%)
   creditAtClose?: number;   // credit per contract at time of close — used to back-calc pct
+  // ES-0001: diagnostic/audit evidence for the canonical close-order safety
+  // gate -- reuses this existing audit mechanism rather than adding a new
+  // one. groupKey lets a later investigation trace exactly which canonical
+  // position group (post-split, if any) this order was built against.
+  groupKey?: string;
+  safetyGateOk?: boolean;
+  safetyGateIssues?: string[];  // rule IDs of any issues (block or warn)
 }
 
 interface OrderLeg {
@@ -668,6 +696,12 @@ interface BatchOrderItem {
   priceError: string | null;        // null = ok, string = blocking error message
   closeQuote?: CloseQuote | null;   // live net bid/mid/ask per contract for the scale
   quoteFetchedAt?: number;          // Date.now() when closeQuote was fetched — for staleness display
+  // ES-0001: canonical identity + safety-gate result for this item. Computed
+  // once in enrich() and re-validated in submitAll() immediately before
+  // submission; the confirmation UI renders `safetyCheck.issues` so a block
+  // is visible before the user can submit, not just in a console log.
+  closeIdentity?: CanonicalCloseIdentity;
+  safetyCheck?: SafetyCheckResult;
   // roll-specific
   rollExpiry?: string;
   rollShortStrike?: number;
@@ -730,7 +764,7 @@ async function findRollCandidates(pos: Position, token: string): Promise<RollCan
     const origLong  = pos.legs.find(l => l.direction === 'Long');
     if (!origShort || !origLong) return [];
     const width = Math.abs(origShort.strikePrice - origLong.strikePrice);
-    const qty = pos.legs[0]?.quantity ?? 1;
+    const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
 
     const chainData = await ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/expirations`, token);
     const expirations: any[] = chainData?.data?.items ?? [];
@@ -1574,7 +1608,7 @@ async function fetchCloseLimit(
         perShare -= legPrice * leg.quantity;
       }
     }
-    const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
+    const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
     // perShare is already weighted by each leg's quantity; convert to a
     // per-CONTRACT figure (divide by short qty) to match buildCloseOrder's
     // per-contract limit convention.
@@ -1617,7 +1651,7 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
         shareMid -= mid * leg.quantity;
       }
     }
-    const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? pos.legs[0]?.quantity ?? 1;
+    const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
     const div = qty > 0 ? qty : 1;
     return {
       netBid: parseFloat((shareBid / div).toFixed(2)),
@@ -2085,10 +2119,11 @@ async function fetchGtcOrders(accountNumber: string, token: string): Promise<Gtc
   } catch { return []; }
 }
 
-function classifyPositionStopLoss(position: Pick<Position, 'legs' | 'creditReceived'>, gtcOrders: GtcOrder[]): StopLossInfo {
+function classifyPositionStopLoss(position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>, gtcOrders: GtcOrder[]): StopLossInfo {
   const shortLeg = position.legs.find(l => l.direction === 'Short');
   if (!shortLeg?.symbol) return { status: 'unknown', price: null };
-  const creditPerContract = shortLeg.quantity > 0 ? position.creditReceived / (shortLeg.quantity * 100) : position.creditReceived / 100;
+  // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
+  const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
   const stopThreshold = parseFloat((creditPerContract * 2).toFixed(2));
   const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
   const match = gtcOrders.find(order =>
@@ -2114,11 +2149,45 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     p['instrument-type'] === 'Equity Option' || p['instrument-type'] === 'Index Option'
   );
 
-  const groups: Record<string, any[]> = {};
+  const rawBuckets: Record<string, any[]> = {};
   for (const pos of optionPositions) {
     const key = `${pos['underlying-symbol']}::${pos['expires-at']?.slice(0, 10) ?? 'unknown'}`;
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(pos);
+    if (!rawBuckets[key]) rawBuckets[key] = [];
+    rawBuckets[key].push(pos);
+  }
+
+  // ES-0001 fix (confirmed root cause): the old symbol+expiration-only key
+  // above could silently merge two independently-opened spreads that differ
+  // in quantity into one displayed Position, with break-even computed from
+  // their combined aggregate economics. Split each symbol+expiration bucket
+  // into canonical, quantity-consistent groups before building Positions --
+  // see lib/portfolio/closeOrderSafety.ts and
+  // docs/design/ES-0001-Live-Close-Order-Safety.md. A single coherent
+  // multi-leg strategy (vertical spread, iron condor) always has matching
+  // leg quantities, so this never splits a genuine position; it only
+  // separates legs that were never economically one position to begin with.
+  const groups: Record<string, any[]> = {};
+  for (const [bucketKey, rawLegs] of Object.entries(rawBuckets)) {
+    const sepIdx = bucketKey.indexOf('::');
+    const underlying = bucketKey.slice(0, sepIdx);
+    const expiration = bucketKey.slice(sepIdx + 2);
+    const economicLegs: RawEconomicLeg[] = rawLegs.map((l: any) => {
+      const parsed = parseOptionSymbol(l.symbol);
+      return {
+        symbol: l.symbol,
+        optionType: parsed.optionType,
+        strikePrice: parsed.strikePrice,
+        direction: l['quantity-direction'] as 'Short' | 'Long',
+        quantity: parseInt(l['quantity'] ?? '1', 10),
+        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
+        createdAt: l['created-at'] ?? null,
+      };
+    });
+    const canonicalSplit = groupEconomicLegs(underlying, expiration, economicLegs);
+    for (const g of canonicalSplit) {
+      const symbolsInGroup = new Set(g.legs.map(l => l.symbol));
+      groups[g.key] = rawLegs.filter((l: any) => symbolsInGroup.has(l.symbol));
+    }
   }
 
   const allOptionSymbols = optionPositions.map((p: any) => p.symbol).filter(Boolean);
@@ -2513,6 +2582,11 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
 
     const creditReceived = calculateSpreadCredit(positionLegs);
 
+    // ES-0001: canonical quantity for this position. Safe to read from the
+    // first leg because groupEconomicLegs guarantees every leg in a group
+    // shares one quantity -- this is no longer an arbitrary pick.
+    const canonicalQuantity = Math.abs(positionLegs[0]?.quantity ?? 1) || 1;
+
     // General mark value (mid) — used for ongoing P/L tracking, badges, and
     // rule logic throughout the app. NOT what you'd actually realize by closing.
     let currentValue = 0; let hasCurrentPrices = true;
@@ -2556,7 +2630,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
     const targetPrice = Math.abs(creditReceived) * profitTarget;
     const hitTarget = hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
 
-    const stopLoss = classifyPositionStopLoss({ legs: positionLegs, creditReceived: Math.abs(creditReceived) }, gtcOrders);
+    const stopLoss = classifyPositionStopLoss({ legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity }, gtcOrders);
 
     // Only treat earnings as relevant if it occurs on or before this position's expiration.
     // Tastytrade market-metrics can return the next earnings date within ~60 days;
@@ -2573,6 +2647,7 @@ async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: 
 
     return {
       key, symbol, expDate, dte, strategy, legs: positionLegs,
+      quantity: canonicalQuantity,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
@@ -2738,7 +2813,7 @@ function getRecommendation(pos: Position, trend: TrendResult | null): Recommenda
   // already-conservative mid-based verdict is never weakened. See
   // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
   const veryLargeLoss = pnlPct <= -200 || (marketablePnlPct != null && marketablePnlPct <= -200);
-  const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
+  const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
   // stopLossPrice is a per-spread/per-contract option price (e.g. 1.56 = $156 per contract).
   // currentValue is the total buyback value for the whole position, so scale the stop by contracts.
   // PI-0014: stop-loss detection now checks EITHER the mid buyback value or
@@ -2848,7 +2923,7 @@ function isActionRelevant(pos: Position, action: ActionType, override?: Recommen
     // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
     const marketablePnlPct = computeMarketablePnlPct(pos);
     const atExtremeLoss = (pnlPct != null && pnlPct <= -200) || (marketablePnlPct != null && marketablePnlPct <= -200);
-    const shortQty = Math.abs(pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1);
+    const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
     const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
       ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
       : false;
@@ -4194,7 +4269,7 @@ function BatchConfirmModal({
         fetchFreshPositionPrice(item.pos, token),
         fetchCloseQuote(item.pos, token).catch(() => null),
       ]);
-      const qty = item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+      const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
       const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
       setBatchItems(prev => prev.map(i => i.pos.key === key
         ? { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() }
@@ -4223,9 +4298,18 @@ function BatchConfirmModal({
 
         for (const { pos, action } of initialItems) {
           const freshPrice = await fetchFreshPositionPrice(pos, token);
-          const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+          const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
           const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
           const creditPerContract = pos.creditReceived / (qty * 100);
+          // ES-0001: canonical close-order identity -- the single source the
+          // safety gate, P/L calc, and broker payload all consume for this
+          // item. Built directly off pos.legs/pos.quantity (already
+          // canonical from loadPositions), not re-derived here.
+          const closeIdentity: CanonicalCloseIdentity = buildCanonicalCloseIdentity(
+            { key: pos.key, underlying: pos.symbol, expiration: pos.expDate, quantity: pos.quantity,
+              legs: pos.legs.map(l => ({ symbol: l.symbol, optionType: l.optionType, strikePrice: l.strikePrice, direction: l.direction, quantity: l.quantity, avgOpenPrice: l.avgOpenPrice })) },
+            pos.creditReceived
+          );
 
           const stalePriceWarning = freshPrice != null && pos.currentValue != null
             ? Math.abs(freshPrice - pos.currentValue) / pos.currentValue > STALE_PRICE_THRESHOLD
@@ -4299,11 +4383,28 @@ function BatchConfirmModal({
           const orderBody = buildCloseOrder(pos, limitPrice, tif);
           const estPnl = effectiveValue != null ? pos.creditReceived - effectiveValue : pos.pnl;
 
+          // ES-0001: run the canonical safety gate against the order actually
+          // being built here (same identity, same requested quantity/price
+          // that will be submitted) so a structural mismatch is caught and
+          // disclosed at enrich time, not discovered after the broker has
+          // already accepted a mispriced order.
+          const requestedClosingQuantity = orderBody.legs.length > 0
+            ? Math.abs(orderBody.legs[0].quantity)
+            : pos.quantity;
+          const safetyCheck: SafetyCheckResult = runCloseOrderSafetyGate({
+            identity: closeIdentity,
+            requestedClosingQuantity,
+            requestedLimitPrice: limitPrice,
+            quoteIsOneSided: closeQuote == null,
+            quoteAgeMs: 0,
+          });
+
           const item: BatchOrderItem = {
             pos, action, orderBody, limitPrice, estPnl,
             stalePriceWarning, freshPrice, freshPerContract, duplicateGtcWarning, priceError,
             closeQuote,
             quoteFetchedAt: Date.now(),
+            closeIdentity, safetyCheck,
           };
 
           if (action === 'CLOSE_ROLL') {
@@ -4361,7 +4462,22 @@ function BatchConfirmModal({
         const parsed = parseFloat(ovr);
         if (!isNaN(parsed) && parsed > 0) {
           const updatedBody = buildCloseOrder(i.pos, parsed, i.orderBody['time-in-force'] as 'GTC' | 'Day');
-          return { ...i, limitPrice: parsed, orderBody: updatedBody };
+          // ES-0001: re-validate against the OVERRIDDEN price -- an operator
+          // override must be re-checked by the same gate as the default, not
+          // exempted from it.
+          const requestedClosingQuantity = updatedBody.legs.length > 0
+            ? Math.abs(updatedBody.legs[0].quantity)
+            : i.pos.quantity;
+          const updatedSafetyCheck = i.closeIdentity
+            ? runCloseOrderSafetyGate({
+                identity: i.closeIdentity,
+                requestedClosingQuantity,
+                requestedLimitPrice: parsed,
+                quoteIsOneSided: i.closeQuote == null,
+                quoteAgeMs: i.quoteFetchedAt != null ? Date.now() - i.quoteFetchedAt : null,
+              })
+            : i.safetyCheck;
+          return { ...i, limitPrice: parsed, orderBody: updatedBody, safetyCheck: updatedSafetyCheck };
         }
       }
       return i;
@@ -4372,7 +4488,7 @@ function BatchConfirmModal({
     // Live per-item P&L from the CURRENT effective limit (override or item
     // default), matching the per-card display — not the frozen enrich-time
     // estPnl, which doesn't move when the limit is dragged/snapped/edited.
-    const q = Math.abs(i.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
+    const q = i.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
     const creditPc = i.pos.creditReceived / (q * 100);
     const ovr = limitOverrides[i.pos.key];
     const effLimit = (ovr !== undefined && ovr !== '' && !isNaN(parseFloat(ovr)))
@@ -4404,6 +4520,29 @@ function BatchConfirmModal({
 
       for (const item of activeItems) {
         try {
+          // ES-0001 safety gate: hard block (not warn) submission of any
+          // item whose canonical identity/quantity/price failed validation.
+          // Re-run at submit time (not just trust the enrich-time result) as
+          // defense in depth against any state drift between enrich and
+          // submit. A structural mismatch here means this order's price was
+          // computed against economics that don't match its actual legs --
+          // exactly the confirmed failure shape this ticket investigates.
+          if (item.closeIdentity) {
+            const submitTimeCheck = runCloseOrderSafetyGate({
+              identity: item.closeIdentity,
+              requestedClosingQuantity: item.orderBody.legs.length > 0
+                ? Math.abs(item.orderBody.legs[0].quantity)
+                : item.pos.quantity,
+              requestedLimitPrice: item.limitPrice,
+              quoteIsOneSided: item.closeQuote == null,
+              quoteAgeMs: item.quoteFetchedAt != null ? Date.now() - item.quoteFetchedAt : null,
+            });
+            if (!submitTimeCheck.ok) {
+              const blockMsgs = submitTimeCheck.issues.filter(iss => iss.severity === 'block').map(iss => iss.message).join(' ');
+              throw new Error(`Blocked by safety gate: ${blockMsgs}`);
+            }
+          }
+
           let orderId: string;
 
           // AUTO CANCEL EXISTING GTC IF USER CONFIRMED
@@ -4425,7 +4564,7 @@ function BatchConfirmModal({
           if (!dryRun) {
             try {
               const liveTotal = await fetchFreshPositionPrice(item.pos, token);
-              const qty = item.pos.legs.find((l: PositionLeg) => l.direction === 'Short')?.quantity ?? 1;
+              const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
               const livePerContract = liveTotal != null ? liveTotal / (qty * 100) : null;
               const creditPerContract = item.pos.creditReceived / (qty * 100);
 
@@ -4486,7 +4625,7 @@ function BatchConfirmModal({
               if (_ed <= _td) throw new Error('Roll expiry is in the past. Enter a future date.');
               const optType: 'P' | 'C' = item.pos.strategy === 'BCS' ? 'C' : 'P';
               const suggestion = rollSuggestions[item.pos.key];
-              const qty = item.pos.legs[0]?.quantity ?? 1;
+              const qty = item.pos.quantity; // ES-0001: canonical quantity, not legs[0] (previously unfiltered by direction)
 
               const inputCredit = parseFloat(ri.credit);
               const inputWidth  = Math.abs(parseFloat(ri.shortStrike) - parseFloat(ri.longStrike));
@@ -4592,7 +4731,7 @@ function BatchConfirmModal({
             results.push({ symbol: item.pos.symbol, action: item.action, orderId, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
           }
 
-          const _auditQty = item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+          const _auditQty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
           const _creditPc = item.pos.creditReceived / (_auditQty * 100);
           const _closeProfitPct = (item.action === 'TAKE_PROFIT' && _creditPc > 0 && item.estPnl != null)
             ? Math.round(((item.pos.creditReceived - (item.limitPrice * _auditQty * 100)) / item.pos.creditReceived) * 100)
@@ -4606,6 +4745,9 @@ function BatchConfirmModal({
             estPnl: item.estPnl ?? undefined,
             closeProfitPct: _closeProfitPct,
             creditAtClose: _creditPc,
+            groupKey: item.pos.key,
+            safetyGateOk: item.safetyCheck?.ok,
+            safetyGateIssues: item.safetyCheck?.issues.map(iss => iss.ruleId),
           });
 
           const verdict = verdicts[item.pos.key] ?? null;
@@ -4623,7 +4765,10 @@ function BatchConfirmModal({
             id: crypto.randomUUID(), timestamp: new Date().toISOString(),
             symbol: item.pos.symbol, strategy: item.pos.strategy, action: item.action,
             orderType: item.orderBody['order-type'], limitPrice: item.limitPrice,
-            quantity: item.pos.legs[0]?.quantity ?? 1, orderId: '—', status: 'error', error: e.message,
+            quantity: item.pos.quantity, orderId: '—', status: 'error', error: e.message,
+            groupKey: item.pos.key,
+            safetyGateOk: item.safetyCheck?.ok,
+            safetyGateIssues: item.safetyCheck?.issues.map(iss => iss.ruleId),
           });
         }
         completed++;
@@ -4669,7 +4814,7 @@ function BatchConfirmModal({
               <p className="text-yellow-400 font-bold text-sm mb-3">⚠ Existing GTC Close Order Detected</p>
               {needsGtcConfirmation.map(item => {
                 const gtcProfit = item.pos.gtcOrderPrice != null && item.pos.creditReceived > 0
-                  ? Math.round(((item.pos.creditReceived - (item.pos.gtcOrderPrice * (item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) * 100)) / item.pos.creditReceived) * 100)
+                  ? Math.round(((item.pos.creditReceived - (item.pos.gtcOrderPrice * item.pos.quantity * 100)) / item.pos.creditReceived) * 100)
                   : null;
                 return (
                   <div key={item.pos.key} className="flex items-center justify-between py-2 border-b border-yellow-500/20 last:border-none">
@@ -4844,7 +4989,7 @@ function BatchConfirmModal({
                           />
                         </div>
                         {(() => {
-                          const q = Math.abs(item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
+                          const q = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
                           const creditPc = item.pos.creditReceived / (q * 100);
                           const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
                           // Live P&L follows the current limit: credit kept minus cost to close.
@@ -4876,15 +5021,47 @@ function BatchConfirmModal({
                           </div>
                         )}
                         <TakeProfitScale
-                          creditPerContract={(() => {
-                            const q = Math.abs(item.pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1) || 1;
-                            return item.pos.creditReceived / (q * 100);
-                          })()}
+                          creditPerContract={item.pos.creditReceived / (item.pos.quantity * 100)}
                           quote={item.closeQuote ?? null}
                           limit={parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice}
                           onChange={(price) => setLimitOverrides(prev => ({ ...prev, [item.pos.key]: price.toFixed(2) }))}
                           th={th}
                         />
+                      </div>
+                    )}
+
+                    {/* ES-0001: enhanced confirmation disclosure -- LIVE mode
+                        badge, exact legs/strikes/quantity being closed, entry
+                        vs. close economics, and any safety-gate issues. This
+                        is the concrete artifact meant to make a merged/
+                        mis-attributed close order visible to the operator
+                        BEFORE submission, not just caught after the fact. */}
+                    {!isExcluded && (
+                      <div className={`mx-4 mb-2 p-2.5 rounded-lg border ${item.safetyCheck && !item.safetyCheck.ok ? 'border-red-500/50 bg-red-500/10' : 'border-slate-500/20 bg-slate-500/5'}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[9px] font-bold uppercase tracking-wide ${dryRun ? 'text-slate-400' : 'text-red-400'}`}>
+                            {dryRun ? 'DRY RUN' : 'LIVE'} · {item.pos.symbol} {item.pos.strategy} · qty {item.pos.quantity}
+                          </span>
+                          <span className={`text-[9px] ${th.textFaint}`}>{item.pos.expDate}</span>
+                        </div>
+                        <p className={`text-[9px] ${th.textFaint} leading-relaxed`}>
+                          {item.pos.legs.map(l => `${l.direction === 'Short' ? '−' : '+'}${l.quantity} ${l.optionType}${l.strikePrice}`).join('  ')}
+                        </p>
+                        <p className={`text-[9px] ${th.textFaint} mt-0.5`}>
+                          Entry credit ${(item.pos.creditReceived / item.pos.quantity / 100).toFixed(2)}/ct
+                          {' · '}Close limit ${item.limitPrice.toFixed(2)}/ct
+                          {item.closeQuote?.netAsk != null && ` · Marketable (ask) $${item.closeQuote.netAsk.toFixed(2)}/ct`}
+                          {' · fees excluded from all P&L figures shown here'}
+                        </p>
+                        {item.safetyCheck && item.safetyCheck.issues.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {item.safetyCheck.issues.map((iss, idx) => (
+                              <p key={idx} className={`text-[9px] font-bold ${iss.severity === 'block' ? 'text-red-400' : 'text-yellow-400'}`}>
+                                {iss.severity === 'block' ? '✕ BLOCKED' : '⚠'} [{iss.ruleId}] {iss.message}
+                              </p>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -6721,7 +6898,7 @@ OUTPUT FORMAT — JSON only, nothing else:
 }`;
 
 function buildStopGtcPrompt(pos: Position): string {
-  const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+  const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
   const creditPerContract = pos.creditReceived / (qty * 100);
   const currentValuePerContract = pos.currentValue != null ? pos.currentValue / (qty * 100) : null;
   const pnlPct = pos.pnl != null && pos.creditReceived > 0
@@ -6841,7 +7018,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   //   Maximum reasonable stop: 3× credit per contract (beyond that = max loss anyway).
   //   Minimum: current spread value + $0.01
 
-  const qty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+  const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
   const creditPerContract = pos.creditReceived / (qty * 100);
   // currentValue from pos is total across all contracts × 100
   // Per-contract spread value = currentValue / (qty * 100)
@@ -7137,6 +7314,29 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         action: (leg.direction === 'Short' ? 'Buy to Close' : 'Sell to Close') as 'Buy to Close' | 'Sell to Close',
         'instrument-type': itype,
       }));
+
+      // ES-0001 safety gate: defense in depth. pos.legs is expected to already
+      // be quantity-consistent (guaranteed by groupEconomicLegs upstream in
+      // loadPositions), so this should never actually block in practice --
+      // but a GTC/stop order shares this same "one price across every leg"
+      // shape as a close order, so it gets the same hard-blocking check
+      // rather than trusting that invariant silently.
+      const stopIdentity: CanonicalCloseIdentity = buildCanonicalCloseIdentity(
+        { key: pos.key, underlying: pos.symbol, expiration: pos.expDate, quantity: pos.quantity,
+          legs: pos.legs.map(l => ({ symbol: l.symbol, optionType: l.optionType, strikePrice: l.strikePrice, direction: l.direction, quantity: l.quantity, avgOpenPrice: l.avgOpenPrice })) },
+        pos.creditReceived
+      );
+      const stopSafetyCheck = runCloseOrderSafetyGate({
+        identity: stopIdentity,
+        requestedClosingQuantity: legs.length > 0 ? Math.abs(legs[0].quantity) : pos.quantity,
+        requestedLimitPrice: stopTrigger,
+      });
+      if (!stopSafetyCheck.ok) {
+        const blockMsgs = stopSafetyCheck.issues.filter(iss => iss.severity === 'block').map(iss => iss.message).join(' ');
+        setResult('error');
+        setResultMsg(`Blocked by safety gate: ${blockMsgs}`);
+        return;
+      }
 
       if (needsOco) {
         setPhase('Cancelling existing GTC order...');
@@ -8609,10 +8809,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 </span>
             
                 {(() => {
-                  const qty = Math.abs(
-                    pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1
-                  );
-            
+                  const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
+
                   return (
                     <span
                       className={`block font-bold ${th.text}`}
@@ -8988,7 +9186,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                   pos.stopLossStatus === 'loose' ? { icon: '⚠', label: 'Loose', cls: 'text-yellow-400'  } :
                   pos.stopLossStatus === 'none'  ? { icon: '✕', label: 'None',  cls: 'text-red-400'     } :
                                                    { icon: '—', label: '?',     cls: th.textFaint        };
-                const shortQty = pos.legs.find(l => l.direction === 'Short')?.quantity ?? 1;
+                const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
                 const creditPerContract = shortQty > 0 ? pos.creditReceived / (shortQty * 100) : pos.creditReceived / 100;
                 const stopMultiple = pos.stopLossPrice != null && creditPerContract > 0
                   ? (pos.stopLossPrice / creditPerContract).toFixed(1)
