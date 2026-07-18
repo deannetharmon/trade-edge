@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) is implemented and awaiting Product Owner review — not yet merged.
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `main` and `origin/main` are both at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`. Only `main` and `feature/autopilot` remain as current branches.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -47,9 +47,9 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 
 Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
 
-**PT-0001 — Manual Paper Trading Sandbox** is implemented on `feature/manual-paper-trading` and awaiting Product Owner review; **not yet merged, not yet complete.** It adds `lib/paper-trading/`, a manual (not autonomous) paper-trading domain supporting CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a new `/paper-trading` page, and a Portfolio Intelligence adapter for the paper portfolio. It is distinct from, and does not touch, the separate (still-dormant) Autopilot paper framework referenced by TE-0010 below. PT-0001 is the **ledger and sandbox foundation** — a standalone accounting/persistence engine and its own minimal UI, not the final application-wide user experience for choosing between live and paper context; that UX-level integration is PT-0002, immediately below. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md`.
+**PT-0001 — Manual Paper Trading Sandbox** is **complete and merged into `main`** (merge commit `05d0f31`; closeout commit `1ffc54a`). It adds `lib/paper-trading/`, a manual (not autonomous) paper-trading domain supporting CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a new `/paper-trading` page, and a Portfolio Intelligence adapter for the paper portfolio. Its accepted atomic commit design uses a single precondition-checked Redis Lua `EVAL` (not `WATCH`/`MULTI`/`EXEC`), with every commit-path error classified as `CONFIRMED_NOT_COMMITTED`, `OUTCOME_UNKNOWN`, or `INTEGRITY_FAILURE` — only `CONFIRMED_NOT_COMMITTED` may produce a rejected audit event. It is distinct from, and does not touch, the separate (still-dormant) Autopilot paper framework referenced by TE-0010 below. PT-0001 is the **ledger and sandbox foundation** — a standalone accounting/persistence engine and its own minimal UI, not the final application-wide user experience for choosing between live and paper context; that UX-level integration is PT-0002, immediately below. The temporary branch `feature/manual-paper-trading` has been deleted, locally and remotely. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md`.
 
-**PT-0002 — Application-Wide Portfolio Mode Foundation** is **queued, not approved, not started.** It builds on PT-0001's ledger/sandbox foundation to make LIVE vs. PAPER an explicit, first-class, application-wide concept rather than a feature confined to the `/paper-trading` page. Required scope:
+**PT-0002 — Application-Wide Portfolio Mode Foundation** is **queued, not approved, not started.** It builds on PT-0001's now-accepted ledger/sandbox foundation to make LIVE vs. PAPER an explicit, first-class, application-wide concept rather than a feature confined to the `/paper-trading` page. PT-0001's acceptance satisfies this ticket's dependency but does not itself approve or start it — it still requires explicit Product Owner approval and scoping. Required scope:
 
 - A persistent, global LIVE/PAPER selector — not a per-page toggle.
 - Unmistakable mode display across every portfolio-dependent screen, so it is never ambiguous which context the user is looking at.
@@ -85,8 +85,8 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 
 This sequence is a strict dependency order — each step requires the prior step to be approved and accepted before starting, not merely started:
 
-1. **PT-0001 — Manual Paper Trading Sandbox** (implemented, in Product Owner corrective review) — the ledger/persistence/accounting foundation and a minimal manual UI.
-2. **PT-0002 — Application-Wide Portfolio Mode Foundation** (queued, not approved) — makes LIVE/PAPER a first-class, application-wide context rather than a page-local feature.
+1. **PT-0001 — Manual Paper Trading Sandbox** (complete, merged into `main` at `05d0f31`) — the ledger/persistence/accounting foundation and a minimal manual UI.
+2. **PT-0002 — Application-Wide Portfolio Mode Foundation** (queued, not approved, not started) — makes LIVE/PAPER a first-class, application-wide context rather than a page-local feature.
 3. Separately approved paper-action integration into the rest of the product (e.g. taking a paper action directly from Portfolio Intelligence recommendations, the Daily Briefing, or the Opportunity Engine) — **not yet scoped, not yet a ticket.**
 4. **TE-0010 — Autopilot Paper Mode** — only after manual paper mode (PT-0001 + PT-0002) is proven out. Autopilot activation is not implied or accelerated by either PT-0001 or PT-0002.
 

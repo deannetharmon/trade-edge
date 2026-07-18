@@ -1,13 +1,13 @@
 # TradeEdge — Sprint Status
 
 **Status:** Active operational source of truth
-**Last Updated:** 2026-07-18 (PT-0001 corrective round)
+**Last Updated:** 2026-07-18 (PT-0001 documentation closeout)
 **Primary Branch:** `main`
 **Long-Lived Development Branch:** `feature/autopilot`
 
 ## Current State
 
-**PT-0001 — Manual Paper Trading Sandbox** — the original implementation was **rejected by the Product Owner** for blocking persistence, idempotency, identity, and accounting-safety defects (shallow idempotency hashing that silently dropped nested fields; a non-atomic lock release plus no lease-loss fencing; a three-way non-atomic ledger/audit/idempotency write; client-supplied manual-fill confirmation identity trusted as authoritative; no validation rejecting zero/negative entry credit or negative close debit). A **corrective round** on `feature/manual-paper-trading` has fixed all seven required corrections (canonical nested idempotency hashing, atomic ownership-safe lock release, atomic ledger+audit+idempotency commit with lease fencing, server-derived confirmation identity, entry-credit/close-debit validation, populated `auditRefs`, formatting cleanup). 847 repo-wide tests pass (0 failures), `tsc --noEmit` is clean, `git diff --check` is clean. **Not yet committed or pushed** — a stale `.git/index.lock` in the sandbox stopped the automated git sequence per this sprint's explicit instruction; exact commands for Dean to run natively are in `docs/reviews/PT-0001-Implementation-Report.md` §37. **Not merged, not re-reviewed, not complete.** See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` §14 and `docs/reviews/PT-0001-Implementation-Report.md` §29–38 for the full corrective-round account.
+**PT-0001 — Manual Paper Trading Sandbox** is **accepted, complete, merged, and pushed.** The original implementation (`7b41eeb`) was **rejected by the Product Owner** for blocking persistence, idempotency, identity, and accounting-safety defects (shallow idempotency hashing that silently dropped nested fields; a non-atomic lock release plus no lease-loss fencing; a three-way non-atomic ledger/audit/idempotency write; client-supplied manual-fill confirmation identity trusted as authoritative; no validation rejecting zero/negative entry credit or negative close debit). A corrective round fixed all seven required corrections and was accepted as `9a24fd9`. Several further Product Owner review rounds hardened the atomic commit design (replacing an initial `WATCH`/`MULTI`/`EXEC` approach with a single precondition-checked Redis Lua `EVAL`), ambiguous-outcome resolution, and explicit commit-outcome classification (`CONFIRMED_NOT_COMMITTED` / `OUTCOME_UNKNOWN` / `INTEGRITY_FAILURE` — only `CONFIRMED_NOT_COMMITTED` may ever produce a rejected audit event). PT-0001 was merged into `main` as `05d0f31`, and the accepted implementation report was restored/finalized in closeout commit `1ffc54a`. The temporary branch `feature/manual-paper-trading` has been **deleted, locally and remotely**, per the standard short-lived-branch lifecycle. Validation at acceptance: 182 targeted tests across 17 files, 879 tests across 66 files repo-wide, 0 failures; `tsc --noEmit` clean; `git diff --check` clean; production build subject to the documented local sandbox limitation (see Validation Baseline below). See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md` for the full account, including all Product Owner correction rounds.
 
 Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`.
 
@@ -15,9 +15,9 @@ Portfolio Intelligence implementation through **PI-0013** is complete and merged
 
 **OE-0001 — Opportunity Engine Foundation** is **complete and merged into `main`** (merge commit `c97a705`). It implements roadmap item TE-0007 / Master Spec §4.1: the canonical Opportunity Engine foundation (`lib/opportunity-engine/`), a deterministic ranking layer over already-computed Decision Engine evaluations, and one candidate adapter compatible with real `DecisionAnalysis` output (against the shape already produced by the existing `POST /api/autopilot/recommendations` route, though that route has no production caller yet). It was implemented, reviewed by the Product Owner, corrected through a corrective round (disposition-vs-disclosure separation, final display-order fix, added component test coverage, documentation corrections), accepted, and merged. The temporary branch (`feature/opportunity-engine-foundation`) was deleted locally and remotely per the standard short-lived-branch lifecycle. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` (§10, Corrective Round Addendum) for the full account and validation results.
 
-**Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. No paper or live execution exists anywhere in this codebase.
+**Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. **Manual paper simulation now exists (PT-0001, below); live execution and autonomous paper trading do not exist anywhere in this codebase.**
 
-**PT-0001 is the current active implementation sprint** (corrective round complete, awaiting Product Owner re-review — see above). **PT-0002 — Application-Wide Portfolio Mode Foundation is queued in `docs/roadmap/ROADMAP.md`, not approved, not started, and not scoped as an active sprint.** It depends on PT-0001 being accepted first. PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001 or PT-0002. No next sprint beyond PT-0001's own review/correction cycle is selected or approved in this document — that determination belongs to the Product Owner.
+**No sprint is currently active.** PT-0001 is accepted, complete, merged, and pushed (see above). **PT-0002 — Application-Wide Portfolio Mode Foundation remains queued in `docs/roadmap/ROADMAP.md`, not approved, and not started** — PT-0001's acceptance satisfies its dependency, but PT-0002 itself still requires explicit Product Owner approval and scoping before any implementation begins. PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001 or PT-0002. No next sprint is selected or approved in this document — that determination belongs to the Product Owner.
 
 ## Governance
 
@@ -36,19 +36,20 @@ Key operating rules:
 
 Autopilot must produce deterministic, explainable, portfolio-aware recommendations before it is allowed to create paper trades.
 
-No live execution work may begin before paper execution, autonomous paper management, paper beta validation, and an explicit live-readiness review are complete.
+No live execution work may begin before paper execution, autonomous paper management, paper beta validation, and an explicit live-readiness review are complete. ("Paper execution" here refers to the still-dormant, **autonomous** Autopilot paper framework — Milestone C / TE-0010, not started — which is distinct from PT-0001's already-complete, **manual**, intentional-action-only paper trading sandbox. See "Completed Capability Tracker" and Milestone C below.)
 
 For TastyTrade scans, execution remains browser-owned and client-authenticated. Do not reintroduce Vercel server-side TastyTrade scan execution until server authentication is explicitly solved.
 
 ## Repository State
 
-Verified 2026-07-17 (PT-0001 preflight, before implementation began):
+Verified 2026-07-18 (PT-0001 documentation closeout, post-merge):
 
-- Current branch: `feature/manual-paper-trading`, created from `main` @ `4812301`
-- `main` and `origin/main` both at `4812301` at that time
-- `feature/autopilot` untouched by PT-0001 (still at `7e81cd1`)
-- Only `main`, `feature/autopilot`, and the new `feature/manual-paper-trading` remain
-- Working tree was clean before PT-0001 implementation began; PT-0001's changes are implemented but **not yet committed** (see `docs/reviews/PT-0001-Implementation-Report.md` §25 — a sandbox git-lock quirk stopped the Implementation Engineer from committing natively; exact commands are provided in that report for Dean to run)
+- Current branch: `main`, at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`
+- `main` and `origin/main` both at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`
+- `feature/autopilot` — the one remaining long-lived branch, untouched by PT-0001
+- Only `main` and `feature/autopilot` remain locally; `origin/main` and `origin/feature/autopilot` remotely
+- The temporary `feature/manual-paper-trading` branch has been **deleted, both locally and remotely**, per the standard short-lived-branch lifecycle
+- Working tree clean
 
 ## Definition of Done
 
@@ -91,8 +92,9 @@ A sprint is complete only when all applicable items are true:
 | PI-0013 | Daily Briefing Dashboard | Complete ✅ | Deterministic priorities, snapshot, opportunities, and risks summary |
 | PI-0014 | Marketable Pricing for Risk-Gating, Phase 1 | Complete ✅ | Stop-loss, take-profit, emergency-exit, and Cut Losses gates now consider marketable (executable) pricing alongside mid; `PositionValuation` valuation layer; liquidity-tier classification |
 | OE-0001 | Opportunity Engine Foundation | Complete ✅ | Canonical deterministic ranking layer (`lib/opportunity-engine/`) over already-computed Decision Engine evaluations; one candidate adapter compatible with real `DecisionAnalysis` output; production UI (`BestOpportunitiesPanel`) built and tested but intentionally unmounted pending a real live-candidate consumer |
+| PT-0001 | Manual Paper Trading Sandbox | Complete ✅ | Manual, intentional-action-only paper-trading sandbox for CSP/BPS/BCS/IC (`lib/paper-trading/`), structurally isolated from any live-order path; single precondition-checked Redis Lua `EVAL` atomic ledger+audit+idempotency commit with explicit commit-outcome classification (`CONFIRMED_NOT_COMMITTED`/`OUTCOME_UNKNOWN`/`INTEGRITY_FAILURE`); paper-only API, `/paper-trading` page, and a Portfolio Intelligence adapter reusing the canonical Decision Engine unchanged. Distinct from, and does not touch, the still-dormant autonomous Autopilot paper framework (TE-0010) |
 
-PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`). PI-0014 was merged to `main` in commit `2c79d5e` (`merge: PI-0014 marketable pricing for risk-gating`). OE-0001 was merged to `main` in commit `c97a705` (`merge: OE-0001 opportunity engine foundation`).
+PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`). PI-0014 was merged to `main` in commit `2c79d5e` (`merge: PI-0014 marketable pricing for risk-gating`). OE-0001 was merged to `main` in commit `c97a705` (`merge: OE-0001 opportunity engine foundation`). PT-0001 was merged to `main` in commit `05d0f31` (`merge: PT-0001 manual paper trading sandbox`), with its accepted implementation report finalized in closeout commit `1ffc54a`.
 
 ## Validation Baseline
 
@@ -108,7 +110,7 @@ PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, mul
 
 **OE-0001 (merged, commit `c97a705`)** validation results at merge: 697 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests). Vercel validation remains unverified — no direct evidence (deployment URL, build log, or dashboard confirmation) has been supplied or confirmed. See `docs/reviews/OE-0001-Implementation-Report.md` for the full account, including the Corrective Round Addendum.
 
-**PT-0001 (implementation complete on `feature/manual-paper-trading`, not yet merged)** validation results: 115/115 targeted tests passing (`lib/paper-trading`, `components/paper-trading`, `app/api/paper-trading`); 812/812 tests passing repo-wide across 63 test files; `tsc --noEmit` clean; local production build subject to the same documented environment limitation. Not yet committed, pushed, or reviewed. See `docs/reviews/PT-0001-Implementation-Report.md` for the full account.
+**PT-0001 (accepted, merged into `main` at commit `05d0f31`; closeout finalized at `1ffc54a`)** validation results at acceptance: 182/182 targeted tests passing across 17 files (`lib/paper-trading`, `components/paper-trading`, `app/api/paper-trading`); 879/879 tests passing repo-wide across 66 test files, run as six verified non-overlapping shards; `tsc --noEmit` clean; `git diff --check` clean; local production build subject to the same documented environment limitation (hangs at the initial Next.js banner in this sandbox — not treated as a regression given clean TypeScript and passing tests; Vercel remains the authoritative build check). The temporary branch (`feature/manual-paper-trading`) was deleted locally and remotely. See `docs/reviews/PT-0001-Implementation-Report.md` for the full account, including all Product Owner correction rounds.
 
 ## Current Milestones
 
@@ -141,6 +143,8 @@ No paper execution, live execution, order submission, or position mutation exist
 
 Goal: Autopilot can create simulated trades through an explicit, auditable, kill-switch-controlled paper execution engine.
 
+This milestone is about **autonomous** Autopilot-driven paper trading (TE-0010) and remains not started. It is distinct from **PT-0001 — Manual Paper Trading Sandbox**, which is accepted and complete: PT-0001 is a manual, intentional-action-only paper ledger with no Autopilot involvement, and does not itself complete or activate this milestone. It is, however, the approved sequencing's prerequisite foundation this milestone builds on — via PT-0002 and, later, TE-0010 (see "Paper trading sequencing" under Known Follow-Ups) — not an unrelated, disconnected effort.
+
 ### Milestone D — Position Management
 
 **Status:** Not started ⬜
@@ -163,9 +167,10 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ### Paper trading sequencing
 
-- **PT-0002 — Application-Wide Portfolio Mode Foundation: queued, not approved, not started.** Builds on PT-0001's ledger/sandbox foundation once accepted. Scope (see `docs/roadmap/ROADMAP.md`): a persistent global LIVE/PAPER selector; unmistakable mode display across every portfolio-dependent screen; a shared portfolio-context abstraction read by Portfolio Intelligence, Decision Engine inputs, the Daily Briefing, reviews, risk analysis, analytics, and the Opportunity Engine; complete live/paper data isolation with no blending or implicit copying; persistence across navigation and refresh; safe failure on missing/ambiguous context; mode displayed at every execution-like confirmation; PAPER actions able to mutate only the paper ledger; no mode switch can trigger or enable live execution; Autopilot stays disabled and out of scope.
-- Sequencing is strict: PT-0001 → PT-0002 → a separately approved paper-action integration (not yet scoped) → TE-0010 Autopilot Paper Mode, only after manual paper mode is proven.
-- Do not begin PT-0002 implementation before it is explicitly approved and scoped by the Product Owner, and before PT-0001 itself is accepted.
+- **PT-0001 — Manual Paper Trading Sandbox: accepted, complete, merged (`05d0f31`).** Its ledger/sandbox foundation is now available for PT-0002 to build on.
+- **PT-0002 — Application-Wide Portfolio Mode Foundation: queued, not approved, not started.** Builds on PT-0001's now-accepted ledger/sandbox foundation. Scope (see `docs/roadmap/ROADMAP.md`): a persistent global LIVE/PAPER selector; unmistakable mode display across every portfolio-dependent screen; a shared portfolio-context abstraction read by Portfolio Intelligence, Decision Engine inputs, the Daily Briefing, reviews, risk analysis, analytics, and the Opportunity Engine; complete live/paper data isolation with no blending or implicit copying; persistence across navigation and refresh; safe failure on missing/ambiguous context; mode displayed at every execution-like confirmation; PAPER actions able to mutate only the paper ledger; no mode switch can trigger or enable live execution; Autopilot stays disabled and out of scope.
+- Sequencing is strict: PT-0001 (accepted) → PT-0002 (queued, not approved) → a separately approved paper-action integration (not yet scoped) → TE-0010 Autopilot Paper Mode, only after manual paper mode is proven.
+- Do not begin PT-0002 implementation before it is explicitly approved and scoped by the Product Owner. PT-0001's acceptance satisfies PT-0002's dependency but does not itself approve or start PT-0002.
 
 ### Portfolio Intelligence acceptance
 
@@ -200,9 +205,9 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ## Next Sprint Decision Gate
 
-**PT-0001 is implemented and awaiting Product Owner review.** It is not merged and not marked complete. Until it is accepted (or a corrective round is required and completed), no new sprint should be selected.
+**PT-0001 is accepted, complete, and merged.** It is no longer a blocker to selecting a next sprint. **No sprint is currently active, and this document does not select one.**
 
-Once PT-0001 reaches an accepted, merged state, the Product Owner must determine whether the highest-value next sprint is:
+The Product Owner must determine whether the highest-value next sprint is:
 
 1. Wiring a real page to a live `DecisionAnalysis[]` feed and mounting `BestOpportunitiesPanel` against it — a future, separately approved capability surfaced by OE-0001 (see its implementation report §10.7);
 2. PI-0015 / Portfolio Intelligence stabilization and live-market acceptance fixes (queued);
