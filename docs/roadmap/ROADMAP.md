@@ -2,7 +2,9 @@
 
 ## Current Branch
 
-`feature/portfolio-intelligence`
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` is an active, frozen short-lived sprint branch (OE-0001; a Product Owner corrective round is complete, pending re-review — not yet merged).
+
+For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
 ## Completed Platform / Infrastructure
 
@@ -15,19 +17,35 @@
 - TE-0005B — Global Background Task Status Bar
 - TE-0005C — Task Completion Notifications
 - TE-0005D — Global Task Drawer
+- TE-0007A — First-Class CSP Screener Strategy (reuses Wheel's contract search; see `docs/reviews/TE-0007A-Implementation-Report.md`)
 
 ## Completed Trader Intelligence
 
 - TE-0006A — Portfolio Health Scoring Framework (consolidated into `lib/portfolio-intelligence` in PI-0002)
 - TE-0006B — Portfolio Recommendation Rules (consolidated into `lib/portfolio-intelligence` in PI-0002, now produces canonical `PortfolioObjective[]`)
-- Sprint 2 — Decision Engine (`lib/decision-engine`, `lib/autopilot/decision`) — merged to `main`, live in production
-- Sprint 3, PI-0001 — Portfolio Objective Engine (`lib/portfolio-intelligence`) — first slice, locally verified, pending Vercel confirmation
-- Sprint 3, PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved out of `features/portfolio/` into the canonical model, `app/portfolio/page.tsx` now a consumer, stable rule IDs introduced
-- Sprint 3, PI-0003 — Canonical Portfolio Priority Engine — risk policy separation, 15 fine-grained rule IDs, TE-0006C (Daily Priority List) consolidated into the canonical `prioritizePortfolioObjectives()`, `evaluatePortfolioObjectives()` given its first production consumer
-- Sprint 3, PI-0003.5 — Real Financial Data Wiring — `DEPLOY_IDLE_CASH`, `REDUCE_CONCENTRATION`, and `PRESERVE_BUYING_POWER`'s utilization branch now fire from real account balances via a new single normalization point
-- Sprint 4, PI-0004A — Today's Priorities — first UI surface for canonical Portfolio Intelligence: renders the existing ranked `PortfolioObjective[]` with expand/collapse, no new business logic, locally verified, pending Vercel confirmation
+- TE-0006C — Daily Priority List (consolidated into the canonical `prioritizePortfolioObjectives()`)
+- Sprint 2 — Decision Engine (`lib/decision-engine`, `lib/autopilot/decision`) — merged to `main`, live in production. Canonical per-candidate evaluation contract (DR-0002): deterministic recommendations, full reasoning, kill switch, deduplication, audit trail.
+- PI-0001 — Portfolio Objective Engine (`lib/portfolio-intelligence`) — canonical deterministic portfolio objectives
+- PI-0002 — Portfolio Engine Consolidation — TE-0006A/B moved into the canonical model, `app/portfolio/page.tsx` a consumer, stable rule IDs
+- PI-0003 — Canonical Portfolio Priority Engine — risk policy separation, fine-grained rule IDs, canonical `prioritizePortfolioObjectives()`
+- PI-0003.5 — Real Financial Data Wiring — objective rules now fire from real account balances via a single normalization point
+- PI-0004A — Today's Priorities UI — first UI surface for canonical Portfolio Intelligence
+- PI-0004B — Actionability and Wheel Awareness — actionability dimension, strategy/assignment preference awareness
+- PI-0004C — Today's Priorities Workflow — dedicated subpage, persisted Complete/Reopen
+- PI-0004D — Daily Portfolio Briefing — 30-second executive summary over the canonical objective list, default `/portfolio` tab
+- PI-0005 — Position Intelligence — expandable per-position panel explaining the canonical recommendation (why, evidence, concerns, alternatives) with zero new evaluation rules
+- PI-0006A — Assertive Recommendations — decisive labels and evidence bullets
+- PI-0006B — Intent-Based Recommendation Engine — evidence-scored canonical management intents
+- PI-0007A — Recommendation Scorecard — observable candidate scores, winner, margin, confidence tier
+- PI-0008A — Remaining Opportunity Engine — Opportunity Captured and Remaining Opportunity metrics
+- PI-0008B — Decision Quality V1 — centralized recommendation-weighting matrix; Net Edge, technical trend, and gamma/DTE risk carry more influence, Remaining Opportunity and earnings proximity became genuine scoring inputs
+- PI-0012A — Portfolio Review Composition Layer — composes existing health/objective engines, no new scoring or AI
+- PI-0013 — Daily Briefing Dashboard — deterministic priorities, snapshot, opportunities, and risks summary
+- PI-0014 — Marketable Pricing for Risk-Gating, Phase 1 — stop-loss/take-profit/emergency-exit/Cut Losses gates now consider marketable (executable) pricing; liquidity-tier classification
 
-Note: `evaluatePortfolioObjectives()`'s output is wired into the Portfolio page's state but not yet rendered anywhere. Portfolio-level financial aggregates (net liquidity, buying power, drawdown, concentration, income) aren't yet read from the Balances tab, so those specific objective rules don't fire from production data yet. See `planning/SPRINT3_PI0003_PLAN.md` "Later items".
+**TE-0007 — Opportunity Engine Foundation** is being implemented via **OE-0001** on `feature/opportunity-engine-foundation` (a Product Owner corrective round is complete, pending re-review; not yet merged). It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) is built and tested but **intentionally not mounted anywhere** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the full account.
+
+Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
 
 ## Current Planning Focus
 
@@ -37,18 +55,16 @@ See:
 
 `docs/specifications/TradeEdge-Phase3-Master-Specification.md`
 
-Phase 3 shifts the product from infrastructure toward trader-facing intelligence. Sprint 3's Portfolio Intelligence layer (`lib/portfolio-intelligence`) is the current implementation of this shift's portfolio-level reasoning.
+Phase 3 shifts the product from infrastructure toward trader-facing intelligence. Sprint 3's Portfolio Intelligence layer (`lib/portfolio-intelligence`) and OE-0001's Opportunity Engine layer (`lib/opportunity-engine`) are the current implementations of this shift's portfolio- and opportunity-level reasoning.
 
 ## Near-Term Roadmap
 
-1. Portfolio Intelligence — next slice(s) beyond PI-0003 (see "Later items" in `planning/SPRINT3_PI0003_PLAN.md`, `planning/SPRINT3_PI0002_PLAN.md`, and `planning/SPRINT3_PORTFOLIO_INTELLIGENCE_PLAN.md`)
-2. TE-0006C — Daily Priority List
-3. TE-0006D — Position Advisor Cards
-4. TE-0006E — Recommendation Explanation Panel
-5. TE-0007 — Opportunity Engine Foundation
-6. TE-0008 — Capital Allocation / Wheel Preference Engine
-7. TE-0009 — Income Engine Foundation
-8. TE-0010 — Autopilot Paper Mode
+1. Product Owner review and disposition of OE-0001 (merge decision, or corrective follow-up)
+2. Give a real page a live `DecisionAnalysis[]` feed (via the existing `POST /api/autopilot/recommendations` route) so the Best Opportunities panel can render real rankings — surfaced as a backlog item by OE-0001, not yet an approved sprint
+3. Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
+4. TE-0008 — Capital Allocation / Wheel Preference Engine
+5. TE-0009 — Income Engine Foundation
+6. TE-0010 — Autopilot Paper Mode
 
 ## Later Backlog — Paper Strategy Laboratory
 
@@ -107,10 +123,10 @@ Exit criteria for the future implementation:
 
 ## Core Product Engines
 
-1. Opportunity Engine — Where should my next dollar go?
+1. Opportunity Engine — Where should my next dollar go? (`lib/opportunity-engine`, OE-0001 foundation implemented, pending review)
 2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 + PI-0003 complete)
 3. Risk Engine — What could hurt me?
-4. Income Engine — Am I producing enough recurring income?
+4. Income Engine — Am I producing enough recurring income? (`app/engine/page.tsx` — SPX/SPY/Wheel capital-allocation dashboard; not yet unified with the Decision Engine or Opportunity Engine)
 5. Execution Engine — What do I actually need to do today?
 
 ## Working Model

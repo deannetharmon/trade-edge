@@ -16,6 +16,10 @@ export default defineConfig({
     include: [
       'lib/**/__tests__/**/*.test.ts',
       'features/**/__tests__/**/*.test.tsx',
+      // OE-0001 correction: components/opportunity-engine/__tests__ is the
+      // first test under components/ -- without this glob its component
+      // test would silently never run under `npm test`.
+      'components/**/__tests__/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
     reporters: ['default'],
