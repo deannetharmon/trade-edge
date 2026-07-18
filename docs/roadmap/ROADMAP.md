@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch, untouched by ES-0001. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `main` and `origin/main` are both at `1ffc54a69a39fd3a7eb81d3c0106ae5d9a9ac1fb`. `feature/live-close-safety` (ES-0001, Live Close-Order Identity and Break-Even Safety) is a branch whose first implementation round was **REJECTED by the Product Owner** (quantity-only grouping is not canonical identity; disclosure is not a substitute for a hard block) and is now in a corrective round on the same branch — pushed, **not merged, not complete — active and under corrective review**; see `docs/design/ES-0001-Live-Close-Order-Safety.md` and `docs/reviews/ES-0001-Implementation-Report.md`. `main`, `feature/autopilot`, and `feature/live-close-safety` are the current branches.
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch, untouched by ES-0001. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `feature/live-close-safety` (ES-0001, Live Close-Order Identity and Break-Even Safety) went through a rejected first implementation round and a rejected first corrective round before an accepted round 2 (deterministic economic-structure analysis, an all-block safety gate, a structurally-enforced broker boundary), and has been **merged into `main` at merge commit `a7f6acb`**. `main` and `origin/main` are both at `a7f6acb`. See `docs/design/ES-0001-Live-Close-Order-Safety.md`, `docs/reviews/ES-0001-Implementation-Report.md`, and the post-merge closeout review at `docs/reviews/ES-0001-Closeout-Report.md` (architectural review, technical debt register, test coverage assessment, and next-sprint recommendation — including one pre-existing, out-of-scope live-order path, `replacePendingOrder`, found still bypassing this safety gate). `main` and `feature/autopilot` are the current branches; `feature/live-close-safety` has served its purpose and is a candidate for standard deletion.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -64,6 +64,8 @@ Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently re
 
 See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md`'s note on this sequencing; PT-0002 does not yet have its own design doc — that is the first deliverable when this ticket is approved and scoped.
 
+**ES-0001 — Live Close-Order Identity and Break-Even Safety** is **complete and merged into `main`** (merge commit `a7f6acb`). It replaces broad symbol+expiration position grouping with deterministic economic-structure analysis (`lib/portfolio/closeOrderSafety.ts`) that hard-blocks any genuinely ambiguous leg pairing instead of merging-and-disclosing it, fixes a critical 100x broker-price-unit defect found during corrective review, and structurally enforces (not just tests) that every live close/roll/stop-loss submission passes through a single safety gate before reaching the broker (`lib/portfolio/closeOrderSubmission.ts`). A post-merge closeout review (`docs/reviews/ES-0001-Closeout-Report.md`) found one pre-existing, out-of-scope live-order path — `replacePendingOrder` (GTC/pending-order repricing) — that still bypasses this gate entirely, and recommends it as the next sprint (ES-0002).
+
 ## Current Planning Focus
 
 ### Phase 3 — Trader Intelligence Master Specification
@@ -76,10 +78,11 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 
 ## Near-Term Roadmap
 
-1. Give a real page a live `DecisionAnalysis[]` feed (via the existing `POST /api/autopilot/recommendations` route) and mount the Best Opportunities panel against it — a future, separately approved capability surfaced as a backlog item by OE-0001, not yet an approved sprint
-2. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
-3. TE-0008 — Capital Allocation / Wheel Preference Engine
-4. TE-0009 — Income Engine Foundation
+1. **ES-0002 — close the `replacePendingOrder` live-order safety gap** surfaced by the ES-0001 closeout review (`docs/reviews/ES-0001-Closeout-Report.md`) — not yet an approved sprint
+2. Give a real page a live `DecisionAnalysis[]` feed (via the existing `POST /api/autopilot/recommendations` route) and mount the Best Opportunities panel against it — a future, separately approved capability surfaced as a backlog item by OE-0001, not yet an approved sprint
+3. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
+4. TE-0008 — Capital Allocation / Wheel Preference Engine
+5. TE-0009 — Income Engine Foundation
 
 ### Paper Trading Sequencing
 
