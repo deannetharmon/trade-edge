@@ -4,6 +4,12 @@
 // contract, independent of batch sequencing (rankOpportunityCandidates.ts
 // has its own suite for the full 16 required scenarios, which exercises
 // this function as part of a real batch).
+//
+// Product Owner correction: `conflictDescriptions` is strictly
+// disposition-changing (exact symbol+strategy+expiration duplicates) and
+// `exposureDisclosures` is strictly informational (ordinary nonzero
+// ticker/sector exposure) -- they are separate parameters and this file
+// tests that they cannot be confused with each other.
 
 import { describe, expect, it } from 'vitest';
 import { evaluateOpportunityCandidate } from '../evaluateOpportunityCandidate';
@@ -16,6 +22,8 @@ const baseContext: OpportunityContext = {
   generatedAt: new Date('2026-07-20T00:00:00.000Z').toISOString(),
 };
 
+const noExposureDisclosures = { descriptions: [], ruleIds: [] };
+
 describe('evaluateOpportunityCandidate', () => {
   it('never overrides an existing hard rejection -- status not_recommended always yields REJECTED', () => {
     const candidate = buildOpportunityCandidateFixture({ status: 'not_recommended', opportunityScoreTotal: 99 });
@@ -24,6 +32,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).toBe('REJECTED');
@@ -38,6 +47,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).toBe('WATCH');
@@ -52,6 +62,7 @@ describe('evaluateOpportunityCandidate', () => {
       context,
       capitalRemainingBeforeThisCandidate: context.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).not.toBe('RECOMMENDED');
@@ -67,6 +78,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: 100, // less than capitalRequired
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).toBe('ACCEPTABLE_ALTERNATIVE');
@@ -74,17 +86,18 @@ describe('evaluateOpportunityCandidate', () => {
     expect(recommendation.ruleIds).toContain(OE_RULE_IDS.capitalConsumedByHigherRanked);
   });
 
-  it('demotes to ACCEPTABLE_ALTERNATIVE, never REJECTED or silently promoted, when a conflict is disclosed', () => {
+  it('demotes to ACCEPTABLE_ALTERNATIVE, never REJECTED or silently promoted, when an exact duplicate conflict is disclosed', () => {
     const candidate = buildOpportunityCandidateFixture({ status: 'recommended', capitalRequired: 100 });
     const { recommendation } = evaluateOpportunityCandidate({
       candidate,
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
-      conflictDescriptions: ['Existing AAPL exposure of $1,000 is already on the books.'],
+      conflictDescriptions: ['An existing open position already matches AAPL BPS exp 2026-08-21.'],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).toBe('ACCEPTABLE_ALTERNATIVE');
-    expect(recommendation.portfolioConflicts).toContain('Existing AAPL exposure of $1,000 is already on the books.');
+    expect(recommendation.portfolioConflicts).toContain('An existing open position already matches AAPL BPS exp 2026-08-21.');
     expect(recommendation.ruleIds).toContain(OE_RULE_IDS.duplicateExposureDetected);
   });
 
@@ -95,6 +108,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.disposition).toBe('RECOMMENDED');
@@ -109,6 +123,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.opportunityScoreTotal).toBe(42);
@@ -124,6 +139,7 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.missingInformationDisclosures.length).toBeGreaterThan(0);
@@ -144,9 +160,54 @@ describe('evaluateOpportunityCandidate', () => {
       context: baseContext,
       capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
       conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
     });
 
     expect(recommendation.ruleIds).not.toContain(OE_RULE_IDS.missingSectorDisclosure);
     expect(recommendation.ruleIds).not.toContain(OE_RULE_IDS.missingEarningsDisclosure);
+  });
+
+  it('ordinary nonzero ticker/sector exposure is disclosed but never demotes disposition, even though it is nonzero', () => {
+    const candidate = buildOpportunityCandidateFixture({ status: 'recommended', capitalRequired: 400 });
+    const { recommendation, capitalConsumed } = evaluateOpportunityCandidate({
+      candidate,
+      context: baseContext,
+      capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
+      conflictDescriptions: [], // no exact duplicate
+      exposureDisclosures: {
+        descriptions: [
+          'Existing AAPL exposure of $1,000 is already on the books.',
+          'Existing Technology sector exposure of $5,000 is already on the books.',
+        ],
+        ruleIds: [OE_RULE_IDS.tickerExposureDisclosed, OE_RULE_IDS.sectorExposureDisclosed],
+      },
+    });
+
+    // Disclosed for awareness...
+    expect(recommendation.exposureDisclosures).toEqual([
+      'Existing AAPL exposure of $1,000 is already on the books.',
+      'Existing Technology sector exposure of $5,000 is already on the books.',
+    ]);
+    expect(recommendation.ruleIds).toContain(OE_RULE_IDS.tickerExposureDisclosed);
+    expect(recommendation.ruleIds).toContain(OE_RULE_IDS.sectorExposureDisclosed);
+    // ...but never treated as a conflict, and never demotes disposition or
+    // blocks capital consumption.
+    expect(recommendation.portfolioConflicts).toEqual([]);
+    expect(recommendation.disposition).toBe('RECOMMENDED');
+    expect(capitalConsumed).toBe(400);
+    expect(recommendation.ruleIds).not.toContain(OE_RULE_IDS.duplicateExposureDetected);
+  });
+
+  it('exposureDisclosures never appear in exposureDisclosures output when none are supplied', () => {
+    const candidate = buildOpportunityCandidateFixture({ status: 'recommended' });
+    const { recommendation } = evaluateOpportunityCandidate({
+      candidate,
+      context: baseContext,
+      capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
+      conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
+    });
+
+    expect(recommendation.exposureDisclosures).toEqual([]);
   });
 });

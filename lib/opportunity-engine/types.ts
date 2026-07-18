@@ -132,7 +132,28 @@ export interface OpportunityRecommendation {
   primaryReason: string;
   supportingFactors: string[];
   riskTradeoffs: string[];
+
+  // Disposition-changing conflicts only: an exact symbol+strategy+expiration
+  // duplicate against an existing open position or an earlier candidate in
+  // this same batch. These are the only exposure-related facts this module
+  // uses to demote a candidate below RECOMMENDED. A genuine, canonical
+  // concentration breach (single-ticker or sector) already affects
+  // `disposition` upstream -- it pushes the Decision Engine's own
+  // `recommendation.status` to `conditional` or worse (see
+  // lib/decision-engine's `single-ticker-concentration` /
+  // `sector-concentration` concerns), which rule 5.1.2 already maps to
+  // WATCH. This module never adds a second, independent concentration
+  // threshold of its own.
   portfolioConflicts: string[];
+
+  // Informational only -- ordinary nonzero existing ticker or sector
+  // exposure, disclosed for the trader's awareness. Never affects
+  // `disposition`, `rank`, or capital sequencing. Exposure being greater
+  // than zero is not, by itself, evidence of a problem; only the Decision
+  // Engine's own configured concentration limits (reflected in
+  // `portfolioConflicts` via `disposition`, see above) determine that.
+  exposureDisclosures: string[];
+
   rejectionReasons: string[];
   missingInformationDisclosures: string[];
   whatWouldImprove: string[];

@@ -4,7 +4,6 @@
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
@@ -41,7 +40,7 @@ function getSavedEtfRules(): EtfRules {
 
 const DEFAULT_ALLOC = { reserve: 5, wheel: 51, spx: 30, hunter: 7, longBook: 7 };
 
-type SubTab = 'actions' | 'dashboard' | 'timeline' | 'advisor' | 'opportunities';
+type SubTab = 'actions' | 'dashboard' | 'timeline' | 'advisor';
 type ActionPriority = 'urgent' | 'review' | 'entry' | 'hold';
 type EngineStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -3058,7 +3057,6 @@ export default function EnginePage() {
             { key: 'dashboard', label: 'Dashboard', icon: '◈' },
             { key: 'timeline', label: 'Timeline', icon: '⟿' },
             { key: 'advisor', label: 'Advisor', icon: '◬' },
-            { key: 'opportunities', label: 'Opportunities', icon: '★' },
           ] as { key: SubTab; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => saveSubTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
@@ -3754,26 +3752,6 @@ export default function EnginePage() {
         {/* ── ADVISOR TAB ── */}
         {status === 'ready' && d && subTab === 'advisor' && (
           <EngineAdvisor data={d} watchlist={watchlist} th={th} />
-        )}
-
-        {/* ── OPPORTUNITIES TAB ──
-            Read-only surface over lib/opportunity-engine's ranked output
-            (OE-0001). Rendered independent of engine-scan status because
-            it does not depend on this page's SPX/SPY/wheel scan data --
-            see the design doc for why: those scans produce
-            SpxSuggestion/SpySuggestion/WheelSuggestion objects, not
-            DecisionAnalysis, so they cannot be adapted into
-            OpportunityCandidate without either fabricating a
-            DecisionAnalysis this module didn't compute or running a new
-            Decision Engine evaluation here (both out of scope this
-            sprint). The panel is wired and ready; only a real
-            DecisionAnalysis[] source is missing. */}
-        {subTab === 'opportunities' && (
-          <BestOpportunitiesPanel
-            recommendations={[]}
-            th={th}
-            blockerNotice="Best Opportunities is not yet connected to a live candidate source on this page. The Income Engine's own SPX/SPY/Wheel suggestions are produced by a separate scan and were never evaluated by the Decision Engine, so they can't be ranked here without recomputing scores this module doesn't own. Screener and Repeat Trade candidates already flow through the Decision Engine (see POST /api/autopilot/recommendations) and are ready to be piped into this panel once a page owns that data fetch -- see docs/design/OE-0001-Opportunity-Engine-Foundation.md section 7."
-          />
         )}
       </div>
 

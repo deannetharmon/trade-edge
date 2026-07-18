@@ -5,6 +5,13 @@
 // deterministic ranking, capital sequencing, conflict detection, and the
 // non-negotiable rule that this module never overrides an existing
 // Decision Engine hard rejection or recomputes its scores.
+//
+// Product Owner correction round adds: disposition-changing conflicts vs.
+// informational exposure disclosures are now strictly separate (ordinary
+// nonzero ticker/sector exposure never demotes a candidate), and final
+// display order always respects disposition precedence (RECOMMENDED,
+// then ACCEPTABLE_ALTERNATIVE, then WATCH, then REJECTED) even when that
+// differs from the evaluation/capital-sequencing order.
 
 import { describe, expect, it } from 'vitest';
 import { OE_RULE_IDS } from '../ruleIds';
@@ -50,9 +57,9 @@ describe('rankOpportunityCandidates', () => {
     expect(results[1].ruleIds).toContain(OE_RULE_IDS.hardRejectedByDecisionEngine);
   });
 
-  // 3. Conditional candidates sort between recommended and rejected, and
-  // surface as WATCH.
-  it('scenario 3: conditional-status candidates rank between recommended and rejected, and surface as WATCH', () => {
+  // 3. Conditional candidates surface as WATCH and display after every
+  // RECOMMENDED/ACCEPTABLE_ALTERNATIVE candidate, ahead only of REJECTED.
+  it('scenario 3: conditional-status candidates display after recommended, ahead of rejected, and surface as WATCH', () => {
     const recommended = buildOpportunityCandidateFixture({ symbol: 'AAPL', status: 'recommended' });
     const conditional = buildOpportunityCandidateFixture({ symbol: 'MSFT', status: 'conditional' });
     const rejected = buildOpportunityCandidateFixture({ symbol: 'TSLA', status: 'not_recommended' });
@@ -65,8 +72,9 @@ describe('rankOpportunityCandidates', () => {
 
   // 4. Capital sequencing: the top-ranked pick consumes capital, and a
   // second candidate that would have fit standalone becomes an
-  // ACCEPTABLE_ALTERNATIVE once the pool is exhausted.
-  it('scenario 4: sequential capital reservation demotes a second, otherwise-affordable pick to ACCEPTABLE_ALTERNATIVE', () => {
+  // ACCEPTABLE_ALTERNATIVE once the pool is exhausted. The demotion
+  // explanation must reference the actual remaining/short amounts.
+  it('scenario 4: sequential capital reservation demotes a second, otherwise-affordable pick to ACCEPTABLE_ALTERNATIVE, with an internally consistent explanation', () => {
     const first = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 90, capitalRequired: 9_000 });
     const second = buildOpportunityCandidateFixture({ symbol: 'MSFT', opportunityScoreTotal: 80, capitalRequired: 2_000 });
 
@@ -75,6 +83,9 @@ describe('rankOpportunityCandidates', () => {
     expect(results[0].disposition).toBe('RECOMMENDED');
     expect(results[1].disposition).toBe('ACCEPTABLE_ALTERNATIVE');
     expect(results[1].ruleIds).toContain(OE_RULE_IDS.capitalConsumedByHigherRanked);
+    // $10,000 pool - $9,000 (AAPL) = $1,000 remaining; MSFT needs $2,000, so
+    // it is $1,000 short -- both figures must appear together and agree.
+    expect(results[1].portfolioConflicts.some((c) => c.includes('$1,000 remains') && c.includes('$1,000 short'))).toBe(true);
   });
 
   // 5. A candidate that exceeds the ENTIRE available pool (not just what's
@@ -89,9 +100,9 @@ describe('rankOpportunityCandidates', () => {
   });
 
   // 6. Exact symbol+strategy+expiration duplicate against an existing open
-  // position is disclosed as a conflict and caps the candidate below
-  // RECOMMENDED.
-  it('scenario 6: an exact duplicate of an existing open position is disclosed and demoted', () => {
+  // position is a disposition-changing conflict and caps the candidate
+  // below RECOMMENDED.
+  it('scenario 6: an exact duplicate of an existing open position affects disposition', () => {
     const candidate = buildOpportunityCandidateFixture({ symbol: 'AAPL', strategy: 'BPS' });
     const key = `AAPL::BPS::${candidate.expiration}`;
 
@@ -107,8 +118,10 @@ describe('rankOpportunityCandidates', () => {
 
   // 7. Duplicate exposure detected WITHIN the same batch (two candidates
   // proposing the identical symbol+strategy+expiration) demotes the
-  // lower-ranked duplicate, not the higher-ranked one.
-  it('scenario 7: a same-batch duplicate demotes only the lower-ranked of the two candidates', () => {
+  // lower-ranked duplicate, not the higher-ranked one, and still affects
+  // disposition (it is an exact duplicate, not an ordinary exposure
+  // disclosure).
+  it('scenario 7: a same-batch exact duplicate demotes only the lower-ranked of the two candidates', () => {
     const better = buildOpportunityCandidateFixture({
       symbol: 'AAPL',
       strategy: 'BPS',
@@ -131,34 +144,44 @@ describe('rankOpportunityCandidates', () => {
     expect(results[1].ruleIds).toContain(OE_RULE_IDS.duplicateExposureDetected);
   });
 
-  // 8. Known existing ticker exposure is disclosed as a conflict even when
-  // the Decision Engine itself raised no concern.
-  it('scenario 8: known existing ticker exposure is disclosed as a portfolio conflict', () => {
-    const candidate = buildOpportunityCandidateFixture({ symbol: 'AAPL' });
+  // 8. Corrected behavior: ordinary nonzero existing ticker exposure is
+  // disclosed for awareness but must NEVER, by itself, demote a candidate.
+  it('scenario 8: ordinary nonzero ticker exposure is disclosed without automatic demotion', () => {
+    const candidate = buildOpportunityCandidateFixture({ symbol: 'AAPL', status: 'recommended', capitalRequired: 400 });
 
     const results = rankOpportunityCandidates(
       [candidate],
       context({ existingTickerExposure: { AAPL: 1_500 } }),
     );
 
-    expect(results[0].disposition).toBe('ACCEPTABLE_ALTERNATIVE');
-    expect(results[0].portfolioConflicts.some((c) => c.includes('AAPL'))).toBe(true);
+    expect(results[0].disposition).toBe('RECOMMENDED');
+    expect(results[0].portfolioConflicts).toEqual([]);
+    expect(results[0].exposureDisclosures.some((d) => d.includes('AAPL'))).toBe(true);
+    expect(results[0].ruleIds).toContain(OE_RULE_IDS.tickerExposureDisclosed);
+    expect(results[0].ruleIds).not.toContain(OE_RULE_IDS.duplicateExposureDetected);
   });
 
-  // 9. Known existing sector exposure is disclosed when the candidate's
-  // sector is known, and never fabricated when it isn't.
-  it('scenario 9: known sector exposure is disclosed only when the candidate sector is known', () => {
-    const known = buildOpportunityCandidateFixture({ symbol: 'AAPL', candidateOverrides: { sector: 'Technology' } });
-    const unknown = buildOpportunityCandidateFixture({ symbol: 'MSFT', candidateOverrides: { sector: undefined } });
+  // 9. Corrected behavior: ordinary nonzero existing sector exposure is
+  // disclosed only when the candidate's sector is known, never fabricated
+  // when it isn't, and never demotes disposition either way.
+  it('scenario 9: ordinary nonzero sector exposure is disclosed (only when sector is known) without automatic demotion', () => {
+    const known = buildOpportunityCandidateFixture({ symbol: 'AAPL', status: 'recommended', capitalRequired: 400, candidateOverrides: { sector: 'Technology' } });
+    const unknown = buildOpportunityCandidateFixture({ symbol: 'MSFT', status: 'recommended', capitalRequired: 400, candidateOverrides: { sector: undefined } });
 
-    const ctx = context({ existingSectorExposure: { Technology: 5_000 } });
+    const ctx = context({ availableCapital: 10_000, existingSectorExposure: { Technology: 5_000 } });
     const results = rankOpportunityCandidates([known, unknown], ctx);
 
     const knownResult = results.find((r) => r.symbol === 'AAPL')!;
     const unknownResult = results.find((r) => r.symbol === 'MSFT')!;
 
-    expect(knownResult.portfolioConflicts.some((c) => c.includes('Technology'))).toBe(true);
-    expect(unknownResult.portfolioConflicts.length).toBe(0);
+    expect(knownResult.disposition).toBe('RECOMMENDED');
+    expect(knownResult.exposureDisclosures.some((d) => d.includes('Technology'))).toBe(true);
+    expect(knownResult.portfolioConflicts).toEqual([]);
+    expect(knownResult.ruleIds).toContain(OE_RULE_IDS.sectorExposureDisclosed);
+
+    expect(unknownResult.disposition).toBe('RECOMMENDED');
+    expect(unknownResult.exposureDisclosures).toEqual([]);
+    expect(unknownResult.portfolioConflicts).toEqual([]);
   });
 
   // 10. Deterministic tie-break: identical score and confidence fall back to
@@ -217,8 +240,8 @@ describe('rankOpportunityCandidates', () => {
   });
 
   // 13. Rank numbers are assigned sequentially starting at 1 and matching
-  // final sorted position, regardless of disposition.
-  it('scenario 13: rank is assigned sequentially by final sorted position', () => {
+  // final disposition-respecting display order.
+  it('scenario 13: rank is assigned sequentially by final display order', () => {
     const candidates = [
       buildOpportunityCandidateFixture({ symbol: 'TSLA', status: 'not_recommended' }),
       buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 90 }),
@@ -251,12 +274,15 @@ describe('rankOpportunityCandidates', () => {
     expect(results).toEqual([]);
   });
 
-  // 16. End-to-end regression proving the full contract together: scores
-  // and confidence are passed through verbatim (never recalculated), a
-  // hard rejection stays REJECTED even ranked last among a mixed batch, and
-  // capital sequencing plus conflict detection compose correctly in one
-  // realistic multi-candidate pass.
-  it('scenario 16: end-to-end -- verbatim scores, hard-rejection integrity, and capital/conflict sequencing all compose correctly', () => {
+  // 16. End-to-end regression proving the full corrected contract together:
+  // scores/confidence passed through verbatim, a hard rejection stays
+  // REJECTED and last even with a deliberately high score, ordinary sector
+  // exposure does NOT demote a clean candidate (corrected behavior), and
+  // capital sequencing still produces a RECOMMENDED candidate that
+  // display-outranks an ACCEPTABLE_ALTERNATIVE candidate evaluated ahead of
+  // it in capital order -- proving display order follows disposition, not
+  // evaluation order.
+  it('scenario 16: end-to-end -- verbatim scores, hard-rejection integrity, corrected exposure disclosure, and disposition-respecting display order', () => {
     const topPick = buildOpportunityCandidateFixture({
       symbol: 'AAPL',
       opportunityScoreTotal: 88,
@@ -269,12 +295,12 @@ describe('rankOpportunityCandidates', () => {
       confidenceOverall: 75,
       capitalRequired: 5_000, // fits standalone, not after topPick's reservation
     });
-    const conflicted = buildOpportunityCandidateFixture({
+    const cleanLowerScore = buildOpportunityCandidateFixture({
       symbol: 'GOOGL',
       opportunityScoreTotal: 60,
       confidenceOverall: 70,
       capitalRequired: 1_000,
-      candidateOverrides: { sector: 'Technology' },
+      candidateOverrides: { sector: 'Technology' }, // has nonzero sector exposure in context below
     });
     const hardRejected = buildOpportunityCandidateFixture({
       symbol: 'TSLA',
@@ -284,32 +310,150 @@ describe('rankOpportunityCandidates', () => {
 
     const ctx = context({
       availableCapital: 10_000,
-      existingSectorExposure: { Technology: 2_000 },
+      existingSectorExposure: { Technology: 2_000 }, // ordinary disclosure only, not a conflict
     });
 
-    const results = rankOpportunityCandidates([hardRejected, conflicted, secondPick, topPick], ctx);
+    const results = rankOpportunityCandidates([hardRejected, cleanLowerScore, secondPick, topPick], ctx);
 
-    // Sort order: recommended-status candidates first (by score desc: 88,
-    // 70, 60), the hard-rejected candidate always last regardless of its
-    // (deliberately high) score.
-    expect(results.map((r) => r.symbol)).toEqual(['AAPL', 'MSFT', 'GOOGL', 'TSLA']);
+    // Evaluation order (by score, for capital sequencing) would have been
+    // AAPL, MSFT, GOOGL, TSLA. But MSFT's capital gets exhausted by AAPL and
+    // it becomes ACCEPTABLE_ALTERNATIVE, while GOOGL -- evaluated after MSFT
+    // -- still fits and has no disposition-changing conflict (its sector
+    // exposure is disclosed only), so it is RECOMMENDED. Final display
+    // order must reflect disposition: both RECOMMENDED candidates (AAPL,
+    // GOOGL) display ahead of the ACCEPTABLE_ALTERNATIVE (MSFT), which
+    // displays ahead of the REJECTED candidate (TSLA).
+    expect(results.map((r) => r.symbol)).toEqual(['AAPL', 'GOOGL', 'MSFT', 'TSLA']);
+    expect(results.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
 
     const aapl = results[0];
     expect(aapl.disposition).toBe('RECOMMENDED');
     expect(aapl.opportunityScoreTotal).toBe(88);
     expect(aapl.decisionConfidenceTotal).toBe(90);
 
-    const msft = results[1];
+    const googl = results[1];
+    expect(googl.disposition).toBe('RECOMMENDED');
+    expect(googl.portfolioConflicts).toEqual([]);
+    expect(googl.exposureDisclosures.some((d) => d.includes('Technology'))).toBe(true);
+
+    const msft = results[2];
     expect(msft.disposition).toBe('ACCEPTABLE_ALTERNATIVE');
     expect(msft.ruleIds).toContain(OE_RULE_IDS.capitalConsumedByHigherRanked);
-
-    const googl = results[2];
-    expect(googl.disposition).toBe('ACCEPTABLE_ALTERNATIVE');
-    expect(googl.portfolioConflicts.some((c) => c.includes('Technology'))).toBe(true);
 
     const tsla = results[3];
     expect(tsla.disposition).toBe('REJECTED');
     expect(tsla.opportunityScoreTotal).toBe(99);
     expect(tsla.ruleIds).toContain(OE_RULE_IDS.hardRejectedByDecisionEngine);
+  });
+
+  // 17. Product Owner correction: a higher-score exact-duplicate alternative
+  // must never display above a clean recommended candidate.
+  it('scenario 17: a higher-score exact-duplicate ACCEPTABLE_ALTERNATIVE never displays above a clean RECOMMENDED candidate', () => {
+    const cleanLowerScore = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 55, capitalRequired: 500 });
+    const duplicateHigherScore = buildOpportunityCandidateFixture({
+      symbol: 'MSFT',
+      strategy: 'BPS',
+      opportunityScoreTotal: 95,
+      capitalRequired: 500,
+      candidateOverrides: { expiration: '2026-08-21' },
+    });
+    const key = `MSFT::BPS::2026-08-21`;
+
+    const results = rankOpportunityCandidates(
+      [duplicateHigherScore, cleanLowerScore],
+      context({ existingOpenPositionKeys: [key] }),
+    );
+
+    expect(results[0].symbol).toBe('AAPL');
+    expect(results[0].disposition).toBe('RECOMMENDED');
+    expect(results[1].symbol).toBe('MSFT');
+    expect(results[1].disposition).toBe('ACCEPTABLE_ALTERNATIVE');
+    expect(results[0].rank).toBe(1);
+    expect(results[1].rank).toBe(2);
+  });
+
+  // 18. Product Owner correction: a high-score candidate that cannot be
+  // afforded at all (WATCH) must never display above an affordable,
+  // lower-score RECOMMENDED candidate.
+  it('scenario 18: a high-score unaffordable WATCH candidate never displays above an affordable RECOMMENDED candidate', () => {
+    const affordable = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 50, capitalRequired: 500 });
+    const unaffordable = buildOpportunityCandidateFixture({ symbol: 'MSFT', opportunityScoreTotal: 98, capitalRequired: 50_000 });
+
+    const results = rankOpportunityCandidates([unaffordable, affordable], context({ availableCapital: 10_000 }));
+
+    expect(results[0].symbol).toBe('AAPL');
+    expect(results[0].disposition).toBe('RECOMMENDED');
+    expect(results[1].symbol).toBe('MSFT');
+    expect(results[1].disposition).toBe('WATCH');
+    expect(results[0].rank).toBe(1);
+    expect(results[1].rank).toBe(2);
+  });
+
+  // 19. Product Owner correction: rejected candidates always appear after
+  // every non-rejected candidate, across a mixed batch of all four
+  // dispositions, regardless of input order.
+  it('scenario 19: rejected candidates always appear after every non-rejected candidate, across all four dispositions', () => {
+    const recommended = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 90, capitalRequired: 500 });
+    const watch = buildOpportunityCandidateFixture({ symbol: 'MSFT', opportunityScoreTotal: 99, capitalRequired: 50_000 });
+    const alternative = buildOpportunityCandidateFixture({
+      symbol: 'GOOGL',
+      strategy: 'BPS',
+      opportunityScoreTotal: 97,
+      capitalRequired: 500,
+      candidateOverrides: { expiration: '2026-08-21' },
+    });
+    const rejected = buildOpportunityCandidateFixture({ symbol: 'TSLA', status: 'not_recommended', opportunityScoreTotal: 100 });
+    const key = `GOOGL::BPS::2026-08-21`;
+
+    const results = rankOpportunityCandidates(
+      [rejected, watch, alternative, recommended],
+      context({ availableCapital: 10_000, existingOpenPositionKeys: [key] }),
+    );
+
+    const rejectedIndex = results.findIndex((r) => r.disposition === 'REJECTED');
+    const otherIndices = results
+      .map((r, i) => (r.disposition !== 'REJECTED' ? i : -1))
+      .filter((i) => i !== -1);
+
+    expect(rejectedIndex).toBe(results.length - 1);
+    expect(otherIndices.every((i) => i < rejectedIndex)).toBe(true);
+  });
+
+  // 20. Product Owner correction: reversing input order produces identical
+  // final results, including for a mixed-disposition batch where display
+  // order differs from evaluation order.
+  it('scenario 20: reversing input order produces identical final results for a mixed-disposition batch', () => {
+    const topPick = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 90, capitalRequired: 6_000 });
+    const capitalBlocked = buildOpportunityCandidateFixture({ symbol: 'MSFT', opportunityScoreTotal: 80, capitalRequired: 5_000 });
+    const cleanRecommended = buildOpportunityCandidateFixture({ symbol: 'GOOGL', opportunityScoreTotal: 60, capitalRequired: 1_000 });
+    const rejected = buildOpportunityCandidateFixture({ symbol: 'TSLA', status: 'not_recommended', opportunityScoreTotal: 99 });
+
+    const candidates = [topPick, capitalBlocked, cleanRecommended, rejected];
+    const ctx = context({ availableCapital: 10_000 });
+
+    const forward = rankOpportunityCandidates(candidates, ctx);
+    const reversed = rankOpportunityCandidates([...candidates].reverse(), ctx);
+
+    expect(reversed).toEqual(forward);
+  });
+
+  // 21. Capital allocation and "higher-ranked candidate" explanations
+  // remain internally consistent: the demoted candidate's explanation must
+  // name the same higher-ranked symbol whose consumption actually caused
+  // the shortfall, and the arithmetic must agree with the batch's real
+  // capital pool.
+  it('scenario 21: capital-consumed explanations are internally consistent with the actual pool and higher-ranked pick', () => {
+    const higherRanked = buildOpportunityCandidateFixture({ symbol: 'AAPL', opportunityScoreTotal: 95, capitalRequired: 7_500 });
+    const blocked = buildOpportunityCandidateFixture({ symbol: 'MSFT', opportunityScoreTotal: 80, capitalRequired: 3_000 });
+
+    const results = rankOpportunityCandidates([higherRanked, blocked], context({ availableCapital: 10_000 }));
+
+    const higherRankedResult = results.find((r) => r.symbol === 'AAPL')!;
+    const blockedResult = results.find((r) => r.symbol === 'MSFT')!;
+
+    expect(higherRankedResult.disposition).toBe('RECOMMENDED');
+    expect(blockedResult.disposition).toBe('ACCEPTABLE_ALTERNATIVE');
+    // $10,000 - $7,500 = $2,500 remains; $3,000 required means $500 short.
+    expect(blockedResult.portfolioConflicts.some((c) => c.includes('$2,500 remains') && c.includes('$500 short'))).toBe(true);
   });
 });

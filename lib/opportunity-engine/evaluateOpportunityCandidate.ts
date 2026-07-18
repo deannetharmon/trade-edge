@@ -28,13 +28,26 @@ export interface EvaluateOpportunityCandidateArgs {
   // consumed. Pass context.availableCapital itself when evaluating a
   // candidate standalone (no batch sequencing).
   capitalRemainingBeforeThisCandidate: number;
-  // Human-readable descriptions of every known conflicting-exposure signal
-  // for this candidate (exact symbol+strategy+expiration duplicate against
-  // an existing position or an earlier candidate in the same batch, known
-  // existing ticker exposure, known existing sector exposure). Empty when
-  // none apply. See rankOpportunityCandidates.ts's detectExposureConflicts()
-  // for how this is determined in production.
+  // Human-readable descriptions of every known DISPOSITION-CHANGING
+  // conflict for this candidate: an exact symbol+strategy+expiration
+  // duplicate against an existing open position, or against an earlier
+  // candidate in the same batch. Empty when none apply. Deliberately does
+  // NOT include ordinary nonzero ticker/sector exposure -- see
+  // `exposureDisclosures` below. See rankOpportunityCandidates.ts's
+  // detectDispositionConflicts() for how this is determined in production.
   conflictDescriptions: string[];
+  // Informational-only exposure facts (known existing nonzero ticker
+  // exposure, known existing nonzero sector exposure) that are disclosed to
+  // the trader but never affect `disposition`, `rank`, or capital
+  // sequencing. A genuine concentration breach against the account's own
+  // configured limits already reaches this candidate through
+  // `candidate.decisionAnalysis.recommendation.status` (the Decision
+  // Engine's own `single-ticker-concentration` / `sector-concentration`
+  // concerns push status to `conditional` or worse upstream) -- this
+  // module never adds a second, independent "exposure > 0 is a problem"
+  // threshold of its own. See rankOpportunityCandidates.ts's
+  // buildExposureDisclosures().
+  exposureDisclosures: { descriptions: string[]; ruleIds: string[] };
 }
 
 export interface EvaluateOpportunityCandidateResult {
@@ -90,7 +103,12 @@ function formatCurrency(value: number): string {
 export function evaluateOpportunityCandidate(
   args: EvaluateOpportunityCandidateArgs,
 ): EvaluateOpportunityCandidateResult {
-  const { candidate, capitalRemainingBeforeThisCandidate, conflictDescriptions } = args;
+  const { candidate, capitalRemainingBeforeThisCandidate, conflictDescriptions, exposureDisclosures } = args;
+  // hasConflictingExposure now means ONLY an exact symbol+strategy+expiration
+  // duplicate -- ordinary nonzero ticker/sector exposure is carried
+  // separately in `exposureDisclosures` and never reaches this flag. See
+  // rankOpportunityCandidates.ts's detectDispositionConflicts() vs.
+  // buildExposureDisclosures().
   const hasConflictingExposure = conflictDescriptions.length > 0;
   const analysis = candidate.decisionAnalysis;
   const concerns = analysis.concerns ?? [];
@@ -101,7 +119,10 @@ export function evaluateOpportunityCandidate(
     buildMissingInformationDisclosures(candidate);
 
   const portfolioConflicts: string[] = [];
-  const ruleIds: string[] = [...missingInfoRuleIds];
+  // Informational only -- appended to ruleIds unconditionally, before any
+  // disposition branch runs, so it can never be mistaken for a
+  // disposition-changing signal. Never gates a branch below.
+  const ruleIds: string[] = [...missingInfoRuleIds, ...exposureDisclosures.ruleIds];
   const whatWouldImprove: string[] = [];
   let disposition: OpportunityDisposition;
   let rejectionReasons: string[] = [];
@@ -181,6 +202,7 @@ export function evaluateOpportunityCandidate(
       supportingFactors,
       riskTradeoffs,
       portfolioConflicts,
+      exposureDisclosures: exposureDisclosures.descriptions,
       rejectionReasons,
       missingInformationDisclosures,
       whatWouldImprove,

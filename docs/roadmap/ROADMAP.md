@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` is an active short-lived sprint branch (OE-0001, implemented, awaiting Product Owner review — not yet merged).
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` is an active, frozen short-lived sprint branch (OE-0001; a Product Owner corrective round is complete, pending re-review — not yet merged).
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -43,7 +43,7 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 - PI-0013 — Daily Briefing Dashboard — deterministic priorities, snapshot, opportunities, and risks summary
 - PI-0014 — Marketable Pricing for Risk-Gating, Phase 1 — stop-loss/take-profit/emergency-exit/Cut Losses gates now consider marketable (executable) pricing; liquidity-tier classification
 
-**TE-0007 — Opportunity Engine Foundation** is implemented via **OE-0001** on `feature/opportunity-engine-foundation`, awaiting Product Owner review (not yet merged). It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, one real connected candidate adapter (`DecisionAnalysis → OpportunityCandidate`), and a read-only "Best Opportunities" tab in the Income Engine — currently rendering an honest empty state pending a live candidate feed. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md`.
+**TE-0007 — Opportunity Engine Foundation** is being implemented via **OE-0001** on `feature/opportunity-engine-foundation` (a Product Owner corrective round is complete, pending re-review; not yet merged). It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) is built and tested but **intentionally not mounted anywhere** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the full account.
 
 Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
 

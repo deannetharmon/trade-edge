@@ -6,13 +6,24 @@
 // DecisionAnalysis-backed candidates) -- this component never fetches,
 // scores, or ranks anything itself. It is purely presentational.
 //
-// See docs/design/OE-0001-Opportunity-Engine-Foundation.md section 7 for
-// why this panel currently renders with an empty recommendations array
-// wherever it's mounted: no page in this repository yet has a real,
-// live DecisionAnalysis[] to hand it without introducing a new scan,
-// cross-page state, or server-side computation, all of which are out of
-// scope for this sprint. The `blockerNotice` prop exists specifically to
-// surface that limitation honestly instead of rendering fabricated data.
+// STATUS: intentionally NOT mounted anywhere in production. Per Product
+// Owner review, mounting an empty tab with no real candidate feed was
+// rejected -- an unmounted component with no live consumer is preferable
+// to a production surface with nothing behind it. This component is kept
+// as a finished, tested, reusable building block: it is compatible with
+// real DecisionAnalysis-backed OpportunityRecommendation[] output and
+// ready to be mounted the moment a page owns a real, live
+// DecisionAnalysis[] feed (see docs/design/OE-0001-Opportunity-Engine-Foundation.md
+// section 7 for the exact architectural reason none exists yet, and
+// docs/roadmap/ROADMAP.md for the deferred future-sprint item that would
+// close that gap). Do not mount this component with mock data, a new
+// fetch, persistence, or cross-page state -- only with a real,
+// already-computed OpportunityRecommendation[].
+//
+// The `blockerNotice` prop exists for a future caller that mounts this
+// panel before a full live feed is available (e.g. a page with a partial
+// candidate source) and needs to disclose that honestly rather than
+// implying completeness.
 
 import type { Theme, THEMES } from '@/lib/theme';
 import type { OpportunityDisposition, OpportunityRecommendation } from '@/lib/opportunity-engine';
@@ -92,6 +103,18 @@ function RecommendationCard({
         <ul className="space-y-0.5">
           {rec.portfolioConflicts.map((conflict, i) => (
             <li key={i} className={`text-[10px] text-blue-400/90`}>⚠ {conflict}</li>
+          ))}
+        </ul>
+      )}
+
+      {/* Informational only -- ordinary nonzero ticker/sector exposure.
+          Rendered distinctly (muted, not blue/warning-colored) from
+          portfolioConflicts above, since these never affected this
+          candidate's disposition. */}
+      {rec.exposureDisclosures.length > 0 && (
+        <ul className="space-y-0.5">
+          {rec.exposureDisclosures.map((disclosure, i) => (
+            <li key={i} className={`text-[10px] ${th.textFaint}`}>ℹ {disclosure}</li>
           ))}
         </ul>
       )}
