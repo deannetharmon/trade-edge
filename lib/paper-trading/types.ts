@@ -80,6 +80,24 @@ export interface PaperManualFillOverride {
 }
 
 // ---------------------------------------------------------------------------
+// Manual fill override -- CLIENT input shape (corrective round, fix #4)
+// ---------------------------------------------------------------------------
+//
+// The client may express its own price and reason and the fact that it has
+// confirmed the override, but it can NEVER supply an authoritative
+// confirmation identity or timestamp -- those are always derived
+// server-side from the authenticated request (see
+// service.ts's resolveManualOverride()) and stamped into the full
+// PaperManualFillOverride above before it reaches pricing.ts or the audit
+// trail. API routes accept only this narrower shape from the request body
+// and silently ignore any `confirmedByUser`/`confirmedAt` the client sends.
+export interface PaperManualFillOverrideInput {
+  manualPrice: number;
+  reason: string;
+  confirmed: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Fill evidence attached to an entry or a close
 // ---------------------------------------------------------------------------
 
@@ -189,16 +207,22 @@ export type PaperAuditEventType =
   | 'close_rejected'
   | 'close_duplicate_replayed'
   | 'stale_quote_confirmed'
-  | 'manual_fill_override_confirmed';
+  | 'manual_fill_override_confirmed'
+  // Corrective round: explicit mark-refresh audit coverage, added when
+  // refreshPaperMark() was moved onto the same atomic, lease-fenced commit
+  // path as open/close/reset (persistence/commit.ts always requires a
+  // full audit event as part of its commit unit).
+  | 'mark_refreshed';
 
 export interface PaperAuditEvent {
   id: string;
   userId: string;
   eventType: PaperAuditEventType;
-  operation: 'open' | 'close' | 'reset';
+  operation: 'open' | 'close' | 'reset' | 'mark';
   positionId?: string;
   timestamp: string;
-  idempotencyKey: string;
+  /** Absent for operations with no caller-supplied idempotency key (mark refresh is not idempotency-guarded — section 9.1/12). */
+  idempotencyKey?: string;
   pricingSource?: PaperFillPricingSource;
   quoteAgeSeconds?: number | null;
   capitalBefore?: number;
@@ -222,11 +246,76 @@ export type PaperTradingErrorCode =
   | 'IDEMPOTENCY_CONFLICT'
   | 'POSITION_NOT_FOUND'
   | 'POSITION_ALREADY_CLOSED'
-  | 'UNAUTHORIZED';
+  | 'UNAUTHORIZED'
+  // Corrective round (fix #2/#3): the mutation lock's lease was lost (TTL
+  // expired and a different caller acquired it) before this mutation's
+  // atomic commit could complete, so the commit was safely aborted instead
+  // of applied. Always safe to retry -- nothing was persisted.
+  | 'LOCK_LOST'
+  // Corrective round (fix #3): the atomic ledger+audit+idempotency commit
+  // itself failed (a persistence write reported an error), OR a
+  // network/connection failure during commit was confirmed, after
+  // re-reading authoritative state, to mean the operation did NOT persist.
+  // No partial state was left behind for this operation in either case;
+  // safe to retry.
+  | 'COMMIT_FAILED'
+  // PO Round 2 (item 4): a commit's outcome was ambiguous (the commit
+  // script's response was lost) and, on re-reading authoritative state to
+  // resolve the ambiguity, the ledger, audit trail, and/or idempotency
+  // record DISAGREED about whether it committed. This module's own atomic
+  // commit path cannot itself produce that disagreement, so it signals
+  // persistence state was altered outside this path. Never assumed to be
+  // safe to retry -- requires investigation.
+  | 'INTEGRITY_FAILURE'
+  // PO Round 5: a commit's outcome was ambiguous (the commit script's
+  // response was lost) AND the follow-up attempt to re-read authoritative
+  // state (the ledger, the audit trail, or the idempotency record) itself
+  // failed -- so whether the operation committed is genuinely UNKNOWN, not
+  // confirmed either way. Never safe to assume rejected; never safe to
+  // retry under a NEW idempotency key (that could double-apply an operation
+  // that actually did commit) -- the caller must retry/reconcile using the
+  // SAME idempotency key, which will correctly replay the original result
+  // once persistence state becomes reachable again.
+  | 'OUTCOME_UNKNOWN';
+
+/**
+ * PO Round 5: classifies every error capable of leaving
+ * persistence/commit.ts's commitPaperMutation() into exactly one of three
+ * outcomes, so callers (service.ts) can decide what audit evidence, if any,
+ * is safe to record WITHOUT inferring anything from error message text:
+ *
+ *   - 'CONFIRMED_NOT_COMMITTED': the script (or a pre-EVAL guard) positively
+ *     confirmed nothing was written -- a LOCK_LOST/TYPE_ERROR/INVALID_ARG
+ *     script result, an ambiguous outcome that reconciliation successfully
+ *     resolved to "did not commit", a pre-EVAL TypeScript-side validation
+ *     failure, or a pure build()/domain rejection that never reached EVAL at
+ *     all. Safe to record a rejected-audit event and safe to retry.
+ *   - 'OUTCOME_UNKNOWN': the EVAL acknowledgement was lost AND the
+ *     reconciliation read(s) needed to resolve that ambiguity themselves
+ *     failed. Whether the mutation committed cannot be determined right
+ *     now. NEVER safe to record a rejected-audit event (the accepted
+ *     mutation may already exist) and never safe to retry under a
+ *     different idempotency key -- only a reconciliation retry under the
+ *     SAME key is safe.
+ *   - 'INTEGRITY_FAILURE': reconciliation reads all succeeded, but the
+ *     signals they returned disagree with each other -- a state this
+ *     module's own atomic commit cannot itself produce. NEVER safe to
+ *     record a rejected-audit event, and never safe to auto-retry or
+ *     auto-repair; requires investigation.
+ */
+export type PaperCommitOutcomeClass = 'CONFIRMED_NOT_COMMITTED' | 'OUTCOME_UNKNOWN' | 'INTEGRITY_FAILURE';
 
 export class PaperTradingError extends Error {
   code: PaperTradingErrorCode;
   details?: Record<string, unknown>;
+  /**
+   * Only meaningful for errors that can leave commitPaperMutation() (see
+   * PaperCommitOutcomeClass's doc comment above). Undefined for every other
+   * PaperTradingError in this codebase (validation, capital, pricing, ...).
+   * service.ts's catch blocks branch on THIS field, never on `message` text,
+   * to decide whether recording a rejected-audit event is safe.
+   */
+  commitOutcome?: PaperCommitOutcomeClass;
 
   constructor(code: PaperTradingErrorCode, message: string, details?: Record<string, unknown>) {
     super(message);

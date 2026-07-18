@@ -8,9 +8,9 @@
 
 import { NextResponse } from 'next/server';
 import { resolveAutopilotUserId } from '@/lib/autopilot/server/auth';
-import { paperErrorResponse } from '@/lib/paper-trading/http';
+import { paperErrorResponse, parseManualOverrideInput } from '@/lib/paper-trading/http';
 import { refreshPaperMark } from '@/lib/paper-trading/service';
-import type { PaperManualFillOverride, PaperQuoteSnapshot } from '@/lib/paper-trading/types';
+import type { PaperQuoteSnapshot } from '@/lib/paper-trading/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,9 @@ export async function POST(request: Request, { params }: { params: { positionId:
       positionId: params.positionId,
       quoteSnapshot: (body?.quoteSnapshot ?? null) as PaperQuoteSnapshot | null,
       staleConfirmed: Boolean(body?.staleConfirmed),
-      manualOverride: (body?.manualOverride ?? null) as PaperManualFillOverride | null,
+      // Never trust a caller-supplied confirmedByUser/confirmedAt -- see
+      // parseManualOverrideInput() and service.ts's resolveManualOverride().
+      manualOverride: parseManualOverrideInput(body),
     });
 
     return NextResponse.json(result);

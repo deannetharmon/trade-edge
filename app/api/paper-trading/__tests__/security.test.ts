@@ -79,3 +79,71 @@ describe('caller-supplied user id cannot select another account', () => {
     expect(body.position.userId).not.toBe('someone-elses-account');
   });
 });
+
+describe('manual-fill confirmation identity cannot be spoofed (corrective round fix #4)', () => {
+  it('the authenticated session user becomes the recorded confirmer, even when the client sends a different confirmedByUser', async () => {
+    const { POST } = await import('../positions/route');
+    const res = await POST(
+      jsonRequest({
+        idempotencyKey: 'k-manual-1',
+        symbol: 'SPY',
+        strategy: 'CSP',
+        expiration: '2026-08-21',
+        quantity: 1,
+        legs: [{ legId: 'p', optionType: 'put', strike: 100, expiration: '2026-08-21', openAction: 'sell_to_open' }],
+        quoteSnapshot: null,
+        manualOverride: {
+          manualPrice: 250,
+          reason: 'after hours',
+          confirmed: true,
+          // A forged identity/timestamp -- must be silently ignored, never
+          // read, never forwarded to the domain/audit layer.
+          confirmedByUser: 'someone-else',
+          confirmedAt: '2000-01-01T00:00:00.000Z',
+        },
+      }),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.position.entryFill.manualOverride.confirmedByUser).toBe('real-user');
+    expect(body.position.entryFill.manualOverride.confirmedByUser).not.toBe('someone-else');
+    expect(body.position.entryFill.manualOverride.confirmedAt).not.toBe('2000-01-01T00:00:00.000Z');
+  });
+
+  it('a manual fill without an explicit confirmed:true flag is rejected, not silently accepted', async () => {
+    const { POST } = await import('../positions/route');
+    const res = await POST(
+      jsonRequest({
+        idempotencyKey: 'k-manual-2',
+        symbol: 'SPY',
+        strategy: 'CSP',
+        expiration: '2026-08-21',
+        quantity: 1,
+        legs: [{ legId: 'p', optionType: 'put', strike: 100, expiration: '2026-08-21', openAction: 'sell_to_open' }],
+        quoteSnapshot: null,
+        manualOverride: { manualPrice: 250, reason: 'after hours', confirmed: false },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe('MANUAL_OVERRIDE_CONFIRMATION_REQUIRED');
+  });
+
+  it('an unauthenticated manual-fill mutation is still rejected before any identity resolution happens', async () => {
+    mockResolvedUserId = null;
+    const { POST } = await import('../positions/route');
+    const res = await POST(
+      jsonRequest({
+        idempotencyKey: 'k-manual-3',
+        symbol: 'SPY',
+        strategy: 'CSP',
+        expiration: '2026-08-21',
+        quantity: 1,
+        legs: [{ legId: 'p', optionType: 'put', strike: 100, expiration: '2026-08-21', openAction: 'sell_to_open' }],
+        quoteSnapshot: null,
+        manualOverride: { manualPrice: 250, reason: 'after hours', confirmed: true, confirmedByUser: 'someone-else' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+});

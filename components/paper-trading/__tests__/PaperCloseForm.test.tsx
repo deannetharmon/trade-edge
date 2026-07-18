@@ -1,7 +1,7 @@
 // components/paper-trading/__tests__/PaperCloseForm.test.tsx
 
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PaperCloseForm from '../PaperCloseForm';
 import type { PaperFillEvidence, PaperTradingPosition } from '@/lib/paper-trading/types';
 
@@ -87,5 +87,28 @@ describe('PaperCloseForm', () => {
     fireEvent.click(screen.getByText('Cancel'));
     expect(onCancel).toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('sends no hardcoded personal identity for a manual paper fill -- only price, reason, and confirmed:true (corrective round fix #4)', async () => {
+    const fetchSpy: ReturnType<typeof vi.fn<any[], any>> = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ position: {}, ledgerView: {}, replay: false }),
+    }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    render(<PaperCloseForm position={makePosition()} onClosed={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/Manual Paper Fill override/i));
+    fireEvent.change(screen.getByPlaceholderText('Manual close price'), { target: { value: '150' } });
+    fireEvent.change(screen.getByPlaceholderText('Reason'), { target: { value: 'after hours' } });
+    fireEvent.click(screen.getByText('Close Paper Position'));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+
+    const sentBody = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.manualOverride).toEqual({ manualPrice: 150, reason: 'after hours', confirmed: true });
+    expect(sentBody.manualOverride.confirmedByUser).toBeUndefined();
+    expect(sentBody.manualOverride.confirmedAt).toBeUndefined();
   });
 });

@@ -80,4 +80,29 @@ describe('PaperTicketForm', () => {
       expect(text).not.toContain(forbidden);
     }
   });
+
+  it('sends no hardcoded personal identity for a manual paper fill -- only price, reason, and confirmed:true (corrective round fix #4)', async () => {
+    render(<PaperTicketForm onSubmitted={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('SPY'), { target: { value: 'SPY' } });
+    fireEvent.change(screen.getByLabelText('Strike'), { target: { value: '400' } });
+    const expirationInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    fireEvent.change(expirationInput, { target: { value: '2026-08-21' } });
+
+    fireEvent.click(screen.getByLabelText(/Manual Paper Fill \(override/i));
+    fireEvent.change(screen.getByLabelText(/Manual fill price/i), { target: { value: '250' } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'after hours' } });
+
+    fireEvent.click(screen.getByLabelText(/I understand this creates/i));
+    fireEvent.click(screen.getByText('Simulate Paper Fill'));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+
+    const sentBody = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
+    expect(sentBody.manualOverride).toEqual({ manualPrice: 250, reason: 'after hours', confirmed: true });
+    expect(sentBody.manualOverride.confirmedByUser).toBeUndefined();
+    expect(sentBody.manualOverride.confirmedAt).toBeUndefined();
+  });
 });

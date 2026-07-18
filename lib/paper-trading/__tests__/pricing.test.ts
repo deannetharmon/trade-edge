@@ -190,3 +190,154 @@ describe('manual override (section 7.5)', () => {
     ).toThrow(PaperTradingError);
   });
 });
+
+describe('fill-value economic validation (corrective round fix #5)', () => {
+  const confirmedOverride = (manualPrice: number) => ({
+    manualPrice,
+    reason: 'test',
+    confirmedAt: NOW.toISOString(),
+    confirmedByUser: 'u1',
+  });
+
+  it('rejects a zero manual entry credit', () => {
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: null,
+        side: 'open',
+        staleConfirmed: false,
+        manualOverride: confirmedOverride(0),
+        now: NOW,
+      }),
+    ).toThrow(/positive/i);
+  });
+
+  it('rejects a negative manual entry credit', () => {
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: null,
+        side: 'open',
+        staleConfirmed: false,
+        manualOverride: confirmedOverride(-50),
+        now: NOW,
+      }),
+    ).toThrow(/positive/i);
+  });
+
+  it('rejects a zero quote-derived entry credit (net-zero vertical spread)', () => {
+    // short bid == long ask -> net entry credit is exactly zero.
+    const snap = snapshot({ short: { bid: 1.2, ask: 1.4 }, long: { bid: 1.0, ask: 1.2 } });
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: snap,
+        side: 'open',
+        staleConfirmed: false,
+        manualOverride: null,
+        now: NOW,
+      }),
+    ).toThrow(/positive/i);
+  });
+
+  it('rejects a negative quote-derived entry credit (a debit vertical masquerading as a credit strategy)', () => {
+    // short bid (1.0) < long ask (1.2) -> negative net entry credit.
+    const snap = snapshot({ short: { bid: 1.0, ask: 1.1 }, long: { bid: 1.1, ask: 1.2 } });
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: snap,
+        side: 'open',
+        staleConfirmed: false,
+        manualOverride: null,
+        now: NOW,
+      }),
+    ).toThrow(/positive/i);
+  });
+
+  it('rejects a negative closing debit (a malformed/crossed close that would pay the trader cash it never owed)', () => {
+    // short ask (1.0) < long bid (1.2) -> negative net closing debit.
+    const snap = snapshot({ short: { bid: 0.9, ask: 1.0 }, long: { bid: 1.2, ask: 1.3 } });
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: snap,
+        side: 'close',
+        staleConfirmed: false,
+        manualOverride: null,
+        now: NOW,
+      }),
+    ).toThrow(/non-negative|closing debit/i);
+  });
+
+  it('rejects a negative manual closing debit', () => {
+    expect(() =>
+      buildFillEvidence({
+        legs,
+        quantity: 1,
+        contractMultiplier: 100,
+        quoteSnapshot: null,
+        side: 'close',
+        staleConfirmed: false,
+        manualOverride: confirmedOverride(-10),
+        now: NOW,
+      }),
+    ).toThrow(/non-negative|closing debit/i);
+  });
+
+  it('accepts a valid positive entry credit', () => {
+    const evidence = buildFillEvidence({
+      legs,
+      quantity: 1,
+      contractMultiplier: 100,
+      quoteSnapshot: snapshot(),
+      side: 'open',
+      staleConfirmed: false,
+      manualOverride: null,
+      now: NOW,
+    });
+    expect(evidence.simulatedFillValue).toBeGreaterThan(0);
+  });
+
+  it('accepts a valid zero closing debit (retained policy: zero is acceptable for a close given valid pricing evidence)', () => {
+    // short ask (1.0) == long bid (1.0) -> net closing debit is exactly zero.
+    const snap = snapshot({ short: { bid: 0.9, ask: 1.0 }, long: { bid: 1.0, ask: 1.1 } });
+    const evidence = buildFillEvidence({
+      legs,
+      quantity: 1,
+      contractMultiplier: 100,
+      quoteSnapshot: snap,
+      side: 'close',
+      staleConfirmed: false,
+      manualOverride: null,
+      now: NOW,
+    });
+    // toBeCloseTo (not toBe) -- floating-point cancellation can legitimately
+    // produce -0 here, which is mathematically equal to 0 for this policy.
+    expect(evidence.simulatedFillValue).toBeCloseTo(0, 8);
+  });
+
+  it('accepts a valid positive closing debit', () => {
+    const evidence = buildFillEvidence({
+      legs,
+      quantity: 1,
+      contractMultiplier: 100,
+      quoteSnapshot: snapshot(),
+      side: 'close',
+      staleConfirmed: false,
+      manualOverride: null,
+      now: NOW,
+    });
+    expect(evidence.simulatedFillValue).toBeGreaterThan(0);
+  });
+});

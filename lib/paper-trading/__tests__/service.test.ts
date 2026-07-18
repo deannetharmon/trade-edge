@@ -75,8 +75,16 @@ describe('openPaperPosition / closePaperPosition full lifecycle', () => {
 
 describe('idempotent replay (section 9.1)', () => {
   it('replays the original result for a duplicate open with the same key and payload', async () => {
-    const first = await openPaperPosition(openReq());
-    const second = await openPaperPosition(openReq());
+    // Reuse the SAME request object for both calls -- quoteFor() stamps a
+    // fresh quoteTimestamp on every call, and a genuinely different quote
+    // observation is correctly treated as a materially different payload
+    // (corrective round fix #1: nested quote fields are no longer silently
+    // dropped from the idempotency comparison). A real duplicate submission
+    // resends the identical captured quote snapshot, not a freshly-sampled
+    // one, so this mirrors the actual retry behavior being tested.
+    const req = openReq();
+    const first = await openPaperPosition(req);
+    const second = await openPaperPosition(req);
 
     expect(second.replay).toBe(true);
     expect(second.position.positionId).toBe(first.position.positionId);

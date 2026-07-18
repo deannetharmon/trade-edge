@@ -166,6 +166,53 @@ export function isStale(ageSeconds: number | null): boolean {
   return ageSeconds != null && ageSeconds > STALE_QUOTE_THRESHOLD_SECONDS;
 }
 
+// ---------------------------------------------------------------------------
+// Fill-value economic validation (PT-0001 corrective round, fix #5)
+// ---------------------------------------------------------------------------
+//
+// CSP/BPS/BCS/IC are credit-entry strategies (section 8: capital and risk
+// rules assume a credit was collected at entry). Before this fix, neither
+// buildFillEvidence() nor anything downstream validated that an opening
+// fill's simulatedFillValue was actually a positive credit, nor that a
+// closing fill's simulatedFillValue was a non-negative debit -- a malformed
+// leg market (e.g. a near-zero-width, near-zero-credit spread) or a
+// mistyped manual override could silently produce a zero or negative
+// "credit," which would then flow straight into ledger.ts as entryCredit
+// (cash increases by <= 0) or closingDebit (cash decreases by a NEGATIVE
+// amount, i.e. a close that pays the trader cash it never owed). Both
+// validators below run for BOTH marketable/quote-derived fills and manual
+// overrides, since buildFillEvidence() is the single choke point both paths
+// pass through, and they run before this function returns -- i.e. strictly
+// before any caller can pass the resulting PaperFillEvidence into a ledger
+// mutation.
+function validateEntryCredit(value: number, pricingSource: PaperFillPricingSource): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new PaperTradingError(
+      'VALIDATION_ERROR',
+      'Opening entry credit must be a positive amount for a credit-entry strategy. A zero or negative entry credit was computed and has been rejected before any account mutation.',
+      { simulatedFillValue: value, pricingSource, side: 'open' },
+    );
+  }
+}
+
+function validateCloseDebit(value: number, pricingSource: PaperFillPricingSource): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new PaperTradingError(
+      'VALIDATION_ERROR',
+      'Closing debit must be zero or a positive amount. A negative closing debit would represent an economically invalid crossed or malformed close (paying the trader cash it never owed) and has been rejected before any account mutation.',
+      { simulatedFillValue: value, pricingSource, side: 'close' },
+    );
+  }
+}
+
+function validateFillValue(value: number, side: 'open' | 'close', pricingSource: PaperFillPricingSource): void {
+  if (side === 'open') {
+    validateEntryCredit(value, pricingSource);
+  } else {
+    validateCloseDebit(value, pricingSource);
+  }
+}
+
 export interface BuildFillEvidenceArgs {
   legs: PaperLeg[];
   quantity: number;
@@ -202,6 +249,8 @@ export function buildFillEvidence(args: BuildFillEvidenceArgs): PaperFillEvidenc
       midValue = computeNetValue(legs, quoteSnapshot, side, 'mid_directional', quantity, contractMultiplier);
     }
 
+    validateFillValue(manualOverride.manualPrice, side, 'manual_paper_fill');
+
     return {
       pricingSource: 'manual_paper_fill',
       midValue,
@@ -231,6 +280,8 @@ export function buildFillEvidence(args: BuildFillEvidenceArgs): PaperFillEvidenc
   const { netValue, midNetValue, slippage } = computeMarketableFill(legs, quoteSnapshot, side, quantity, contractMultiplier);
 
   const pricingSource: PaperFillPricingSource = stale ? 'stale_confirmed' : 'marketable';
+
+  validateFillValue(netValue, side, pricingSource);
 
   return {
     pricingSource,

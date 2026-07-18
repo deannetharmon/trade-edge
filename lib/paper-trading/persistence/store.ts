@@ -1,10 +1,25 @@
 // lib/paper-trading/persistence/store.ts
 //
-// PT-0001: the only module that reads/writes the canonical account record's
-// `paperTrading` field. Wraps the existing lib/autopilot/persistence/
-// paperAccountStore.ts get/save functions (same Redis key, same record — see
-// lib/paper-trading/types.ts's module doc comment) rather than creating a
-// second paper account per user.
+// PT-0001: the only module (besides persistence/commit.ts, which performs
+// the atomic accepted-mutation write) that reads the canonical account
+// record's `paperTrading` field. Wraps the existing
+// lib/autopilot/persistence/paperAccountStore.ts get/save functions (same
+// Redis key, same record — see lib/paper-trading/types.ts's module doc
+// comment) rather than creating a second paper account per user.
+//
+// PT-0001 corrective round (fix #3): mutatePaperTradingLedger() and
+// withPaperTradingLedgerLock() have been removed. They persisted the ledger
+// via a single savePaperAccount() call that happened AFTER the mutator
+// callback had already written the accepted audit event and idempotency
+// record separately — three non-atomic writes, the exact defect the
+// corrective round requires fixed. service.ts now performs every accepted
+// open/close/reset through persistence/commit.ts's commitPaperMutation(),
+// which commits the ledger, the one accepted audit event, and the
+// idempotency record together in a single Redis transaction. The read-only
+// lazy-initialization path below (getPaperTradingLedger) has no
+// audit/idempotency component and is unaffected by that defect, so it is
+// unchanged apart from threading the lock id through withPaperTradingLock's
+// updated signature.
 
 import { getPaperAccount, savePaperAccount } from '@/lib/autopilot/persistence/paperAccountStore';
 import { createInitialLedger } from '../ledger';
@@ -30,42 +45,6 @@ export async function getPaperTradingLedger(userId: string): Promise<PaperTradin
     const ledger = createInitialLedger(userId, DEFAULT_PAPER_TRADING_STARTING_BALANCE);
     await savePaperAccount({ ...fresh, paperTrading: ledger });
     return ledger;
-  });
-}
-
-/**
- * Atomically reads the ledger, lets `mutator` compute the next ledger state
- * (plus any extra return value), persists it, and returns the mutator's
- * extra value. All of this happens inside the paper-trading mutation lock,
- * so two concurrent requests for the same user cannot interleave.
- */
-export async function mutatePaperTradingLedger<T>(
-  userId: string,
-  mutator: (current: PaperTradingLedger) => { next: PaperTradingLedger; extra: T } | Promise<{ next: PaperTradingLedger; extra: T }>,
-): Promise<T> {
-  return withPaperTradingLock(userId, async () => {
-    const account = await getPaperAccount(userId);
-    const current = account.paperTrading ?? createInitialLedger(userId, DEFAULT_PAPER_TRADING_STARTING_BALANCE);
-    const { next, extra } = await mutator(current);
-    await savePaperAccount({ ...account, paperTrading: next });
-    return extra;
-  });
-}
-
-/**
- * Like mutatePaperTradingLedger, but for an operation (e.g. a replayed
- * idempotent request) that determines it does not need to change the
- * ledger at all. Still runs inside the same lock as a real mutation so a
- * duplicate-detection decision is never racing a concurrent real mutation.
- */
-export async function withPaperTradingLedgerLock<T>(
-  userId: string,
-  fn: (current: PaperTradingLedger) => Promise<T>,
-): Promise<T> {
-  return withPaperTradingLock(userId, async () => {
-    const account = await getPaperAccount(userId);
-    const current = account.paperTrading ?? createInitialLedger(userId, DEFAULT_PAPER_TRADING_STARTING_BALANCE);
-    return fn(current);
   });
 }
 

@@ -7,9 +7,9 @@
 
 import { NextResponse } from 'next/server';
 import { resolveAutopilotUserId } from '@/lib/autopilot/server/auth';
-import { paperErrorResponse } from '@/lib/paper-trading/http';
+import { paperErrorResponse, parseManualOverrideInput } from '@/lib/paper-trading/http';
 import { openPaperPosition } from '@/lib/paper-trading/service';
-import type { PaperLeg, PaperManualFillOverride, PaperQuoteSnapshot, PaperStrategy } from '@/lib/paper-trading/types';
+import type { PaperLeg, PaperQuoteSnapshot, PaperStrategy } from '@/lib/paper-trading/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +32,9 @@ export async function POST(request: Request) {
       quantity: Number(body?.quantity),
       quoteSnapshot: (body?.quoteSnapshot ?? null) as PaperQuoteSnapshot | null,
       staleConfirmed: Boolean(body?.staleConfirmed),
-      manualOverride: (body?.manualOverride ?? null) as PaperManualFillOverride | null,
+      // Never trust a caller-supplied confirmedByUser/confirmedAt -- see
+      // parseManualOverrideInput() and service.ts's resolveManualOverride().
+      manualOverride: parseManualOverrideInput(body),
       entryRationale: typeof body?.entryRationale === 'string' ? body.entryRationale : null,
     });
 

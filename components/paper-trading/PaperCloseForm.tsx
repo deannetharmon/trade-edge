@@ -96,9 +96,11 @@ export default function PaperCloseForm({ position, onClosed, onCancel }: { posit
           idempotencyKey,
           quoteSnapshot,
           staleConfirmed,
-          manualOverride: manualOverride
-            ? { manualPrice: Number(manualPrice), reason: manualReason, confirmedAt: new Date().toISOString(), confirmedByUser: 'dean' }
-            : null,
+          // Corrective round (fix #4): the client never asserts an
+          // authoritative confirmer identity or timestamp -- the server
+          // derives both from the authenticated request. Only price,
+          // reason, and the fact that the user confirmed are sent.
+          manualOverride: manualOverride ? { manualPrice: Number(manualPrice), reason: manualReason, confirmed: true } : null,
         }),
       });
       const body = await res.json();

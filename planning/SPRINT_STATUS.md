@@ -1,13 +1,13 @@
 # TradeEdge — Sprint Status
 
-**Status:** Active operational source of truth  
-**Last Updated:** 2026-07-17 (PT-0001)  
-**Primary Branch:** `main`  
+**Status:** Active operational source of truth
+**Last Updated:** 2026-07-18 (PT-0001 corrective round)
+**Primary Branch:** `main`
 **Long-Lived Development Branch:** `feature/autopilot`
 
 ## Current State
 
-**PT-0001 — Manual Paper Trading Sandbox** is **implementation complete on `feature/manual-paper-trading`, awaiting Product Owner review. Not merged.** It adds a new `lib/paper-trading/` domain package (validation, marketable-fill pricing with a stale-quote and manual-override policy, per-strategy capital/max-loss formulas for CSP/BPS/BCS/IC, an accounting ledger, idempotency, atomicity via a dedicated Redis lock, and an append-only audit trail), a paper-only API namespace (`/api/paper-trading/*`), a new `/paper-trading` page and focused UI components, and a Portfolio Intelligence adapter that evaluates the paper portfolio using the same canonical per-position evaluator real positions use. It extends the existing canonical account record (`autopilot:paper-account:<userId>`) with one new optional field rather than creating a second account per user; the still-dormant Autopilot Decision Engine's own paper framework is untouched. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md` for the full account, including a pre-existing reset defect found and fixed as a consequence of this sprint (the existing `/api/autopilot/paper-account` reset would have silently deleted a user's new PT-0001 ledger).
+**PT-0001 — Manual Paper Trading Sandbox** — the original implementation was **rejected by the Product Owner** for blocking persistence, idempotency, identity, and accounting-safety defects (shallow idempotency hashing that silently dropped nested fields; a non-atomic lock release plus no lease-loss fencing; a three-way non-atomic ledger/audit/idempotency write; client-supplied manual-fill confirmation identity trusted as authoritative; no validation rejecting zero/negative entry credit or negative close debit). A **corrective round** on `feature/manual-paper-trading` has fixed all seven required corrections (canonical nested idempotency hashing, atomic ownership-safe lock release, atomic ledger+audit+idempotency commit with lease fencing, server-derived confirmation identity, entry-credit/close-debit validation, populated `auditRefs`, formatting cleanup). 847 repo-wide tests pass (0 failures), `tsc --noEmit` is clean, `git diff --check` is clean. **Not yet committed or pushed** — a stale `.git/index.lock` in the sandbox stopped the automated git sequence per this sprint's explicit instruction; exact commands for Dean to run natively are in `docs/reviews/PT-0001-Implementation-Report.md` §37. **Not merged, not re-reviewed, not complete.** See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` §14 and `docs/reviews/PT-0001-Implementation-Report.md` §29–38 for the full corrective-round account.
 
 Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`.
 
@@ -17,7 +17,7 @@ Portfolio Intelligence implementation through **PI-0013** is complete and merged
 
 **Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. No paper or live execution exists anywhere in this codebase.
 
-**PT-0001 is the current active implementation sprint** (implementation complete, awaiting Product Owner review — see above). PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001. No next sprint beyond PT-0001's own review/correction cycle is selected or approved in this document — that determination belongs to the Product Owner.
+**PT-0001 is the current active implementation sprint** (corrective round complete, awaiting Product Owner re-review — see above). **PT-0002 — Application-Wide Portfolio Mode Foundation is queued in `docs/roadmap/ROADMAP.md`, not approved, not started, and not scoped as an active sprint.** It depends on PT-0001 being accepted first. PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001 or PT-0002. No next sprint beyond PT-0001's own review/correction cycle is selected or approved in this document — that determination belongs to the Product Owner.
 
 ## Governance
 
@@ -128,7 +128,7 @@ No execution capability was introduced.
 
 ### Milestone B2 — Portfolio Intelligence
 
-**Status:** Implementation complete ✅  
+**Status:** Implementation complete ✅
 **Acceptance status:** Real-world workflow validation pending 🟡
 
 TradeEdge can evaluate portfolio-wide objectives, identify current priorities, choose management intent, explain the recommendation scorecard, estimate remaining opportunity, compose a Portfolio Review, and generate a deterministic Daily Briefing.
@@ -160,6 +160,12 @@ Goal: Validate the entire paper-trading lifecycle under realistic conditions.
 Goal: Independent review confirms readiness before any live-mode implementation begins.
 
 ## Known Follow-Ups
+
+### Paper trading sequencing
+
+- **PT-0002 — Application-Wide Portfolio Mode Foundation: queued, not approved, not started.** Builds on PT-0001's ledger/sandbox foundation once accepted. Scope (see `docs/roadmap/ROADMAP.md`): a persistent global LIVE/PAPER selector; unmistakable mode display across every portfolio-dependent screen; a shared portfolio-context abstraction read by Portfolio Intelligence, Decision Engine inputs, the Daily Briefing, reviews, risk analysis, analytics, and the Opportunity Engine; complete live/paper data isolation with no blending or implicit copying; persistence across navigation and refresh; safe failure on missing/ambiguous context; mode displayed at every execution-like confirmation; PAPER actions able to mutate only the paper ledger; no mode switch can trigger or enable live execution; Autopilot stays disabled and out of scope.
+- Sequencing is strict: PT-0001 → PT-0002 → a separately approved paper-action integration (not yet scoped) → TE-0010 Autopilot Paper Mode, only after manual paper mode is proven.
+- Do not begin PT-0002 implementation before it is explicitly approved and scoped by the Product Owner, and before PT-0001 itself is accepted.
 
 ### Portfolio Intelligence acceptance
 
