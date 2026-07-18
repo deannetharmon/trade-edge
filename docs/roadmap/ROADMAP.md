@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. Only `main` and `feature/autopilot` remain.
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) is implemented and awaiting Product Owner review — not yet merged.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -47,6 +47,23 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 
 Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
 
+**PT-0001 — Manual Paper Trading Sandbox** is implemented on `feature/manual-paper-trading` and awaiting Product Owner review; **not yet merged, not yet complete.** It adds `lib/paper-trading/`, a manual (not autonomous) paper-trading domain supporting CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a new `/paper-trading` page, and a Portfolio Intelligence adapter for the paper portfolio. It is distinct from, and does not touch, the separate (still-dormant) Autopilot paper framework referenced by TE-0010 below. PT-0001 is the **ledger and sandbox foundation** — a standalone accounting/persistence engine and its own minimal UI, not the final application-wide user experience for choosing between live and paper context; that UX-level integration is PT-0002, immediately below. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md`.
+
+**PT-0002 — Application-Wide Portfolio Mode Foundation** is **queued, not approved, not started.** It builds on PT-0001's ledger/sandbox foundation to make LIVE vs. PAPER an explicit, first-class, application-wide concept rather than a feature confined to the `/paper-trading` page. Required scope:
+
+- A persistent, global LIVE/PAPER selector — not a per-page toggle.
+- Unmistakable mode display across every portfolio-dependent screen, so it is never ambiguous which context the user is looking at.
+- A shared portfolio-context abstraction that Portfolio Intelligence, Decision Engine inputs, the Daily Briefing, Portfolio Review, risk analysis, analytics, and the Opportunity Engine all read from — no page independently re-deriving "which portfolio am I showing."
+- Complete data isolation between live and paper contexts: no blending, no implicit copying of one into the other.
+- Mode selection persists across navigation and page refresh.
+- Safe failure when context is missing or ambiguous — never silently default to live data, and never silently default to paper data either; fail visibly and require an explicit selection.
+- The active mode is displayed at every execution-like confirmation step, not just in a header badge.
+- Actions taken while in PAPER mode can mutate only the paper ledger (PT-0001's `paperTrading` field) — never a live position, order, or account value.
+- No sequence of mode switches can trigger, enable, or shortcut live order execution. Switching modes is purely a display/read-context change; it is not, and must never become, a live-trading control.
+- Autopilot remains disabled and explicitly out of scope for PT-0002 — this ticket does not activate or extend the dormant Autopilot Decision Engine paper framework.
+
+See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md`'s note on this sequencing; PT-0002 does not yet have its own design doc — that is the first deliverable when this ticket is approved and scoped.
+
 ## Current Planning Focus
 
 ### Phase 3 — Trader Intelligence Master Specification
@@ -63,7 +80,15 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 2. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
 3. TE-0008 — Capital Allocation / Wheel Preference Engine
 4. TE-0009 — Income Engine Foundation
-5. TE-0010 — Autopilot Paper Mode
+
+### Paper Trading Sequencing
+
+This sequence is a strict dependency order — each step requires the prior step to be approved and accepted before starting, not merely started:
+
+1. **PT-0001 — Manual Paper Trading Sandbox** (implemented, in Product Owner corrective review) — the ledger/persistence/accounting foundation and a minimal manual UI.
+2. **PT-0002 — Application-Wide Portfolio Mode Foundation** (queued, not approved) — makes LIVE/PAPER a first-class, application-wide context rather than a page-local feature.
+3. Separately approved paper-action integration into the rest of the product (e.g. taking a paper action directly from Portfolio Intelligence recommendations, the Daily Briefing, or the Opportunity Engine) — **not yet scoped, not yet a ticket.**
+4. **TE-0010 — Autopilot Paper Mode** — only after manual paper mode (PT-0001 + PT-0002) is proven out. Autopilot activation is not implied or accelerated by either PT-0001 or PT-0002.
 
 ## Later Backlog — Paper Strategy Laboratory
 

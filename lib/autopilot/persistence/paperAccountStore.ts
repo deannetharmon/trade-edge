@@ -47,6 +47,13 @@ export async function savePaperAccount(account: PaperAccount): Promise<PaperAcco
 }
 
 export async function resetPaperAccount(userId: string, startingBalance = DEFAULT_STARTING_BALANCE): Promise<PaperAccount> {
+  // PT-0001: this resets only the (still-dormant) Autopilot framework's own
+  // paper fields (currentBalance/peakBalance/openPositions/...). It must
+  // never silently delete the separate PT-0001 manual paper-trading ledger,
+  // which is namespaced under `paperTrading` on this same record -- so the
+  // existing account is read first and its `paperTrading` field is carried
+  // forward untouched, rather than this reset overwriting the whole record.
+  const existing = await getPaperAccount(userId);
   const account = createInitialPaperAccount(userId, startingBalance);
-  return savePaperAccount(account);
+  return savePaperAccount({ ...account, paperTrading: existing.paperTrading });
 }
