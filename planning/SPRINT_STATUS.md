@@ -11,9 +11,11 @@ Portfolio Intelligence implementation through **PI-0013** is complete and merged
 
 **PI-0014 — Marketable Pricing for Risk-Gating, Phase 1** is complete and merged into `main` (merge commit `2c79d5e`). It was implemented, recovered after an out-of-band `main` reset lost it from all reachable refs, reviewed by the Product Owner (required refactor completed), corrected through a Corrective Closeout sprint (documentation drift, missing-marketable-data test coverage, invalid-quote test coverage, unknown-liquidity classification fix, generated-artifact cleanup), accepted, and merged. The temporary branch (`feature/marketable-pricing`) was deleted locally and remotely per the standard short-lived-branch lifecycle. See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account (Process Note, Product Owner Addendum, Corrective Closeout Addendum) and validation results.
 
-**OE-0001 — Opportunity Engine Foundation** is the **active, frozen sprint**, in progress on `feature/opportunity-engine-foundation` (based on `main` @ `a86c92d`). It is **not complete and not merged into `main`**. It implements roadmap item TE-0007 / Master Spec §4.1: a canonical, deterministic ranking layer (`lib/opportunity-engine/`) over already-computed Decision Engine evaluations, and one candidate adapter compatible with real `DecisionAnalysis` output (against the shape already produced by the existing `POST /api/autopilot/recommendations` route, though that route has no caller yet). A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) was built and is **intentionally not mounted anywhere in production** — a first implementation round mounted it as an empty tab in the Income Engine experience, which the Product Owner rejected; `app/engine/page.tsx` has since been reverted to match `main` exactly. The first round also contained a ranking defect (ordinary nonzero ticker/sector exposure was incorrectly treated as a disposition-demoting conflict) and a display-order defect (final rank did not always respect disposition precedence), both since corrected. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` (§10, Corrective Round Addendum) for the full account, corrections, and validation results. Vercel build status for this branch is **unverified** pending direct evidence.
+**OE-0001 — Opportunity Engine Foundation** is **complete and merged into `main`** (merge commit `c97a705`). It implements roadmap item TE-0007 / Master Spec §4.1: the canonical Opportunity Engine foundation (`lib/opportunity-engine/`), a deterministic ranking layer over already-computed Decision Engine evaluations, and one candidate adapter compatible with real `DecisionAnalysis` output (against the shape already produced by the existing `POST /api/autopilot/recommendations` route, though that route has no production caller yet). It was implemented, reviewed by the Product Owner, corrected through a corrective round (disposition-vs-disclosure separation, final display-order fix, added component test coverage, documentation corrections), accepted, and merged. The temporary branch (`feature/opportunity-engine-foundation`) was deleted locally and remotely per the standard short-lived-branch lifecycle. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` (§10, Corrective Round Addendum) for the full account and validation results.
 
-**OE-0001 is under active Product Owner review; this is corrective work within the existing frozen sprint, not a new sprint, and scope has not expanded.** No further sprint may begin until OE-0001 is accepted or further corrected. PI-0015 / Portfolio Intelligence corrections and live-market acceptance validation remain queued behind OE-0001's acceptance, per the Product Owner's ongoing gate below.
+**Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. No paper or live execution exists anywhere in this codebase.
+
+**No implementation sprint is currently active.** PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation. No next sprint is selected or approved in this document — that determination belongs to the Product Owner.
 
 ## Governance
 
@@ -42,9 +44,11 @@ Verified 2026-07-17:
 
 - Local branches: `main`, `feature/autopilot`
 - Remote branches: `origin/main`, `origin/feature/autopilot`
-- `main` synchronized with `origin/main`, both at `2c79d5e` (PI-0014 merge commit)
-- `feature/autopilot` synchronized with `origin/feature/autopilot`, untouched by PI-0014 work
-- `feature/marketable-pricing` — deleted locally and remotely after PI-0014's accepted merge, per the standard short-lived-branch lifecycle. No longer exists.
+- `main` synchronized with `origin/main`, both at `c97a705` (OE-0001 merge commit)
+- `feature/autopilot` untouched by OE-0001 or PI-0014 work
+- `feature/marketable-pricing` — deleted locally and remotely after PI-0014's accepted merge. No longer exists.
+- `feature/opportunity-engine-foundation` — deleted locally and remotely after OE-0001's accepted merge, per the standard short-lived-branch lifecycle. No longer exists.
+- Only `main` and the reserved `feature/autopilot` remain.
 - Working tree clean
 - No stale backup branches
 - No stale completed feature branches
@@ -89,8 +93,9 @@ A sprint is complete only when all applicable items are true:
 | PI-0012A | Portfolio Review Composition Layer | Complete ✅ | Composes existing health and objective engines; no new scoring or AI |
 | PI-0013 | Daily Briefing Dashboard | Complete ✅ | Deterministic priorities, snapshot, opportunities, and risks summary |
 | PI-0014 | Marketable Pricing for Risk-Gating, Phase 1 | Complete ✅ | Stop-loss, take-profit, emergency-exit, and Cut Losses gates now consider marketable (executable) pricing alongside mid; `PositionValuation` valuation layer; liquidity-tier classification |
+| OE-0001 | Opportunity Engine Foundation | Complete ✅ | Canonical deterministic ranking layer (`lib/opportunity-engine/`) over already-computed Decision Engine evaluations; one candidate adapter compatible with real `DecisionAnalysis` output; production UI (`BestOpportunitiesPanel`) built and tested but intentionally unmounted pending a real live-candidate consumer |
 
-PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`). PI-0014 was merged to `main` in commit `2c79d5e` (`merge: PI-0014 marketable pricing for risk-gating`).
+PI-0012A and PI-0013 were merged to `main` in commit `a90f8f1` (`merge: portfolio intelligence`). PI-0014 was merged to `main` in commit `2c79d5e` (`merge: PI-0014 marketable pricing for risk-gating`). OE-0001 was merged to `main` in commit `c97a705` (`merge: OE-0001 opportunity engine foundation`).
 
 ## Validation Baseline
 
@@ -104,7 +109,7 @@ PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, mul
 
 **PI-0014 (merged, commit `2c79d5e`)** validation results at merge: 643 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests — Vercel remains the authoritative build check). See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account, including the Corrective Closeout Addendum.
 
-**OE-0001 (active, in progress on `feature/opportunity-engine-foundation`, not merged)** current validation results, after the Product Owner corrective round: 697 tests passing repo-wide (up from 675 at the original round, reflecting expanded `lib/opportunity-engine` tests plus a new `components/opportunity-engine` test file — see `docs/reviews/OE-0001-Implementation-Report.md` §10.9); `tsc --noEmit` clean; local production build reproduces the same documented environment limitation as PI-0014 (hangs at the initial Next.js banner, not treated as a regression). Vercel build status is unverified pending direct evidence.
+**OE-0001 (merged, commit `c97a705`)** validation results at merge: 697 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests). Vercel validation remains unverified — no direct evidence (deployment URL, build log, or dashboard confirmation) has been supplied or confirmed. See `docs/reviews/OE-0001-Implementation-Report.md` for the full account, including the Corrective Round Addendum.
 
 ## Current Milestones
 
@@ -190,14 +195,14 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ## Next Sprint Decision Gate
 
-**OE-0001 — Opportunity Engine Foundation is the active, frozen sprint, currently under Product Owner review (a corrective round is complete; re-review pending).** It is not merged. No new sprint may be selected, recommended, or started while OE-0001 is open — this section records what comes *after* OE-0001 is accepted, not a sprint in progress now.
+OE-0001 is now merged. **No implementation sprint is currently active.** No next sprint is selected, recommended, or defined in this document — that determination belongs to the Product Owner.
 
-Do not start another feature merely because PI-0013 and PI-0014 are merged, and do not start another feature while OE-0001 remains open.
+Do not start another feature merely because PI-0013, PI-0014, and OE-0001 are merged.
 
-Once OE-0001 is accepted, the Product Owner must determine whether the highest-value next sprint is:
+The Product Owner must first determine whether the highest-value next sprint is:
 
-1. Wiring a real page to a live `DecisionAnalysis[]` feed and mounting `BestOpportunitiesPanel` against it (the backlog item OE-0001 itself surfaced — see its implementation report §10.7);
-2. PI-0015 / Portfolio Intelligence stabilization and acceptance fixes (queued, unaffected by OE-0001, remains behind it in sequence);
+1. Wiring a real page to a live `DecisionAnalysis[]` feed and mounting `BestOpportunitiesPanel` against it — a future, separately approved capability surfaced by OE-0001 (see its implementation report §10.7), not automatically in scope of any future sprint;
+2. PI-0015 / Portfolio Intelligence stabilization and live-market acceptance fixes (queued);
 3. an unresolved foundational follow-up;
 4. Paper Execution preparation;
 5. another roadmap capability with greater immediate trader value.

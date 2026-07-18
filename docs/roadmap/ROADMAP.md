@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` is an active, frozen short-lived sprint branch (OE-0001; a Product Owner corrective round is complete, pending re-review — not yet merged).
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. Only `main` and `feature/autopilot` remain.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -43,7 +43,7 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 - PI-0013 — Daily Briefing Dashboard — deterministic priorities, snapshot, opportunities, and risks summary
 - PI-0014 — Marketable Pricing for Risk-Gating, Phase 1 — stop-loss/take-profit/emergency-exit/Cut Losses gates now consider marketable (executable) pricing; liquidity-tier classification
 
-**TE-0007 — Opportunity Engine Foundation** is being implemented via **OE-0001** on `feature/opportunity-engine-foundation` (a Product Owner corrective round is complete, pending re-review; not yet merged). It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) is built and tested but **intentionally not mounted anywhere** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the full account.
+**TE-0007 — Opportunity Engine Foundation** is complete, implemented via **OE-0001**, merged into `main` at commit `c97a705`. It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) is built and tested but **intentionally not mounted anywhere in production** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. Live candidate wiring and mounting this panel remain a **future, separately approved capability**. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the full account.
 
 Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
 
@@ -59,12 +59,11 @@ Phase 3 shifts the product from infrastructure toward trader-facing intelligence
 
 ## Near-Term Roadmap
 
-1. Product Owner review and disposition of OE-0001 (merge decision, or corrective follow-up)
-2. Give a real page a live `DecisionAnalysis[]` feed (via the existing `POST /api/autopilot/recommendations` route) so the Best Opportunities panel can render real rankings — surfaced as a backlog item by OE-0001, not yet an approved sprint
-3. Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
-4. TE-0008 — Capital Allocation / Wheel Preference Engine
-5. TE-0009 — Income Engine Foundation
-6. TE-0010 — Autopilot Paper Mode
+1. Give a real page a live `DecisionAnalysis[]` feed (via the existing `POST /api/autopilot/recommendations` route) and mount the Best Opportunities panel against it — a future, separately approved capability surfaced as a backlog item by OE-0001, not yet an approved sprint
+2. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
+3. TE-0008 — Capital Allocation / Wheel Preference Engine
+4. TE-0009 — Income Engine Foundation
+5. TE-0010 — Autopilot Paper Mode
 
 ## Later Backlog — Paper Strategy Laboratory
 
@@ -123,7 +122,7 @@ Exit criteria for the future implementation:
 
 ## Core Product Engines
 
-1. Opportunity Engine — Where should my next dollar go? (`lib/opportunity-engine`, OE-0001 foundation implemented, pending review)
+1. Opportunity Engine — Where should my next dollar go? (`lib/opportunity-engine`, OE-0001 foundation complete and merged; production UI intentionally unmounted pending a live candidate feed)
 2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 + PI-0003 complete)
 3. Risk Engine — What could hurt me?
 4. Income Engine — Am I producing enough recurring income? (`app/engine/page.tsx` — SPX/SPY/Wheel capital-allocation dashboard; not yet unified with the Decision Engine or Opportunity Engine)
