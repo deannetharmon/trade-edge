@@ -2,7 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. Only `main` and `feature/autopilot` remain.
+`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) is implemented and awaiting Product Owner review — not yet merged.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -46,6 +46,8 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 **TE-0007 — Opportunity Engine Foundation** is complete, implemented via **OE-0001**, merged into `main` at commit `c97a705`. It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) is built and tested but **intentionally not mounted anywhere in production** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. Live candidate wiring and mounting this panel remain a **future, separately approved capability**. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the full account.
 
 Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
+
+**PT-0001 — Manual Paper Trading Sandbox** is implemented on `feature/manual-paper-trading` and awaiting Product Owner review; **not yet merged, not yet complete.** It adds `lib/paper-trading/`, a manual (not autonomous) paper-trading domain supporting CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a new `/paper-trading` page, and a Portfolio Intelligence adapter for the paper portfolio. It is distinct from, and does not touch, the separate (still-dormant) Autopilot paper framework referenced by TE-0010 below. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md`.
 
 ## Current Planning Focus
 

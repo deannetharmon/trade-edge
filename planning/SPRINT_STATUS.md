@@ -1,11 +1,13 @@
 # TradeEdge — Sprint Status
 
 **Status:** Active operational source of truth  
-**Last Updated:** 2026-07-17  
+**Last Updated:** 2026-07-17 (PT-0001)  
 **Primary Branch:** `main`  
 **Long-Lived Development Branch:** `feature/autopilot`
 
 ## Current State
+
+**PT-0001 — Manual Paper Trading Sandbox** is **implementation complete on `feature/manual-paper-trading`, awaiting Product Owner review. Not merged.** It adds a new `lib/paper-trading/` domain package (validation, marketable-fill pricing with a stale-quote and manual-override policy, per-strategy capital/max-loss formulas for CSP/BPS/BCS/IC, an accounting ledger, idempotency, atomicity via a dedicated Redis lock, and an append-only audit trail), a paper-only API namespace (`/api/paper-trading/*`), a new `/paper-trading` page and focused UI components, and a Portfolio Intelligence adapter that evaluates the paper portfolio using the same canonical per-position evaluator real positions use. It extends the existing canonical account record (`autopilot:paper-account:<userId>`) with one new optional field rather than creating a second account per user; the still-dormant Autopilot Decision Engine's own paper framework is untouched. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md` for the full account, including a pre-existing reset defect found and fixed as a consequence of this sprint (the existing `/api/autopilot/paper-account` reset would have silently deleted a user's new PT-0001 ledger).
 
 Portfolio Intelligence implementation through **PI-0013** is complete and merged into `main`.
 
@@ -15,7 +17,7 @@ Portfolio Intelligence implementation through **PI-0013** is complete and merged
 
 **Its production UI remains intentionally unmounted.** `components/opportunity-engine/BestOpportunitiesPanel.tsx` exists as a finished, tested, read-only presentational component but is not mounted on any page. Wiring a real, live `DecisionAnalysis[]` feed into a page and mounting this panel against it is a **future, separately approved capability** — not part of OE-0001 and not implied by its merge. No paper or live execution exists anywhere in this codebase.
 
-**No implementation sprint is currently active.** PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation. No next sprint is selected or approved in this document — that determination belongs to the Product Owner.
+**PT-0001 is the current active implementation sprint** (implementation complete, awaiting Product Owner review — see above). PI-0015 / Portfolio Intelligence corrections remain queued for live-market acceptance validation, unaffected by PT-0001. No next sprint beyond PT-0001's own review/correction cycle is selected or approved in this document — that determination belongs to the Product Owner.
 
 ## Governance
 
@@ -40,18 +42,13 @@ For TastyTrade scans, execution remains browser-owned and client-authenticated. 
 
 ## Repository State
 
-Verified 2026-07-17:
+Verified 2026-07-17 (PT-0001 preflight, before implementation began):
 
-- Local branches: `main`, `feature/autopilot`
-- Remote branches: `origin/main`, `origin/feature/autopilot`
-- `main` synchronized with `origin/main`, both at `c97a705` (OE-0001 merge commit)
-- `feature/autopilot` untouched by OE-0001 or PI-0014 work
-- `feature/marketable-pricing` — deleted locally and remotely after PI-0014's accepted merge. No longer exists.
-- `feature/opportunity-engine-foundation` — deleted locally and remotely after OE-0001's accepted merge, per the standard short-lived-branch lifecycle. No longer exists.
-- Only `main` and the reserved `feature/autopilot` remain.
-- Working tree clean
-- No stale backup branches
-- No stale completed feature branches
+- Current branch: `feature/manual-paper-trading`, created from `main` @ `4812301`
+- `main` and `origin/main` both at `4812301` at that time
+- `feature/autopilot` untouched by PT-0001 (still at `7e81cd1`)
+- Only `main`, `feature/autopilot`, and the new `feature/manual-paper-trading` remain
+- Working tree was clean before PT-0001 implementation began; PT-0001's changes are implemented but **not yet committed** (see `docs/reviews/PT-0001-Implementation-Report.md` §25 — a sandbox git-lock quirk stopped the Implementation Engineer from committing natively; exact commands are provided in that report for Dean to run)
 
 ## Definition of Done
 
@@ -110,6 +107,8 @@ PI-0012A and PI-0013 were implementation-reviewed and merged. Real-position, mul
 **PI-0014 (merged, commit `2c79d5e`)** validation results at merge: 643 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests — Vercel remains the authoritative build check). See `docs/reviews/PI-0014-Marketable-Pricing-Implementation-Report.md` for the full account, including the Corrective Closeout Addendum.
 
 **OE-0001 (merged, commit `c97a705`)** validation results at merge: 697 tests passing repo-wide; `tsc --noEmit` clean; local production build subject to the documented environment limitation (hangs at the initial Next.js banner in this sandbox, not treated as a regression given clean TypeScript and passing tests). Vercel validation remains unverified — no direct evidence (deployment URL, build log, or dashboard confirmation) has been supplied or confirmed. See `docs/reviews/OE-0001-Implementation-Report.md` for the full account, including the Corrective Round Addendum.
+
+**PT-0001 (implementation complete on `feature/manual-paper-trading`, not yet merged)** validation results: 115/115 targeted tests passing (`lib/paper-trading`, `components/paper-trading`, `app/api/paper-trading`); 812/812 tests passing repo-wide across 63 test files; `tsc --noEmit` clean; local production build subject to the same documented environment limitation. Not yet committed, pushed, or reviewed. See `docs/reviews/PT-0001-Implementation-Report.md` for the full account.
 
 ## Current Milestones
 
@@ -195,16 +194,14 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ## Next Sprint Decision Gate
 
-OE-0001 is now merged. **No implementation sprint is currently active.** No next sprint is selected, recommended, or defined in this document — that determination belongs to the Product Owner.
+**PT-0001 is implemented and awaiting Product Owner review.** It is not merged and not marked complete. Until it is accepted (or a corrective round is required and completed), no new sprint should be selected.
 
-Do not start another feature merely because PI-0013, PI-0014, and OE-0001 are merged.
+Once PT-0001 reaches an accepted, merged state, the Product Owner must determine whether the highest-value next sprint is:
 
-The Product Owner must first determine whether the highest-value next sprint is:
-
-1. Wiring a real page to a live `DecisionAnalysis[]` feed and mounting `BestOpportunitiesPanel` against it — a future, separately approved capability surfaced by OE-0001 (see its implementation report §10.7), not automatically in scope of any future sprint;
+1. Wiring a real page to a live `DecisionAnalysis[]` feed and mounting `BestOpportunitiesPanel` against it — a future, separately approved capability surfaced by OE-0001 (see its implementation report §10.7);
 2. PI-0015 / Portfolio Intelligence stabilization and live-market acceptance fixes (queued);
-3. an unresolved foundational follow-up;
-4. Paper Execution preparation;
+3. Automatic mark-to-market quote wiring for the PT-0001 Paper Portfolio (deferred, see its design doc §12);
+4. Paper Execution preparation for the real (non-paper) Autopilot framework;
 5. another roadmap capability with greater immediate trader value.
 
 The recommendation must include rationale, explicit scope, non-goals, acceptance criteria, test requirements, and branch strategy. The sprint becomes frozen only after repository-owner approval.

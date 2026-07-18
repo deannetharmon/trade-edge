@@ -110,6 +110,15 @@ export interface PaperAccount {
   updatedAt: string;
   lastRunAt?: string;
   liveBuyingPowerSnapshot?: number;
+  // PT-0001 (Manual Paper Trading Sandbox): a separate, independently
+  // versioned ledger namespaced under this same canonical account record so
+  // there is exactly one PaperAccount per user in Redis. Every field above
+  // this comment belongs to the still-dormant Autopilot Decision Engine
+  // paper framework (Sprint 1B/2) and is untouched by PT-0001 — see
+  // lib/paper-trading/types.ts's module doc comment for the full rationale.
+  // Optional/absent on every account that predates PT-0001; lib/paper-trading
+  // lazily initializes it on first use rather than requiring a migration.
+  paperTrading?: import('../paper-trading/types').PaperTradingLedger;
 }
 
 export interface AutopilotCandidate {

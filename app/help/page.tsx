@@ -305,6 +305,40 @@ export default function HelpPage() {
           </div>
         </Section>
 
+        {/* Paper Trading */}
+        <Section title="Paper Trading (PT-0001)" th={th}>
+          <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
+            The Paper Portfolio is a fully simulated sandbox for practicing CSP, BPS, BCS, and Iron Condor trades with a virtual account. Every open
+            and close is a manual action you confirm yourself — nothing is automated, and nothing here can ever reach a real broker order.
+          </p>
+          <div className="space-y-2 mt-2">
+            {[
+              { step: '1', title: 'Open the Paper Portfolio', desc: 'From the home page nav bar or Quick Access grid, choose PAPER TRADING.' },
+              { step: '2', title: 'Set a starting balance', desc: 'A default $100,000 paper account is created automatically. Use Reset Paper Account any time to start over with a new balance.' },
+              { step: '3', title: 'Add a paper position', desc: 'Pick a strategy, enter the symbol/expiration/strikes, and enter the current bid/ask for each leg (there is no live quote feed in this version — you enter what you see on your broker or the Screener).' },
+              { step: '4', title: 'Review before confirming', desc: 'The ticket shows the simulated fill credit, capital required, and max loss before you confirm. You must check the PAPER confirmation box to submit.' },
+              { step: '5', title: 'Monitor and close', desc: 'Use Refresh Mark to enter a current bid/ask and see unrealized P/L. Use Close Paper Position for a full close, with the same bid/ask entry and confirmation step.' },
+            ].map((s) => (
+              <div key={s.step} className={`flex gap-3 py-2 border-b ${th.border} last:border-0`}>
+                <span className="text-[9px] bg-amber-500/20 text-amber-400 border border-amber-600 rounded px-1.5 py-0.5 font-medium h-fit shrink-0">
+                  {s.step}
+                </span>
+                <div>
+                  <p className={`text-[11px] font-bold ${th.textMuted}`}>{s.title}</p>
+                  <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className={`text-[10px] text-amber-400 mt-2 font-medium`}>
+            ⚠ Quotes must be entered manually in this version — there is no automatic live quote feed yet. A stale (5+ minute old) quote requires an
+            extra confirmation before use.
+          </p>
+          <p className={`text-[10px] ${th.textFaint} mt-2`}>
+            The Paper Portfolio is completely separate from your real positions, Trade Log, and broker account. Resetting it never touches real data.
+          </p>
+        </Section>
+
         {/* Footer */}
         <div className={`text-center text-[10px] ${th.textFaint} py-4 border-t ${th.border}`}>
           <p>TRADEEDGE · Based on Prosper Trading course materials</p>

@@ -20,6 +20,14 @@ export default defineConfig({
       // first test under components/ -- without this glob its component
       // test would silently never run under `npm test`.
       'components/**/__tests__/**/*.test.tsx',
+      // PT-0001: components/paper-trading/__tests__ has plain .test.ts
+      // (not .tsx) render-free unit tests alongside its .test.tsx ones.
+      'components/**/__tests__/**/*.test.ts',
+      // PT-0001: app/api/paper-trading/__tests__ is the first test under
+      // app/ -- without this glob its route-level security tests (auth
+      // rejection, caller-supplied user id ignored) would silently never
+      // run under `npm test`.
+      'app/**/__tests__/**/*.test.ts',
     ],
     setupFiles: ['./vitest.setup.ts'],
     reporters: ['default'],
