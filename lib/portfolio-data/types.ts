@@ -1,0 +1,265 @@
+// lib/portfolio-data/types.ts
+//
+// TC-0001 corrective round: relocated verbatim from app/portfolio/page.tsx
+// (mechanical move only -- no logic changes; see the Implementation
+// Report's relocation audit table). These are the canonical position/
+// pending-order/snapshot shapes both app/portfolio/page.tsx and the new
+// PortfolioDataProvider (components/portfolio-data/PortfolioDataProvider.tsx)
+// use -- a single source of truth, not a duplicate of anything.
+
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { PositionValuation } from '@/lib/positionValuation';
+import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
+
+
+export interface PositionLeg {
+  symbol: string;
+  optionType: 'P' | 'C';
+  strikePrice: number;
+  direction: 'Short' | 'Long';
+  quantity: number;
+  avgOpenPrice: number;
+  currentPrice: number | null;
+}
+
+
+// Trader's reference point for AI analysis. Auto-defaulted from strategy
+// (lone short put -> acquisition, everything else -> income) and overridable
+// per position; persisted in Redis via /api/position-intent.
+export type PositionIntent = 'income' | 'acquisition' | 'neutral';
+
+
+export interface Position {
+  key: string;
+  symbol: string;
+  expDate: string;
+  dte: number;
+  strategy: string;
+  legs: PositionLeg[];
+  // ES-0001 (corrective round): the canonical quantity for this position,
+  // mirrored from `identity.quantity` when the structure is unambiguous.
+  // Retained for backward-compatible display only -- DO NOT use this field
+  // (or re-derive quantity from `legs.find(...)`/`legs[0]`) for any live
+  // close/roll/stop-loss/GTC/P&L computation. Use `identity` instead, which
+  // is null whenever `structureAmbiguous` is true.
+  quantity: number;
+  // ES-0001 (corrective round): the canonical close-order identity, built by
+  // lib/portfolio/closeOrderSafety's analyzePositionStructure +
+  // buildCanonicalCloseIdentity. Null whenever the raw broker legs could not
+  // be partitioned into exactly one defensible position structure (or entry
+  // economics could not be attributed) -- see `structureAmbiguous` /
+  // `structureBlockMessage`. Every close/roll/stop-loss/take-profit/cut-
+  // losses/snap-to-breakeven action MUST check this is non-null before
+  // proceeding; it is the single source `runCloseOrderSafetyGate` consumes.
+  identity: CanonicalCloseIdentity | null;
+  // True when this position's raw legs could not be resolved to one
+  // defensible structure (multiple valid pairings) or its entry economics
+  // could not be attributed. The card still renders (legs, symbol, strategy
+  // guess) for visibility, but every action button for this position must
+  // be disabled -- per Product Owner ruling, disclosure is not a substitute
+  // for a hard block.
+  structureAmbiguous: boolean;
+  structureBlockMessage: string | null;
+  creditReceived: number;
+  currentValue: number | null;
+  closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
+  closeNowPnl: number | null;   // credit - closeValue — matches the close/cut-losses modal exactly
+  pnl: number | null;
+  pnlPct: number | null;
+  pnlReliable: boolean;
+  intent: PositionIntent;
+  plOpen: number | null;
+  targetPrice: number;
+  profitTarget: number;
+  maxRisk: number;
+  hitTarget: boolean;
+  needsClose: boolean;
+  entryDte: number;
+  entryDate: string | null;  // date position was opened (YYYY-MM-DD)
+  // Entry snapshot fields are captured the first time TradeEdge sees the open position.
+  // For positions opened before this feature existed, the first snapshot will be 'first tracked', not true trade entry.
+  entrySnapshotKey?: string | null;
+  entrySnapshotCreatedAt?: string | null;
+  snapshotHistory?: PositionSnapshot[]; // daily snapshots for this position (for net-edge peak/trend)
+  ivAtEntry?: number | null;
+  ivrAtEntry?: number | null;
+  popAtEntry?: number | null;
+  deltaAtEntry?: number | null;
+  thetaAtEntry?: number | null;
+  gammaAtEntry?: number | null;
+  vegaAtEntry?: number | null;
+  stockPriceAtEntry?: number | null;
+  otmAtEntry?: number | null;
+  dteAtEntry?: number | null;
+  accountNumber: string;
+  // Greeks
+  ivr: number | null;
+  iv: number | null;          // current implied volatility %
+  hv30: number | null;        // 30-day historical volatility %
+  beta: number | null;        // beta to SPY
+  netDelta: number | null;    // net position delta
+  netVega: number | null;     // net position vega
+  pop: number | null;         // current probability of profit (breakeven-based), % 0-100
+  hasGtc: boolean;
+  gtcOrderId: string | null;       // ID of the working profit-target GTC order
+  gtcOrderPrice: number | null;    // current limit price on that GTC order
+  stopLossStatus: StopStatus;
+  stopLossPrice: number | null;
+  stockPrice: number | null;
+  buffer: number | null;
+  theta: number | null;
+  gamma: number | null;
+  earningsDate: string | null; // next earnings only if on/before option expiration
+  healthScore?: PositionHealthScore;
+  // PI-0014: purely observational mid vs. marketable valuation evidence
+  // (slippage cost, liquidity tier). Null when currentValue or closeValue is
+  // unavailable (same "never fabricate absent data" convention those two
+  // fields already follow) -- see lib/positionValuation and
+  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  valuation?: PositionValuation | null;
+  // PI-0014 follow-up (Product Owner review): whether marketable evidence
+  // actually changed this position's recommendation, decided by
+  // evaluatePositionObjective() (a decision-engine property -- see that
+  // function's PositionObjectiveResult doc, and lib/positionValuation's
+  // types.ts doc for why this deliberately does NOT live on `valuation`).
+  liquidityTrapTriggered?: boolean;
+  recommendation?: PortfolioRecommendation;
+  // PI-0002: canonical objective, computed alongside `recommendation` from
+  // the same evaluatePositionObjective() call. Not rendered anywhere yet
+  // (no UI change in this slice) -- wired through so a future slice can
+  // consume it without another data-plumbing pass. Null when the position
+  // needs no action (the old system's "hold" case).
+  portfolioObjective?: PortfolioObjective | null;
+}
+
+
+// ── Pending Orders ───────────────────────────────────────────────────────
+// An unfilled OTOCO entry/opening order -- the trigger leg of a complex
+// order that hasn't filled yet, so it has no corresponding Position. These
+// come from the same /complex-orders fetch loadPositions already does for
+// gtcSymbols, filtered down to legs with Sell to Open / Buy to Open actions
+// (as opposed to Buy to Close / Sell to Close, which mark GTC/stop orders
+// protecting an already-open position -- those are tracked separately via
+// Position.hasGtc / gtcOrderId / stopLossStatus, not here).
+export interface PendingOrderLeg {
+  symbol: string;       // OCC option symbol, space-padded as TastyTrade returns it
+  action: string;       // 'Sell to Open' | 'Buy to Open' | etc.
+  optionType: 'P' | 'C' | null;
+  strikePrice: number;
+  quantity: number;     // needed to rebuild the order body on Replace
+}
+
+
+export interface PendingOrder {
+  id: string;                 // complex-order id -- pending orders are always complex-order-sourced
+  accountNumber: string;
+  symbol: string;              // underlying symbol
+  strategy: string;             // inferred from legs: BPS / BCS / IC / UNKNOWN
+  legs: PendingOrderLeg[];
+  expDate: string | null;       // expiration date of the option legs, if parseable
+  limitPrice: number | null;    // trigger order's limit price
+  priceEffect: string | null;   // 'Credit' | 'Debit'
+  status: string;               // raw status string from the trigger/nested order
+  createdAt: string | null;
+  orderType: string | null;     // 'Limit' etc. — preserved on Replace
+  timeInForce: string | null;   // 'GTC' | 'Day' — preserved on Replace
+}
+
+
+// ── Position Snapshots ───────────────────────────────────────────────────
+// Daily snapshot of a position's live state, captured client-side whenever
+// the Portfolio page loads (TastyTrade can't be called server-side, so this
+// can only run while the browser is open — see project notes). Kept
+// permanently once captured; only the "Clear Snapshot History" button
+// removes them. This is what lets a future 21-vs-30-DTE exit comparison use
+// real recorded values instead of a modeled estimate.
+export interface PositionSnapshot {
+  date: string;          // YYYY-MM-DD, the day this snapshot was taken
+  dte: number;
+  currentValue: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  iv: number | null;
+  ivr: number | null;
+  theta: number | null;
+  gamma: number | null;
+  netDelta: number | null;
+  netVega: number | null;
+  pop: number | null;
+  buffer: number | null;
+  stockPrice: number | null;
+}
+
+
+export type StopStatus = 'live' | 'loose' | 'none' | 'unknown';
+
+
+export interface GtcOrderLeg { symbol: string; action: string; }
+
+
+export interface GtcOrder {
+  id: string; price: string; stopPrice: string | null;
+  orderType: string; timeInForce: string; legs: GtcOrderLeg[];
+  complexOrderId?: string; // set when this order is part of a complex/OCO order
+}
+
+
+export interface StopLossInfo { status: StopStatus; price: number | null; }
+
+
+export interface PriceSupportAnalysis {
+  verdict: 'GOOD' | 'CAUTION' | 'BAD' | 'UNKNOWN';
+  score: number;
+  lookbackDays: number;
+  price: number | null;
+  shortStrike: number | null;
+  nearestSupport: number | null;
+  supportZoneLow: number | null;
+  supportZoneHigh: number | null;
+  low20: number | null;
+  low50: number | null;
+  swingLow: number | null;
+  ma20: number | null;
+  ma50: number | null;
+  strikeVsSupportPct: number | null;
+  priceVsMa20Pct: number | null;
+  priceVsMa50Pct: number | null;
+  reason: string;
+}
+
+
+export interface TrendResult {
+  trend: 'uptrend' | 'downtrend' | 'sideways' | 'unknown';
+  strategy: 'BPS' | 'BCS' | 'IC' | 'NO_TRADE';
+  confidence: number;
+  reason: string;
+  supportAnalysis?: PriceSupportAnalysis;
+}
+
+
+// ── Entry Snapshot Tracking ────────────────────────────────────────────────
+export interface EntrySnapshot {
+  key: string;
+  createdAt: string;
+  symbol: string;
+  strategy: string;
+  expDate: string;
+  entryDate: string | null;
+  ivAtEntry: number | null;
+  ivrAtEntry: number | null;
+  popAtEntry: number | null;
+  deltaAtEntry: number | null;
+  thetaAtEntry: number | null;
+  gammaAtEntry: number | null;
+  vegaAtEntry: number | null;
+  stockPriceAtEntry: number | null;
+  otmAtEntry: number | null;
+  dteAtEntry: number | null;
+}
+
+
+// ── Recommendation Engine ──────────────────────────────────────────────────
+export interface Recommendation { action: ActionType; detail: string; }
