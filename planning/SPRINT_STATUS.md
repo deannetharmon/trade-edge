@@ -227,7 +227,7 @@ Goal: Independent review confirms readiness before any live-mode implementation 
 
 ## Next Sprint Decision Gate
 
-**PT-0001 and ES-0002 are accepted, complete, and merged.** Neither is a blocker to selecting a next sprint. **TC-0001's corrective round is complete on `feature/trade-command-center` and awaiting Product Owner review** (see above and `docs/reviews/TC-0001-Implementation-Report.md` §11) — it is complete on the feature branch but not committed, pushed, or merged, and the sprint after TC-0001 remains unselected; this document does not select one.
+**PT-0001 and ES-0002 are accepted, complete, and merged.** Neither is a blocker to selecting a next sprint. **TC-0001's corrective round is committed (`3385d23`) and pushed to `origin/feature/trade-command-center`, awaiting Product Owner review before merge** (see above and `docs/reviews/TC-0001-Implementation-Report.md` §11), and the sprint after TC-0001 remains unselected; this document does not select one.
 
 The corrective round resolved the prior round's rejection: `/dashboard` and `/portfolio` now share one canonical, live portfolio composition via a new `PortfolioDataProvider` (see the Implementation Report §11 for the full architecture and the 60-symbol relocation audit table), so Daily Briefing, Today's Priorities, and Portfolio Health render real, live data. `loadPositions()`'s live TastyTrade acquisition pipeline was not duplicated or left disconnected — the closed, non-React-coupled portion it depends on (60 symbols, ~1,621 lines) was relocated verbatim into `lib/tastytrade/` and `lib/portfolio-data/`; order submission and every ES-0001/ES-0002 safety-gated call site remain untouched in `app/portfolio/page.tsx`.
 

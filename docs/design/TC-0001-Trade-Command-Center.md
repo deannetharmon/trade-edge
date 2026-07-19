@@ -1,6 +1,6 @@
 # TC-0001 — Trade Command Center
 
-**Status:** Implemented, pending Product Owner review. Complete on `feature/trade-command-center`. Not committed, not pushed, not merged.
+**Status:** Corrective round committed (`3385d23`) and pushed to `origin/feature/trade-command-center`. Pending Product Owner review. Not merged.
 **Project:** TradeEdge
 **Owner:** Dean Harmon
 **Implementation Branch:** `feature/trade-command-center` (created off clean `main` @ `424e068`, ES-0002's merge commit)
@@ -257,4 +257,4 @@ Only the **Best Opportunity** panel remains a legitimate, disclosed empty state 
 
 Full regression suite (74 files / 1,034 tests) re-run and passing; `npx tsc --noEmit` clean; `git diff --check` clean (after normalizing a trailing-newline issue in the three newly extracted files). Full detail in `docs/reviews/TC-0001-Implementation-Report.md` §11.7. No behavioral change was required beyond mechanical relocation; the corrective directive's stop condition was not triggered.
 
-No commit, push, or merge has been made. This remains a review package for Product Owner approval.
+Committed (`3385d23`) and pushed to `origin/feature/trade-command-center`. Not merged. This remains a review package for Product Owner approval.

@@ -1,6 +1,6 @@
 # TC-0001 — Trade Command Center — Implementation Report
 
-Status: **IMPLEMENTED, AWAITING PRODUCT OWNER REVIEW.** Complete on branch `feature/trade-command-center`. Not committed, not pushed, not merged. This report, together with `docs/design/TC-0001-Trade-Command-Center.md` and the accompanying `.diff` patch file, is the review package.
+Status: **CORRECTIVE ROUND COMMITTED AND PUSHED, AWAITING PRODUCT OWNER REVIEW.** Commit `3385d23` on `feature/trade-command-center`, pushed to `origin/feature/trade-command-center`. Not merged. This report, together with `docs/design/TC-0001-Trade-Command-Center.md` and the accompanying `.diff` patch file, is the review package.
 
 ## 0. Pre-flight verification
 
@@ -285,4 +285,4 @@ Old locations are line numbers in `app/portfolio/page.tsx` as it stood at the st
 - `/tmp/TC-0001-corrective-review.diff` — full patch (binary-safe, `tsconfig.tsbuildinfo` excluded), covering all 29 changed/added files: everything from the original round plus `lib/tastytrade/client.ts`, `lib/portfolio-data/types.ts`, `lib/portfolio-data/acquisition.ts`, `components/portfolio-data/PortfolioDataProvider.tsx` (new), and `app/portfolio/page.tsx`, `app/dashboard/page.tsx`, `app/providers.tsx` (modified).
 - Updated `docs/roadmap/ROADMAP.md`, `planning/SPRINT_STATUS.md`, `docs/HANDOFF.md`.
 
-No commit, push, or merge has been made. This remains a review package for Product Owner approval.
+Committed (`3385d23`) and pushed to `origin/feature/trade-command-center`. Not merged. This remains a review package for Product Owner approval.
