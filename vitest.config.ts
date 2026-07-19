@@ -15,6 +15,12 @@ export default defineConfig({
     environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']],
     include: [
       'lib/**/__tests__/**/*.test.ts',
+      // PT-0002A: lib/portfolio-mode/__tests__ has a few jsdom-dependent
+      // .test.tsx files (localStorage/React-hook coverage) alongside its
+      // plain .test.ts ones -- without this glob they would silently never
+      // run under `npm test`, same trap OE-0001/PT-0001 hit before it for
+      // components/ and app/ (see the comments below).
+      'lib/**/__tests__/**/*.test.tsx',
       'features/**/__tests__/**/*.test.tsx',
       // OE-0001 correction: components/opportunity-engine/__tests__ is the
       // first test under components/ -- without this glob its component
