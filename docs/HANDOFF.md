@@ -2,13 +2,38 @@
 
 Last updated: 2026-07-18 (ES-0001 Closeout Review — **ES-0001, Live Close-Order Identity and Break-Even Safety, is ACCEPTED, COMPLETE, and MERGED into `main` at merge commit `a7f6acb`.** Dean applied, committed (`90033cd`), and merged this ticket's round-2 corrective diff outside the implementing session; verified directly against the repository (`main`/`origin/main` both at `a7f6acb`, working tree clean, `git show --stat` matching file-for-file). A post-merge closeout review (architectural review, technical debt register, test coverage assessment, documentation audit, retrospective, next-sprint recommendation) is at `docs/reviews/ES-0001-Closeout-Report.md`. It investigated a real, live financial loss from a "Snap to Break Even" close-order action; confirmed an overly-broad position-grouping key plus a broader systemic "arbitrary leg quantity" defect across ~7 call sites. The **first implementation round (commit `8a796ac`) was REJECTED by the Product Owner** (grouping by quantity is not canonical position identity; confirmation-modal disclosure is not an acceptable substitute for a hard safety block), and a **first corrective round was also REJECTED** (introduced a critical 100x price-unit defect and did not actually enforce the broker-boundary wrapper on the production submission path). The accepted round 2 replaced quantity-only grouping with deterministic economic-structure analysis (hard-blocking `AMBIGUOUS_POSITION_STRUCTURE`), fixed the 100x unit defect and the unenforced boundary, made quote/actual-order/displayed-P&L required (not optional) fields, and added UI-level hard-blocking for ambiguous positions — 65 tests across `lib/portfolio/__tests__/closeOrderSafety.test.ts` and `closeOrderSubmission.test.ts`, reconfirmed passing against `main` today. The closeout review found one pre-existing, out-of-scope live-order path (`replacePendingOrder`, GTC/pending-order repricing) that still bypasses this safety gate entirely — flagged as the top technical-debt item and top next-sprint candidate (ES-0002) in the closeout report. See `docs/design/ES-0001-Live-Close-Order-Safety.md`, `docs/reviews/ES-0001-Implementation-Report.md`, and `docs/reviews/ES-0001-Closeout-Report.md`. Prior state: PT-0001 Manual Paper Trading Sandbox documentation closeout — **accepted, complete, merged into `main` (commit `05d0f31`), and pushed**; the original round was committed/pushed at `7b41eeb`, then **rejected by Product Owner** for persistence/idempotency/identity/accounting-safety defects; a corrective round fixed all seven required corrections (`9a24fd9`); several further Product Owner review rounds hardened the atomic commit design and error classification before final acceptance; the accepted implementation report was restored/finalized in closeout commit `1ffc54a`. The temporary branch `feature/manual-paper-trading` has been deleted, locally and remotely.). Paste this file (or point Claude at its repo path) at the start of a new chat to resume with full context.
 
-## Governance
+## Governance Framework
 
-All future implementation planning, sprint management, repository management, and release decisions shall conform to:
+The `governance/` directory is the constitutional foundation of TradeEdge.
 
-planning/PROJECT_GOVERNANCE.md
+All product decisions, architecture, implementation, AI-assisted work, user experience changes, and contributor activity must conform to the Governance Framework.
 
-If this handoff document conflicts with PROJECT_GOVERNANCE.md, the governance document takes precedence until intentionally amended.
+The documents are hierarchical:
+
+1. `GOV-0001 — Product Philosophy`
+2. `GOV-0002 — Portfolio Decision Principles`
+3. `GOV-0003 — AI Decision Principles`
+4. `GOV-0004 — Architecture Principles`
+5. `GOV-0005 — UX Principles`
+6. `GOV-0006 — Contributing`
+
+Higher-order governance takes precedence when guidance overlaps.
+
+Significant features, architectural changes, and major implementation efforts should be reviewed using:
+
+`planning/GOVERNANCE_REVIEW_TEMPLATE.md`
+
+Governance changes require explicit Product Owner approval and should be infrequent.
+
+### Project Operating Governance
+
+Implementation planning, sprint management, repository management, and release decisions shall also conform to:
+
+`planning/PROJECT_GOVERNANCE.md`
+
+If this handoff conflicts with `planning/PROJECT_GOVERNANCE.md` on project operating procedures, `planning/PROJECT_GOVERNANCE.md` takes precedence until intentionally amended.
+
+If project operating governance conflicts with the constitutional principles in `governance/`, the constitutional Governance Framework takes precedence.
 
 ## Project
 
