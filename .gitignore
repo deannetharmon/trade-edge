@@ -1,6 +1,4 @@
 node_modules
 .next/
 *.py
-*.py
-.DS_Store
 .DS_Store
