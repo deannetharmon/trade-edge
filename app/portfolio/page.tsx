@@ -71,8 +71,14 @@ import { submitCloseOrderIfSafe } from '@/lib/portfolio/closeOrderSubmission';
 // docs/design/ES-0002-Pending-Order-Replacement-Safety.md.
 import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
 import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
+// TC-0001: canonicalPriorities/todaysPrioritiesDashboard/topPriority/
+// averagePositionHealth/portfolioHealth/portfolioReview/dailyBriefing are now
+// all composed by this single shared function (also used by the new
+// /dashboard route) instead of this page's own inline useMemo/useEffect
+// chain -- see that module's doc for the full rationale.
+import { buildDashboardComposition } from '@/lib/portfolio-intelligence/dashboardComposition';
 // PI-0014: Marketable Pricing for Risk-Gating (Phase 1) -- see
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md. Pure valuation
 // math only; this page computes the raw mid/marketable/maxRisk inputs
@@ -97,13 +103,11 @@ import type { PositionSnapshotInput, PositionSnapshotStore as LifecycleSnapshotS
 // which are a completely separate store (see fetchSnapshotStore above).
 import { readCache as readTradeLogCache } from '@/lib/tradeLog/reconstructTrades';
 import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
-// PI-0010A: Today's Priorities Dashboard -- pure orchestration layer
-// (buildTodaysPrioritiesDashboard) plus its presentation component. Both
-// consume state this page already computes (positions[].portfolioObjective,
-// canonicalPriorities, decisionReviews) -- no new Portfolio Intelligence or
-// Decision Engine calls are introduced here.
-import { buildTodaysPrioritiesDashboard, selectTopPriority } from '@/lib/todaysPriorities';
-import type { TodaysPrioritiesInput, TodaysPrioritiesPositionInput, CoveredCallOpportunityInput } from '@/lib/todaysPriorities';
+// PI-0010A: Today's Priorities Dashboard -- pure orchestration layer, now
+// invoked via buildDashboardComposition() above, plus its presentation
+// component. Both consume state this page already computes
+// (positions[].portfolioObjective, canonicalPriorities, decisionReviews) --
+// no new Portfolio Intelligence or Decision Engine calls are introduced here.
 import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
 // PI-0011A: Portfolio Mission Control -- orchestrates the Briefing tab's own
 // Portfolio Health/Summary derivations plus PI-0010A/B's Today's Priorities
@@ -112,26 +116,48 @@ import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/Todays
 // MissionControl.tsx's own module doc for the full source list.
 import { MissionControl } from '@/features/portfolio/missionControl/MissionControl';
 // PI-0011B: Portfolio Health Engine -- a deterministic 0-100 score computed
-// from data this page already has (see the healthInput useMemo below for
-// exactly which existing values feed it). No new Portfolio Intelligence or
-// Decision Engine calls, no new market data.
-import { calculatePortfolioHealthScore } from '@/lib/portfolioHealth';
-import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
+// from data this page already has, now via buildDashboardComposition() above.
+// No new Portfolio Intelligence or Decision Engine calls, no new market data.
 // PI-0012A: Portfolio Review, Phase 1 -- a thin composition layer over
 // Portfolio Health (above), the canonical objective list, and Today's
 // Priorities' already-scored dashboard. No new score, no new ranking, no
 // new recommendation logic -- see lib/portfolioReview's own module docs and
 // docs/design/PI-0012-Portfolio-Review-Architecture.md.
-import { buildPortfolioReview } from '@/lib/portfolioReview';
-import type { PortfolioReviewInput, PortfolioReviewPositionInput } from '@/lib/portfolioReview';
 import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReviewCard';
 // PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
 // Review (above) and Today's Priorities' dashboard. No new score, no new
 // ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
 // module docs and docs/reviews/PI-0013-Daily-Briefing-Implementation-Report.md.
-import { buildDailyBriefing } from '@/lib/dailyBriefing';
-import type { DailyBriefingInput } from '@/lib/dailyBriefing';
 import { DailyBriefingCard } from '@/features/portfolio/dailyBriefing/DailyBriefingCard';
+import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
+import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import type {
+  Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent,
+} from '@/lib/portfolio-data/types';
+import {
+  LS_PROFIT_TARGETS,
+  computeNetEdgeEvidence,
+  computeMarketablePnlPct,
+  scorePortfolioPositionObjective,
+  scorePortfolioRemainingOpportunity,
+  fetchSnapshotStore,
+  attachSnapshotHistory,
+  calculateMaxRisk,
+  normalizeOccSymbol,
+  isBuyToCloseAction,
+  isStopOrder,
+  fetchGtcOrders,
+  loadPositions,
+  loadAccountBalances,
+  isShortDateEntry,
+  getRecommendation,
+  normalizePercentValue,
+  getCurrentPop,
+  netEdgeFrom,
+  netEdgeLive,
+  netEdgeSeries,
+  netEdgePeak,
+} from '@/lib/portfolio-data/acquisition';
 
 
 // Inject accent CSS variable style
@@ -162,13 +188,9 @@ if (typeof document !== 'undefined') {
   }
 }
 
-const BASE = 'https://api.tastytrade.com';
-const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-const LS_PROFIT_TARGETS = 'hunter-profit-targets';
 const LS_AUDIT_LOG = 'hunter-audit-log';
 const LS_MEMORY = 'hunter-trading-memory';
 const LS_DRY_RUN = 'hunter-dry-run';
-const LS_ENTRY_SNAPSHOTS = 'hunter-entry-snapshots';
 const LS_SECTION_ORDER = 'hunter-portfolio-section-order';
 const DEFAULT_SECTION_ORDER = ['pending', 'needsClose', 'review', 'hitTarget', 'noGtc', 'normal'];
 const MEMORY_RAW_TRADES_PER_SYMBOL = 5;   // keep this many raw; summarize older
@@ -186,315 +208,17 @@ function setDryRun(val: boolean) {
   try { val ? localStorage.setItem(LS_DRY_RUN, 'true') : localStorage.removeItem(LS_DRY_RUN); } catch {}
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────
-type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
 
-interface PositionLeg {
-  symbol: string;
-  optionType: 'P' | 'C';
-  strikePrice: number;
-  direction: 'Short' | 'Long';
-  quantity: number;
-  avgOpenPrice: number;
-  currentPrice: number | null;
-}
 
-// Trader's reference point for AI analysis. Auto-defaulted from strategy
-// (lone short put -> acquisition, everything else -> income) and overridable
-// per position; persisted in Redis via /api/position-intent.
-type PositionIntent = 'income' | 'acquisition' | 'neutral';
 
-interface Position {
-  key: string;
-  symbol: string;
-  expDate: string;
-  dte: number;
-  strategy: string;
-  legs: PositionLeg[];
-  // ES-0001 (corrective round): the canonical quantity for this position,
-  // mirrored from `identity.quantity` when the structure is unambiguous.
-  // Retained for backward-compatible display only -- DO NOT use this field
-  // (or re-derive quantity from `legs.find(...)`/`legs[0]`) for any live
-  // close/roll/stop-loss/GTC/P&L computation. Use `identity` instead, which
-  // is null whenever `structureAmbiguous` is true.
-  quantity: number;
-  // ES-0001 (corrective round): the canonical close-order identity, built by
-  // lib/portfolio/closeOrderSafety's analyzePositionStructure +
-  // buildCanonicalCloseIdentity. Null whenever the raw broker legs could not
-  // be partitioned into exactly one defensible position structure (or entry
-  // economics could not be attributed) -- see `structureAmbiguous` /
-  // `structureBlockMessage`. Every close/roll/stop-loss/take-profit/cut-
-  // losses/snap-to-breakeven action MUST check this is non-null before
-  // proceeding; it is the single source `runCloseOrderSafetyGate` consumes.
-  identity: CanonicalCloseIdentity | null;
-  // True when this position's raw legs could not be resolved to one
-  // defensible structure (multiple valid pairings) or its entry economics
-  // could not be attributed. The card still renders (legs, symbol, strategy
-  // guess) for visibility, but every action button for this position must
-  // be disabled -- per Product Owner ruling, disclosure is not a substitute
-  // for a hard block.
-  structureAmbiguous: boolean;
-  structureBlockMessage: string | null;
-  creditReceived: number;
-  currentValue: number | null;
-  closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
-  closeNowPnl: number | null;   // credit - closeValue — matches the close/cut-losses modal exactly
-  pnl: number | null;
-  pnlPct: number | null;
-  pnlReliable: boolean;
-  intent: PositionIntent;
-  plOpen: number | null;
-  targetPrice: number;
-  profitTarget: number;
-  maxRisk: number;
-  hitTarget: boolean;
-  needsClose: boolean;
-  entryDte: number;
-  entryDate: string | null;  // date position was opened (YYYY-MM-DD)
-  // Entry snapshot fields are captured the first time TradeEdge sees the open position.
-  // For positions opened before this feature existed, the first snapshot will be 'first tracked', not true trade entry.
-  entrySnapshotKey?: string | null;
-  entrySnapshotCreatedAt?: string | null;
-  snapshotHistory?: PositionSnapshot[]; // daily snapshots for this position (for net-edge peak/trend)
-  ivAtEntry?: number | null;
-  ivrAtEntry?: number | null;
-  popAtEntry?: number | null;
-  deltaAtEntry?: number | null;
-  thetaAtEntry?: number | null;
-  gammaAtEntry?: number | null;
-  vegaAtEntry?: number | null;
-  stockPriceAtEntry?: number | null;
-  otmAtEntry?: number | null;
-  dteAtEntry?: number | null;
-  accountNumber: string;
-  // Greeks
-  ivr: number | null;
-  iv: number | null;          // current implied volatility %
-  hv30: number | null;        // 30-day historical volatility %
-  beta: number | null;        // beta to SPY
-  netDelta: number | null;    // net position delta
-  netVega: number | null;     // net position vega
-  pop: number | null;         // current probability of profit (breakeven-based), % 0-100
-  hasGtc: boolean;
-  gtcOrderId: string | null;       // ID of the working profit-target GTC order
-  gtcOrderPrice: number | null;    // current limit price on that GTC order
-  stopLossStatus: StopStatus;
-  stopLossPrice: number | null;
-  stockPrice: number | null;
-  buffer: number | null;
-  theta: number | null;
-  gamma: number | null;
-  earningsDate: string | null; // next earnings only if on/before option expiration
-  healthScore?: PositionHealthScore;
-  // PI-0014: purely observational mid vs. marketable valuation evidence
-  // (slippage cost, liquidity tier). Null when currentValue or closeValue is
-  // unavailable (same "never fabricate absent data" convention those two
-  // fields already follow) -- see lib/positionValuation and
-  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
-  valuation?: PositionValuation | null;
-  // PI-0014 follow-up (Product Owner review): whether marketable evidence
-  // actually changed this position's recommendation, decided by
-  // evaluatePositionObjective() (a decision-engine property -- see that
-  // function's PositionObjectiveResult doc, and lib/positionValuation's
-  // types.ts doc for why this deliberately does NOT live on `valuation`).
-  liquidityTrapTriggered?: boolean;
-  recommendation?: PortfolioRecommendation;
-  // PI-0002: canonical objective, computed alongside `recommendation` from
-  // the same evaluatePositionObjective() call. Not rendered anywhere yet
-  // (no UI change in this slice) -- wired through so a future slice can
-  // consume it without another data-plumbing pass. Null when the position
-  // needs no action (the old system's "hold" case).
-  portfolioObjective?: PortfolioObjective | null;
-}
 
-// ── Pending Orders ───────────────────────────────────────────────────────
-// An unfilled OTOCO entry/opening order -- the trigger leg of a complex
-// order that hasn't filled yet, so it has no corresponding Position. These
-// come from the same /complex-orders fetch loadPositions already does for
-// gtcSymbols, filtered down to legs with Sell to Open / Buy to Open actions
-// (as opposed to Buy to Close / Sell to Close, which mark GTC/stop orders
-// protecting an already-open position -- those are tracked separately via
-// Position.hasGtc / gtcOrderId / stopLossStatus, not here).
-interface PendingOrderLeg {
-  symbol: string;       // OCC option symbol, space-padded as TastyTrade returns it
-  action: string;       // 'Sell to Open' | 'Buy to Open' | etc.
-  optionType: 'P' | 'C' | null;
-  strikePrice: number;
-  quantity: number;     // needed to rebuild the order body on Replace
-}
-interface PendingOrder {
-  id: string;                 // complex-order id -- pending orders are always complex-order-sourced
-  accountNumber: string;
-  symbol: string;              // underlying symbol
-  strategy: string;             // inferred from legs: BPS / BCS / IC / UNKNOWN
-  legs: PendingOrderLeg[];
-  expDate: string | null;       // expiration date of the option legs, if parseable
-  limitPrice: number | null;    // trigger order's limit price
-  priceEffect: string | null;   // 'Credit' | 'Debit'
-  status: string;               // raw status string from the trigger/nested order
-  createdAt: string | null;
-  orderType: string | null;     // 'Limit' etc. — preserved on Replace
-  timeInForce: string | null;   // 'GTC' | 'Day' — preserved on Replace
-}
 
-// ── Position Snapshots ───────────────────────────────────────────────────
-// Daily snapshot of a position's live state, captured client-side whenever
-// the Portfolio page loads (TastyTrade can't be called server-side, so this
-// can only run while the browser is open — see project notes). Kept
-// permanently once captured; only the "Clear Snapshot History" button
-// removes them. This is what lets a future 21-vs-30-DTE exit comparison use
-// real recorded values instead of a modeled estimate.
-interface PositionSnapshot {
-  date: string;          // YYYY-MM-DD, the day this snapshot was taken
-  dte: number;
-  currentValue: number | null;
-  pnl: number | null;
-  pnlPct: number | null;
-  iv: number | null;
-  ivr: number | null;
-  theta: number | null;
-  gamma: number | null;
-  netDelta: number | null;
-  netVega: number | null;
-  pop: number | null;
-  buffer: number | null;
-  stockPrice: number | null;
-}
 
-function scorePortfolioPositionHealth(pos: Position): PositionHealthScore {
-  return calculatePositionHealthScore({
-    ...pos,
-    positionId: pos.key,
-  });
-}
 
-// PI-0006B: Net Edge decline vs. this position's own tracked peak, extracted
-// as a shared helper since PI-0008A's Remaining Opportunity Engine reuses the
-// exact same evidence (see its module doc: "no new calculations"). Both
-// netEdgeLive/netEdgePeak already exist below in this file and are
-// synchronous (pos.snapshotHistory is attached before either caller runs --
-// see attachSnapshotHistory), so no new fetch/integration is needed.
-function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | null; netEdgeNegative: boolean | null } {
-  const liveEdge = netEdgeLive(pos);
-  const peakEdge = netEdgePeak(pos);
-  const netEdgeDeclinePct = liveEdge != null && peakEdge != null && peakEdge > 0
-    ? ((liveEdge - peakEdge) / peakEdge) * 100
-    : null;
-  const netEdgeNegative = liveEdge != null ? liveEdge <= 0 : null;
-  return { netEdgeDeclinePct, netEdgeNegative };
-}
 
-// PI-0014: marketable/executable pnl% -- same null-safe convention pnlPct
-// itself already uses, but reads pos.closeNowPnl (credit - marketable
-// buyback) instead of pos.pnl (credit - mid buyback). Null when closeValue
-// is unavailable (one-sided market on some leg) -- never fabricated from
-// mid. See lib/positionValuation and
-// docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
-function computeMarketablePnlPct(pos: Position): number | null {
-  return pos.closeNowPnl != null && pos.creditReceived !== 0
-    ? (pos.closeNowPnl / pos.creditReceived) * 100
-    : null;
-}
 
-// PI-0014: purely observational mid/marketable valuation evidence -- see
-// lib/positionValuation's types.ts doc. Whether marketable evidence changed
-// a recommendation (liquidityTrapTriggered) is owned by evaluatePositionObjective()
-// instead (PI-0014 follow-up, Product Owner review), not by this object.
-// Null when currentValue or closeValue is unavailable, same convention
-// those two fields already follow.
-function computeRawPositionValuation(pos: Position) {
-  if (pos.currentValue == null || pos.closeValue == null) return null;
-  return computePositionValuation({
-    creditReceived: pos.creditReceived,
-    midValue: pos.currentValue,
-    marketableValue: pos.closeValue,
-    maxRisk: pos.maxRisk,
-  });
-}
 
-// PI-0002: single canonical evaluation call. Returns both the legacy-shaped
-// recommendation (unchanged output, for existing badges/priority list) and
-// the new canonical objective (not yet rendered, wired through for later).
-// PI-0014: also returns `valuation` -- the purely observational mid/marketable
-// evidence object -- and `liquidityTrapTriggered`, owned by
-// evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
-// review: this is a decision-engine property, not a valuation property).
-function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean } {
-  const healthScore = pos.healthScore ?? (
-    typeof scorePortfolioPositionHealth === 'function'
-      ? scorePortfolioPositionHealth(pos)
-      : undefined
-  );
 
-  // technicalAlignment is deliberately NOT wired in this slice: trend
-  // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
-  // available at this synchronous call site -- left as an accepted,
-  // documented gap for a future slice.
-  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
-
-  // PI-0008B: reuses PI-0008A's Remaining Opportunity calculation (the exact
-  // same inputs scorePortfolioRemainingOpportunity below already assembles)
-  // so intent selection sees the same number Position Intelligence displays,
-  // computed fresh at render time -- nothing new persisted onto Position.
-  const { remainingOpportunityPct } = calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
-    dte: pos.dte,
-    buffer: normalizePositionObjectivePct(pos.buffer),
-    healthScore: healthScore?.score ?? null,
-    earningsDate: pos.earningsDate,
-    expDate: pos.expDate,
-    netEdgeDeclinePct,
-    netEdgeNegative,
-    lifecycleType: classifyPositionLifecycle(pos).type,
-  });
-
-  // PI-0014: computed here (not inside evaluatePositionObjective) because
-  // this file already owns pos.closeNowPnl/pos.currentValue/pos.closeValue --
-  // the Decision Engine only ever sees the already-normalized percentage,
-  // never raw prices, matching how pnlPct itself is passed through today.
-  const marketablePnlPct = computeMarketablePnlPct(pos);
-  const valuation = computeRawPositionValuation(pos);
-
-  const { objective, legacyRecommendation, liquidityTrapTriggered } = evaluatePositionObjective({
-    ...pos,
-    positionId: pos.key,
-    healthScore,
-    netEdgeDeclinePct,
-    netEdgeNegative,
-    remainingOpportunityPct,
-    marketablePnlPct,
-    liquidityTier: valuation?.liquidityTier ?? null,
-  });
-
-  return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered };
-}
-
-// PI-0008A: Remaining Opportunity Engine -- a parallel, independent
-// calculation from scorePortfolioPositionObjective above (not part of the
-// Decision Engine; see remainingOpportunity.ts's module doc). Computed fresh
-// at render time from the same already-available fields, the same way
-// classifyPositionLifecycle(pos) already is at this file's Position
-// Intelligence call site -- nothing is persisted onto Position.
-function scorePortfolioRemainingOpportunity(pos: Position) {
-  const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
-  return calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
-    // Same fraction-vs-percent normalization evaluatePositionObjective()
-    // already applies to these two fields before using them -- keeps this
-    // metric's captured/remaining percentages consistent with the
-    // recommendation engine's own reading of the same position.
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
-    dte: pos.dte,
-    buffer: normalizePositionObjectivePct(pos.buffer),
-    healthScore: pos.healthScore?.score ?? null,
-    earningsDate: pos.earningsDate,
-    expDate: pos.expDate,
-    netEdgeDeclinePct,
-    netEdgeNegative,
-    lifecycleType: classifyPositionLifecycle(pos).type,
-  });
-}
 
 function todayLocalDateString(): string {
   const d = new Date();
@@ -541,31 +265,7 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
   }
 }
 
-// Fetches the full snapshot store and returns it keyed by position.key.
-// Non-blocking caller handles failure by leaving history empty.
-async function fetchSnapshotStore(): Promise<Record<string, PositionSnapshot[]>> {
-  const res = await fetch('/api/position-snapshots');
-  if (!res.ok) throw new Error(`snapshot fetch ${res.status}`);
-  const data = await res.json();
-  return (data?.snapshots ?? {}) as Record<string, PositionSnapshot[]>;
-}
 
-// Attaches each position's snapshot history (sorted by date ascending) onto
-// the position object so the card render can compute net-edge peak/trend.
-function attachSnapshotHistory(
-  positions: Position[],
-  store: Record<string, PositionSnapshot[]>,
-): Position[] {
-  return positions.map(p => {
-    const hist = store[p.key] ?? [];
-    const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
-    const withHistory = { ...p, snapshotHistory: sorted };
-    const healthScore = scorePortfolioPositionHealth(withHistory);
-    const withHealth = { ...withHistory, healthScore };
-    const { recommendation, objective, valuation, liquidityTrapTriggered } = scorePortfolioPositionObjective(withHealth);
-    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered };
-  });
-}
 
 async function clearSnapshotHistory(): Promise<void> {
   await fetch('/api/position-snapshots', { method: 'DELETE' });
@@ -672,43 +372,9 @@ interface ActionVerdict {
 
 type EvaluatedAction = 'EXTEND_PROFIT' | 'CLOSE_ROLL' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'PLACE_GTC';
 
-type StopStatus = 'live' | 'loose' | 'none' | 'unknown';
 
-interface GtcOrderLeg { symbol: string; action: string; }
-interface GtcOrder {
-  id: string; price: string; stopPrice: string | null;
-  orderType: string; timeInForce: string; legs: GtcOrderLeg[];
-  complexOrderId?: string; // set when this order is part of a complex/OCO order
-}
-interface StopLossInfo { status: StopStatus; price: number | null; }
 
-interface PriceSupportAnalysis {
-  verdict: 'GOOD' | 'CAUTION' | 'BAD' | 'UNKNOWN';
-  score: number;
-  lookbackDays: number;
-  price: number | null;
-  shortStrike: number | null;
-  nearestSupport: number | null;
-  supportZoneLow: number | null;
-  supportZoneHigh: number | null;
-  low20: number | null;
-  low50: number | null;
-  swingLow: number | null;
-  ma20: number | null;
-  ma50: number | null;
-  strikeVsSupportPct: number | null;
-  priceVsMa20Pct: number | null;
-  priceVsMa50Pct: number | null;
-  reason: string;
-}
 
-interface TrendResult {
-  trend: 'uptrend' | 'downtrend' | 'sideways' | 'unknown';
-  strategy: 'BPS' | 'BCS' | 'IC' | 'NO_TRADE';
-  confidence: number;
-  reason: string;
-  supportAnalysis?: PriceSupportAnalysis;
-}
 
 interface AuditEntry {
   id: string;
@@ -1361,189 +1027,13 @@ function clearMemory() {
 }
 
 
-// ── Entry Snapshot Tracking ────────────────────────────────────────────────
-interface EntrySnapshot {
-  key: string;
-  createdAt: string;
-  symbol: string;
-  strategy: string;
-  expDate: string;
-  entryDate: string | null;
-  ivAtEntry: number | null;
-  ivrAtEntry: number | null;
-  popAtEntry: number | null;
-  deltaAtEntry: number | null;
-  thetaAtEntry: number | null;
-  gammaAtEntry: number | null;
-  vegaAtEntry: number | null;
-  stockPriceAtEntry: number | null;
-  otmAtEntry: number | null;
-  dteAtEntry: number | null;
-}
 
-async function fetchEntrySnapshots(): Promise<Record<string, EntrySnapshot>> {
-  try {
-    const res = await fetch('/api/position-entry-snapshots');
-    if (!res.ok) return {};
-    const data = await res.json();
-    return data?.snapshots ?? {};
-  } catch {
-    return {};
-  }
-}
 
-// Upserts entries server-side. The API route never overwrites an existing
-// key, so this is safe to call speculatively (e.g. every page load for
-// positions that turn out to already have a snapshot -- those are just
-// skipped server-side).
-async function postEntrySnapshots(
-  entries: { positionKey: string; snapshot: EntrySnapshot }[]
-): Promise<Record<string, EntrySnapshot> | null> {
-  if (entries.length === 0) return null;
-  try {
-    const res = await fetch('/api/position-entry-snapshots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entries }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.snapshots ?? null;
-  } catch {
-    return null;
-  }
-}
 
-// One-time migration: earlier versions of TradeEdge stored entry snapshots
-// in this browser's localStorage only, which meant the Trade Evolution
-// baseline never followed the trader to a different device. If old
-// localStorage data is still present, push it up to Redis (server-side
-// upsert skips anything that already exists there, so this can never
-// clobber a real baseline), then clear the local copy so this doesn't
-// re-run on every load.
-async function migrateLocalEntrySnapshotsIfNeeded(): Promise<void> {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    const raw = localStorage.getItem(LS_ENTRY_SNAPSHOTS);
-    if (!raw) return;
 
-    const localSnapshots: Record<string, EntrySnapshot> = JSON.parse(raw);
-    const entries = Object.entries(localSnapshots).map(([positionKey, snapshot]) => ({
-      positionKey,
-      snapshot,
-    }));
-    if (entries.length === 0) {
-      localStorage.removeItem(LS_ENTRY_SNAPSHOTS);
-      return;
-    }
 
-    const result = await postEntrySnapshots(entries);
-    if (result != null) {
-      localStorage.removeItem(LS_ENTRY_SNAPSHOTS);
-    }
-  } catch {}
-}
 
-function positionEntrySnapshotKey(pos: Pick<Position, 'accountNumber' | 'symbol' | 'expDate' | 'entryDate' | 'legs'>): string {
-  const legsKey = pos.legs
-    .map(l => `${l.direction[0]}${l.optionType}${l.strikePrice}x${Math.abs(l.quantity)}`)
-    .sort()
-    .join('|');
-  return [pos.accountNumber, pos.symbol, pos.expDate, pos.entryDate ?? 'unknown', legsKey].join('::');
-}
 
-async function attachEntrySnapshots(positions: Position[]): Promise<Position[]> {
-  await migrateLocalEntrySnapshotsIfNeeded();
-
-  const snapshots = await fetchEntrySnapshots();
-  const toCreate: { positionKey: string; snapshot: EntrySnapshot }[] = [];
-
-  const enriched = positions.map(pos => {
-    const key = positionEntrySnapshotKey(pos);
-    let snap = snapshots[key];
-
-    if (!snap) {
-      snap = {
-        key,
-        createdAt: new Date().toISOString(),
-        symbol: pos.symbol,
-        strategy: pos.strategy,
-        expDate: pos.expDate,
-        entryDate: pos.entryDate,
-        ivAtEntry: pos.iv ?? null,
-        ivrAtEntry: pos.ivr ?? null,
-        popAtEntry: getCurrentPop(pos),
-        deltaAtEntry: pos.netDelta ?? null,
-        thetaAtEntry: pos.theta ?? null,
-        gammaAtEntry: pos.gamma ?? null,
-        vegaAtEntry: pos.netVega ?? null,
-        stockPriceAtEntry: pos.stockPrice ?? null,
-        otmAtEntry: pos.buffer ?? null,
-        dteAtEntry: pos.entryDte ?? pos.dte ?? null,
-      };
-      snapshots[key] = snap;
-      toCreate.push({ positionKey: key, snapshot: snap });
-    }
-
-    return {
-      ...pos,
-      entrySnapshotKey: key,
-      entrySnapshotCreatedAt: snap.createdAt,
-      ivAtEntry: snap.ivAtEntry ?? null,
-      ivrAtEntry: snap.ivrAtEntry ?? null,
-      popAtEntry: snap.popAtEntry ?? null,
-      deltaAtEntry: snap.deltaAtEntry ?? null,
-      thetaAtEntry: snap.thetaAtEntry ?? null,
-      gammaAtEntry: snap.gammaAtEntry ?? null,
-      vegaAtEntry: snap.vegaAtEntry ?? null,
-      stockPriceAtEntry: snap.stockPriceAtEntry ?? null,
-      otmAtEntry: snap.otmAtEntry ?? null,
-      dteAtEntry: snap.dteAtEntry ?? pos.entryDte ?? null,
-    };
-  });
-
-  if (toCreate.length > 0) {
-    await postEntrySnapshots(toCreate);
-  }
-
-  return enriched;
-}
-
-// ── Auth & API ─────────────────────────────────────────────────────────────
-async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) {
-    sessionStorage.removeItem('tt_access_token');
-    localStorage.removeItem('tt_refresh_token');
-    window.location.href = '/login';
-    throw new Error('Session expired');
-  }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
-  sessionStorage.setItem('tt_access_token', token);
-  if (data.refresh_token && data.refresh_token !== refreshToken) localStorage.setItem('tt_refresh_token', data.refresh_token);
-  return token;
-}
-
-async function ttFetch(path: string, token: string) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-    cache: 'no-store',
-  });
-  if (res.status === 401) { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  if (!res.ok) { const text = await res.text(); throw new Error(`${path} failed (${res.status}): ${text.slice(0, 120)}`); }
-  return res.json();
-}
 
 async function ttPost(path: string, token: string, body: unknown) {
   console.log('TT ORDER BODY:', JSON.stringify(body, null, 2));
@@ -1992,167 +1482,15 @@ function buildOpenSpreadOrder(
   };
 }
 
-// ── Position Loading ───────────────────────────────────────────────────────
-function parseOptionSymbol(sym: string): { optionType: 'P' | 'C'; strikePrice: number } {
-  const match = sym.trim().replace(/\s+/g, '').match(/^([A-Z/]+)(\d{6})([CP])(\d{8})$/);
-  if (!match) return { optionType: 'C', strikePrice: 0 };
-  return { optionType: match[3] as 'P' | 'C', strikePrice: parseInt(match[4], 10) / 1000 };
-}
 
 
-function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number {
-  // Returns the actual net opening credit for the whole position in dollars.
-  // TT leg prices are per-share option prices; multiply by contracts * 100.
-  const net = legs.reduce((sum, leg) => {
-    const qty = Math.abs(Number(leg.quantity) || 0);
-    const price = Number(leg.avgOpenPrice) || 0;
-    return sum + (leg.direction === 'Short' ? price * qty : -price * qty);
-  }, 0);
-  return Math.max(0, Math.round(net * 100 * 100) / 100);
-}
 
-function sideGrossRisk(
-  shorts: PositionLeg[],
-  longs: PositionLeg[],
-  side: 'P' | 'C'
-): number {
-  // Gross risk before credit for verticals on one side, in dollars.
-  // For puts: short strike should be above long strike. For calls: short strike should be below long strike.
-  const availableLongs = longs
-    .filter(l => l.optionType === side && l.strikePrice > 0 && l.quantity > 0)
-    .map(l => ({ ...l, remainingQty: Math.abs(l.quantity) }))
-    .sort((a, b) => side === 'P' ? b.strikePrice - a.strikePrice : a.strikePrice - b.strikePrice);
 
-  let gross = 0;
-  const orderedShorts = shorts
-    .filter(s => s.optionType === side && s.strikePrice > 0 && s.quantity > 0)
-    .sort((a, b) => side === 'P' ? b.strikePrice - a.strikePrice : a.strikePrice - b.strikePrice);
 
-  for (const short of orderedShorts) {
-    let remainingShortQty = Math.abs(short.quantity);
-    for (const long of availableLongs) {
-      if (remainingShortQty <= 0) break;
-      if (long.remainingQty <= 0) continue;
-      const protects = side === 'P'
-        ? long.strikePrice < short.strikePrice
-        : long.strikePrice > short.strikePrice;
-      if (!protects) continue;
 
-      const matchedQty = Math.min(remainingShortQty, long.remainingQty);
-      gross += Math.abs(short.strikePrice - long.strikePrice) * 100 * matchedQty;
-      remainingShortQty -= matchedQty;
-      long.remainingQty -= matchedQty;
-    }
 
-    // If any short contracts are unprotected, treat them as naked risk for margin display.
-    // This keeps the number conservative instead of incorrectly showing $0 risk.
-    if (remainingShortQty > 0) gross += short.strikePrice * 100 * remainingShortQty;
-  }
 
-  return gross;
-}
 
-function calculateMaxRisk(legs: PositionLeg[], creditReceived: number, strategy: string): number {
-  const shorts = legs.filter(l => l.direction === 'Short');
-  const longs = legs.filter(l => l.direction === 'Long');
-
-  const putGross = sideGrossRisk(shorts, longs, 'P');
-  const callGross = sideGrossRisk(shorts, longs, 'C');
-
-  let grossRisk = 0;
-  if (strategy === 'IC') {
-    // An iron condor can only lose on one side at expiration, so use the larger side, not both.
-    grossRisk = Math.max(putGross, callGross);
-  } else if (strategy === 'BPS' || strategy === 'PUT') {
-    grossRisk = putGross;
-  } else if (strategy === 'BCS' || strategy === 'CALL') {
-    grossRisk = callGross;
-  } else {
-    grossRisk = putGross + callGross;
-  }
-
-  return Math.max(0, Math.round((grossRisk - Math.abs(creditReceived)) * 100) / 100);
-}
-
-function normalizeOccSymbol(symbol: string): string { return String(symbol ?? '').replace(/\s+/g, '').trim(); }
-function normalizeOrderAction(action: string): string { return String(action ?? '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); }
-function isBuyToCloseAction(action: string): boolean { const n = normalizeOrderAction(action); return n === 'buy to close' || n === 'btc'; }
-function isStopOrder(order: GtcOrder): boolean { return Boolean(order.stopPrice) || order.orderType.toLowerCase().includes('stop'); }
-
-function pickOrderField(o: any, keys: string[]): string | null {
-  for (const key of keys) { const v = o?.[key]; if (v !== undefined && v !== null && String(v).trim() !== '') return String(v); }
-  return null;
-}
-
-function mapGtcOrder(o: any, parentTif?: string, parentComplexId?: string): GtcOrder {
-  // Collect legs from direct legs array OR from nested orders' legs (automation/complex orders)
-  let legs = (o?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? '') }));
-  if (legs.length === 0) {
-    for (const nested of o?.orders ?? []) {
-      const nestedLegs = (nested?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? '') }));
-      legs = legs.concat(nestedLegs);
-    }
-  }
-  const tif = String(o?.['time-in-force'] ?? o?.timeInForce ?? parentTif ?? '');
-  // complex-order-id comes from TT on individual orders; parentComplexId comes from collectRawOrders
-  const complexOrderId = o?.['complex-order-id']
-    ? String(o['complex-order-id'])
-    : parentComplexId
-    ? String(parentComplexId)
-    : undefined;
-  console.log(`MAP_GTC_ORDER id=${o?.id} complex-order-id=${o?.['complex-order-id']} parentComplexId=${parentComplexId} resolved=${complexOrderId}`);
-  return {
-    id: String(o?.id ?? ''),
-    price: String(o?.price ?? o?.['limit-price'] ?? ''),
-    stopPrice: pickOrderField(o, ['stop-trigger', 'stop-price', 'stopPrice', 'stop', 'trigger-price']),
-    orderType: String(o?.['order-type'] ?? o?.orderType ?? ''),
-    timeInForce: tif,
-    legs,
-    complexOrderId,
-  };
-}
-
-function collectRawOrders(raw: any): any[] {
-  const out: any[] = [];
-  const visit = (order: any, parentTif?: string, parentComplexId?: string) => {
-    if (!order || typeof order !== 'object') return;
-    const tif = String(order?.['time-in-force'] ?? order?.timeInForce ?? parentTif ?? '');
-    // Collect this order if it has direct legs
-    if (Array.isArray(order.legs) && order.legs.length > 0) {
-      // Inject complex-order-id from parent if not already set on the order
-      const complexId = order['complex-order-id'] ?? parentComplexId;
-      out.push({ ...order, 'complex-order-id': complexId, _inheritedTif: tif, _parentComplexId: parentComplexId });
-    }
-    // For complex/automation orders: also collect as a combined order with all nested legs merged
-    if (Array.isArray(order.orders) && order.orders.length > 0) {
-      const allLegs: any[] = [];
-      for (const nested of order.orders) allLegs.push(...(nested?.legs ?? []));
-      if (allLegs.length > 0) {
-        out.push({ ...order, legs: allLegs, _inheritedTif: tif, _isCombined: true });
-      }
-      // Pass this order's ID as the parentComplexId to its nested orders
-      const thisComplexId = String(order.id ?? parentComplexId ?? '');
-      for (const nested of order.orders) visit(nested, tif, thisComplexId);
-    }
-  };
-  for (const item of raw?.data?.items ?? []) visit(item);
-  return out;
-}
-
-function findProfitGtcOrder(positionLegs: PositionLeg[], gtcOrders: GtcOrder[]): GtcOrder | null {
-  // Find a GTC limit order (not a stop) that has Buy to Close on the short leg.
-  // Also matches automation/complex orders where legs are combined from sub-orders.
-  const shortLeg = positionLegs.find(l => l.direction === 'Short');
-  if (!shortLeg?.symbol) return null;
-  const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
-  return gtcOrders.find(order =>
-    !isStopOrder(order) &&
-    (order.orderType.toLowerCase().includes('limit') || order.orderType === '') &&
-    order.legs.some(leg =>
-      normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action)
-    )
-  ) ?? null;
-}
 
 async function ttPatch(path: string, token: string, body: unknown) {
   const res = await fetch(`${BASE}${path}`, {
@@ -2166,882 +1504,13 @@ async function ttPatch(path: string, token: string, body: unknown) {
   return data;
 }
 
-async function fetchAllComplexOrders(accountNumber: string, token: string): Promise<any> {
-  // Paginate through all complex orders — TT defaults to 10/page
-  const allItems: any[] = [];
-  let page = 0;
-  while (true) {
-    const data = await ttFetch(`/accounts/${accountNumber}/complex-orders?page-offset=${page}&per-page=50`, token);
-    const items = data?.data?.items ?? [];
-    allItems.push(...items);
-    const pagination = data?.pagination;
-    if (!pagination || page >= (pagination['total-pages'] ?? 1) - 1) break;
-    page++;
-  }
-  return { data: { items: allItems } };
-}
 
-async function fetchGtcOrders(accountNumber: string, token: string): Promise<GtcOrder[]> {
-  try {
-    // Use /orders/live only — it returns working + recent 24h orders.
-    // ?status=Open and ?per-page=250 are invalid params that return 400.
-    const [liveResult, complexResult] = await Promise.allSettled([
-      ttFetch(`/accounts/${accountNumber}/orders/live`, token),
-      fetchAllComplexOrders(accountNumber, token),
-    ]);
 
-    // Build a map from individual order ID → complex order ID
-    // Orders from /orders/live don't have complex-order-id, but we can look them up
-    // by matching their ID against nested orders in the complex orders response
-    const individualToComplexId: Record<string, string> = {};
-    if (complexResult.status === 'fulfilled') {
-      for (const complexOrder of complexResult.value?.data?.items ?? []) {
-        const complexId = String(complexOrder.id);
-        for (const nestedOrder of complexOrder.orders ?? []) {
-          if (nestedOrder.id) {
-            individualToComplexId[String(nestedOrder.id)] = complexId;
-          }
-        }
-      }
-    }
 
-    const requests = [liveResult, complexResult];
-    const rawOrders = requests.flatMap(r => r.status === 'fulfilled' ? collectRawOrders(r.value) : []);
-    // Inject complexOrderId for orders that came from /orders/live
-    rawOrders.forEach(o => {
-      if (!o['complex-order-id'] && individualToComplexId[String(o.id)]) {
-        o['complex-order-id'] = individualToComplexId[String(o.id)];
-      }
-    });
-    const seen = new Set<string>();
-    return rawOrders.map(o => mapGtcOrder(o, o._inheritedTif, o._parentComplexId)).filter(order => {
-      const tif = order.timeInForce.toUpperCase();
-      const type = order.orderType.toLowerCase();
-      // Parent OCO envelope has no tif/type — check nested sub-orders
-      // Accept if any nested order has GTC tif, or if tif is empty (parent envelope)
-      const isGtcTif = tif === 'GTC' || tif === '' || tif === 'PENDING';
-      const isLimitOrStop = type.includes('limit') || type.includes('stop') || type === '';
-      if ((!isGtcTif || !isLimitOrStop) && order.legs.length === 0) return false;
-      if (order.legs.length === 0) return false;
-      const key = `${order.id}|${order.orderType}|${order.price}|${order.stopPrice ?? ''}|${order.legs.map(l => `${l.symbol}:${l.action}`).join(',')}`;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-  } catch { return []; }
-}
 
-function classifyPositionStopLoss(position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>, gtcOrders: GtcOrder[]): StopLossInfo {
-  const shortLeg = position.legs.find(l => l.direction === 'Short');
-  if (!shortLeg?.symbol) return { status: 'unknown', price: null };
-  // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
-  const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
-  const stopThreshold = parseFloat((creditPerContract * 2).toFixed(2));
-  const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
-  const match = gtcOrders.find(order =>
-    isStopOrder(order) && order.legs.some(leg => normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action))
-  );
-  if (!match) return { status: 'none', price: null };
-  const orderPrice = parseFloat(match.stopPrice ?? match.price);
-  if (isNaN(orderPrice)) return { status: 'unknown', price: null };
-  return orderPrice <= stopThreshold + 0.02 ? { status: 'live', price: orderPrice } : { status: 'loose', price: orderPrice };
-}
 
-async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: PendingOrder[] }> {
-  const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const accounts = accountsData?.data?.items ?? [];
-  if (accounts.length === 0) throw new Error('No accounts found');
-  const accountNumber = accounts[0]?.account?.['account-number'];
-  if (!accountNumber) throw new Error('Could not read account number');
 
-  const positionsData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
-  const rawPositions = positionsData?.data?.items ?? [];
-  const optionPositions = rawPositions.filter((p: any) =>
-    p['instrument-type'] === 'Equity Option' || p['instrument-type'] === 'Index Option'
-  );
 
-  const rawBuckets: Record<string, any[]> = {};
-  for (const pos of optionPositions) {
-    const key = `${pos['underlying-symbol']}::${pos['expires-at']?.slice(0, 10) ?? 'unknown'}`;
-    if (!rawBuckets[key]) rawBuckets[key] = [];
-    rawBuckets[key].push(pos);
-  }
-
-  // ES-0001 (corrective round): quantity-only grouping was rejected by the
-  // Product Owner -- it cannot tell apart two independently-opened spreads
-  // that share symbol, expiration, AND quantity. Each symbol+expiration
-  // bucket is now run through deterministic economic-structure analysis
-  // (lib/portfolio/closeOrderSafety.ts's analyzePositionStructure), which
-  // asks whether the raw legs partition into exactly one defensible
-  // structure using option type, strike, direction, and quantity together.
-  // RESOLVED buckets may yield MULTIPLE structures (e.g. two independent
-  // same-symbol spreads at different quantities, or a naked leg alongside a
-  // vertical) -- each becomes its own group/Position. AMBIGUOUS/UNSUPPORTED
-  // buckets still render as ONE group so the position remains visible, but
-  // are flagged so every downstream action is hard-blocked -- see
-  // docs/design/ES-0001-Live-Close-Order-Safety.md.
-  interface RawGroup {
-    rawLegs: any[];
-    ambiguous: boolean;
-    blockMessage: string | null;
-    structure: EconomicStructure | null;
-  }
-  const groups: Record<string, RawGroup> = {};
-  for (const [bucketKey, rawLegs] of Object.entries(rawBuckets)) {
-    const sepIdx = bucketKey.indexOf('::');
-    const underlying = bucketKey.slice(0, sepIdx);
-    const expiration = bucketKey.slice(sepIdx + 2);
-    const economicLegs: RawEconomicLeg[] = rawLegs.map((l: any) => {
-      const parsed = parseOptionSymbol(l.symbol);
-      return {
-        symbol: l.symbol,
-        optionType: parsed.optionType,
-        strikePrice: parsed.strikePrice,
-        direction: l['quantity-direction'] as 'Short' | 'Long',
-        quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
-        createdAt: l['created-at'] ?? null,
-      };
-    });
-    const analysis = analyzePositionStructure(economicLegs);
-    if (analysis.status !== 'RESOLVED') {
-      const issue = structureAnalysisToBlockingIssue(analysis);
-      groups[bucketKey] = { rawLegs, ambiguous: true, blockMessage: issue?.message ?? 'Position structure is ambiguous.', structure: null };
-      continue;
-    }
-    for (const structure of analysis.structures) {
-      const symbolsInGroup = new Set(structure.legs.map(l => l.symbol));
-      const groupKey = analysis.structures.length > 1
-        ? `${underlying}::${expiration}::${structure.quantity}::${structure.legs.map(l => l.symbol).sort().join(',')}`
-        : bucketKey;
-      groups[groupKey] = {
-        rawLegs: rawLegs.filter((l: any) => symbolsInGroup.has(l.symbol)),
-        ambiguous: false,
-        blockMessage: null,
-        structure,
-      };
-    }
-  }
-
-  const allOptionSymbols = optionPositions.map((p: any) => p.symbol).filter(Boolean);
-  const currentPrices: Record<string, number> = {};
-  const currentBids: Record<string, number> = {};
-  const currentAsks: Record<string, number> = {};
-  const unpriceableSymbols = new Set<string>();
-  // Legs with no real two-sided market (missing bid or ask). currentBids/Asks
-  // fall back to mark for these so the mid-based P&L (currentValue) still
-  // works, but that fallback must NOT feed closeValue — "Close now
-  // (marketable)" is only meaningful when it's actually built from a real
-  // ask (short leg) / bid (long leg), not a mark masquerading as both.
-  const oneSidedSymbols = new Set<string>();
-  const thetaMap: Record<string, number> = {};
-  const gammaMap: Record<string, number> = {};
-  const deltaMap: Record<string, number> = {};
-  const vegaMap:  Record<string, number> = {};
-  if (allOptionSymbols.length > 0) {
-    try {
-      for (let i = 0; i < allOptionSymbols.length; i += 50) {
-        const chunk = allOptionSymbols.slice(i, i + 50);
-        const qs = chunk.map((s: string) => `equity-option=${encodeURIComponent(s)}`).join('&');
-        const priceData = await ttFetch(`/market-data/by-type?${qs}`, token);
-        for (const item of priceData?.data?.items ?? []) {
-          const sym = item.symbol?.replace(/\s+/g, '');
-          if (!sym) continue;
-          const bid = parseFloat(item.bid ?? '0');
-          const ask = parseFloat(item.ask ?? '0');
-          const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
-          const mid = (bid + ask) / 2;
-          const twoSided = bid > 0 && ask > 0;
-          currentPrices[sym] = twoSided ? mid : mark > 0 ? mark : 0;
-          currentBids[sym] = twoSided ? bid : mark > 0 ? mark : 0;
-          currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : 0;
-          if (!twoSided && mark <= 0) unpriceableSymbols.add(sym);
-          if (!twoSided) oneSidedSymbols.add(sym);
-          const theta = parseFloat(item.theta ?? 'NaN');
-          const gamma = parseFloat(item.gamma ?? 'NaN');
-          const delta = parseFloat(item.delta ?? 'NaN');
-          const vega  = parseFloat(item.vega  ?? 'NaN');
-          if (!isNaN(theta)) thetaMap[sym] = theta;
-          if (!isNaN(gamma)) gammaMap[sym] = gamma;
-          if (!isNaN(delta)) deltaMap[sym] = delta;
-          if (!isNaN(vega))  vegaMap[sym]  = vega;
-        }
-      }
-    } catch {}
-  }
-
-  const ivrMap: Record<string, number | null> = {};
-  const ivMap:  Record<string, number | null> = {};
-  const hv30Map: Record<string, number | null> = {};
-  const betaMap: Record<string, number | null> = {};
-  const earningsMap: Record<string, string | null> = {};
-  try {
-    const underlyingSymbols: string[] = (optionPositions as any[]).map((p: any) => String(p['underlying-symbol'])).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
-    const metricsData = await ttFetch(`/market-metrics?symbols=${encodeURIComponent(underlyingSymbols.join(','))}`, token);
-    for (const item of metricsData?.data?.items ?? []) {
-      const sym = item['symbol'];
-      // IVR
-      const rawIvr = item['implied-volatility-index-rank'] ?? item['iv-rank'] ?? null;
-      const parsedIvr = rawIvr != null ? parseFloat(String(rawIvr)) : NaN;
-      if (!isNaN(parsedIvr)) ivrMap[sym] = parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr);
-      // IV (current implied volatility as %)
-      const rawIv = item['implied-volatility'] ?? item['iv'] ?? item['implied-volatility-30-day'] ?? item['iv-30-day'] ?? null;
-      const parsedIv = rawIv != null ? parseFloat(String(rawIv)) : NaN;
-      if (!isNaN(parsedIv)) ivMap[sym] = parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv);
-      // HV30
-      const rawHv = item['hv-30'] ?? item['historical-volatility-30'] ?? item['hv30'] ?? item['historical-volatility'] ?? null;
-      const parsedHv = rawHv != null ? parseFloat(String(rawHv)) : NaN;
-      if (!isNaN(parsedHv)) hv30Map[sym] = parsedHv < 1 ? Math.round(parsedHv * 100) : Math.round(parsedHv);
-      // Debug: log raw metrics for indexes so we can see what fields come back
-      if (['SPX','NDX','RUT','VIX'].includes(sym)) {
-        console.log(`METRICS ${sym}:`, JSON.stringify(item).slice(0, 500));
-      }
-      // Beta
-      const rawBeta = item['beta'] ?? item['beta-60-day'] ?? null;
-      const parsedBeta = rawBeta != null ? parseFloat(String(rawBeta)) : NaN;
-      if (!isNaN(parsedBeta)) betaMap[sym] = parsedBeta;
-      // Earnings — next earnings date within 60 days
-      const earningsRaw = item['earnings'] ?? item['next-earnings-date'] ?? null;
-      if (earningsRaw) {
-        const eDate = String(earningsRaw?.['expected-report-date'] ?? earningsRaw ?? '');
-        if (eDate && eDate.match(/\d{4}-\d{2}-\d{2}/)) earningsMap[sym] = eDate;
-      }
-    }
-  } catch {}
-
-  const stockPrices: Record<string, number | null> = {};
-  try {
-    const underlyingSymbols: string[] = (optionPositions as any[]).map((p: any) => String(p['underlying-symbol'])).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
-    const indexSymbols = underlyingSymbols.filter(s => ['SPX','NDX','RUT','VIX','DJX'].includes(s.toUpperCase()));
-    const equitySymbols = underlyingSymbols.filter(s => !['SPX','NDX','RUT','VIX','DJX'].includes(s.toUpperCase()));
-    const qsParts: string[] = [
-      ...equitySymbols.map(s => `equity=${encodeURIComponent(s)}`),
-      ...indexSymbols.map(s => `index=${encodeURIComponent(s)}`),
-    ];
-    if (qsParts.length > 0) {
-      const stockData = await ttFetch(`/market-data/by-type?${qsParts.join('&')}`, token);
-      for (const item of stockData?.data?.items ?? []) {
-        const bid = parseFloat(item.bid ?? '0'); const ask = parseFloat(item.ask ?? '0');
-        const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
-        const mid = (bid + ask) / 2;
-        stockPrices[item.symbol] = mid > 0 ? mid : mark > 0 ? mark : 0;
-      }
-    }
-  } catch {}
-
-  const gtcOrders = await fetchGtcOrders(accountNumber, token);
-  const gtcSymbols = new Set<string>();
-  for (const order of gtcOrders) for (const leg of order.legs) {
-    const parsed = parseOptionSymbol(leg.symbol);
-    if (parsed.strikePrice > 0) gtcSymbols.add(leg.symbol.split(/\d{6}/)[0].trim());
-  }
-
-  try {
-    const liveData = await Promise.allSettled([
-      ttFetch(`/accounts/${accountNumber}/orders/live`, token),
-    ]);
-    const allOrders = (liveData[0].status === 'fulfilled' ? liveData[0].value?.data?.items : null) ?? [];
-    for (const order of allOrders) {
-      const status = (order['status'] ?? '').toLowerCase();
-      if (['working', 'live', 'contingent', 'received', 'pending', 'queued'].includes(status)) {
-        for (const leg of order.legs ?? []) {
-          const sym = leg['underlying-symbol'] ?? leg.symbol ?? '';
-          if (sym) gtcSymbols.add(sym.split(' ')[0].trim());
-        }
-      }
-    }
-  } catch {}
-
-  const pendingOrders: PendingOrder[] = [];
-  try {
-    const complexData = await fetchAllComplexOrders(accountNumber, token);
-    for (const order of complexData?.data?.items ?? []) {
-      // Parent OCO envelope has no status/tif/type — check nested sub-orders instead
-      const nestedOrders: any[] = order.orders ?? [];
-      const hasActiveNested = nestedOrders.some(no => {
-        const s = (no['status'] ?? '').toLowerCase();
-        return ['working', 'live', 'contingent', 'received', 'routed', 'pending', 'queued'].includes(s);
-      });
-      // Also accept if parent has no terminal-at (still open) and has nested orders
-      const parentActive = !order['terminal-at'] && nestedOrders.length > 0;
-      console.log(`COMPLEX ORDER: id=${order.id} hasActiveNested=${hasActiveNested} parentActive=${parentActive} nestedStatuses=${nestedOrders.map((o:any) => o['status']).join(',')}`);
-      if (hasActiveNested || parentActive) {
-        for (const nestedOrder of nestedOrders) for (const leg of nestedOrder.legs ?? []) {
-          // Prefer underlying-symbol; fall back to parsing the OCC option symbol
-          const underlying = leg['underlying-symbol'];
-          if (underlying) {
-            const sym = underlying.split(' ')[0].trim();
-            gtcSymbols.add(sym);
-            // Also add SPX↔SPXW variants
-            if (sym === 'SPXW') gtcSymbols.add('SPX');
-            if (sym === 'SPX') gtcSymbols.add('SPXW');
-            console.log(`COMPLEX LEG underlying=${underlying} added=${sym}`);
-          } else if (leg.symbol) {
-            // OCC format: SPX   260726P07290000 — split on first digit sequence
-            const fromOcc = leg.symbol.split(/\d{6}/)[0].trim();
-            if (fromOcc) {
-              gtcSymbols.add(fromOcc);
-              if (fromOcc === 'SPXW') gtcSymbols.add('SPX');
-              if (fromOcc === 'SPX') gtcSymbols.add('SPXW');
-              console.log(`COMPLEX LEG occ=${leg.symbol} added=${fromOcc}`);
-            }
-          }
-        }
-
-        // Pending entry order detection: the trigger leg of an OTOCO opening
-        // order uses Sell to Open / Buy to Open. GTC profit-target and stop
-        // legs on an already-open position use Buy to Close / Sell to Close
-        // -- those are tracked via Position.hasGtc/gtcOrderId elsewhere, not
-        // here. Only treat this complex order as "pending" if it's still
-        // active overall AND its trigger order's legs are opening actions.
-        if (hasActiveNested || parentActive) {
-          const triggerOrder = order['trigger-order'] ?? nestedOrders[0];
-          const triggerLegs: any[] = triggerOrder?.legs ?? [];
-          const triggerIsOpening = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
-            const action = String(l.action ?? '');
-            return action === 'Sell to Open' || action === 'Buy to Open';
-          });
-          // Roll OTOCO: the trigger is a CLOSE (Buy/Sell to Close) and the
-          // contingent orders[] carry the opening legs. When the trigger is a
-          // close, read the opening legs from the first contingent order whose
-          // legs are all opening actions, and surface THAT as the pending entry.
-          const triggerIsClosing = triggerLegs.length > 0 && triggerLegs.every((l: any) => {
-            const action = String(l.action ?? '');
-            return action === 'Buy to Close' || action === 'Sell to Close';
-          });
-          const contingentOpen = triggerIsClosing
-            ? (nestedOrders ?? []).find((o: any) => {
-                const ls: any[] = o?.legs ?? [];
-                return ls.length > 0 && ls.every((l: any) => {
-                  const a = String(l.action ?? '');
-                  return a === 'Sell to Open' || a === 'Buy to Open';
-                });
-              })
-            : null;
-          // openingSource is whichever order actually holds the opening legs we
-          // want to display as the pending entry (trigger for entry OTOCOs,
-          // contingent for roll OTOCOs).
-          const openingSource = triggerIsOpening ? triggerOrder : contingentOpen;
-          const isOpeningOrder = Boolean(openingSource);
-          // A filled trigger means the entry already executed -- the position is
-          // now live and tracked in the positions list, so it must NOT appear as a
-          // pending entry. In an OTOCO the trigger can be Filled while the OCO
-          // bracket legs are still Live, which keeps hasActiveNested true; without
-          // this check the filled opening order leaks into Pending Orders.
-          const openingStatus = String(openingSource?.status ?? '').toLowerCase();
-          const openingIsTerminal = ['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(openingStatus);
-          const openingLegs: any[] = openingSource?.legs ?? [];
-          if (isOpeningOrder && !openingIsTerminal) {
-            const parsedLegs: PendingOrderLeg[] = openingLegs.map((l: any) => {
-              const occSymbol = String(l.symbol ?? '');
-              const parsed = parseOptionSymbol(occSymbol);
-              return {
-                symbol: occSymbol,
-                action: String(l.action ?? ''),
-                optionType: parsed.strikePrice > 0 ? parsed.optionType : null,
-                strikePrice: parsed.strikePrice,
-                quantity: Number(l.quantity ?? 1),
-              };
-            });
-            const putLegs = parsedLegs.filter(l => l.optionType === 'P');
-            const callLegs = parsedLegs.filter(l => l.optionType === 'C');
-            let strategy = 'UNKNOWN';
-            if (putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
-            else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
-            else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
-            const underlyingSymbol =
-              openingSource?.['underlying-symbol'] ??
-              (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
-            const expMatch = parsedLegs[0]?.symbol?.match(/(\d{6})[CP]\d{8}/);
-            const expDate = expMatch
-              ? `20${expMatch[1].slice(0, 2)}-${expMatch[1].slice(2, 4)}-${expMatch[1].slice(4, 6)}`
-              : null;
-            pendingOrders.push({
-              id: String(order.id ?? ''),
-              accountNumber,
-              symbol: underlyingSymbol ?? 'UNKNOWN',
-              strategy,
-              legs: parsedLegs,
-              expDate,
-              limitPrice: openingSource?.price != null ? parseFloat(openingSource.price) : null,
-              priceEffect: openingSource?.['price-effect'] ?? null,
-              status: openingSource?.status ?? order['status'] ?? 'unknown',
-              createdAt: openingSource?.['received-at'] ?? openingSource?.['updated-at'] ?? null,
-              orderType: openingSource?.['order-type'] ?? null,
-              timeInForce: openingSource?.['time-in-force'] ?? null,
-            });
-          }
-        }
-      }
-    }
-  } catch {}
-
-  const plBySymbol: Record<string, number> = {};
-  try {
-    const plData = await ttFetch(`/accounts/${accountNumber}/positions?include-marks=true`, token);
-    for (const item of plData?.data?.items ?? []) {
-      const sym = item['underlying-symbol']; if (!sym) continue;
-      const expDate = item['expires-at']?.slice(0, 10) ?? 'unknown';
-      const key = `${sym}::${expDate}`;
-      const qty = parseFloat(item['quantity'] ?? '1');
-      const multiplier = parseFloat(item['multiplier'] ?? '100');
-      const avgOpen = parseFloat(item['average-open-price'] ?? '0');
-      const markRaw = parseFloat(item['mark-price'] ?? '0');
-      const closeRaw = parseFloat(item['close-price'] ?? '0');
-      const mark = markRaw !== 0 ? markRaw : closeRaw;
-      const dir = item['quantity-direction'] === 'Short' ? -1 : 1;
-      plBySymbol[key] = (plBySymbol[key] ?? 0) + dir * (mark - avgOpen) * qty * multiplier;
-    }
-  } catch {}
-
-  let profitTargets: Record<string, number> = {};
-  try { profitTargets = JSON.parse(localStorage.getItem(LS_PROFIT_TARGETS) ?? '{}'); } catch {}
-
-  // ── POP (probability of profit) ──────────────────────────────────────
-  // Breakeven-based estimate under lognormal price assumption, same approach
-  // as app/screener/page.tsx's calcSpreadPop. Extended here to cover every
-  // strategy type that can appear in an open portfolio (CSP included, plus
-  // the two-sided IC case), since screener only ever quotes new BPS/BCS.
-  const positionNormalCdf = (x: number): number => {
-    const sign = x < 0 ? -1 : 1;
-    const absX = Math.abs(x) / Math.sqrt(2);
-    const t = 1 / (1 + 0.3275911 * absX);
-    const a1 = 0.254829592;
-    const a2 = -0.284496736;
-    const a3 = 1.421413741;
-    const a4 = -1.453152027;
-    const a5 = 1.061405429;
-    const erfApprox =
-      sign *
-      (1 -
-        (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) *
-          t *
-          Math.exp(-absX * absX)));
-    return 0.5 * (1 + erfApprox);
-  };
-
-  // POP that price stays above a lower breakeven (short put / put-side breach level).
-  const positionPopAbove = (price: number, breakeven: number, dte: number, ivPct: number): number => {
-    const sigma = ivPct / 100;
-    const t = dte / 365;
-    const d2 = (Math.log(price / breakeven) - 0.5 * sigma * sigma * t) / (sigma * Math.sqrt(t));
-    return positionNormalCdf(d2) * 100;
-  };
-
-  // POP that price stays below an upper breakeven (short call / call-side breach level).
-  const positionPopBelow = (price: number, breakeven: number, dte: number, ivPct: number): number => {
-    const sigma = ivPct / 100;
-    const t = dte / 365;
-    const d2 = (Math.log(price / breakeven) - 0.5 * sigma * sigma * t) / (sigma * Math.sqrt(t));
-    return (1 - positionNormalCdf(d2)) * 100;
-  };
-
-  const calcPositionPop = (
-    strategy: string,
-    legs: PositionLeg[],
-    price: number | null,
-    creditReceived: number,
-    dte: number,
-    ivPct: number | null
-  ): number | null => {
-    if (price == null || price <= 0 || ivPct == null || ivPct <= 0 || dte <= 0) return null;
-
-    const creditPerShare = Math.abs(creditReceived) / 100;
-    const shortPut = legs.find(l => l.optionType === 'P' && l.direction === 'Short');
-    const shortCall = legs.find(l => l.optionType === 'C' && l.direction === 'Short');
-
-    if (strategy === 'PUT' || strategy === 'BPS') {
-      if (!shortPut) return null;
-      const breakeven = shortPut.strikePrice - creditPerShare;
-      if (breakeven <= 0) return null;
-      return positionPopAbove(price, breakeven, dte, ivPct);
-    }
-
-    if (strategy === 'CALL' || strategy === 'BCS') {
-      if (!shortCall) return null;
-      const breakeven = shortCall.strikePrice + creditPerShare;
-      return positionPopBelow(price, breakeven, dte, ivPct);
-    }
-
-    if (strategy === 'IC') {
-      if (!shortPut || !shortCall) return null;
-      // IC profits only while price stays between both breakevens. Total
-      // credit is split across both sides for a conservative breakeven
-      // estimate (matches how max profit is realized at expiration).
-      const putBreakeven = shortPut.strikePrice - creditPerShare / 2;
-      const callBreakeven = shortCall.strikePrice + creditPerShare / 2;
-      if (putBreakeven <= 0) return null;
-      const popAbovePut = positionPopAbove(price, putBreakeven, dte, ivPct);
-      const popBelowCall = positionPopBelow(price, callBreakeven, dte, ivPct);
-      // Probability of staying inside the range: sum of both one-sided
-      // breach probabilities subtracted from 100, floored at 0.
-      return Math.max(0, popAbovePut + popBelowCall - 100);
-    }
-
-    return null;
-  };
-
-  let intentOverrides: Record<string, PositionIntent> = {};
-  try {
-    const intentRes = await fetch('/api/position-intent');
-    if (intentRes.ok) intentOverrides = (await intentRes.json())?.intents ?? {};
-  } catch {}
-
-  const today = new Date();
-  let positions: Position[] = Object.entries(groups).map(([key, group]) => {
-    const { rawLegs: legs, ambiguous, blockMessage, structure } = group;
-    const [symbol, expDate] = key.split('::');
-    const dte = Math.round((new Date(expDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    const openedAt = legs[0]?.['created-at']?.slice(0, 10) ?? null;
-    const entryDte = openedAt ? Math.round((new Date(expDate).getTime() - new Date(openedAt).getTime()) / (1000 * 60 * 60 * 24)) : dte;
-
-    // ES-0001 (corrective round): strategy label now comes from the
-    // resolved, unambiguous structure (strategyLabelForStructure), not a
-    // leg-count guess. For an ambiguous/unsupported group there is no single
-    // structure to label -- fall back to the old leg-count heuristic PURELY
-    // for the card's display text; this label is never used for any safety
-    // decision (structureAmbiguous gates every action regardless of label).
-    let strategy = 'UNKNOWN';
-    if (structure) {
-      strategy = strategyLabelForStructure(structure);
-    } else {
-      const putLegs = legs.filter((l: any) => parseOptionSymbol(l.symbol).optionType === 'P');
-      const callLegs = legs.filter((l: any) => parseOptionSymbol(l.symbol).optionType === 'C');
-      if (putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
-      else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
-      else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
-      else if (putLegs.length === 1) strategy = 'PUT';
-      else if (callLegs.length === 1) strategy = 'CALL';
-    }
-
-    const positionLegs: PositionLeg[] = legs.map((l: any) => {
-      const parsed = parseOptionSymbol(l.symbol);
-      return {
-        symbol: l.symbol, optionType: parsed.optionType, strikePrice: parsed.strikePrice,
-        direction: l['quantity-direction'] as 'Short' | 'Long',
-        quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
-        currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
-      };
-    });
-
-    const creditReceived = calculateSpreadCredit(positionLegs);
-
-    // ES-0001 (corrective round): the canonical close-order identity is
-    // built directly from the resolved structure's own legs/economics, NOT
-    // from this aggregate `creditReceived` -- `buildCanonicalCloseIdentity`
-    // computes signed entry economics itself (fixing the pre-existing
-    // Math.max(0,...) debit-flooring defect) and BLOCKS rather than
-    // fabricates when they are invalid. `identity` is the ONLY source any
-    // close/roll/stop-loss/take-profit/cut-losses/snap-to-breakeven action
-    // may read economics or quantity from.
-    let identity: CanonicalCloseIdentity | null = null;
-    let structureAmbiguous = ambiguous;
-    let structureBlockMessage: string | null = blockMessage;
-    if (!ambiguous && structure) {
-      const idResult = buildCanonicalCloseIdentity(structure, key, symbol, expDate);
-      if (idResult.ok) {
-        identity = idResult.identity;
-      } else {
-        structureAmbiguous = true;
-        structureBlockMessage = `${idResult.ruleId}: ${idResult.message}`;
-      }
-    }
-
-    // `Position.quantity` is retained ONLY for backward-compatible display
-    // (card leg-count text, etc.) -- mirrors identity.quantity when known,
-    // never independently authoritative. See the Position interface's doc
-    // comment.
-    const canonicalQuantity = identity?.quantity ?? (Math.abs(positionLegs[0]?.quantity ?? 1) || 1);
-
-    // General mark value (mid) — used for ongoing P/L tracking, badges, and
-    // rule logic throughout the app. NOT what you'd actually realize by closing.
-    let currentValue = 0; let hasCurrentPrices = true;
-    for (const leg of legs) {
-      const qty = parseInt(leg['quantity'] ?? '1', 10);
-      const price = currentPrices[leg.symbol?.replace(/\s+/g, '')];
-      if (price == null) { hasCurrentPrices = false; break; }
-      currentValue += leg['quantity-direction'] === 'Short' ? price * qty : -(price * qty);
-    }
-    currentValue = currentValue * 100;
-
-    // Marketable "if I closed now" value — same convention as fetchCloseQuote:
-    // Buy to Close (short leg) fills at ask; Sell to Close (long leg) fills at bid.
-    // This is the number that should match the close/cut-losses modal exactly.
-    // Requires a REAL two-sided market on every leg — currentAsks/currentBids
-    // fall back to mark when a leg is one-sided (see population above), and
-    // using that fallback here would silently turn "marketable" into "mid,"
-    // which can make it equal to or even better than Buyback (mid). Better to
-    // show '—' than a close-now number that isn't actually a worse-case fill.
-    let closeValue = 0; let hasCloseValue = true;
-    for (const leg of legs) {
-      const qty = parseInt(leg['quantity'] ?? '1', 10);
-      const sym = leg.symbol?.replace(/\s+/g, '');
-      if (oneSidedSymbols.has(sym)) { hasCloseValue = false; break; }
-      const isShort = leg['quantity-direction'] === 'Short';
-      const price = isShort ? currentAsks[sym] : currentBids[sym];
-      if (price == null || price <= 0) { hasCloseValue = false; break; }
-      closeValue += isShort ? price * qty : -(price * qty);
-    }
-    closeValue = closeValue * 100;
-
-    const anyLegUnpriceable = legs.some(
-      (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
-    );
-    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable;
-    const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
-    const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
-    const pnl = hasCurrentPrices ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
-    const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
-    const profitTarget = profitTargets[key] ?? 0.5;
-    const targetPrice = Math.abs(creditReceived) * profitTarget;
-    const hitTarget = hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
-
-    const stopLoss = classifyPositionStopLoss({ legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity }, gtcOrders);
-
-    // Only treat earnings as relevant if it occurs on or before this position's expiration.
-    // Tastytrade market-metrics can return the next earnings date within ~60 days;
-    // that is NOT the same as "earnings within expiry."
-    const rawEarningsDate = earningsMap[symbol] ?? null;
-    // Use string comparison (YYYY-MM-DD) — avoids UTC midnight timezone shifts
-    // that cause new Date() comparisons to misclassify same-day or next-day earnings
-    const earningsWithinExpiry =
-      rawEarningsDate &&
-      rawEarningsDate >= new Date().toISOString().slice(0, 10) &&
-      rawEarningsDate <= expDate
-        ? rawEarningsDate
-        : null;
-
-    return {
-      key, symbol, expDate, dte, strategy, legs: positionLegs,
-      quantity: canonicalQuantity,
-      identity,
-      structureAmbiguous,
-      structureBlockMessage,
-      creditReceived: Math.abs(creditReceived),
-      currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
-      closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
-      pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
-      plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
-      maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
-      entryDte, entryDate: openedAt,
-      // needsClose (the hard 21-DTE close-or-roll rule) applies ONLY to
-      // defined-risk spreads. A CSP is never "close now" — assignment is a valid
-      // outcome (especially under acquire intent), so CSPs get their own banner.
-      needsClose: (() => {
-        const puts = positionLegs.filter(l => l.optionType === 'P');
-        const calls = positionLegs.filter(l => l.optionType === 'C');
-        const shortPuts = puts.filter(l => l.direction === 'Short');
-        const isCsp = shortPuts.length > 0 && puts.filter(l => l.direction === 'Long').length === 0 && calls.length === 0;
-        return !isCsp && entryDte > 21 && dte <= 21;
-      })(),
-      accountNumber,
-      ivr: ivrMap[symbol] ?? null,
-      iv: ivMap[symbol] ?? null,
-      hv30: hv30Map[symbol] ?? null,
-      beta: betaMap[symbol] ?? null,
-      pop: calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, dte, ivMap[symbol] ?? null),
-      earningsDate: earningsWithinExpiry,
-      hasGtc: (() => {
-        // Check both the position symbol and its weekly option variant
-        // SPX positions may have SPXW option legs; SPXW positions may have SPXW legs
-        if (gtcSymbols.has(symbol)) { console.log(`HASGТС ${symbol}: direct match`); return true; }
-        // Map underlying to possible OCC prefix variants
-        const variants: Record<string, string> = { 'SPX': 'SPXW', 'NDX': 'NDXP', 'RUT': 'RUTW', 'VIX': 'VIXW' };
-        const reverseVariants: Record<string, string> = { 'SPXW': 'SPX', 'NDXP': 'NDX', 'RUTW': 'RUT', 'VIXW': 'VIX' };
-        const variant = variants[symbol] ?? reverseVariants[symbol];
-        const result = variant ? gtcSymbols.has(variant) : false;
-        console.log(`HASGTC ${symbol}: variant=${variant} result=${result} gtcSymbols=[${Array.from(gtcSymbols).join(',')}]`);
-        return result;
-      })(),
-      gtcOrderId: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match?.id ?? null;
-      })(),
-      gtcComplexOrderId: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match?.complexOrderId ?? null;
-      })(),
-      gtcOrderPrice: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match ? parseFloat(match.price) || null : null;
-      })(),
-      stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
-      stockPrice: stockPrices[symbol] ?? null,
-      buffer: (() => {
-        const stock = stockPrices[symbol];
-        if (stock == null) return null;
-        const shorts = legs.filter((l: any) => l['quantity-direction'] === 'Short');
-        if (!shorts[0]) return null;
-        const shortStrike = parseOptionSymbol(shorts[0].symbol).strikePrice;
-        const optType = parseOptionSymbol(shorts[0].symbol).optionType;
-        return optType === 'P' ? ((stock - shortStrike) / stock) * 100 : ((shortStrike - stock) / stock) * 100;
-      })(),
-      theta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = thetaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? Math.abs(val) * qty : -Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      gamma: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = gammaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netDelta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = deltaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -val * qty : val * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netVega: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = vegaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-    };
-  });
-
-  positions = await attachEntrySnapshots(positions);
-
-  const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
-  positions.sort((a, b) => {
-    if (a.needsClose && !b.needsClose) return -1;
-    if (!a.needsClose && b.needsClose) return 1;
-    const aRec = getRecommendation(a, null).action;
-    const bRec = getRecommendation(b, null).action;
-    const aPri = actionPriority[aRec] ?? 9;
-    const bPri = actionPriority[bRec] ?? 9;
-    if (aPri !== bPri) return aPri - bPri;
-    return a.dte - b.dte;
-  });
-  return { positions, pendingOrders };
-}
-
-// PI-0003.5: reuses the exact same account-lookup pattern as loadPositions()
-// above and app/engine/page.tsx's capital calculator -- same endpoint
-// (/accounts/{account}/balances) both of those already call independently.
-// Parsing is delegated entirely to buildPortfolioFinancialContext() (pure,
-// testable, lives in lib/portfolio-intelligence) so this function is just
-// "fetch the raw payload, hand it to the parser."
-async function loadAccountBalances(): Promise<PortfolioFinancialContext> {
-  const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-    ?? accountsData?.data?.items?.[0];
-  const accountNumber = account?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
-
-  const balData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
-  return buildPortfolioFinancialContext(balData?.data ?? {});
-}
-
-// ── Recommendation Engine ──────────────────────────────────────────────────
-interface Recommendation { action: ActionType; detail: string; }
-
-// Returns true when this was intentionally entered as a short-dated trade
-function isShortDateEntry(pos: Position): boolean {
-  return pos.entryDte <= 21;
-}
-
-function getRecommendation(pos: Position, trend: TrendResult | null): Recommendation {
-  const pnlPct = pos.pnl != null && pos.creditReceived !== 0 ? (pos.pnl / pos.creditReceived) * 100 : 0;
-  const targetPct = pos.profitTarget * 100;
-  const trendAgainst = trend && ((pos.strategy === 'BPS' && trend.trend === 'downtrend') || (pos.strategy === 'BCS' && trend.trend === 'uptrend'));
-  const trendAligns = trend && ((pos.strategy === 'BPS' && trend.trend === 'uptrend') || (pos.strategy === 'BCS' && trend.trend === 'downtrend') || (pos.strategy === 'IC' && trend.trend === 'sideways'));
-  const shortDate = isShortDateEntry(pos);
-  const breached = pos.buffer != null && pos.buffer <= 0;
-  const criticalBuffer = pos.buffer != null && pos.buffer < 2;
-  // PI-0014: marketable/executable pnl% -- see computeMarketablePnlPct's
-  // doc comment above. Null when closeValue is unavailable.
-  const marketablePnlPct = computeMarketablePnlPct(pos);
-  // Emergency exit: fires on EITHER mid or marketable evidence -- marketable
-  // pricing can only make this fire more often, never less, so an
-  // already-conservative mid-based verdict is never weakened. See
-  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
-  const veryLargeLoss = pnlPct <= -200 || (marketablePnlPct != null && marketablePnlPct <= -200);
-  const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-  // stopLossPrice is a per-spread/per-contract option price (e.g. 1.56 = $156 per contract).
-  // currentValue is the total buyback value for the whole position, so scale the stop by contracts.
-  // PI-0014: stop-loss detection now checks EITHER the mid buyback value or
-  // the marketable/executable buyback value -- a stop-loss is an execution
-  // order, so it must be evaluated against execution reality, not just the
-  // theoretical mark. This can only make the stop fire more often, never
-  // less (an already-breached mid stop is never un-breached by marketable
-  // pricing).
-  const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
-    ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
-    : false;
-  const stopLossBreachedMarketable = pos.stopLossPrice != null && pos.closeValue != null && shortQty > 0
-    ? pos.closeValue >= (pos.stopLossPrice * 100 * shortQty)
-    : false;
-  const stopLossBreached = stopLossBreachedMid || stopLossBreachedMarketable;
-
-  // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this
-  if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
-  if (pos.needsClose && pnlPct < 0)  return { action: 'MANAGE', detail: `${pos.dte} DTE with loss — review close/roll, don't auto-cut` };
-
-  // Acquisition-intent CSP: ITM / paper loss is the plan working, not a risk signal.
-  // Skip all breach/stop/loss-based hard exits — hold to expiration for assignment.
-  const isAcquisitionCsp = pos.strategy === 'PUT' && pos.intent === 'acquisition';
-  if (isAcquisitionCsp) {
-    if (breached) return { action: 'HOLD', detail: `ITM — on track for assignment, holding to expiration` };
-    return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% paper — acquisition intent, hold for assignment or expiry` };
-  }
-
-  // Hard exits: breached strike, explicit stop breach, or very large loss.
-  if (breached) return { action: 'CUT_LOSSES', detail: `Short strike breached — exit or roll immediately` };
-  if (stopLossBreached) return { action: 'CUT_LOSSES', detail: `Stop threshold reached — follow the risk plan` };
-  if (veryLargeLoss && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% and trend is adverse — exit or roll` };
-
-  // Short-dated entry: maximize profit, but do not treat ordinary red P/L as a failure.
-  if (shortDate) {
-    if (pos.hitTarget) return { action: 'TAKE_PROFIT', detail: `${Math.round(targetPct)}% target hit — take it, no time to wait` };
-    if (pnlPct >= 30 && pos.dte <= 7)  return { action: 'TAKE_PROFIT', detail: `${pnlPct.toFixed(0)}% profit at ${pos.dte} DTE — take profit now, gamma risk rising` };
-    if (pnlPct >= 40)                  return { action: 'TAKE_PROFIT', detail: `${pnlPct.toFixed(0)}% profit — solid capture for short-dated trade` };
-    if (!pos.hasGtc)                   return { action: 'PLACE_GTC', detail: 'Short-dated trade — place GTC immediately' };
-    if (criticalBuffer && pnlPct < 0)  return { action: 'MANAGE', detail: `${pos.buffer?.toFixed(1)}% buffer with ${pos.dte} DTE — manage closely, not automatic cut` };
-    if (pnlPct < -100 && trendAgainst) return { action: 'MANAGE', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% + adverse trend — review exit/roll` };
-    if (pos.dte <= 3)                  return { action: 'TAKE_PROFIT', detail: `${pos.dte} DTE — expiry imminent, close to avoid pin/assignment risk` };
-    if (trendAgainst)                  return { action: 'MANAGE', detail: `Trend against position with only ${pos.dte} DTE — watch closely` };
-    if (pnlPct < 0)                    return { action: 'HOLD', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% — ${pos.dte} DTE, monitor buffer/theta` };
-    return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% profit — ${pos.dte} DTE, short-dated, let theta work` };
-  }
-
-  // Standard entry
-  if (pos.hitTarget)                  return { action: 'TAKE_PROFIT', detail: `${Math.round(targetPct)}% target — lock in $${pos.pnl?.toFixed(2)}` };
-  if (!pos.hasGtc)                    return { action: 'PLACE_GTC', detail: 'No GTC order set — place profit target' };
-  if (pnlPct < -150 && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% + adverse trend confirms — exit` };
-  if (pnlPct < -50 && trendAgainst)  return { action: 'MANAGE', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% with adverse trend — manage actively` };
-  if (pnlPct < -50)                  return { action: 'MANAGE', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% — manage actively` };
-  if (pnlPct >= targetPct)           return { action: 'TAKE_PROFIT', detail: `${pnlPct.toFixed(0)}% profit` };
-  if (pnlPct < 0 && trendAgainst)    return { action: 'MANAGE', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% with adverse trend` };
-  if (trendAligns)                   return { action: 'HOLD', detail: `Trend confirms ${pos.strategy} — ${pnlPct.toFixed(0)}% profit` };
-  return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% profit — ${pos.dte} DTE remaining` };
-}
 
 // Translates the AI analysis recommendation enum into the badge's ActionType.
 // CLOSE and ROLL both collapse to CLOSE_ROLL (the badge doesn't distinguish
@@ -3886,22 +2355,7 @@ function fmtEntryNowNetEdge(entry: number | null | undefined, current: number | 
 }
 
 
-function normalizePercentValue(value: number | null | undefined): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  // Some APIs store probability as 0.78, others as 78.
-  return Math.abs(value) <= 1 ? value * 100 : value;
-}
 
-function getCurrentPop(pos: Position): number | null {
-  const raw =
-    (pos as any).pop ??
-    (pos as any).probabilityOfProfit ??
-    (pos as any).probabilityOfProfitPct ??
-    (pos as any).popPct ??
-    null;
-
-  return normalizePercentValue(raw);
-}
 
 function fmtEntryNowMaybePct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
   const e = normalizePercentValue(entry);
@@ -8269,39 +6723,8 @@ function premiumEdgeValue(iv: number | null, hv30: number | null): number | null
   return Math.round(iv - hv30);
 }
 
-// ── Net Daily Edge (theta vs gamma) ────────────────────────────────────────
-// The dollars/day you collect from decay (theta) minus the expected dollars/day
-// gamma costs you via price movement. Positive = paid to hold; approaching $0 =
-// gamma catching up (get-out signal); negative = gamma winning.
-//
-// theta and gamma here are already whole-position, per-contract * qty dollar
-// figures (see loadPositions), and on the same unit basis, so NO x100 multiplier
-// is applied. Treat the absolute value as a directional estimate; the peak/trend
-// behavior is robust to any constant scaling.
-const TRADING_DAYS = 252;
 
-function netEdgeFrom(
-  theta: number | null,
-  gamma: number | null,
-  iv: number | null,
-  stockPrice: number | null,
-): number | null {
-  if (theta == null || gamma == null || iv == null || stockPrice == null) return null;
-  // theta and gamma are stored as RAW per-share Greeks (x qty). To get whole-
-  // position dollars they must be multiplied by the 100 option multiplier — the
-  // same x100 the Theta column applies for display. Without it, net edge
-  // collapses to ~$0 for every position.
-  const MULT = 100;
-  // 1-sigma daily dollar move from IV (iv is a whole-number percent, e.g. 41).
-  const dailyMove = stockPrice * (iv / 100) * Math.sqrt(1 / TRADING_DAYS);
-  const thetaDollars = theta * MULT;
-  const gammaCostDollars = 0.5 * Math.abs(gamma) * dailyMove * dailyMove * MULT;
-  return thetaDollars - gammaCostDollars;
-}
 
-function netEdgeLive(pos: Position): number | null {
-  return netEdgeFrom(pos.theta, pos.gamma, pos.iv, pos.stockPrice);
-}
 
 // Requires all four at-entry values (theta/gamma/iv/stockPrice) — older
 // snapshots captured before this fix won't have gamma/stockPrice at entry,
@@ -8310,25 +6733,7 @@ function netEdgeAtEntry(pos: Position): number | null {
   return netEdgeFrom(pos.thetaAtEntry ?? null, pos.gammaAtEntry ?? null, pos.ivAtEntry ?? null, pos.stockPriceAtEntry ?? null);
 }
 
-// Net edge over this position's snapshot history, oldest-first, nulls dropped.
-function netEdgeSeries(pos: Position): { date: string; value: number }[] {
-  const hist = pos.snapshotHistory ?? [];
-  const out: { date: string; value: number }[] = [];
-  for (const s of hist) {
-    const v = netEdgeFrom(s.theta, s.gamma, s.iv, s.stockPrice);
-    if (v != null) out.push({ date: s.date, value: v });
-  }
-  return out;
-}
 
-// Peak net edge this position has ever reached (history + today's live value).
-function netEdgePeak(pos: Position): number | null {
-  const series = netEdgeSeries(pos).map(p => p.value);
-  const live = netEdgeLive(pos);
-  if (live != null) series.push(live);
-  if (series.length === 0) return null;
-  return Math.max(...series);
-}
 
 // Yesterday's (most recent snapshot strictly before today) net edge, for the
 // day-over-day delta. Excludes any snapshot dated today — if the page has
@@ -10260,13 +8665,28 @@ export default function PortfolioPage() {
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { injectAccentStyle(); applyAccent(getSavedAccent()); }, []);
 
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  // TC-0001 corrective round: positions/pendingOrders/balances/
+  // decisionReviews/loading/error/lastRefresh/composition are now owned by
+  // the shared PortfolioDataProvider (mounted in app/providers.tsx) instead
+  // of this component's own state -- app/dashboard/page.tsx consumes the
+  // exact same context. See components/portfolio-data/
+  // PortfolioDataProvider.tsx's module doc for the full rationale.
+  const {
+    positions, pendingOrders, balances, decisionReviews, loading, error, lastRefresh, composition,
+    setPositions, setPendingOrders, setDecisionReviews, setError,
+    refresh: refreshPortfolioData, refreshBalances, refreshDecisionReviews,
+  } = usePortfolioData();
+  const {
+    canonicalPriorities,
+    todaysPrioritiesDashboard,
+    topPriority,
+    averagePositionHealth,
+    portfolioHealth,
+    portfolioReview,
+    dailyBriefing,
+  } = composition;
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
   const [clearingSnapshots, setClearingSnapshots] = useState(false);
@@ -10296,58 +8716,28 @@ export default function PortfolioPage() {
 
   const marketStatus = getMarketStatus();
 
-  const fetchPositions = async () => {
-    setLoading(true); setError(''); setChecked(new Set());
-    try {
-      const { positions: data, pendingOrders: pendingData } = await loadPositions();
-      setPositions(data);
-      setPendingOrders(pendingData);
-      setLastRefresh(new Date());
-      captureSnapshotsIfNeeded(data); // fire-and-forget; doesn't block the UI
-      // Load snapshot history and attach it to positions (non-blocking; if it
-      // fails the cards simply render without peak/trend context).
-      fetchSnapshotStore()
-        .then(store => {
-          setPositions(prev => {
-            const updated = attachSnapshotHistory(prev, store);
-            // PI-0009A: fire-and-forget, after recommendation/healthScore/
-            // netEdge are attached -- doesn't block or affect this render.
-            captureLifecycleSnapshotsIfNeeded(updated);
-            return updated;
-          });
-        })
-        .catch(e => console.error('Snapshot history fetch failed (non-blocking):', e));
-    } catch (e: any) {
-      if (e.message === 'Not authenticated' || e.message === 'Session expired') { window.location.href = '/login'; return; }
-      setError(e.message);
-    } finally { setLoading(false); }
-  };
+  // TC-0001 corrective round: positions/pendingOrders/balances/
+  // decisionReviews are now fetched by the shared PortfolioDataProvider
+  // (refresh()/refreshBalances()/refreshDecisionReviews()) instead of this
+  // component's own effects -- the two snapshot-capture side effects
+  // (captureSnapshotsIfNeeded/captureLifecycleSnapshotsIfNeeded, still
+  // page-local, unchanged) are passed through as callbacks so their exact
+  // original call sequence/timing is preserved. `fetchPositions` below
+  // reproduces the original on-every-visit refresh behavior: this page
+  // re-fetches fresh data each time it mounts, exactly as it did before this
+  // refactor, via the same shared refresh() the Refresh button also calls.
+  const fetchPositions = useCallback(() => {
+    setChecked(new Set());
+    return refreshPortfolioData({
+      onRawPositionsLoaded: captureSnapshotsIfNeeded,
+      onSnapshotHistoryAttached: captureLifecycleSnapshotsIfNeeded,
+    });
+  }, [refreshPortfolioData]);
 
-  useEffect(() => { fetchPositions(); }, []);
-
-  // PI-0003.5: real account balances, fetched in parallel with positions
-  // (non-blocking -- if it fails, canonical priorities simply computes with
-  // financial data unavailable, same as before this slice; positions still
-  // render normally either way).
-  const [balances, setBalances] = useState<PortfolioFinancialContext | null>(null);
   useEffect(() => {
-    loadAccountBalances()
-      .then(setBalances)
-      .catch(e => console.error('Balance fetch failed (non-blocking):', e));
-  }, []);
-
-  // PI-0008C: Decision Outcome Tracking -- fetched independently and
-  // non-blocking, same pattern as balances above. `decisionReviews` is the
-  // full per-user store (keyed by review id, see
-  // app/api/decision-reviews/route.ts); Position Intelligence looks up the
-  // latest review per position via latestReviewForPosition(), and the
-  // Decision History tab renders the whole store directly.
-  const [decisionReviews, setDecisionReviews] = useState<DecisionReviewStore>({});
-  useEffect(() => {
-    fetch('/api/decision-reviews')
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`decision-reviews fetch ${res.status}`))))
-      .then(data => setDecisionReviews(data?.reviews ?? {}))
-      .catch(e => console.error('Decision review fetch failed (non-blocking):', e));
+    fetchPositions();
+    refreshBalances();
+    refreshDecisionReviews();
   }, []);
 
   // PI-0009B: Decision Outcome Analysis -- the Decision History view needs
@@ -10393,246 +8783,15 @@ export default function PortfolioPage() {
   // loadAccountBalances above) instead of an always-empty snapshot. Fields
   // with no real source yet (income, drawdown history) stay genuinely
   // undefined rather than fabricated -- see balancesNormalization.ts.
-  const [canonicalPriorities, setCanonicalPriorities] = useState<CanonicalPortfolioPriorities | null>(null);
-  useEffect(() => {
-    if (positions.length === 0 && pendingOrders.length === 0) { setCanonicalPriorities(null); return; }
-    // PI-0004B: assignmentPreference derives deterministically from the
-    // existing per-position `intent` field (already live-wired to every
-    // position via /api/position-intent) -- 'acquisition' already means
-    // "assignment is success, not failure" in this codebase, i.e. PREFER.
-    // positionStrategy is deliberately left unset for every real position:
-    // WHEEL is a new concept with no existing data source, and the PI-0004B
-    // brief is explicit that ACQUIRE-shaped positions must not be silently
-    // reclassified as WHEEL. Wheel-aware concentration recommendations are
-    // fully implemented and tested (see lib/portfolio-intelligence), but
-    // won't activate in production until a control to set positionStrategy
-    // exists -- tracked as a PI-0004C follow-up.
-    const positionInputs = positions.map(p => ({ ...p, positionId: p.key, healthScore: p.healthScore ?? null, assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent) }));
-    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({ symbol: p.symbol, maxRisk: p.maxRisk, assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent) }));
-    const rawPendingOrders = pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status }));
-    setCanonicalPriorities(computeCanonicalPortfolioPriorities(positionInputs, balances ?? {}, positionsForConcentration, rawPendingOrders));
-  }, [positions, pendingOrders, balances]);
-
-  // PI-0010A: Today's Priorities Dashboard input. `objectives` deliberately
-  // combines two different existing sources rather than reusing
-  // canonicalPriorities.objectives alone:
-  //   - per-position objectives come from positions[].portfolioObjective
-  //     (already computed by attachSnapshotHistory/scorePortfolioPositionObjective
-  //     for every position, INCLUDING MONITOR-tier ones) -- needed because
-  //     computeCanonicalPortfolioPriorities() intentionally filters MONITOR
-  //     out of its own per-position objectives (see its doc comment), and
-  //     this dashboard's own Monitor section needs exactly those.
-  //   - portfolio-level + pending-order objectives (concentration, buying
-  //     power, idle cash, income, stale orders) come from
-  //     canonicalPriorities.objectives, filtered to source !== 'position' so
-  //     the position-level ones already included above aren't duplicated.
-  //
-  // PI-0010B: five extra per-position fields feed Priority Score (see
-  // lib/priorityScore/priorityScore.ts) -- every one of them is a value this
-  // file already computes elsewhere for an existing purpose, just read again
-  // here rather than recomputed or fetched anew:
-  //   - netEdgeDeclinePct/netEdgeNegative: computeNetEdgeEvidence(pos), the
-  //     same call scorePortfolioPositionObjective() already makes per
-  //     position for the Decision Engine's own net-edge evidence.
-  //   - remainingOpportunityPct: scorePortfolioRemainingOpportunity(pos),
-  //     the same Remaining Opportunity Engine call (PI-0008A) already wired
-  //     into the Position Intelligence panel.
-  //   - capitalAtRisk: pos.maxRisk, already displayed elsewhere on the page.
-  //   - hasPendingDecisionReview: latestReviewForPosition (PI-0008C, already
-  //     imported) against the same decisionReviews store Decision History
-  //     already renders from.
-  const todaysPrioritiesInput: TodaysPrioritiesInput = useMemo(() => {
-    const positionObjectives = positions
-      .map(p => p.portfolioObjective)
-      .filter((o): o is PortfolioObjective => o != null);
-    const portfolioLevelObjectives = (canonicalPriorities?.objectives ?? []).filter(o => o.source !== 'position');
-    const objectives = [...positionObjectives, ...portfolioLevelObjectives];
-
-    const positionInputsForDashboard: TodaysPrioritiesPositionInput[] = positions.map(p => {
-      const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(p);
-      const { remainingOpportunityPct } = scorePortfolioRemainingOpportunity(p);
-      const latestReview = latestReviewForPosition(decisionReviews, p.key);
-      return {
-        key: p.key,
-        symbol: p.symbol,
-        strategy: p.strategy,
-        dte: p.dte,
-        healthScore: p.healthScore?.score ?? null,
-        objective: p.portfolioObjective ?? null,
-        netEdgeDeclinePct,
-        netEdgeNegative: netEdgeNegative ?? false,
-        remainingOpportunityPct,
-        capitalAtRisk: p.maxRisk ?? null,
-        hasPendingDecisionReview: latestReview?.outcomeStatus === 'PENDING',
-      };
-    });
-
-    // Covered Call opportunities: uncovered stock left over from an
-    // assignment (classifyPositionLifecycle already identifies this as
-    // 'ASSIGNED_STOCK' everywhere else in this file) -- no existing
-    // PortfolioObjective type represents "sell a covered call here" yet, so
-    // this reuses the lifecycle classifier's own `.shares` field rather than
-    // fabricating a new one.
-    const coveredCallOpportunities: CoveredCallOpportunityInput[] = positions.reduce<CoveredCallOpportunityInput[]>((acc, p) => {
-      const lifecycle = classifyPositionLifecycle(p);
-      if (lifecycle.type === 'ASSIGNED_STOCK') acc.push({ key: p.key, symbol: p.symbol, shares: lifecycle.shares });
-      return acc;
-    }, []);
-
-    return {
-      objectives,
-      positions: positionInputsForDashboard,
-      decisionReviews,
-      openPositionIds: positions.map(p => p.key),
-      coveredCallOpportunities,
-      // V1 scope: no persisted Screener scan output exists anywhere to reuse
-      // (Screener runs a live-only scan) -- an honest `false` rather than
-      // triggering or duplicating that scan here.
-      screenerCandidatesAvailable: false,
-    };
-  }, [positions, canonicalPriorities, decisionReviews]);
-
-  const todaysPrioritiesDashboard = useMemo(
-    () => buildTodaysPrioritiesDashboard(todaysPrioritiesInput),
-    [todaysPrioritiesInput],
-  );
-
-  // PI-0011A: Mission Control's Top Priority section -- the single highest
-  // Priority Score entry across the dashboard above, already sorted per
-  // bucket; selectTopPriority() just takes the max of already-sorted heads.
-  const topPriority = useMemo(() => selectTopPriority(todaysPrioritiesDashboard), [todaysPrioritiesDashboard]);
-
-  // PI-0011B: Portfolio Health Engine input -- every field here is a value
-  // this page already has or already computes elsewhere:
-  //   - immediateActionsCount / decisionReviewsNeedingFollowUpCount come
-  //     straight off todaysPrioritiesDashboard (PI-0010A/B), zero new work.
-  //   - criticalPositionsCount/earningsExposedPositionsCount/averagePosition
-  //     Health/averageDecisionConfidence are derived from the same full,
-  //     unfiltered per-position objective list (positions[].portfolioObjective)
-  //     the Today's Priorities dashboard input already uses.
-  //   - buyingPowerUsedPct/cashBalance/netLiquidity come straight off the
-  //     same `balances` (PortfolioFinancialContext) state already fetched
-  //     for canonicalPriorities above -- no new balance fetch.
-  //   - maxSymbolConcentrationPct reuses derivePositionConcentration(), the
-  //     exact same pure function computeCanonicalPortfolioPriorities already
-  //     calls internally, over the same positionsForConcentration shape
-  //     built the same way as in the canonicalPriorities effect above.
-  // PI-0013: lifted out of healthInput's useMemo below so this single
-  // reduction has exactly one call site -- healthInput and the new
-  // dailyBriefingInput (see below) both read this same value rather than
-  // each computing their own copy of "average position health."
-  const averagePositionHealth = useMemo(() => {
-    const positionHealthScores = positions
-      .map(p => p.healthScore?.score)
-      .filter((s): s is number => s != null);
-    return positionHealthScores.length > 0
-      ? positionHealthScores.reduce((sum, s) => sum + s, 0) / positionHealthScores.length
-      : null;
-  }, [positions]);
-
-  const healthInput: PortfolioHealthInput = useMemo(() => {
-    const positionObjectives = positions
-      .map(p => p.portfolioObjective)
-      .filter((o): o is PortfolioObjective => o != null);
-
-    const criticalPositionKeys = new Set(
-      positions.filter(p => p.portfolioObjective?.priority === 'critical').map(p => p.key),
-    );
-    const earningsExposedPositionsCount = positions.filter(
-      p => p.portfolioObjective?.reviewTriggers.some(t => t.triggerType === 'earnings'),
-    ).length;
-
-    const confidences = positionObjectives.map(o => o.confidence);
-    const averageDecisionConfidence = confidences.length > 0
-      ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
-      : null;
-
-    const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({
-      symbol: p.symbol,
-      maxRisk: p.maxRisk,
-      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
-    }));
-    const concentrationBySymbol = derivePositionConcentration(positionsForConcentration, balances?.netLiquidity);
-    const concentrationValues = Object.values(concentrationBySymbol);
-    const maxSymbolConcentrationPct = concentrationValues.length > 0 ? Math.max(...concentrationValues) : null;
-
-    return {
-      immediateActionsCount: todaysPrioritiesDashboard.immediateAction.length,
-      criticalPositionsCount: criticalPositionKeys.size,
-      totalPositionsCount: positions.length,
-      earningsExposedPositionsCount,
-      buyingPowerUsedPct: balances?.buyingPowerUsedPct ?? null,
-      cashBalance: balances?.cashBalance ?? null,
-      netLiquidity: balances?.netLiquidity ?? null,
-      maxSymbolConcentrationPct,
-      averagePositionHealth,
-      averageDecisionConfidence,
-      decisionReviewsNeedingFollowUpCount: todaysPrioritiesDashboard.reviewToday.needsFollowUp.length,
-    };
-  }, [positions, balances, todaysPrioritiesDashboard, averagePositionHealth]);
-
-  const portfolioHealth = useMemo(() => calculatePortfolioHealthScore(healthInput), [healthInput]);
-
-  // PI-0012A: Portfolio Review, Phase 1 -- composes portfolioHealth (above,
-  // reused verbatim), canonicalPriorities.objectives (portfolio-level
-  // concentration/buying-power/idle-cash/income objectives, reused
-  // unfiltered -- buildPortfolioReview() filters by `type` itself),
-  // todaysPrioritiesDashboard (already-scored/sorted, for Top Risks), and a
-  // lean per-position shape for composition/concentration/Wheel-managed
-  // aggregation. positionStrategy stays null for every real position (same
-  // "no data source yet" limitation already documented on the
-  // canonicalPriorities effect above) -- assignmentPreference reuses the
-  // exact same deriveAssignmentPreferenceFromIntent(p.intent) call this file
-  // already makes in two other places. No new fetch, no new Portfolio
-  // Intelligence or Decision Engine call.
-  const portfolioReviewInput: PortfolioReviewInput = useMemo(() => {
-    const reviewPositions: PortfolioReviewPositionInput[] = positions.map(p => ({
-      symbol: p.symbol,
-      strategy: p.strategy,
-      maxRisk: p.maxRisk ?? null,
-      positionStrategy: null,
-      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
-    }));
-
-    return {
-      health: portfolioHealth,
-      objectives: canonicalPriorities?.objectives ?? [],
-      dashboard: todaysPrioritiesDashboard,
-      positions: reviewPositions,
-      netLiquidity: balances?.netLiquidity ?? null,
-    };
-  }, [positions, portfolioHealth, canonicalPriorities, todaysPrioritiesDashboard, balances]);
-
-  const portfolioReview = useMemo(
-    () => (positions.length === 0 && pendingOrders.length === 0 && !canonicalPriorities ? null : buildPortfolioReview(portfolioReviewInput)),
-    [portfolioReviewInput, positions, pendingOrders, canonicalPriorities],
-  );
-
-  // PI-0013: Daily Briefing Dashboard -- composes portfolioReview (above,
-  // reused verbatim: Portfolio Health, Top Risks, concentration/capital
-  // concerns), todaysPrioritiesDashboard (reused verbatim: DTE/earnings/
-  // follow-up buckets for Upcoming Events, opportunity buckets for
-  // Opportunity Summary, Immediate Action for Risk Summary),
-  // canonicalPriorities.objectives (consulted only for the existing
-  // OBJ-ASSIGNMENT-RISK ruleId tag), and averagePositionHealth/
-  // balances.buyingPowerUsedPct (both already computed above for Portfolio
-  // Health -- passed through, never recomputed). No new fetch, no new
-  // Portfolio Intelligence/Decision Engine call, no AI.
-  const dailyBriefingInput: DailyBriefingInput | null = useMemo(() => {
-    if (!portfolioReview) return null;
-    return {
-      portfolioReview,
-      dashboard: todaysPrioritiesDashboard,
-      objectives: canonicalPriorities?.objectives ?? [],
-      averagePositionHealth,
-      capitalDeploymentPct: balances?.buyingPowerUsedPct ?? null,
-    };
-  }, [portfolioReview, todaysPrioritiesDashboard, canonicalPriorities, averagePositionHealth, balances]);
-
-  const dailyBriefing = useMemo(
-    () => (dailyBriefingInput ? buildDailyBriefing(dailyBriefingInput) : null),
-    [dailyBriefingInput],
-  );
+  // TC-0001 corrective round: canonicalPriorities/todaysPrioritiesDashboard/
+  // topPriority/averagePositionHealth/portfolioHealth/portfolioReview/
+  // dailyBriefing are destructured from `composition` near the top of this
+  // component (from usePortfolioData()) -- the shared PortfolioDataProvider
+  // now computes this the same way this page's own TC-0001A useMemo used to,
+  // so app/dashboard/page.tsx reads the exact same result instead of a
+  // second, independently-fetched copy. See
+  // components/portfolio-data/PortfolioDataProvider.tsx and
+  // docs/reviews/TC-0001-Implementation-Report.md for the full account.
 
   const [sectionOrder, setSectionOrder] = useState<string[]>(DEFAULT_SECTION_ORDER);
   useEffect(() => {
