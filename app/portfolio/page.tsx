@@ -61,6 +61,16 @@ import {
 // their literal ttPost/ttPostComplex call INSIDE its callback, so there is
 // no broker-reaching statement outside of it.
 import { submitCloseOrderIfSafe } from '@/lib/portfolio/closeOrderSubmission';
+// ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
+// cancel/resubmit and its automatic restore-on-failure path now route
+// through this same discipline (deterministic plan, hard-blocking gate,
+// broker call only inside the guarded callback). This is a DIFFERENT safety
+// model from closeOrderSafety's CanonicalCloseIdentity -- a pending order is
+// an unfilled opening order with no entry-fill economics, so it validates
+// leg/price/price-effect payload integrity, not P&L. See
+// docs/design/ES-0002-Pending-Order-Replacement-Safety.md.
+import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
+import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, CanonicalPortfolioPriorities, PortfolioFinancialContext, PositionExposureInput } from '@/lib/portfolio-intelligence';
 import { calculatePositionHealthScore, evaluatePositionObjective, computeCanonicalPortfolioPriorities, buildPortfolioFinancialContext, deriveAssignmentPreferenceFromIntent, calculateRemainingOpportunity, normalizePositionObjectivePct, derivePositionConcentration } from '@/lib/portfolio-intelligence';
 // PI-0014: Marketable Pricing for Risk-Gating (Phase 1) -- see
@@ -1879,6 +1889,52 @@ function buildReplaceOrder(order: PendingOrder, price: number): OrderBody {
       action: l.action as OrderLeg['action'],
       'instrument-type': itype,
     })),
+  };
+}
+
+// ES-0002: maps the broker-sourced `PendingOrder` (from `loadPositions()`)
+// into the framework-free evidence shape `pendingOrderReplacementSafety.ts`
+// validates against. Pure, no defaulting of price effect -- an invalid/
+// missing `priceEffect` is passed through unchanged so the safety module
+// hard-blocks it, rather than this adapter silently normalizing it first.
+function toPendingOrderEvidence(order: PendingOrder): PendingOrderEvidence {
+  return {
+    id: order.id,
+    accountNumber: order.accountNumber,
+    symbol: order.symbol,
+    legs: order.legs.map(l => ({ symbol: l.symbol, action: l.action, quantity: l.quantity })),
+    priceEffect: order.priceEffect,
+    limitPrice: order.limitPrice,
+    orderType: order.orderType,
+    timeInForce: order.timeInForce,
+  };
+}
+
+// ES-0002: reads the actual-payload cross-check evidence back OUT of the
+// exact `OrderBody` object that is about to be (or was just) passed to
+// `ttPost` -- never a separately reconstructed approximation of it. This is
+// what lets the safety gate prove "the payload validated is the payload
+// submitted" rather than merely asserting it by inspection.
+//
+// CORRECTIVE ROUND: this adapter must NOT default a missing/malformed price
+// to `0` or a missing price effect to `'Debit'` -- a prior version's
+// `?? 'Debit'` fallback meant a payload with NO price effect would silently
+// match a Debit plan's `priceEffect` via equality, and `parseFloat(... ?? '0')`
+// masked a missing price as `0` instead of surfacing it as invalid. The raw
+// payload values are passed through UNCHANGED so
+// `runPendingOrderReplacementSafetyGate`'s explicit
+// `REPLACEMENT_PAYLOAD_LIMIT_PRICE_INVALID`/`REPLACEMENT_PAYLOAD_PRICE_EFFECT_INVALID`
+// checks can hard-block a malformed payload instead of a default masking it.
+function toActualReplacementEvidence(orderBody: OrderBody): ActualReplacementOrderEvidence {
+  return {
+    legs: orderBody.legs.map(l => ({ symbol: l.symbol, action: l.action, quantity: l.quantity })),
+    // `parseFloat(undefined)` is NaN, which is what we want when `price` is
+    // missing -- NEVER default to '0' first, which would report a
+    // missing price as a validly-parsed zero.
+    limitPricePoints: orderBody.price != null ? parseFloat(orderBody.price) : NaN,
+    // Pass the raw (possibly undefined) field through unchanged -- the gate
+    // validates it explicitly; this adapter must not guess.
+    priceEffect: orderBody['price-effect'],
   };
 }
 
@@ -10648,39 +10704,74 @@ export default function PortfolioPage() {
   // automatic recovery by re-placing the original order at its original
   // price, mirroring the same safety pattern used for the OCO stop handler
   // (never silently leave the trader with nothing where an order used to be).
+  // ES-0002 (closes ES-0001 Closeout TD-1): the cancel/replace/restore
+  // ordering itself is extracted to `runPendingOrderReplacementWorkflow`
+  // (lib/portfolio/pendingOrderReplacementSubmission.ts) so it is
+  // independently unit-testable with mocked cancel/post functions. This
+  // function is now a thin adapter: it supplies the REAL `ttDelete`/`ttPost`/
+  // `buildReplaceOrder` implementations as `deps` and maps the workflow's
+  // discriminated result onto `setError`/`fetchPositions`/UI state. There is
+  // no `ttPost` statement anywhere in this file's pending-order-replace path
+  // that is not inside `runPendingOrderReplacementWorkflow`'s guarded
+  // callback (which itself only calls `deps.postOrder` via
+  // `submitPendingOrderReplacementIfSafe`/`submitPendingOrderRestoreIfSafe`).
   const replacePendingOrder = async (order: PendingOrder, newPrice: number) => {
     setReplacingOrderIds(prev => new Set(prev).add(order.id));
     setError('');
-    let cancelSucceeded = false;
-    try {
-      const token = await getAccessToken();
-      await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
-      cancelSucceeded = true;
-      await new Promise(r => setTimeout(r, 500));
-      await ttPost(`/accounts/${order.accountNumber}/orders`, token, buildReplaceOrder(order, newPrice));
-    } catch (e: any) {
-      if (cancelSucceeded) {
-        try {
-          const token2 = await getAccessToken();
-          const restorePrice = order.limitPrice ?? newPrice;
-          await ttPost(`/accounts/${order.accountNumber}/orders`, token2, buildReplaceOrder(order, restorePrice));
-          setError(
-            `Replace failed (${e.message ?? 'unknown error'}) — restored the original order at $${restorePrice.toFixed(2)} instead. ` +
-            `Any attached profit/stop bracket was NOT restored.`
-          );
-        } catch (restoreErr: any) {
-          setError(
-            `⚠ Replace failed AND the automatic restore also failed (${restoreErr.message ?? 'unknown error'}). ` +
-            `The original order was already cancelled — ${order.symbol} has no pending entry order right now. Re-enter it manually in TastyTrade.`
-          );
-        }
-      } else {
-        setError(`Could not cancel order to replace it: ${e.message ?? 'unknown error'}`);
-      }
-    } finally {
-      await fetchPositions();
-      setReplacingOrderIds(prev => { const next = new Set(prev); next.delete(order.id); return next; });
+
+    const evidence = toPendingOrderEvidence(order);
+
+    const result = await runPendingOrderReplacementWorkflow(evidence, newPrice, {
+      cancelExistingOrder: async () => {
+        const token = await getAccessToken();
+        await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
+      },
+      waitBetweenCancelAndPost: () => new Promise(r => setTimeout(r, 500)),
+      buildOrderBody: (limitPricePoints: number) => buildReplaceOrder(order, limitPricePoints),
+      toActualOrder: toActualReplacementEvidence,
+      // Fetches its own fresh token per call (matching the pre-ES-0002
+      // behavior of a separately-fetched `token2` for the restore attempt) --
+      // this runs for both the replacement post and, if needed, the restore
+      // post, each as its own broker call.
+      postOrder: async (orderBody: OrderBody) => {
+        const token = await getAccessToken();
+        return ttPost(`/accounts/${order.accountNumber}/orders`, token, orderBody);
+      },
+    });
+
+    switch (result.kind) {
+      case 'REJECTED_BEFORE_CANCEL':
+        setError(`Replace rejected — ${result.reason}`);
+        break;
+      case 'CANCEL_FAILED':
+        setError(`Could not cancel order to replace it: ${result.reason}`);
+        break;
+      case 'REPLACED':
+        break; // success -- no error to surface
+      case 'RESTORED':
+        setError(
+          `Replace failed (${result.replaceError}) — restored the original order instead. ` +
+          `Any attached profit/stop bracket was NOT restored.`
+        );
+        break;
+      case 'RESTORE_BLOCKED':
+        setError(
+          `⚠ Replace failed (${result.replaceError}) AND the original order cannot be safely restored automatically (${result.restoreReason}). ` +
+          `The original order was already cancelled — ${order.symbol} has no pending entry order right now. Re-enter it manually in TastyTrade.`
+        );
+        break;
+      case 'RESTORE_FAILED':
+        setError(
+          `⚠ Replace failed AND the automatic restore also failed (${result.restoreError}). ` +
+          `The original order was already cancelled — ${order.symbol} has no pending entry order right now. Re-enter it manually in TastyTrade.`
+        );
+        break;
     }
+
+    if (result.kind !== 'REJECTED_BEFORE_CANCEL') {
+      await fetchPositions();
+    }
+    setReplacingOrderIds(prev => { const next = new Set(prev); next.delete(order.id); return next; });
   };
 
   const handleIntentChange = (key: string, intent: PositionIntent) => {
