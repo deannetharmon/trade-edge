@@ -5794,6 +5794,8 @@ function saveLastStopMultiple(strategy: string, multiple: number) {
 }
 
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
+  const portfolioMode = usePortfolioMode();
+
   // ── Price bounds ──────────────────────────────────────────────────────────
   // All valid GTC and stop prices must respect these hard bounds derived from
   // live spread value and credit received. These are enforced everywhere:
@@ -6053,6 +6055,21 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const submit = async () => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'set stop-loss order',
+      );
+    } catch (e: any) {
+      setResult('error');
+      setResultMsg(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE stop-order submission.',
+      );
+      return;
+    }
+
     const stopTrigger = parseFloat(stopPrice);
     const gtcLimit    = parseFloat(gtcPrice);
     let preflightContext = '';
@@ -8673,6 +8690,8 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
 }
 
 export default function PortfolioPage() {
+  const portfolioMode = usePortfolioMode();
+
   // PI-0004C: 'priorities' added as a Portfolio subpage alongside the
   // existing 'positions'/'balances' tabs -- Today's Priorities no longer
   // renders inline above Positions (see the sub-tab bar and its render
@@ -8877,6 +8896,20 @@ export default function PortfolioPage() {
   // id, never the trigger/nested sub-order ids) -- so cancelling one
   // only ever needs the complex-orders endpoint, no branching required.
   const cancelPendingOrder = async (order: PendingOrder) => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'cancel pending order',
+      );
+    } catch (e: any) {
+      setError(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE order cancellation.',
+      );
+      return;
+    }
+
     setCancellingOrderIds(prev => new Set(prev).add(order.id));
     setError('');
     try {
@@ -8908,6 +8941,20 @@ export default function PortfolioPage() {
   // callback (which itself only calls `deps.postOrder` via
   // `submitPendingOrderReplacementIfSafe`/`submitPendingOrderRestoreIfSafe`).
   const replacePendingOrder = async (order: PendingOrder, newPrice: number) => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'replace pending order',
+      );
+    } catch (e: any) {
+      setError(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE order replacement.',
+      );
+      return;
+    }
+
     setReplacingOrderIds(prev => new Set(prev).add(order.id));
     setError('');
 
@@ -8994,6 +9041,22 @@ export default function PortfolioPage() {
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
+
+  // PT-0002B: fail closed at the render boundary. LIVE account
+  // content is never displayed while mode is unresolved, invalid,
+  // or explicitly PAPER.
+  if (!(
+    portfolioMode.status === 'ready'
+    && portfolioMode.mode === 'LIVE'
+  )) {
+    return (
+      <PortfolioModeGateNotice
+        portfolioMode={portfolioMode}
+        th={th}
+        screenName="Portfolio"
+      />
+    );
+  }
 
   return (
     <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
