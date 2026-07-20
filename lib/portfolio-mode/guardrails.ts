@@ -70,3 +70,40 @@ export function assertPaperContext(mode: PortfolioMode, action: string): void {
     throw new PortfolioModeGuardError('PAPER', mode, action);
   }
 }
+
+// PT-0002B --------------------------------------------------------------
+//
+// The real call sites this module was built for (app/portfolio/page.tsx's
+// broker-submission functions) read mode from usePortfolioMode(), whose
+// `mode` is `PortfolioMode | null` -- null while `status` is 'resolving' or
+// 'invalid' (see components/portfolio-mode/PortfolioModeProvider.tsx).
+// assertLiveContext() above cannot accept null, and was never meant to --
+// it's a pure check against an already-known PortfolioMode. This wrapper is
+// the actual guard those call sites use: it fails closed (throws) on
+// 'resolving'/'invalid' exactly the same as it does on a confirmed PAPER
+// mode, rather than requiring every call site to separately null-check
+// before calling assertLiveContext. See
+// docs/design/PT-0002B-Portfolio-Context-Integration.md §3.1.
+
+/**
+ * Throws PortfolioModeGuardError unless portfolio mode is resolved AND
+ * confirmed LIVE. Unlike assertLiveContext, this accepts the raw
+ * PortfolioModeProvider status/mode pair (mode may be null) so a real React
+ * call site can pass usePortfolioMode()'s output directly without its own
+ * null-check -- 'resolving' and 'invalid' are treated as "not LIVE," never
+ * silently assumed to be LIVE.
+ */
+export function assertLiveContextReady(
+  status: 'resolving' | 'ready' | 'invalid',
+  mode: PortfolioMode | null,
+  action: string,
+): void {
+  if (status !== 'ready' || mode == null) {
+    // 'PAPER' here is a placeholder label, not a claim that PAPER is
+    // actually selected -- 'resolving'/'invalid' have no valid PortfolioMode
+    // to report as `actual`. The important, tested property is that this
+    // always throws in that case, not the exact label.
+    throw new PortfolioModeGuardError('LIVE', 'PAPER', action);
+  }
+  assertLiveContext(mode, action);
+}
