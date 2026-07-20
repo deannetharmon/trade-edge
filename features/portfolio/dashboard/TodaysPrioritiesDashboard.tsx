@@ -4,23 +4,9 @@
 // lib/todaysPriorities/dashboard.ts's pure bucketing output.
 // PI-0010B: Intelligent Prioritization -- every objective-bearing bucket is
 // now a PrioritizedObjective[] (already sorted highest Priority Score first
-// by the pure module), rendered here via the new <PriorityRankedList>
-// instead of the PI-0004A <TodaysPriorities> component. <TodaysPriorities>
-// is still used elsewhere (the Briefing and Priority List tabs) and is
-// deliberately left untouched -- it doesn't know about Priority Score, and
-// this ticket's brief is "only improve prioritization", not redesign that
-// shared component. <PriorityRankedList> is new, local to this dashboard,
-// and displays exactly the four things the brief asks for on each card:
-// Priority Score, tier (Critical/High/Medium/Low), Expected Portfolio
-// Impact (objective.portfolioImpact -- already computed, not recalculated
-// here), and the concise Reason bullets calculatePriorityScore() produced.
-//
-// The remaining subsections -- Monitor entries, Decision Reviews needing
-// follow-up, and the covered-call opportunity list -- are not
-// PortfolioObjectives (Monitor is explicitly "no action needed", and
-// Covered Call opportunities have no backing objective to score), so they
-// keep their PI-0010A compact rows, unchanged, built from the same theme
-// tokens (th.border/th.card/th.textFaint/th.textMuted).
+// by the pure module), rendered here via the new <PriorityRankedList>.
+// DT-0001: Decision Transparency -- expose deterministic evidence, why-now
+// triggers, and confidence separately from priority without changing ranking.
 
 'use client';
 
@@ -32,15 +18,11 @@ import type {
   CoveredCallOpportunityInput,
   PrioritizedObjective,
 } from '@/lib/todaysPriorities';
+import { buildRecommendationExplanation } from '@/lib/todaysPriorities/explanation';
 import type { DecisionReview } from '@/lib/decision-review';
 import { DECISION_OUTCOME_STATUS_LABEL } from '@/lib/decision-review';
 import type { PriorityTier } from '@/lib/priorityScore';
 
-// Mirrors (does not import -- that map is module-private to
-// features/portfolio/components/TodaysPriorities.tsx) the same red/orange/
-// amber/slate priority color convention already established there, applied
-// to this ticket's own Critical/High/Medium/Low Priority Score tier instead
-// of PortfolioObjective['priority']. Same visual language, new dimension.
 const TIER_STYLE: Record<PriorityTier, { border: string; bg: string; text: string }> = {
   Critical: { border: 'border-red-500/60', bg: 'bg-red-500/10', text: 'text-red-300' },
   High: { border: 'border-orange-500/60', bg: 'bg-orange-500/10', text: 'text-orange-300' },
@@ -54,9 +36,11 @@ const IMPACT_DIRECTION_ARROW: Record<'positive' | 'negative' | 'neutral', string
   neutral: '→',
 };
 
-// PI-0011A: exported so Portfolio Mission Control can reuse the exact same
-// card renderer for its own "Top Priority" section (a single-item list)
-// instead of re-implementing the score/tier/impact/reason card markup.
+function formatDriverValue(value: string | number | undefined): string | null {
+  if (value === undefined || value === '') return null;
+  return String(value);
+}
+
 export function PriorityRankedList({
   items,
   th,
@@ -70,9 +54,12 @@ export function PriorityRankedList({
     <div>
       {title && <h3 className={`mb-1.5 text-[10px] uppercase tracking-widest ${th.textFaint}`}>{title}</h3>}
       <div className="space-y-2">
-        {items.map(({ objective, score, tier, reasons }) => {
+        {items.map((item) => {
+          const { objective, score, tier } = item;
           const tierStyle = TIER_STYLE[tier];
           const impact = objective.portfolioImpact;
+          const explanation = buildRecommendationExplanation(item);
+
           return (
             <div key={objective.id} className={`rounded-xl border ${th.border} ${th.card} p-3`}>
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -80,11 +67,22 @@ export function PriorityRankedList({
                   <p className={`text-[12px] font-bold ${th.text}`}>{objective.title}</p>
                   <p className={`mt-0.5 text-[11px] ${th.textMuted}`}>{objective.summary}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${tierStyle.border} ${tierStyle.bg} ${tierStyle.text}`}>
-                    {tier}
-                  </span>
-                  <span className={`text-[13px] font-bold ${th.text}`} title="Priority Score">{score}</span>
+                <div className="flex shrink-0 items-start gap-3">
+                  <div className="text-right">
+                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Priority</span>
+                    <div className="mt-0.5 flex items-center justify-end gap-2">
+                      <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${tierStyle.border} ${tierStyle.bg} ${tierStyle.text}`}>
+                        {tier}
+                      </span>
+                      <span className={`text-[13px] font-bold ${th.text}`} title="Priority Score">{score}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Confidence</span>
+                    <span className={`mt-0.5 block text-[10px] font-semibold ${th.text}`}>
+                      {explanation.confidence.label} ({explanation.confidence.score}%)
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -97,12 +95,30 @@ export function PriorityRankedList({
               </div>
               {impact.explanation && <p className={`mt-0.5 text-[10px] ${th.textFaint}`}>{impact.explanation}</p>}
 
-              {reasons.length > 0 && (
-                <div className="mt-2">
-                  <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Reason</span>
+              {explanation.drivers.length > 0 && (
+                <div className="mt-3">
+                  <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Top Decision Drivers</span>
+                  <ul className="mt-1 grid gap-1 md:grid-cols-2">
+                    {explanation.drivers.map((driver) => {
+                      const value = formatDriverValue(driver.value);
+                      return (
+                        <li key={driver.id} className={`rounded-md border ${th.borderLight} px-2 py-1.5 text-[10px] ${th.textMuted}`}>
+                          <span className={`font-semibold ${th.text}`}>{driver.label}</span>
+                          {value && <span>: {value}</span>}
+                          {driver.explanation && <span className={`mt-0.5 block ${th.textFaint}`}>{driver.explanation}</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              {explanation.whyNow.length > 0 && (
+                <div className="mt-3">
+                  <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Why Now</span>
                   <ul className="mt-0.5 space-y-0.5">
-                    {reasons.map((reason) => (
-                      <li key={reason} className={`text-[10px] ${th.textMuted}`}>&bull; {reason}</li>
+                    {explanation.whyNow.map((reason) => (
+                      <li key={reason} className={`text-[10px] ${th.textMuted}`}>✓ {reason}</li>
                     ))}
                   </ul>
                 </div>
@@ -196,7 +212,6 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
 
   return (
     <div className="space-y-8">
-      {/* 1. Immediate Action */}
       <section aria-label="Immediate Action">
         <SectionHeader label="Immediate Action" count={immediateAction.length} th={th} />
         {immediateAction.length === 0 ? (
@@ -206,7 +221,6 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         )}
       </section>
 
-      {/* 2. Review Today */}
       <section aria-label="Review Today">
         <SectionHeader label="Review Today" count={reviewTodayCount} th={th} />
         {reviewTodayCount === 0 ? (
@@ -238,7 +252,6 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         )}
       </section>
 
-      {/* 3. Monitor */}
       <section aria-label="Monitor">
         <SectionHeader label="Monitor" count={monitor.length} th={th} />
         {monitor.length === 0 ? (
@@ -261,7 +274,6 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         )}
       </section>
 
-      {/* 4. Opportunities */}
       <section aria-label="Opportunities">
         <SectionHeader label="Opportunities" count={opportunitiesCount} th={th} />
         {opportunitiesCount === 0 ? (
