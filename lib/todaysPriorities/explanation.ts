@@ -20,6 +20,9 @@ export interface RecommendationExplanation {
   };
 }
 
+const MAX_DECISION_DRIVERS = 4;
+const MAX_WHY_NOW_ITEMS = 3;
+
 const GENERIC_REASON_PATTERNS = [
   /^recommendation:/i,
   /^high confidence recommendation$/i,
@@ -73,13 +76,13 @@ function topDrivers(objective: PortfolioObjective, reasons: string[]): Recommend
       seen.add(key);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, MAX_DECISION_DRIVERS);
 }
 
 export function buildRecommendationExplanation(item: PrioritizedObjective): RecommendationExplanation {
   return {
     drivers: topDrivers(item.objective, item.reasons),
-    whyNow: item.objective.reviewTriggers.map(triggerText).filter(Boolean).slice(0, 3),
+    whyNow: item.objective.reviewTriggers.map(triggerText).filter(Boolean).slice(0, MAX_WHY_NOW_ITEMS),
     confidence: {
       score: item.objective.confidence,
       label: confidenceLabel(item.objective.confidence),
