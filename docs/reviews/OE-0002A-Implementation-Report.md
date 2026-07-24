@@ -3,7 +3,7 @@
 
 **Branch:** `feature/oe-0002a-opportunity-engine-activation`
 **Base:** `main` @ `6f46936`
-**Status:** Implemented, pushed, awaiting Quinn's technical review and Paul's product sign-off. Not merged.
+**Status:** ✅ MERGED into `main` at merge commit `7acb641` (DOC-0001 reconciliation, verified against Git history 2026-07-24). Quinn's technical review and Paul's product review both approved this sprint with no corrective round required; the temporary branch `feature/oe-0002a-opportunity-engine-activation` has been deleted, locally and remotely.
 
 ## 1. Repository Verification
 

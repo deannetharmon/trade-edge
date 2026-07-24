@@ -1,6 +1,6 @@
 # OE-0001 — Opportunity Engine Foundation
 
-**Status:** Corrected per Product Owner review round 1; pending re-review. Active sprint, not merged, not complete.
+**Status:** ✅ MERGED into `main` at merge commit `c97a705` (DOC-0001 reconciliation, verified against Git history 2026-07-24). The corrective round described below was reviewed and approved by the Product Owner; the temporary branch `feature/opportunity-engine-foundation` has been deleted, locally and remotely. Its production UI (`BestOpportunitiesPanel`) was intentionally left unmounted at merge time and has since been activated by OE-0002A (merged `7acb641`) on `/screener`. The remainder of this document is preserved as the historical design record.
 **Branch:** `feature/opportunity-engine-foundation`
 **Base:** `main` @ `a86c92dc72470ccdeb7221ceb6aa11a27cf1d7a5` (`main` and `origin/main` remain at this commit; this branch is separate and unmerged)
 **Implements:** `docs/specifications/TradeEdge-Phase3-Master-Specification.md` §4.1 ("Opportunity Engine"), roadmap item **TE-0007 — Opportunity Engine Foundation**

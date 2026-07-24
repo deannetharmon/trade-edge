@@ -1,6 +1,6 @@
 # OE-0002A — Opportunity Engine Activation
 
-**Status:** Implemented on `feature/oe-0002a-opportunity-engine-activation`, awaiting Quinn's technical review and Paul's product sign-off. Not committed to `main`.
+**Status:** ✅ MERGED into `main` at merge commit `7acb641` (DOC-0001 reconciliation, verified against Git history 2026-07-24). Quinn's technical review and Paul's product review both approved this sprint with no corrective round required; the temporary branch `feature/oe-0002a-opportunity-engine-activation` has been deleted, locally and remotely.
 **Base:** `main` @ `6f46936` (post DT-0001 merge).
 **Implements:** the deferred item disclosed in `docs/design/OE-0001-Opportunity-Engine-Foundation.md` §7 and `docs/roadmap/ROADMAP.md` line 165 — activating the OE-0001 foundation against a real candidate feed. Follows the read-only architecture discovery already completed and returned this session (repository verification, OE-0001 architecture inventory, UI integration state, data-source inventory, DT-0001 reuse assessment, portfolio-mode safety assessment, test coverage, and a recommended smallest slice).
 

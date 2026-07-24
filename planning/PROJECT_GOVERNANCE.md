@@ -1,8 +1,8 @@
 # TradeEdge Project Governance
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Active  
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-07-24 (DOC-0001 documentation reconciliation — updated Roles and Responsibilities to reflect the TradeEdge Engineering Operating Model Update adopted by the repository owner, and updated Branch Strategy to reflect the current long-lived branch name. No other section materially changed.)
 
 ## Purpose
 
@@ -37,35 +37,45 @@ TradeEdge shall:
 
 The repository owner retains final authority over product direction, sprint approval, production deployment, and any live-trading capability.
 
-### Product Owner — ChatGPT
+### Product Owner — Paul
 
 The Product Owner is responsible for:
 
 - maintaining the product vision and roadmap;
 - evaluating priorities before recommending a sprint;
 - defining complete sprint scope and acceptance criteria;
-- maintaining architectural consistency;
 - reviewing implementation results and defects;
-- managing repository and branch strategy;
-- maintaining project governance, sprint status, and handoff documentation;
-- guiding merge, release, and branch-cleanup workflows;
+- issuing final product sign-off and merge decisions;
 - preventing scope drift and redundant implementation.
 
 Repository disorder, unclear sprint state, conflicting instructions, or untracked scope changes are treated as Product Owner process failures.
 
-### Implementation Engineer — Claude
+### Chief Architect — Quinn
 
-The Implementation Engineer is responsible for:
+The Chief Architect is responsible for:
+
+- maintaining architectural consistency across sprints;
+- conducting technical review of each implementation before product sign-off;
+- approving or rejecting architecture, layering, separation of concerns, determinism, and test strategy;
+- identifying when a discovered issue requires an "ARCHITECTURE REVIEW REQUIRED" escalation rather than a unilateral implementation decision.
+
+### Lead Engineer / Implementation Lead — Dean
+
+The Lead Engineer is responsible for:
 
 - implementing the approved sprint specification;
 - working only within the approved scope;
 - using the active working tree and approved branch;
+- verifying repository/branch/sprint state before every implementation session;
 - writing or updating targeted tests;
 - running the required validation sequence;
 - documenting implementation results, limitations, and deviations;
-- committing and pushing completed work when instructed.
+- committing and pushing completed work when instructed;
+- managing day-to-day repository and branch mechanics (creation, verification, cleanup) under Product Owner/Chief Architect direction.
 
-The Implementation Engineer must not independently expand sprint scope, redesign unrelated architecture, or introduce future-sprint features.
+The Lead Engineer must not independently expand sprint scope, redesign unrelated architecture, introduce future-sprint features, modify acceptance criteria, or rewrite design documents unilaterally. When an architecture, safety, scope, governance, or repository-state assumption proves wrong mid-session, the Lead Engineer must stop and return an "ARCHITECTURE REVIEW REQUIRED" report rather than self-resolving.
+
+*(Historical note: earlier revisions of this document, and some superseded implementation reports predating 2026-07-24, refer to "Product Owner — ChatGPT" and "Implementation Engineer — Claude." Those labels describe the same functional roles under different working names and are superseded by the names above; no responsibilities changed as part of this rename.)*
 
 ## Source-of-Truth Hierarchy
 
@@ -122,11 +132,11 @@ A sprint specification should include, as applicable:
 ### Permanent Branches
 
 - `main` — production-ready and always intended to be releasable.
-- `feature/autopilot` — long-lived integration branch for the Autopilot initiative when active integration work requires it.
+- `epic/autopilot` — long-lived integration branch for the Autopilot initiative when active integration work requires it. (This branch was previously named `feature/autopilot`; that name is obsolete and should only appear in historical command transcripts, not in active documentation.)
 
 ### Short-Lived Branches
 
-All other feature or sprint branches are temporary.
+All other feature or sprint branches are temporary, named `feature/<ticket>-<description>`.
 
 Their lifecycle is:
 

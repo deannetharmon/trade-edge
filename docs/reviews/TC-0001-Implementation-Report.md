@@ -1,6 +1,6 @@
 # TC-0001 — Trade Command Center — Implementation Report
 
-Status: **CORRECTIVE ROUND COMMITTED AND PUSHED, AWAITING PRODUCT OWNER REVIEW.** Commit `3385d23` on `feature/trade-command-center`, pushed to `origin/feature/trade-command-center`. Not merged. This report, together with `docs/design/TC-0001-Trade-Command-Center.md` and the accompanying `.diff` patch file, is the review package.
+Status: **✅ MERGED into `main` at merge commit `cfd4080`** (DOC-0001 reconciliation, verified against Git history 2026-07-24). Commit `3385d23` on `feature/trade-command-center` was reviewed and approved by the Product Owner; the temporary branch has been deleted, locally and remotely. The remainder of this report is preserved as the historical implementation record.
 
 ## 0. Pre-flight verification
 
