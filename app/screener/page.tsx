@@ -51,8 +51,12 @@ import {
 // derived fresh from whatever `results` currently holds, and discarded on
 // unmount/navigation -- the same lifecycle `results` itself already has.
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
+import type { DecisionAnalysis } from '@/lib/decision-engine';
 import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
 import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
+// CES-0001 (OE-0002B): this page is a producer, not the owner, of the
+// current recommendation set -- see lib/recommendations/RecommendationService.ts.
+import { publishRecommendations, clearRecommendations } from '@/lib/recommendations/RecommendationService';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -5491,15 +5495,24 @@ export default function Home() {
     });
   }, []);
 
-  // ── OE-0002A: activate the existing Opportunity Engine foundation ────────
+  // ── OE-0002A/B: activate the existing Opportunity Engine foundation, and
+  // publish to the Recommendation Service ──────────────────────────────────
   // Runs whenever `results` changes -- i.e. after runScreen/runPMCCScan/
   // runCspScan complete a real scan (or the cache-restore effect above loads
   // a previous real scan). Sends the real, current ScreenResult[] through
   // the existing, unmodified /api/autopilot/recommendations route to get a
   // real DecisionAnalysis[], then through the existing, unmodified
   // buildOpportunityRecommendations() (OE-0001's adapter + ranker,
-  // untouched). No mock/fixture data, no new scoring, no new persistence --
-  // this effect only orchestrates already-approved production code.
+  // untouched) for this page's own display. No mock/fixture data, no new
+  // scoring -- this effect only orchestrates already-approved production
+  // code.
+  //
+  // CES-0001 (OE-0002B): this page is a *producer* of recommendations, not
+  // their owner (Architectural Principle 6) -- it announces the same real,
+  // unranked DecisionAnalysis[] to lib/recommendations/RecommendationService
+  // so any consumer (today, the Dashboard) can read the current set without
+  // this page knowing that consumer exists. Publishing is a side effect of
+  // this page's own existing pipeline, not a second computation of it.
   useEffect(() => {
     let cancelled = false;
 
@@ -5508,6 +5521,7 @@ export default function Home() {
       setOpportunityGeneratedAt(undefined);
       setOpportunityState('idle');
       setOpportunityError('');
+      clearRecommendations();
       return;
     }
 
@@ -5528,11 +5542,13 @@ export default function Home() {
         }
 
         const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
+        const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
 
         if (!cancelled) {
           setOpportunityRecommendations(recommendations);
           setOpportunityGeneratedAt(generatedAt);
           setOpportunityState('loaded');
+          publishRecommendations(rawAnalyses, generatedAt);
         }
       } catch (e: any) {
         if (!cancelled) {

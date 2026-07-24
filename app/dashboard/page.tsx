@@ -19,10 +19,18 @@
 // duplicating) app/portfolio/page.tsx's acquisition pipeline into
 // lib/portfolio-data/.
 //
-// Known, disclosed limitation (unchanged from TC-0001A/B): no real
-// DecisionAnalysis[] feed exists anywhere in the app yet (see
-// lib/command-center/buildOpportunityRecommendations.ts's doc), so the Best
-// Opportunity card always renders its real, honest empty state today.
+// CES-0001 (OE-0002B): the Best Opportunity card's feed now comes from
+// lib/recommendations/RecommendationService -- the canonical acquisition
+// boundary for "what is the current, real, evaluated candidate set." This
+// page has no knowledge of where that data originates (today, only the
+// Screener publishes to it), no knowledge of IndexedDB, and no knowledge of
+// audit/decision-log persistence. It still performs zero evaluation or
+// ranking itself: it reads DecisionAnalysis[] from the service and passes
+// it through the exact same, unmodified buildOpportunityRecommendations()
+// (OE-0001's adapter + ranker) TC-0001 always called here. If nothing has
+// been published yet in this browser session, the service returns an
+// honest empty set and the card renders its own empty state -- never a
+// fabricated one. See docs/design/OE-0002B-Recommendation-Service-Foundation.md.
 //
 // PT-0002B: this page now reads the global PortfolioMode
 // (lib/portfolio-mode) and renders the LIVE composition below only when
@@ -43,7 +51,7 @@ import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioMo
 import { buildCommandCenterViewModel } from '@/lib/command-center';
 import { buildOpportunityRecommendations } from '@/lib/command-center/buildOpportunityRecommendations';
 import { CommandCenter } from '@/components/command-center/CommandCenter';
-import type { DecisionAnalysis } from '@/lib/decision-engine';
+import { useCurrentRecommendations } from '@/lib/recommendations/RecommendationService';
 
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
@@ -63,12 +71,17 @@ export default function DashboardPage() {
     refreshDecisionReviews();
   }, []);
 
-  // No real DecisionAnalysis[] acquisition mechanism exists yet (see module
-  // doc) -- an honest empty array, never a fabricated candidate.
-  const analyses: DecisionAnalysis[] = [];
+  // Acquisition happens entirely inside the Recommendation Service -- this
+  // page only asks for "the current set" and ranks it for display via the
+  // existing, unmodified Opportunity Engine wrapper. See module doc above.
+  const currentRecommendations = useCurrentRecommendations();
   const { recommendations: opportunityRecommendations } = useMemo(
-    () => buildOpportunityRecommendations(analyses, { availableCapital: 0, generatedAt: new Date().toISOString() }),
-    [],
+    () =>
+      buildOpportunityRecommendations(currentRecommendations.analyses, {
+        availableCapital: 0,
+        generatedAt: currentRecommendations.generatedAt ?? new Date().toISOString(),
+      }),
+    [currentRecommendations],
   );
 
   const viewModel = useMemo(

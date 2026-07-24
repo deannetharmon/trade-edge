@@ -5,15 +5,18 @@
 // then rankOpportunityCandidates() -- exactly as
 // docs/design/TC-0001-Trade-Command-Center.md section 3.6 requires. This
 // function never fabricates a candidate: `analyses` must be a real
-// DecisionAnalysis[] the caller already has (e.g. from a completed
-// screener scan's POST /api/autopilot/recommendations result). No
-// acquisition mechanism for that feed exists on /dashboard yet (see the
-// design doc's "Known limitations") -- callers without one should pass an
-// empty array, which correctly and honestly produces zero recommendations
-// rather than a mocked or sample one. This is intentional, disclosed, and
-// matches BestOpportunitiesPanel's own explicit contract: mount only with a
-// real, already-computed feed, never with a new fetch, persistence, or
-// cross-page state manufactured just to populate it.
+// DecisionAnalysis[] the caller already has.
+//
+// CES-0001 (OE-0002B): acquisition of that real DecisionAnalysis[] is now
+// the explicit job of lib/recommendations/RecommendationService (the
+// Screener publishes to it; app/dashboard/page.tsx reads from it). This
+// function's own contract is unchanged by that -- it still only ranks
+// whatever real analyses its caller supplies, and callers with nothing yet
+// should still pass an empty array, which correctly and honestly produces
+// zero recommendations rather than a mocked or sample one. This function
+// itself never fetches, persists, or reaches across pages -- that boundary
+// now formally belongs to the Recommendation Service, not to this wrapper
+// or to BestOpportunitiesPanel's contract, though both remain true here too.
 
 import {
   decisionAnalysesToOpportunityCandidates,
