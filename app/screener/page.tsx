@@ -40,6 +40,20 @@ import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
 } from '@/lib/screener/screenerJobStore';
 
+// ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
+// Wires this page's already-real, in-memory ScreenResult[] through the
+// existing, unmodified production pipeline:
+//   ScreenResult[] --(POST /api/autopilot/recommendations, existing route)-->
+//   DecisionAnalysis[] --(buildOpportunityRecommendations, existing TC-0001
+//   adapter+ranker wrapper, unmodified)--> OpportunityRecommendation[] -->
+//   BestOpportunitiesPanel (OE-0001, unmodified).
+// No new persistence: recommendations are held in plain component state,
+// derived fresh from whatever `results` currently holds, and discarded on
+// unmount/navigation -- the same lifecycle `results` itself already has.
+import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
+import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
+import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
+
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
 // That ran document.head.appendChild() the instant the client bundle
@@ -5360,6 +5374,15 @@ export default function Home() {
   const [rankConfig, setRankConfig] = useState<RankConfig>(getSavedRankConfig);
   const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>('filter');
 
+  // ── OE-0002A: Best Opportunities state ────────────────────────────────────
+  // Purely derived, in-memory state -- never persisted, never fabricated.
+  // 'idle' before any real scan results exist; 'loading' while the existing
+  // recommendation pipeline runs; 'loaded'/'error' after it returns.
+  const [opportunityRecommendations, setOpportunityRecommendations] = useState<OpportunityRecommendation[]>([]);
+  const [opportunityGeneratedAt, setOpportunityGeneratedAt] = useState<string | undefined>(undefined);
+  const [opportunityState, setOpportunityState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const [opportunityError, setOpportunityError] = useState('');
+
   // ── RF-0001: Ranked Scan orchestration extracted to features/screener/
   // (see docs/reviews/RF-0001-Implementation-Report.md). Mechanical move —
   // same task-reconnect/mirror/start behavior TE-0005A added, now living in
@@ -5467,6 +5490,62 @@ export default function Home() {
       if (cached) setTargetedResults(cached);
     });
   }, []);
+
+  // ── OE-0002A: activate the existing Opportunity Engine foundation ────────
+  // Runs whenever `results` changes -- i.e. after runScreen/runPMCCScan/
+  // runCspScan complete a real scan (or the cache-restore effect above loads
+  // a previous real scan). Sends the real, current ScreenResult[] through
+  // the existing, unmodified /api/autopilot/recommendations route to get a
+  // real DecisionAnalysis[], then through the existing, unmodified
+  // buildOpportunityRecommendations() (OE-0001's adapter + ranker,
+  // untouched). No mock/fixture data, no new scoring, no new persistence --
+  // this effect only orchestrates already-approved production code.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (results.length === 0) {
+      setOpportunityRecommendations([]);
+      setOpportunityGeneratedAt(undefined);
+      setOpportunityState('idle');
+      setOpportunityError('');
+      return;
+    }
+
+    setOpportunityState('loading');
+    setOpportunityError('');
+
+    (async () => {
+      try {
+        const response = await fetch('/api/autopilot/recommendations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ screenResults: results }),
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body?.error ?? `Recommendation engine request failed (${response.status}).`);
+        }
+
+        const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
+
+        if (!cancelled) {
+          setOpportunityRecommendations(recommendations);
+          setOpportunityGeneratedAt(generatedAt);
+          setOpportunityState('loaded');
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setOpportunityRecommendations([]);
+          setOpportunityGeneratedAt(undefined);
+          setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
+          setOpportunityState('error');
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [results]);
 
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
@@ -6126,6 +6205,25 @@ export default function Home() {
                     runScreen(r, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
                   }
                 }} />
+              )}
+
+              {/* OE-0002A: first production activation of OE-0001. Real,
+                  ranked OpportunityRecommendation[] derived from this
+                  page's own current scan results via the existing,
+                  unmodified pipeline -- see the effect above. */}
+              {results.length > 0 && (
+                <BestOpportunitiesPanel
+                  recommendations={opportunityRecommendations}
+                  generatedAt={opportunityGeneratedAt}
+                  th={th}
+                  blockerNotice={
+                    opportunityState === 'error'
+                      ? (opportunityError || 'Unable to load ranked opportunities.')
+                      : opportunityState === 'loading'
+                        ? 'Ranking opportunities from these scan results…'
+                        : undefined
+                  }
+                />
               )}
 
               {screenMode === 'targeted' ? (
