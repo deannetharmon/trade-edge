@@ -3,10 +3,13 @@
 // TC-0001B: mounts the existing, tested BestOpportunitiesPanel (OE-0001)
 // against a real (possibly empty) OpportunityRecommendation[] feed produced
 // by lib/command-center/buildOpportunityRecommendations.ts's real
-// adapter/ranker wiring. No mock data, no new fetch, no persistence, no
-// cross-page state -- see that module's doc for the full rationale. Renders
-// the panel's own empty state ("No ranked opportunity feed is available.")
-// whenever no real feed exists, which is the honest state today.
+// adapter/ranker wiring. This component itself has no idea where the
+// underlying DecisionAnalysis[] came from -- as of CES-0001 (OE-0002B), its
+// caller (app/dashboard/page.tsx) sources that from
+// lib/recommendations/RecommendationService, the canonical acquisition
+// boundary. Renders the panel's own empty state ("No ranked opportunity
+// feed is available.") whenever nothing has been published yet, which is
+// an honest state, never a fabricated one.
 
 import type { THEMES, Theme } from '@/lib/theme';
 import type { CommandCenterOpportunityViewModel } from '@/lib/command-center';
