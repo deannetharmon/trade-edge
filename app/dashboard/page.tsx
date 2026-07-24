@@ -51,7 +51,7 @@ import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioMo
 import { buildCommandCenterViewModel } from '@/lib/command-center';
 import { buildOpportunityRecommendations } from '@/lib/command-center/buildOpportunityRecommendations';
 import { CommandCenter } from '@/components/command-center/CommandCenter';
-import { useCurrentRecommendations } from '@/lib/recommendations/RecommendationService';
+import { useCurrentRecommendations } from '@/lib/recommendations';
 
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];

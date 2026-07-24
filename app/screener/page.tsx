@@ -56,7 +56,7 @@ import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/
 import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
-import { publishRecommendations, clearRecommendations } from '@/lib/recommendations/RecommendationService';
+import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
