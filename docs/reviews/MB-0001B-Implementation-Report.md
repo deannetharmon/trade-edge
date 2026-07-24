@@ -3,7 +3,23 @@
 **Ticket:** MB-0001B — Review Experience Foundation
 **Engineer:** Dane (Lead Engineer)
 **Branch:** `feature/mb-0001b-review-conductor-foundation` (created off `main` @ `818a79f`)
+**Foundation commit:** `4c3ef5f` — `feat(review-conductor): add Trader Commitment, Revalidation Engine, and Review Conductor foundations`
 **Scope executed:** Foundation-first, per Dean's approval of three scoping decisions prior to implementation (see `docs/design/MB-0001B-Review-Conductor-Foundation.md`, Section 1). The full page narrative refactor and the three Review UI concepts are explicitly deferred to a follow-up pass and were not started.
+
+## 0. Corrective Round (post-`4c3ef5f`)
+
+**Defect:** `MONITOR` commitments were always-silent by construction, with no way for a trader to schedule a re-review. This conflated "no re-review needed, ever" (a legitimate trader decision) with "monitoring, will decide later" (which needs an actual re-review trigger) into one permanently-silent behavior.
+
+**Fix:** Added an explicit `reviewAfter: string | null` field to `MonitorCommitment` (`lib/trader-commitments/types.ts`) rather than introducing a new commitment kind:
+
+- `reviewAfter: null` — indefinite acknowledgment. Stays silent forever, by explicit trader choice. This is the default when a caller doesn't supply the field, so no existing call site's behavior changed.
+- `reviewAfter: <ISO date>` — active monitoring with an explicit re-review condition. `monitorRule` (`lib/revalidation/rules.ts`) now compares `context.now` against `reviewAfter` and fires a `RevalidationChange` once the date is reached or passed, using the same silent-until-met contract `holdUntilDteRule` already established.
+
+`isValidCommitment` (`lib/trader-commitments/store.ts`) was extended to validate `reviewAfter` during store parsing (`null` or `string`; anything else drops that one entry, never crashes).
+
+**Files touched in this round:** `lib/trader-commitments/types.ts`, `lib/trader-commitments/store.ts`, `lib/revalidation/rules.ts`, `lib/trader-commitments/__tests__/store.test.ts`, `lib/revalidation/__tests__/revalidateCommitment.test.ts`, `docs/design/MB-0001B-Review-Conductor-Foundation.md`, this report. No other file changed — page integration, persistence, ranking, and all other existing application behavior are untouched, per the corrective-round instructions.
+
+**New tests:** 7 (2 in `store.test.ts` covering the `reviewAfter` default/explicit-value construction and defensive parsing of a malformed `reviewAfter`; 5 in `revalidateCommitment.test.ts` covering silent-before-date, fires-at-date, fires-after-date, re-entry on a fresh call once the condition is met, and independence from objective/position context). Full targeted suite: **405/405 passing** across 29 files (up from 398/398 at `4c3ef5f`). `tsc --noEmit` clean. `git diff --check` clean.
 
 ## 1. Repository Verification
 
@@ -85,4 +101,4 @@ Per the approved "foundation first" scoping, none of the following are regressio
 
 ## 7. Commit
 
-Pending — final validation above was run before staging. Commit and push follow this report, on `feature/mb-0001b-review-conductor-foundation`, targeting `origin`.
+Foundation: `4c3ef5f`. Corrective round: pending — final validation above was run before staging. Commit and push follow this report, on `feature/mb-0001b-review-conductor-foundation`, targeting `origin`, submitted for Quinn's final approval.

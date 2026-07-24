@@ -15,12 +15,21 @@
 //                        already uses to route objectives into the
 //                        Earnings Review bucket. No new earnings-proximity
 //                        computation is introduced here.
-//   MONITOR           -- real rule, always silent. A Monitor commitment has
-//                        no target condition to compare against by
-//                        definition (see lib/todaysPriorities/dashboard.ts's
-//                        own "Monitor is explicitly requires no action"
-//                        doc) -- always returning null here is the correct,
-//                        intentional behavior, not an unfinished rule.
+//   MONITOR           -- real rule, conditional. A Monitor commitment carries
+//                        an explicit `reviewAfter` field (see
+//                        lib/trader-commitments/types.ts's MonitorCommitment)
+//                        that separates two distinct, equally intentional
+//                        states: `reviewAfter: null` is indefinite
+//                        acknowledgment (the trader decided no re-review
+//                        date applies) and stays silent forever, by design;
+//                        a set `reviewAfter` date is active monitoring with
+//                        an explicit re-review condition, and fires exactly
+//                        once RevalidationContext.now reaches or passes it.
+//                        This corrects the original foundation pass, which
+//                        made MONITOR always-silent regardless of trader
+//                        intent -- see
+//                        docs/design/MB-0001B-Review-Conductor-Foundation.md's
+//                        corrective-round addendum.
 //
 //   LET_THETA_WORK    -- NOT registered. A real rule would need a theta-
 //                        decay/time-value-captured signal this codebase
@@ -77,9 +86,20 @@ const waitForEarningsRule: RevalidationRule = (commitment: TraderCommitment, con
   };
 };
 
-// Always silent -- see module doc above for why this is intentional, not
-// unfinished.
-const monitorRule: RevalidationRule = (): RevalidationChange | null => null;
+// Silent when the commitment has no re-review date (indefinite
+// acknowledgment) or the date hasn't arrived yet; fires exactly once
+// `context.now` reaches or passes `reviewAfter`. See module doc above.
+const monitorRule: RevalidationRule = (commitment: TraderCommitment, context: RevalidationContext): RevalidationChange | null => {
+  if (commitment.kind !== 'MONITOR') return null;
+  if (commitment.reviewAfter === null) return null;
+  if (new Date(context.now).getTime() < new Date(commitment.reviewAfter).getTime()) return null;
+
+  return {
+    whatChanged: `${commitment.subject.label} has reached its scheduled re-review date (${commitment.reviewAfter}).`,
+    whyItMatters: 'You chose to monitor this without acting, but set a date to revisit that decision. That date has arrived.',
+    whyNow: `The re-review date you set (${commitment.reviewAfter}) is at or before today (${context.now}).`,
+  };
+};
 
 export const DEFAULT_REVALIDATION_RULES: RevalidationRuleRegistry = {
   HOLD_UNTIL_DTE: holdUntilDteRule,

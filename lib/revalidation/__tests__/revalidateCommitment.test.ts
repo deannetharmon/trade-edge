@@ -116,7 +116,7 @@ describe('revalidateCommitment: WAIT_FOR_EARNINGS', () => {
   });
 });
 
-describe('revalidateCommitment: MONITOR is always silent', () => {
+describe('revalidateCommitment: MONITOR indefinite acknowledgment (reviewAfter: null)', () => {
   it('never reports a change regardless of context, by design', () => {
     const commitment = createTraderCommitment({ kind: 'MONITOR', subject: SUBJECT }, NOW);
     const objective = makeObjective({
@@ -126,6 +126,69 @@ describe('revalidateCommitment: MONITOR is always silent', () => {
 
     expect(result.changed).toBe(false);
     expect(result.change).toBeNull();
+  });
+});
+
+describe('revalidateCommitment: MONITOR active monitoring with an explicit re-review condition', () => {
+  it('stays silent before the reviewAfter date arrives', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    const result = revalidateCommitment(commitment, emptyContext({ now: '2026-08-01T00:00:00.000Z' }));
+
+    expect(result.changed).toBe(false);
+    expect(result.change).toBeNull();
+  });
+
+  it('reports a re-review-due change once now reaches the reviewAfter date exactly', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    const result = revalidateCommitment(commitment, emptyContext({ now: '2026-08-15T00:00:00.000Z' }));
+
+    expect(result.changed).toBe(true);
+    expect(result.change?.whatChanged).toContain('re-review');
+    expect(result.change?.whyItMatters.length).toBeGreaterThan(0);
+    expect(result.change?.whyNow.length).toBeGreaterThan(0);
+  });
+
+  it('reports a re-review-due change once now has passed the reviewAfter date', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    const result = revalidateCommitment(commitment, emptyContext({ now: '2026-09-01T00:00:00.000Z' }));
+
+    expect(result.changed).toBe(true);
+  });
+
+  it('re-entry: re-review fires again on a fresh call once the date has passed, matching the "condition met" contract other rules already provide', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+
+    const before = revalidateCommitment(commitment, emptyContext({ now: '2026-08-01T00:00:00.000Z' }));
+    const atCondition = revalidateCommitment(commitment, emptyContext({ now: '2026-08-15T00:00:00.000Z' }));
+
+    expect(before.changed).toBe(false);
+    expect(atCondition.changed).toBe(true);
+  });
+
+  it('is unaffected by objective/position context -- the re-review condition is date-only', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    const objective = makeObjective({ reviewTriggers: [] });
+    const result = revalidateCommitment(
+      commitment,
+      emptyContext({ now: '2026-09-01T00:00:00.000Z', objective, position: { dte: 5 } }),
+    );
+
+    expect(result.changed).toBe(true);
   });
 });
 

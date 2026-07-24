@@ -32,7 +32,11 @@ export function createTraderCommitmentId(now: Date = new Date()): string {
 
 export type CreateTraderCommitmentInput =
   | { kind: 'HOLD_UNTIL_DTE'; subject: TraderCommitmentSubject; targetDte: number; note?: string | null }
-  | { kind: 'MONITOR'; subject: TraderCommitmentSubject; note?: string | null }
+  // reviewAfter is optional and defaults to null (indefinite acknowledgment)
+  // -- a caller that doesn't set a re-review date is making an honest choice
+  // not to, not leaving the field unfinished. See types.ts's module doc on
+  // MonitorCommitment.
+  | { kind: 'MONITOR'; subject: TraderCommitmentSubject; reviewAfter?: string | null; note?: string | null }
   | { kind: 'LET_THETA_WORK'; subject: TraderCommitmentSubject; note?: string | null }
   | { kind: 'WAIT_FOR_EARNINGS'; subject: TraderCommitmentSubject; note?: string | null }
   | { kind: 'GTC_WORKING'; subject: TraderCommitmentSubject; orderId: string | null; note?: string | null };
@@ -53,7 +57,7 @@ export function createTraderCommitment(input: CreateTraderCommitmentInput, now: 
     case 'HOLD_UNTIL_DTE':
       return { ...base, kind: 'HOLD_UNTIL_DTE', targetDte: input.targetDte } satisfies HoldUntilDteCommitment;
     case 'MONITOR':
-      return { ...base, kind: 'MONITOR' } satisfies MonitorCommitment;
+      return { ...base, kind: 'MONITOR', reviewAfter: input.reviewAfter ?? null } satisfies MonitorCommitment;
     case 'LET_THETA_WORK':
       return { ...base, kind: 'LET_THETA_WORK' } satisfies LetThetaWorkCommitment;
     case 'WAIT_FOR_EARNINGS':
@@ -125,6 +129,7 @@ function isValidCommitment(value: unknown): value is TraderCommitment {
     case 'HOLD_UNTIL_DTE':
       return typeof value.targetDte === 'number' && Number.isFinite(value.targetDte);
     case 'MONITOR':
+      return value.reviewAfter === null || typeof value.reviewAfter === 'string';
     case 'LET_THETA_WORK':
     case 'WAIT_FOR_EARNINGS':
       return true;

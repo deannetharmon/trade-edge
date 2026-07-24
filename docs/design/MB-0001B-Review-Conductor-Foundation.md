@@ -82,9 +82,22 @@ One entry point, `revalidateCommitment(commitment, context, rules?) → Revalida
 |---|---|---|
 | `HOLD_UNTIL_DTE` | Real | `context.position.dte` reaching/passing `commitment.targetDte` — already-computed DTE, same field `TodaysPrioritiesPositionInput` carries. |
 | `WAIT_FOR_EARNINGS` | Real | `objective.reviewTriggers` carrying an `'earnings'` trigger — the same existing signal `lib/todaysPriorities/dashboard.ts`'s `hasTrigger()` already uses. |
-| `MONITOR` | Real, always silent | A Monitor commitment has no target condition by definition — always returning `null` is correct, not unfinished. |
+| `MONITOR` | Real, conditional (see corrective-round addendum below) | `commitment.reviewAfter` compared against `context.now`. `null` means indefinite acknowledgment (silent forever, by trader choice); a set date fires once reached. |
 | `LET_THETA_WORK` | **Not registered** | Would need a theta-decay/time-value-captured signal this codebase does not compute anywhere today (Remaining Opportunity is the closest candidate; wiring it in was not in this pass's scope). |
 | `GTC_WORKING` | **Not registered** | Would need live broker order-status data — new market-data acquisition, explicitly out of scope. |
+
+### Corrective-round addendum: MONITOR re-review condition
+
+The original foundation pass made `MONITOR` always-silent, reasoning that "a Monitor commitment has no target condition by definition." That conflated two different trader intents into one always-silent behavior: a trader who has genuinely decided "no re-review needed, ever" and a trader who wants to be reminded to look again after some period. Only the first of those should ever be permanently silent.
+
+The fix adds an explicit field rather than a new commitment kind, keeping the existing `MONITOR` kind and its call sites intact: `MonitorCommitment.reviewAfter: string | null` (`lib/trader-commitments/types.ts`).
+
+- `reviewAfter: null` — **indefinite acknowledgment**. The trader explicitly chose not to set a re-review date. `monitorRule` stays silent forever for this commitment, same as before. This remains the default when a caller doesn't supply `reviewAfter` (`createTraderCommitment`'s `MONITOR` branch defaults it to `null`, matching this codebase's "absent input becomes an honest default, never a fabricated value" convention) — so no existing caller's behavior changes unless it opts in.
+- `reviewAfter: <ISO date>` — **active monitoring with an explicit re-review condition**. `monitorRule` (`lib/revalidation/rules.ts`) compares `context.now` against `reviewAfter` and fires a `RevalidationChange` once `now` reaches or passes it, using the same "silent until the condition is met, then fires" contract `holdUntilDteRule` already established for `HOLD_UNTIL_DTE`.
+
+`isValidCommitment` in `lib/trader-commitments/store.ts` was extended to validate `reviewAfter` (`null` or `string`) for `MONITOR` entries during store parsing, so a corrupted or malformed `reviewAfter` degrades that one entry to "dropped," not a crash — consistent with every other field in this store.
+
+No other commitment kind, no ranking, no persistence, no page integration, and no existing application behavior changed in this round.
 
 `RevalidationRuleRegistry` is `Partial<Record<TraderCommitmentKind, RevalidationRule>>` precisely so an unregistered kind is a typed, visible fact (absent key), not a placeholder function pretending to check something.
 

@@ -53,6 +53,19 @@ export interface HoldUntilDteCommitment extends BaseTraderCommitment {
 
 export interface MonitorCommitment extends BaseTraderCommitment {
   kind: 'MONITOR';
+  // Corrective round (post-MB-0001B foundation): MONITOR no longer implies
+  // permanent silence by construction. `reviewAfter` is an explicit,
+  // trader-set re-review condition -- an ISO date string meaning "check
+  // this again once this date arrives" -- checked by
+  // lib/revalidation/rules.ts's monitorRule against RevalidationContext.now.
+  //
+  // `null` is a distinct, equally explicit state: indefinite acknowledgment.
+  // The trader looked at this and decided no re-review date applies at all
+  // (as opposed to simply forgetting to set one) -- honest permanent
+  // silence, not an unfinished field. This mirrors this codebase's existing
+  // "null is an honest absence, never a stand-in for 'not implemented'"
+  // convention (see `note` and GtcWorkingCommitment.orderId above).
+  reviewAfter: string | null;
 }
 
 export interface LetThetaWorkCommitment extends BaseTraderCommitment {

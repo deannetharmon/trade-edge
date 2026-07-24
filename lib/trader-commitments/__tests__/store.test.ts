@@ -44,10 +44,25 @@ describe('createTraderCommitment', () => {
     }
   });
 
-  it('builds a MONITOR commitment against a portfolio-level subject', () => {
+  it('builds a MONITOR commitment against a portfolio-level subject, defaulting to indefinite acknowledgment (reviewAfter: null)', () => {
     const commitment = createTraderCommitment({ kind: 'MONITOR', subject: PORTFOLIO_SUBJECT }, NOW);
     expect(commitment.kind).toBe('MONITOR');
     expect(commitment.subject).toEqual(PORTFOLIO_SUBJECT);
+    if (commitment.kind === 'MONITOR') {
+      expect(commitment.reviewAfter).toBeNull();
+    }
+  });
+
+  it('builds a MONITOR commitment with an explicit re-review condition when supplied', () => {
+    const commitment = createTraderCommitment(
+      { kind: 'MONITOR', subject: PORTFOLIO_SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    if (commitment.kind === 'MONITOR') {
+      expect(commitment.reviewAfter).toBe('2026-08-15T00:00:00.000Z');
+    } else {
+      throw new Error('expected a MONITOR commitment');
+    }
   });
 
   it('builds a LET_THETA_WORK commitment', () => {
@@ -170,5 +185,22 @@ describe('parseTraderCommitmentStore', () => {
     const parsed = parseTraderCommitmentStore(raw);
 
     expect(Object.keys(parsed)).toEqual([good.id]);
+  });
+
+  it('accepts a MONITOR entry with a string reviewAfter and with a null reviewAfter, but drops one with a malformed reviewAfter', () => {
+    const indefinite = createTraderCommitment({ kind: 'MONITOR', subject: POSITION_SUBJECT }, NOW);
+    const scheduled = createTraderCommitment(
+      { kind: 'MONITOR', subject: POSITION_SUBJECT, reviewAfter: '2026-08-15T00:00:00.000Z' },
+      NOW,
+    );
+    const raw = JSON.stringify({
+      [indefinite.id]: indefinite,
+      [scheduled.id]: scheduled,
+      bad_review_after: { ...scheduled, id: 'bad_review_after', reviewAfter: 12345 },
+    });
+
+    const parsed = parseTraderCommitmentStore(raw);
+
+    expect(Object.keys(parsed).sort()).toEqual([indefinite.id, scheduled.id].sort());
   });
 });
