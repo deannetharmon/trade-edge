@@ -23,6 +23,14 @@
 // DecisionAnalysis[] feed exists anywhere in the app yet (see
 // lib/command-center/buildOpportunityRecommendations.ts's doc), so the Best
 // Opportunity card always renders its real, honest empty state today.
+//
+// PT-0002B: this page now reads the global PortfolioMode
+// (lib/portfolio-mode) and renders the LIVE composition below only when
+// mode is resolved and confirmed LIVE. See
+// docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2. PAPER
+// rendering is deliberately NOT built here (§2.2 item 5 of that doc) --
+// selecting PAPER shows a placeholder pointing at /paper-trading instead of
+// forcing PT-0001's ledger shape through this LIVE-only composition.
 
 'use client';
 
@@ -30,6 +38,8 @@ import { useEffect, useMemo } from 'react';
 import { THEMES, getSavedTheme } from '@/lib/theme';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
+import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { buildCommandCenterViewModel } from '@/lib/command-center';
 import { buildOpportunityRecommendations } from '@/lib/command-center/buildOpportunityRecommendations';
 import { CommandCenter } from '@/components/command-center/CommandCenter';
@@ -39,6 +49,7 @@ export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
   const { tasks } = useTaskManager();
   const { composition, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
+  const portfolioMode = usePortfolioMode();
 
   // Refresh on every visit to this page, same "fresh on every visit"
   // behavior app/portfolio/page.tsx has always had -- this page does not
@@ -70,6 +81,10 @@ export default function DashboardPage() {
       }),
     [composition, opportunityRecommendations, tasks, lastRefresh],
   );
+
+  if (!(portfolioMode.status === 'ready' && portfolioMode.mode === 'LIVE')) {
+    return <PortfolioModeGateNotice portfolioMode={portfolioMode} th={th} screenName="Dashboard" />;
+  }
 
   return <CommandCenter viewModel={viewModel} th={th} />;
 }

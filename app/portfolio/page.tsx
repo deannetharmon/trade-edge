@@ -131,6 +131,17 @@ import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReview
 import { DailyBriefingCard } from '@/features/portfolio/dailyBriefing/DailyBriefingCard';
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+// PT-0002B: this page now reads the global PortfolioMode and refuses to
+// render LIVE portfolio content unless it is resolved and confirmed LIVE
+// (see docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2). The
+// three broker-submission entry points below (BatchConfirmModal.submitAll,
+// SetStopLossButton.submit, PortfolioPage.cancelPendingOrder/
+// replacePendingOrder) each also call usePortfolioMode() directly and guard
+// with assertLiveContextReady -- defense in depth, not reliance on the
+// render-level gate alone (§3.3).
+import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
+import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
+import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import type {
   Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent,
 } from '@/lib/portfolio-data/types';
@@ -2877,6 +2888,11 @@ function BatchConfirmModal({
   const [gtcConfirmed, setGtcConfirmed] = useState<Set<string>>(new Set());
   const [refreshingQuote, setRefreshingQuote] = useState<Set<string>>(new Set());
 
+  // PT-0002B: guard call site for this component's real broker submissions
+  // (cancelOrder/ttValidateOrder/ttPost/ttPostComplex, all inside submitAll
+  // below). See the design doc §3.3.
+  const portfolioMode = usePortfolioMode();
+
   const marketStatus = getMarketStatus();
 
   // Re-fetch a single item's live quote on demand — the batch is priced once
@@ -3212,6 +3228,18 @@ function BatchConfirmModal({
   const submitAll = async () => {
     if (needsGtcConfirmation.length > 0 && !allGtcConfirmed) {
       setErrorMsg('You must confirm replacing the existing GTC orders before submitting.');
+      return;
+    }
+
+    // PT-0002B: the single guard for every real broker-submission call this
+    // function reaches (cancelOrder/ttValidateOrder/ttPost/ttPostComplex,
+    // both the simple-close and roll/OTOCO paths below) -- see §3.3. Dry-run
+    // submissions still exercise TastyTrade's validate-only endpoint, so
+    // this check applies regardless of `dryRun`.
+    try {
+      assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'submit batch order(s)');
+    } catch (e: any) {
+      setErrorMsg(e.message ?? 'Portfolio mode does not allow live order submission right now.');
       return;
     }
 
@@ -4016,7 +4044,12 @@ function BatchConfirmModal({
                 ) : (
                   <button onClick={submitAll} disabled={activeItems.length === 0}
                     className={`flex-1 py-3 text-white rounded-xl text-xs font-bold tracking-widest transition-colors ${dryRun ? 'bg-amber-600 hover:bg-amber-500' : 'ac-btn-solid'}`}>
-                    {dryRun ? `⚗ DRY RUN — Simulate ${activeItems.length} Order${activeItems.length !== 1 ? 's' : ''}` : `SUBMIT ${activeItems.length} ORDER${activeItems.length !== 1 ? 'S' : ''}`}
+                    {dryRun
+                      ? `⚗ DRY RUN — Simulate ${activeItems.length} Order${activeItems.length !== 1 ? 's' : ''}`
+                      : /* PT-0002B, Mandatory Invariant 6: the actual mode is part of the
+                         * confirmation copy on the one real order-submission button in this
+                         * modal, not just the global indicator. */
+                        `SUBMIT ${activeItems.length} ORDER${activeItems.length !== 1 ? 'S' : ''} — ${portfolioMode.mode ?? 'MODE UNRESOLVED'}`}
                   </button>
                 )}
                 <button onClick={onClose} className={`px-4 py-3 border ${th.border} ${th.textFaint} rounded-xl text-xs font-medium hover:border-white/30 transition-colors`}>
@@ -5761,6 +5794,8 @@ function saveLastStopMultiple(strategy: string, multiple: number) {
 }
 
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
+  const portfolioMode = usePortfolioMode();
+
   // ── Price bounds ──────────────────────────────────────────────────────────
   // All valid GTC and stop prices must respect these hard bounds derived from
   // live spread value and credit received. These are enforced everywhere:
@@ -6020,6 +6055,21 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const submit = async () => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'set stop-loss order',
+      );
+    } catch (e: any) {
+      setResult('error');
+      setResultMsg(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE stop-order submission.',
+      );
+      return;
+    }
+
     const stopTrigger = parseFloat(stopPrice);
     const gtcLimit    = parseFloat(gtcPrice);
     let preflightContext = '';
@@ -8640,6 +8690,8 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
 }
 
 export default function PortfolioPage() {
+  const portfolioMode = usePortfolioMode();
+
   // PI-0004C: 'priorities' added as a Portfolio subpage alongside the
   // existing 'positions'/'balances' tabs -- Today's Priorities no longer
   // renders inline above Positions (see the sub-tab bar and its render
@@ -8844,6 +8896,20 @@ export default function PortfolioPage() {
   // id, never the trigger/nested sub-order ids) -- so cancelling one
   // only ever needs the complex-orders endpoint, no branching required.
   const cancelPendingOrder = async (order: PendingOrder) => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'cancel pending order',
+      );
+    } catch (e: any) {
+      setError(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE order cancellation.',
+      );
+      return;
+    }
+
     setCancellingOrderIds(prev => new Set(prev).add(order.id));
     setError('');
     try {
@@ -8875,6 +8941,20 @@ export default function PortfolioPage() {
   // callback (which itself only calls `deps.postOrder` via
   // `submitPendingOrderReplacementIfSafe`/`submitPendingOrderRestoreIfSafe`).
   const replacePendingOrder = async (order: PendingOrder, newPrice: number) => {
+    try {
+      assertLiveContextReady(
+        portfolioMode.status,
+        portfolioMode.mode,
+        'replace pending order',
+      );
+    } catch (e: any) {
+      setError(
+        e.message
+          ?? 'Portfolio mode does not allow LIVE order replacement.',
+      );
+      return;
+    }
+
     setReplacingOrderIds(prev => new Set(prev).add(order.id));
     setError('');
 
@@ -8961,6 +9041,22 @@ export default function PortfolioPage() {
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
+
+  // PT-0002B: fail closed at the render boundary. LIVE account
+  // content is never displayed while mode is unresolved, invalid,
+  // or explicitly PAPER.
+  if (!(
+    portfolioMode.status === 'ready'
+    && portfolioMode.mode === 'LIVE'
+  )) {
+    return (
+      <PortfolioModeGateNotice
+        portfolioMode={portfolioMode}
+        th={th}
+        screenName="Portfolio"
+      />
+    );
+  }
 
   return (
     <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
