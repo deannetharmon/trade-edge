@@ -171,7 +171,7 @@ Multiple commands may be grouped only when they form one atomic, low-risk operat
 
 ## Implementation Efficiency Standards
 
-Claude implementation prompts shall require efficient use of the active environment.
+Lead Engineer implementation prompts shall require efficient use of the active environment.
 
 Unless a sprint explicitly requires otherwise:
 
