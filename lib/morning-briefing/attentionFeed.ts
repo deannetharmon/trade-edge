@@ -11,19 +11,34 @@
 //   - calculatePriorityScore()              (via buildTodaysPrioritiesDashboard)
 //   - buildTodaysPrioritiesDashboard()      (the input this module consumes)
 //   - buildRecommendationExplanation()      (reused verbatim, see below)
-//   - selectTopPriority()                   (left untouched; see the parity
-//                                             test in __tests__ for why
-//                                             topAttentionItem's own,
-//                                             CES-specified tie-break order
-//                                             does not need to reproduce it
-//                                             move-for-move -- only agree on
-//                                             which objective is on top).
+//   - selectTopPriority()                   (left completely untouched --
+//                                             topAttentionItem below is
+//                                             resolved FROM its answer, not
+//                                             re-derived independently; see
+//                                             the corrective-round note
+//                                             above buildAttentionFeed()).
 //
-// This module only flattens, labels-by-origin, and globally orders what
-// those producers already computed.
+// This module only flattens, labels-by-origin, deduplicates, and globally
+// orders what those producers already computed.
+//
+// Corrective round (Quinn's review, docs/reviews/MB-0001A-Quinn-Architecture-Review.md):
+// the initial version flattened every source bucket independently, which
+// (a) could surface the same PortfolioObjective more than once, since
+// buildTodaysPrioritiesDashboard() intentionally lets one objective belong
+// to more than one bucket, and (b) computed topAttentionItem from this
+// module's own orderedActionable head, which is not guaranteed to agree
+// with the existing selectTopPriority() when different-bucket heads tie at
+// the same score (the two functions' tie-break rules are allowed to
+// differ). Both are corrected below: buildAttentionFeed() now deduplicates
+// by objective.id (highest source-precedence occurrence wins, every other
+// occurrence dropped, not merged or re-scored) before building
+// immediate/watch/orderedActionable, and topAttentionItem is resolved from
+// selectTopPriority(dashboard)'s own answer, looked up by objective id in
+// the already-deduplicated feed -- never independently re-derived.
 
 import {
   buildRecommendationExplanation,
+  selectTopPriority,
   type PrioritizedObjective,
   type RecommendationDriver,
   type TodaysPrioritiesMonitorEntry,
@@ -37,10 +52,14 @@ import type {
 } from './types';
 
 // CES section 6 / handoff "Deterministic global order": lower index sorts
-// first when scores tie. MONITOR is included only so the map stays total
-// over every AttentionSource; MONITOR-banded items never enter
-// orderedActionable (they are not actionable -- see buildHealthyItem below),
-// so this value is never actually consulted by the comparator.
+// first when scores tie in compareActionable(). Quinn's corrective review
+// reuses this exact same ordering as the deduplication precedence in
+// buildAttentionFeed() below -- one objective appearing in multiple source
+// buckets keeps whichever bucket has the lowest index here. MONITOR is
+// included only so the map stays total over every AttentionSource;
+// MONITOR-banded items never enter orderedActionable or the dedup pass
+// (they are not actionable -- see toHealthyItem below), so this value is
+// never actually consulted by either.
 const SOURCE_PRECEDENCE: Record<AttentionSource, number> = {
   IMMEDIATE_ACTION: 0,
   EARNINGS_REVIEW: 1,
@@ -50,6 +69,17 @@ const SOURCE_PRECEDENCE: Record<AttentionSource, number> = {
   CSP_OPPORTUNITY: 5,
   MONITOR: 6,
 };
+
+// The six actionable source buckets, walked in source-precedence order --
+// both for deduplication (buildAttentionFeed() keeps the first, i.e.
+// highest-precedence, occurrence of each objective.id) and as each item's
+// band. Declared once here so bucket set/order cannot drift between the
+// dedup pass and SOURCE_PRECEDENCE above.
+interface ActionableSourceBucket {
+  source: AttentionSource;
+  band: 'IMMEDIATE' | 'WATCH';
+  entries: PrioritizedObjective[];
+}
 
 // CES section 7 / "Monitor" mapping rule: Monitor is explicitly "requires no
 // action" (see lib/todaysPriorities/dashboard.ts's own module doc). This is
@@ -181,20 +211,52 @@ function compareActionable(a: AttentionItem, b: AttentionItem): number {
 export function buildAttentionFeed(input: BuildAttentionFeedInput): AttentionFeed {
   const { dashboard, generatedAt } = input;
 
-  const immediate = dashboard.immediateAction.map((entry) => toActionableItem(entry, 'IMMEDIATE', 'IMMEDIATE_ACTION'));
-
-  const watch = [
-    ...dashboard.reviewToday.earningsReviews.map((entry) => toActionableItem(entry, 'WATCH', 'EARNINGS_REVIEW')),
-    ...dashboard.reviewToday.expiringPositions.map((entry) => toActionableItem(entry, 'WATCH', 'EXPIRING_POSITION')),
-    ...dashboard.reviewToday.mediumPriority.map((entry) => toActionableItem(entry, 'WATCH', 'MEDIUM_PRIORITY')),
-    ...dashboard.opportunities.rollOpportunities.map((entry) => toActionableItem(entry, 'WATCH', 'ROLL_OPPORTUNITY')),
-    ...dashboard.opportunities.cspOpportunities.map((entry) => toActionableItem(entry, 'WATCH', 'CSP_OPPORTUNITY')),
+  const buckets: ActionableSourceBucket[] = [
+    { source: 'IMMEDIATE_ACTION', band: 'IMMEDIATE', entries: dashboard.immediateAction },
+    { source: 'EARNINGS_REVIEW', band: 'WATCH', entries: dashboard.reviewToday.earningsReviews },
+    { source: 'EXPIRING_POSITION', band: 'WATCH', entries: dashboard.reviewToday.expiringPositions },
+    { source: 'MEDIUM_PRIORITY', band: 'WATCH', entries: dashboard.reviewToday.mediumPriority },
+    { source: 'ROLL_OPPORTUNITY', band: 'WATCH', entries: dashboard.opportunities.rollOpportunities },
+    { source: 'CSP_OPPORTUNITY', band: 'WATCH', entries: dashboard.opportunities.cspOpportunities },
   ];
 
+  // Finding A (duplicate logical attention items): walk buckets in
+  // source-precedence order and keep only the first occurrence of each
+  // objective.id. buildTodaysPrioritiesDashboard() intentionally allows one
+  // objective to belong to more than one bucket (e.g. a CRITICAL
+  // DEPLOY_IDLE_CASH objective is both Immediate Action and a CSP
+  // Opportunity) -- that is correct for its own per-section presentation,
+  // but a unified attention feed must answer "what deserves attention" once
+  // per decision, not once per dashboard taxonomy membership. Every
+  // lower-precedence duplicate is dropped entirely; identity, score, tier,
+  // reasons, and explanation of the retained occurrence are unchanged.
+  const dedupedById = new Map<string, AttentionItem>();
+  for (const bucket of buckets) {
+    for (const entry of bucket.entries) {
+      const id = entry.objective.id;
+      if (dedupedById.has(id)) continue;
+      dedupedById.set(id, toActionableItem(entry, bucket.band, bucket.source));
+    }
+  }
+
+  const deduped = Array.from(dedupedById.values());
+  const immediate = deduped.filter((item) => item.band === 'IMMEDIATE');
+  const watch = deduped.filter((item) => item.band === 'WATCH');
   const healthy = dashboard.monitor.map(toHealthyItem);
 
-  const orderedActionable = [...immediate, ...watch].sort(compareActionable);
-  const topAttentionItem = orderedActionable[0] ?? null;
+  const orderedActionable = [...deduped].sort(compareActionable);
+
+  // Finding B (top-item parity): do not re-derive the top item from this
+  // module's own ordering. selectTopPriority() is the existing, untouched,
+  // canonical selector for "what's the single most urgent thing" -- its
+  // answer is authoritative here by construction, resolved into this
+  // already-deduplicated feed by objective id. Every objective
+  // selectTopPriority() can return comes from one of the six buckets above,
+  // so the lookup below always succeeds when it returns non-null; the
+  // fallback to null is defensive only, never expected to trigger for
+  // structurally valid input.
+  const topPriority = selectTopPriority(dashboard);
+  const topAttentionItem = topPriority ? (dedupedById.get(topPriority.objective.id) ?? null) : null;
 
   return {
     generatedAt,

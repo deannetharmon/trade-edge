@@ -10,6 +10,13 @@
 // build real PortfolioObjective/PrioritizedObjective/TodaysPrioritiesDashboard
 // shapes directly (no as any casts), following the same pattern as
 // lib/todaysPriorities/__tests__/explanation.test.ts.
+//
+// Corrective round (docs/reviews/MB-0001A-Quinn-Architecture-Review.md):
+// added "duplicate objective deduplication (Finding A)" (two- and
+// three-bucket overlap, field-preservation on the retained occurrence) and
+// "topAttentionItem tie-case parity (Finding B)" (every cross-bucket
+// precedence conflict between this module's source-precedence order and
+// selectTopPriority()'s own iteration order, plus the null case).
 
 import { describe, expect, it } from 'vitest';
 import { buildAttentionFeed } from '../attentionFeed';
@@ -198,7 +205,17 @@ describe('buildAttentionFeed: WATCH mapping', () => {
     });
   });
 
-  it('surfaces the same objective under two sources when Today\'s Priorities itself already does (e.g. a DEPLOY_IDLE_CASH objective in both mediumPriority and cspOpportunities) -- this module flattens honestly, it does not deduplicate across sections', () => {
+});
+
+// Quinn's corrective review, Finding A: buildTodaysPrioritiesDashboard()
+// intentionally lets the same PortfolioObjective belong to more than one
+// bucket (e.g. a DEPLOY_IDLE_CASH objective in both mediumPriority and
+// cspOpportunities -- see lib/todaysPriorities/__tests__/dashboard.test.ts's
+// own "Also still appears in Review Today" test for the precedent). The
+// unified attention feed must not surface that objective twice or inflate
+// counts by bucket membership.
+describe('buildAttentionFeed: duplicate objective deduplication (Finding A)', () => {
+  it('produces exactly one AttentionItem when the same objective appears in two source buckets, keeping the higher-precedence source', () => {
     const shared = makePrioritized({ objective: makeObjective({ id: 'obj_shared', type: 'DEPLOY_IDLE_CASH' }) });
 
     const feed = buildAttentionFeed({
@@ -219,9 +236,94 @@ describe('buildAttentionFeed: WATCH mapping', () => {
       generatedAt: GENERATED_AT,
     });
 
-    expect(feed.watch).toHaveLength(2);
-    expect(feed.watch.map((item) => item.id)).toEqual(['obj_shared', 'obj_shared']);
-    expect(feed.watch.map((item) => item.source).sort()).toEqual(['CSP_OPPORTUNITY', 'MEDIUM_PRIORITY']);
+    // MEDIUM_PRIORITY (index 3) precedes CSP_OPPORTUNITY (index 5).
+    expect(feed.watch).toHaveLength(1);
+    expect(feed.watch[0].id).toBe('obj_shared');
+    expect(feed.watch[0].source).toBe('MEDIUM_PRIORITY');
+    expect(feed.orderedActionable).toHaveLength(1);
+    expect(feed.counts).toEqual({ immediate: 0, watch: 1, healthy: 0, actionable: 1 });
+  });
+
+  it('produces exactly one AttentionItem when the same objective appears in three source buckets, keeping the highest-precedence source', () => {
+    // A single objective that is simultaneously a plain medium-priority
+    // review item (no earnings/dte trigger), a DEPLOY_IDLE_CASH CSP
+    // opportunity, and roll-flagged via managementIntent -- three
+    // independent, non-exclusive classifications the existing dashboard
+    // bucketing logic can all apply to one objective at once.
+    const shared = makePrioritized({
+      objective: makeObjective({
+        id: 'obj_triple',
+        type: 'DEPLOY_IDLE_CASH',
+        managementIntent: {
+          intent: 'ROLL_POSITION',
+          label: 'Roll Position',
+          reasons: [],
+          alternatives: [],
+          candidates: [],
+          winnerScore: 10,
+          runnerUpIntent: null,
+          runnerUpScore: 0,
+          margin: 10,
+          confidenceTier: 'Low',
+        },
+      }),
+    });
+
+    const feed = buildAttentionFeed({
+      dashboard: makeDashboard({
+        reviewToday: {
+          mediumPriority: [shared],
+          earningsReviews: [],
+          expiringPositions: [],
+          needsFollowUp: [],
+        },
+        opportunities: {
+          cspOpportunities: [shared],
+          rollOpportunities: [shared],
+          coveredCallOpportunities: [],
+          screenerCandidatesAvailable: false,
+        },
+      }),
+      generatedAt: GENERATED_AT,
+    });
+
+    // MEDIUM_PRIORITY (index 3) precedes both ROLL_OPPORTUNITY (4) and
+    // CSP_OPPORTUNITY (5).
+    expect(feed.watch).toHaveLength(1);
+    expect(feed.watch[0].id).toBe('obj_triple');
+    expect(feed.watch[0].source).toBe('MEDIUM_PRIORITY');
+    expect(feed.orderedActionable).toHaveLength(1);
+    expect(feed.counts).toEqual({ immediate: 0, watch: 1, healthy: 0, actionable: 1 });
+  });
+
+  it('preserves identity, score, tier, reasons, and explanation of the retained occurrence unchanged', () => {
+    const shared = makePrioritized({
+      objective: makeObjective({ id: 'obj_shared_fields', type: 'DEPLOY_IDLE_CASH' }),
+      score: 77,
+      tier: 'High',
+      reasons: ['Some specific reason'],
+    });
+    const expectedExplanation = buildRecommendationExplanation(shared);
+
+    const feed = buildAttentionFeed({
+      dashboard: makeDashboard({
+        reviewToday: { mediumPriority: [shared], earningsReviews: [], expiringPositions: [], needsFollowUp: [] },
+        opportunities: {
+          cspOpportunities: [shared],
+          rollOpportunities: [],
+          coveredCallOpportunities: [],
+          screenerCandidatesAvailable: false,
+        },
+      }),
+      generatedAt: GENERATED_AT,
+    });
+
+    const [item] = feed.watch;
+    expect(item.score).toBe(77);
+    expect(item.tier).toBe('High');
+    expect(item.reasons).toEqual(['Some specific reason']);
+    expect(item.objective?.id).toBe('obj_shared_fields');
+    expect(item.explanation?.confidenceScore).toBe(expectedExplanation.confidence.score);
   });
 });
 
@@ -358,6 +460,90 @@ describe('buildAttentionFeed: topAttentionItem parity with selectTopPriority()',
 
     expect(expected?.objective.id).toBe('obj_strong_medium');
     expect(feed.topAttentionItem?.id).toBe(expected?.objective.id);
+  });
+});
+
+// Quinn's corrective review, Finding B: selectTopPriority()'s own
+// first-wins-on-tie candidate order (immediateAction, mediumPriority,
+// earningsReviews, expiringPositions, cspOpportunities, rollOpportunities)
+// differs from the CES's orderedActionable source-precedence order
+// (IMMEDIATE_ACTION, EARNINGS_REVIEW, EXPIRING_POSITION, MEDIUM_PRIORITY,
+// ROLL_OPPORTUNITY, CSP_OPPORTUNITY) in three pairwise relative orderings.
+// Each is tested here at an exact score tie between only those two buckets,
+// proving topAttentionItem now always agrees with selectTopPriority() by
+// construction (resolved from its answer), not merely when the two
+// orderings happen to coincide.
+describe('buildAttentionFeed: topAttentionItem tie-case parity (Finding B)', () => {
+  it('mediumPriority vs. earningsReviews tie: agrees with selectTopPriority (picks mediumPriority)', () => {
+    const medium = makePrioritized({ objective: makeObjective({ id: 'obj_medium' }), score: 70 });
+    const earnings = makePrioritized({ objective: makeObjective({ id: 'obj_earnings' }), score: 70 });
+
+    const dashboard = makeDashboard({
+      reviewToday: { mediumPriority: [medium], earningsReviews: [earnings], expiringPositions: [], needsFollowUp: [] },
+    });
+
+    const expected = selectTopPriority(dashboard);
+    const feed = buildAttentionFeed({ dashboard, generatedAt: GENERATED_AT });
+
+    expect(expected?.objective.id).toBe('obj_medium');
+    expect(feed.topAttentionItem?.id).toBe('obj_medium');
+    // This module's own orderedActionable display order is unaffected --
+    // EARNINGS_REVIEW still displays before MEDIUM_PRIORITY there, it is
+    // only topAttentionItem that must agree with selectTopPriority().
+    expect(feed.orderedActionable.map((item) => item.id)).toEqual(['obj_earnings', 'obj_medium']);
+  });
+
+  it('mediumPriority vs. expiringPositions tie: agrees with selectTopPriority (picks mediumPriority)', () => {
+    const medium = makePrioritized({ objective: makeObjective({ id: 'obj_medium' }), score: 70 });
+    const expiring = makePrioritized({ objective: makeObjective({ id: 'obj_expiring' }), score: 70 });
+
+    const dashboard = makeDashboard({
+      reviewToday: { mediumPriority: [medium], expiringPositions: [expiring], earningsReviews: [], needsFollowUp: [] },
+    });
+
+    const expected = selectTopPriority(dashboard);
+    const feed = buildAttentionFeed({ dashboard, generatedAt: GENERATED_AT });
+
+    expect(expected?.objective.id).toBe('obj_medium');
+    expect(feed.topAttentionItem?.id).toBe('obj_medium');
+    expect(feed.orderedActionable.map((item) => item.id)).toEqual(['obj_expiring', 'obj_medium']);
+  });
+
+  it('cspOpportunities vs. rollOpportunities tie: agrees with selectTopPriority (picks cspOpportunities)', () => {
+    const csp = makePrioritized({ objective: makeObjective({ id: 'obj_csp' }), score: 70 });
+    const roll = makePrioritized({ objective: makeObjective({ id: 'obj_roll' }), score: 70 });
+
+    const dashboard = makeDashboard({
+      opportunities: {
+        cspOpportunities: [csp],
+        rollOpportunities: [roll],
+        coveredCallOpportunities: [],
+        screenerCandidatesAvailable: false,
+      },
+    });
+
+    const expected = selectTopPriority(dashboard);
+    const feed = buildAttentionFeed({ dashboard, generatedAt: GENERATED_AT });
+
+    expect(expected?.objective.id).toBe('obj_csp');
+    expect(feed.topAttentionItem?.id).toBe('obj_csp');
+    expect(feed.orderedActionable.map((item) => item.id)).toEqual(['obj_roll', 'obj_csp']);
+  });
+
+  it('returns null only when selectTopPriority() returns null (Monitor/Covered-Call-only dashboard)', () => {
+    const dashboard = makeDashboard({
+      monitor: [makeMonitorEntry()],
+      opportunities: {
+        coveredCallOpportunities: [{ key: 'pos_cc', symbol: 'CC', shares: 100 }],
+        rollOpportunities: [],
+        cspOpportunities: [],
+        screenerCandidatesAvailable: false,
+      },
+    });
+
+    expect(selectTopPriority(dashboard)).toBeNull();
+    const feed = buildAttentionFeed({ dashboard, generatedAt: GENERATED_AT });
+    expect(feed.topAttentionItem).toBeNull();
   });
 });
 
