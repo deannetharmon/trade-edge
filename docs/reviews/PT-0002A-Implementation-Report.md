@@ -1,6 +1,6 @@
 # PT-0002A — Global Portfolio Mode Foundation — Implementation Report
 
-Status: **CORRECTIVE ROUND COMPLETE, AWAITING PRODUCT OWNER REVIEW.** Complete on branch `feature/global-portfolio-mode-foundation`. Not committed, not pushed, not merged. The original round (§1–§12) was rejected — see §13 for the corrective round. This report, together with `docs/design/PT-0002A-Global-Portfolio-Mode-Foundation.md` and `PT-0002A-corrective-review.diff`, is the review package.
+Status: **✅ MERGED into `main` at merge commit `ce28842`** (DOC-0001 reconciliation, verified against Git history 2026-07-24). The corrective round (§13) was reviewed and approved by the Product Owner; the temporary branch `feature/global-portfolio-mode-foundation` has been deleted, locally and remotely. The original round (§1–§12) was rejected before the accepted corrective round was merged. The remainder of this report is preserved as the historical implementation record.
 
 ## 1. Executive summary
 

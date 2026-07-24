@@ -1,6 +1,6 @@
 # OE-0001 Implementation Report
 
-**Status:** Corrected per Product Owner review round 1. Active sprint on `feature/opportunity-engine-foundation`, not merged into `main`, not complete. Pending re-review.
+**Status:** ✅ MERGED into `main` at merge commit `c97a705` (DOC-0001 reconciliation, verified against Git history 2026-07-24). The corrective round (§10) was reviewed and approved by the Product Owner; the temporary branch `feature/opportunity-engine-foundation` has been deleted, locally and remotely.
 
 This report has two parts: the original implementation (§1–§9), and a Corrective Round addendum (§10) describing what the Product Owner rejected and what was changed in response. Where the two disagree, the Corrective Round addendum in §10 is authoritative.
 

@@ -1,6 +1,6 @@
 # PT-0002B — Portfolio Context Integration
 
-**Status:** Implemented on `feature/portfolio-context-integration`, pushed for review in draft PR #15, awaiting Quinn approval, and not merged. **Revised 2026-07-24** during a documentation reconciliation review to correct §1, §2.1, §2.2, §2.3, §3.4, §4, and §5 against the actual implementation (see §2.2 item 9) — no code changed as part of this revision.
+**Status:** ✅ MERGED into `main` at merge commit `ee26423` (DOC-0001 reconciliation, verified against Git history 2026-07-24). The temporary branch `feature/portfolio-context-integration` has been deleted, locally and remotely. **Revised 2026-07-24** during a documentation reconciliation review to correct §1, §2.1, §2.2, §2.3, §3.4, §4, and §5 against the actual implementation (see §2.2 item 9) — no code changed as part of that revision, which was itself merged along with the implementation.
 **Project:** TradeEdge
 **Owner:** Dean Harmon
 

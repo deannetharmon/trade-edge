@@ -1,6 +1,6 @@
 # TC-0001 — Trade Command Center
 
-**Status:** Corrective round committed (`3385d23`) and pushed to `origin/feature/trade-command-center`. Pending Product Owner review. Not merged.
+**Status:** ✅ MERGED into `main` at merge commit `cfd4080` (DOC-0001 reconciliation, verified against Git history 2026-07-24). The corrective round described below (`3385d23`) was reviewed and approved by the Product Owner; the temporary branch `feature/trade-command-center` has been deleted, locally and remotely. The remainder of this document is preserved as the historical design record of that implementation.
 **Project:** TradeEdge
 **Owner:** Dean Harmon
 **Implementation Branch:** `feature/trade-command-center` (created off clean `main` @ `424e068`, ES-0002's merge commit)

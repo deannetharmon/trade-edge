@@ -1,6 +1,6 @@
 # PT-0002A — Global Portfolio Mode Foundation
 
-**Status:** Corrective round complete, pending Product Owner review. Complete on `feature/global-portfolio-mode-foundation` (branched from `feature/trade-command-center` @ `2827ad9`, which contains the accepted, pushed TC-0001 corrective round). Not committed, not pushed, not merged. The original round (§1–§8 below) was rejected — see §9, Corrective Round Addendum.
+**Status:** ✅ MERGED into `main` at merge commit `ce28842` (DOC-0001 reconciliation, verified against Git history 2026-07-24). The corrective round described below was reviewed and approved by the Product Owner; the temporary branch `feature/global-portfolio-mode-foundation` has been deleted, locally and remotely. The original round (§1–§8 below) was rejected — see §9, Corrective Round Addendum — before the accepted round was merged. The remainder of this document is preserved as the historical design record.
 **Project:** TradeEdge
 **Owner:** Dean Harmon
 

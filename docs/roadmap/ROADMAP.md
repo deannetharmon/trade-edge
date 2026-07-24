@@ -2,13 +2,7 @@
 
 ## Current Branch
 
-`main` is the primary branch. `feature/autopilot` is the long-lived Autopilot development branch, untouched by ES-0001, ES-0002, or TC-0001. `feature/opportunity-engine-foundation` (OE-0001) has been merged into `main` and deleted, locally and remotely. `feature/manual-paper-trading` (PT-0001, Manual Paper Trading Sandbox) has been merged into `main` (merge commit `05d0f31`, closeout commit `1ffc54a`) and deleted, locally and remotely. `feature/live-close-safety` (ES-0001, Live Close-Order Identity and Break-Even Safety) went through a rejected first implementation round and a rejected first corrective round before an accepted round 2 (deterministic economic-structure analysis, an all-block safety gate, a structurally-enforced broker boundary), and has been **merged into `main` at merge commit `a7f6acb`**. See `docs/design/ES-0001-Live-Close-Order-Safety.md`, `docs/reviews/ES-0001-Implementation-Report.md`, and the post-merge closeout review at `docs/reviews/ES-0001-Closeout-Report.md` (architectural review, technical debt register, test coverage assessment, and next-sprint recommendation — including one pre-existing, out-of-scope live-order path, `replacePendingOrder`, found still bypassing this safety gate).
-
-**`feature/pending-order-replacement-safety` (ES-0002, Pending-Order Replacement Safety) is complete and merged into `main`** at merge commit `424e068`. `main` and `origin/main` are both at `424e068`. It closes ES-0001 Closeout Technical Debt TD-1 (the `replacePendingOrder` gap named above) with a dedicated, framework-free plan/gate/broker-boundary module pair (`lib/portfolio/pendingOrderReplacementSafety.ts`, `lib/portfolio/pendingOrderReplacementSubmission.ts`). The temporary branch `feature/pending-order-replacement-safety` has been deleted, locally and remotely. See `docs/design/ES-0002-Pending-Order-Replacement-Safety.md`, `docs/reviews/ES-0002-Implementation-Report.md`, and `docs/reviews/ES-0002-Broker-Submission-Inventory.md`.
-
-**`feature/trade-command-center` (TC-0001, Trade Command Center)'s corrective round is committed (`3385d23`, plus a documentation follow-up at `2827ad9`) and pushed to `origin/feature/trade-command-center`, awaiting Product Owner review before merge** — a new `/dashboard` route composing existing Daily Briefing, Today's Priorities, Portfolio Health, Best Opportunity (Opportunity Engine), and Background Task intelligence into one morning landing dashboard, via a new shared, pure composition module (`lib/portfolio-intelligence/dashboardComposition.ts`) and a shared `PortfolioDataProvider` also now consumed by `app/portfolio/page.tsx`. See `docs/design/TC-0001-Trade-Command-Center.md` and `docs/reviews/TC-0001-Implementation-Report.md`.
-
-**`feature/global-portfolio-mode-foundation` (PT-0002A, Global Portfolio Mode Foundation)'s corrective round is complete, awaiting Product Owner review** — branched from `feature/trade-command-center` @ `2827ad9`. Adds a single, application-wide `PortfolioMode` (`LIVE | PAPER`) abstraction: a hydration-safe provider with versioned persistence, an unmistakable global mode indicator, a canonical mode-aware contract, and LIVE/PAPER adapters (thin wrappers around the existing `PortfolioDataProvider` and PT-0001's API, respectively) — infrastructure only, no existing screen wired to consume it yet (deferred to PT-0002B). The original round was rejected because its indicator exposed a working PAPER switch while no screen responded to mode, letting the shell display PAPER over live data; the corrective round removes any way to select PAPER through the UI and blocks the shell if a legacy PAPER value is ever found persisted, rather than displaying or silently coercing it. Not committed, not pushed, not merged. See `docs/design/PT-0002A-Global-Portfolio-Mode-Foundation.md` §9 and `docs/reviews/PT-0002A-Implementation-Report.md` §13.
+`main` is the primary branch, at merge commit `7acb641` ("merge: OE-0002A opportunity engine activation") as of 2026-07-24. `epic/autopilot` is the long-lived Autopilot development branch (previously named `feature/autopilot`; that name is obsolete and should only appear in historical command transcripts), untouched by every sprint below. Every sprint through **OE-0002A** has been merged into `main` and its temporary branch deleted, locally and remotely, per the standard short-lived-branch lifecycle: `feature/opportunity-engine-foundation` (OE-0001), `feature/manual-paper-trading` (PT-0001), `feature/live-close-safety` (ES-0001), `feature/pending-order-replacement-safety` (ES-0002), `feature/trade-command-center` (TC-0001), `feature/global-portfolio-mode-foundation` (PT-0002A), `feature/portfolio-context-integration` (PT-0002B), `feature/dt-0001-decision-transparency` (DT-0001), and `feature/oe-0002a-opportunity-engine-activation` (OE-0002A). **DOC-0001** (this reconciliation) is the current active sprint, on `feature/doc-0001-project-reconciliation`.
 
 For the authoritative, up-to-date operational status (what's merged, what's active, validation baselines, known follow-ups), see `planning/SPRINT_STATUS.md`. This document is intentionally high-level and forward-looking; it does not duplicate that tracker's detail and can lag it between updates.
 
@@ -48,33 +42,42 @@ For the authoritative, up-to-date operational status (what's merged, what's acti
 - PI-0012A — Portfolio Review Composition Layer — composes existing health/objective engines, no new scoring or AI
 - PI-0013 — Daily Briefing Dashboard — deterministic priorities, snapshot, opportunities, and risks summary
 - PI-0014 — Marketable Pricing for Risk-Gating, Phase 1 — stop-loss/take-profit/emergency-exit/Cut Losses gates now consider marketable (executable) pricing; liquidity-tier classification
+- **TE-0007 — Opportunity Engine Foundation**, implemented via **OE-0001** — `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a real candidate adapter. Merged `c97a705`.
+- **PT-0001 — Manual Paper Trading Sandbox** — `lib/paper-trading/`, a manual (not autonomous) paper-trading domain for CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a `/paper-trading` page. Merged `05d0f31`.
+- **ES-0001 — Live Close-Order Identity and Break-Even Safety** — deterministic economic-structure analysis hard-blocks ambiguous leg pairings; every live close/roll/stop-loss submission structurally routes through one safety gate. Merged `a7f6acb`.
+- **ES-0002 — Pending-Order Replacement Safety** — closes the `replacePendingOrder` gap ES-0001's closeout identified. Merged `424e068`.
+- **TC-0001 — Trade Command Center** — new `/dashboard` route composing existing intelligence, shared `PortfolioDataProvider`, first mount of `BestOpportunitiesPanel`. Merged `cfd4080`.
+- **PT-0002A — Global Portfolio Mode Foundation** — application-wide `PortfolioMode` (`LIVE`\|`PAPER`) infrastructure. Merged `ce28842`.
+- **PT-0002B — Portfolio Context Integration** — wires `/dashboard`/`/portfolio` and 4 broker-submission call sites to PT-0002A's mode-aware adapters. Merged `ee26423`.
+- **DT-0001 — Decision Transparency** — deterministic decision-driver/why-now/confidence explanation layer over Today's Priorities. Merged `6f46936`.
+- **OE-0002A — Opportunity Engine Activation** — first production activation of the Opportunity Engine, wired through `/screener`. Merged `7acb641`.
 
-**TE-0007 — Opportunity Engine Foundation** is complete, implemented via **OE-0001**, merged into `main` at commit `c97a705`. It adds `lib/opportunity-engine/`, a deterministic ranking layer over already-computed Decision Engine evaluations, and a candidate adapter (`DecisionAnalysis → OpportunityCandidate`) compatible with real Decision Engine output, though no production route calls it yet. A read-only "Best Opportunities" panel (`components/opportunity-engine/BestOpportunitiesPanel.tsx`) was built and tested but **left intentionally unmounted at the time** — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner. **TC-0001 (below, pending Product Owner review) mounts this panel for the first time**, on the new `/dashboard` route, with real adapter/ranker wiring — though no real `DecisionAnalysis[]` feed exists yet to populate it, so it still renders its own honest empty state in production today. See `docs/design/OE-0001-Opportunity-Engine-Foundation.md` and `docs/reviews/OE-0001-Implementation-Report.md` for the OE-0001 account, and `docs/design/TC-0001-Trade-Command-Center.md`/`docs/reviews/TC-0001-Implementation-Report.md` for the mounting.
+Note: some items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table remains an open documentation follow-up.
 
-Note: some of the items above (PI-0004D, PI-0005, PI-0008B) are not currently reflected in `planning/SPRINT_STATUS.md`'s Completed Capability Tracker table. They are included here on the basis of their own implementation specs/reports in `planning/` and `docs/reviews/`; reconciling that tracker table is a documentation follow-up, not part of the OE-0001 sprint.
+## Opportunity Engine — Activation History
 
-**PT-0001 — Manual Paper Trading Sandbox** is **complete and merged into `main`** (merge commit `05d0f31`; closeout commit `1ffc54a`). It adds `lib/paper-trading/`, a manual (not autonomous) paper-trading domain supporting CSP/BPS/BCS/IC, a dedicated `/api/paper-trading/*` API, a new `/paper-trading` page, and a Portfolio Intelligence adapter for the paper portfolio. Its accepted atomic commit design uses a single precondition-checked Redis Lua `EVAL` (not `WATCH`/`MULTI`/`EXEC`), with every commit-path error classified as `CONFIRMED_NOT_COMMITTED`, `OUTCOME_UNKNOWN`, or `INTEGRITY_FAILURE` — only `CONFIRMED_NOT_COMMITTED` may produce a rejected audit event. It is distinct from, and does not touch, the separate (still-dormant) Autopilot paper framework referenced by TE-0010 below. PT-0001 is the **ledger and sandbox foundation** — a standalone accounting/persistence engine and its own minimal UI, not the final application-wide user experience for choosing between live and paper context; that UX-level integration is PT-0002, immediately below. The temporary branch `feature/manual-paper-trading` has been deleted, locally and remotely. See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md` and `docs/reviews/PT-0001-Implementation-Report.md`.
+**OE-0001** (merged `c97a705`) built the canonical foundation but its production UI (`BestOpportunitiesPanel`) was deliberately left unmounted — a first attempt to mount it as an empty Income Engine tab was rejected by the Product Owner, since an unmounted, finished component was preferable to a production surface with nothing behind it.
 
-**PT-0002 — Application-Wide Portfolio Mode Foundation** is **queued, not approved, not started.** It builds on PT-0001's now-accepted ledger/sandbox foundation to make LIVE vs. PAPER an explicit, first-class, application-wide concept rather than a feature confined to the `/paper-trading` page. PT-0001's acceptance satisfies this ticket's dependency but does not itself approve or start it — it still requires explicit Product Owner approval and scoping. Required scope:
+**TC-0001** (merged `cfd4080`) mounted that panel for the first time, on `/dashboard`, with real adapter/ranker wiring — but no real `DecisionAnalysis[]` feed existed anywhere in the app yet, so it rendered its own honest empty state.
 
-- A persistent, global LIVE/PAPER selector — not a per-page toggle.
-- Unmistakable mode display across every portfolio-dependent screen, so it is never ambiguous which context the user is looking at.
-- A shared portfolio-context abstraction that Portfolio Intelligence, Decision Engine inputs, the Daily Briefing, Portfolio Review, risk analysis, analytics, and the Opportunity Engine all read from — no page independently re-deriving "which portfolio am I showing."
-- Complete data isolation between live and paper contexts: no blending, no implicit copying of one into the other.
-- Mode selection persists across navigation and page refresh.
-- Safe failure when context is missing or ambiguous — never silently default to live data, and never silently default to paper data either; fail visibly and require an explicit selection.
-- The active mode is displayed at every execution-like confirmation step, not just in a header badge.
-- Actions taken while in PAPER mode can mutate only the paper ledger (PT-0001's `paperTrading` field) — never a live position, order, or account value.
-- No sequence of mode switches can trigger, enable, or shortcut live order execution. Switching modes is purely a display/read-context change; it is not, and must never become, a live-trading control.
-- Autopilot remains disabled and explicitly out of scope for PT-0002 — this ticket does not activate or extend the dormant Autopilot Decision Engine paper framework.
+**OE-0002A** (merged `7acb641`) closed that gap: `/screener`'s real scan output now flows through the existing, previously-uncalled `/api/autopilot/recommendations` route and the existing OE-0001 adapter/ranker, rendering real ranked recommendations via the same, unmodified `BestOpportunitiesPanel` — directly on `/screener`. `OpportunityContext` is deliberately portfolio-neutral (`availableCapital: 0`, no exposure fields) to avoid introducing live-account data onto `/screener`, which is not yet PortfolioMode-gated.
 
-See `docs/design/PT-0001-Manual-Paper-Trading-Sandbox.md`'s note on this sequencing; PT-0002 does not yet have its own design doc — that is the first deliverable when this ticket is approved and scoped.
+**Planned, not started:**
 
-**ES-0001 — Live Close-Order Identity and Break-Even Safety** is **complete and merged into `main`** (merge commit `a7f6acb`). It replaces broad symbol+expiration position grouping with deterministic economic-structure analysis (`lib/portfolio/closeOrderSafety.ts`) that hard-blocks any genuinely ambiguous leg pairing instead of merging-and-disclosing it, fixes a critical 100x broker-price-unit defect found during corrective review, and structurally enforces (not just tests) that every live close/roll/stop-loss submission passes through a single safety gate before reaching the broker (`lib/portfolio/closeOrderSubmission.ts`). A post-merge closeout review (`docs/reviews/ES-0001-Closeout-Report.md`) found one pre-existing, out-of-scope live-order path — `replacePendingOrder` (GTC/pending-order repricing) — that still bypasses this gate entirely, and recommends it as the next sprint (ES-0002).
+- **OE-0002B — Dashboard Integration**: decide whether/how `/dashboard`'s `BestOpportunityCard` (still passing a hardcoded empty feed) should share OE-0002A's real feed.
+- **OE-0003 — Optional Opportunity Context**: wire real, portfolio-mode-gated capital/exposure data into `OpportunityContext`, once `/screener`'s PortfolioMode gating question is resolved. Accepted by Quinn and Paul as a future architectural enhancement during OE-0002A's technical review — not part of OE-0002A itself.
 
-**ES-0002 — Pending-Order Replacement Safety** is **complete and merged into `main`** at merge commit `424e068`. It closes the `replacePendingOrder` gap named above: a new `lib/portfolio/pendingOrderReplacementSafety.ts`/`pendingOrderReplacementSubmission.ts` module pair validates a canonical replacement/restore plan built from the broker-sourced pending order (not a fabricated `CanonicalCloseIdentity` — a pending order has no fill economics to build one from) and structurally enforces that both the replacement and the automatic restore-on-failure submission reach `ttPost` only through a hard-blocking, broker-mock-tested boundary that validates the exact broker payload, including hard-blocking missing or malformed price and price-effect values and rejecting one-cent payload drift via exact integer-cent comparison (a pre-approval corrective round fixed both). 58 new tests, 65/65 ES-0001 tests reconfirmed passing (no regression; ES-0001 unaffected). The temporary branch `feature/pending-order-replacement-safety` has been deleted, locally and remotely. See `docs/design/ES-0002-Pending-Order-Replacement-Safety.md`, `docs/reviews/ES-0002-Implementation-Report.md`, and `docs/reviews/ES-0002-Broker-Submission-Inventory.md` (which also flags a second, unrelated unguarded live-order path discovered in `app/rinse-repeat/page.tsx`, deferred pending a separate Product Owner scoping decision).
+See `docs/design/OE-0001-Opportunity-Engine-Foundation.md`, `docs/design/TC-0001-Trade-Command-Center.md`, and `docs/design/OE-0002A-Opportunity-Engine-Activation.md` for the full account of each stage.
 
-**TC-0001 — Trade Command Center** is **implemented on `feature/trade-command-center`, awaiting Product Owner review** — not committed, not pushed, not merged. It composes existing Daily Briefing, Today's Priorities, Portfolio Health, Best Opportunity, and Background Task intelligence into a new `/dashboard` landing route, via a new shared pure composition module (`lib/portfolio-intelligence/dashboardComposition.ts`) that both this new route and `app/portfolio/page.tsx` now consume — introduced no new recommendation/scoring logic, and mounts the previously-unmounted `BestOpportunitiesPanel` (OE-0001) for the first time, real adapter/ranker wiring included, though no real `DecisionAnalysis[]` feed exists yet to populate it (disclosed, out of scope). 32 new tests; full 1,034-test repository regression passing; `tsc --noEmit` clean; `git diff --check` clean. See `docs/design/TC-0001-Trade-Command-Center.md` and `docs/reviews/TC-0001-Implementation-Report.md`.
+## Portfolio Mode — Foundation and Integration History
+
+**PT-0001** (merged `05d0f31`) is the ledger and sandbox foundation — a standalone accounting/persistence engine and its own minimal UI, not the final application-wide user experience for choosing between live and paper context.
+
+**PT-0002A** (merged `ce28842`) added the application-wide `PortfolioMode` (`LIVE`\|`PAPER`) abstraction as tested, ready-to-use infrastructure — provider, versioned persistence, global indicator, mode-aware contract, LIVE/PAPER adapters — with no existing screen wired to consume it yet.
+
+**PT-0002B** (merged `ee26423`) wired `/dashboard` and `/portfolio` to those adapters, and gated 4 live broker-submission call sites. A post-merge documentation review found the design doc had overstated two things — `PortfolioModeIndicator` reactivation (still hard-disabled) and full ambiguous-context closure (six surfaces — `/engine`, `/rinse-repeat`, `/screener`, `/long-book`, `/trade-log`, `/performance` — remain outside PortfolioMode awareness) — both corrected in the design document with no code change. This is a **disclosed, accepted gap**, not yet scoped as its own ticket: closing it, or explicitly classifying each surface as mode-independent, is future work.
+
+See `docs/design/PT-0002A-Global-Portfolio-Mode-Foundation.md` and `docs/design/PT-0002B-Portfolio-Context-Integration.md` for the full account.
 
 ## Current Planning Focus
 
@@ -84,26 +87,29 @@ See:
 
 `docs/specifications/TradeEdge-Phase3-Master-Specification.md`
 
-Phase 3 shifts the product from infrastructure toward trader-facing intelligence. Sprint 3's Portfolio Intelligence layer (`lib/portfolio-intelligence`) and OE-0001's Opportunity Engine layer (`lib/opportunity-engine`) are the current implementations of this shift's portfolio- and opportunity-level reasoning.
+Phase 3 shifts the product from infrastructure toward trader-facing intelligence. Sprint 3's Portfolio Intelligence layer (`lib/portfolio-intelligence`), OE-0001's Opportunity Engine layer (`lib/opportunity-engine`), and DT-0001's decision-transparency layer (`lib/todaysPriorities/explanation.ts`) are the current implementations of this shift's portfolio-, opportunity-, and explanation-level reasoning.
 
 ## Near-Term Roadmap
 
-1. **TC-0001 — Trade Command Center** — corrective round committed (`3385d23`) and pushed to `origin/feature/trade-command-center`, awaiting Product Owner review before merge (see `docs/reviews/TC-0001-Implementation-Report.md` §11). `/dashboard` now shares live portfolio composition with `/portfolio` via a new `PortfolioDataProvider`, so Daily Briefing, Today's Priorities, and Portfolio Health render real, live data — only the Best Opportunity panel remains a legitimately empty state pending a live `DecisionAnalysis[]` feed.
-2. **PT-0002A — Global Portfolio Mode Foundation** — corrective round complete on `feature/global-portfolio-mode-foundation`, awaiting Product Owner review (see `docs/reviews/PT-0002A-Implementation-Report.md` §13); not committed, not pushed, not merged. Delivers the `PortfolioMode` type/provider/persistence/global indicator and LIVE/PAPER adapters as tested, ready-to-use infrastructure; no existing screen consumes it yet. The original round's global indicator exposed a working PAPER switch with no screen wired to respond to it — corrected: no control can select PAPER this round, and a legacy-persisted PAPER value blocks the shell rather than being silently shown or coerced.
-3. PT-0002B — wire `/dashboard` and `/portfolio` to the new mode-aware adapters, and wire the new guardrails into real broker-submission/paper-mutation call sites (deferred from PT-0002A, not yet an approved sprint)
-4. Establish a real, live `DecisionAnalysis[]` acquisition mechanism so the Best Opportunity card (wired by TC-0001) has a real feed to rank instead of always rendering its empty state
-5. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups")
-6. TE-0008 — Capital Allocation / Wheel Preference Engine
-7. TE-0009 — Income Engine Foundation
+Every item below is either **planned, not started** or **queued for a Product Owner scoping decision** — no implementation sprint is currently active besides DOC-0001's documentation reconciliation.
+
+1. **OE-0002B — Dashboard Integration** (planned, not started) — wire `/dashboard`'s Best Opportunity card to OE-0002A's real feed, if approved, without introducing a new persistence layer.
+2. **OE-0003 — Optional Opportunity Context** (planned, not started) — real capital/exposure data for the Opportunity Engine, contingent on a PortfolioMode decision for `/screener`.
+3. Close the six-surface PortfolioMode gap disclosed by PT-0002B, or explicitly classify those surfaces as mode-independent (not yet scoped as a ticket).
+4. A follow-on to address the second unguarded live-order path discovered during ES-0002's mandatory broker inventory (`app/rinse-repeat/page.tsx`'s OTOCO entry submission — see `docs/reviews/ES-0002-Broker-Submission-Inventory.md`, item 11) — candidate ES-0003 (broker-safety numbering, distinct from the Opportunity Engine's OE-0003 above).
+5. PI-0015 / Portfolio Intelligence real-world acceptance validation (see `planning/SPRINT_STATUS.md` "Known Follow-Ups").
+6. TE-0008 — Capital Allocation / Wheel Preference Engine.
+7. TE-0009 — Income Engine Foundation.
+8. A dedicated DT-0001 design document (documentation follow-up; DT-0001 is complete and merged but, unlike every other ticket, has no `docs/design/` record).
 
 ### Paper Trading Sequencing
 
 This sequence is a strict dependency order — each step requires the prior step to be approved and accepted before starting, not merely started:
 
-1. **PT-0001 — Manual Paper Trading Sandbox** (complete, merged into `main` at `05d0f31`) — the ledger/persistence/accounting foundation and a minimal manual UI.
-2. **PT-0002 — Application-Wide Portfolio Mode Foundation** (queued, not approved, not started) — makes LIVE/PAPER a first-class, application-wide context rather than a page-local feature.
+1. **PT-0001 — Manual Paper Trading Sandbox** (complete, merged `05d0f31`) — the ledger/persistence/accounting foundation and a minimal manual UI.
+2. **PT-0002A + PT-0002B — Application-Wide Portfolio Mode** (complete, merged `ce28842` / `ee26423`) — LIVE/PAPER as a first-class, application-wide context, gated on `/dashboard` and `/portfolio` (six other surfaces remain ungated — see above).
 3. Separately approved paper-action integration into the rest of the product (e.g. taking a paper action directly from Portfolio Intelligence recommendations, the Daily Briefing, or the Opportunity Engine) — **not yet scoped, not yet a ticket.**
-4. **TE-0010 — Autopilot Paper Mode** — only after manual paper mode (PT-0001 + PT-0002) is proven out. Autopilot activation is not implied or accelerated by either PT-0001 or PT-0002.
+4. **TE-0010 — Autopilot Paper Mode** — only after manual paper mode is proven out. Autopilot activation is not implied or accelerated by PT-0001 or PT-0002A/B.
 
 ## Later Backlog — Paper Strategy Laboratory
 
@@ -162,15 +168,17 @@ Exit criteria for the future implementation:
 
 ## Core Product Engines
 
-1. Opportunity Engine — Where should my next dollar go? (`lib/opportunity-engine`, OE-0001 foundation complete and merged; mounted on `/dashboard` by TC-0001, pending Product Owner review, still rendering its empty state pending a live candidate feed — the only remaining disclosed gap after TC-0001's corrective round)
-2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 + PI-0003 complete)
+1. Opportunity Engine — Where should my next dollar go? (`lib/opportunity-engine`, OE-0001 foundation complete and merged; activated on `/screener` by OE-0002A — real ranked recommendations now render there. `/dashboard`'s Best Opportunity card remains on a hardcoded empty feed pending OE-0002B)
+2. Portfolio Engine — What should I do with what I already own? (`lib/portfolio-intelligence`, PI-0001 + PI-0002 + PI-0003 complete; DT-0001 added a deterministic explanation layer on top)
 3. Risk Engine — What could hurt me?
 4. Income Engine — Am I producing enough recurring income? (`app/engine/page.tsx` — SPX/SPY/Wheel capital-allocation dashboard; not yet unified with the Decision Engine or Opportunity Engine)
 5. Execution Engine — What do I actually need to do today?
 
 ## Working Model
 
-- Dean: Product Owner / Trader
-- ChatGPT: Chief Architect / Reviewer
-- Claude/Gemini: Implementation Engineer
+- Paul: Product Owner
+- Quinn: Chief Architect
+- Dean: Lead Engineer / Implementation Lead
 - Vercel: authoritative build validation after push
+
+*(Historical note: earlier revisions of this document, and implementation reports predating 2026-07-24, refer to "Dean: Product Owner / Trader," "ChatGPT: Chief Architect / Reviewer," and "Claude/Gemini: Implementation Engineer." Those labels describe the same functional roles under different working names, formalized as the TradeEdge Engineering Operating Model on 2026-07-24; no responsibilities changed.)*

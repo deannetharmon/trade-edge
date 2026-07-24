@@ -6,9 +6,11 @@ This document maps the major Trade Edge subsystems so implementation work has a 
 
 ## Working Roles
 
-- Dean: Product Owner / Trader
-- ChatGPT: Chief Architect / Reviewer
-- Claude: Implementation Engineer
+- Paul: Product Owner
+- Quinn: Chief Architect
+- Dean: Lead Engineer / Implementation Lead
+
+*(Updated 2026-07-24, DOC-0001. Previously: "Dean: Product Owner / Trader," "ChatGPT: Chief Architect / Reviewer," "Claude: Implementation Engineer" — same functional roles, formalized under the TradeEdge Engineering Operating Model.)*
 
 ## High-Level Domains
 
