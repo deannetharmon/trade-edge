@@ -68,8 +68,8 @@ export function PriorityRankedList({
                   <p className={`mt-0.5 text-[11px] ${th.textMuted}`}>{objective.summary}</p>
                 </div>
                 <div className="flex shrink-0 items-start gap-3">
-                  <div className="text-right">
-                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Priority</span>
+                  <div className="text-right" title="Ranking produced by the prioritization engine">
+                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Priority Score</span>
                     <div className="mt-0.5 flex items-center justify-end gap-2">
                       <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${tierStyle.border} ${tierStyle.bg} ${tierStyle.text}`}>
                         {tier}
@@ -77,10 +77,14 @@ export function PriorityRankedList({
                       <span className={`text-[13px] font-bold ${th.text}`} title="Priority Score">{score}</span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Confidence</span>
-                    <span className={`mt-0.5 block text-[10px] font-semibold ${th.text}`}>
-                      {explanation.confidence.label} ({explanation.confidence.score}%)
+                  <div
+                    className={`border-l ${th.borderLight} pl-3 text-right`}
+                    title="Confidence in this specific recommendation — not a ranking"
+                  >
+                    <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>Decision Confidence</span>
+                    <span className={`mt-0.5 block text-[10px] font-medium normal-case ${th.textMuted}`}>
+                      {explanation.confidence.label}
+                      <span className={`ml-1 text-[9px] ${th.textFaint}`}>({explanation.confidence.score}%)</span>
                     </span>
                   </div>
                 </div>
