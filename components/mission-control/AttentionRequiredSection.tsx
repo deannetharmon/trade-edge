@@ -3,8 +3,10 @@
 // WA-0003 (CES section 11, ruling 6): reduced from a full duplicate work
 // queue to exactly four things -- lead open item headline, open-attention
 // count, one-line compact summary, and one contextual deep link. The link
-// always targets Today's Priorities (`?tab=todays-priorities&priority=<stableKey>`),
-// never Positions or Decision History directly -- Mission Control's lead
+// always targets Today's Priorities via an absolute application path
+// (`/portfolio?tab=todays-priorities&priority=<stableKey>`), never a
+// query-only URL (this section renders on /dashboard) and never Positions
+// or Decision History directly -- Mission Control's lead
 // item, open count, and link target all derive from the same
 // buildTodaysPrioritiesQueue()+partitionTodaysPrioritiesQueue() call Today's
 // Priorities itself uses (lib/mission-control/buildMissionControlViewModel.ts),

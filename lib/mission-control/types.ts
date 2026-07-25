@@ -27,8 +27,10 @@ import type { PriorityWorkflowState } from '@/features/portfolio/priorities/prio
 // (lib/todays-priorities-queue), never from narrative.attention/
 // narrative.counts.attention (which stays unchanged for its own existing
 // purpose -- see the CES's section 11 disclosed rationale on why reusing it
-// here would risk a silent count/lead-item drift). `deepLink` is always a
-// level-1 link (?tab=todays-priorities&priority=<stableKey>) -- Mission
+// here would risk a silent count/lead-item drift). `deepLink` is always an
+// absolute, level-1 application path (/portfolio?tab=todays-priorities&
+// priority=<stableKey>), since this summary renders on /dashboard and a
+// query-only URL would resolve against /dashboard, not /portfolio -- Mission
 // Control never links directly to Positions or Decision History.
 export interface MissionControlTodaysPrioritiesSummary {
   leadItem: TodaysPrioritiesQueueItem | null;

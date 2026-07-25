@@ -92,7 +92,10 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
   const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
     leadItem: partition.leadItem,
     openCount: partition.openCount,
-    deepLink: partition.leadItem ? `?tab=todays-priorities&priority=${encodeURIComponent(partition.leadItem.stableKey)}` : null,
+    // Absolute application path -- this link is rendered on Mission Control
+    // (/dashboard), so a query-only URL would resolve against /dashboard,
+    // not /portfolio. Must always be the full /portfolio path.
+    deepLink: partition.leadItem ? `/portfolio?tab=todays-priorities&priority=${encodeURIComponent(partition.leadItem.stableKey)}` : null,
   };
 
   return { state: 'loaded', narrative, generatedAt, lastRefreshedAt, todaysPriorities };

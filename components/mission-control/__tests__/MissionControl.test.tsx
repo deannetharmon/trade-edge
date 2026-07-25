@@ -186,7 +186,7 @@ describe('MissionControl: WA-0003 reduced Attention Required section', () => {
     const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
       leadItem: queueItem,
       openCount: 3,
-      deepLink: `?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
+      deepLink: `/portfolio?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
     };
     render(<MissionControl viewModel={viewModelFor(narrativeFor(), todaysPriorities)} th={THEMES.dark} />);
 
@@ -204,13 +204,17 @@ describe('MissionControl: WA-0003 reduced Attention Required section', () => {
       const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
         leadItem: queueItem,
         openCount: 1,
-        deepLink: `?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
+        deepLink: `/portfolio?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
       };
       const { unmount } = render(<MissionControl viewModel={viewModelFor(narrativeFor(), todaysPriorities)} th={THEMES.dark} />);
       const link = screen.getByRole('link', { name: /open in today's priorities/i });
-      expect(link.getAttribute('href')).toContain('tab=todays-priorities');
-      expect(link.getAttribute('href')).not.toContain('tab=positions');
-      expect(link.getAttribute('href')).not.toContain('tab=history');
+      const href = link.getAttribute('href')!;
+      expect(href).toMatch(/^\/portfolio\?/);
+      expect(href).toContain('tab=todays-priorities');
+      expect(href).not.toMatch(/^\?/);
+      expect(href).not.toMatch(/^\/dashboard\?/);
+      expect(href).not.toContain('tab=positions');
+      expect(href).not.toContain('tab=history');
       unmount();
     }
   });
@@ -248,7 +252,7 @@ describe('MissionControl: real content renders end to end', () => {
     const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
       leadItem: makeQueueItem(),
       openCount: 1,
-      deepLink: '?tab=todays-priorities&priority=attention%3A%3AOBJ-X%3A%3Aposition%3A%3Apos_1',
+      deepLink: '/portfolio?tab=todays-priorities&priority=attention%3A%3AOBJ-X%3A%3Aposition%3A%3Apos_1',
     };
     render(<MissionControl viewModel={viewModelFor(narrative, todaysPriorities)} th={THEMES.dark} />);
 

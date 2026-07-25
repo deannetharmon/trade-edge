@@ -189,7 +189,10 @@ describe('buildMissionControlViewModel: WA-0003 todaysPriorities summary', () =>
 
     expect(result.todaysPriorities.openCount).toBe(expectedPartition.openCount);
     expect(result.todaysPriorities.leadItem?.stableKey).toBe(expectedPartition.leadItem?.stableKey);
-    expect(result.todaysPriorities.deepLink).toBe(`?tab=todays-priorities&priority=${encodeURIComponent(expectedPartition.leadItem!.stableKey)}`);
+    expect(result.todaysPriorities.deepLink).toBe(`/portfolio?tab=todays-priorities&priority=${encodeURIComponent(expectedPartition.leadItem!.stableKey)}`);
+    expect(result.todaysPriorities.deepLink).toMatch(/^\/portfolio\?/);
+    expect(result.todaysPriorities.deepLink).not.toMatch(/^\?/);
+    expect(result.todaysPriorities.deepLink).not.toMatch(/^\/dashboard\?/);
     expect(result.todaysPriorities.deepLink).not.toContain('tab=positions');
     expect(result.todaysPriorities.deepLink).not.toContain('tab=history');
   });
