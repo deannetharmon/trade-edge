@@ -15,6 +15,17 @@
 // need to know before I make a trading decision today" in under 30 seconds;
 // Portfolio Review (rendered directly below this card) remains the more
 // detailed, browsable breakdown.
+//
+// WA-0002: `variant` prop added. Default `'full'` is this card's original,
+// unchanged behavior (all six sections). `'transitional'` renders only
+// Executive Summary, Portfolio Snapshot, and Upcoming Events, plus a visible
+// "temporary" label -- used on the Positions tab so Briefing-owned content
+// with no equivalent destination until WA-0004 remains visible to the
+// trader rather than silently disappearing when Today's Priorities/
+// Opportunities/Risks are removed from Positions (all three are already
+// fully owned elsewhere). No new data is fetched and no lib/dailyBriefing
+// function changes for either variant -- this is conditional rendering of
+// sections that already exist.
 
 'use client';
 
@@ -87,9 +98,13 @@ export interface DailyBriefingCardProps {
   briefing: DailyBriefing | null;
   loading: boolean;
   th: typeof THEMES[Theme];
+  // WA-0002: 'full' (default) is this card's original, unchanged behavior.
+  // 'transitional' renders only Executive Summary/Portfolio Snapshot/
+  // Upcoming Events plus a temporary-content label -- see module doc.
+  variant?: 'full' | 'transitional';
 }
 
-export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardProps) {
+export function DailyBriefingCard({ briefing, loading, th, variant = 'full' }: DailyBriefingCardProps) {
   if (briefing === null) {
     if (!loading) return null;
     return (
@@ -102,10 +117,23 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
   }
 
   const healthStyle = HEALTH_STATUS_STYLE[briefing.snapshot.healthStatus];
+  const isTransitional = variant === 'transitional';
 
   return (
     <section className={`mb-6 rounded-xl border ${th.border} ${th.card} p-4 space-y-5`} aria-label="Today's Briefing">
       <h2 className={`text-[12px] font-bold uppercase tracking-widest ${th.text}`}>Today&rsquo;s Briefing</h2>
+
+      {/* WA-0002: transitional-variant label -- this content has no
+          equivalent destination on Positions until WA-0004 ships the
+          Briefing workspace; scheduled for removal from Positions then. */}
+      {isTransitional && (
+        <p
+          className="rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-400"
+          aria-label="Transitional Content Notice"
+        >
+          Temporary &mdash; moving to Briefing in WA-0004
+        </p>
+      )}
 
       {/* 1. Executive Summary */}
       <div aria-label="Executive Summary">
@@ -117,7 +145,10 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
 
       {/* 2. Today's Priorities -- same <PriorityRankedList> Portfolio Review
           and Mission Control already render, fed Portfolio Review's own
-          already-scored/limited Top Risks. Nothing re-ranked here. */}
+          already-scored/limited Top Risks. Nothing re-ranked here.
+          Not rendered in the transitional variant: already fully owned by
+          Mission Control / Today's Priorities. */}
+      {!isTransitional && (
       <div aria-label="Today's Priorities">
         <SectionHeader label="Today's Priorities" th={th} />
         {briefing.priorities.length > 0 ? (
@@ -126,6 +157,7 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
           <EmptyState label="Nothing urgent enough to lead with right now." th={th} />
         )}
       </div>
+      )}
 
       {/* 3. Portfolio Snapshot -- direct reads of already-computed values. */}
       <div aria-label="Portfolio Snapshot">
@@ -170,7 +202,9 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
       </div>
 
       {/* 5. Opportunity Summary -- identical stat-card style to Mission
-          Control's own Opportunity Summary section. */}
+          Control's own Opportunity Summary section. Not rendered in the
+          transitional variant: already fully owned by Today's Priorities. */}
+      {!isTransitional && (
       <div aria-label="Current Opportunities">
         <SectionHeader label="Current Opportunities" th={th} />
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -179,8 +213,18 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
           ))}
         </div>
       </div>
+      )}
 
-      {/* 6. Risk Summary */}
+      {/* 6. Risk Summary -- not rendered in the transitional variant. Every
+          RiskKind is already fully covered elsewhere: concentration/capital
+          on Mission Control's Portfolio Health/Top Risks, immediate_attention
+          on Mission Control's Attention Required (same source data,
+          dashboard.immediateAction), and assignment_exposure/
+          earnings_exposure as position-card risk badges (WA-0002,
+          PositionRiskBadges). See
+          docs/design/WA-0002-Positions-Legacy-Mission-Control-CES.md
+          Section 8 for the evidence behind each. */}
+      {!isTransitional && (
       <div aria-label="Current Risks">
         <SectionHeader label="Current Risks" th={th} />
         {briefing.risks.length > 0 ? (
@@ -196,6 +240,7 @@ export function DailyBriefingCard({ briefing, loading, th }: DailyBriefingCardPr
           <EmptyState label="No active risks right now." th={th} />
         )}
       </div>
+      )}
     </section>
   );
 }

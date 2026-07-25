@@ -84,11 +84,15 @@ function buildUpcomingEvents(dashboard: TodaysPrioritiesDashboard): UpcomingEven
   return events;
 }
 
-// Reads the exact same four buckets Mission Control's own Opportunity
-// Summary already counts (see features/portfolio/missionControl/MissionControl.tsx) --
-// no new opportunity discovery, no new counting rule. All four are always
-// present (even at count 0) so the UI can render a stable, predictable
-// four-stat layout, the same convention Mission Control already uses.
+// Reads the same four portfolio-derived opportunity buckets (roll/covered
+// call/CSP/screener-candidate counts) the legacy Portfolio-tab Mission
+// Control's own Opportunity Summary used to count before that tab was
+// retired in WA-0002 -- no new opportunity discovery, no new counting rule.
+// (Distinct from /dashboard's screener-sourced NewOpportunitiesSection,
+// MB-0002, which surfaces OpportunityRecommendation candidates from the
+// Opportunity Engine, not this dashboard-derived count.) All four buckets
+// are always present here (even at count 0) so the UI can render a stable,
+// predictable four-stat layout.
 function buildOpportunitySummary(dashboard: TodaysPrioritiesDashboard): OpportunityItem[] {
   const { opportunities } = dashboard;
   return [

@@ -34,6 +34,11 @@ export default defineConfig({
       // rejection, caller-supplied user id ignored) would silently never
       // run under `npm test`.
       'app/**/__tests__/**/*.test.ts',
+      // WA-0002: app/portfolio/__tests__ is the first component-level (.tsx)
+      // test under app/ -- without this glob it would silently never run
+      // under `npm test`, the same trap this file's other comments describe
+      // for components/ and lib/.
+      'app/**/__tests__/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
     reporters: ['default'],

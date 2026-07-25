@@ -114,4 +114,65 @@ describe('PI-0013: DailyBriefingCard', () => {
     expect(opportunityGrid?.className).toMatch(/grid-cols-2/);
     expect(container.querySelector('.overflow-x-auto')).toBeNull();
   });
+
+  // WA-0002: default/'full' variant behavior above is unchanged (no test
+  // above passes `variant` at all, so it exercises the default). The cases
+  // below cover the new 'transitional' variant used on Positions.
+  describe("WA-0002: 'transitional' variant", () => {
+    it('renders only Executive Summary, Portfolio Snapshot, and Upcoming Events', () => {
+      render(<DailyBriefingCard briefing={makeBriefing()} loading={false} th={THEMES.dark} variant="transitional" />);
+
+      const container = screen.getByLabelText("Today's Briefing");
+      const sectionLabels = Array.from(container.querySelectorAll('[aria-label]'))
+        .map((el) => el.getAttribute('aria-label'))
+        .filter((label) => label !== 'Transitional Content Notice');
+      expect(sectionLabels).toEqual(['Executive Summary', 'Portfolio Snapshot', 'Upcoming Events']);
+    });
+
+    it('displays the temporary-content label', () => {
+      render(<DailyBriefingCard briefing={makeBriefing()} loading={false} th={THEMES.dark} variant="transitional" />);
+      expect(screen.getByText(/Temporary/i)).toBeInTheDocument();
+      expect(screen.getByText(/moving to Briefing in WA-0004/i)).toBeInTheDocument();
+    });
+
+    it("excludes Today's Priorities, Current Opportunities, and Current Risks", () => {
+      const briefing = makeBriefing({
+        priorities: [],
+        risks: [{ id: 'r1', kind: 'concentration', label: 'Reduce Concentration: AAPL', detail: 'Above limit.' }],
+      });
+      render(<DailyBriefingCard briefing={briefing} loading={false} th={THEMES.dark} variant="transitional" />);
+
+      expect(screen.queryByLabelText("Today's Priorities")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Current Opportunities')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Current Risks')).not.toBeInTheDocument();
+      expect(screen.queryByText('Reduce Concentration: AAPL')).not.toBeInTheDocument();
+    });
+
+    it('still renders Executive Summary/Snapshot/Upcoming Events content correctly', () => {
+      const briefing = makeBriefing({
+        executiveSummary: 'Portfolio is Healthy today.',
+        snapshot: { healthScore: 90, healthStatus: 'Healthy', openPositionCount: 4, capitalDeploymentPct: 30, largestConcentrationPct: 10, averagePositionHealth: 88 },
+        upcomingEvents: [{ id: 'e1', kind: 'earnings', label: 'Earnings Risk: AMD', symbol: 'AMD', detail: 'Earnings before expiration.' }],
+      });
+      render(<DailyBriefingCard briefing={briefing} loading={false} th={THEMES.dark} variant="transitional" />);
+
+      expect(screen.getByText('Portfolio is Healthy today.')).toBeInTheDocument();
+      expect(screen.getByText('90')).toBeInTheDocument();
+      expect(screen.getByText('Earnings Risk: AMD')).toBeInTheDocument();
+    });
+
+    it('defaulting variant to "full" when omitted still renders all six sections (regression guard)', () => {
+      render(<DailyBriefingCard briefing={makeBriefing()} loading={false} th={THEMES.dark} />);
+      const container = screen.getByLabelText("Today's Briefing");
+      const sectionLabels = Array.from(container.querySelectorAll('[aria-label]')).map((el) => el.getAttribute('aria-label'));
+      expect(sectionLabels).toEqual([
+        'Executive Summary',
+        "Today's Priorities",
+        'Portfolio Snapshot',
+        'Upcoming Events',
+        'Current Opportunities',
+        'Current Risks',
+      ]);
+    });
+  });
 });

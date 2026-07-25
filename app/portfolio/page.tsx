@@ -89,6 +89,7 @@ import { PositionHealthBadge } from '@/features/portfolio/components/PositionHea
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
 import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/PositionIntelligencePanel';
+import { PositionRiskBadges } from '@/features/portfolio/positions/PositionRiskBadges';
 import { DecisionHistoryView } from '@/features/portfolio/decisionReview/DecisionHistoryView';
 import { upsertDecisionReview, latestReviewForPosition } from '@/lib/decision-review';
 import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
@@ -109,12 +110,11 @@ import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 // (positions[].portfolioObjective, canonicalPriorities, decisionReviews) --
 // no new Portfolio Intelligence or Decision Engine calls are introduced here.
 import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
-// PI-0011A: Portfolio Mission Control -- orchestrates the Briefing tab's own
-// Portfolio Health/Summary derivations plus PI-0010A/B's Today's Priorities
-// dashboard and its new selectTopPriority() into one landing view. No new
-// Portfolio Intelligence/Decision Engine calls here either -- see
-// MissionControl.tsx's own module doc for the full source list.
-import { MissionControl } from '@/features/portfolio/missionControl/MissionControl';
+// PI-0011A's Portfolio-tab "Mission Control" landing view (which used to be
+// documented here) was retired in WA-0002 -- Mission Control now lives only
+// at /dashboard (MB-0002). canonicalPriorities/topPriority/portfolioHealth
+// (PI-0011B) remain in use on this page by other tabs; see their remaining
+// call sites below.
 // PI-0011B: Portfolio Health Engine -- a deterministic 0-100 score computed
 // from data this page already has, now via buildDashboardComposition() above.
 // No new Portfolio Intelligence or Decision Engine calls, no new market data.
@@ -123,7 +123,7 @@ import { MissionControl } from '@/features/portfolio/missionControl/MissionContr
 // Priorities' already-scored dashboard. No new score, no new ranking, no
 // new recommendation logic -- see lib/portfolioReview's own module docs and
 // docs/design/PI-0012-Portfolio-Review-Architecture.md.
-import { PortfolioReviewCard } from '@/features/portfolio/review/PortfolioReviewCard';
+import { PositionCompositionCard } from '@/features/portfolio/positions/PositionCompositionCard';
 // PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
 // Review (above) and Today's Priorities' dashboard. No new score, no new
 // ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
@@ -8044,6 +8044,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
         </div>
       </div>
 
+      {/* WA-0002: position-specific risk badges -- renders nothing unless
+          pos.portfolioObjective is assignment- or earnings-exposed; see
+          PositionRiskBadges.tsx for the exact predicates. */}
+      <PositionRiskBadges objective={pos.portfolioObjective ?? null} th={th} />
+
       {/* Action + Analyze row */}
       <div className={`flex items-center px-4 py-2 border-t ${th.borderLight} overflow-x-auto`} style={{ flexWrap: 'nowrap' }}>
         {/* Quick action buttons */}
@@ -8710,7 +8715,7 @@ export default function PortfolioPage() {
   // tab's own Portfolio Health/Summary derivations and a new Top Priority
   // highlight into one higher-level view. 'today' itself is untouched and
   // still reachable on its own tab as a detailed drill-down.
-  const [activeTab, setActiveTab] = useState<'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('mission-control');
+  const [activeTab, setActiveTab] = useState<'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('positions');
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -9141,7 +9146,6 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
-            { key: 'mission-control', label: 'Mission Control', icon: '◎' },
             { key: 'today', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
@@ -9151,7 +9155,7 @@ export default function PortfolioPage() {
             { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'mission-control' | 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9166,25 +9170,6 @@ export default function PortfolioPage() {
       </div>
 
       {activeTab === 'balances' && <BalancesTab />}
-
-      {/* PI-0011A: Portfolio Mission Control -- the new default subpage,
-          superseding 'today'. Orchestrates canonicalPriorities.objectives
-          (Portfolio Summary, reusing the Briefing tab's own derivation
-          function), todaysPrioritiesDashboard (Today's Work Queue, reused
-          wholesale), topPriority (selectTopPriority's output), and
-          portfolioHealth (PI-0011B's score) into one landing view. No new
-          computation happens in MissionControl.tsx itself -- see its own
-          module doc. */}
-      {activeTab === 'mission-control' && (
-        <MissionControl
-          objectives={canonicalPriorities?.objectives ?? null}
-          dashboard={todaysPrioritiesDashboard}
-          topPriority={topPriority}
-          health={portfolioHealth}
-          loading={loading}
-          th={th}
-        />
-      )}
 
       {/* PI-0010A: Today's Priorities Dashboard -- still its own subpage,
           reachable as a detailed drill-down. Pure orchestration over state
@@ -9255,19 +9240,28 @@ export default function PortfolioPage() {
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
 
-      {/* PI-0013: Daily Briefing Dashboard -- first card on the Portfolio
-          page, above Portfolio Review and the position list. Renders
-          lib/dailyBriefing's already-composed briefing; computes nothing
-          itself. */}
+      {/* WA-0002: DailyBriefingCard's transitional variant -- Executive
+          Summary, Portfolio Snapshot, and Upcoming Events only, explicitly
+          labeled temporary. This is Briefing-owned content (PI-0013) with no
+          equivalent destination until the WA-0004 Briefing workspace ships;
+          it is retained here, visible, rather than silently unmounted, per
+          the WA-0002 CES corrective ruling. Today's Priorities, Current
+          Opportunities, and Current Risks are intentionally NOT rendered --
+          each is already fully owned elsewhere (Mission Control /
+          Today's Priorities). Remove this call site as part of WA-0004 once
+          Briefing provides its permanent destination for this content. */}
       <div className="px-6 pt-4">
-        <DailyBriefingCard briefing={dailyBriefing} loading={loading} th={th} />
+        <DailyBriefingCard briefing={dailyBriefing} loading={loading} th={th} variant="transitional" />
       </div>
 
-      {/* PI-0012A: Portfolio Review, Phase 1 -- above the position list.
+      {/* WA-0002: Portfolio Composition -- extracted from PI-0012A's
+          PortfolioReviewCard onto its own, correctly-named component.
           Renders lib/portfolioReview's already-composed snapshot; computes
-          nothing itself. */}
+          nothing itself. Portfolio Health, Top Risks, and Capital & Income
+          are intentionally not rendered here -- all three are already fully
+          owned by Mission Control (/dashboard, MB-0002). */}
       <div className="px-6">
-        <PortfolioReviewCard review={portfolioReview} loading={loading} th={th} />
+        <PositionCompositionCard review={portfolioReview} loading={loading} th={th} />
       </div>
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
