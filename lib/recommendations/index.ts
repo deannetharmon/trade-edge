@@ -23,3 +23,18 @@ export {
   subscribeToRecommendations,
 } from './RecommendationService';
 export type { RecommendationSet, RecommendationEvaluationStatus } from './RecommendationService';
+export {
+  buildBatchedRecommendationTransportPlan,
+  evaluateScreenResultsInBatches,
+  RECOMMENDATION_ENGINE_BUSY_CODE,
+  DEFAULT_BUSY_RETRY_LIMIT,
+  DEFAULT_BUSY_RETRY_BASE_DELAY_MS,
+  DEFAULT_BUSY_RETRY_MAX_DELAY_MS,
+  RECOMMENDATION_SAFE_REQUEST_BYTES,
+  VERCEL_FUNCTION_BODY_LIMIT_BYTES,
+} from './screenerRecommendationTransport';
+export type {
+  BatchedRecommendationApiBody,
+  BatchedRecommendationTransportPlan,
+  RecommendationCandidateBatch,
+} from './screenerRecommendationTransport';

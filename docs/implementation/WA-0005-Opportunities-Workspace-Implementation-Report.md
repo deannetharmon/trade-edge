@@ -2,7 +2,7 @@
 
 **Accepted baseline:** `455873f898a9e08b62513e723ccf69aa0afe5a4d` (branch `feature/wa-0005-opportunities-workspace-design`).
 **Frozen CES reference:** `docs/design/WA-0005-Opportunities-Workspace-CES.md` — Product Owner accepted and frozen, untouched by any implementation round, including this one.
-**Document status:** this is now the **fifth Product Owner corrective round** (§10 below is round 5's own account; §1–9 are round 4's original, unmodified report, retained as historical record). Rounds 1–2 addressed 7 findings; round 3 addressed 4 more; round 4 addressed 2 more (all summarized/re-verified in §7). **Round 5 is narrowly scoped to exactly 2 real production defects the Product Owner found by reviewing round 4's diff** — see §10 for the full account. Round 4's core architectural fixes (the committed job-identity state in `screenerJobStore.ts`, the Mission Control lifecycle signal threading) were accepted as sound and are untouched by round 5 except where directly implicated by round 5's own two fixes. `lib/opportunity-engine/`, `lib/decision-engine/`, `lib/autopilot/decision/`, and the frozen CES remain unmodified across all five rounds (confirmed by `git diff --stat`, §10.7). WA-0006 was not begun. **This sprint remains implementation complete and awaiting Product Owner review — it is not accepted, merged, or closed.**
+**Document status:** this now includes the **preview-discovered HTTP 413 corrective round** (§11). Sections §1–10 retain the prior five Product Owner corrective rounds as historical record. This round is narrowly scoped to the deployed recommendation-transport failure observed after a successful 9,425-result Ranked Scan. `lib/opportunity-engine/`, `lib/decision-engine/`, `lib/autopilot/decision/`, and the frozen CES remain unmodified. WA-0006 was not begun. **This sprint remains implementation complete and awaiting Product Owner review plus repeat Vercel preview acceptance — it is not accepted, merged, or closed.**
 
 ---
 
@@ -357,6 +357,303 @@ The round-4 implementation report (§2, §9, unmodified text preserved above wit
 **Status: implementation complete and awaiting Product Owner review.** WA-0005 is not accepted, merged, or closed.
 
 ---
+
+## 11. Preview HTTP 413 Corrective Round
+
+### 11.1 Trigger and confirmed rejection boundary
+
+Paul's Vercel preview test completed a broad Ranked Scan with 9,425 raw
+`ScreenResult` records, then Ranked Opportunities failed with:
+
+`Recommendation engine request failed (413)`
+
+The production path was confirmed directly:
+
+1. `app/screener/page.tsx` serialized the complete current `results` array as
+   `JSON.stringify({ screenResults: results })`.
+2. The browser sent that single body to
+   `POST /api/autopilot/recommendations`.
+3. `app/api/autopilot/recommendations/route.ts` could only begin application
+   parsing at `await request.json()`.
+
+Vercel's documented Function request-body ceiling is 4.5 MB. A request above
+that limit is rejected by Vercel's Function ingress with
+`413 FUNCTION_PAYLOAD_TOO_LARGE`, before the Next.js route can execute
+`request.json()`. Increasing a Next.js parser limit would therefore not reach
+or correct this boundary.
+
+### 11.2 Representative measurement and root cause
+
+A representative 9,425-record payload, populated with the real
+`ScreenResult`, `SpreadCandidate`, check, and trend shapes, measured:
+
+- Original `{"screenResults":[...]}` body: **26,740,262 bytes**
+  (approximately 26.74 MB).
+- The same eligible population after the existing canonical
+  `screenResultsToAutopilotCandidates()` projection:
+  **8,355,822 bytes** (approximately 8.36 MB).
+
+Compaction removes scan-only fields that the recommendation engine never
+consumes, but the complete eligible candidate population still exceeds
+Vercel's 4.5 MB ingress ceiling. The root cause is therefore not option-chain
+acquisition or application JSON parsing: it is a single, unbounded browser
+request containing the complete large scan-result population.
+
+The browser was not sending complete option chains: each serialized
+`ScreenResult` contained one selected `bestCandidate` plus scan checks and
+trend metadata. The combined 9,425-record envelope—not chain acquisition—was
+the rejected payload.
+
+### 11.3 Selected correction
+
+The correction is a narrow combination of canonical compaction and
+deterministic byte-bounded batching:
+
+- `lib/recommendations/screenerRecommendationTransport.ts` calls the existing
+  `screenResultsToAutopilotCandidates()` exactly once over the complete
+  original scan output. Eligibility therefore remains governed by the
+  original scan's `qualified` flag, `bestCandidate`, supported-strategy set,
+  and leg construction. Later UI sorting/filtering never shrinks the
+  evaluation population.
+- The resulting canonical `AutopilotCandidate[]` is the compact transport DTO.
+  No second candidate model or eligibility engine was created.
+- Candidate groups are partitioned by actual UTF-8 byte length of the exact
+  JSON request body, never by candidate count.
+- The enforced request ceiling is now **900,000 bytes**, leaving a
+  **3,600,000-byte request margin** below Vercel's documented
+  4,500,000-byte limit. The earlier 1,000,000-byte ceiling was lowered after
+  measuring the complete real route envelope (§11.8), not retained on
+  assumption.
+- Requests are sequential because `runRecommendationEngine()` already owns a
+  per-user run lock; concurrent batches would contend with the canonical
+  engine rather than improve correctness.
+- `app/api/autopilot/recommendations/route.ts` accepts the compact candidate
+  array, validates the exact Screener transport shape (supported strategy,
+  positive finite underlying price, finite credit, nonnegative finite maximum
+  loss, nonempty structurally valid option legs, and every optional
+  candidate/leg field consumed by scoring when present). Optional numbers
+  must be finite; enumerated/date/timestamp/string/notes metadata must match
+  its declared structural type. No new financial range or threshold is
+  imposed. The route then delegates unchanged to
+  `runRecommendationEngine()`. This is boundary protection, not a second
+  financial eligibility/scoring policy. Its legacy
+  small-`ScreenResult[]` contract remains available for compatible callers.
+
+### 11.4 Completeness, uniqueness, and canonical ranking
+
+Every scan result is accounted for exactly once by the existing canonical
+adapter:
+
+- eligible results produce one `AutopilotCandidate`;
+- unqualified, unsupported, or non-representable results remain in the
+  canonical `skipped` disclosure;
+- no first-N truncation, display-filter truncation, or arbitrary sampling is
+  performed.
+
+The existing candidate pipeline's duplicate identity is based on normalized
+symbol, strategy, and ordered leg economic structure. The transport uses the
+same identity only as an affinity key to keep duplicate-equivalent candidates
+inside one request. It does not drop or choose between them. The existing
+canonical pipeline still makes the retain/drop decision and returns its
+inspectable `DuplicateCandidateRecord`, so partitioning does not let a
+cross-batch duplicate evade canonical deduplication.
+
+Every batch returns unranked canonical `DecisionAnalysis[]`. The browser
+aggregates all successful batches first, then calls the existing
+`opportunityRecommendationsFromApiResponse()` once. That function still calls
+the unchanged `buildOpportunityRecommendations()` with
+`availableCapital: 0`, and the unchanged Opportunity Engine performs its
+canonical two-pass global ranking across the complete aggregate. A transport
+batch is never individually published as a completed ranked evaluation.
+
+### 11.5 Failure, cancellation, refresh, and supersession
+
+- If any batch fails, the aggregate promise rejects. No partial aggregate is
+  returned or published as success.
+- If any successful route response reports `killSwitchActive: true`, the
+  transport stops immediately. It sends no later batch, discards every
+  earlier recommendation/duplicate/count accumulated in the browser, and
+  constructs the canonical coherent paused outcome: zero recommendations,
+  zero duplicates, zero candidates scanned, kill switch active. A distinct
+  `RecommendationEvaluationPausedError` then routes that outcome through the
+  existing page failure lifecycle, so a prior successful publication is
+  preserved and the current paused state is disclosed as an alert. No mixed
+  pre-pause/post-pause set can reach ranking or publication.
+- The existing `/screener` failure path sets the truthful error state while
+  preserving the last successful `opportunityRecommendations`,
+  `rawAnalyses`, and `generatedAt`.
+- Browser abort alone does not stop a request that already entered
+  `runRecommendationEngine()`: the older server run can finish and retain the
+  per-user Redis lock during that interval. The route now classifies only the
+  engine's exact pre-run lock-contention error as HTTP 409 with
+  `code: "AUTOPILOT_ENGINE_BUSY"` and `retryable: true`. All other failures
+  remain non-retryable errors.
+- The current evaluation retries only that explicit 409. Waiting uses
+  abortable exponential backoff (500 ms, 1 s, 2 s, 4 s, then 5 s capped),
+  with at most 12 retries after the initial attempt (47.5 seconds maximum
+  scheduled wait; 13 total attempts). There is no tight polling. Exhaustion
+  rejects with an explicit "not published" failure.
+- One `AbortController` is owned by each results-triggered evaluation. React
+  effect cleanup aborts an in-flight fetch or pending retry wait when a newer
+  scan supersedes it or the page unmounts. Thus only the current effect can
+  continue retrying.
+- The existing committed results-affecting job identity and `cancelled` guard
+  remain in force. An older late response cannot publish or overwrite a newer
+  evaluation.
+- First evaluation, refresh-with-prior-results, refresh failure, Mission
+  Control lifecycle, Targeted Scan exclusion, cache restoration, and hard
+  reload behavior remain owned by the existing WA-0005 state machinery.
+- `beginRecommendationsEvaluation()` fires once for the complete evaluation;
+  `publishRecommendations()` fires once only after all batches succeed;
+  `failRecommendationsEvaluation()` fires once on a non-supersession failure.
+
+### 11.6 Stateful backend attempts across transport batches
+
+Repository tracing of
+`lib/autopilot/decision/recommendationEngine.ts` and its lock helper confirmed
+the existing lifecycle; neither file was changed:
+
+- Every successful batch is a real canonical engine attempt with its own run
+  ID and timestamp.
+- For each returned analysis, the engine appends the existing decision-log and
+  `recommendation_generated` audit records, then updates the paper account's
+  `lastRunAt`.
+- Those records describe candidate evaluation activity. They are not the
+  `/screener` Recommendation Service publication, and they do not represent a
+  trade or order. The browser still publishes exactly once only after every
+  batch has succeeded.
+- If a later batch fails, earlier successful attempt records remain. Erasing
+  them would make the audit trail less truthful: those candidates really were
+  evaluated. `lastRunAt` likewise records the latest successful engine
+  activity, not completion of the browser's logical aggregate.
+- Lock retries cannot duplicate those records. The retryable 409 is emitted
+  when lock acquisition fails, before candidate evaluation or persistence
+  starts. A normal 500, network failure, malformed response, or response loss
+  is never retried; this avoids replaying a run that may already have
+  completed server-side.
+- A superseded server run may still finish and persist its truthful evaluation
+  records. The newer results-affecting evaluation is a distinct attempt; it
+  waits for the lock and may create its own records, while the older browser
+  effect is prevented from publishing by abort plus the existing `cancelled`
+  guard.
+- A kill-switch response is also a truthful canonical attempt record. If the
+  switch is already active, the first batch creates the engine's one
+  `autopilot_paused` audit and the transport stops, avoiding one paused audit
+  per planned batch. If the switch activates after an earlier batch, the
+  earlier batch's truthful evaluation records remain and the paused batch
+  creates its canonical paused audit, but the browser discards the mixed
+  aggregate and preserves the prior publication.
+
+Changing these records into a single atomic multi-request backend transaction
+would require changing the forbidden canonical decision/persistence lifecycle.
+The correction therefore preserves the existing truthful per-attempt audit
+semantics and constrains retries at the transport boundary.
+
+### 11.7 Files in this correction
+
+Created:
+
+- `lib/recommendations/screenerRecommendationTransport.ts`
+- `lib/recommendations/__tests__/screenerRecommendationTransport.test.ts`
+- `app/api/autopilot/recommendations/__tests__/route.test.ts`
+
+Modified:
+
+- `app/screener/page.tsx`
+- `app/screener/__tests__/ScreenerPage.test.tsx`
+- `app/api/autopilot/recommendations/route.ts`
+- `lib/recommendations/index.ts`
+- `docs/implementation/WA-0005-Opportunities-Workspace-Implementation-Report.md`
+- `planning/SPRINT_STATUS.md`
+
+Explicitly excluded and unchanged:
+
+- `docs/design/WA-0005-Opportunities-Workspace-CES.md` (frozen)
+- `lib/opportunity-engine/`
+- `lib/decision-engine/`
+- `lib/autopilot/decision/`
+- `tsconfig.tsbuildinfo`
+
+### 11.8 Automated evidence, payload measurements, and remaining preview gate
+
+The new transport tests cover the representative 9,425-result population,
+actual serialized-byte enforcement, variable-sized candidates, no omission,
+no duplicate transport, duplicate-affinity co-location, normal small scans,
+complete-set canonical ranking equivalence, whole-evaluation failure, and
+supersession cancellation. They additionally cover explicit-lock-only retries,
+abort during retry wait, bounded exhaustion, non-retry of genuine failures,
+kill switch on the first batch, kill switch after an earlier successful
+batch, partial-aggregate discard, and no request after a paused response. The
+route tests cover compact-candidate acceptance, every required and optional
+candidate/leg validation field, exact lock classification, genuine failure
+classification, backward compatibility, and the complete response
+measurement described below.
+
+`app/screener/__tests__/ScreenerPage.test.tsx` mounts the real page and drives
+the TaskManager completion/results lifecycle directly for these
+transport-lifecycle cases (it does not claim those particular cases click the
+button/command bus). They prove: a small scan makes one request; an oversized
+broad result set makes multiple exact byte-bounded requests; nothing is
+published after the first batch; the complete aggregate publishes once; a
+later batch failure is disclosed and preserves the prior publication; a newer
+results-affecting job encounters an older run's temporary 409, retries,
+publishes successfully, and remains authoritative after the older response
+arrives late; first-batch and mid-evaluation kill-switch responses stop later
+requests, publish no mixed results, and preserve a prior successful
+publication with an explicit current-state error. The pre-existing refresh
+tests separately drive the real button/command bus. Existing Targeted Scan
+exclusion coverage remains in force.
+
+Response-side evidence now comes from the actual
+`POST /api/autopilot/recommendations` route test, not a reduced synthetic
+transport response. The mocked `RecommendationRunResult` includes every real
+field: run ID, timestamp, user, mode/live flags, full config, populated
+portfolio state, populated paper account, scanned/approved/rejected/suppressed
+counts, detailed canonical analyses, duplicates, and kill-switch state. Each
+analysis has populated confidence framework, evidence, concerns, alternatives,
+review triggers, expected outcome, opportunity score, candidate/legs, and
+metadata. The test reads `NextResponse.text()` and measures its exact UTF-8
+body.
+
+Exact standalone serialization of that same route-test fixture produced:
+
+- Candidate count in the maximum 900,000-byte batch: **831**
+- Exact request body: **899,125 bytes**
+- Exact complete `NextResponse` JSON body: **3,392,383 bytes**
+- Response headroom below 4,500,000 bytes: **1,107,617 bytes**
+  (approximately **24.6%**)
+
+For comparison, the complete fixture at the earlier 1,000,000-byte ceiling
+measured 3,767,948 response bytes with only 732,052 bytes of headroom. That
+evidence caused the ceiling reduction to 900,000 bytes. No response fields
+needed by ranking, explanations, inspection, or backend lifecycle reporting
+were removed.
+
+Automated tests use mocked external market-data dependencies and cannot prove
+the Vercel deployment boundary by themselves. WA-0005 remains unmerged, not
+accepted, and awaiting Product Owner preview acceptance. Paul must repeat the
+broad Vercel preview scan before acceptance.
+
+### 11.9 Final validation results
+
+The active checkout contains no installed project dependencies. Per the frozen
+instruction, no dependency installation or environment replacement was
+attempted.
+
+| Check | Exact command | Result |
+|---|---|---|
+| Touched targeted suites | `npm test -- lib/recommendations/__tests__/screenerRecommendationTransport.test.ts app/api/autopilot/recommendations/__tests__/route.test.ts app/screener/__tests__/ScreenerPage.test.tsx lib/recommendations/__tests__/RecommendationService.test.ts lib/command-center/__tests__/screenerOpportunityRecommendations.test.ts lib/command-center/__tests__/screenerRankedOpportunitiesState.test.ts components/opportunity-engine/__tests__/BestOpportunitiesPanel.test.tsx components/mission-control/__tests__/NewOpportunitiesSection.test.tsx components/mission-control/__tests__/MissionControl.test.tsx` | **Blocked/inconclusive**, exit 127 in 0.18s: `vitest: command not found`. Zero test files or tests started; no test failure or product-code error was emitted. |
+| Full repository suite | `npm test` | **Blocked/inconclusive**, exit 127 in 0.14s: `vitest: command not found`. Zero test files or tests started; no test failure or product-code error was emitted. |
+| TypeScript | `tsc --noEmit -p tsconfig.json` | **Blocked/inconclusive**, exit 127 immediately: `tsc: command not found`. No TypeScript diagnostic or product-code error was emitted. |
+| Production build | `npm run build` | **Blocked/inconclusive**, exit 127 in 0.16s: `next: command not found`. Compilation never started; no product-code build error was emitted. |
+| Whitespace | `git diff --check` | **Clean**, exit 0, no output. |
+| Frozen/semantic directories | `git diff --exit-code 55a4993 -- docs/design/WA-0005-Opportunities-Workspace-CES.md lib/opportunity-engine lib/decision-engine lib/autopilot/decision` | **Clean**, exit 0, no diff. |
+| Capital contract | `rg -n "availableCapital:\s*0" lib/command-center/screenerOpportunityRecommendations.ts` | Confirmed unchanged at line 72. |
+
+The missing dependency executables are an environment-state blocker, not a
+passing validation result. The new tests remain unexecuted in this workspace
+and must be run in the dependency-complete CI/Vercel environment before
+acceptance.
 
 ## Appendix: Prior Rounds (unchanged, summarized only)
 

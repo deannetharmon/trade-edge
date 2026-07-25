@@ -17,20 +17,14 @@
 //     in-memory fake matching the exact open/transaction/objectStore/get/
 //     put call shape app/screener/page.tsx's local idbOpen/idbGet/idbSet
 //     use, and seeds it before each render that needs non-empty results.
-//   - Every other scan-triggering path (runScreen/runTargetedScan/the
-//     Ranked Scan task-reconnect flow) requires live TastyTrade network
-//     calls this file does not attempt to fully simulate -- states that
-//     depend on driving a *second* live scan mid-session (refresh
-//     preservation, failed-refresh-with-prior-results, session-supersession
-//     staleness) are instead covered exhaustively at the pure-logic level
-//     (lib/command-center/__tests__/screenerRankedOpportunitiesState.test.ts)
-//     and at the component level (components/opportunity-engine/__tests__/
-//     BestOpportunitiesPanel.test.tsx's `stale`/blockerNotice-with-prior-
-//     recommendations coverage), which this page's rendering branches
-//     directly and verifiably consume (see the wiring at the "Ranked
-//     Opportunities" JSX block in app/screener/page.tsx). This split is a
-//     deliberate, disclosed test-architecture decision, not a coverage gap
-//     in the underlying behavior.
+//   - Live TastyTrade chain acquisition remains mocked at the ranked-scan
+//     runner boundary. The refresh-specific cases below drive the real
+//     button/command bus. The transport-lifecycle cases create and complete
+//     real TaskManager jobs directly, then exercise the mounted page effect,
+//     recommendation transport, and Recommendation Service lifecycle. This
+//     keeps the seam explicit while covering aggregation, failure
+//     preservation, supersession/lock recovery, and late responses without
+//     making external brokerage calls.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react';
@@ -40,9 +34,16 @@ import { CommandProvider } from '@/components/commands/CommandProvider';
 import type { TaskManager } from '@/lib/tasks/task-manager';
 import type { ScreenResult, CheckResult } from '@/lib/scans/types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
+import type { AutopilotCandidate } from '@/lib/autopilot/types';
 import { startScreenerJob, completeScreenerJob, clearScreenerJob } from '@/lib/screener/screenerJobStore';
 import { runRankedScan } from '@/lib/scans/ranked-scan-runner';
 import type { RankedScanResult } from '@/lib/scans/ranked-scan-runner';
+import {
+  clearRecommendations,
+  getCurrentRecommendations,
+  RECOMMENDATION_SAFE_REQUEST_BYTES,
+  subscribeToRecommendations,
+} from '@/lib/recommendations';
 import ScreenerPage from '../page';
 
 // Hoisted to module scope (vi.mock calls are hoisted by vitest regardless
@@ -159,7 +160,28 @@ function makeScreenResult(overrides: Partial<ScreenResult> = {}): ScreenResult {
     price: 190,
     ivr: 55,
     qualified: true,
-    bestCandidate: null,
+    bestCandidate: {
+      strategy: 'BPS',
+      expiration: '2026-09-18',
+      dte: 55,
+      shortStrike: 180,
+      longStrike: 175,
+      shortDelta: -0.22,
+      credit: 1.35,
+      spreadWidth: 5,
+      creditRatio: 0.27,
+      roc: 0.37,
+      pop: 74,
+      shortOI: 2_500,
+      longOI: 1_800,
+      shortOccSymbol: 'AAPL260918P00180000',
+      longOccSymbol: 'AAPL260918P00175000',
+      shortBid: 1.32,
+      shortAsk: 1.38,
+      longBid: 0.22,
+      longAsk: 0.26,
+      quoteFetchedAt: 1_785_000_000_000,
+    },
     failReasons: [],
     trendResult: undefined,
     isEtf: false,
@@ -191,6 +213,35 @@ function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): Decisi
     metadata: { source: 'screener', executionAllowed: false, paperExecutionAllowed: false, rulesEvaluated: [], rulesBlocked: [] },
     ...overrides,
   };
+}
+
+function makeAnalysisForCandidate(
+  candidate: AutopilotCandidate,
+  index = 0,
+): DecisionAnalysis {
+  return makeDecisionAnalysis({
+    id: `decision_${candidate.id}_${index}`,
+    subject: {
+      type: 'candidate',
+      id: candidate.id,
+      symbol: candidate.symbol,
+      strategy: candidate.strategy,
+      label: `${candidate.symbol} ${candidate.strategy}`,
+    },
+    candidate,
+  });
+}
+
+function makeLargeTransportResult(symbol: string, fill: string): ScreenResult {
+  const base = makeScreenResult({ symbol });
+  return makeScreenResult({
+    symbol,
+    bestCandidate: {
+      ...base.bestCandidate!,
+      shortOccSymbol: `${symbol}${fill}`,
+      longOccSymbol: `${symbol}${fill}`,
+    },
+  });
 }
 
 function renderScreenerPage() {
@@ -248,6 +299,7 @@ beforeEach(() => {
   // from a prior test can never leak into this one and produce a false
   // staleness signal.
   clearScreenerJob();
+  clearRecommendations();
   // Default: network disabled. Overridden per test for
   // /api/autopilot/recommendations as needed. loadExistingPositions/
   // loadWatchlist/loadFilters etc. all treat a rejection as a non-blocking,
@@ -259,6 +311,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   clearScreenerJob();
+  clearRecommendations();
   delete (globalThis as unknown as { indexedDB?: unknown }).indexedDB;
 });
 
@@ -898,6 +951,433 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // job-ASSOCIATION proof Defect 2 requires -- not just a check on which
     // symbol text happens to be on screen.
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
+  });
+
+  it('a normal small scan uses one recommendation request and publishes once', async () => {
+    const manager = renderRankedScanScreenerPage();
+    const publishedAnalysisCounts: number[] = [];
+    const unsubscribe = subscribeToRecommendations(() => {
+      const count = getCurrentRecommendations().analyses.length;
+      if (count > 0) publishedAnalysisCounts.push(count);
+    });
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    let task: any;
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Small ranked scan' }); });
+    act(() => {
+      manager.completeTask(task.id, {
+        results: [makeScreenResult({ symbol: 'AAPL' }), makeScreenResult({ symbol: 'MSFT' })],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
+    const recommendationCalls = (globalThis.fetch as any).mock.calls.filter(
+      ([url]: [string]) => url === '/api/autopilot/recommendations',
+    );
+    expect(recommendationCalls).toHaveLength(1);
+    expect(publishedAnalysisCounts).toEqual([2]);
+    unsubscribe();
+  });
+
+  it('a broad result set makes multiple byte-bounded requests but publishes only once after the complete aggregate', async () => {
+    const manager = renderRankedScanScreenerPage();
+    const requests: Array<{
+      candidates: AutopilotCandidate[];
+      deferred: ReturnType<typeof createDeferred<any>>;
+    }> = [];
+    const publishedAnalysisCounts: number[] = [];
+    const unsubscribe = subscribeToRecommendations(() => {
+      const count = getCurrentRecommendations().analyses.length;
+      if (count > 0) publishedAnalysisCounts.push(count);
+    });
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      const deferred = createDeferred<any>();
+      requests.push({ candidates, deferred });
+      return deferred.promise;
+    });
+
+    const large = 'x'.repeat(300_000);
+    let task: any;
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Broad ranked scan' }); });
+    act(() => {
+      manager.completeTask(task.id, {
+        results: [
+          makeLargeTransportResult('AAPL', large),
+          makeLargeTransportResult('MSFT', large),
+        ],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(new TextEncoder().encode(JSON.stringify({
+      candidates: requests[0].candidates,
+    })).byteLength).toBeLessThanOrEqual(RECOMMENDATION_SAFE_REQUEST_BYTES);
+    expect(getCurrentRecommendations().analyses).toHaveLength(0);
+
+    act(() => {
+      requests[0].deferred.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: requests[0].candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: requests[0].candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(getCurrentRecommendations().analyses).toHaveLength(0);
+    expect(publishedAnalysisCounts).toEqual([]);
+    expect(new TextEncoder().encode(JSON.stringify({
+      candidates: requests[1].candidates,
+    })).byteLength).toBeLessThanOrEqual(RECOMMENDATION_SAFE_REQUEST_BYTES);
+
+    act(() => {
+      requests[1].deferred.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: requests[1].candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: requests[1].candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
+    expect(publishedAnalysisCounts).toEqual([2]);
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument();
+    unsubscribe();
+  });
+
+  it('a later batch failure is disclosed and preserves the prior published recommendation set', async () => {
+    const manager = renderRankedScanScreenerPage();
+    let phase: 'prior' | 'refresh' = 'prior';
+    let refreshCall = 0;
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      if (phase === 'refresh') {
+        refreshCall += 1;
+        if (refreshCall === 2) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: async () => ({ error: 'Second recommendation batch failed.' }),
+          });
+        }
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    let taskA: any;
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan' }); });
+    act(() => {
+      manager.completeTask(taskA.id, {
+        results: [makeScreenResult({ symbol: 'AAPL' })],
+        rawScanCache: [],
+      });
+    });
+    await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
+
+    phase = 'refresh';
+    const large = 'y'.repeat(300_000);
+    let taskB: any;
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Refresh ranked scan' }); });
+    act(() => {
+      manager.completeTask(taskB.id, {
+        results: [
+          makeLargeTransportResult('MSFT', large),
+          makeLargeTransportResult('NVDA', large),
+        ],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('Second recommendation batch failed.')).toBeInTheDocument());
+    expect(refreshCall).toBe(2);
+    expect(getCurrentRecommendations().analyses).toHaveLength(1);
+    expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(screen.getByText('Second recommendation batch failed.').closest('[role="alert"]')).not.toBeNull();
+  });
+
+  it('a first-batch kill-switch response stops a broad evaluation and publishes no recommendations', async () => {
+    const manager = renderRankedScanScreenerPage();
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: [],
+            duplicates: [],
+            candidatesScanned: 0,
+            killSwitchActive: true,
+          },
+        }),
+      });
+    });
+
+    const large = 'k'.repeat(300_000);
+    let task: any;
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Paused broad scan' }); });
+    act(() => {
+      manager.completeTask(task.id, {
+        results: [
+          makeLargeTransportResult('AAPL', large),
+          makeLargeTransportResult('MSFT', large),
+          makeLargeTransportResult('NVDA', large),
+        ],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText(
+      'Autopilot kill switch is active. Ranked Opportunities were not updated.',
+    )).toBeInTheDocument());
+    const recommendationCalls = (globalThis.fetch as any).mock.calls.filter(
+      ([url]: [string]) => url === '/api/autopilot/recommendations',
+    );
+    expect(recommendationCalls).toHaveLength(1);
+    expect(getCurrentRecommendations()).toMatchObject({
+      analyses: [],
+      status: 'error',
+      error: 'Autopilot kill switch is active. Ranked Opportunities were not updated.',
+    });
+  });
+
+  it('a mid-evaluation kill switch discards earlier batch results, sends no later batch, and preserves the prior publication', async () => {
+    const manager = renderRankedScanScreenerPage();
+    let phase: 'prior' | 'paused-refresh' = 'prior';
+    let refreshCall = 0;
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      if (phase === 'paused-refresh') {
+        refreshCall += 1;
+        if (refreshCall === 2) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              result: {
+                recommendations: [],
+                duplicates: [],
+                candidatesScanned: 0,
+                killSwitchActive: true,
+              },
+            }),
+          });
+        }
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    let taskA: any;
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior successful scan' }); });
+    act(() => {
+      manager.completeTask(taskA.id, {
+        results: [makeScreenResult({ symbol: 'AAPL' })],
+        rawScanCache: [],
+      });
+    });
+    await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
+
+    phase = 'paused-refresh';
+    const large = 'p'.repeat(300_000);
+    let taskB: any;
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Paused refresh scan' }); });
+    act(() => {
+      manager.completeTask(taskB.id, {
+        results: [
+          makeLargeTransportResult('MSFT', large),
+          makeLargeTransportResult('NVDA', large),
+          makeLargeTransportResult('TSLA', large),
+        ],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText(
+      'Autopilot kill switch is active. Ranked Opportunities were not updated.',
+    )).toBeInTheDocument());
+    expect(refreshCall).toBe(2);
+    expect(getCurrentRecommendations()).toMatchObject({
+      status: 'error',
+      error: 'Autopilot kill switch is active. Ranked Opportunities were not updated.',
+    });
+    expect(getCurrentRecommendations().analyses).toHaveLength(1);
+    expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(document.getElementById('ranked-opportunities')!).queryByText('MSFT')).not.toBeInTheDocument();
+  });
+
+  it('a newer evaluation retries an old server lock, publishes the newer result, and ignores the older late response', async () => {
+    const manager = renderRankedScanScreenerPage();
+    const oldResponse = createDeferred<any>();
+    let msftAttempts = 0;
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      if (candidates[0]?.symbol === 'AAPL') return oldResponse.promise;
+      if (candidates[0]?.symbol === 'MSFT') {
+        msftAttempts += 1;
+        if (msftAttempts === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: 'Autopilot recommendation engine is already running.',
+              code: 'AUTOPILOT_ENGINE_BUSY',
+              retryable: true,
+            }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            result: {
+              recommendations: candidates.map(makeAnalysisForCandidate),
+              duplicates: [],
+              candidatesScanned: candidates.length,
+              killSwitchActive: false,
+            },
+          }),
+        });
+      }
+      return Promise.reject(new Error('Unexpected candidate.'));
+    });
+
+    let taskA: any;
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Old ranked scan' }); });
+    const oldLarge = 'z'.repeat(300_000);
+    act(() => {
+      manager.completeTask(taskA.id, {
+        results: [
+          makeLargeTransportResult('AAPL', oldLarge),
+          makeLargeTransportResult('NVDA', oldLarge),
+        ],
+        rawScanCache: [],
+      });
+    });
+    await waitFor(() => expect((globalThis.fetch as any).mock.calls.some(
+      ([url, init]: [string, RequestInit]) => (
+        url === '/api/autopilot/recommendations'
+        && JSON.parse(String(init?.body)).candidates[0]?.symbol === 'AAPL'
+      ),
+    )).toBe(true));
+
+    let taskB: any;
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'New ranked scan' }); });
+    act(() => {
+      manager.completeTask(taskB.id, {
+        results: [makeScreenResult({ symbol: 'MSFT' })],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(msftAttempts).toBe(2), { timeout: 2_000 });
+    await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('MSFT'));
+
+    act(() => {
+      oldResponse.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: [makeDecisionAnalysis()],
+            duplicates: [],
+            candidatesScanned: 1,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(getCurrentRecommendations().analyses).toHaveLength(1);
+    expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('MSFT');
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument();
+    expect(within(document.getElementById('ranked-opportunities')!).queryByText('AAPL')).not.toBeInTheDocument();
+    expect((globalThis.fetch as any).mock.calls.some(
+      ([url, init]: [string, RequestInit]) => (
+        url === '/api/autopilot/recommendations'
+        && JSON.parse(String(init?.body)).candidates[0]?.symbol === 'NVDA'
+      ),
+    )).toBe(false);
   });
 
   it('Targeted Scan exclusion, via a real (non-Ranked) job kind: a completed Targeted Scan never affects Ranked Opportunities staleness or identity even when triggered through the same job-store mechanism real scans use', async () => {

@@ -84,6 +84,7 @@ import {
   clearRecommendations,
   beginRecommendationsEvaluation,
   failRecommendationsEvaluation,
+  evaluateScreenResultsInBatches,
 } from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
@@ -5667,19 +5668,18 @@ export default function Home() {
     // observe it too -- without touching whatever was last successfully
     // published there.
     beginRecommendationsEvaluation();
+    const abortController = new AbortController();
 
     (async () => {
       try {
-        const response = await fetch('/api/autopilot/recommendations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ screenResults: results }),
+        // WA-0005 production 413 correction: adapt once through the existing
+        // canonical Screener adapter, then send deterministic byte-bounded
+        // compact candidate batches. The complete response is aggregated
+        // before the existing canonical global Opportunity Engine ranking or
+        // any success publication occurs.
+        const body = await evaluateScreenResultsInBatches(results, {
+          signal: abortController.signal,
         });
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(body?.error ?? `Recommendation engine request failed (${response.status}).`);
-        }
 
         const { recommendations, generatedAt, skipped } = opportunityRecommendationsFromApiResponse(body);
         const analyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
@@ -5694,6 +5694,7 @@ export default function Home() {
           publishRecommendations(analyses, generatedAt);
         }
       } catch (e: any) {
+        if (cancelled || e?.name === 'AbortError') return;
         if (!cancelled) {
           // WA-0005 §16: a failed refresh must preserve the last valid
           // Ranked Opportunities presentation, not blank it out -- do NOT
@@ -5714,7 +5715,10 @@ export default function Home() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
     // PO corrective round 5 (WA-0005 Defect 1): `isScanCurrentlyRefreshing`
     // is intentionally read but not listed here. It is only consulted
     // inside the `results.length === 0` branch above, and `results` and the
@@ -6967,7 +6971,6 @@ export default function Home() {
     </div>
   );
 }
-
 
 
 
