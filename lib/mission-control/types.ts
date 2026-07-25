@@ -48,6 +48,30 @@ export type MissionControlState = 'loading' | 'loaded' | 'empty' | 'error' | 'un
 // always returns a real snapshot once positions/pendingOrders exist, so
 // `empty` is not reachable via today's inputs, but the state exists so a
 // consumer never has to special-case its absence.
+// WA-0004 (CES section 11, corrective ruling): Mission Control's reduced
+// "Since Your Last Review" summary -- lead text, count, one-line compact
+// summary, and a single deep link into Briefing, all derived from the SAME
+// `narrative.sinceLastReview.changes` + shared `TRADER_COMMITMENT_TRACKING_ACTIVE`
+// flag (lib/review-conductor) Briefing's own full section uses, computed
+// once here rather than re-derived independently by the presentation
+// component (mirrors `MissionControlTodaysPrioritiesSummary`'s existing
+// pattern exactly). `deepLink` is always the absolute application path
+// `/portfolio?tab=briefing` -- never a query-only `?tab=briefing` string
+// (this summary renders on /dashboard) and never `/dashboard?tab=briefing`.
+export interface MissionControlSinceLastReviewSummary {
+  trackingActive: boolean;
+  // First change's commitment.subject.label when changes exist; the
+  // honest tracking-unavailable copy when `trackingActive` is false; the
+  // genuine-zero-change copy when `trackingActive` is true and there are no
+  // changes. Never blank.
+  leadText: string;
+  // `null` exactly when `trackingActive` is false -- a `0` here would
+  // itself imply "tracking ran and found nothing," which is not true today.
+  count: number | null;
+  summary: string;
+  deepLink: string;
+}
+
 export interface MissionControlViewModel {
   state: MissionControlState;
   message?: string;
@@ -59,6 +83,9 @@ export interface MissionControlViewModel {
   // special-case its absence. { leadItem: null, openCount: 0, deepLink: null }
   // in every non-'loaded' state.
   todaysPriorities: MissionControlTodaysPrioritiesSummary;
+  // WA-0004 (CES section 11) -- always populated (never null), even when
+  // `narrative` itself is null, mirroring `todaysPriorities`'s convention.
+  sinceLastReview: MissionControlSinceLastReviewSummary;
 }
 
 export interface BuildMissionControlViewModelInput {

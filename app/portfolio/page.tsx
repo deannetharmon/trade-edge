@@ -138,7 +138,11 @@ import { PositionCompositionCard } from '@/features/portfolio/positions/Position
 // Review (above) and Today's Priorities' dashboard. No new score, no new
 // ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
 // module docs and docs/reviews/PI-0013-Daily-Briefing-Implementation-Report.md.
-import { DailyBriefingCard } from '@/features/portfolio/dailyBriefing/DailyBriefingCard';
+// WA-0004: DailyBriefingCard itself (features/portfolio/dailyBriefing/
+// DailyBriefingCard.tsx) has been retired -- its transitional call site
+// below is gone, and Briefing (the 'briefing' tab, above) is now the
+// permanent destination for the content it used to render on Positions.
+// See docs/implementation/WA-0004-Briefing-Separation-Implementation-Report.md.
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
@@ -8758,7 +8762,7 @@ export default function PortfolioPage() {
   const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>(() => {
     if (typeof window === 'undefined') return 'positions';
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab === 'todays-priorities' || tab === 'positions' || tab === 'history') return tab;
+    if (tab === 'todays-priorities' || tab === 'briefing' || tab === 'positions' || tab === 'history') return tab;
     return 'positions';
   });
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
@@ -9248,13 +9252,22 @@ export default function PortfolioPage() {
         <TodaysPrioritiesQueueView queue={todaysPrioritiesQueue} loading={loading} th={th} />
       )}
 
-      {/* PI-0004D: Daily Portfolio Briefing -- the default subpage. Consumes
-          the exact same canonicalPriorities state computed above; no new
-          fetch, no new Portfolio Intelligence call, no duplicated
-          Today's Priorities logic (it renders TodaysPrioritiesWorkflow
-          directly). */}
+      {/* WA-0004: Briefing -- the single canonical composition of Portfolio
+          Health, Executive Summary/Snapshot/Upcoming Events, Since Your
+          Last Review, and contextual risks. Consumes the exact same
+          canonicalPriorities/portfolioReview/todaysPrioritiesDashboard/
+          dailyBriefing state this page already computes; no new fetch, no
+          new Portfolio Intelligence call. Deep-linkable via
+          `?tab=briefing` (allow-listed above). */}
       {activeTab === 'briefing' && (
-        <DailyPortfolioBriefing objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+        <DailyPortfolioBriefing
+          objectives={canonicalPriorities?.objectives ?? null}
+          dailyBriefing={dailyBriefing}
+          portfolioReview={portfolioReview}
+          todaysPrioritiesDashboard={todaysPrioritiesDashboard}
+          loading={loading}
+          th={th}
+        />
       )}
 
       {/* PI-0004C: Today's Priorities is now its own Portfolio subpage --
@@ -9318,19 +9331,11 @@ export default function PortfolioPage() {
         </div>
       )}
 
-      {/* WA-0002: DailyBriefingCard's transitional variant -- Executive
-          Summary, Portfolio Snapshot, and Upcoming Events only, explicitly
-          labeled temporary. This is Briefing-owned content (PI-0013) with no
-          equivalent destination until the WA-0004 Briefing workspace ships;
-          it is retained here, visible, rather than silently unmounted, per
-          the WA-0002 CES corrective ruling. Today's Priorities, Current
-          Opportunities, and Current Risks are intentionally NOT rendered --
-          each is already fully owned elsewhere (Mission Control /
-          Today's Priorities). Remove this call site as part of WA-0004 once
-          Briefing provides its permanent destination for this content. */}
-      <div className="px-6 pt-4">
-        <DailyBriefingCard briefing={dailyBriefing} loading={loading} th={th} variant="transitional" />
-      </div>
+      {/* WA-0004: the transitional DailyBriefingCard call site that used to
+          render here (Executive Summary/Portfolio Snapshot/Upcoming Events)
+          has been removed -- Briefing (the 'briefing' tab) is now that
+          content's permanent, verified destination, closing WA-0002's
+          binding transitional-content obligation. */}
 
       {/* WA-0002: Portfolio Composition -- extracted from PI-0012A's
           PortfolioReviewCard onto its own, correctly-named component.

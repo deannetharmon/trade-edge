@@ -10,4 +10,5 @@ export type {
   MissionControlState,
   MissionControlViewModel,
   MissionControlTodaysPrioritiesSummary,
+  MissionControlSinceLastReviewSummary,
 } from './types';

@@ -238,3 +238,44 @@ describe('buildMissionControlViewModel: determinism', () => {
     expect(second).toEqual(first);
   });
 });
+
+describe('buildMissionControlViewModel: WA-0004 sinceLastReview summary', () => {
+  it('is always populated (never null/undefined), even in every non-loaded state', () => {
+    expect(buildMissionControlViewModel(baseInput({ compositionLoading: true })).sinceLastReview).toBeDefined();
+    expect(
+      buildMissionControlViewModel(baseInput({ composition: loadedComposition(), compositionError: 'boom' })).sinceLastReview,
+    ).toBeDefined();
+  });
+
+  it('reports the tracking-unavailable state (today\'s real, only-possible state) -- never "Nothing changed" and never a numeric count', () => {
+    const result = buildMissionControlViewModel(baseInput({ composition: loadedComposition() }));
+
+    expect(result.sinceLastReview.trackingActive).toBe(false);
+    expect(result.sinceLastReview.leadText).toBe('Change tracking is not yet active.');
+    expect(result.sinceLastReview.leadText).not.toBe('Nothing changed since your last review.');
+    expect(result.sinceLastReview.count).toBeNull();
+  });
+
+  it('imports TRADER_COMMITMENT_TRACKING_ACTIVE from the identical shared module Briefing uses', async () => {
+    const fs = await import('node:fs/promises');
+    const missionControlText = await fs.readFile('lib/mission-control/buildMissionControlViewModel.ts', 'utf-8');
+    const briefingText = await fs.readFile('features/portfolio/briefing/DailyPortfolioBriefing.tsx', 'utf-8');
+    expect(missionControlText).toContain("from '@/lib/review-conductor'");
+    expect(briefingText).toContain("from '@/lib/review-conductor'");
+    expect(missionControlText).toMatch(/TRADER_COMMITMENT_TRACKING_ACTIVE/);
+    expect(briefingText).toMatch(/TRADER_COMMITMENT_TRACKING_ACTIVE/);
+  });
+
+  it('the deep link is always the absolute path /portfolio?tab=briefing -- never a bare ?tab=briefing and never /dashboard?tab=briefing', () => {
+    const loaded = buildMissionControlViewModel(baseInput({ composition: loadedComposition() }));
+    const loading = buildMissionControlViewModel(baseInput({ compositionLoading: true }));
+    const errored = buildMissionControlViewModel(baseInput({ composition: loadedComposition(), compositionError: 'boom' }));
+
+    for (const result of [loaded, loading, errored]) {
+      expect(result.sinceLastReview.deepLink).toBe('/portfolio?tab=briefing');
+      expect(result.sinceLastReview.deepLink).toMatch(/^\/portfolio\?/);
+      expect(result.sinceLastReview.deepLink).not.toMatch(/^\?/);
+      expect(result.sinceLastReview.deepLink).not.toMatch(/^\/dashboard\?/);
+    }
+  });
+});

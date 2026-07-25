@@ -12,7 +12,7 @@
 // by default, not live data acquisition.
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioDataProvider';
@@ -114,5 +114,50 @@ describe('WA-0003: explicit tab query-param deep links', () => {
 
     await waitFor(() => expect(screen.getByText('Positions')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('NO OPEN POSITIONS FOUND')).toBeInTheDocument());
+  });
+
+  // WA-0004: 'briefing' is now a recognized deep-link value (previously only
+  // reachable by clicking the tab -- CES section 13). With a zero-position
+  // fixture, dailyBriefing composes to null (portfolioReview is null exactly
+  // when there are zero positions, zero pending orders, and no canonical
+  // priorities -- lib/portfolio-intelligence/dashboardComposition.ts), so
+  // DailyPortfolioBriefing renders its explicit, honest empty-briefing state
+  // (never a blank workspace -- WA-0004 corrective round). Both the Briefing
+  // landmark and its empty-state copy must render, and Positions'/Today's
+  // Priorities' own content must not, proving activeTab actually switched
+  // away from the 'positions' default.
+  it('opens the Briefing tab directly when ?tab=briefing is present, without falling back to Positions', async () => {
+    window.history.pushState({}, '', '/portfolio?tab=briefing');
+    render(
+      <PortfolioModeProvider>
+        <PortfolioDataProvider>
+          <PortfolioPage />
+        </PortfolioDataProvider>
+      </PortfolioModeProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Positions')).toBeInTheDocument());
+    // Positions' own "no positions" empty state must not render while
+    // 'briefing' is the active tab -- proof the allow-list actually routed
+    // to Briefing rather than silently falling through to 'positions'.
+    await waitFor(() => expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument());
+    expect(screen.queryByLabelText('Open Priorities')).not.toBeInTheDocument();
+
+    // The Briefing landmark renders, and it renders its own explicit,
+    // honest empty-state message -- not a blank pane. Never presents this
+    // as "portfolio is healthy" or "nothing changed."
+    const briefingLandmark = await screen.findByLabelText('Daily Portfolio Briefing');
+    expect(within(briefingLandmark).getByText('No briefing available right now.')).toBeInTheDocument();
+    expect(within(briefingLandmark).getByText('There is no portfolio data or open positions to summarize.')).toBeInTheDocument();
+    expect(within(briefingLandmark).queryByText('Nothing changed since your last review.')).not.toBeInTheDocument();
+  });
+});
+
+describe('WA-0004: transitional DailyBriefingCard call site fully removed from Positions', () => {
+  it('page.tsx no longer imports DailyBriefingCard (WA-0002\'s transitional call site is closed, not merely hidden)', async () => {
+    const fs = await import('node:fs/promises');
+    const pageText = await fs.readFile('app/portfolio/page.tsx', 'utf-8');
+    expect(pageText).not.toMatch(/import\s*\{[^}]*DailyBriefingCard/);
+    expect(pageText).not.toContain('variant="transitional"');
   });
 });

@@ -14,6 +14,7 @@
 import type { THEMES, Theme } from '@/lib/theme';
 import type { PortfolioHealthStatus } from '@/lib/portfolioHealth';
 import type { ReviewLeadItem, ReviewNarrative } from '@/lib/review-conductor';
+import type { MissionControlSinceLastReviewSummary } from '@/lib/mission-control';
 
 const HEALTH_STATUS_STYLE: Record<PortfolioHealthStatus, string> = {
   Healthy: 'text-emerald-400',
@@ -29,12 +30,6 @@ function leadItemHeadline(leadItem: ReviewLeadItem | null): string {
   return leadItem.item.headline;
 }
 
-function sinceLastReviewSummary(narrative: ReviewNarrative): string {
-  const { changes } = narrative.counts as { changes: number };
-  if (changes === 0) return 'Nothing changed since your last review.';
-  return `${changes} ${changes === 1 ? 'change' : 'changes'} since your last review.`;
-}
-
 function attentionSummary(narrative: ReviewNarrative): string {
   if (narrative.complete.isComplete) return narrative.complete.message;
   const { attention } = narrative.counts;
@@ -43,10 +38,19 @@ function attentionSummary(narrative: ReviewNarrative): string {
 
 export interface SummaryStripProps {
   narrative: ReviewNarrative;
+  // WA-0004 (CES section 7/10/11, corrective ruling): the same shared
+  // summary buildMissionControlViewModel.ts builds for
+  // SinceLastReviewSection -- this strip must never independently derive
+  // "Nothing changed since your last review." from `narrative.counts.changes
+  // === 0` alone, since that is structurally identical whether commitment
+  // tracking never ran or ran and found nothing. Reusing the identical
+  // pre-built summary guarantees this strip and the full section below can
+  // never disagree.
+  sinceLastReview: MissionControlSinceLastReviewSummary;
   th: (typeof THEMES)[Theme];
 }
 
-export function SummaryStrip({ narrative, th }: SummaryStripProps) {
+export function SummaryStrip({ narrative, sinceLastReview, th }: SummaryStripProps) {
   const health = narrative.portfolioStatus.review.currentState.health;
 
   return (
@@ -69,7 +73,7 @@ export function SummaryStrip({ narrative, th }: SummaryStripProps) {
       </div>
 
       <div className={`mt-4 flex flex-col gap-1 border-t ${th.borderLight} pt-4 md:flex-row md:items-center md:justify-between md:gap-6`}>
-        <p className={`text-[12px] ${th.textMuted}`}>{sinceLastReviewSummary(narrative)}</p>
+        <p className={`text-[12px] ${th.textMuted}`}>{sinceLastReview.summary}</p>
         <p className={`text-[12px] ${th.textMuted}`}>{attentionSummary(narrative)}</p>
       </div>
     </section>

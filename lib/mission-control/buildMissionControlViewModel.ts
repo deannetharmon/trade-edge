@@ -14,11 +14,63 @@
 // responsibility TC-0001's view-model layer already established.
 
 import { buildAttentionFeed } from '@/lib/morning-briefing';
-import { conductReview } from '@/lib/review-conductor';
+import { conductReview, TRADER_COMMITMENT_TRACKING_ACTIVE } from '@/lib/review-conductor';
 import { buildTodaysPrioritiesQueue, partitionTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
-import type { BuildMissionControlViewModelInput, MissionControlTodaysPrioritiesSummary, MissionControlViewModel } from './types';
+import type {
+  BuildMissionControlViewModelInput,
+  MissionControlSinceLastReviewSummary,
+  MissionControlTodaysPrioritiesSummary,
+  MissionControlViewModel,
+} from './types';
+import type { ReviewNarrative } from '@/lib/review-conductor';
 
 const EMPTY_TODAYS_PRIORITIES_SUMMARY: MissionControlTodaysPrioritiesSummary = { leadItem: null, openCount: 0, deepLink: null };
+
+// WA-0004: the absolute application path every Mission Control -> Briefing
+// link must use. Mission Control renders on /dashboard; a query-only
+// `?tab=briefing` href would resolve against /dashboard, not /portfolio --
+// the exact defect class WA-0003's corrective round found and fixed
+// (commit abbf261) for the `priority` deep link. Built once, here, so it can
+// never drift.
+const BRIEFING_DEEP_LINK = '/portfolio?tab=briefing';
+
+// WA-0004 (CES section 11): builds the single shared "Since Your Last
+// Review" summary both SummaryStrip and SinceLastReviewSection consume --
+// neither recomputes or independently decides the tracking-active state.
+function buildSinceLastReviewSummary(narrative: ReviewNarrative | null): MissionControlSinceLastReviewSummary {
+  const trackingActive = TRADER_COMMITMENT_TRACKING_ACTIVE;
+  const changes = narrative?.sinceLastReview.changes ?? [];
+
+  if (!trackingActive) {
+    return {
+      trackingActive: false,
+      leadText: 'Change tracking is not yet active.',
+      count: null,
+      summary: 'Commitment tracking is not yet active.',
+      deepLink: BRIEFING_DEEP_LINK,
+    };
+  }
+
+  if (changes.length === 0) {
+    return {
+      trackingActive: true,
+      leadText: 'Nothing changed since your last review.',
+      count: 0,
+      summary: 'Nothing changed since your last review.',
+      deepLink: BRIEFING_DEEP_LINK,
+    };
+  }
+
+  return {
+    trackingActive: true,
+    leadText: changes[0].commitment.subject.label,
+    count: changes.length,
+    summary: `${changes.length} ${changes.length === 1 ? 'thing' : 'things'} changed since your last review.`,
+    deepLink: BRIEFING_DEEP_LINK,
+  };
+}
+
+const EMPTY_SINCE_LAST_REVIEW_SUMMARY: MissionControlSinceLastReviewSummary = buildSinceLastReviewSummary(null);
 
 export function buildMissionControlViewModel(input: BuildMissionControlViewModelInput): MissionControlViewModel {
   const now = input.now ?? new Date();
@@ -33,6 +85,7 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
       generatedAt,
       lastRefreshedAt,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
+      sinceLastReview: EMPTY_SINCE_LAST_REVIEW_SUMMARY,
     };
   }
 
@@ -52,6 +105,7 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
       generatedAt,
       lastRefreshedAt,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
+      sinceLastReview: EMPTY_SINCE_LAST_REVIEW_SUMMARY,
     };
   }
 
@@ -98,5 +152,10 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
     deepLink: partition.leadItem ? `/portfolio?tab=todays-priorities&priority=${encodeURIComponent(partition.leadItem.stableKey)}` : null,
   };
 
-  return { state: 'loaded', narrative, generatedAt, lastRefreshedAt, todaysPriorities };
+  // WA-0004 (CES section 11): built once, from this exact `narrative`, and
+  // handed to both SummaryStrip and SinceLastReviewSection so neither
+  // recomputes or independently decides the tracking-active state.
+  const sinceLastReview = buildSinceLastReviewSummary(narrative);
+
+  return { state: 'loaded', narrative, generatedAt, lastRefreshedAt, todaysPriorities, sinceLastReview };
 }

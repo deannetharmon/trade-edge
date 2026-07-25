@@ -1,6 +1,6 @@
 // components/mission-control/__tests__/MissionControl.test.tsx
 //
-// MB-0002: component-level coverage for the Mission Control layout.
+// MB-0002/WA-0004: component-level coverage for the Mission Control layout.
 // Verifies: narrative sections render in the exact required order on every
 // render (order is DOM order, not CSS -- see MissionControl.tsx's module
 // doc); the first-viewport Summary Strip answers all three mission
@@ -8,14 +8,21 @@
 // state (loading/error/unavailable) renders its own honest, distinct
 // message; empty-state copy for each narrative section renders through real
 // components; the completion band renders both the complete and
-// not-complete cases; and the whole surface remains strictly read-only.
+// not-complete cases; the whole surface remains strictly read-only; and
+// (WA-0004) the reduced "Since Your Last Review" summary honestly
+// distinguishes tracking-unavailable from a genuine zero-change result, and
+// its deep link is always the absolute /portfolio?tab=briefing path.
 
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
 import { MissionControl } from '../MissionControl';
-import type { MissionControlViewModel, MissionControlTodaysPrioritiesSummary } from '@/lib/mission-control';
+import type {
+  MissionControlSinceLastReviewSummary,
+  MissionControlTodaysPrioritiesSummary,
+  MissionControlViewModel,
+} from '@/lib/mission-control';
 import type { ReviewNarrative } from '@/lib/review-conductor';
 import type { AttentionItem } from '@/lib/morning-briefing';
 import type { RevalidationResult } from '@/lib/revalidation';
@@ -23,6 +30,17 @@ import type { TodaysPrioritiesQueueItem } from '@/lib/todays-priorities-queue';
 import { createTraderCommitment } from '@/lib/trader-commitments';
 
 const EMPTY_TODAYS_PRIORITIES: MissionControlTodaysPrioritiesSummary = { leadItem: null, openCount: 0, deepLink: null };
+
+// WA-0004: today's real, only-possible state (TRADER_COMMITMENT_TRACKING_ACTIVE
+// is false) -- matches buildMissionControlViewModel.ts's own
+// buildSinceLastReviewSummary(null)/tracking-inactive output exactly.
+const TRACKING_INACTIVE_SINCE_LAST_REVIEW: MissionControlSinceLastReviewSummary = {
+  trackingActive: false,
+  leadText: 'Change tracking is not yet active.',
+  count: null,
+  summary: 'Commitment tracking is not yet active.',
+  deepLink: '/portfolio?tab=briefing',
+};
 
 function makeQueueItem(overrides: Partial<TodaysPrioritiesQueueItem> = {}): TodaysPrioritiesQueueItem {
   return {
@@ -102,19 +120,29 @@ function narrativeFor(overrides: Partial<ReviewNarrative> = {}): ReviewNarrative
   };
 }
 
-function viewModelFor(narrative: ReviewNarrative, todaysPriorities: MissionControlTodaysPrioritiesSummary = EMPTY_TODAYS_PRIORITIES): MissionControlViewModel {
-  return { state: 'loaded', narrative, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities };
+function viewModelFor(
+  narrative: ReviewNarrative,
+  todaysPriorities: MissionControlTodaysPrioritiesSummary = EMPTY_TODAYS_PRIORITIES,
+  sinceLastReview: MissionControlSinceLastReviewSummary = TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+): MissionControlViewModel {
+  return { state: 'loaded', narrative, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities, sinceLastReview };
 }
 
 describe('MissionControl: non-loaded states', () => {
   it('renders a loading state with role=status', () => {
-    const vm: MissionControlViewModel = { state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities: EMPTY_TODAYS_PRIORITIES };
+    const vm: MissionControlViewModel = {
+      state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+    };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
   it('renders an error state with role=alert and the given message', () => {
-    const vm: MissionControlViewModel = { state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities: EMPTY_TODAYS_PRIORITIES };
+    const vm: MissionControlViewModel = {
+      state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+    };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByRole('alert')).toHaveTextContent('boom');
   });
@@ -127,6 +155,7 @@ describe('MissionControl: non-loaded states', () => {
       generatedAt: FIXED_NOW,
       lastRefreshedAt: null,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES,
+      sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
     };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByText(/not available yet/)).toBeInTheDocument();
@@ -153,14 +182,17 @@ describe('MissionControl: narrative section order', () => {
 });
 
 describe('MissionControl: first-viewport Summary Strip', () => {
-  it('answers all three mission questions from the Summary Strip alone, on a quiet day', () => {
+  it('answers all three mission questions from the Summary Strip alone, on a quiet day, honestly reporting tracking-unavailable', () => {
     render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
 
     const strip = screen.getByLabelText('Review Summary');
     expect(strip).toHaveTextContent('Healthy');
     expect(strip).toHaveTextContent('82');
     expect(strip).toHaveTextContent('Nothing needs your immediate attention.');
-    expect(strip).toHaveTextContent('Nothing changed since your last review.');
+    // WA-0004: today's real state -- never "Nothing changed since your last
+    // review." while tracking is inactive.
+    expect(strip).toHaveTextContent('Commitment tracking is not yet active.');
+    expect(strip).not.toHaveTextContent('Nothing changed since your last review.');
   });
 
   it('surfaces the lead item headline when one exists', () => {
@@ -227,18 +259,66 @@ describe('MissionControl: WA-0003 reduced Attention Required section', () => {
   });
 });
 
+describe('WA-0004: MissionControl reduced "Since Your Last Review" section', () => {
+  it('honestly reports the tracking-unavailable state -- never "Nothing changed since your last review." and never a zero count, but the deep link still renders', () => {
+    render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Since Your Last Review');
+    expect(section).toHaveTextContent('Change tracking is not yet active.');
+    expect(section).not.toHaveTextContent('Nothing changed since your last review.');
+    expect(section).not.toHaveTextContent('0 things changed');
+    expect(screen.getByRole('link', { name: /open in briefing/i })).toBeInTheDocument();
+  });
+
+  it('renders the genuine zero-change copy only when tracking is active and there are no changes', () => {
+    const sinceLastReview: MissionControlSinceLastReviewSummary = {
+      trackingActive: true, leadText: 'Nothing changed since your last review.', count: 0,
+      summary: 'Nothing changed since your last review.', deepLink: '/portfolio?tab=briefing',
+    };
+    render(<MissionControl viewModel={viewModelFor(narrativeFor(), EMPTY_TODAYS_PRIORITIES, sinceLastReview)} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Since Your Last Review');
+    expect(section).toHaveTextContent('Nothing changed since your last review.');
+    expect(section).not.toHaveTextContent('Change tracking is not yet active.');
+  });
+
+  it('renders the lead change and count when tracking is active and changes exist', () => {
+    const change = makeRevalidationResult();
+    const sinceLastReview: MissionControlSinceLastReviewSummary = {
+      trackingActive: true, leadText: change.commitment.subject.label, count: 1,
+      summary: '1 thing changed since your last review.', deepLink: '/portfolio?tab=briefing',
+    };
+    render(<MissionControl viewModel={viewModelFor(narrativeFor(), EMPTY_TODAYS_PRIORITIES, sinceLastReview)} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Since Your Last Review');
+    expect(section).toHaveTextContent('MSFT BPS');
+    expect(section).toHaveTextContent('1 thing changed since your last review.');
+    // The full whatChanged/whyItMatters detail is Briefing-only now.
+    expect(section).not.toHaveTextContent('MSFT BPS reached 21 DTE.');
+  });
+
+  it('the deep link is exactly /portfolio?tab=briefing -- never a bare ?tab=briefing and never /dashboard?tab=briefing', () => {
+    render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
+    const link = screen.getByRole('link', { name: /open in briefing/i });
+    const href = link.getAttribute('href')!;
+    expect(href).toBe('/portfolio?tab=briefing');
+    expect(href).toMatch(/^\/portfolio\?/);
+    expect(href).not.toMatch(/^\?/);
+    expect(href).not.toMatch(/^\/dashboard\?/);
+  });
+});
+
 describe('MissionControl: empty-state copy for each section', () => {
   it('renders the required honest empty-state copy when nothing has changed and nothing needs attention', () => {
     render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
 
-    expect(screen.getAllByText('Nothing changed since your last review.').length).toBeGreaterThan(0);
     expect(screen.getByText('Nothing needs your attention right now.')).toBeInTheDocument();
     expect(screen.getByText('No ranked opportunities to display.')).toBeInTheDocument();
   });
 });
 
 describe('MissionControl: real content renders end to end', () => {
-  it('renders a real Since Your Last Review change and a real Attention Required item verbatim', () => {
+  it('renders a real Attention Required item verbatim (Since Your Last Review\'s full detail is Briefing-only now)', () => {
     const change = makeRevalidationResult();
     const item = makeAttentionItem();
     const narrative = narrativeFor({
@@ -254,14 +334,13 @@ describe('MissionControl: real content renders end to end', () => {
       openCount: 1,
       deepLink: '/portfolio?tab=todays-priorities&priority=attention%3A%3AOBJ-X%3A%3Aposition%3A%3Apos_1',
     };
-    render(<MissionControl viewModel={viewModelFor(narrative, todaysPriorities)} th={THEMES.dark} />);
+    const sinceLastReview: MissionControlSinceLastReviewSummary = {
+      trackingActive: true, leadText: change.commitment.subject.label, count: 1,
+      summary: '1 thing changed since your last review.', deepLink: '/portfolio?tab=briefing',
+    };
+    render(<MissionControl viewModel={viewModelFor(narrative, todaysPriorities, sinceLastReview)} th={THEMES.dark} />);
 
-    // "MSFT BPS reached 21 DTE." legitimately appears twice: once as the
-    // Summary Strip's Lead Item preview, once in the full Since Your Last
-    // Review section below -- the same canonical field rendered at two
-    // narrative depths, not a bug.
-    expect(screen.getAllByText('MSFT BPS reached 21 DTE.').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByLabelText('Since Your Last Review')).toHaveTextContent('MSFT BPS reached 21 DTE.');
+    expect(screen.getByLabelText('Since Your Last Review')).toHaveTextContent('MSFT BPS');
     // WA-0003: Attention Required now shows the shared queue's lead item
     // headline (todaysPriorities.leadItem), not narrative.attention.items --
     // deliberately, per the CES's ruling-6 parity requirement.

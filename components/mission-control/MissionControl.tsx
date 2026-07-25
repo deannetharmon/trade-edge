@@ -41,7 +41,7 @@ export interface MissionControlProps {
 }
 
 export function MissionControl({ viewModel, th }: MissionControlProps) {
-  const { state, message, narrative, todaysPriorities } = viewModel;
+  const { state, message, narrative, todaysPriorities, sinceLastReview } = viewModel;
 
   return (
     <main className={`mx-auto max-w-3xl px-4 py-6 ${th.bg}`}>
@@ -67,9 +67,9 @@ export function MissionControl({ viewModel, th }: MissionControlProps) {
 
       {state === 'loaded' && narrative && (
         <>
-          <SummaryStrip narrative={narrative} th={th} />
+          <SummaryStrip narrative={narrative} sinceLastReview={sinceLastReview} th={th} />
           <PortfolioStatusSection review={narrative.portfolioStatus.review} th={th} />
-          <SinceLastReviewSection changes={narrative.sinceLastReview.changes} th={th} />
+          <SinceLastReviewSection sinceLastReview={sinceLastReview} th={th} />
           <AttentionRequiredSection todaysPriorities={todaysPriorities} th={th} />
           <NewOpportunitiesSection items={narrative.newOpportunities.items} generatedAt={narrative.generatedAt} th={th} />
           <ReviewCompleteBand narrative={narrative} th={th} />
