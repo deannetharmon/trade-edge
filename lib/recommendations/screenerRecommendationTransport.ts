@@ -119,7 +119,7 @@ function groupCandidatesByDedupeAffinity(
     else groups.set(key, [candidate]);
   }
 
-  return [...groups.values()];
+  return Array.from(groups.values());
 }
 
 export function buildBatchedRecommendationTransportPlan(
