@@ -109,7 +109,17 @@ import type { ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 // component. Both consume state this page already computes
 // (positions[].portfolioObjective, canonicalPriorities, decisionReviews) --
 // no new Portfolio Intelligence or Decision Engine calls are introduced here.
-import { TodaysPrioritiesDashboard } from '@/features/portfolio/dashboard/TodaysPrioritiesDashboard';
+// WA-0003: the 'today' tab's TodaysPrioritiesDashboard mount is retired
+// (relocated into TodaysPrioritiesQueueView + HealthyMonitoringSection, per
+// the CES's ruling 1/2) -- this import is no longer used to render this
+// page's tabs, but the file itself is retained (its PriorityRankedList/
+// SectionHeader/EmptyState/CoveredCallOpportunityRow/NeedsFollowUpRow
+// exports still have a real, if legacy, consumer in
+// components/command-center/PriorityListCard.tsx, out of this sprint's
+// scope to touch).
+import { HealthyMonitoringSection } from '@/features/portfolio/positions/HealthyMonitoringSection';
+import { TodaysPrioritiesQueueView } from '@/features/portfolio/todaysPriorities/TodaysPrioritiesQueueView';
+import { buildTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
 // PI-0011A's Portfolio-tab "Mission Control" landing view (which used to be
 // documented here) was retired in WA-0002 -- Mission Control now lives only
 // at /dashboard (MB-0002). canonicalPriorities/topPriority/portfolioHealth
@@ -7237,7 +7247,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, decisionReview, onSaveDecisionReview }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, decisionReview, onSaveDecisionReview, focusKey }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -7252,6 +7262,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   // section when onSaveDecisionReview is provided.
   decisionReview?: DecisionReview | null;
   onSaveDecisionReview?: (review: DecisionReview) => void;
+  // WA-0003 (CES section 13.2, level-2 deep link): when this matches
+  // pos.key exactly, expand this card and scroll it into view on mount.
+  // Optional, defaults to undefined/null -- every existing caller's
+  // rendering is unchanged (expanded still defaults to false).
+  focusKey?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [trend, setTrend] = useState<TrendResult | null>(null);
@@ -7269,6 +7284,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const chartButtonRef = useRef<HTMLButtonElement>(null);
   const cardRef = useRef(null as HTMLDivElement | null);
   const [chartPopupPos, setChartPopupPos] = useState<{ bottom: number; left: number } | null>(null);
+
+  // WA-0003 (CES section 13.2): exact pos.key match only -- never
+  // symbol-only, since multiple positions can share a symbol at different
+  // expirations. Runs once per focusKey change; expands and scrolls this
+  // card into view, reusing the card's own existing `expanded` state (no
+  // new expand mechanism invented).
+  useEffect(() => {
+    if (!focusKey || focusKey !== pos.key) return;
+    setExpanded(true);
+    cardRef.current?.scrollIntoView?.({ block: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey, pos.key]);
 
   useEffect(() => {
     if (!showChart) return;
@@ -8391,7 +8418,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, decisionReviews, onSaveDecisionReview }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, decisionReviews, onSaveDecisionReview, focusKey }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -8403,6 +8430,11 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   // PositionSection that predates this ticket keeps compiling unchanged.
   decisionReviews?: DecisionReviewStore;
   onSaveDecisionReview?: (review: DecisionReview) => void;
+  // WA-0003 (CES section 13.2): the exact pos.key to expand/highlight/
+  // scroll to on mount, from the level-2 `focus` query param. Optional,
+  // defaults to undefined -- every existing caller keeps compiling and
+  // rendering unchanged.
+  focusKey?: string | null;
 }) {
   const lifecycleRank: Record<string, number> = {
     CSP: 1,
@@ -8448,6 +8480,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
             onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
             decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
             onSaveDecisionReview={onSaveDecisionReview}
+            focusKey={focusKey}
           />
         ))}
       </div>
@@ -8715,7 +8748,19 @@ export default function PortfolioPage() {
   // tab's own Portfolio Health/Summary derivations and a new Top Priority
   // highlight into one higher-level view. 'today' itself is untouched and
   // still reachable on its own tab as a detailed drill-down.
-  const [activeTab, setActiveTab] = useState<'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>('positions');
+  // WA-0003: 'today' identity retired in favor of 'todays-priorities' --
+  // the new finite, completion-aware workspace (CES section 14). Default
+  // remains 'positions', resolved not open (CES section 23, final ruling).
+  // Deep links may explicitly select 'todays-priorities', 'positions', or
+  // 'history' via the `tab` query param -- read once, on initial state
+  // construction, so a fresh load of a deep link opens directly into the
+  // right tab without an extra render/flash.
+  const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>(() => {
+    if (typeof window === 'undefined') return 'positions';
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'todays-priorities' || tab === 'positions' || tab === 'history') return tab;
+    return 'positions';
+  });
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
@@ -8742,6 +8787,14 @@ export default function PortfolioPage() {
     portfolioReview,
     dailyBriefing,
   } = composition;
+  // WA-0003: the one additive, canonical queue composition (lib/todays-
+  // priorities-queue) -- memoized on the same todaysPrioritiesDashboard this
+  // page already computes, so it recomputes only when the underlying
+  // dashboard actually changes, not on every unrelated re-render.
+  const todaysPrioritiesQueue = useMemo(
+    () => buildTodaysPrioritiesQueue({ dashboard: todaysPrioritiesDashboard, generatedAt: new Date().toISOString() }),
+    [todaysPrioritiesDashboard],
+  );
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -8752,6 +8805,20 @@ export default function PortfolioPage() {
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [dryRunMode, setDryRunMode] = useState<boolean>(isDryRun);
+  // WA-0003 (CES section 13.2, level-2 deep link): read once on initial
+  // mount, mirroring activeTab's own initial-URL-read pattern above. `focus`
+  // resolves on Positions by exact pos.key match; `reviewId` resolves on
+  // History by exact DecisionReview.id match. Distinct params from `priority`
+  // (level-1, resolved entirely inside TodaysPrioritiesQueueView) -- never
+  // conflated, never read by the same resolver.
+  const [focusPositionKey] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('focus');
+  });
+  const [focusReviewId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('reviewId');
+  });
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
 
@@ -9146,16 +9213,17 @@ export default function PortfolioPage() {
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
         <div className="flex gap-0">
           {([
-            { key: 'today', label: "Today's Priorities", icon: '✦' },
+            { key: 'todays-priorities', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
             { key: 'positions', label: 'Positions', icon: '◈' },
-            // PI-0010A: relabeled from "Today's Priorities" (now the new
-            // 'today' tab's name) to disambiguate -- same component
-            // (TodaysPrioritiesWorkflow), same data, unchanged otherwise.
+            // PI-0010A: relabeled from "Today's Priorities" (now the
+            // 'todays-priorities' tab's name) to disambiguate -- same
+            // component (TodaysPrioritiesWorkflow), same data, unchanged
+            // otherwise. WA-0003 retains this tab, unmodified (CES section 12).
             { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'today' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+          ] as { key: 'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -9171,14 +9239,13 @@ export default function PortfolioPage() {
 
       {activeTab === 'balances' && <BalancesTab />}
 
-      {/* PI-0010A: Today's Priorities Dashboard -- still its own subpage,
-          reachable as a detailed drill-down. Pure orchestration over state
-          this page already computes; see todaysPrioritiesInput above for
-          exactly which existing outputs feed each of the four sections. */}
-      {activeTab === 'today' && (
-        <div className="p-6">
-          <TodaysPrioritiesDashboard dashboard={todaysPrioritiesDashboard} th={th} />
-        </div>
+      {/* WA-0003: Today's Priorities -- the finite, completion-aware open
+          queue (lib/todays-priorities-queue, additive over
+          buildAttentionFeed()). Reuses the exact same todaysPrioritiesDashboard
+          this page already computes; no new fetch, no new evaluation. Owns
+          its own `priority` deep-link resolution (CES section 13.1). */}
+      {activeTab === 'todays-priorities' && (
+        <TodaysPrioritiesQueueView queue={todaysPrioritiesQueue} loading={loading} th={th} />
       )}
 
       {/* PI-0004D: Daily Portfolio Briefing -- the default subpage. Consumes
@@ -9213,6 +9280,7 @@ export default function PortfolioPage() {
             openPositionIds={positions.map(p => p.key)}
             closedTrades={closedTradesForOutcomeAnalysis}
             snapshotStore={lifecycleSnapshots}
+            focusReviewId={focusReviewId}
             th={th}
           />
         </div>
@@ -9240,6 +9308,16 @@ export default function PortfolioPage() {
 
       {error && <div className="mx-6 mt-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-sm">{error}</div>}
 
+      {/* WA-0003 (CES section 13.2): level-2 fail-safe -- a `focus` target
+          that no longer resolves to a live position (closed, or never
+          existed) renders a dismissible notice, never a crash or blank
+          state. */}
+      {focusPositionKey && !loading && !positions.some(p => p.key === focusPositionKey) && (
+        <div role="status" className="mx-6 mt-4 rounded-lg border border-amber-600/60 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          The position this link pointed to is no longer open.
+        </div>
+      )}
+
       {/* WA-0002: DailyBriefingCard's transitional variant -- Executive
           Summary, Portfolio Snapshot, and Upcoming Events only, explicitly
           labeled temporary. This is Briefing-owned content (PI-0013) with no
@@ -9262,6 +9340,14 @@ export default function PortfolioPage() {
           owned by Mission Control (/dashboard, MB-0002). */}
       <div className="px-6">
         <PositionCompositionCard review={portfolioReview} loading={loading} th={th} />
+      </div>
+
+      {/* WA-0003: Healthy-Monitoring Relocation (CES section 10) --
+          extracted verbatim from TodaysPrioritiesDashboard.tsx's old
+          Monitor section. Informational only: no completion control, never
+          counted in Today's Priorities' open queue/count. */}
+      <div className="px-6">
+        <HealthyMonitoringSection monitor={todaysPrioritiesDashboard.monitor} th={th} />
       </div>
 
       {loading && positions.length === 0 && pendingOrders.length === 0 && (
@@ -9307,6 +9393,7 @@ export default function PortfolioPage() {
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
+                        focusKey={focusPositionKey}
                       />
                     )}
                   </>

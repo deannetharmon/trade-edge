@@ -147,6 +147,84 @@ describe('buildMissionControlViewModel: loaded state', () => {
   });
 });
 
+describe('buildMissionControlViewModel: WA-0003 todaysPriorities summary', () => {
+  it('is the empty summary (leadItem null, openCount 0, deepLink null) in every non-loaded state', () => {
+    expect(buildMissionControlViewModel(baseInput({ compositionLoading: true })).todaysPriorities).toEqual({
+      leadItem: null, openCount: 0, deepLink: null,
+    });
+    expect(buildMissionControlViewModel(baseInput({ composition: loadedComposition(), compositionError: 'boom' })).todaysPriorities).toEqual({
+      leadItem: null, openCount: 0, deepLink: null,
+    });
+  });
+
+  it('is the empty summary when the loaded dashboard has no attention items ("no open items" state)', () => {
+    const result = buildMissionControlViewModel(baseInput({ composition: loadedComposition() }));
+    expect(result.todaysPriorities).toEqual({ leadItem: null, openCount: 0, deepLink: null });
+  });
+
+  it('leadItem/openCount/deepLink derive from the shared queue, matching an equivalent partitionTodaysPrioritiesQueue call -- never from narrative.attention/narrative.counts.attention', async () => {
+    const { buildTodaysPrioritiesQueue, partitionTodaysPrioritiesQueue } = await import('@/lib/todays-priorities-queue');
+    const objective = {
+      id: 'obj_1', createdAt: '2026-07-24T00:00:00.000Z', version: 'portfolio-objective-v1',
+      type: 'MANAGE_POSITION', ruleId: 'OBJ-WATCH-POSITION', title: 'Manage AMD', summary: 'Test', priority: 'high',
+      urgency: 'today', actionability: 'CRITICAL', confidence: 90, status: 'active', source: 'position',
+      subject: { type: 'position', id: 'AMD::2026-08-21', symbol: 'AMD', label: 'AMD' },
+      rationale: 'Test rationale', supportingEvidence: [], concerns: [],
+      portfolioImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      riskImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      capitalImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      reviewTriggers: [], metadata: { executionAllowed: false, paperExecutionAllowed: false, rulesEvaluated: [], rulesTriggered: [] },
+    } as any;
+    const dashboardWithAttention = {
+      ...EMPTY_DASHBOARD,
+      immediateAction: [{ objective, score: 90, tier: 'Critical', reasons: [] }],
+    };
+    const composition = { ...loadedComposition(), todaysPrioritiesDashboard: dashboardWithAttention };
+
+    const result = buildMissionControlViewModel(baseInput({ composition }));
+
+    const expectedQueue = buildTodaysPrioritiesQueue({ dashboard: dashboardWithAttention, generatedAt: FIXED_NOW.toISOString() });
+    const expectedPartition = partitionTodaysPrioritiesQueue(expectedQueue, {});
+
+    expect(result.todaysPriorities.openCount).toBe(expectedPartition.openCount);
+    expect(result.todaysPriorities.leadItem?.stableKey).toBe(expectedPartition.leadItem?.stableKey);
+    expect(result.todaysPriorities.deepLink).toBe(`?tab=todays-priorities&priority=${encodeURIComponent(expectedPartition.leadItem!.stableKey)}`);
+    expect(result.todaysPriorities.deepLink).not.toContain('tab=positions');
+    expect(result.todaysPriorities.deepLink).not.toContain('tab=history');
+  });
+
+  it('excludes a completed item from openCount/leadItem when workflowState is threaded in, matching Today\'s Priorities\' own partitioning', async () => {
+    const { markComplete, getPriorityWorkflowKey } = await import('@/features/portfolio/priorities/priorityWorkflowState');
+    const objective = {
+      id: 'obj_1', createdAt: '2026-07-24T00:00:00.000Z', version: 'portfolio-objective-v1',
+      type: 'MANAGE_POSITION', ruleId: 'OBJ-CLOSE-LOSER', title: 'Manage AMD', summary: 'Test', priority: 'high',
+      urgency: 'today', actionability: 'CRITICAL', confidence: 90, status: 'active', source: 'position',
+      subject: { type: 'position', id: 'AMD::2026-08-21', symbol: 'AMD', label: 'AMD' },
+      rationale: 'Test rationale', supportingEvidence: [], concerns: [],
+      portfolioImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      riskImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      capitalImpact: { direction: 'neutral', magnitude: 'low', explanation: '' },
+      reviewTriggers: [], metadata: { executionAllowed: false, paperExecutionAllowed: false, rulesEvaluated: [], rulesTriggered: [] },
+    } as any;
+    const dashboardWithAttention = { ...EMPTY_DASHBOARD, immediateAction: [{ objective, score: 90, tier: 'Critical', reasons: [] }] };
+    const composition = { ...loadedComposition(), todaysPrioritiesDashboard: dashboardWithAttention };
+    const workflowState = markComplete({}, objective);
+
+    const result = buildMissionControlViewModel(baseInput({ composition, workflowState }));
+    expect(result.todaysPriorities).toEqual({ leadItem: null, openCount: 0, deepLink: null });
+    expect(getPriorityWorkflowKey(objective)).toBeDefined();
+  });
+
+  it('does not change any existing narrative field\'s value (byte-identical to before this field existed)', () => {
+    const composition = loadedComposition();
+    const result = buildMissionControlViewModel(baseInput({ composition }));
+    expect(result.narrative!.attention.items).toEqual([]);
+    expect(result.narrative!.leadItem).toBeNull();
+  });
+});
+
 describe('buildMissionControlViewModel: determinism', () => {
   it('produces deeply equal results across repeated calls with identical input', () => {
     const input = baseInput({ composition: loadedComposition() });

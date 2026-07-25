@@ -38,7 +38,7 @@
 
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { THEMES, getSavedTheme } from '@/lib/theme';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
@@ -49,6 +49,12 @@ import { buildMissionControlViewModel } from '@/lib/mission-control';
 import { MissionControl } from '@/components/mission-control/MissionControl';
 import { BackgroundTaskCard } from '@/components/command-center/BackgroundTaskCard';
 import { useCurrentRecommendations } from '@/lib/recommendations';
+// WA-0003 (CES section 11): reads the exact same Priority Workflow
+// localStorage state Today's Priorities/Priority List already read/write,
+// mirroring TodaysPrioritiesWorkflow.tsx's existing load-on-mount pattern,
+// so Mission Control's Attention summary can never drift from Today's
+// Priorities' own open count.
+import { loadPriorityWorkflowState, type PriorityWorkflowState } from '@/features/portfolio/priorities/priorityWorkflowState';
 
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
@@ -63,6 +69,13 @@ export default function DashboardPage() {
     refresh();
     refreshBalances();
     refreshDecisionReviews();
+  }, []);
+
+  // WA-0003: read-only, additive -- loaded once on mount, same as
+  // TodaysPrioritiesWorkflow.tsx's own loadPriorityWorkflowState() effect.
+  const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
+  useEffect(() => {
+    setWorkflowState(loadPriorityWorkflowState());
   }, []);
 
   // Acquisition happens entirely inside the Recommendation Service -- this
@@ -87,8 +100,9 @@ export default function DashboardPage() {
         compositionError: error || undefined,
         opportunityRecommendations,
         lastRefreshedAt: lastRefresh ? lastRefresh.toISOString() : null,
+        workflowState,
       }),
-    [composition, loading, error, opportunityRecommendations, lastRefresh],
+    [composition, loading, error, opportunityRecommendations, lastRefresh, workflowState],
   );
 
   const backgroundTasks = useMemo(

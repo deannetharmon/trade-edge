@@ -102,7 +102,13 @@ function ImpactRow({ label, impact, th }: { label: string; impact: ObjectiveImpa
   );
 }
 
-const PriorityCard = memo(function PriorityCard({
+// WA-0003: exported (additive-only -- the component itself, its default
+// export, and every existing caller's rendering are byte-identical to
+// before) so features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx
+// can reuse this exact card rendering for kind: 'attention' queue items,
+// with its own externally-controlled expanded/highlight state for deep-link
+// focus, instead of cloning PriorityCard's rendering logic (CES section 15).
+export const PriorityCard = memo(function PriorityCard({
   objective,
   expanded,
   onToggle,

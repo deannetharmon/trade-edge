@@ -5,4 +5,9 @@
 // './types' directly.
 
 export { buildMissionControlViewModel } from './buildMissionControlViewModel';
-export type { BuildMissionControlViewModelInput, MissionControlState, MissionControlViewModel } from './types';
+export type {
+  BuildMissionControlViewModelInput,
+  MissionControlState,
+  MissionControlViewModel,
+  MissionControlTodaysPrioritiesSummary,
+} from './types';

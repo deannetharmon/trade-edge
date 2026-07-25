@@ -15,11 +15,27 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
 import { MissionControl } from '../MissionControl';
-import type { MissionControlViewModel } from '@/lib/mission-control';
+import type { MissionControlViewModel, MissionControlTodaysPrioritiesSummary } from '@/lib/mission-control';
 import type { ReviewNarrative } from '@/lib/review-conductor';
 import type { AttentionItem } from '@/lib/morning-briefing';
 import type { RevalidationResult } from '@/lib/revalidation';
+import type { TodaysPrioritiesQueueItem } from '@/lib/todays-priorities-queue';
 import { createTraderCommitment } from '@/lib/trader-commitments';
+
+const EMPTY_TODAYS_PRIORITIES: MissionControlTodaysPrioritiesSummary = { leadItem: null, openCount: 0, deepLink: null };
+
+function makeQueueItem(overrides: Partial<TodaysPrioritiesQueueItem> = {}): TodaysPrioritiesQueueItem {
+  return {
+    kind: 'attention',
+    id: 'obj_1',
+    stableKey: 'attention::OBJ-X::position::pos_1',
+    subjectId: 'pos_1',
+    headline: 'Hold Position: AAPL reached 21 DTE target',
+    detail: 'Close or roll before expiration.',
+    completable: true,
+    ...overrides,
+  };
+}
 
 const FIXED_NOW = '2026-07-25T09:00:00.000Z';
 
@@ -86,19 +102,19 @@ function narrativeFor(overrides: Partial<ReviewNarrative> = {}): ReviewNarrative
   };
 }
 
-function viewModelFor(narrative: ReviewNarrative): MissionControlViewModel {
-  return { state: 'loaded', narrative, generatedAt: FIXED_NOW, lastRefreshedAt: null };
+function viewModelFor(narrative: ReviewNarrative, todaysPriorities: MissionControlTodaysPrioritiesSummary = EMPTY_TODAYS_PRIORITIES): MissionControlViewModel {
+  return { state: 'loaded', narrative, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities };
 }
 
 describe('MissionControl: non-loaded states', () => {
   it('renders a loading state with role=status', () => {
-    const vm: MissionControlViewModel = { state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null };
+    const vm: MissionControlViewModel = { state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities: EMPTY_TODAYS_PRIORITIES };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
   it('renders an error state with role=alert and the given message', () => {
-    const vm: MissionControlViewModel = { state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null };
+    const vm: MissionControlViewModel = { state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities: EMPTY_TODAYS_PRIORITIES };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByRole('alert')).toHaveTextContent('boom');
   });
@@ -110,6 +126,7 @@ describe('MissionControl: non-loaded states', () => {
       narrative: null,
       generatedAt: FIXED_NOW,
       lastRefreshedAt: null,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES,
     };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByText(/not available yet/)).toBeInTheDocument();
@@ -163,6 +180,49 @@ describe('MissionControl: first-viewport Summary Strip', () => {
   });
 });
 
+describe('MissionControl: WA-0003 reduced Attention Required section', () => {
+  it('renders only lead item headline, open count, compact summary, and one deep link -- never a full per-item card list', () => {
+    const queueItem = makeQueueItem();
+    const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
+      leadItem: queueItem,
+      openCount: 3,
+      deepLink: `?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
+    };
+    render(<MissionControl viewModel={viewModelFor(narrativeFor(), todaysPriorities)} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Attention Required');
+    expect(section).toHaveTextContent('Hold Position: AAPL reached 21 DTE target');
+    expect(section).toHaveTextContent('3 items need your attention today.');
+    // The full recommendedAction/detail text is Today's Priorities-only now.
+    expect(section).not.toHaveTextContent('Close or roll before expiration.');
+  });
+
+  it('the deep link always targets Today\'s Priorities and never Positions or Decision History directly, for any item kind', () => {
+    const kinds: TodaysPrioritiesQueueItem['kind'][] = ['attention', 'covered_call_opportunity', 'needs_follow_up'];
+    for (const kind of kinds) {
+      const queueItem = makeQueueItem({ kind, stableKey: `${kind}::stable-key` });
+      const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
+        leadItem: queueItem,
+        openCount: 1,
+        deepLink: `?tab=todays-priorities&priority=${encodeURIComponent(queueItem.stableKey)}`,
+      };
+      const { unmount } = render(<MissionControl viewModel={viewModelFor(narrativeFor(), todaysPriorities)} th={THEMES.dark} />);
+      const link = screen.getByRole('link', { name: /open in today's priorities/i });
+      expect(link.getAttribute('href')).toContain('tab=todays-priorities');
+      expect(link.getAttribute('href')).not.toContain('tab=positions');
+      expect(link.getAttribute('href')).not.toContain('tab=history');
+      unmount();
+    }
+  });
+
+  it('renders no Mark Complete/Reopen control and no deep link when there are no open items', () => {
+    render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
+    expect(screen.queryByRole('button', { name: /mark complete/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reopen/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open in today's priorities/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('MissionControl: empty-state copy for each section', () => {
   it('renders the required honest empty-state copy when nothing has changed and nothing needs attention', () => {
     render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
@@ -185,7 +245,12 @@ describe('MissionControl: real content renders end to end', () => {
       counts: { changes: 1, attention: 1, opportunities: 0 },
       complete: { isComplete: false, message: '' },
     });
-    render(<MissionControl viewModel={viewModelFor(narrative)} th={THEMES.dark} />);
+    const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
+      leadItem: makeQueueItem(),
+      openCount: 1,
+      deepLink: '?tab=todays-priorities&priority=attention%3A%3AOBJ-X%3A%3Aposition%3A%3Apos_1',
+    };
+    render(<MissionControl viewModel={viewModelFor(narrative, todaysPriorities)} th={THEMES.dark} />);
 
     // "MSFT BPS reached 21 DTE." legitimately appears twice: once as the
     // Summary Strip's Lead Item preview, once in the full Since Your Last
@@ -193,8 +258,10 @@ describe('MissionControl: real content renders end to end', () => {
     // narrative depths, not a bug.
     expect(screen.getAllByText('MSFT BPS reached 21 DTE.').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByLabelText('Since Your Last Review')).toHaveTextContent('MSFT BPS reached 21 DTE.');
-    expect(screen.getByText('Hold Position: AAPL reached 21 DTE target')).toBeInTheDocument();
-    expect(screen.getByText('Close or roll before expiration.')).toBeInTheDocument();
+    // WA-0003: Attention Required now shows the shared queue's lead item
+    // headline (todaysPriorities.leadItem), not narrative.attention.items --
+    // deliberately, per the CES's ruling-6 parity requirement.
+    expect(screen.getByLabelText('Attention Required')).toHaveTextContent('Hold Position: AAPL reached 21 DTE target');
   });
 });
 

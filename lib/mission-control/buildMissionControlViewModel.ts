@@ -15,7 +15,10 @@
 
 import { buildAttentionFeed } from '@/lib/morning-briefing';
 import { conductReview } from '@/lib/review-conductor';
-import type { BuildMissionControlViewModelInput, MissionControlViewModel } from './types';
+import { buildTodaysPrioritiesQueue, partitionTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
+import type { BuildMissionControlViewModelInput, MissionControlTodaysPrioritiesSummary, MissionControlViewModel } from './types';
+
+const EMPTY_TODAYS_PRIORITIES_SUMMARY: MissionControlTodaysPrioritiesSummary = { leadItem: null, openCount: 0, deepLink: null };
 
 export function buildMissionControlViewModel(input: BuildMissionControlViewModelInput): MissionControlViewModel {
   const now = input.now ?? new Date();
@@ -23,7 +26,14 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
   const lastRefreshedAt = input.lastRefreshedAt ?? null;
 
   if (input.compositionError) {
-    return { state: 'error', message: input.compositionError, narrative: null, generatedAt, lastRefreshedAt };
+    return {
+      state: 'error',
+      message: input.compositionError,
+      narrative: null,
+      generatedAt,
+      lastRefreshedAt,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
+    };
   }
 
   // buildDashboardComposition() only returns a real PortfolioReviewSnapshot
@@ -41,6 +51,7 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
       narrative: null,
       generatedAt,
       lastRefreshedAt,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
     };
   }
 
@@ -64,5 +75,25 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
     revalidationResults: [],
   });
 
-  return { state: 'loaded', narrative, generatedAt, lastRefreshedAt };
+  // WA-0003 (CES section 11, ruling 6): a second, parallel, additive
+  // summary computed alongside `narrative` -- NOT a modification to it.
+  // Deliberately built from the same buildTodaysPrioritiesQueue() +
+  // partitionTodaysPrioritiesQueue() call Today's Priorities itself uses,
+  // against the same workflowState, so this count/lead-item/link can never
+  // silently drift from narrative.attention/narrative.counts.attention
+  // (which is filtered to exclude Trader-Commitment-covered items --
+  // currently always a no-op in production, but a real, disclosed
+  // divergence risk this field must not inherit).
+  const todaysPrioritiesQueue = buildTodaysPrioritiesQueue({
+    dashboard: input.composition.todaysPrioritiesDashboard,
+    generatedAt,
+  });
+  const partition = partitionTodaysPrioritiesQueue(todaysPrioritiesQueue, input.workflowState ?? {});
+  const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
+    leadItem: partition.leadItem,
+    openCount: partition.openCount,
+    deepLink: partition.leadItem ? `?tab=todays-priorities&priority=${encodeURIComponent(partition.leadItem.stableKey)}` : null,
+  };
+
+  return { state: 'loaded', narrative, generatedAt, lastRefreshedAt, todaysPriorities };
 }

@@ -10,11 +10,9 @@
 
 'use client';
 
-import { useState } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import type {
   TodaysPrioritiesDashboard as TodaysPrioritiesDashboardData,
-  TodaysPrioritiesMonitorEntry,
   CoveredCallOpportunityInput,
   PrioritizedObjective,
 } from '@/lib/todaysPriorities';
@@ -152,24 +150,16 @@ function EmptyState({ label, th }: { label: string; th: typeof THEMES[Theme] }) 
   );
 }
 
-function MonitorRow({ entry, th }: { entry: TodaysPrioritiesMonitorEntry; th: typeof THEMES[Theme] }) {
-  return (
-    <div className={`flex items-center justify-between rounded-lg border ${th.borderLight} ${th.card} px-3 py-2`}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={`text-[11px] font-semibold ${th.text}`}>{entry.symbol}</span>
-        <span className={`text-[10px] ${th.textFaint}`}>{entry.strategy}</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className={`text-[10px] ${th.textFaint}`}>{entry.dte}d</span>
-        <span className={`text-[10px] font-semibold ${th.textMuted}`}>
-          {entry.healthScore !== null ? `${entry.healthScore}` : '—'}
-        </span>
-      </div>
-    </div>
-  );
-}
+// WA-0003: MonitorRow and its collapse-after-6 interaction were extracted,
+// verbatim, into features/portfolio/positions/HealthyMonitoringSection.tsx
+// (CES section 10) -- that file is now their sole home, mounted on
+// Positions instead of here. Not duplicated here.
 
-function NeedsFollowUpRow({ review, th }: { review: DecisionReview; th: typeof THEMES[Theme] }) {
+// WA-0003: exported (additive-only change, no rendering difference) so
+// features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx can
+// reuse this exact row rendering for kind: 'needs_follow_up' queue items
+// instead of cloning it (CES section 15).
+export function NeedsFollowUpRow({ review, th }: { review: DecisionReview; th: typeof THEMES[Theme] }) {
   return (
     <div className={`flex items-center justify-between rounded-lg border ${th.borderLight} ${th.card} px-3 py-2`}>
       <div className="flex min-w-0 items-center gap-2">
@@ -183,7 +173,10 @@ function NeedsFollowUpRow({ review, th }: { review: DecisionReview; th: typeof T
   );
 }
 
-function CoveredCallOpportunityRow({ opp, th }: { opp: CoveredCallOpportunityInput; th: typeof THEMES[Theme] }) {
+// WA-0003: exported (additive-only, see NeedsFollowUpRow above) for the
+// same reason -- reused by the new Today's Priorities workspace component
+// for kind: 'covered_call_opportunity' queue items.
+export function CoveredCallOpportunityRow({ opp, th }: { opp: CoveredCallOpportunityInput; th: typeof THEMES[Theme] }) {
   return (
     <div className={`flex items-center justify-between rounded-lg border ${th.borderLight} ${th.card} px-3 py-2`}>
       <span className={`text-[11px] font-semibold ${th.text}`}>{opp.symbol}</span>
@@ -198,9 +191,7 @@ export interface TodaysPrioritiesDashboardProps {
 }
 
 export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDashboardProps) {
-  const [monitorExpanded, setMonitorExpanded] = useState(false);
-
-  const { immediateAction, reviewToday, monitor, opportunities } = dashboard;
+  const { immediateAction, reviewToday, opportunities } = dashboard;
   const reviewTodayCount =
     reviewToday.mediumPriority.length +
     reviewToday.earningsReviews.length +
@@ -211,8 +202,6 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
     opportunities.coveredCallOpportunities.length +
     opportunities.cspOpportunities.length +
     (opportunities.screenerCandidatesAvailable ? 1 : 0);
-
-  const visibleMonitor = monitorExpanded ? monitor : monitor.slice(0, 6);
 
   return (
     <div className="space-y-8">
@@ -256,27 +245,11 @@ export function TodaysPrioritiesDashboard({ dashboard, th }: TodaysPrioritiesDas
         )}
       </section>
 
-      <section aria-label="Monitor">
-        <SectionHeader label="Monitor" count={monitor.length} th={th} />
-        {monitor.length === 0 ? (
-          <EmptyState label="No healthy positions to display." th={th} />
-        ) : (
-          <div className="space-y-1.5">
-            {visibleMonitor.map((entry) => (
-              <MonitorRow key={entry.key} entry={entry} th={th} />
-            ))}
-            {monitor.length > 6 && (
-              <button
-                type="button"
-                onClick={() => setMonitorExpanded((v) => !v)}
-                className={`text-[10px] font-semibold ${th.textFaint} hover:${th.text}`}
-              >
-                {monitorExpanded ? 'Show less' : `Show all ${monitor.length}`}
-              </button>
-            )}
-          </div>
-        )}
-      </section>
+      {/* WA-0003: the Monitor section was removed entirely from this
+          component (relocated, not duplicated) -- see
+          features/portfolio/positions/HealthyMonitoringSection.tsx, now
+          mounted on Positions. Today's Priorities is action-only per the
+          CES's ruling 2. */}
 
       <section aria-label="Opportunities">
         <SectionHeader label="Opportunities" count={opportunitiesCount} th={th} />

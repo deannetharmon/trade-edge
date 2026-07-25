@@ -22,7 +22,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import {
   allReviewsByRecency,
@@ -49,6 +49,10 @@ export interface DecisionHistoryViewProps {
   // has nothing to match against and shows "—" for every row.
   closedTrades?: ClosedTrade[];
   snapshotStore?: PositionSnapshotStore;
+  // WA-0003 (CES section 13.2, level-2 deep link): exact DecisionReview.id
+  // to highlight and scroll to on mount. Optional -- omitted, this
+  // component's rendering is byte-identical to before.
+  focusReviewId?: string | null;
   th: typeof THEMES[Theme];
 }
 
@@ -85,8 +89,15 @@ function formatPnl(pnl: number | null): string {
   return `${sign}${pnl.toFixed(2)}`;
 }
 
-export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrades = [], snapshotStore = {}, th }: DecisionHistoryViewProps) {
+export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrades = [], snapshotStore = {}, focusReviewId = null, th }: DecisionHistoryViewProps) {
   const [filter, setFilter] = useState<DecisionHistoryFilter>('ALL');
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  useEffect(() => {
+    if (!focusReviewId) return;
+    const el = rowRefs.current.get(focusReviewId);
+    el?.scrollIntoView?.({ block: 'center' });
+  }, [focusReviewId]);
 
   const sorted = useMemo(() => allReviewsByRecency(reviews), [reviews]);
   const filtered = useMemo(
@@ -100,8 +111,15 @@ export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrade
     [reviews, snapshotStore, closedTrades],
   );
 
+  const focusTargetMissing = focusReviewId != null && !sorted.some((r) => r.id === focusReviewId);
+
   return (
     <div className="space-y-4">
+      {focusTargetMissing && (
+        <div role="status" className="rounded-lg border border-amber-600/60 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          The decision review this link pointed to could not be found.
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Decision history filters">
         {FILTERS.map((f) => (
           <button
@@ -138,7 +156,14 @@ export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrade
             </thead>
             <tbody>
               {filtered.map((review) => (
-                <tr key={review.id} className={`border-b ${th.borderLight} last:border-b-0`}>
+                <tr
+                  key={review.id}
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(review.id, el);
+                    else rowRefs.current.delete(review.id);
+                  }}
+                  className={`border-b ${th.borderLight} last:border-b-0 ${focusReviewId === review.id ? 'ring-2 ring-inset ring-[var(--accent)]' : ''}`}
+                >
                   <td className={`text-[12px] font-semibold ${th.text} px-3 py-2 whitespace-nowrap`}>{review.symbol}</td>
                   <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`}>{review.evidence.label}</td>
                   <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`}>

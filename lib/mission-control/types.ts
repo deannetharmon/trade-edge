@@ -18,6 +18,23 @@
 import type { DashboardComposition } from '@/lib/portfolio-intelligence/dashboardComposition';
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { ReviewNarrative } from '@/lib/review-conductor';
+import type { TodaysPrioritiesQueueItem } from '@/lib/todays-priorities-queue';
+import type { PriorityWorkflowState } from '@/features/portfolio/priorities/priorityWorkflowState';
+
+// WA-0003: Mission Control's reduced Attention Required summary (CES section
+// 11) -- lead item, open count, and deep link, all derived from the SAME
+// shared queue+partition logic Today's Priorities uses
+// (lib/todays-priorities-queue), never from narrative.attention/
+// narrative.counts.attention (which stays unchanged for its own existing
+// purpose -- see the CES's section 11 disclosed rationale on why reusing it
+// here would risk a silent count/lead-item drift). `deepLink` is always a
+// level-1 link (?tab=todays-priorities&priority=<stableKey>) -- Mission
+// Control never links directly to Positions or Decision History.
+export interface MissionControlTodaysPrioritiesSummary {
+  leadItem: TodaysPrioritiesQueueItem | null;
+  openCount: number;
+  deepLink: string | null;
+}
 
 export type MissionControlState = 'loading' | 'loaded' | 'empty' | 'error' | 'unavailable';
 
@@ -35,6 +52,11 @@ export interface MissionControlViewModel {
   narrative: ReviewNarrative | null;
   generatedAt: string;
   lastRefreshedAt: string | null;
+  // WA-0003: additive (CES section 11/15) -- always populated (never null),
+  // even when `narrative` itself is null, so the UI never has to
+  // special-case its absence. { leadItem: null, openCount: 0, deepLink: null }
+  // in every non-'loaded' state.
+  todaysPriorities: MissionControlTodaysPrioritiesSummary;
 }
 
 export interface BuildMissionControlViewModelInput {
@@ -49,4 +71,13 @@ export interface BuildMissionControlViewModelInput {
   opportunityError?: string;
   now?: Date;
   lastRefreshedAt?: string | null;
+  // WA-0003: additive (CES section 11) -- the trader's stored Priority
+  // Workflow state (features/portfolio/priorities/priorityWorkflowState.ts,
+  // UNCHANGED), read from localStorage by app/dashboard/page.tsx itself
+  // (mirroring TodaysPrioritiesWorkflow.tsx's existing pattern) and threaded
+  // in as plain data -- this module stays pure, no localStorage access here.
+  // Defaults to {} when omitted (e.g. server-side / not-yet-loaded), which
+  // is the same honest "nothing completed yet" state loadPriorityWorkflowState()
+  // itself returns before its first client read.
+  workflowState?: PriorityWorkflowState;
 }

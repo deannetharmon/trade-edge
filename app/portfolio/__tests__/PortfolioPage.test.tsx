@@ -73,3 +73,46 @@ describe('WA-0002: Portfolio default tab', () => {
     expect(screen.queryByText('Immediate Action')).not.toBeInTheDocument();
   });
 });
+
+describe('WA-0003: explicit tab query-param deep links', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.history.pushState({}, '', '/portfolio');
+  });
+
+  it('opens the Today\'s Priorities tab directly when ?tab=todays-priorities is present, without requiring a click', async () => {
+    window.history.pushState({}, '', '/portfolio?tab=todays-priorities');
+    render(
+      <PortfolioModeProvider>
+        <PortfolioDataProvider>
+          <PortfolioPage />
+        </PortfolioDataProvider>
+      </PortfolioModeProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Positions')).toBeInTheDocument());
+    // Today's Priorities' own "Open Priorities" section only renders when
+    // that tab is active.
+    await waitFor(() => expect(screen.getByLabelText('Open Priorities')).toBeInTheDocument());
+    expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
+  });
+
+  it('still defaults to Positions when ?tab is present but not one of the three deep-linkable values', async () => {
+    window.history.pushState({}, '', '/portfolio?tab=not-a-real-tab');
+    render(
+      <PortfolioModeProvider>
+        <PortfolioDataProvider>
+          <PortfolioPage />
+        </PortfolioDataProvider>
+      </PortfolioModeProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Positions')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('NO OPEN POSITIONS FOUND')).toBeInTheDocument());
+  });
+});
