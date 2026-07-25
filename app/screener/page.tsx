@@ -5679,12 +5679,28 @@ export default function Home() {
         // any success publication occurs.
         const body = await evaluateScreenResultsInBatches(results, {
           signal: abortController.signal,
+          // Ranked Scan is intentionally exhaustive. Its checklist
+          // `qualified` flag is presentation metadata, not an instruction to
+          // suppress real candidate structures before decision analysis.
+          // Targeted Scan uses separate state and never reaches this effect.
+          includeUnqualifiedCandidates: screenMode === 'rank',
         });
 
         const { recommendations, generatedAt, skipped } = opportunityRecommendationsFromApiResponse(body);
         const analyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
 
         if (!cancelled) {
+          // One concise, collection-derived summary per completed Ranked Scan
+          // evaluation. No candidates, contracts, account data, or request
+          // bodies are logged. This bridges client-only adaptation/ranking
+          // stages that Vercel route logs cannot observe.
+          if (screenMode === 'rank') {
+            console.info('[WA-0005] ranked-opportunities evaluation summary', {
+              ...body.diagnostics,
+              globallyRankedAnalysisCount: analyses.length,
+              publishedOpportunityCount: recommendations.length,
+            });
+          }
           setOpportunityRecommendations(recommendations);
           setOpportunityGeneratedAt(generatedAt);
           setRawAnalyses(analyses);
@@ -5696,6 +5712,13 @@ export default function Home() {
       } catch (e: any) {
         if (cancelled || e?.name === 'AbortError') return;
         if (!cancelled) {
+          if (screenMode === 'rank' && e?.diagnostics) {
+            console.info('[WA-0005] ranked-opportunities evaluation summary', {
+              ...e.diagnostics,
+              globallyRankedAnalysisCount: 0,
+              publishedOpportunityCount: 0,
+            });
+          }
           // WA-0005 §16: a failed refresh must preserve the last valid
           // Ranked Opportunities presentation, not blank it out -- do NOT
           // clear opportunityRecommendations/rawAnalyses/opportunityGeneratedAt
@@ -5703,14 +5726,17 @@ export default function Home() {
           // and the resulting staleness (recommendationsJobId now trailing
           // latestResultsAffectingJobId) are updated.
           const message = e?.message ?? 'Unable to load ranked opportunities.';
-          setOpportunityError(message);
+          const displayMessage = opportunityRecommendations.length > 0
+            ? `${message} The last successfully published ranked opportunities remain visible.`
+            : message;
+          setOpportunityError(displayMessage);
           setOpportunityState('error');
           // PO corrective round 4 (WA-0005 Defect 1): announce this same
           // real failure to the Recommendation Service (never clearing its
           // last successfully published analyses/generatedAt) so Mission
           // Control can observe "the most recent evaluation attempt
           // failed" too.
-          failRecommendationsEvaluation(message);
+          failRecommendationsEvaluation(displayMessage);
         }
       }
     })();
@@ -6971,6 +6997,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-

@@ -28,6 +28,10 @@ export interface BatchedRecommendationTransportPlan {
   batches: RecommendationCandidateBatch[];
   candidateCount: number;
   skipped: RecommendationsApiResponseSkippedEntry[];
+  diagnostics: Omit<
+    RecommendationEvaluationDiagnostics,
+    'httpBatchCount' | 'submittedCandidateCount' | 'returnedAnalysisCount' | 'batchCandidateCounts' | 'batchAnalysisCounts'
+  >;
 }
 
 export interface BatchedRecommendationApiBody {
@@ -44,6 +48,21 @@ export interface BatchedRecommendationApiBody {
     candidateCount: number;
     requestBytes: number[];
   };
+  diagnostics: RecommendationEvaluationDiagnostics;
+}
+
+export interface RecommendationEvaluationDiagnostics {
+  rawResultCount: number;
+  resultsWithBestCandidate: number;
+  qualifiedTrueCount: number;
+  qualifiedFalseCount: number;
+  canonicalCandidateCount: number;
+  duplicateAffinityGroupCount: number;
+  httpBatchCount: number;
+  submittedCandidateCount: number;
+  returnedAnalysisCount: number;
+  batchCandidateCounts: number[];
+  batchAnalysisCounts: number[];
 }
 
 export class RecommendationEvaluationPausedError extends Error {
@@ -53,6 +72,16 @@ export class RecommendationEvaluationPausedError extends Error {
     super('Autopilot kill switch is active. Ranked Opportunities were not updated.');
     this.name = 'RecommendationEvaluationPausedError';
     this.pausedResult = pausedResult;
+  }
+}
+
+export class EmptyRecommendationEvaluationError extends Error {
+  readonly diagnostics: RecommendationEvaluationDiagnostics;
+
+  constructor(message: string, diagnostics: RecommendationEvaluationDiagnostics) {
+    super(message);
+    this.name = 'EmptyRecommendationEvaluationError';
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -125,6 +154,7 @@ function groupCandidatesByDedupeAffinity(
 export function buildBatchedRecommendationTransportPlan(
   results: ScreenResult[],
   maxRequestBytes = RECOMMENDATION_SAFE_REQUEST_BYTES,
+  includeUnqualifiedCandidates = false,
 ): BatchedRecommendationTransportPlan {
   if (
     !Number.isSafeInteger(maxRequestBytes)
@@ -139,7 +169,19 @@ export function buildBatchedRecommendationTransportPlan(
   // Adapt exactly once, before partitioning. This is the existing canonical
   // Screener -> AutopilotCandidate adapter; no transport-only candidate model
   // or second eligibility engine is introduced.
-  const { candidates, skipped } = screenResultsToAutopilotCandidates(results);
+  // Ranked Scan is deliberately exhaustive: `qualified` is a legacy
+  // checklist/display outcome, not a statement that the row has no
+  // evaluable option structure.  The canonical adapter historically uses
+  // that flag as a filter for curated scans.  Preserve that behavior for
+  // every other producer, while allowing real Ranked Scan structures to
+  // reach the canonical adapter and decision engine (which must produce the
+  // WATCH/alternative/rejected analysis rather than silently losing it).
+  const canonicalInput = results.map((result) => (
+    includeUnqualifiedCandidates && result.bestCandidate
+      ? { ...result, qualified: true }
+      : result
+  ));
+  const { candidates, skipped } = screenResultsToAutopilotCandidates(canonicalInput);
   const groups = groupCandidatesByDedupeAffinity(candidates);
   const batches: RecommendationCandidateBatch[] = [];
   let current: AutopilotCandidate[] = [];
@@ -180,10 +222,37 @@ export function buildBatchedRecommendationTransportPlan(
   }
   pushCurrent();
 
+  if (results.length > 0 && candidates.length === 0) {
+    throw new EmptyRecommendationEvaluationError(
+      'Recommendation evaluation produced no canonical candidates.',
+      {
+        rawResultCount: results.length,
+        resultsWithBestCandidate: results.filter((result) => !!result.bestCandidate).length,
+        qualifiedTrueCount: results.filter((result) => result.qualified).length,
+        qualifiedFalseCount: results.filter((result) => !result.qualified).length,
+        canonicalCandidateCount: 0,
+        duplicateAffinityGroupCount: 0,
+        httpBatchCount: 0,
+        submittedCandidateCount: 0,
+        returnedAnalysisCount: 0,
+        batchCandidateCounts: [],
+        batchAnalysisCounts: [],
+      },
+    );
+  }
+
   return {
     batches,
     candidateCount: candidates.length,
     skipped,
+    diagnostics: {
+      rawResultCount: results.length,
+      resultsWithBestCandidate: results.filter((result) => !!result.bestCandidate).length,
+      qualifiedTrueCount: results.filter((result) => result.qualified).length,
+      qualifiedFalseCount: results.filter((result) => !result.qualified).length,
+      canonicalCandidateCount: candidates.length,
+      duplicateAffinityGroupCount: groups.length,
+    },
   };
 }
 
@@ -196,15 +265,18 @@ export async function evaluateScreenResultsInBatches(
     maxBusyRetries?: number;
     busyRetryBaseDelayMs?: number;
     busyRetryMaxDelayMs?: number;
+    includeUnqualifiedCandidates?: boolean;
   } = {},
 ): Promise<BatchedRecommendationApiBody> {
   const plan = buildBatchedRecommendationTransportPlan(
     results,
     options.maxRequestBytes ?? RECOMMENDATION_SAFE_REQUEST_BYTES,
+    options.includeUnqualifiedCandidates ?? false,
   );
   const fetchImpl = options.fetch ?? fetch;
   const recommendations: DecisionAnalysis[] = [];
   const duplicates: DuplicateCandidateRecord[] = [];
+  const batchAnalysisCounts: number[] = [];
   let candidatesScanned = 0;
   const maxBusyRetries = options.maxBusyRetries ?? DEFAULT_BUSY_RETRY_LIMIT;
   const busyRetryBaseDelayMs = options.busyRetryBaseDelayMs ?? DEFAULT_BUSY_RETRY_BASE_DELAY_MS;
@@ -288,12 +360,42 @@ export async function evaluateScreenResultsInBatches(
           candidateCount: plan.candidateCount,
           requestBytes: plan.batches.slice(0, index + 1).map((item) => item.byteLength),
         },
+        diagnostics: {
+          ...plan.diagnostics,
+          httpBatchCount: index + 1,
+          submittedCandidateCount: plan.batches
+            .slice(0, index + 1)
+            .reduce((total, item) => total + item.candidates.length, 0),
+          returnedAnalysisCount: recommendations.length,
+          batchCandidateCounts: plan.batches
+            .slice(0, index + 1)
+            .map((item) => item.candidates.length),
+          batchAnalysisCounts: [...batchAnalysisCounts, 0],
+        },
       });
     }
 
     recommendations.push(...batchRecommendations);
+    batchAnalysisCounts.push(batchRecommendations.length);
     duplicates.push(...batchDuplicates);
     candidatesScanned += Number(body?.result?.candidatesScanned ?? batch.candidates.length);
+  }
+
+  if (recommendations.length === 0) {
+    throw new EmptyRecommendationEvaluationError(
+      'Recommendation evaluation completed without candidate analyses.',
+      {
+        ...plan.diagnostics,
+        httpBatchCount: plan.batches.length,
+        submittedCandidateCount: plan.batches.reduce(
+          (total, batch) => total + batch.candidates.length,
+          0,
+        ),
+        returnedAnalysisCount: 0,
+        batchCandidateCounts: plan.batches.map((batch) => batch.candidates.length),
+        batchAnalysisCounts,
+      },
+    );
   }
 
   return {
@@ -309,6 +411,17 @@ export async function evaluateScreenResultsInBatches(
       batchCount: plan.batches.length,
       candidateCount: plan.candidateCount,
       requestBytes: plan.batches.map((batch) => batch.byteLength),
+    },
+    diagnostics: {
+      ...plan.diagnostics,
+      httpBatchCount: plan.batches.length,
+      submittedCandidateCount: plan.batches.reduce(
+        (total, batch) => total + batch.candidates.length,
+        0,
+      ),
+      returnedAnalysisCount: recommendations.length,
+      batchCandidateCounts: plan.batches.map((batch) => batch.candidates.length),
+      batchAnalysisCounts,
     },
   };
 }
