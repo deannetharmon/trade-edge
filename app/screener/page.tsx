@@ -37,7 +37,7 @@ import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import {
-  startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
+  startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob, useScreenerJobState,
 } from '@/lib/screener/screenerJobStore';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
@@ -54,9 +54,37 @@ import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
 import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
+// WA-0005 §13/§21: additive, presentation-only DecisionAnalysis[] ->
+// decisionAnalysisId-keyed detail index for the Detailed tier. Does not
+// touch lib/opportunity-engine or lib/decision-engine.
+import { buildOpportunityCandidateDetails } from '@/lib/command-center/opportunityCandidateDetails';
+// WA-0005 §15/§16/§22: pure state-classification helper, unit-tested
+// exhaustively in isolation (lib/command-center/__tests__/
+// screenerRankedOpportunitiesState.test.ts) since this page's own live
+// dependencies make exercising every §15 state through a full render
+// impractical.
+import { classifyEmptyUniverseState, classifyRankedOpportunitiesState } from '@/lib/command-center/screenerRankedOpportunitiesState';
+// PO corrective round 3, Finding 2: the authoritative "last completed
+// results-affecting job id," held independently of the live job's current
+// phase -- see the module doc there for the full bug account (the prior
+// inline derivation went null while a refresh was running or after it
+// failed, which broke session-supersession staleness during exactly the
+// window it matters most).
+import { useLatestResultsAffectingJobId } from '@/lib/command-center/useLatestResultsAffectingJobId';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
-import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
+// PO corrective round 4 (WA-0005 Defect 1): beginRecommendationsEvaluation()/
+// failRecommendationsEvaluation() thread this page's own real, already-
+// computed opportunityState/opportunityError lifecycle through to the
+// Recommendation Service, so any consumer (Mission Control) can observe "an
+// evaluation is running right now" / "the most recent attempt failed" --
+// signals that previously existed only as this page's own local state.
+import {
+  publishRecommendations,
+  clearRecommendations,
+  beginRecommendationsEvaluation,
+  failRecommendationsEvaluation,
+} from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -5386,6 +5414,49 @@ export default function Home() {
   const [opportunityGeneratedAt, setOpportunityGeneratedAt] = useState<string | undefined>(undefined);
   const [opportunityState, setOpportunityState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [opportunityError, setOpportunityError] = useState('');
+  // WA-0005 §13/§15/§21: the raw DecisionAnalysis[] this page already holds
+  // locally (same array published to RecommendationService) -- kept in
+  // state (not just a local effect variable) so the page can (a) discriminate
+  // §15 states 2 vs. 5 by rawAnalyses.length, and (b) build the additive,
+  // presentation-only candidate-detail index (lib/command-center/
+  // opportunityCandidateDetails.ts) for the Detailed tier.
+  const [rawAnalyses, setRawAnalyses] = useState<DecisionAnalysis[]>([]);
+  // WA-0005 §16 (corrected, PO corrective round 3, Finding 2): session-
+  // supersession staleness, anchored to the existing, canonical
+  // screenerJobStore job identity (lib/screener/screenerJobStore.ts) --
+  // but NOW held via useLatestResultsAffectingJobId(), which captures that
+  // identity at the moment a results-affecting job completes and holds it
+  // independently of the CURRENT job's live phase. The prior inline
+  // derivation (`screenerJob.phase === 'complete' ? screenerJob.id : null`)
+  // went null the instant a refresh started running or failed, which broke
+  // staleness/refresh-in-progress disclosure during exactly the window
+  // those matter -- see lib/command-center/useLatestResultsAffectingJobId.ts
+  // for the full account. Targeted Scan is still deliberately excluded
+  // (inside the hook): it writes to `targetedResults`, not `results`, and
+  // structurally cannot affect the recommendations pipeline.
+  const screenerJob = useScreenerJobState();
+  const latestResultsAffectingJobId = useLatestResultsAffectingJobId(screenerJob);
+  // Finding 2: "refresh in progress" -- a real, results-affecting scan job
+  // is currently running (not Targeted) WHILE this page already has a
+  // prior valid Ranked Opportunities presentation to preserve underneath.
+  // Distinct from the base "loading" state (first scan, nothing to
+  // preserve yet). Uses the same live `screenerJob` signal already
+  // available -- not fabricated.
+  const isScanCurrentlyRefreshing =
+    screenerJob.phase === 'running' && !!screenerJob.kind && screenerJob.kind !== 'targeted';
+  const [recommendationsJobId, setRecommendationsJobId] = useState<string | null>(null);
+  // WA-0005 §11/§15: distinguishes "no scan has ever run this session"
+  // (Initial/not-yet-run) from "a scan completed and found zero raw
+  // candidates" (state 1, Empty Universe) -- both otherwise look identical
+  // via results.length === 0 alone. Set true on any loading(true) ->
+  // loading(false) transition (every scan mode's existing pattern), so it
+  // requires no changes to the scan functions themselves.
+  const [scanHasRunThisSession, setScanHasRunThisSession] = useState(false);
+  const wasLoadingRef = useRef(false);
+  useEffect(() => {
+    if (wasLoadingRef.current && !loading) setScanHasRunThisSession(true);
+    wasLoadingRef.current = loading;
+  }, [loading]);
 
   // ── RF-0001: Ranked Scan orchestration extracted to features/screener/
   // (see docs/reviews/RF-0001-Implementation-Report.md). Mechanical move —
@@ -5513,20 +5584,89 @@ export default function Home() {
   // so any consumer (today, the Dashboard) can read the current set without
   // this page knowing that consumer exists. Publishing is a side effect of
   // this page's own existing pipeline, not a second computation of it.
+  // WA-0005 §13/§21/Finding 3: the canonical adapter-skip list for the
+  // current scan's evaluation attempt (app/api/autopilot/recommendations
+  // route's own `skipped` field, sourced from
+  // lib/autopilot/decision/screenerCandidateAdapter.ts, unchanged) --
+  // genuine evidence for a partial-evaluation disclosure, never fabricated.
+  const [skippedCandidates, setSkippedCandidates] = useState<Array<{ symbol: string; strategy?: string; reason: string }>>([]);
+
   useEffect(() => {
     let cancelled = false;
+    // WA-0005 §16 (corrected, PO corrective round 3, Finding 2): capture
+    // which results-affecting job (if any) this fetch is being made on
+    // behalf of, at the moment THIS effect instance fires -- the same job
+    // whose completion (via completeScreenerJob()) is what caused `results`
+    // to change in the first place, for every results-affecting scan mode.
+    // `null` when `results` changed for a reason with no associated job
+    // (e.g. an IndexedDB cache-restore).
+    //
+    // Race-condition fix (Finding 2's second requirement -- "couple the
+    // recommendation request to the exact scan job that produced its
+    // results"): `latestResultsAffectingJobId` is now sourced from
+    // useLatestResultsAffectingJobId(), which mutates its ref synchronously
+    // during render (see that module's doc for why), so it is guaranteed
+    // accurate for THIS specific `results` transition by the time this
+    // effect instance captures it into `jobIdForThisFetch` -- never a
+    // later-scan's id read through a stale closure. The `cancelled` flag
+    // below is the second half of the fix: if a NEWER results-affecting job
+    // completes (and thus `results` changes again) before this fetch
+    // resolves, React tears down this effect instance first (setting
+    // `cancelled = true`) before the new effect instance for the newer
+    // `results` starts its own fetch. If this (now-superseded) fetch
+    // resolves late, `cancelled` is true and none of its setState calls
+    // run -- so a late-resolving response for an OLDER job can never
+    // overwrite state that a NEWER job's own (earlier-resolving) response
+    // already set. This is what the required test scenario proves: start
+    // job A, start and complete job B before A's response resolves, then
+    // let A resolve late -- the final state must reflect B, not a stale
+    // closure over A.
+    const jobIdForThisFetch = latestResultsAffectingJobId;
 
     if (results.length === 0) {
+      // PO corrective round 5 (WA-0005 Defect 1): `results.length === 0` is
+      // NOT unambiguous. It is also what `startRankedScan()` (features/
+      // screener/hooks/useRankedScan.ts) produces the INSTANT a refresh is
+      // dispatched -- it calls `setResults([])` synchronously (before the
+      // new scan's raw results have landed) purely to give the RAW results
+      // table an honest "these specific rows are about to be replaced"
+      // signal. That call is batched, in the same synchronous tick, with
+      // `startScreenerJob()` (lib/screener/screenerJobStore.ts), which is
+      // exactly what `isScanCurrentlyRefreshing` (computed above from the
+      // same committed, external-store `screenerJob` this page already
+      // reads) observes. So when this branch fires because a refresh is
+      // genuinely in progress -- not because nothing has ever run, or
+      // because the user explicitly reset (clearResultsCache()), both of
+      // which leave `isScanCurrentlyRefreshing` false -- the prior
+      // successfully-published Ranked Opportunities presentation (local
+      // state AND lib/recommendations/RecommendationService.ts's published
+      // set) must be left exactly as it was. The new scan's own evaluation
+      // (the effect instance that runs once `results` actually holds the
+      // new scan's rows) is what updates the presentation next, win or
+      // fail -- never this optimistic, RAW-results-only clear.
+      if (isScanCurrentlyRefreshing) {
+        return;
+      }
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
       setOpportunityState('idle');
       setOpportunityError('');
+      setRawAnalyses([]);
+      setSkippedCandidates([]);
+      setRecommendationsJobId(null);
       clearRecommendations();
       return;
     }
 
     setOpportunityState('loading');
     setOpportunityError('');
+    // PO corrective round 4 (WA-0005 Defect 1): announce this same real
+    // "an evaluation is running right now" transition to the
+    // Recommendation Service, so Mission Control (which only reads
+    // useCurrentRecommendations(), never this page's own local state) can
+    // observe it too -- without touching whatever was last successfully
+    // published there.
+    beginRecommendationsEvaluation();
 
     (async () => {
       try {
@@ -5541,27 +5681,123 @@ export default function Home() {
           throw new Error(body?.error ?? `Recommendation engine request failed (${response.status}).`);
         }
 
-        const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
-        const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
+        const { recommendations, generatedAt, skipped } = opportunityRecommendationsFromApiResponse(body);
+        const analyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
 
         if (!cancelled) {
           setOpportunityRecommendations(recommendations);
           setOpportunityGeneratedAt(generatedAt);
+          setRawAnalyses(analyses);
+          setSkippedCandidates(skipped);
           setOpportunityState('loaded');
-          publishRecommendations(rawAnalyses, generatedAt);
+          setRecommendationsJobId(jobIdForThisFetch);
+          publishRecommendations(analyses, generatedAt);
         }
       } catch (e: any) {
         if (!cancelled) {
-          setOpportunityRecommendations([]);
-          setOpportunityGeneratedAt(undefined);
-          setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
+          // WA-0005 §16: a failed refresh must preserve the last valid
+          // Ranked Opportunities presentation, not blank it out -- do NOT
+          // clear opportunityRecommendations/rawAnalyses/opportunityGeneratedAt
+          // here. Only the failure itself (opportunityState/opportunityError)
+          // and the resulting staleness (recommendationsJobId now trailing
+          // latestResultsAffectingJobId) are updated.
+          const message = e?.message ?? 'Unable to load ranked opportunities.';
+          setOpportunityError(message);
           setOpportunityState('error');
+          // PO corrective round 4 (WA-0005 Defect 1): announce this same
+          // real failure to the Recommendation Service (never clearing its
+          // last successfully published analyses/generatedAt) so Mission
+          // Control can observe "the most recent evaluation attempt
+          // failed" too.
+          failRecommendationsEvaluation(message);
         }
       }
     })();
 
     return () => { cancelled = true; };
+    // PO corrective round 5 (WA-0005 Defect 1): `isScanCurrentlyRefreshing`
+    // is intentionally read but not listed here. It is only consulted
+    // inside the `results.length === 0` branch above, and `results` and the
+    // committed `screenerJob` state it derives from always change together,
+    // in the same synchronous tick, for every producer that clears results
+    // to start a new scan (startRankedScan() calls setResults([]) and
+    // startScreenerJob() back-to-back with no `await` in between; runScreen/
+    // clearResultsCache() likewise). So the effect instance that this
+    // dependency array schedules always closes over the `isScanCurrentlyRefreshing`
+    // value computed in that same render -- there is no stale-closure risk
+    // to fix by adding it as a dependency, and adding it would make this
+    // effect re-run (and re-fetch) on every screenerJob phase transition,
+    // not just on genuine `results` changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results]);
+
+  // WA-0005 §13/§21: additive, presentation-only projection of the already-
+  // published DecisionAnalysis[] into a decisionAnalysisId-keyed index for
+  // the Detailed tier. Recomputed only when rawAnalyses changes -- no new
+  // fetch, no change to canonical domain types.
+  const opportunityCandidateDetails = useMemo(
+    () => buildOpportunityCandidateDetails(rawAnalyses),
+    [rawAnalyses],
+  );
+
+  // WA-0005 §15/§16: derived state classification -- never stored
+  // redundantly, always computed fresh from the same counts the CES's
+  // state table is keyed on. Delegated to a pure, exhaustively unit-tested
+  // helper (see the import above) rather than re-implemented inline.
+  const {
+    isState2: isRankedOpportunitiesState2,
+    isState5: isRankedOpportunitiesState5,
+    isStale: isRankedOpportunitiesStale,
+  } = classifyRankedOpportunitiesState({
+    opportunityState,
+    resultsLength: results.length,
+    rawAnalysesLength: rawAnalyses.length,
+    recommendationsLength: opportunityRecommendations.length,
+    recommendationsJobId,
+    latestResultsAffectingJobId,
+  });
+  // PO corrective round 3, Finding 2: "refresh in progress" -- distinct
+  // from the base "loading" state (first scan, nothing to preserve yet).
+  // True when EITHER (a) a real, results-affecting scan job is currently
+  // running live in screenerJobStore (before its results have even landed
+  // yet), or (b) the recommendations fetch for already-new results is in
+  // flight while a prior valid presentation still exists to preserve.
+  // Both conditions are real, already-computed signals -- nothing
+  // fabricated, no elapsed-time heuristic.
+  const isRankedOpportunitiesRefreshInProgress =
+    (isScanCurrentlyRefreshing && opportunityRecommendations.length > 0) ||
+    (opportunityState === 'loading' && opportunityRecommendations.length > 0);
+  // PO corrective round 5 (WA-0005 Defect 1): the Ranked Opportunities
+  // section itself was gated purely on `results.length > 0` -- the same raw
+  // state startRankedScan() (features/screener/hooks/useRankedScan.ts)
+  // clears to `[]` the INSTANT a refresh is dispatched, purely to give the
+  // RAW results table below an honest "these rows are about to be replaced"
+  // signal. That gate alone meant the entire section (including whatever
+  // BestOpportunitiesPanel was showing from the LAST successful evaluation)
+  // unmounted the instant refresh started, even after the
+  // recommendations-fetch effect above was corrected to stop clearing its
+  // own local state / RecommendationService's published set in this exact
+  // window -- the effect fix alone was not sufficient; this render gate
+  // needed its own, independent correction. `opportunityState` is the same
+  // real signal that effect intentionally leaves untouched (still
+  // 'loaded'/'error' from the last real evaluation, never reset to 'idle')
+  // for exactly this refresh-in-progress window -- it only resets to 'idle'
+  // via that effect's genuine full-clear branch (not currently refreshing:
+  // nothing has ever run, or the user explicitly reset via
+  // clearResultsCache()). So `opportunityState !== 'idle'` is true if and
+  // only if there is a real prior evaluation attempt/result to keep
+  // showing, and is the same signal already relied on above.
+  const showRankedOpportunitiesSection = results.length > 0 || opportunityState !== 'idle';
+  // PO corrective round, Finding 3: genuine partial-evaluation evidence --
+  // some of this scan's submitted candidates were skipped by the adapter
+  // while others were successfully evaluated into rawAnalyses. Never
+  // fabricated: absent any skipped candidates, or absent any successfully
+  // evaluated candidate to preserve alongside them, this stays false.
+  const isRankedOpportunitiesPartialEvaluation = skippedCandidates.length > 0 && rawAnalyses.length > 0;
+  const emptyUniverseClassification = classifyEmptyUniverseState({
+    resultsLength: results.length,
+    scanHasRunThisSession,
+  });
 
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
@@ -6146,13 +6382,47 @@ export default function Home() {
           {results.length === 0 && targetedResults.length === 0 && !loading && (
             <div className={`h-full flex flex-col items-center justify-center ${th.textFaint}`}>
               <div className="text-4xl mb-3 opacity-20">◈</div>
-              <p className={`text-[10px] tracking-widest ${th.textMuted}`}>ADD TICKERS AND RUN HUNTER</p>
-              <p className={`text-[9px] mt-2 ${th.textFaint}`}>Save sessions · Load scan lists · Upload Finviz screenshots</p>
+              {/* WA-0005 §11/§15: "Initial/not yet run" and state 1 ("scan
+                  completed, zero raw candidates" / Empty Universe) look
+                  identical via results.length === 0 alone -- scanHasRunThisSession
+                  is the discriminator so these two states are never
+                  conflated, and neither is ever worded as "no qualifying
+                  opportunities." */}
+              {emptyUniverseClassification === 'empty-universe' ? (
+                <>
+                  <p className={`text-[10px] tracking-widest ${th.textMuted}`}>EMPTY UNIVERSE — SCAN FOUND NO CANDIDATES</p>
+                  <p className={`text-[9px] mt-2 ${th.textFaint}`}>This scan completed but returned zero raw results. Try different tickers or looser rules, then run again.</p>
+                </>
+              ) : (
+                <>
+                  <p className={`text-[10px] tracking-widest ${th.textMuted}`}>ADD TICKERS AND RUN HUNTER</p>
+                  <p className={`text-[9px] mt-2 ${th.textFaint}`}>Save sessions · Load scan lists · Upload Finviz screenshots</p>
+                </>
+              )}
             </div>
           )}
           {loading && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
 
-          {(results.length > 0 || targetedResults.length > 0) && (
+          {/* PO corrective round 5 (WA-0005 Defect 1): this wrapper used to
+              gate purely on `results.length > 0 || targetedResults.length >
+              0` -- the same raw `results` startRankedScan() (features/
+              screener/hooks/useRankedScan.ts) optimistically clears to `[]`
+              the instant a refresh is dispatched. Since the Ranked
+              Opportunities section (`showRankedOpportunitiesSection`, its
+              own doc comment above) lives INSIDE this wrapper, the wrapper
+              itself unmounting during a refresh would hide the Ranked
+              Opportunities section regardless of that section's own,
+              already-corrected internal gate -- the outer gate was silently
+              overriding the inner one. Extended to also stay mounted
+              whenever `showRankedOpportunitiesSection` is true (a real
+              prior evaluation exists to keep showing), not only when raw
+              `results`/`targetedResults` are non-empty. "All Scan Results"
+              underneath legitimately shows its own honest zero-rows state
+              during this exact window (results genuinely is `[]` while the
+              refresh's raw scan is still running) -- nothing fabricated,
+              and the sibling `loading && 'SCANNING...'` indicator above
+              already discloses that a scan is in progress. */}
+          {(showRankedOpportunitiesSection || targetedResults.length > 0) && (
             <div className="space-y-4">
               {screenMode === 'filter' && (
                 <p className="text-sm font-bold tracking-wide text-amber-400">⬢ FILTERED SCAN</p>
@@ -6223,26 +6493,101 @@ export default function Home() {
                 }} />
               )}
 
-              {/* OE-0002A: first production activation of OE-0001. Real,
-                  ranked OpportunityRecommendation[] derived from this
-                  page's own current scan results via the existing,
-                  unmodified pipeline -- see the effect above. */}
-              {results.length > 0 && (
-                <BestOpportunitiesPanel
-                  recommendations={opportunityRecommendations}
-                  generatedAt={opportunityGeneratedAt}
-                  th={th}
-                  blockerNotice={
-                    opportunityState === 'error'
-                      ? (opportunityError || 'Unable to load ranked opportunities.')
-                      : opportunityState === 'loading'
-                        ? 'Ranking opportunities from these scan results…'
-                        : undefined
-                  }
-                />
+              {/* WA-0005 §10.2/§11: Ranked Opportunities -- second in page
+                  order, immediately after scan controls and before "All
+                  Scan Results." Only renders once a scan has produced
+                  evaluable results (results.length > 0), per §11's precise
+                  definition; never before. The canonical Opportunity
+                  Engine pipeline (OE-0001/OE-0002A, unchanged) still drives
+                  every score/confidence/disposition value here -- this
+                  section only sequences presentation.
+                  PO corrective round 5 (WA-0005 Defect 1): the gate is now
+                  `showRankedOpportunitiesSection` (results.length > 0 OR a
+                  real prior evaluation exists, per its own doc comment
+                  above), not `results.length > 0` alone -- a refresh in
+                  progress optimistically clears `results` before this
+                  section's own re-evaluation completes, and this section
+                  must remain visible, showing the last valid presentation,
+                  throughout that window. */}
+              {showRankedOpportunitiesSection && (
+                <section id="ranked-opportunities" aria-label="Ranked Opportunities" className="space-y-2">
+                  <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint}`}>Ranked Opportunities</h2>
+                  {isRankedOpportunitiesState2 ? (
+                    // WA-0005 §15 state 2: rawAnalyses existed but none
+                    // became OpportunityRecommendations. Never rendered as
+                    // "no qualifying opportunities," never identical to
+                    // state 1 or state 5's copy. PO corrective round,
+                    // Finding 4: the capital-limitation notice must still
+                    // appear here (a real, applicable post-scan evaluation
+                    // took place) -- routed through the single canonical
+                    // BestOpportunitiesPanel renderer (via showCapitalNotice/
+                    // emptyStateMessage) instead of a second, duplicated
+                    // notice implementation.
+                    <BestOpportunitiesPanel
+                      recommendations={[]}
+                      th={th}
+                      showCapitalNotice
+                      emptyStateMessage="Candidates were analyzed, but none could be adapted or ranked."
+                      partialEvaluation={
+                        isRankedOpportunitiesPartialEvaluation
+                          ? { skippedCount: skippedCandidates.length, totalSubmitted: results.length }
+                          : undefined
+                      }
+                    />
+                  ) : isRankedOpportunitiesState5 ? (
+                    // WA-0005 §15 state 5: scan results existed, but the
+                    // evaluation service produced no candidate analyses at
+                    // all. Deliberately never renders BestOpportunitiesPanel's
+                    // generic "No ranked opportunities to display" copy,
+                    // since that copy would hide this distinction. Finding 4:
+                    // capital notice still applies here too.
+                    <BestOpportunitiesPanel
+                      recommendations={[]}
+                      th={th}
+                      showCapitalNotice
+                      emptyStateMessage="Scan results existed, but the evaluation service produced no candidate analyses."
+                    />
+                  ) : (
+                    <BestOpportunitiesPanel
+                      recommendations={opportunityRecommendations}
+                      generatedAt={opportunityGeneratedAt}
+                      th={th}
+                      candidateDetails={opportunityCandidateDetails}
+                      stale={isRankedOpportunitiesStale}
+                      partialEvaluation={
+                        isRankedOpportunitiesPartialEvaluation
+                          ? { skippedCount: skippedCandidates.length, totalSubmitted: results.length }
+                          : undefined
+                      }
+                      blockerNoticeIsError={opportunityState === 'error'}
+                      blockerNotice={
+                        opportunityState === 'error'
+                          ? (opportunityError || 'Unable to load ranked opportunities.')
+                          // PO corrective round 3, Finding 2: refresh-in-
+                          // progress must be EXPLICITLY, distinctly
+                          // disclosed -- not the same generic copy as a
+                          // first scan's loading state -- while the prior
+                          // valid results remain visible underneath
+                          // (opportunityRecommendations is never cleared
+                          // here). isRefreshInProgress is real: either a
+                          // results-affecting scan job is currently running
+                          // (screenerJobStore's own live phase) or the
+                          // recommendations fetch itself is in flight while
+                          // prior results already exist.
+                          : isRankedOpportunitiesRefreshInProgress
+                            ? 'Refreshing ranked opportunities — a new scan is in progress. The results below are your last valid ranked opportunities.'
+                            : opportunityState === 'loading'
+                              ? 'Ranking opportunities from these scan results…'
+                              : undefined
+                      }
+                    />
+                  )}
+                </section>
               )}
 
-              {screenMode === 'targeted' ? (
+              <section aria-label="All Scan Results" className="space-y-4">
+                <h2 className={`text-[11px] font-bold uppercase tracking-widest ${th.textFaint}`}>All Scan Results</h2>
+                {screenMode === 'targeted' ? (
                 <TargetedScanResultsPanel
                   entries={targetedResults}
                   sortBy={targetedSortBy}
@@ -6570,6 +6915,7 @@ export default function Home() {
                 </div>
                 );
               })()}
+              </section>
             </div>
           )}
         </div>

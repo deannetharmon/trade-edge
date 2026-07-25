@@ -18,6 +18,42 @@ export interface ScreenerJobState {
   completedAt: number | null;
   error: string | null;
   resultsHref: string;
+  // PO corrective round 4 (WA-0005 Finding 2): the authoritative "last
+  // completed results-affecting job" identity, held here as COMMITTED,
+  // external-store state -- never a ref mutated during a React render body.
+  //
+  // Prior architecture (round 3) held this value in a separate hook
+  // (lib/command-center/useLatestResultsAffectingJobId.ts) via a `useRef`
+  // mutated synchronously during render. Round 4's review found that
+  // unsound: a render that mutates a ref can occur without that render
+  // ever committing (a discarded render pass, an error boundary unwind, a
+  // concurrent-mode interruption, or a StrictMode development double-
+  // invocation), so a ref mutated mid-render is not a reliable place to
+  // record "this job authoritatively completed." It also didn't atomically
+  // bind a specific job id to the specific `results` array that job
+  // produced -- the ref and the page's own `results` state were two
+  // independently-updated values that could, in principle, drift apart in
+  // intermediate renders.
+  //
+  // Corrected architecture: this field is set by completeScreenerJob()
+  // itself, as part of the SAME `emit()` call that transitions `phase` to
+  // 'complete' -- i.e. in the exact same synchronous, committed external-
+  // store update every results-affecting scan producer (runScreen/
+  // runPMCCScan/runCspScan/useRankedScan's real TaskManager-driven effect)
+  // already calls immediately alongside its own `setResults(...)` call, in
+  // the same synchronous function body, with no `await` in between. Because
+  // `emit()` mutates `currentState` synchronously (before `notify()` even
+  // runs), any render that reads this field via `useScreenerJobState()`
+  // (a `useSyncExternalStore` subscription) is guaranteed to see the
+  // fully-updated value -- there is no possible intermediate render where
+  // `results` has advanced but this field has not, the way there could be
+  // with a `useEffect`+`setState` pair one render behind. See
+  // completeScreenerJob() below for exactly how it is derived (never
+  // cleared by a later job merely starting ('running') or failing
+  // ('error'); Targeted Scan is structurally excluded since it writes to
+  // `targetedResults`, not `results`, and cannot affect the recommendations
+  // pipeline).
+  lastResultsAffectingJobId: string | null;
 }
 
 const STORAGE_KEY = 'trade-edge-screener-job-state';
@@ -35,6 +71,7 @@ const DEFAULT_STATE: ScreenerJobState = {
   completedAt: null,
   error: null,
   resultsHref: '/screener',
+  lastResultsAffectingJobId: null,
 };
 
 let currentState: ScreenerJobState = DEFAULT_STATE;
@@ -145,6 +182,15 @@ export function startScreenerJob(args: {
   resultsHref?: string;
 }): string {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  // PO corrective round 4 (WA-0005 Defect 2): previously spread
+  // `...DEFAULT_STATE`, which reset `lastResultsAffectingJobId` to `null`
+  // on every new job start -- the exact defect this field exists to avoid
+  // (a later job merely STARTING must never erase a prior genuinely
+  // completed job's identity). Now preserves the current
+  // `lastResultsAffectingJobId` explicitly, spreading only the other
+  // DEFAULT_STATE fields (a fresh job's progress/status/error/etc. still
+  // resets normally).
+  const prev = getScreenerJobState();
   emit({
     ...DEFAULT_STATE,
     id,
@@ -156,6 +202,7 @@ export function startScreenerJob(args: {
     progressTotal: args.total ?? 0,
     startedAt: Date.now(),
     resultsHref: args.resultsHref ?? '/screener',
+    lastResultsAffectingJobId: prev.lastResultsAffectingJobId,
   });
   return id;
 }
@@ -166,6 +213,17 @@ export function updateScreenerJob(patch: Partial<ScreenerJobState>): void {
 
 export function completeScreenerJob(args: { resultCount?: number | null; status?: string; resultsHref?: string } = {}): void {
   const prev = getScreenerJobState();
+  // PO corrective round 4 (WA-0005 Finding 2): the completing job's own id
+  // becomes the new `lastResultsAffectingJobId` -- captured HERE, as part of
+  // this same atomic emit(), the exact moment the job that produced new
+  // `results` (via the caller's own synchronous, same-tick setResults(...)
+  // call) reaches 'complete'. Targeted Scan is excluded (it writes to
+  // targetedResults, not results, and cannot affect the recommendations
+  // pipeline); if this completion is not results-affecting, the field is
+  // left exactly as it was -- never cleared -- so a later job merely
+  // starting or failing can never erase a genuinely prior completed job's
+  // identity (the defect this replaces).
+  const isResultsAffecting = !!prev.kind && prev.kind !== 'targeted' && !!prev.id;
   emit({
     ...prev,
     phase: 'complete',
@@ -174,6 +232,7 @@ export function completeScreenerJob(args: { resultCount?: number | null; status?
     completedAt: Date.now(),
     error: null,
     resultsHref: args.resultsHref ?? prev.resultsHref ?? '/screener',
+    lastResultsAffectingJobId: isResultsAffecting ? (prev.id as string) : prev.lastResultsAffectingJobId,
   });
 }
 

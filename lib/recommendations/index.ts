@@ -14,7 +14,12 @@ export {
   useCurrentRecommendations,
   getCurrentRecommendations,
   publishRecommendations,
+  // PO corrective round 4 (WA-0005 Defect 1): the real evaluation-lifecycle
+  // signal, additive to the existing publish/clear pair -- see
+  // RecommendationService.ts's own doc comments.
+  beginRecommendationsEvaluation,
+  failRecommendationsEvaluation,
   clearRecommendations,
   subscribeToRecommendations,
 } from './RecommendationService';
-export type { RecommendationSet } from './RecommendationService';
+export type { RecommendationSet, RecommendationEvaluationStatus } from './RecommendationService';

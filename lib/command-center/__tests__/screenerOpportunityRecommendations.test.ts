@@ -67,4 +67,18 @@ describe('OE-0002A: opportunityRecommendationsFromApiResponse', () => {
 
     expect(recommendations[0].disposition).not.toBe('RECOMMENDED');
   });
+
+  it('Finding 3: passes the canonical `skipped` field through verbatim when the route supplies it', () => {
+    const result = opportunityRecommendationsFromApiResponse(
+      { result: { recommendations: [] }, skipped: [{ symbol: 'IBM', strategy: 'PMCC', reason: 'PMCC is not adaptable.' }] },
+      NOW,
+    );
+
+    expect(result.skipped).toEqual([{ symbol: 'IBM', strategy: 'PMCC', reason: 'PMCC is not adaptable.' }]);
+  });
+
+  it('Finding 3: `skipped` defaults to an honest empty array when the route omits it -- never fabricated', () => {
+    const result = opportunityRecommendationsFromApiResponse({ result: { recommendations: [] } }, NOW);
+    expect(result.skipped).toEqual([]);
+  });
 });

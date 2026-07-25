@@ -68,7 +68,8 @@ describe('TC-0001: CommandCenter layout', () => {
 
     expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('href', '/portfolio');
     expect(screen.getByRole('link', { name: 'Screener / Hunter' })).toHaveAttribute('href', '/screener');
-    expect(screen.getByRole('link', { name: 'Opportunity Review' })).toHaveAttribute('href', '#best-opportunity');
+    // WA-0005 §17: repointed to /screener's own ranked-opportunities anchor.
+    expect(screen.getByRole('link', { name: 'Opportunity Review' })).toHaveAttribute('href', '/screener#ranked-opportunities');
     expect(screen.getByRole('link', { name: 'Paper Trading' })).toHaveAttribute('href', '/paper-trading');
     expect(screen.getByRole('link', { name: 'Performance' })).toHaveAttribute('href', '/performance');
     expect(screen.getByRole('link', { name: 'Trade Log' })).toHaveAttribute('href', '/trade-log');

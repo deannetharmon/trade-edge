@@ -10,11 +10,12 @@ import type { THEMES, Theme } from '@/lib/theme';
 const LINKS: { href: string; label: string }[] = [
   { href: '/portfolio', label: 'Portfolio' },
   { href: '/screener', label: 'Screener / Hunter' },
-  // "Opportunity review destination" (design doc section 3.8): no dedicated
-  // review route exists elsewhere in the app yet -- the Best Opportunity
-  // card below IS that destination on this page, so this links to it
-  // in-page rather than inventing a route that doesn't exist.
-  { href: '#best-opportunity', label: 'Opportunity Review' },
+  // WA-0005 §17: repointed from the in-page /dashboard anchor
+  // (#best-opportunity) to /screener's own, genuinely-existing
+  // id="ranked-opportunities" anchor -- finally realizing WA-0001 §3/§7's
+  // stated (but never implemented, until this sprint) intent to move this
+  // link to the canonical Opportunities workspace itself.
+  { href: '/screener#ranked-opportunities', label: 'Opportunity Review' },
   { href: '/paper-trading', label: 'Paper Trading' },
   { href: '/performance', label: 'Performance' },
   { href: '/trade-log', label: 'Trade Log' },
