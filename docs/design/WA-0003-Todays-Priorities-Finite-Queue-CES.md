@@ -1,6 +1,6 @@
 # WA-0003 — Today's Priorities Finite Queue: Implementation Specification (CES)
 
-**Status:** CES / design-only. No application code changed. Awaiting Dean/Paul/Quinn/Chuck review and approval before implementation is scoped as its own sprint.
+**Status:** CES / design-only. No application code changed. Approved by Dean, subject to the corrective ruling on the deep-link contract incorporated below (frozen product ruling 6 requires Mission Control to open the exact corresponding item within Today's Priorities, not bypass it). §23 resolved per that ruling; `'positions'` remains the confirmed default landing tab.
 **Repository:** `deannetharmon/trade-edge`, inspected against `main` @ `d3b836be8f66179387c8e29a9be9b7fae0ff9344`.
 **Author:** Dane (Lead Engineer)
 **Authority:** `docs/design/WA-0001-Workspace-Content-Ownership-Audit.md` and `docs/design/WA-0002-Positions-Legacy-Mission-Control-CES.md` (as corrected) are authoritative. This CES cites and extends their rulings; it does not reinterpret them.
@@ -13,9 +13,9 @@ The central finding, evidenced below, is that none of the three existing collect
 
 The completion workflow (`features/portfolio/priorities/priorityWorkflowState.ts`) already operates on a stable `ruleId::subjectType::subjectKey` identity, not on any UI's presentation order — so Today's Priorities can read and write the exact same `localStorage` state Priority List already uses, with zero schema change, simply by continuing to call `partitionPriorities()` unchanged against the union of `PortfolioObjective`s the new queue surfaces. Healthy-position monitoring (the dashboard's existing `Monitor` bucket) is relocated, unchanged in meaning, from the `today` tab onto Positions, reusing its existing row renderer rather than a redesign. Mission Control's Attention Required section shrinks to a lead item, an open count, a compact summary, and a deep link — all four already either directly available or one small, additive view-model field away from available.
 
-The one genuine gap requiring new (not invented-intelligence, purely mechanical) work is deep linking: no query-parameter, hash, or highlight mechanism into a specific position exists anywhere in this codebase today. This CES specifies a minimal, `pos.key`-based contract to close that gap, since without it, rulings 6 and 8 cannot be satisfied at all.
+The one genuine gap requiring new (not invented-intelligence, purely mechanical) work is deep linking: no query-parameter, hash, or highlight mechanism into a specific position, opportunity, or review exists anywhere in this codebase today. Per ruling 6, that gap requires **two distinct link levels**, not one: Mission Control's lead-item link must open the exact queue item **within Today's Priorities** (never bypass it and jump straight to Positions or Decision History), using a stable, namespaced queue-item key that is agnostic to item kind; the focused priority card, once landed on, then separately exposes its own applicable action destination (`pos.key` for position-linked items, `reviewId` for decision-review follow-ups, an unfocused Positions landing for portfolio-level items with no position identity). §13 specifies both levels' contracts in full.
 
-**Recommendation: GO**, with one open product question flagged in §23 (not a blocker to approving the rest of this specification).
+**Recommendation: GO.** §23's landing-tab question is resolved in this revision (default remains `'positions'`, per the final ruling) and is no longer open.
 
 ## 2. Current-State Evidence
 
@@ -78,6 +78,8 @@ Today's Priorities page              Mission Control's reduced
 
 Priority List (`features/portfolio/components/TodaysPriorities.tsx` + `TodaysPrioritiesWorkflow.tsx`) continues to read `canonicalPriorities.objectives` directly and call `partitionPriorities()` against the same `workflowState`, entirely unchanged, per §12.
 
+**Two-stage deep-link resolution (corrective ruling, §13 for full contract):** every `TodaysPrioritiesQueueItem` above carries a `stableKey` (namespaced by kind — `attention::…`, `cc::…`, `review::…`), derived once, in the same place the queue itself is built, from data already flowing through this map — never recomputed independently by Mission Control or by Today's Priorities. Mission Control's lead-item link (§11) targets `?tab=todays-priorities&priority=<stableKey>`, which resolves **inside** Today's Priorities to the exact queue item (expand/highlight/scroll), never directly to Positions or Decision History. Only from that focused card does the existing, unchanged position/review destination link (`focus=<pos.key>` / `reviewId=<id>`) become available, as a second, separate hop the trader takes deliberately.
+
 ## 4. Exact Queue Membership Rules
 
 No new eligibility intelligence is introduced. Every inclusion/exclusion below is a direct read of an existing typed field already produced by an existing canonical function.
@@ -135,6 +137,9 @@ export type TodaysPrioritiesQueueItemKind = 'attention' | 'covered_call_opportun
 export interface TodaysPrioritiesQueueItem {
   kind: TodaysPrioritiesQueueItemKind;
   id: string;                 // AttentionItem.id, CC opportunity's key, or DecisionReview.id
+  stableKey: string;          // NEW, corrective ruling — namespaced, deterministic, kind-agnostic
+                               // identifier for deep-link focus. See getStableQueueKey() below.
+                               // Never display text, list position, or symbol-only.
   subjectId: string | null;   // position key, when applicable
   headline: string;
   detail: string;             // recommendedAction / rationale-equivalent, unchanged text
@@ -145,6 +150,27 @@ export interface TodaysPrioritiesQueueItem {
   decisionReview?: DecisionReview;                  // unchanged PI-0008D shape
 }
 
+// Stable, namespaced queue-item key — corrective ruling requirement.
+// Namespacing (the `attention::` / `cc::` / `review::` prefix) is what prevents
+// collisions across kinds even when the underlying identifiers could otherwise
+// coincide (e.g. a covered-call opportunity's position key and an attention
+// item's subjectKey are drawn from the same position-key space).
+export function getStableQueueKey(item: TodaysPrioritiesQueueItem): string {
+  switch (item.kind) {
+    case 'attention':
+      // Canonical workflow identity — the same key priorityWorkflowState.ts
+      // already uses for completion, never a regenerated objective.id.
+      return `attention::${getPriorityWorkflowKey(item.attentionItem!.objective!)}`;
+    case 'covered_call_opportunity':
+      // Namespaced on the existing position key (dashboardComposition.ts's
+      // `key: p.key`), not a freshly minted identifier.
+      return `cc::${item.coveredCallOpportunity!.key}`;
+    case 'needs_follow_up':
+      // Namespaced on the existing DecisionReview.id.
+      return `review::${item.decisionReview!.id}`;
+  }
+}
+
 export interface TodaysPrioritiesQueue {
   generatedAt: string;
   orderedItems: TodaysPrioritiesQueueItem[]; // scored items (via buildAttentionFeed order) first, then CC opportunities, then needsFollowUp, each group in existing stable order
@@ -153,7 +179,7 @@ export interface TodaysPrioritiesQueue {
 }
 ```
 
-`buildTodaysPrioritiesQueue({ dashboard, generatedAt })` calls `buildAttentionFeed({ dashboard, generatedAt })` **unmodified** for the scored portion, wraps each of its `orderedActionable` entries as `kind: 'attention'` (completable per `isCompletable(item.objective!)` — always true here since `buildAttentionFeed` never surfaces `WAIT`), then appends `dashboard.opportunities.coveredCallOpportunities.map(...)` as `kind: 'covered_call_opportunity'` (`completable: false`) and `dashboard.reviewToday.needsFollowUp.map(...)` as `kind: 'needs_follow_up'` (`completable: false`). No sorting is invented for the appended groups — their existing array order is preserved as-is.
+`buildTodaysPrioritiesQueue({ dashboard, generatedAt })` calls `buildAttentionFeed({ dashboard, generatedAt })` **unmodified** for the scored portion, wraps each of its `orderedActionable` entries as `kind: 'attention'` (completable per `isCompletable(item.objective!)` — always true here since `buildAttentionFeed` never surfaces `WAIT`), then appends `dashboard.opportunities.coveredCallOpportunities.map(...)` as `kind: 'covered_call_opportunity'` (`completable: false`) and `dashboard.reviewToday.needsFollowUp.map(...)` as `kind: 'needs_follow_up'` (`completable: false`). No sorting is invented for the appended groups — their existing array order is preserved as-is. Every item's `stableKey` is populated at construction time via `getStableQueueKey()` (above) — computed once, here, and carried unchanged through Mission Control's summary and Today's Priorities' rendering; neither consumer re-derives it independently.
 
 **Completion partitioning (reuses `partitionPriorities()` unmodified):**
 
@@ -230,7 +256,7 @@ Unchanged, by construction: `computeObjectiveFingerprint()` and `getPriorityWork
 1. **Lead open item** — headline text (reuses `SummaryStrip.tsx`'s existing `leadItemHeadline()`-style logic, now sourced from the new queue's `leadItem`, not `narrative.leadItem`, per the ruling-6 parity requirement below).
 2. **Open-attention count** — a single number.
 3. **Compact condition summary** — one line, e.g. "`{count} items need your attention today.`" (reusing `SummaryStrip.tsx`'s existing `attentionSummary()` phrasing pattern).
-4. **Contextual deep link** — one link/button, using the lead item's own deep-link contract (§13), labeled e.g. "Open in Today's Priorities."
+4. **Contextual deep link** — one link/button targeting **Today's Priorities, not the item's downstream destination** (corrective ruling): `?tab=todays-priorities&priority=<encoded leadItem.stableKey>`, labeled e.g. "Open in Today's Priorities." This link never points at `?tab=positions&focus=…` or `?tab=history&reviewId=…` directly — Mission Control's lead-item identity, open count, and link target all come from the same partitioned queue (below), so the link target and the count it accompanies cannot drift apart, and the item's actual position/review destination is reached only as a second, separate hop from inside Today's Priorities (§13).
 
 **Removed:** the full per-item card list; any implied Mark Complete/Reopen surface (none existed, so nothing to remove there, but this confirms none is added).
 
@@ -257,42 +283,73 @@ Navigation may promote Today's Priorities as the primary entry point (e.g., defa
 | Mission Control's full Attention Required list | `/dashboard` | REDUCE (lead item + count + summary + deep link only) | Mission Control (summary) / Today's Priorities (full experience) | WA-0003 | Ruling 6 |
 | `today` tab itself (as a distinct sub-tab from the new Today's Priorities) | `/portfolio` sub-tab bar | RETIRE the separate `today` tab identity — its content becomes Today's Priorities' content directly (one workspace, not two overlapping tabs) | Today's Priorities | WA-0003 | Avoids two sub-tabs both claiming to be "today's priorities"; not a new redesign, a consolidation the frozen architecture already implies (one workspace, one job) |
 
-## 13. Deep-Link Contract
+## 13. Deep-Link Contract (corrective ruling: two distinct link levels)
 
-**No existing mechanism exists** (confirmed, §2) — this is new, minimal, mechanical infrastructure, not new domain intelligence.
+**No existing mechanism exists** (confirmed, §2) — this is new, minimal, mechanical infrastructure, not new domain intelligence. Per frozen product ruling 6, Mission Control's contextual link must open the exact corresponding item **within Today's Priorities** — it must never bypass Today's Priorities and jump straight to Positions or Decision History. This requires two distinct, separately-specified link levels.
 
-**URL contract:** a query parameter on `/portfolio`, e.g. `?tab=positions&focus=<url-encoded pos.key>`. For `needs_follow_up` items (closed positions, no live card to focus), the contract instead targets Decision History: `?tab=history&reviewId=<DecisionReview.id>`. For portfolio-level items with no `subjectId` (`REDUCE_CONCENTRATION`, `PRESERVE_BUYING_POWER`, `DEPLOY_IDLE_CASH`/CSP-opportunity — genuinely not tied to one existing position), the link targets `?tab=positions` with no `focus` param — landing on the general Positions view is the correct, honest behavior here, since no more specific destination exists (ruling 8's "insufficient" language applies to items that *do* have a position identity and are shortchanged to a generic page, not to items with no position identity at all).
+### 13.1 Level 1 — Mission Control → Today's Priorities
 
-**Target behavior:** on mount (and on `focus` param change), `app/portfolio/page.tsx` looks up the position by exact `pos.key` match (never symbol-only matching — multiple positions can share a symbol at different expirations, and `pos.key` already disambiguates that, §2), scrolls it into view (`scrollIntoView({ block: 'center' })`), and sets its `expanded` state to `true` (reusing the existing, unmodified `expanded`/`setExpanded` state already on `PositionCard` — no new expand mechanism). `?tab=history&reviewId=...` similarly scrolls to and highlights the matching `DecisionReview` entry in `DecisionHistoryView.tsx`.
+**URL contract:**
 
-**Refresh behavior:** the query param persists across a full page reload (it is in the URL, not client memory), so the same target re-resolves identically.
+```
+/portfolio?tab=todays-priorities&priority=<url-encoded stableKey>
+```
 
-**Back-button behavior:** standard browser history — navigating back returns to whatever preceded the link (typically `/dashboard`); no custom history manipulation is introduced.
+This parameter (`priority`) is **distinct from, and never conflated with,** the level-2 parameters (`focus`, `reviewId`) below — it identifies a *queue item*, not a *position* or a *review*, and the two are resolved at different times by different code paths.
 
-**Mobile behavior:** identical contract; `scrollIntoView` and query-param parsing are viewport-independent. No separate mobile navigation path exists to diverge (WA-0002 already confirmed one shared tab-bar component for all viewports).
+**Identifier:** the item's `stableKey` (§7, `getStableQueueKey()`), computed once at queue-build time and carried unchanged through both Mission Control and Today's Priorities. By construction this satisfies every item kind:
 
-**Missing-target fallback:** if `focus=<key>` matches no current position (closed, or data not yet loaded), render a small, dismissible inline notice ("This item is no longer open.") and fall through to Positions' normal, unfocused rendering — never a blank page, never a thrown error, never a silent no-op. If `reviewId=<id>` matches no `DecisionReview`, the equivalent fallback applies on the History tab.
+- Attention item: `attention::${getPriorityWorkflowKey(objective)}` — the canonical workflow identity already used for completion state, never a regenerated `objective.id`.
+- Covered-call opportunity: `cc::${opportunity.key}` — namespaced on the existing position key.
+- Decision-review follow-up: `review::${review.id}` — namespaced on the existing review id.
 
-**Tests required:** exact `pos.key` match; two positions sharing a symbol resolve to distinct targets; refresh preserves focus; missing target renders the fallback notice without crashing; `needsFollowUp` link lands on History, not Positions; portfolio-level item link lands on unfocused Positions.
+The `attention::` / `cc::` / `review::` namespace prefix is mandatory and prevents collisions across kinds (e.g. a covered-call opportunity's position key living in the same string space as an attention item's `subjectKey`). No display text, list position, symbol-only value, or DOM assumption is ever used as this identifier.
+
+**Target behavior:** on mount of the `todays-priorities` tab (and on `priority` param change), the Today's Priorities workspace component looks up the queue item by exact `stableKey` match against the current `buildTodaysPrioritiesQueue()` output, then expands its card, applies a visible highlight treatment, and scrolls it into view (`scrollIntoView({ block: 'center' })`) — reusing whatever expand/collapse state the queue item's renderer (`PriorityCard` / `CoveredCallOpportunityRow` / `NeedsFollowUpRow`) already has, no new expand mechanism invented. This works uniformly for all three kinds — attention items, covered-call opportunities, and decision-review follow-ups — since resolution is by `stableKey`, not by kind-specific logic.
+
+**Fail-safe behavior:** if no current queue item matches `priority=<key>` (the item completed, self-resolved, or the underlying data no longer produces it), render a small, dismissible inline notice ("This priority is no longer open.") and fall through to Today's Priorities' normal, unfocused rendering — never a blank page, thrown error, or silent no-op.
+
+**Refresh behavior:** the `priority` param persists across a full page reload (URL-carried, not client memory); the same `stableKey` re-resolves identically, or hits the fail-safe above if the item has since resolved.
+
+**Back-button behavior:** standard browser history — navigating back returns to whatever preceded the link (typically `/dashboard`); no custom history manipulation.
+
+### 13.2 Level 2 — Today's Priorities → action destination
+
+Once a priority card is focused (via level 1, or by the trader simply browsing to it), it retains its own, already-specified applicable destination — unchanged from the single-level design this replaces, just no longer reachable directly from Mission Control:
+
+- **Position-linked item** (attention items with a position `subjectId`; covered-call opportunities) → `?tab=positions&focus=<url-encoded pos.key>`. Resolution is by exact `pos.key` match only — never symbol-only matching, since multiple positions can share a symbol at different expirations and `pos.key` already disambiguates that (§2).
+- **Decision-review follow-up** → `?tab=history&reviewId=<DecisionReview.id>`.
+- **Portfolio-level item** with no `subjectId` (`REDUCE_CONCENTRATION`, `PRESERVE_BUYING_POWER`, `DEPLOY_IDLE_CASH`/CSP-opportunity — genuinely not tied to one existing position) → `?tab=positions` with no `focus` param — the most specific honest destination currently available; landing on the general Positions view is correct here since no more specific one exists (ruling 8's "insufficient" language applies to items that *do* have a position identity and are shortchanged to a generic page, not to items with no position identity at all).
+- **Missing destination** (target position/review closed or no longer resolvable) → the same fail-safe notice pattern as level 1, scoped to Positions/History instead of Today's Priorities.
+
+**Target behavior:** identical mechanics to the pre-correction single-level design — `app/portfolio/page.tsx` resolves `focus`/`reviewId` by exact key match, scrolls into view, expands the target (`PositionCard`'s existing `expanded` state) or highlights the target (`DecisionHistoryView.tsx`'s matching `DecisionReview` entry). No new expand/highlight mechanism beyond what already exists for these two destinations.
+
+**Refresh / back-button / mobile behavior:** identical to level 1 — URL-carried, standard browser history, viewport-independent (WA-0002 already confirmed one shared tab-bar component for all viewports).
+
+**Missing-target fallback:** identical pattern to level 1, scoped to the level-2 destination.
+
+**Tests required (both levels):** exact `stableKey` match opens the correct queue item regardless of kind; exact `pos.key` match at level 2; two positions sharing a symbol resolve to distinct level-2 targets; two priorities for the same position (e.g. an attention item and a covered-call opportunity on the same `pos.key`) resolve to distinct level-1 targets via their distinct namespaced `stableKey`s and are never confused; refresh preserves both level-1 and level-2 focus; back navigation from Today's Priorities returns to Mission Control normally, and from Positions/History returns to Today's Priorities normally; a level-1 target that has since completed or self-resolved renders the fail-safe notice, not a crash, and does not attempt level-2 navigation; a level-2 target that is missing renders its own fail-safe notice; `needsFollowUp` level-2 link lands on History, not Positions; portfolio-level item's level-2 link lands on unfocused Positions; Mission Control never navigates directly to `?tab=positions&focus=…` or `?tab=history&reviewId=…` for any item kind.
 
 ## 14. Navigation and Persisted-State Handling
 
-- **New `activeTab` value:** the `today` tab identity is retired (§12); `'positions' | 'briefing' | 'priorities' | 'history' | 'balances'` gains a new value, e.g. `'todays-priorities'`, replacing `'today'` in the type union and tab array (same mechanical pattern WA-0002 already used to remove `'mission-control'`).
-- **Default tab:** unchanged from WA-0002's ruling (`'positions'`) — this CES does not reopen that decision. Whether Today's Priorities should become the new default is a product question, not a technical one; §23 flags it as open, not decided here.
-- **No persisted tab-selection state exists today** (confirmed, WA-0002); this CES adds none beyond the `focus`/`reviewId`/`tab` query parameters themselves, which are transient (present only while following a specific link) and safely absent otherwise.
+- **New `activeTab` value:** the `today` tab identity is retired (§12); `'positions' | 'briefing' | 'priorities' | 'history' | 'balances'` gains a new value, `'todays-priorities'`, replacing `'today'` in the type union and tab array (same mechanical pattern WA-0002 already used to remove `'mission-control'`).
+- **Default tab:** `/portfolio` continues to default to `'positions'` during WA-0003 — resolved, not open (§23's final ruling; superseded from "flagged for Dean/Paul" to decided). Deep links may explicitly select any of `'todays-priorities'`, `'positions'`, or `'history'` via the `tab` query parameter, independent of the default. The general landing-default question is reconsidered only after WA-0004 and WA-0005 establish the complete 5-workspace experience — not reopened by this CES.
+- **`priority` query-param resolution (new, corrective ruling, §13.1):** on mount of the `todays-priorities` tab, `app/portfolio/page.tsx` (or the new Today's Priorities workspace component it mounts) reads `priority` from the URL, resolves it against the current `buildTodaysPrioritiesQueue()` output by exact `stableKey` match, and expands/highlights/scrolls to the match, or renders the fail-safe notice on no match (§13.1). This is a new, small, additive effect — analogous in shape to the existing `focus`/`reviewId` handling on Positions/History, but keyed on `stableKey`, not `pos.key` or `reviewId`.
+- **`focus`/`reviewId` query-param resolution (§13.2):** unchanged in mechanics from the pre-correction design — still resolves on Positions/History by exact `pos.key`/`reviewId` match — but is now reached only as a second hop from within Today's Priorities (a card's own destination link), never linked to directly by Mission Control.
+- **No persisted tab-selection state exists today** (confirmed, WA-0002); this CES adds none beyond the `tab`/`priority`/`focus`/`reviewId` query parameters themselves, which are transient (present only while following a specific link) and safely absent otherwise.
 - **Portfolio Mode:** unaffected — the fail-closed gate (`portfolioMode.status === 'ready' && mode === 'LIVE'`) sits above all tab content, including the new deep-link resolution, which only runs after that gate already passed (identical to every other piece of tab content today).
 - **Background Task visibility:** unaffected — no file this CES touches is anywhere near `RankedScanTaskMirror`/`ScreenerJobStatus`/background-task state.
 - **WA-0002 transitional Briefing content:** unaffected — `DailyBriefingCard`'s `variant="transitional"` mount on Positions is untouched by this CES; the new `HealthyMonitoringSection` (§10) and deep-link focus behavior are additive alongside it, not a replacement.
 
 ## 15. Exact Component Plan
 
-- **New:** `lib/todays-priorities-queue/types.ts`, `buildTodaysPrioritiesQueue.ts`, `index.ts` (§7).
+- **New:** `lib/todays-priorities-queue/types.ts`, `buildTodaysPrioritiesQueue.ts`, `index.ts` (§7) — includes `getStableQueueKey()` (§7, corrective ruling), the single place every consumer's `stableKey` is derived.
 - **New:** `features/portfolio/positions/HealthyMonitoringSection.tsx` (§10, extracted from `TodaysPrioritiesDashboard.tsx`'s `MonitorRow` + collapse logic).
-- **New (or repurposed):** a Today's Priorities workspace component — either a new `features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx` composing the existing bucketed section layout (Immediate Action / Review Today / Opportunities, minus Monitor) with the new queue + Mark Complete/Reopen wired in, or an evolution of the existing `TodaysPrioritiesWorkflow.tsx` retargeted at the new queue instead of raw `PortfolioObjective[]`. Either approach reuses `TodaysPriorities.tsx`'s existing `PriorityCard` rendering for `kind: 'attention'` items, and adds two small new row renderers (reusing `CoveredCallOpportunityRow`/`NeedsFollowUpRow`, extracted from `TodaysPrioritiesDashboard.tsx` rather than rewritten) for the two new kinds.
-- **Changed:** `lib/mission-control/types.ts`/`buildMissionControlViewModel.ts` — one new additive field (§11).
-- **Changed:** `components/mission-control/AttentionRequiredSection.tsx` (or its renamed replacement) — reduced to lead item/count/summary/deep-link (§11).
+- **New (or repurposed):** a Today's Priorities workspace component — either a new `features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx` composing the existing bucketed section layout (Immediate Action / Review Today / Opportunities, minus Monitor) with the new queue + Mark Complete/Reopen wired in, or an evolution of the existing `TodaysPrioritiesWorkflow.tsx` retargeted at the new queue instead of raw `PortfolioObjective[]`. Either approach reuses `TodaysPriorities.tsx`'s existing `PriorityCard` rendering for `kind: 'attention'` items, and adds two small new row renderers (reusing `CoveredCallOpportunityRow`/`NeedsFollowUpRow`, extracted from `TodaysPrioritiesDashboard.tsx` rather than rewritten) for the two new kinds. **New (corrective ruling):** this component also owns `priority` query-param resolution (§13.1/§14) — matching by `stableKey` against the current queue, expanding/highlighting/scrolling to the match, and rendering the level-1 fail-safe notice on no match — and renders each focused card's existing level-2 destination link (§13.2) rather than Mission Control linking to that destination directly.
+- **Changed:** `lib/mission-control/types.ts`/`buildMissionControlViewModel.ts` — one new additive field (§11), whose `deepLink` is now `?tab=todays-priorities&priority=<stableKey>` (never a level-2 URL).
+- **Changed:** `components/mission-control/AttentionRequiredSection.tsx` (or its renamed replacement) — reduced to lead item/count/summary/deep-link (§11); its one link always targets Today's Priorities, never Positions or Decision History directly (corrective ruling).
 - **Changed:** `app/dashboard/page.tsx` — reads `loadPriorityWorkflowState()` on mount (new, small `useEffect`, mirroring `TodaysPrioritiesWorkflow.tsx`'s existing pattern) and threads it into `buildMissionControlViewModel()`.
-- **Changed:** `app/portfolio/page.tsx` — retire the `today` tab identity/import in favor of the new Today's Priorities component; mount `HealthyMonitoringSection` on Positions; add `focus`/`reviewId` query-param resolution (§13).
+- **Changed:** `app/portfolio/page.tsx` — retire the `today` tab identity/import in favor of the new Today's Priorities component; mount `HealthyMonitoringSection` on Positions; add `focus`/`reviewId` query-param resolution scoped to Positions/History (§13.2), reached only as a second hop from Today's Priorities.
 - **Changed:** `features/portfolio/dashboard/TodaysPrioritiesDashboard.tsx` — Monitor section removed (extracted, not duplicated); this file may be retained for its remaining sections if reused directly by the new workspace component, or retired if fully superseded — implementer's call, contingent on §16/§17's deletion criteria being met at implementation time.
 - **Unchanged:** every canonical engine (`lib/portfolio-intelligence`, `lib/priorityScore`, `lib/todaysPriorities/dashboard.ts`, `lib/decision-review`, `lib/morning-briefing/attentionFeed.ts`, `lib/review-conductor/conductReview.ts`), `PositionIntelligencePanel`, `PositionCard`'s core rendering, `PositionCompositionCard`, `PositionRiskBadges`, `DailyBriefingCard`.
 
@@ -303,7 +360,8 @@ Navigation may promote Today's Priorities as the primary entry point (e.g., defa
 | `lib/todays-priorities-queue/*` (new) | New files | Houses the one new, additive composition function (§7) | Low — additive, no existing consumer to break | New unit tests |
 | `features/portfolio/positions/HealthyMonitoringSection.tsx` (new) | New file, extracted from `TodaysPrioritiesDashboard.tsx` | Relocates healthy monitoring to Positions (§10) | Low — verbatim extraction of already-tested rendering | New unit tests seeded from any existing Monitor-section assertions |
 | `features/portfolio/dashboard/TodaysPrioritiesDashboard.tsx` | Remove Monitor section; possibly retire the whole file if its remaining sections are absorbed into a new component | Consolidating `today` tab into Today's Priorities (§12, §15) | Medium — this file's remaining sections' presentation logic must not be lost, only relocated | Re-run/port its existing tests (if any exist — none were found under `features/portfolio/dashboard/__tests__/`; confirm at implementation time) against the new location |
-| `app/portfolio/page.tsx` | Retire `today` tab entry/type-union value/import; mount new Today's Priorities component under a new tab key; mount `HealthyMonitoringSection` on Positions; add `focus`/`reviewId` query-param resolution and fallback notice | Core consolidation + deep-link infrastructure | Medium — large file; localized changes, but the query-param effect must not interfere with existing `activeTab`/`showIntelligence`/`expanded` state | New tests for query-param resolution, fallback, and default-tab non-regression (extending WA-0002's own `PortfolioPage.test.tsx` pattern) |
+| `app/portfolio/page.tsx` | Retire `today` tab entry/type-union value/import; mount new Today's Priorities component under a new `'todays-priorities'` tab key; mount `HealthyMonitoringSection` on Positions; add `focus`/`reviewId` query-param resolution and fallback notice, now reached only as a level-2 hop from Today's Priorities (§13.2), never linked to directly by Mission Control | Core consolidation + level-2 deep-link infrastructure | Medium — large file; localized changes, but the query-param effect must not interfere with existing `activeTab`/`showIntelligence`/`expanded` state | New tests for query-param resolution, fallback, and default-tab non-regression (extending WA-0002's own `PortfolioPage.test.tsx` pattern); confirms `'positions'` remains the default |
+| New Today's Priorities workspace component(s) — `priority` param handling | Add `stableKey`-based `priority` query-param resolution (§13.1), expand/highlight/scroll on match, fail-safe notice on no match | Level-1 deep-link infrastructure — corrective ruling | Medium — must not confuse `priority` (queue-item focus) with `focus`/`reviewId` (level-2, destination focus); must disambiguate same-position items across kinds via namespaced `stableKey` | New tests: exact `stableKey` match per kind; two priorities on the same position resolve to distinct targets; refresh preserves focus; missing target renders fail-safe, not crash |
 | `features/portfolio/priorities/priorityWorkflowState.ts` | **No change** | Already correctly identity/fingerprint-scoped; reused as-is (§7-8) | None | Existing 24 tests must still pass unmodified |
 | `features/portfolio/components/TodaysPriorities.tsx` / `TodaysPrioritiesWorkflow.tsx` | **No change** | Priority List retained temporarily, unmodified (§12) | None | Existing 20 + 15 tests must still pass unmodified |
 | New Today's Priorities workspace component(s) | New file(s) | The finite action queue's new home (§15) | Medium — new composition of existing renderers; must not reintroduce duplicate items across sections (dedup already guaranteed by `buildAttentionFeed`) | New tests: queue membership, ordering, Mark Complete/Reopen, shared-state parity with Priority List |
@@ -325,16 +383,17 @@ Applying the same four-criteria test WA-0002 established (zero remaining consume
 
 ## 18. Implementation Sequence
 
-1. Add `lib/todays-priorities-queue/` (new, additive, independently testable) and its tests — verifiable before anything else changes.
+1. Add `lib/todays-priorities-queue/` (new, additive, independently testable) — including `getStableQueueKey()` (§7, corrective ruling) — and its tests; test the namespaced-key scheme (no cross-kind collisions) before anything else depends on it.
 2. Extract `HealthyMonitoringSection.tsx` from `TodaysPrioritiesDashboard.tsx`'s Monitor section; add its tests; mount it on Positions (additive — does not yet remove anything from the `today` tab).
-3. Build the new Today's Priorities workspace component(s), wiring the new queue + reused `priorityWorkflowState.ts` functions + reused `PriorityCard`/`CoveredCallOpportunityRow`/`NeedsFollowUpRow` renderers; add its tests. Mount it under a new tab key, alongside (not yet replacing) the existing `today` tab.
-4. Add the `focus`/`reviewId` query-param resolution and fallback notice to `app/portfolio/page.tsx`; add its tests.
-5. Remove the `today` tab's Monitor section (now redundant with step 2) and, once the new workspace component in step 3 is confirmed equivalent-or-better, retire the `today` tab entry/type-union value/import entirely.
-6. Add the `workflowState`-threading and one new field to `lib/mission-control`; add its tests.
-7. Reduce `AttentionRequiredSection.tsx`; update `MissionControl.test.tsx`.
-8. Full targeted test run (`lib/todays-priorities-queue`, `lib/mission-control`, `lib/todaysPriorities`, `lib/morning-briefing`, `lib/review-conductor`, `features/portfolio/**`, `components/mission-control`) plus `tsc --noEmit` and `git diff --check` (implementation-time, not this CES).
+3. Build the new Today's Priorities workspace component(s), wiring the new queue + reused `priorityWorkflowState.ts` functions + reused `PriorityCard`/`CoveredCallOpportunityRow`/`NeedsFollowUpRow` renderers; add its tests. Mount it under a new `'todays-priorities'` tab key, alongside (not yet replacing) the existing `today` tab.
+4. Add the `priority` query-param resolution (level 1, §13.1) — `stableKey` match, expand/highlight/scroll, fail-safe notice — to the new Today's Priorities workspace component; add its tests, including same-position/different-kind disambiguation.
+5. Add the `focus`/`reviewId` query-param resolution and fallback notice (level 2, §13.2) to `app/portfolio/page.tsx`, reachable only from a focused Today's Priorities card; add its tests.
+6. Remove the `today` tab's Monitor section (now redundant with step 2) and, once the new workspace component in steps 3-5 is confirmed equivalent-or-better, retire the `today` tab entry/type-union value/import entirely.
+7. Add the `workflowState`-threading and one new field to `lib/mission-control`, with `deepLink` built as `?tab=todays-priorities&priority=<leadItem.stableKey>` (never a level-2 URL); add its tests.
+8. Reduce `AttentionRequiredSection.tsx` to lead item/count/summary/level-1 deep link only; update `MissionControl.test.tsx`, including an assertion that its link never targets `?tab=positions` or `?tab=history` directly.
+9. Full targeted test run (`lib/todays-priorities-queue`, `lib/mission-control`, `lib/todaysPriorities`, `lib/morning-briefing`, `lib/review-conductor`, `features/portfolio/**`, `components/mission-control`) plus `tsc --noEmit` and `git diff --check` (implementation-time, not this CES).
 
-Rationale: additive infrastructure first (steps 1-4, all independently verifiable, zero regression risk), consolidation/removal last (steps 5-7, only after their replacements are proven).
+Rationale: additive infrastructure first (steps 1-5, all independently verifiable, zero regression risk), consolidation/removal last (steps 6-8, only after their replacements are proven).
 
 ## 19. Acceptance Criteria
 
@@ -353,13 +412,22 @@ Rationale: additive infrastructure first (steps 1-4, all independently verifiabl
 - Mission Control shows only the approved summary (lead item, open count, compact summary, deep link) — no full duplicate work queue, no Mark Complete/Reopen control.
 - Mission Control's open count and Today's Priorities' open count are computed from the identical queue+partition logic and cannot drift.
 - Mission Control's lead item equals the canonical open queue's first item.
-- Every position-linked queue item's deep link opens the exact corresponding position (by `pos.key`), not merely `/portfolio` in general; `needsFollowUp` items link to Decision History instead, since their position is already closed.
-- A missing deep-link target (closed/nonexistent position or review) fails safely with a visible notice, never a crash or blank page.
+- **Mission Control's lead-item link opens the exact corresponding item within Today's Priorities** (`?tab=todays-priorities&priority=<stableKey>`) — never navigates directly to Positions or Decision History, for any item kind (attention, covered-call opportunity, or decision-review follow-up).
+- **The queue-item target is identified by a deterministic, namespaced `stableKey`** (`attention::…` / `cc::…` / `review::…`), never by display text, list position, symbol-only matching, or DOM assumptions.
+- **Multiple priorities for the same position cannot be confused** — each carries its own distinct, namespaced `stableKey` and resolves to its own distinct level-1 target.
+- **The focused priority card is visibly expanded or highlighted** within Today's Priorities once opened via the level-1 link, and is scrolled into view.
+- **Refresh preserves queue-item focus** — the `priority` param round-trips through a full page reload and re-resolves the same item (or hits the fail-safe if it has since resolved).
+- **Back navigation from Today's Priorities returns to Mission Control normally**, using standard browser history, with no custom manipulation.
+- **Completing or self-resolving the targeted item produces a safe "no longer open" state** — never a crash, blank page, or silent no-op — when its `priority` link is followed afterward.
+- **The focused priority's downstream destination still opens the exact position or review** — every position-linked queue item's level-2 link opens the exact corresponding position (by `pos.key`), not merely `/portfolio` in general; `needsFollowUp` items link to Decision History instead, since their position is already closed; portfolio-level items with no `subjectId` land on unfocused Positions as the most specific honest destination available.
+- **Mission Control's lead-item identity, open count, and level-1 link target all derive from the same partitioned queue** — none is independently recomputed or sourced from `narrative.attention`/`narrative.counts.attention`.
+- A missing level-1 or level-2 deep-link target (item resolved, or closed/nonexistent position or review) fails safely with a visible notice, never a crash or blank page.
 - Recommended Action / rationale and Supporting Evidence remain visible for every queue item that has them, unchanged from today's existing rendering.
 - Priority List remains fully functional, unmodified in behavior, and is not retired.
 - `/dashboard` retains every other accepted MB-0002 Mission Control behavior (Portfolio Status, Since Your Last Review, New Opportunities, Review Complete) unchanged.
 - WA-0002's transitional Briefing content on Positions is unchanged.
 - Background task visibility and Portfolio Mode gating are unaffected.
+- `/portfolio` continues to default to the `'positions'` tab (§23, final ruling); deep links may explicitly select `'todays-priorities'`, `'positions'`, or `'history'` via the `tab` parameter.
 - No file under `lib/portfolio-intelligence`, `lib/priorityScore`, `lib/todaysPriorities/dashboard.ts`, `lib/decision-review`, `lib/morning-briefing/attentionFeed.ts`, or `lib/review-conductor/conductReview.ts` has any executable line changed.
 
 ## 20. Test Plan
@@ -367,9 +435,12 @@ Rationale: additive infrastructure first (steps 1-4, all independently verifiabl
 - **Queue membership** (`lib/todays-priorities-queue`, new): Immediate Action included; Review Today (including `needsFollowUp`) included; roll/CSP/covered-call opportunities included; `WAIT` excluded; healthy/Monitor excluded; screener candidates never included; a completed item's exclusion is verified one layer up (partitioning test, not the queue builder itself, which is completion-agnostic by design).
 - **Completion workflow** (new component tests + existing `priorityWorkflowState.test.tsx` re-run unmodified): Mark Complete persists; refresh persistence; navigation persistence; Reopen; `WAIT` cannot be completed (already covered, re-confirmed reachable from the new surface); material fingerprint change auto-reopens; non-material presentation-only change does not reopen; Today's Priorities and Priority List share state (a new cross-surface test: complete via one, assert open/completed membership via the other, same `localStorage`).
 - **Completed section:** collapsed by default; correct count; empty state; Reopen returns the item to the open queue; rationale/evidence/destination preserved on completed cards.
-- **Mission Control summary:** lead item matches queue head; open count matches Today's Priorities' open count; no-open-items state; lead item changes after completion; a reopened item re-enters the summary and can become lead; deep link targets the exact same item Today's Priorities would.
+- **Mission Control summary:** lead item matches queue head; open count matches Today's Priorities' open count; no-open-items state; lead item changes after completion; a reopened item re-enters the summary and can become lead; deep link is a level-1 (`?tab=todays-priorities&priority=<stableKey>`) link targeting the exact same item Today's Priorities would show as lead, never a level-2 URL; lead-item identity, open count, and link target are all asserted to derive from the identical queue+partition call, not from `narrative.attention`/`narrative.counts.attention`.
 - **Healthy monitoring:** healthy position remains visible on Positions; not shown as an open task anywhere; no completion control rendered for it; health score/DTE values unchanged from the pre-migration `TodaysPrioritiesMonitorEntry` fields.
-- **Deep linking:** exact `pos.key` match; two positions sharing a symbol (different expirations) resolve to distinct targets; refresh preserves the target; back navigation returns to the referring page (standard browser behavior, not separately re-implemented); missing/stale target renders the fallback notice, not a crash; `needsFollowUp` link resolves to Decision History, not Positions; portfolio-level (no-`subjectId`) item link lands on unfocused Positions.
+- **Stable queue keys** (`lib/todays-priorities-queue`, new): `getStableQueueKey()` produces `attention::`/`cc::`/`review::`-namespaced output for each kind; an attention item and a covered-call opportunity on the same underlying position produce distinct keys (namespace prevents collision); the attention-kind key is byte-identical to `getPriorityWorkflowKey(objective)` under the `attention::` prefix, never a regenerated `objective.id`; key stability is verified across two computation runs with unchanged underlying data.
+- **Level-1 deep linking (Mission Control → Today's Priorities, §13.1):** exact `stableKey` match opens the correct item for each of the three kinds; two priorities for the same position (e.g. an attention item and a covered-call opportunity sharing a `pos.key`) resolve to two distinct, unambiguous targets; the focused card is visibly expanded/highlighted and scrolled into view; refresh preserves the `priority` param and re-resolves the same target; back navigation from Today's Priorities returns to Mission Control via standard history; a target that has completed or self-resolved renders the "no longer open" fail-safe notice, not a crash, and does not fall through to a level-2 navigation; Mission Control's link is asserted to never contain `tab=positions` or `tab=history` for any item kind.
+- **Level-2 deep linking (Today's Priorities → destination, §13.2):** exact `pos.key` match; two positions sharing a symbol (different expirations) resolve to distinct targets; refresh preserves the target; back navigation from Positions/History returns to Today's Priorities (standard browser behavior, not separately re-implemented); missing/stale target renders the fallback notice, not a crash; `needsFollowUp` link resolves to Decision History, not Positions; portfolio-level (no-`subjectId`) item link lands on unfocused Positions; the level-2 link is reachable only from a focused Today's Priorities card, never rendered on Mission Control.
+- **Default-tab non-regression (§23, final ruling):** `/portfolio` with no query params defaults to `'positions'`; explicit `?tab=todays-priorities`, `?tab=positions`, and `?tab=history` each select the corresponding tab.
 - **Regression:** Priority List's existing 20+15+24 tests pass unmodified; WA-0002's Positions behavior (composition card, risk badges, transitional Briefing content) unaffected — re-run `features/portfolio/positions/**` and `features/portfolio/dailyBriefing/**` unmodified; background job visibility and Portfolio Mode tests unaffected — re-run `components/portfolio-mode/**` and any background-task tests unmodified; `MissionControl.test.tsx` updated for the new, smaller Attention section but its narrative-order assertions for every other section remain green.
 
 ## 21. Regression Risks and Mitigations
@@ -378,6 +449,10 @@ Rationale: additive infrastructure first (steps 1-4, all independently verifiabl
 - **Risk: a second completion-state model gets invented** by mistake when wiring Mark Complete into the new queue view. Mitigated by §7's explicit reuse of `partitionPriorities()`/`markComplete()`/`reopenPriority()` unmodified, and by an explicit acceptance criterion and cross-surface test.
 - **Risk: `needsFollowUp`/covered-call items are accidentally made completable**, inventing a new eligibility/completion rule not backed by any canonical identity. Mitigated by `completable: false` being a structural property of the queue item's `kind`, not a runtime check that could be bypassed, and by dedicated tests confirming no Mark Complete control renders for either kind.
 - **Risk: deep-link symbol-only matching accidentally ships instead of `pos.key` matching**, silently mistargeting when multiple positions share a symbol. Mitigated by an explicit acceptance criterion and test using two same-symbol, different-expiration positions.
+- **Risk: Mission Control's link bypasses Today's Priorities and navigates directly to Positions or Decision History**, violating ruling 6. Mitigated by specifying the level-1 contract as the only link Mission Control is permitted to render (§11, §13.1), by an explicit acceptance criterion, and by a dedicated `MissionControl.test.tsx` assertion that the rendered link never contains `tab=positions` or `tab=history`.
+- **Risk: the level-1 `priority` param is implemented as, or confused with, the level-2 `focus`/`reviewId` params**, collapsing the two-stage contract back into one stage or causing one param to silently override the other. Mitigated by naming them distinctly, resolving them in different components (Today's Priorities workspace component vs. `app/portfolio/page.tsx`'s Positions/History rendering), and by an explicit acceptance criterion plus tests asserting each param is only ever read by its own resolver.
+- **Risk: the namespaced `stableKey` scheme collides across item kinds** (e.g. a covered-call opportunity and an attention item sharing an underlying position key resolve to the same level-1 target). Mitigated by the mandatory `attention::`/`cc::`/`review::` prefix (§7) and a dedicated test constructing exactly this same-position, cross-kind scenario.
+- **Risk: `stableKey` is derived independently, and inconsistently, by Mission Control and by Today's Priorities** (e.g. each recomputing its own version from raw fields), reintroducing the same drift risk ruling 6 exists to prevent. Mitigated by `getStableQueueKey()` being the single derivation point, computed once at queue-build time and carried as a field on `TodaysPrioritiesQueueItem` (§7) rather than recomputed by either consumer.
 - **Risk: retiring the `today` tab drops a section's content instead of relocating it.** Mitigated by §17's deletion criteria (migrate/verify before retiring) and by requiring the Monitor-section extraction (step 2) to land and be verified before the `today` tab entry itself is removed (step 5).
 - **Risk: `buildMissionControlViewModel()`'s new `workflowState` input changes an existing return field's value.** Mitigated by requiring existing tests to be re-run and confirmed byte-identical on existing fields before any new field's test is added.
 - **Risk: WA-0002's transitional content or position-card boundaries get disturbed** while adding `HealthyMonitoringSection`/deep-link focus logic to `app/portfolio/page.tsx`. Mitigated by scoping those changes to named, additive insertion points (new mount, new effect) rather than restructuring existing JSX, and by re-running WA-0002's own test suite unmodified as a regression gate.
@@ -390,14 +465,16 @@ Rationale: additive infrastructure first (steps 1-4, all independently verifiabl
 - **`needsFollowUp` and covered-call opportunities have no completion identity today.** If a future sprint wants them to be explicitly dismissible/completable (rather than only self-resolving), that requires new identity/fingerprint design — explicitly not invented here, flagged for whoever picks it up.
 - **`TodaysPrioritiesDashboard.tsx`'s ultimate fate** (fully retired vs. partially retained) is an implementation-time call gated on the deletion criteria in §17, not decided definitively here.
 
-## 23. Open Decisions
+## 23. Final Landing-Tab Ruling (resolved)
 
-One genuine product question, not a technical ambiguity — requires Dean/Paul input, does not block approving the rest of this specification:
+Previously an open product question; resolved by Dean's corrective ruling and no longer open:
 
-- **Should Today's Priorities become the new default landing tab on `/portfolio`**, superseding WA-0002's `'positions'` default? This CES deliberately does not decide this (§14) — it is a product sequencing question (whether the trader's first stop should be "assess condition" (Mission Control, `/dashboard`), "inspect positions" (Positions, WA-0002's current default), or "process today's queue" (this sprint's new workspace)), not a consequence of anything this CES's engineering analysis determines. Recommendation, offered but not assumed: leave the default as `'positions'` for this sprint, and revisit defaults once WA-0004/WA-0005 are also in place and the full 5-workspace navigation story can be considered together, rather than changing the default twice in consecutive sprints.
+- `/portfolio` continues to default to `'positions'` during WA-0003.
+- Deep links may explicitly select `'todays-priorities'`, `'positions'`, or `'history'` via the `tab` query parameter, independent of the default.
+- The general landing-tab default is reconsidered only after WA-0004 and WA-0005 establish the complete 5-workspace experience — not revisited by this CES or by WA-0003 implementation.
 
-No other open decisions — every other design choice in this CES is resolved with cited evidence and stated rationale, per the instruction to recommend one existing implementation as canonical wherever surfaces currently differ.
+No open decisions remain — every design choice in this CES, including this one, is resolved with cited evidence and stated rationale.
 
 ## 24. Stop/Go Recommendation
 
-**GO.** Every inclusion/exclusion rule in the queue-membership matrix traces to an existing typed field on an existing canonical output — nothing new is classified, scored, or ranked. The completion workflow is reused verbatim, with its identity/fingerprint scheme already proven (by its own design intent, confirmed by inspection) to be presentation-independent, so migrating which UI calls it carries minimal risk. The one new mechanical capability required — deep linking — has a concrete, evidence-based contract using an identifier (`pos.key`) already used everywhere else in this codebase for exactly this purpose. The one disclosed design decision with real teeth (Mission Control's count/lead-item source, §11) is resolved with clear, cited rationale rather than left ambiguous. The single open item (§23) is a product sequencing question with a stated recommendation, not a blocker. Recommend proceeding to implementation once Dean/Paul/Quinn/Chuck confirm no objection to this specification.
+**GO.** Every inclusion/exclusion rule in the queue-membership matrix traces to an existing typed field on an existing canonical output — nothing new is classified, scored, or ranked. The completion workflow is reused verbatim, with its identity/fingerprint scheme already proven (by its own design intent, confirmed by inspection) to be presentation-independent, so migrating which UI calls it carries minimal risk. The mechanical capability required — deep linking — now has a concrete, evidence-based, two-level contract: a namespaced `stableKey` (§7) routes Mission Control into the exact queue item within Today's Priorities (§13.1, ruling 6), and the existing `pos.key`/`reviewId` identifiers, already used everywhere else in this codebase for exactly this purpose, route from the focused card to its action destination (§13.2). The one disclosed design decision with real teeth (Mission Control's count/lead-item source, §11) is resolved with clear, cited rationale rather than left ambiguous. §23's landing-tab question is resolved (`'positions'` remains default) and no longer open. Approved by Dean subject to the corrective ruling incorporated in this revision; recommend proceeding to implementation once Paul/Quinn/Chuck confirm no objection to this specification.
