@@ -13,6 +13,7 @@ type TickerData = {
   price: number;
   blendedRocPerCycle: number; // fraction, e.g. 0.02 = 2% per cycle
   capPerContract: number; // dollars required per contract
+  iv: number; // implied volatility as a fraction, e.g. 0.35 = 35%
   fetching?: boolean;
   error?: string;
 };
@@ -38,6 +39,227 @@ type SimResult = {
   allocation: Record<string, number>;
   maxIdleStreak: number;
 };
+
+type RealisticResult = {
+  medianFinal: number;
+  p10Final: number;
+  p90Final: number;
+  medianReturn: number;
+  medianTimeline: number[]; // capital at each cycle, median across paths
+  p10Timeline: number[];
+  p90Timeline: number[];
+  avgAssignments: Record<string, number>; // avg # of CSP->CC switches per ticker
+  avgCallAways: Record<string, number>; // avg # of CC->CSP switches per ticker
+  cycles: number;
+  numPaths: number;
+};
+
+// ── Option pricing / GBM helpers ─────────────────────────────────────────
+// Approximate normal CDF (Abramowitz & Stegun 7.1.26)
+function normCdf(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp((-x * x) / 2);
+  let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  if (x > 0) p = 1 - p;
+  return p;
+}
+// Approximate inverse normal CDF (Acklam's algorithm)
+function invNormCdf(p: number): number {
+  if (p <= 0) return -8;
+  if (p >= 1) return 8;
+  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.383577518672690e2, -3.066479806614716e1, 2.506628277459239];
+  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
+  const pl = 0.02425;
+  let q, r;
+  if (p < pl) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+      ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  } else if (p <= 1 - pl) {
+    q = p - 0.5; r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+      (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+  } else {
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+      ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+}
+// Black-Scholes price, r assumed 0 for simplicity
+function bsPrice(type: "C" | "P", S: number, K: number, T: number, sigma: number): number {
+  if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) return Math.max(type === "C" ? S - K : K - S, 0);
+  const d1 = (Math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * Math.sqrt(T));
+  const d2 = d1 - sigma * Math.sqrt(T);
+  return type === "C" ? S * normCdf(d1) - K * normCdf(d2) : K * normCdf(-d2) - S * normCdf(-d1);
+}
+// Approximate strike for a target delta (OTM options), inverting the d1 formula
+function strikeForDelta(type: "C" | "P", S: number, sigma: number, T: number, targetDelta: number): number {
+  const z = type === "C" ? invNormCdf(targetDelta) : invNormCdf(1 - targetDelta);
+  const sqrtT = Math.sqrt(T);
+  const lnRatio = (z - 0.5 * sigma * sqrtT) * sigma * sqrtT;
+  return S / Math.exp(lnRatio);
+}
+// One GBM step over `days` days, annualized vol sigma, drift mu (annualized)
+function gbmStep(S: number, sigma: number, days: number, mu: number, rand: () => number): number {
+  const T = days / 365;
+  // Box-Muller for a standard normal draw
+  const u1 = Math.max(rand(), 1e-9), u2 = rand();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return S * Math.exp((mu - 0.5 * sigma * sigma) * T + sigma * Math.sqrt(T) * z);
+}
+
+type WheelState = { state: "csp" | "cc"; strike: number; spot: number; costBasis: number };
+
+function runRealisticSimulation(
+  tickers: TickerData[],
+  startingCapital: number,
+  dte: number,
+  horizonMonths: number,
+  perTickerCapPct: number,
+  groupCapPct: number,
+  targetDelta: number,
+  annualDrift: number,
+  numPaths: number
+): RealisticResult {
+  const numCycles = Math.max(1, Math.floor((horizonMonths * 30) / dte));
+  const T = dte / 365;
+  const finals: number[] = [];
+  const pathTimelines: number[][] = [];
+  const assignCounts: Record<string, number[]> = {};
+  const callAwayCounts: Record<string, number[]> = {};
+  tickers.forEach((t) => { assignCounts[t.ticker] = []; callAwayCounts[t.ticker] = []; });
+
+  for (let path = 0; path < numPaths; path++) {
+    const wheel: Record<string, WheelState> = {};
+    const contracts: Record<string, number> = {}; // # contracts open per ticker
+    tickers.forEach((t) => {
+      wheel[t.ticker] = { state: "csp", strike: 0, spot: t.price, costBasis: 0 };
+      contracts[t.ticker] = 0;
+    });
+    let idle = startingCapital;
+    let assignedCount: Record<string, number> = {};
+    let calledAwayCount: Record<string, number> = {};
+    tickers.forEach((t) => { assignedCount[t.ticker] = 0; calledAwayCount[t.ticker] = 0; });
+
+    const tickerValue = (t: TickerData) => {
+      const w = wheel[t.ticker];
+      const n = contracts[t.ticker];
+      if (n === 0) return 0;
+      return w.state === "csp" ? n * w.strike * 100 : n * w.spot * 100;
+    };
+    const totalCapital = () => idle + tickers.reduce((sum, t) => sum + tickerValue(t), 0);
+    const groupTotal = (group: string) =>
+      tickers.filter((t) => t.group === group).reduce((sum, t) => sum + tickerValue(t), 0);
+
+    const pathTimeline: number[] = [];
+
+    for (let cycle = 0; cycle < numCycles; cycle++) {
+      // 1. For every open position, collect premium for a new leg at current spot, then advance price and resolve assignment/call-away
+      for (const t of tickers) {
+        const w = wheel[t.ticker];
+        const n = contracts[t.ticker];
+        if (n === 0) continue;
+        const type: "C" | "P" = w.state === "csp" ? "P" : "C";
+        const strike = strikeForDelta(type, w.spot, t.iv, T, targetDelta);
+        const credit = bsPrice(type, w.spot, strike, T, t.iv);
+        idle += credit * 100 * n; // premium always goes to cash
+        const newSpot = gbmStep(w.spot, t.iv, dte, annualDrift, Math.random);
+
+        if (w.state === "csp") {
+          if (newSpot < strike) {
+            // assigned — take shares at strike
+            w.state = "cc";
+            w.costBasis = strike;
+            assignedCount[t.ticker]++;
+          }
+        } else {
+          if (newSpot > strike) {
+            // called away — sell shares at strike, back to cash
+            w.state = "csp";
+            calledAwayCount[t.ticker]++;
+          }
+        }
+        w.strike = strike;
+        w.spot = newSpot;
+      }
+
+      // 2. Deploy idle cash into the best eligible ticker (greedy by rough current-cycle ROC), respecting caps
+      let deployedSomething = true;
+      while (deployedSomething) {
+        deployedSomething = false;
+        const tc = totalCapital();
+        const eligible = tickers
+          .filter((t) => {
+            const w = wheel[t.ticker];
+            const capPerContract = w.state === "csp" ? w.spot * 100 : w.spot * 100; // approx entry cost either way
+            if (idle < capPerContract) return false;
+            const currentVal = tickerValue(t);
+            if (currentVal > 0 && currentVal + capPerContract > tc * perTickerCapPct) return false;
+            if (t.group === "mag7") {
+              const currentGroupVal = groupTotal("mag7");
+              if (currentGroupVal > 0 && currentGroupVal + capPerContract > tc * groupCapPct) return false;
+            }
+            return true;
+          })
+          .map((t) => ({ t, roc: t.blendedRocPerCycle })) // use live-fetched ROC as ranking proxy
+          .sort((a, b) => b.roc - a.roc);
+
+        if (eligible.length > 0) {
+          const { t } = eligible[0];
+          const w = wheel[t.ticker];
+          const capPerContract = w.spot * 100;
+          if (idle >= capPerContract) {
+            contracts[t.ticker] += 1;
+            idle -= capPerContract;
+            if (contracts[t.ticker] === 1) w.strike = strikeForDelta("P", w.spot, t.iv, T, targetDelta);
+            deployedSomething = true;
+          }
+        }
+      }
+
+      pathTimeline.push(totalCapital());
+    }
+
+    finals.push(totalCapital());
+    pathTimelines.push(pathTimeline);
+    tickers.forEach((t) => {
+      assignCounts[t.ticker].push(assignedCount[t.ticker]);
+      callAwayCounts[t.ticker].push(calledAwayCount[t.ticker]);
+    });
+  }
+
+  finals.sort((a, b) => a - b);
+  const pct = (arr: number[], p: number) => arr[Math.floor(arr.length * p)];
+  const medianFinal = pct(finals, 0.5);
+  const p10Final = pct(finals, 0.1);
+  const p90Final = pct(finals, 0.9);
+
+  const medianTimeline: number[] = [], p10Timeline: number[] = [], p90Timeline: number[] = [];
+  for (let c = 0; c < numCycles; c++) {
+    const vals = pathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
+    medianTimeline.push(pct(vals, 0.5));
+    p10Timeline.push(pct(vals, 0.1));
+    p90Timeline.push(pct(vals, 0.9));
+  }
+
+  const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / (arr.length || 1);
+  const avgAssignments: Record<string, number> = {};
+  const avgCallAways: Record<string, number> = {};
+  tickers.forEach((t) => {
+    avgAssignments[t.ticker] = avg(assignCounts[t.ticker]);
+    avgCallAways[t.ticker] = avg(callAwayCounts[t.ticker]);
+  });
+
+  return {
+    medianFinal, p10Final, p90Final,
+    medianReturn: (medianFinal / startingCapital - 1) * 100,
+    medianTimeline, p10Timeline, p90Timeline,
+    avgAssignments, avgCallAways,
+    cycles: numCycles, numPaths,
+  };
+}
 
 function loadScenarios(): Scenario[] {
   try {
@@ -141,7 +363,7 @@ export default function WheelSimulator() {
   const [universe, setUniverse] = useState<string[]>(MAG7);
   const [extraTickers, setExtraTickers] = useState("");
   const [tickers, setTickers] = useState<TickerData[]>(
-    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0 }))
+    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, iv: 0 }))
   );
   const [startingCapital, setStartingCapital] = useState(49000);
   const [dte, setDte] = useState(7);
@@ -154,6 +376,11 @@ export default function WheelSimulator() {
   const [editingScenarioName, setEditingScenarioName] = useState("");
   const [result, setResult] = useState<SimResult | null>(null);
   const [fetchingAll, setFetchingAll] = useState(false);
+  const [targetDelta, setTargetDelta] = useState(30); // shown as whole percent, used as 0.30
+  const [annualDrift, setAnnualDrift] = useState(0); // annualized drift %, 0 = no directional bias
+  const [numPaths, setNumPaths] = useState(200);
+  const [realisticResult, setRealisticResult] = useState<RealisticResult | null>(null);
+  const [runningRealistic, setRunningRealistic] = useState(false);
 
   useEffect(() => setScenarios(loadScenarios()), []);
 
@@ -165,7 +392,7 @@ export default function WheelSimulator() {
     if (!added.length) return;
     setTickers([
       ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0 })),
+      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, iv: 0 })),
     ]);
     setExtraTickers("");
   };
@@ -220,6 +447,10 @@ export default function WheelSimulator() {
       const cspRoc = cspCap > 0 ? (cspCredit * 100) / cspCap : 0;
       const blended = (ccRoc + cspRoc) / 2;
 
+      const ivSamples = [call?.iv, put?.iv].filter((v): v is number => v != null);
+      const ivPct = ivSamples.length ? ivSamples.reduce((a, b) => a + b, 0) / ivSamples.length : 30;
+      const iv = ivPct / 100; // stored as percentage upstream; convert to fraction
+
       setTickers((prev) => {
         const next = [...prev];
         next[idx] = {
@@ -227,6 +458,7 @@ export default function WheelSimulator() {
           price: p,
           capPerContract: p * 100,
           blendedRocPerCycle: blended,
+          iv,
           fetching: false,
           error: "",
         };
@@ -252,6 +484,22 @@ export default function WheelSimulator() {
     if (!ready.length) return;
     const r = runSimulation(ready, startingCapital, dte, horizonMonths, perTickerCapPct / 100, groupCapPct / 100);
     setResult(r);
+  };
+
+  const runRealistic = () => {
+    const ready = tickers.filter((t) => t.capPerContract > 0 && t.iv > 0);
+    if (!ready.length) return;
+    setRunningRealistic(true);
+    // Defer to let the button state paint before the (synchronous, potentially slow) Monte Carlo run
+    setTimeout(() => {
+      const r = runRealisticSimulation(
+        ready, startingCapital, dte, horizonMonths,
+        perTickerCapPct / 100, groupCapPct / 100,
+        targetDelta / 100, annualDrift / 100, numPaths
+      );
+      setRealisticResult(r);
+      setRunningRealistic(false);
+    }, 30);
   };
 
   const saveScenario = () => {
@@ -381,6 +629,44 @@ export default function WheelSimulator() {
         </div>
       )}
 
+      {/* Realistic (Monte Carlo) mode */}
+      <div style={{ borderTop: "1px solid #2a2e37", paddingTop: 20, marginBottom: 24 }}>
+        <h3 style={{ fontSize: 16, marginBottom: 4 }}>Realistic mode (Monte Carlo)</h3>
+        <p style={{ color: "#9aa0a6", fontSize: 13, marginTop: 0 }}>
+          Models actual price movement (GBM, using each ticker's live IV) and the real wheel mechanic — a CSP that finishes in-the-money switches to holding shares and selling calls; a call that finishes in-the-money sells the shares and switches back to CSP. Strikes are re-selected each cycle at your target delta relative to the simulated spot, so premium changes as price and time move, not held constant. Requires live-fetched IV per ticker (fetch above first).
+        </p>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
+          <label>Target delta % <input type="number" value={targetDelta} onChange={(e) => setTargetDelta(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+          <label>Annual drift % <input type="number" value={annualDrift} onChange={(e) => setAnnualDrift(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+          <label>Simulation paths <input type="number" value={numPaths} onChange={(e) => setNumPaths(Math.max(20, parseInt(e.target.value) || 20))} style={inputStyle(60)} /></label>
+        </div>
+        <button onClick={runRealistic} disabled={runningRealistic} style={{ ...btnStyle, background: "#7c3aed", color: "#fff", border: "none" }}>
+          {runningRealistic ? "Running Monte Carlo…" : "Run realistic simulation"}
+        </button>
+
+        {realisticResult && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 24, marginBottom: 12, fontSize: 14 }}>
+              <div>Median final capital: <b style={{ color: "#7ee2a8" }}>{fmtUsd(realisticResult.medianFinal)}</b></div>
+              <div>Median return: <b style={{ color: "#7ee2a8" }}>{fmtPct(realisticResult.medianReturn)}</b></div>
+              <div>10th–90th pctile: <b>{fmtUsd(realisticResult.p10Final)} – {fmtUsd(realisticResult.p90Final)}</b></div>
+              <div>Paths: <b>{realisticResult.numPaths}</b></div>
+            </div>
+
+            <BandChart median={realisticResult.medianTimeline} p10={realisticResult.p10Timeline} p90={realisticResult.p90Timeline} dte={dte} />
+
+            <div style={{ marginTop: 12, fontSize: 12, color: "#9aa0a6" }}>
+              <div style={{ marginBottom: 4, color: "#e6e8eb" }}>Average leg switches over the horizon (per path)</div>
+              {tickers.filter((t) => t.capPerContract > 0 && t.iv > 0).map((t) => (
+                <span key={t.ticker} style={{ marginRight: 16 }}>
+                  {t.ticker}: {realisticResult.avgAssignments[t.ticker]?.toFixed(1) ?? "0"} assigned, {realisticResult.avgCallAways[t.ticker]?.toFixed(1) ?? "0"} called away
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Saved scenarios comparison */}
       {scenarios.length > 0 && (
         <div>
@@ -447,6 +733,61 @@ export default function WheelSimulator() {
         </div>
       )}
     </div>
+  );
+}
+
+function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[]; p90: number[]; dte: number }) {
+  if (!median.length) return null;
+  const w = 640, h = 200, padL = 60, padR = 20, padT = 20, padB = 30;
+  const max = Math.max(...p90);
+  const min = Math.min(...p10);
+  const range = max - min || 1;
+
+  const startDate = new Date();
+  const dateAt = (i: number) => {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i * dte);
+    return d;
+  };
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+  const x = (i: number) => padL + (i / (median.length - 1 || 1)) * (w - padL - padR);
+  const y = (v: number) => h - padB - ((v - min) / range) * (h - padT - padB);
+
+  const bandPath =
+    p90.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    " " +
+    p10.map((v, i) => `L ${x(p10.length - 1 - i)} ${y(p10[p10.length - 1 - i])}`).join(" ") +
+    " Z";
+
+  const medianPts = median.map((v, i) => `${x(i)},${y(v)}`);
+  const yTicks = [min, (min + max) / 2, max];
+  const xTickIdxs = [0, Math.floor((median.length - 1) / 2), median.length - 1];
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6 }}>
+      {yTicks.map((v, i) => (
+        <g key={i}>
+          <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+          <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+            {fmtUsd(v)}
+          </text>
+        </g>
+      ))}
+
+      <path d={bandPath} fill="#7c3aed" opacity={0.15} stroke="none" />
+      <polyline points={medianPts.join(" ")} fill="none" stroke="#a78bfa" strokeWidth={2} />
+
+      {xTickIdxs.map((i) => (
+        <text key={i} x={x(i)} y={h - 8} textAnchor="middle" fontSize={10} fill="#9aa0a6">
+          {fmtDate(dateAt(i))}
+        </text>
+      ))}
+      <text x={w - padR} y={padT} textAnchor="end" fontSize={10} fill="#9aa0a6">
+        shaded band = 10th–90th percentile
+      </text>
+    </svg>
   );
 }
 
