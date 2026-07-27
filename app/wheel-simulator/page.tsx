@@ -766,28 +766,37 @@ function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[];
   const xTickIdxs = [0, Math.floor((median.length - 1) / 2), median.length - 1];
 
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6 }}>
-      {yTicks.map((v, i) => (
-        <g key={i}>
-          <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
-          <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
-            {fmtUsd(v)}
+    <div style={{ maxWidth: 700, margin: "0 auto" }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6, display: "block" }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+            <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+              {fmtUsd(v)}
+            </text>
+          </g>
+        ))}
+
+        <path d={bandPath} fill="#7c3aed" opacity={0.15} stroke="none" />
+        <polyline points={medianPts.join(" ")} fill="none" stroke="#a78bfa" strokeWidth={2} />
+
+        {xTickIdxs.map((i, idx) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={h - 8}
+            textAnchor={idx === 0 ? "start" : idx === xTickIdxs.length - 1 ? "end" : "middle"}
+            fontSize={10}
+            fill="#9aa0a6"
+          >
+            {fmtDate(dateAt(i))}
           </text>
-        </g>
-      ))}
-
-      <path d={bandPath} fill="#7c3aed" opacity={0.15} stroke="none" />
-      <polyline points={medianPts.join(" ")} fill="none" stroke="#a78bfa" strokeWidth={2} />
-
-      {xTickIdxs.map((i) => (
-        <text key={i} x={x(i)} y={h - 8} textAnchor="middle" fontSize={10} fill="#9aa0a6">
-          {fmtDate(dateAt(i))}
+        ))}
+        <text x={w - padR} y={padT} textAnchor="end" fontSize={10} fill="#9aa0a6">
+          shaded band = 10th–90th percentile
         </text>
-      ))}
-      <text x={w - padR} y={padT} textAnchor="end" fontSize={10} fill="#9aa0a6">
-        shaded band = 10th–90th percentile
-      </text>
-    </svg>
+      </svg>
+    </div>
   );
 }
 
@@ -815,33 +824,42 @@ function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: nu
   const xTickIdxs = [0, Math.floor((timeline.length - 1) / 2), timeline.length - 1];
 
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6 }}>
-      {yTicks.map((v, i) => (
-        <g key={i}>
-          <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
-          <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
-            {fmtUsd(v)}
-          </text>
-        </g>
-      ))}
-
-      <polyline points={pts.join(" ")} fill="none" stroke="#7ee2a8" strokeWidth={2} />
-
-      {timeline.map((t, i) =>
-        t.addedTicker ? (
+    <div style={{ maxWidth: 700, margin: "0 auto" }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6, display: "block" }}>
+        {yTicks.map((v, i) => (
           <g key={i}>
-            <circle cx={x(i)} cy={y(t.capital)} r={3.5} fill="#f2a623" />
-            <title>{`${t.addedTicker} added — cycle ${t.cycle} (${fmtDate(dateAt(i))}), capital ${fmtUsd(t.capital)}`}</title>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+            <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+              {fmtUsd(v)}
+            </text>
           </g>
-        ) : null
-      )}
+        ))}
 
-      {xTickIdxs.map((i) => (
-        <text key={i} x={x(i)} y={h - 8} textAnchor="middle" fontSize={10} fill="#9aa0a6">
-          {fmtDate(dateAt(i))}
-        </text>
-      ))}
-    </svg>
+        <polyline points={pts.join(" ")} fill="none" stroke="#7ee2a8" strokeWidth={2} />
+
+        {timeline.map((t, i) =>
+          t.addedTicker ? (
+            <g key={i}>
+              <circle cx={x(i)} cy={y(t.capital)} r={3.5} fill="#f2a623" />
+              <title>{`${t.addedTicker} added — cycle ${t.cycle} (${fmtDate(dateAt(i))}), capital ${fmtUsd(t.capital)}`}</title>
+            </g>
+          ) : null
+        )}
+
+        {xTickIdxs.map((i, idx) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={h - 8}
+            textAnchor={idx === 0 ? "start" : idx === xTickIdxs.length - 1 ? "end" : "middle"}
+            fontSize={10}
+            fill="#9aa0a6"
+          >
+            {fmtDate(dateAt(i))}
+          </text>
+        ))}
+      </svg>
+    </div>
   );
 }
 
