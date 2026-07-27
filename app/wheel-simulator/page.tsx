@@ -602,6 +602,30 @@ export default function WheelSimulator() {
 
   const mag7CapSum = tickers.filter((t) => t.group === "mag7" && t.included).reduce((sum, t) => sum + t.capPct, 0);
 
+  // Weekly income estimates: assumes each ticker is deployed up to its own cap and held
+  // continuously — a quick live projection, not a substitute for actually running a simulation
+  // (it ignores idle cash, group-cap interaction with other tickers, and compounding over time).
+  const T = dte / 365;
+  const weeklyIncomeSimple = (t: TickerData) => {
+    if (!t.capPerContract || !t.blendedRocPerCycle) return 0;
+    const maxAlloc = startingCapital * (t.capPct / 100);
+    const contracts = Math.floor(maxAlloc / t.capPerContract);
+    if (contracts <= 0) return 0;
+    return contracts * t.capPerContract * t.blendedRocPerCycle * (7 / dte);
+  };
+  const weeklyIncomeRealistic = (t: TickerData) => {
+    if (!t.price || !t.putIv) return 0;
+    const strike = strikeForDelta("P", t.price, t.putIv, T, targetDelta / 100);
+    const credit = bsPrice("P", t.price, strike, T, t.putIv);
+    const capPerContractStrike = strike * 100;
+    const maxAlloc = startingCapital * (t.capPct / 100);
+    const contracts = Math.floor(maxAlloc / capPerContractStrike);
+    if (contracts <= 0) return 0;
+    return contracts * credit * 100 * (7 / dte);
+  };
+  const totalWeeklySimple = tickers.filter((t) => t.included).reduce((sum, t) => sum + weeklyIncomeSimple(t), 0);
+  const totalWeeklyRealistic = tickers.filter((t) => t.included).reduce((sum, t) => sum + weeklyIncomeRealistic(t), 0);
+
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <h2 style={{ marginBottom: 4 }}>Wheel capital growth simulator</h2>
@@ -644,7 +668,7 @@ export default function WheelSimulator() {
       <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 4 }}>
         <thead>
           <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-            {["", "Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "Cap %", "Max Alloc", "", ""].map((h) => (
+            {["", "Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "Cap %", "Max Alloc", "Wkly $ (Simple)", "Wkly $ (Realistic)", "", ""].map((h) => (
               <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
             ))}
           </tr>
@@ -688,6 +712,8 @@ export default function WheelSimulator() {
                 />
               </td>
               <td style={{ padding: "6px 10px", color: "#9aa0a6" }}>{fmtUsd(startingCapital * (t.capPct / 100))}</td>
+              <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{weeklyIncomeSimple(t) > 0 ? fmtUsd(weeklyIncomeSimple(t)) : "—"}</td>
+              <td style={{ padding: "6px 10px", color: "#a78bfa" }}>{weeklyIncomeRealistic(t) > 0 ? fmtUsd(weeklyIncomeRealistic(t)) : "—"}</td>
               <td style={{ padding: "6px 10px" }}>
                 <button onClick={() => fetchOne(i)} disabled={t.fetching} style={btnStyle}>{t.fetching ? "…" : "Fetch"}</button>
                 {t.error && <div style={{ color: "#e05252", fontSize: 10 }}>{t.error}</div>}
@@ -698,7 +724,18 @@ export default function WheelSimulator() {
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr style={{ borderTop: "2px solid #2a2e37", fontWeight: 600 }}>
+            <td colSpan={11} style={{ padding: "6px 10px", textAlign: "right", color: "#9aa0a6" }}>Total (included tickers)</td>
+            <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{fmtUsd(totalWeeklySimple)}</td>
+            <td style={{ padding: "6px 10px", color: "#a78bfa" }}>{fmtUsd(totalWeeklyRealistic)}</td>
+            <td colSpan={2} />
+          </tr>
+        </tfoot>
       </table>
+      <div style={{ fontSize: 11, color: "#9aa0a6", marginTop: -10, marginBottom: 12 }}>
+        Weekly income columns are live estimates — each ticker deployed up to its own cap, held continuously, no compounding. Run a simulation below for the real (dynamic, compounding) figures.
+      </div>
 
       {mag7CapSum > groupCapPct && (
         <div style={{ fontSize: 11, color: "#f2a623", marginBottom: 12 }}>
