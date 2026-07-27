@@ -150,6 +150,8 @@ export default function WheelSimulator() {
   const [groupCapPct, setGroupCapPct] = useState(75);
   const [scenarioName, setScenarioName] = useState("");
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
+  const [editingScenarioName, setEditingScenarioName] = useState("");
   const [result, setResult] = useState<SimResult | null>(null);
   const [fetchingAll, setFetchingAll] = useState(false);
 
@@ -272,6 +274,12 @@ export default function WheelSimulator() {
     saveScenarios(updated);
   };
 
+  const renameScenario = (id: string, newName: string) => {
+    const updated = scenarios.map((s) => (s.id === id ? { ...s, name: newName } : s));
+    setScenarios(updated);
+    saveScenarios(updated);
+  };
+
   const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
@@ -388,13 +396,48 @@ export default function WheelSimulator() {
             <tbody>
               {scenarios.map((s) => (
                 <tr key={s.id} style={{ borderBottom: "1px solid #22252c" }}>
-                  <td style={{ padding: "6px 10px" }}>{s.name}</td>
+                  <td style={{ padding: "6px 10px" }}>
+                    {editingScenarioId === s.id ? (
+                      <input
+                        autoFocus
+                        value={editingScenarioName}
+                        onChange={(e) => setEditingScenarioName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            renameScenario(s.id, editingScenarioName.trim() || s.name);
+                            setEditingScenarioId(null);
+                          }
+                          if (e.key === "Escape") setEditingScenarioId(null);
+                        }}
+                        onBlur={() => {
+                          renameScenario(s.id, editingScenarioName.trim() || s.name);
+                          setEditingScenarioId(null);
+                        }}
+                        style={inputStyle(160)}
+                      />
+                    ) : (
+                      <span
+                        onClick={() => { setEditingScenarioId(s.id); setEditingScenarioName(s.name); }}
+                        style={{ cursor: "pointer", borderBottom: "1px dashed #3a3f4a" }}
+                        title="Click to rename"
+                      >
+                        {s.name}
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: "6px 10px" }}>{fmtUsd(s.startingCapital)}</td>
                   <td style={{ padding: "6px 10px" }}>{s.horizonMonths}mo</td>
                   <td style={{ padding: "6px 10px", fontSize: 11, color: "#9aa0a6" }}>{s.tickers.map((t) => t.ticker).join(", ")}</td>
                   <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{s.result ? fmtUsd(s.result.finalCapital) : "—"}</td>
                   <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{s.result ? fmtPct(s.result.totalReturn) : "—"}</td>
                   <td style={{ padding: "6px 10px" }}>
+                    <button
+                      onClick={() => { setEditingScenarioId(s.id); setEditingScenarioName(s.name); }}
+                      style={{ background: "none", border: "none", color: "#9aa0a6", cursor: "pointer", marginRight: 8 }}
+                      title="Rename"
+                    >
+                      ✎
+                    </button>
                     <button onClick={() => deleteScenario(s.id)} style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer" }}>✕</button>
                   </td>
                 </tr>
