@@ -202,7 +202,12 @@ function runRealisticSimulation(
         const eligible = tickers
           .filter((t) => {
             const w = wheel[t.ticker];
-            const capPerContract = w.state === "csp" ? w.spot * 100 : w.spot * 100; // approx entry cost either way
+            // A cash-secured put's real capital requirement is the strike (what you'd pay if
+            // assigned), not the current spot — using spot here would deduct more cash than the
+            // position is actually valued at, creating a phantom loss the instant it's opened.
+            const entryStrike =
+              w.state === "csp" ? strikeForDelta("P", w.spot, t.putIv, T, targetDelta) : w.spot;
+            const capPerContract = entryStrike * 100;
             if (idle < capPerContract) return false;
             const currentVal = tickerValue(t);
             if (currentVal > 0 && currentVal + capPerContract > tc * perTickerCapPct) return false;
@@ -218,11 +223,12 @@ function runRealisticSimulation(
         if (eligible.length > 0) {
           const { t } = eligible[0];
           const w = wheel[t.ticker];
-          const capPerContract = w.spot * 100;
+          const entryStrike = strikeForDelta("P", w.spot, t.putIv, T, targetDelta);
+          const capPerContract = entryStrike * 100;
           if (idle >= capPerContract) {
             contracts[t.ticker] += 1;
             idle -= capPerContract;
-            if (contracts[t.ticker] === 1) w.strike = strikeForDelta("P", w.spot, t.putIv, T, targetDelta);
+            w.strike = entryStrike; // value the position at the same strike the cash was reserved against
             deployedSomething = true;
           }
         }
