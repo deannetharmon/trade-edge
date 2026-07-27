@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 
 const DEFAULT_ROWS = [
@@ -10,7 +11,7 @@ const DEFAULT_ROWS = [
   { ticker: "TSLA", dte: 7, price: "", credit: "", shares: 100 },
 ];
 
-function num(v) {
+function num(v: any) {
   const n = parseFloat(v);
   return isNaN(n) ? 0 : n;
 }
@@ -18,8 +19,8 @@ function num(v) {
 export default function CCTracker() {
   const [rows, setRows] = useState(DEFAULT_ROWS);
 
-  const update = (i, field, val) => {
-    const next = [...rows];
+  const update = (i: number, field: string, val: any) => {
+    const next: any = [...rows];
     next[i] = { ...next[i], [field]: val };
     setRows(next);
   };
@@ -27,7 +28,7 @@ export default function CCTracker() {
   const addRow = () =>
     setRows([...rows, { ticker: "", dte: 7, price: "", credit: "", shares: 100 }]);
 
-  const removeRow = (i) => setRows(rows.filter((_, idx) => idx !== i));
+  const removeRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
 
   const computed = rows.map((r) => {
     const price = num(r.price);
@@ -55,9 +56,9 @@ export default function CCTracker() {
   );
   const totalRoc3mo = totals.cap > 0 ? (totals.revenue3mo / totals.cap) * 100 : 0;
 
-  const fmt$ = (n) =>
+  const fmtUsd = (n: number) =>
     n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-  const fmt% = (n) => `${n.toFixed(1)}%`;
+  const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: 20, background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
@@ -98,13 +99,13 @@ export default function CCTracker() {
                   <input type="number" value={c.credit} onChange={(e) => update(i, "credit", e.target.value)}
                     placeholder="0.00" style={inputStyle(60)} />
                 </td>
-                <td style={{ padding: "6px 10px" }}>{fmt$(c.cap)}</td>
-                <td style={{ padding: "6px 10px" }}>{fmt$(c.revenuePerCycle)}</td>
-                <td style={{ padding: "6px 10px" }}>{fmt%(c.roc)}</td>
-                <td style={{ padding: "6px 10px" }}>{fmt%(c.annualizedRoc)}</td>
+                <td style={{ padding: "6px 10px" }}>{fmtUsd(c.cap)}</td>
+                <td style={{ padding: "6px 10px" }}>{fmtUsd(c.revenuePerCycle)}</td>
+                <td style={{ padding: "6px 10px" }}>{fmtPct(c.roc)}</td>
+                <td style={{ padding: "6px 10px" }}>{fmtPct(c.annualizedRoc)}</td>
                 <td style={{ padding: "6px 10px" }}>{c.cyclesIn3mo.toFixed(1)}</td>
-                <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{fmt$(c.revenue3mo)}</td>
-                <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{fmt%(c.roc3mo)}</td>
+                <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{fmtUsd(c.revenue3mo)}</td>
+                <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{fmtPct(c.roc3mo)}</td>
                 <td style={{ padding: 6 }}>
                   <button onClick={() => removeRow(i)} style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer" }}>✕</button>
                 </td>
@@ -114,11 +115,11 @@ export default function CCTracker() {
           <tfoot>
             <tr style={{ background: "#1b1e24", fontWeight: 600 }}>
               <td colSpan={5} style={{ padding: "8px 10px" }}>Total</td>
-              <td style={{ padding: "8px 10px" }}>{fmt$(totals.cap)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt$(totals.revenuePerCycle)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmtUsd(totals.cap)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmtUsd(totals.revenuePerCycle)}</td>
               <td colSpan={3}></td>
-              <td style={{ padding: "8px 10px", color: "#7ee2a8" }}>{fmt$(totals.revenue3mo)}</td>
-              <td style={{ padding: "8px 10px", color: "#7ee2a8" }}>{fmt%(totalRoc3mo)}</td>
+              <td style={{ padding: "8px 10px", color: "#7ee2a8" }}>{fmtUsd(totals.revenue3mo)}</td>
+              <td style={{ padding: "8px 10px", color: "#7ee2a8" }}>{fmtPct(totalRoc3mo)}</td>
               <td></td>
             </tr>
           </tfoot>
@@ -132,7 +133,7 @@ export default function CCTracker() {
   );
 }
 
-function inputStyle(width) {
+function inputStyle(width: number) {
   return {
     width,
     background: "#14161b",
