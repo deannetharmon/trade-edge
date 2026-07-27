@@ -13,7 +13,8 @@ type TickerData = {
   price: number;
   blendedRocPerCycle: number; // fraction, e.g. 0.02 = 2% per cycle
   capPerContract: number; // dollars required per contract
-  iv: number; // implied volatility as a fraction, e.g. 0.35 = 35%
+  callIv: number; // implied volatility for calls, as a fraction, e.g. 0.35 = 35%
+  putIv: number; // implied volatility for puts — usually higher than callIv due to skew
   fetching?: boolean;
   error?: string;
 };
@@ -162,10 +163,12 @@ function runRealisticSimulation(
         const n = contracts[t.ticker];
         if (n === 0) continue;
         const type: "C" | "P" = w.state === "csp" ? "P" : "C";
-        const strike = strikeForDelta(type, w.spot, t.iv, T, targetDelta);
-        const credit = bsPrice(type, w.spot, strike, T, t.iv);
+        const legIv = type === "P" ? t.putIv : t.callIv; // skew: puts and calls priced off different IV
+        const spotVol = (t.callIv + t.putIv) / 2; // underlying's own realized vol isn't skewed — average the two
+        const strike = strikeForDelta(type, w.spot, legIv, T, targetDelta);
+        const credit = bsPrice(type, w.spot, strike, T, legIv);
         idle += credit * 100 * n; // premium always goes to cash
-        const newSpot = gbmStep(w.spot, t.iv, dte, annualDrift, Math.random);
+        const newSpot = gbmStep(w.spot, spotVol, dte, annualDrift, Math.random);
 
         if (w.state === "csp") {
           if (newSpot < strike) {
@@ -213,7 +216,7 @@ function runRealisticSimulation(
           if (idle >= capPerContract) {
             contracts[t.ticker] += 1;
             idle -= capPerContract;
-            if (contracts[t.ticker] === 1) w.strike = strikeForDelta("P", w.spot, t.iv, T, targetDelta);
+            if (contracts[t.ticker] === 1) w.strike = strikeForDelta("P", w.spot, t.putIv, T, targetDelta);
             deployedSomething = true;
           }
         }
@@ -363,7 +366,7 @@ export default function WheelSimulator() {
   const [universe, setUniverse] = useState<string[]>(MAG7);
   const [extraTickers, setExtraTickers] = useState("");
   const [tickers, setTickers] = useState<TickerData[]>(
-    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, iv: 0 }))
+    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0 }))
   );
   const [startingCapital, setStartingCapital] = useState(49000);
   const [dte, setDte] = useState(7);
@@ -381,6 +384,7 @@ export default function WheelSimulator() {
   const [numPaths, setNumPaths] = useState(200);
   const [realisticResult, setRealisticResult] = useState<RealisticResult | null>(null);
   const [runningRealistic, setRunningRealistic] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => setScenarios(loadScenarios()), []);
 
@@ -392,7 +396,7 @@ export default function WheelSimulator() {
     if (!added.length) return;
     setTickers([
       ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, iv: 0 })),
+      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0 })),
     ]);
     setExtraTickers("");
   };
@@ -447,9 +451,11 @@ export default function WheelSimulator() {
       const cspRoc = cspCap > 0 ? (cspCredit * 100) / cspCap : 0;
       const blended = (ccRoc + cspRoc) / 2;
 
-      const ivSamples = [call?.iv, put?.iv].filter((v): v is number => v != null);
-      const ivPct = ivSamples.length ? ivSamples.reduce((a, b) => a + b, 0) / ivSamples.length : 30;
-      const iv = ivPct / 100; // stored as percentage upstream; convert to fraction
+      // Keep call/put IV separate — puts usually trade at higher IV than calls
+      // at the same delta (volatility skew), and collapsing them into one
+      // average erases that real, usually-favorable-to-CSP asymmetry.
+      const callIv = call?.iv != null ? call.iv / 100 : 0.3;
+      const putIv = put?.iv != null ? put.iv / 100 : 0.3;
 
       setTickers((prev) => {
         const next = [...prev];
@@ -458,7 +464,8 @@ export default function WheelSimulator() {
           price: p,
           capPerContract: p * 100,
           blendedRocPerCycle: blended,
-          iv,
+          callIv,
+          putIv,
           fetching: false,
           error: "",
         };
@@ -487,7 +494,7 @@ export default function WheelSimulator() {
   };
 
   const runRealistic = () => {
-    const ready = tickers.filter((t) => t.capPerContract > 0 && t.iv > 0);
+    const ready = tickers.filter((t) => t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0);
     if (!ready.length) return;
     setRunningRealistic(true);
     // Defer to let the button state paint before the (synchronous, potentially slow) Monte Carlo run
@@ -531,6 +538,35 @@ export default function WheelSimulator() {
   const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
+  const buildAiContext = () => {
+    const lines: string[] = [];
+    lines.push(`Config: starting capital ${fmtUsd(startingCapital)}, DTE ${dte}, horizon ${horizonMonths} months, per-ticker cap ${perTickerCapPct}%, Mag 7 group cap ${groupCapPct}%, target delta ${targetDelta}%, annual drift assumption ${annualDrift}%.`);
+    lines.push("Tickers:");
+    tickers.forEach((t) => {
+      lines.push(
+        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}`
+      );
+    });
+    if (result) {
+      lines.push(
+        `Simple-mode result: final capital ${fmtUsd(result.finalCapital)}, total return ${fmtPct(result.totalReturn)}, ${result.cycles} cycles run, max idle streak ${result.maxIdleStreak} cycles.`
+      );
+      lines.push(
+        `Final allocation: ${Object.entries(result.allocation).filter(([, a]) => a > 0).map(([t, a]) => `${t} ${fmtUsd(a)}`).join(", ") || "none"}`
+      );
+    } else {
+      lines.push("Simple-mode simulation has not been run yet.");
+    }
+    if (realisticResult) {
+      lines.push(
+        `Realistic-mode (Monte Carlo, ${realisticResult.numPaths} paths) result: median final capital ${fmtUsd(realisticResult.medianFinal)}, median return ${fmtPct(realisticResult.medianReturn)}, 10th-90th percentile range ${fmtUsd(realisticResult.p10Final)} - ${fmtUsd(realisticResult.p90Final)}.`
+      );
+    } else {
+      lines.push("Realistic-mode simulation has not been run yet.");
+    }
+    return lines.join("\n");
+  };
+
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: 20, background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <h2 style={{ marginBottom: 4 }}>Wheel capital growth simulator</h2>
@@ -560,7 +596,7 @@ export default function WheelSimulator() {
       <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 16 }}>
         <thead>
           <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "", ""].map((h) => (
+            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "", ""].map((h) => (
               <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
             ))}
           </tr>
@@ -573,6 +609,8 @@ export default function WheelSimulator() {
               <td style={{ padding: "6px 10px" }}>{t.price ? fmtUsd(t.price) : "—"}</td>
               <td style={{ padding: "6px 10px" }}>{t.capPerContract ? fmtUsd(t.capPerContract) : "—"}</td>
               <td style={{ padding: "6px 10px" }}>{t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "—"}</td>
+              <td style={{ padding: "6px 10px" }}>{t.callIv ? fmtPct(t.callIv * 100) : "—"}</td>
+              <td style={{ padding: "6px 10px", color: t.putIv > t.callIv ? "#7ee2a8" : undefined }}>{t.putIv ? fmtPct(t.putIv * 100) : "—"}</td>
               <td style={{ padding: "6px 10px" }}>
                 <button onClick={() => fetchOne(i)} disabled={t.fetching} style={btnStyle}>{t.fetching ? "…" : "Fetch"}</button>
                 {t.error && <div style={{ color: "#e05252", fontSize: 10 }}>{t.error}</div>}
@@ -657,7 +695,7 @@ export default function WheelSimulator() {
 
             <div style={{ marginTop: 12, fontSize: 12, color: "#9aa0a6" }}>
               <div style={{ marginBottom: 4, color: "#e6e8eb" }}>Average leg switches over the horizon (per path)</div>
-              {tickers.filter((t) => t.capPerContract > 0 && t.iv > 0).map((t) => (
+              {tickers.filter((t) => t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0).map((t) => (
                 <span key={t.ticker} style={{ marginRight: 16 }}>
                   {t.ticker}: {realisticResult.avgAssignments[t.ticker]?.toFixed(1) ?? "0"} assigned, {realisticResult.avgCallAways[t.ticker]?.toFixed(1) ?? "0"} called away
                 </span>
@@ -732,6 +770,180 @@ export default function WheelSimulator() {
           </table>
         </div>
       )}
+
+      <button
+        onClick={() => setChatOpen((v) => !v)}
+        style={{
+          position: "fixed", bottom: 20, right: 20, padding: "10px 16px",
+          background: "#2563eb", color: "#fff", border: "none", borderRadius: 24,
+          cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: "0 2px 8px rgba(0,0,0,0.4)", zIndex: 50,
+        }}
+      >
+        {chatOpen ? "Close AI assistant" : "Ask AI about this"}
+      </button>
+
+      {chatOpen && <AiAssistantPanel getContext={buildAiContext} onClose={() => setChatOpen(false)} />}
+    </div>
+  );
+}
+
+type ChatAttachmentUi = { name: string; mediaType: string; data: string; kind: "image"; previewUrl?: string };
+type ChatMsgUi = { role: "user" | "assistant"; text: string; attachments?: ChatAttachmentUi[] };
+
+function AiAssistantPanel({ getContext, onClose }: { getContext: () => string; onClose: () => void }) {
+  const [msgs, setMsgs] = useState<ChatMsgUi[]>([
+    { role: "assistant", text: "Ask me about your simulation results, or try a what-if — e.g. \"what if I raised the per-ticker cap to 40%\" or \"why did AMZN get bought first?\"" },
+  ]);
+  const [input, setInput] = useState("");
+  const [pending, setPending] = useState<ChatAttachmentUi[]>([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1] || "");
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!fileList) return;
+    const newAttachments: ChatAttachmentUi[] = [];
+    for (const file of Array.from(fileList)) {
+      const isImage = file.type.startsWith("image/");
+      if (!isImage) {
+        setError(`${file.name}: only image attachments are supported (the app's AI route doesn't convert PDFs for its model)`);
+        continue;
+      }
+      const data = await fileToBase64(file);
+      newAttachments.push({
+        name: file.name,
+        mediaType: file.type,
+        data,
+        kind: "image",
+        previewUrl: URL.createObjectURL(file),
+      });
+    }
+    setPending((prev) => [...prev, ...newAttachments]);
+  };
+
+  const removePending = (idx: number) => setPending((prev) => prev.filter((_, i) => i !== idx));
+
+  const send = async () => {
+    if (!input.trim() && pending.length === 0) return;
+    setError("");
+    const userMsg: ChatMsgUi = { role: "user", text: input.trim() || "(see attachments)", attachments: pending };
+    const nextMsgs = [...msgs, userMsg];
+    setMsgs(nextMsgs);
+    setInput("");
+    setPending([]);
+    setSending(true);
+
+    try {
+      // /api/analyze expects Anthropic-shaped content parts and converts
+      // { type: 'image', source: { type: 'base64', media_type, data } }
+      // into the OpenAI image_url form itself — so build messages in that shape.
+      const apiMessages = nextMsgs.map((m) => {
+        const imageParts = (m.attachments || []).map((a) => ({
+          type: "image",
+          source: { type: "base64", media_type: a.mediaType, data: a.data },
+        }));
+        const content = imageParts.length > 0 ? [...imageParts, { type: "text", text: m.text }] : m.text;
+        return { role: m.role, content };
+      });
+
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system: getContext(),
+          messages: apiMessages,
+          max_tokens: 1000,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      const replyText = (data.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+      setMsgs((prev) => [...prev, { role: "assistant", text: replyText || "(no response)" }]);
+    } catch (err: any) {
+      setError(err.message || "Failed to reach assistant");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed", bottom: 76, right: 20, width: 380, maxHeight: "70vh",
+        display: "flex", flexDirection: "column",
+        background: "#14161b", border: "1px solid #2a2e37", borderRadius: 10,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.5)", zIndex: 50, fontSize: 13,
+      }}
+    >
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid #2a2e37", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <b>AI assistant</b>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#9aa0a6", cursor: "pointer", fontSize: 16 }}>✕</button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        {msgs.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+            <div
+              style={{
+                background: m.role === "user" ? "#2563eb" : "#1b1e24",
+                color: m.role === "user" ? "#fff" : "#e6e8eb",
+                padding: "8px 10px", borderRadius: 8, whiteSpace: "pre-wrap", lineHeight: 1.4,
+              }}
+            >
+              {m.text}
+              {m.attachments && m.attachments.length > 0 && (
+                <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {m.attachments.map((a, ai) => (
+                    <span key={ai} style={{ fontSize: 11, background: "rgba(255,255,255,0.15)", padding: "2px 6px", borderRadius: 4 }}>
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {sending && <div style={{ color: "#9aa0a6", fontSize: 12 }}>Thinking…</div>}
+        {error && <div style={{ color: "#e05252", fontSize: 12 }}>{error}</div>}
+      </div>
+
+      {pending.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "0 12px 8px" }}>
+          {pending.map((a, i) => (
+            <span key={i} style={{ fontSize: 11, background: "#2a2e37", padding: "3px 8px", borderRadius: 12, display: "flex", alignItems: "center", gap: 6 }}>
+              {a.name}
+              <button onClick={() => removePending(i)} style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer", fontSize: 11, padding: 0 }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 6, padding: 10, borderTop: "1px solid #2a2e37" }}>
+        <label style={{ display: "flex", alignItems: "center", cursor: "pointer", padding: "0 6px", color: "#9aa0a6" }} title="Attach images">
+          <input type="file" multiple accept="image/*" onChange={(e) => handleFiles(e.target.files)} style={{ display: "none" }} />
+          +
+        </label>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Ask a question or a what-if…"
+          style={{ flex: 1, background: "#0f1115", color: "#e6e8eb", border: "1px solid #2a2e37", borderRadius: 6, padding: "6px 8px", fontSize: 13 }}
+        />
+        <button onClick={send} disabled={sending} style={{ ...btnStyle, background: "#2563eb", color: "#fff", border: "none" }}>
+          Send
+        </button>
+      </div>
     </div>
   );
 }
