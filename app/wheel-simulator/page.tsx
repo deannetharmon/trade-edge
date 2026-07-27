@@ -15,6 +15,7 @@ type TickerData = {
   capPerContract: number; // dollars required per contract
   callIv: number; // implied volatility for calls, as a fraction, e.g. 0.35 = 35%
   putIv: number; // implied volatility for puts — usually higher than callIv due to skew
+  annualGrowthPct: number; // trailing CAGR %/yr from historical prices, drives realistic-mode drift
   fetching?: boolean;
   error?: string;
 };
@@ -49,6 +50,7 @@ type RealisticResult = {
   medianTimeline: number[]; // capital at each cycle, median across paths
   p10Timeline: number[];
   p90Timeline: number[];
+  medianPremiumTimeline: number[]; // cumulative premium collected, median across paths
   avgAssignments: Record<string, number>; // avg # of CSP->CC switches per ticker
   avgCallAways: Record<string, number>; // avg # of CC->CSP switches per ticker
   cycles: number;
@@ -121,13 +123,13 @@ function runRealisticSimulation(
   perTickerCapPct: number,
   groupCapPct: number,
   targetDelta: number,
-  annualDrift: number,
   numPaths: number
 ): RealisticResult {
   const numCycles = Math.max(1, Math.floor((horizonMonths * 30) / dte));
   const T = dte / 365;
   const finals: number[] = [];
   const pathTimelines: number[][] = [];
+  const premiumPathTimelines: number[][] = [];
   const assignCounts: Record<string, number[]> = {};
   const callAwayCounts: Record<string, number[]> = {};
   tickers.forEach((t) => { assignCounts[t.ticker] = []; callAwayCounts[t.ticker] = []; });
@@ -140,6 +142,7 @@ function runRealisticSimulation(
       contracts[t.ticker] = 0;
     });
     let idle = startingCapital;
+    let cumulativePremium = 0;
     let assignedCount: Record<string, number> = {};
     let calledAwayCount: Record<string, number> = {};
     tickers.forEach((t) => { assignedCount[t.ticker] = 0; calledAwayCount[t.ticker] = 0; });
@@ -155,6 +158,7 @@ function runRealisticSimulation(
       tickers.filter((t) => t.group === group).reduce((sum, t) => sum + tickerValue(t), 0);
 
     const pathTimeline: number[] = [];
+    const premiumPathTimeline: number[] = [];
 
     for (let cycle = 0; cycle < numCycles; cycle++) {
       // 1. For every open position, collect premium for a new leg at current spot, then advance price and resolve assignment/call-away
@@ -168,7 +172,9 @@ function runRealisticSimulation(
         const strike = strikeForDelta(type, w.spot, legIv, T, targetDelta);
         const credit = bsPrice(type, w.spot, strike, T, legIv);
         idle += credit * 100 * n; // premium always goes to cash
-        const newSpot = gbmStep(w.spot, spotVol, dte, annualDrift, Math.random);
+        cumulativePremium += credit * 100 * n;
+        const mu = t.annualGrowthPct / 100; // per-ticker historical drift drives the price path
+        const newSpot = gbmStep(w.spot, spotVol, dte, mu, Math.random);
 
         if (w.state === "csp") {
           if (newSpot < strike) {
@@ -223,10 +229,12 @@ function runRealisticSimulation(
       }
 
       pathTimeline.push(totalCapital());
+      premiumPathTimeline.push(cumulativePremium);
     }
 
     finals.push(totalCapital());
     pathTimelines.push(pathTimeline);
+    premiumPathTimelines.push(premiumPathTimeline);
     tickers.forEach((t) => {
       assignCounts[t.ticker].push(assignedCount[t.ticker]);
       callAwayCounts[t.ticker].push(calledAwayCount[t.ticker]);
@@ -240,11 +248,15 @@ function runRealisticSimulation(
   const p90Final = pct(finals, 0.9);
 
   const medianTimeline: number[] = [], p10Timeline: number[] = [], p90Timeline: number[] = [];
+  const medianPremiumTimeline: number[] = [];
   for (let c = 0; c < numCycles; c++) {
     const vals = pathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
     medianTimeline.push(pct(vals, 0.5));
     p10Timeline.push(pct(vals, 0.1));
     p90Timeline.push(pct(vals, 0.9));
+
+    const premVals = premiumPathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
+    medianPremiumTimeline.push(pct(premVals, 0.5));
   }
 
   const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / (arr.length || 1);
@@ -258,7 +270,7 @@ function runRealisticSimulation(
   return {
     medianFinal, p10Final, p90Final,
     medianReturn: (medianFinal / startingCapital - 1) * 100,
-    medianTimeline, p10Timeline, p90Timeline,
+    medianTimeline, p10Timeline, p90Timeline, medianPremiumTimeline,
     avgAssignments, avgCallAways,
     cycles: numCycles, numPaths,
   };
@@ -366,7 +378,7 @@ export default function WheelSimulator() {
   const [universe, setUniverse] = useState<string[]>(MAG7);
   const [extraTickers, setExtraTickers] = useState("");
   const [tickers, setTickers] = useState<TickerData[]>(
-    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0 }))
+    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0 }))
   );
   const [startingCapital, setStartingCapital] = useState(49000);
   const [dte, setDte] = useState(7);
@@ -380,7 +392,7 @@ export default function WheelSimulator() {
   const [result, setResult] = useState<SimResult | null>(null);
   const [fetchingAll, setFetchingAll] = useState(false);
   const [targetDelta, setTargetDelta] = useState(30); // shown as whole percent, used as 0.30
-  const [annualDrift, setAnnualDrift] = useState(0); // annualized drift %, 0 = no directional bias
+  const [growthYears, setGrowthYears] = useState(3); // historical lookback window (1-5) for per-ticker CAGR
   const [numPaths, setNumPaths] = useState(200);
   const [realisticResult, setRealisticResult] = useState<RealisticResult | null>(null);
   const [runningRealistic, setRunningRealistic] = useState(false);
@@ -396,12 +408,20 @@ export default function WheelSimulator() {
     if (!added.length) return;
     setTickers([
       ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0 })),
+      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0 })),
     ]);
     setExtraTickers("");
   };
 
   const removeTicker = (ticker: string) => setTickers(tickers.filter((t) => t.ticker !== ticker));
+
+  const updateTicker = (idx: number, field: keyof TickerData, value: any) => {
+    setTickers((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: value };
+      return next;
+    });
+  };
 
   const fetchOne = async (idx: number) => {
     setTickers((prev) => {
@@ -413,9 +433,12 @@ export default function WheelSimulator() {
     try {
       const t = tickers[idx];
       const token = await getAccessToken();
-      const [price, chainData] = await Promise.all([
+      const [price, chainData, growthResult] = await Promise.all([
         getQuote(t.ticker, token),
         getChain(t.ticker, token, {} as any, { min: Math.max(dte - 3, 0), max: dte + 3 }),
+        fetch(`/api/historical-growth?ticker=${encodeURIComponent(t.ticker)}&years=${growthYears}`)
+          .then((r) => r.json())
+          .catch(() => null),
       ]);
       if (!chainData.expirations.length) throw new Error("No expirations found");
 
@@ -457,6 +480,11 @@ export default function WheelSimulator() {
       const callIv = call?.iv != null ? call.iv / 100 : 0.3;
       const putIv = put?.iv != null ? put.iv / 100 : 0.3;
 
+      const annualGrowthPct =
+        growthResult && !growthResult.error && typeof growthResult.annualGrowthPct === "number"
+          ? growthResult.annualGrowthPct
+          : tickers[idx].annualGrowthPct;
+
       setTickers((prev) => {
         const next = [...prev];
         next[idx] = {
@@ -466,8 +494,9 @@ export default function WheelSimulator() {
           blendedRocPerCycle: blended,
           callIv,
           putIv,
+          annualGrowthPct,
           fetching: false,
-          error: "",
+          error: growthResult && growthResult.error ? `Growth fetch: ${growthResult.error}` : "",
         };
         return next;
       });
@@ -502,7 +531,7 @@ export default function WheelSimulator() {
       const r = runRealisticSimulation(
         ready, startingCapital, dte, horizonMonths,
         perTickerCapPct / 100, groupCapPct / 100,
-        targetDelta / 100, annualDrift / 100, numPaths
+        targetDelta / 100, numPaths
       );
       setRealisticResult(r);
       setRunningRealistic(false);
@@ -540,11 +569,11 @@ export default function WheelSimulator() {
 
   const buildAiContext = () => {
     const lines: string[] = [];
-    lines.push(`Config: starting capital ${fmtUsd(startingCapital)}, DTE ${dte}, horizon ${horizonMonths} months, per-ticker cap ${perTickerCapPct}%, Mag 7 group cap ${groupCapPct}%, target delta ${targetDelta}%, annual drift assumption ${annualDrift}%.`);
+    lines.push(`Config: starting capital ${fmtUsd(startingCapital)}, DTE ${dte}, horizon ${horizonMonths} months, per-ticker cap ${perTickerCapPct}%, Mag 7 group cap ${groupCapPct}%, target delta ${targetDelta}%, growth lookback ${growthYears}yr.`);
     lines.push("Tickers:");
     tickers.forEach((t) => {
       lines.push(
-        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}`
+        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}, growth %/yr ${t.annualGrowthPct ? fmtPct(t.annualGrowthPct) : "n/a"}`
       );
     });
     if (result) {
@@ -559,7 +588,7 @@ export default function WheelSimulator() {
     }
     if (realisticResult) {
       lines.push(
-        `Realistic-mode (Monte Carlo, ${realisticResult.numPaths} paths) result: median final capital ${fmtUsd(realisticResult.medianFinal)}, median return ${fmtPct(realisticResult.medianReturn)}, 10th-90th percentile range ${fmtUsd(realisticResult.p10Final)} - ${fmtUsd(realisticResult.p90Final)}.`
+        `Realistic-mode (Monte Carlo, ${realisticResult.numPaths} paths) result: median final capital ${fmtUsd(realisticResult.medianFinal)}, median return ${fmtPct(realisticResult.medianReturn)}, 10th-90th percentile range ${fmtUsd(realisticResult.p10Final)} - ${fmtUsd(realisticResult.p90Final)}. Of the median final capital, ${fmtUsd(realisticResult.medianPremiumTimeline[realisticResult.medianPremiumTimeline.length - 1] || 0)} came from cumulative premium collected, with the remainder from price appreciation on shares held during covered-call legs.`
       );
     } else {
       lines.push("Realistic-mode simulation has not been run yet.");
@@ -581,6 +610,17 @@ export default function WheelSimulator() {
         <label>Horizon (months) <input type="number" value={horizonMonths} onChange={(e) => setHorizonMonths(parseInt(e.target.value) || 1)} style={inputStyle(50)} /></label>
         <label>Per-ticker cap % <input type="number" value={perTickerCapPct} onChange={(e) => setPerTickerCapPct(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
         <label>Mag 7 group cap % <input type="number" value={groupCapPct} onChange={(e) => setGroupCapPct(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+        <label>
+          Growth lookback (yrs)
+          <input
+            type="number"
+            min={1}
+            max={5}
+            value={growthYears}
+            onChange={(e) => setGrowthYears(Math.min(5, Math.max(1, parseInt(e.target.value) || 3)))}
+            style={inputStyle(50)}
+          />
+        </label>
       </div>
 
       {/* Extra tickers */}
@@ -591,12 +631,15 @@ export default function WheelSimulator() {
           {fetchingAll ? "Fetching…" : "Fetch all live data"}
         </button>
       </div>
+      <div style={{ fontSize: 11, color: "#9aa0a6", marginTop: -6, marginBottom: 12 }}>
+        "Fetch" also pulls each ticker's trailing CAGR (over the growth lookback window above) from Yahoo Finance to drive its Growth %/yr — editable below if you want to override.
+      </div>
 
       {/* Ticker table */}
       <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 16 }}>
         <thead>
           <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "", ""].map((h) => (
+            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "", ""].map((h) => (
               <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
             ))}
           </tr>
@@ -611,6 +654,15 @@ export default function WheelSimulator() {
               <td style={{ padding: "6px 10px" }}>{t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "—"}</td>
               <td style={{ padding: "6px 10px" }}>{t.callIv ? fmtPct(t.callIv * 100) : "—"}</td>
               <td style={{ padding: "6px 10px", color: t.putIv > t.callIv ? "#7ee2a8" : undefined }}>{t.putIv ? fmtPct(t.putIv * 100) : "—"}</td>
+              <td style={{ padding: "6px 10px" }}>
+                <input
+                  type="number"
+                  value={t.annualGrowthPct}
+                  onChange={(e) => updateTicker(i, "annualGrowthPct", parseFloat(e.target.value) || 0)}
+                  style={inputStyle(60)}
+                  title="Trailing CAGR %/yr — auto-filled by Fetch, editable to override"
+                />
+              </td>
               <td style={{ padding: "6px 10px" }}>
                 <button onClick={() => fetchOne(i)} disabled={t.fetching} style={btnStyle}>{t.fetching ? "…" : "Fetch"}</button>
                 {t.error && <div style={{ color: "#e05252", fontSize: 10 }}>{t.error}</div>}
@@ -671,19 +723,13 @@ export default function WheelSimulator() {
       <div style={{ borderTop: "1px solid #2a2e37", paddingTop: 20, marginBottom: 24 }}>
         <h3 style={{ fontSize: 16, marginBottom: 4 }}>Realistic mode (Monte Carlo)</h3>
         <p style={{ color: "#9aa0a6", fontSize: 13, marginTop: 0 }}>
-          Models actual price movement (GBM, using each ticker's live IV) and the real wheel mechanic — a CSP that finishes in-the-money switches to holding shares and selling calls; a call that finishes in-the-money sells the shares and switches back to CSP. Strikes are re-selected each cycle at your target delta relative to the simulated spot, so premium changes as price and time move, not held constant. Requires live-fetched IV per ticker (fetch above first).
+          Models actual price movement (GBM, using each ticker's live IV and its own trailing CAGR as drift) and the real wheel mechanic — a CSP that finishes in-the-money switches to holding shares and selling calls; a call that finishes in-the-money sells the shares and switches back to CSP. Strikes are re-selected each cycle at your target delta relative to the simulated spot, so premium changes as price and time move, not held constant. Requires live-fetched IV and growth per ticker (fetch above first).
         </p>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12, fontSize: 13, alignItems: "flex-start" }}>
           <div>
             <label>Target delta % <input type="number" value={targetDelta} onChange={(e) => setTargetDelta(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
             <div style={{ fontSize: 11, color: "#9aa0a6", maxWidth: 200, marginTop: 4 }}>
               How far OTM each strike is picked, same idea as delta on your broker's chain. Typical wheel range: 20-35. Higher = closer to the money, more premium, more frequent assignment/call-away.
-            </div>
-          </div>
-          <div>
-            <label>Annual drift % <input type="number" value={annualDrift} onChange={(e) => setAnnualDrift(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
-            <div style={{ fontSize: 11, color: "#9aa0a6", maxWidth: 220, marginTop: 4 }}>
-              Assumed yearly price drift baked into the simulated price path. 0 = no directional bias (conservative default). Try ~8-10 to reflect long-run market drift, or negative to stress-test a downturn.
             </div>
           </div>
           <div>
@@ -707,6 +753,16 @@ export default function WheelSimulator() {
             </div>
 
             <BandChart median={realisticResult.medianTimeline} p10={realisticResult.p10Timeline} p90={realisticResult.p90Timeline} dte={dte} />
+
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 13, marginBottom: 6, color: "#e6e8eb" }}>Where the growth came from</div>
+              <StackedGrowthChart
+                totalTimeline={realisticResult.medianTimeline}
+                premiumTimeline={realisticResult.medianPremiumTimeline}
+                startingCapital={startingCapital}
+                dte={dte}
+              />
+            </div>
 
             <div style={{ marginTop: 12, fontSize: 12, color: "#9aa0a6" }}>
               <div style={{ marginBottom: 4, color: "#e6e8eb" }}>Average leg switches over the horizon (per path)</div>
@@ -1023,6 +1079,107 @@ function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[];
           shaded band = 10th–90th percentile
         </text>
       </svg>
+    </div>
+  );
+}
+
+// Stacked view of median capital growth: starting capital baseline, cumulative
+// premium collected on top of that, and price appreciation (residual —
+// mark-to-market gains/losses on shares held during covered-call legs) on top of that.
+function StackedGrowthChart({
+  totalTimeline,
+  premiumTimeline,
+  startingCapital,
+  dte,
+}: {
+  totalTimeline: number[];
+  premiumTimeline: number[];
+  startingCapital: number;
+  dte: number;
+}) {
+  if (!totalTimeline.length || !premiumTimeline.length) return null;
+  const w = 640, h = 220, padL = 60, padR = 20, padT = 20, padB = 30;
+
+  const premiumLevel = premiumTimeline.map((p) => startingCapital + p);
+  const totalLevel = totalTimeline;
+
+  const allVals = [startingCapital, ...premiumLevel, ...totalLevel];
+  const max = Math.max(...allVals);
+  const min = Math.min(...allVals);
+  const range = max - min || 1;
+
+  const startDate = new Date();
+  const dateAt = (i: number) => {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i * dte);
+    return d;
+  };
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+  const n = totalLevel.length;
+  const x = (i: number) => padL + (i / (n - 1 || 1)) * (w - padL - padR);
+  const y = (v: number) => h - padB - ((v - min) / range) * (h - padT - padB);
+
+  const baselineY = y(startingCapital);
+
+  const premiumAreaPath =
+    premiumLevel.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    ` L ${x(n - 1)} ${baselineY} L ${x(0)} ${baselineY} Z`;
+
+  const appreciationAreaPath =
+    totalLevel.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    " " +
+    premiumLevel.map((v, i) => `L ${x(n - 1 - i)} ${y(premiumLevel[n - 1 - i])}`).join(" ") +
+    " Z";
+
+  const totalPts = totalLevel.map((v, i) => `${x(i)},${y(v)}`);
+  const premiumPts = premiumLevel.map((v, i) => `${x(i)},${y(v)}`);
+
+  const yTicks = [min, (min + max) / 2, max];
+  const xTickIdxs = [0, Math.floor((n - 1) / 2), n - 1];
+
+  const finalPremium = premiumTimeline[premiumTimeline.length - 1] || 0;
+  const finalAppreciation = (totalLevel[totalLevel.length - 1] || startingCapital) - startingCapital - finalPremium;
+
+  return (
+    <div style={{ maxWidth: 700, margin: "0 auto" }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6, display: "block" }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+            <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+              {fmtUsd(v)}
+            </text>
+          </g>
+        ))}
+
+        <line x1={padL} y1={baselineY} x2={w - padR} y2={baselineY} stroke="#4a4f5a" strokeWidth={1} strokeDasharray="4 3" />
+
+        <path d={premiumAreaPath} fill="#22c55e" opacity={0.25} stroke="none" />
+        <path d={appreciationAreaPath} fill="#f2a623" opacity={0.25} stroke="none" />
+
+        <polyline points={premiumPts.join(" ")} fill="none" stroke="#22c55e" strokeWidth={1.5} />
+        <polyline points={totalPts.join(" ")} fill="none" stroke="#f2a623" strokeWidth={2} />
+
+        {xTickIdxs.map((i, idx) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={h - 8}
+            textAnchor={idx === 0 ? "start" : idx === xTickIdxs.length - 1 ? "end" : "middle"}
+            fontSize={10}
+            fill="#9aa0a6"
+          >
+            {fmtDate(dateAt(i))}
+          </text>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#9aa0a6", marginTop: 6 }}>
+        <span><span style={{ color: "#22c55e" }}>■</span> Premium collected: {fmtUsd(finalPremium)}</span>
+        <span><span style={{ color: "#f2a623" }}>■</span> Price appreciation: {fmtUsd(finalAppreciation)}</span>
+        <span>dashed line = starting capital</span>
+      </div>
     </div>
   );
 }
