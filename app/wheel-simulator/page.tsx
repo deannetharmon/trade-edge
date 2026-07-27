@@ -1021,7 +1021,7 @@ function AiAssistantPanel({ getContext, onClose }: { getContext: () => string; o
 
 function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[]; p90: number[]; dte: number }) {
   if (!median.length) return null;
-  const w = 640, h = 200, padL = 60, padR = 20, padT = 20, padB = 30;
+  const w = 640, h = 200, padL = 68, padR = 20, padT = 20, padB = 30;
   const max = Math.max(...p90);
   const min = Math.min(...p10);
   const range = max - min || 1;
@@ -1033,7 +1033,7 @@ function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[];
     return d;
   };
   const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
-  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtUsdAxis = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 
   const x = (i: number) => padL + (i / (median.length - 1 || 1)) * (w - padL - padR);
   const y = (v: number) => h - padB - ((v - min) / range) * (h - padT - padB);
@@ -1055,7 +1055,7 @@ function BandChart({ median, p10, p90, dte }: { median: number[]; p10: number[];
           <g key={i}>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
             <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
-              {fmtUsd(v)}
+              {fmtUsdAxis(v)}
             </text>
           </g>
         ))}
@@ -1098,7 +1098,7 @@ function StackedGrowthChart({
   dte: number;
 }) {
   if (!totalTimeline.length || !premiumTimeline.length) return null;
-  const w = 640, h = 220, padL = 60, padR = 20, padT = 20, padB = 30;
+  const w = 640, h = 220, padL = 68, padR = 20, padT = 20, padB = 30;
 
   const premiumLevel = premiumTimeline.map((p) => startingCapital + p);
   const totalLevel = totalTimeline;
@@ -1116,6 +1116,7 @@ function StackedGrowthChart({
   };
   const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
   const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtUsdAxis = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 
   const n = totalLevel.length;
   const x = (i: number) => padL + (i / (n - 1 || 1)) * (w - padL - padR);
@@ -1149,7 +1150,7 @@ function StackedGrowthChart({
           <g key={i}>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
             <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
-              {fmtUsd(v)}
+              {fmtUsdAxis(v)}
             </text>
           </g>
         ))}
@@ -1186,7 +1187,7 @@ function StackedGrowthChart({
 
 function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: number }) {
   if (!timeline.length) return null;
-  const w = 640, h = 200, padL = 60, padR = 20, padT = 20, padB = 30;
+  const w = 640, h = 200, padL = 68, padR = 20, padT = 20, padB = 30;
   const max = Math.max(...timeline.map((t) => t.capital));
   const min = Math.min(...timeline.map((t) => t.capital));
   const range = max - min || 1;
@@ -1199,6 +1200,7 @@ function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: nu
   };
   const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
   const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtUsdAxis = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
 
   const x = (i: number) => padL + (i / (timeline.length - 1 || 1)) * (w - padL - padR);
   const y = (cap: number) => h - padB - ((cap - min) / range) * (h - padT - padB);
@@ -1214,7 +1216,7 @@ function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: nu
           <g key={i}>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
             <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
-              {fmtUsd(v)}
+              {fmtUsdAxis(v)}
             </text>
           </g>
         ))}
