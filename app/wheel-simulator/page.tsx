@@ -16,6 +16,7 @@ type TickerData = {
   callIv: number; // implied volatility for calls, as a fraction, e.g. 0.35 = 35%
   putIv: number; // implied volatility for puts — usually higher than callIv due to skew
   annualGrowthPct: number; // trailing CAGR %/yr from historical prices, drives realistic-mode drift
+  capPct: number; // per-ticker allocation ceiling, 0-25 (% of total capital); auto-allocator won't exceed this for this ticker
   fetching?: boolean;
   error?: string;
 };
@@ -26,7 +27,6 @@ type Scenario = {
   startingCapital: number;
   dte: number;
   horizonMonths: number;
-  perTickerCapPct: number; // 0-1
   groupCapPct: number; // 0-1, applies to mag7 bucket
   tickers: TickerData[];
   savedAt: string;
@@ -120,7 +120,6 @@ function runRealisticSimulation(
   startingCapital: number,
   dte: number,
   horizonMonths: number,
-  perTickerCapPct: number,
   groupCapPct: number,
   targetDelta: number,
   numPaths: number
@@ -210,7 +209,7 @@ function runRealisticSimulation(
             const capPerContract = entryStrike * 100;
             if (idle < capPerContract) return false;
             const currentVal = tickerValue(t);
-            if (currentVal > 0 && currentVal + capPerContract > tc * perTickerCapPct) return false;
+            if (currentVal > 0 && currentVal + capPerContract > tc * (t.capPct / 100)) return false;
             if (t.group === "mag7") {
               const currentGroupVal = groupTotal("mag7");
               if (currentGroupVal > 0 && currentGroupVal + capPerContract > tc * groupCapPct) return false;
@@ -302,7 +301,6 @@ function runSimulation(
   startingCapital: number,
   dte: number,
   horizonMonths: number,
-  perTickerCapPct: number,
   groupCapPct: number
 ): SimResult {
   const numCycles = Math.max(1, Math.floor((horizonMonths * 30) / dte));
@@ -340,7 +338,7 @@ function runSimulation(
           // Always allow the first contract in a ticker — caps only block additional contracts
           if (currentAlloc > 0) {
             const newTickerAlloc = currentAlloc + t.capPerContract;
-            if (newTickerAlloc > tc * perTickerCapPct) return false;
+            if (newTickerAlloc > tc * (t.capPct / 100)) return false;
           }
           if (t.group === "mag7") {
             const currentGroupAlloc = groupTotal("mag7");
@@ -384,12 +382,11 @@ export default function WheelSimulator() {
   const [universe, setUniverse] = useState<string[]>(MAG7);
   const [extraTickers, setExtraTickers] = useState("");
   const [tickers, setTickers] = useState<TickerData[]>(
-    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0 }))
+    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25 }))
   );
   const [startingCapital, setStartingCapital] = useState(49000);
   const [dte, setDte] = useState(7);
   const [horizonMonths, setHorizonMonths] = useState(24);
-  const [perTickerCapPct, setPerTickerCapPct] = useState(25);
   const [groupCapPct, setGroupCapPct] = useState(75);
   const [scenarioName, setScenarioName] = useState("");
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -414,7 +411,7 @@ export default function WheelSimulator() {
     if (!added.length) return;
     setTickers([
       ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0 })),
+      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25 })),
     ]);
     setExtraTickers("");
   };
@@ -524,7 +521,7 @@ export default function WheelSimulator() {
   const runSim = () => {
     const ready = tickers.filter((t) => t.capPerContract > 0);
     if (!ready.length) return;
-    const r = runSimulation(ready, startingCapital, dte, horizonMonths, perTickerCapPct / 100, groupCapPct / 100);
+    const r = runSimulation(ready, startingCapital, dte, horizonMonths, groupCapPct / 100);
     setResult(r);
   };
 
@@ -536,7 +533,7 @@ export default function WheelSimulator() {
     setTimeout(() => {
       const r = runRealisticSimulation(
         ready, startingCapital, dte, horizonMonths,
-        perTickerCapPct / 100, groupCapPct / 100,
+        groupCapPct / 100,
         targetDelta / 100, numPaths
       );
       setRealisticResult(r);
@@ -549,7 +546,7 @@ export default function WheelSimulator() {
     const s: Scenario = {
       id: Date.now().toString(),
       name: scenarioName.trim(),
-      startingCapital, dte, horizonMonths, perTickerCapPct, groupCapPct,
+      startingCapital, dte, horizonMonths, groupCapPct,
       tickers, savedAt: new Date().toISOString(), result,
     };
     const updated = [...scenarios, s];
@@ -575,11 +572,11 @@ export default function WheelSimulator() {
 
   const buildAiContext = () => {
     const lines: string[] = [];
-    lines.push(`Config: starting capital ${fmtUsd(startingCapital)}, DTE ${dte}, horizon ${horizonMonths} months, per-ticker cap ${perTickerCapPct}%, Mag 7 group cap ${groupCapPct}%, target delta ${targetDelta}%, growth lookback ${growthYears}yr.`);
+    lines.push(`Config: starting capital ${fmtUsd(startingCapital)}, DTE ${dte}, horizon ${horizonMonths} months, Mag 7 group cap ${groupCapPct}%, target delta ${targetDelta}%, growth lookback ${growthYears}yr.`);
     lines.push("Tickers:");
     tickers.forEach((t) => {
       lines.push(
-        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}, growth %/yr ${t.annualGrowthPct ? fmtPct(t.annualGrowthPct) : "n/a"}`
+        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, allocation cap ${t.capPct}%, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}, growth %/yr ${t.annualGrowthPct ? fmtPct(t.annualGrowthPct) : "n/a"}`
       );
     });
     if (result) {
@@ -602,11 +599,13 @@ export default function WheelSimulator() {
     return lines.join("\n");
   };
 
+  const mag7CapSum = tickers.filter((t) => t.group === "mag7").reduce((sum, t) => sum + t.capPct, 0);
+
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <h2 style={{ marginBottom: 4 }}>Wheel capital growth simulator</h2>
       <p style={{ color: "#9aa0a6", marginTop: 0, fontSize: 13 }}>
-        Assumes 100% premium reinvestment, blended CC/CSP credit held constant from live fetch, greedy allocation by ROC subject to a per-ticker cap and a correlated Mag 7 group cap.
+        Assumes 100% premium reinvestment, blended CC/CSP credit held constant from live fetch, greedy allocation by ROC subject to each ticker's own allocation cap (max 25%) and a correlated Mag 7 group cap (max 75%).
       </p>
 
       {/* Config row */}
@@ -614,8 +613,7 @@ export default function WheelSimulator() {
         <label>Starting capital <input type="number" value={startingCapital} onChange={(e) => setStartingCapital(parseFloat(e.target.value) || 0)} style={inputStyle(90)} /></label>
         <label>DTE <input type="number" value={dte} onChange={(e) => setDte(parseInt(e.target.value) || 7)} style={inputStyle(50)} /></label>
         <label>Horizon (months) <input type="number" value={horizonMonths} onChange={(e) => setHorizonMonths(parseInt(e.target.value) || 1)} style={inputStyle(50)} /></label>
-        <label>Per-ticker cap % <input type="number" value={perTickerCapPct} onChange={(e) => setPerTickerCapPct(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
-        <label>Mag 7 group cap % <input type="number" value={groupCapPct} onChange={(e) => setGroupCapPct(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+        <label>Mag 7 group cap % <input type="number" min={0} max={75} value={groupCapPct} onChange={(e) => setGroupCapPct(Math.min(75, Math.max(0, parseFloat(e.target.value) || 0)))} style={inputStyle(50)} /></label>
         <label>
           Growth lookback (yrs)
           <input
@@ -642,10 +640,10 @@ export default function WheelSimulator() {
       </div>
 
       {/* Ticker table */}
-      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 16 }}>
+      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 4 }}>
         <thead>
           <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "", ""].map((h) => (
+            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "Cap %", "Max Alloc", "", ""].map((h) => (
               <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
             ))}
           </tr>
@@ -670,6 +668,18 @@ export default function WheelSimulator() {
                 />
               </td>
               <td style={{ padding: "6px 10px" }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={25}
+                  value={t.capPct}
+                  onChange={(e) => updateTicker(i, "capPct", Math.min(25, Math.max(0, parseFloat(e.target.value) || 0)))}
+                  style={inputStyle(50)}
+                  title="Max share of total capital the auto-allocator can put into this ticker (0-25%)"
+                />
+              </td>
+              <td style={{ padding: "6px 10px", color: "#9aa0a6" }}>{fmtUsd(startingCapital * (t.capPct / 100))}</td>
+              <td style={{ padding: "6px 10px" }}>
                 <button onClick={() => fetchOne(i)} disabled={t.fetching} style={btnStyle}>{t.fetching ? "…" : "Fetch"}</button>
                 {t.error && <div style={{ color: "#e05252", fontSize: 10 }}>{t.error}</div>}
               </td>
@@ -680,6 +690,13 @@ export default function WheelSimulator() {
           ))}
         </tbody>
       </table>
+
+      {mag7CapSum > groupCapPct && (
+        <div style={{ fontSize: 11, color: "#f2a623", marginBottom: 12 }}>
+          Mag 7 tickers' individual caps sum to {mag7CapSum.toFixed(0)}%, above the {groupCapPct}% group cap — the group cap will still be enforced during the run, so not every ticker will reach its individual cap.
+        </div>
+      )}
+      <div style={{ marginBottom: 16 }} />
 
       <button onClick={runSim} style={{ ...btnStyle, background: "#16a34a", color: "#fff", border: "none", marginBottom: 20 }}>
         Run simulation
