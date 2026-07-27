@@ -420,7 +420,7 @@ function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: nu
     d.setDate(d.getDate() + cycleIdx * dte);
     return d;
   };
-  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
   const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   const x = (i: number) => padL + (i / (timeline.length - 1 || 1)) * (w - padL - padR);
