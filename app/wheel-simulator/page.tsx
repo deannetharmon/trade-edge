@@ -17,6 +17,7 @@ type TickerData = {
   putIv: number; // implied volatility for puts — usually higher than callIv due to skew
   annualGrowthPct: number; // trailing CAGR %/yr from historical prices, drives realistic-mode drift
   capPct: number; // per-ticker allocation ceiling, 0-25 (% of total capital); auto-allocator won't exceed this for this ticker
+  included: boolean; // whether this ticker participates in the simulation runs
   fetching?: boolean;
   error?: string;
 };
@@ -382,7 +383,7 @@ export default function WheelSimulator() {
   const [universe, setUniverse] = useState<string[]>(MAG7);
   const [extraTickers, setExtraTickers] = useState("");
   const [tickers, setTickers] = useState<TickerData[]>(
-    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25 }))
+    MAG7.map((t) => ({ ticker: t, group: "mag7", price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25, included: true }))
   );
   const [startingCapital, setStartingCapital] = useState(49000);
   const [dte, setDte] = useState(7);
@@ -411,7 +412,7 @@ export default function WheelSimulator() {
     if (!added.length) return;
     setTickers([
       ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25 })),
+      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25, included: true })),
     ]);
     setExtraTickers("");
   };
@@ -519,14 +520,14 @@ export default function WheelSimulator() {
   };
 
   const runSim = () => {
-    const ready = tickers.filter((t) => t.capPerContract > 0);
+    const ready = tickers.filter((t) => t.included && t.capPerContract > 0);
     if (!ready.length) return;
     const r = runSimulation(ready, startingCapital, dte, horizonMonths, groupCapPct / 100);
     setResult(r);
   };
 
   const runRealistic = () => {
-    const ready = tickers.filter((t) => t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0);
+    const ready = tickers.filter((t) => t.included && t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0);
     if (!ready.length) return;
     setRunningRealistic(true);
     // Defer to let the button state paint before the (synchronous, potentially slow) Monte Carlo run
@@ -576,7 +577,7 @@ export default function WheelSimulator() {
     lines.push("Tickers:");
     tickers.forEach((t) => {
       lines.push(
-        `- ${t.ticker} (${t.group}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, allocation cap ${t.capPct}%, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}, growth %/yr ${t.annualGrowthPct ? fmtPct(t.annualGrowthPct) : "n/a"}`
+        `- ${t.ticker} (${t.group}${t.included ? "" : ", EXCLUDED from simulation"}): price ${t.price ? fmtUsd(t.price) : "not fetched"}, cap/contract ${t.capPerContract ? fmtUsd(t.capPerContract) : "n/a"}, allocation cap ${t.capPct}%, blended ROC/cycle ${t.blendedRocPerCycle ? fmtPct(t.blendedRocPerCycle * 100) : "n/a"}, call IV ${t.callIv ? fmtPct(t.callIv * 100) : "n/a"}, put IV ${t.putIv ? fmtPct(t.putIv * 100) : "n/a"}, growth %/yr ${t.annualGrowthPct ? fmtPct(t.annualGrowthPct) : "n/a"}`
       );
     });
     if (result) {
@@ -599,7 +600,7 @@ export default function WheelSimulator() {
     return lines.join("\n");
   };
 
-  const mag7CapSum = tickers.filter((t) => t.group === "mag7").reduce((sum, t) => sum + t.capPct, 0);
+  const mag7CapSum = tickers.filter((t) => t.group === "mag7" && t.included).reduce((sum, t) => sum + t.capPct, 0);
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
@@ -643,14 +644,22 @@ export default function WheelSimulator() {
       <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, marginBottom: 4 }}>
         <thead>
           <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-            {["Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "Cap %", "Max Alloc", "", ""].map((h) => (
+            {["", "Ticker", "Group", "Price", "Cap/Contract", "Blended ROC/cycle", "Call IV", "Put IV", "Growth %/yr", "Cap %", "Max Alloc", "", ""].map((h) => (
               <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {tickers.map((t, i) => (
-            <tr key={t.ticker} style={{ borderBottom: "1px solid #22252c" }}>
+            <tr key={t.ticker} style={{ borderBottom: "1px solid #22252c", opacity: t.included ? 1 : 0.45 }}>
+              <td style={{ padding: "6px 10px" }}>
+                <input
+                  type="checkbox"
+                  checked={t.included}
+                  onChange={(e) => updateTicker(i, "included", e.target.checked)}
+                  title="Include this ticker in the simulation"
+                />
+              </td>
               <td style={{ padding: "6px 10px" }}>{t.ticker}</td>
               <td style={{ padding: "6px 10px", color: t.group === "mag7" ? "#7ee2a8" : "#9aa0a6" }}>{t.group}</td>
               <td style={{ padding: "6px 10px" }}>{t.price ? fmtUsd(t.price) : "—"}</td>
@@ -789,7 +798,7 @@ export default function WheelSimulator() {
 
             <div style={{ marginTop: 12, fontSize: 12, color: "#9aa0a6" }}>
               <div style={{ marginBottom: 4, color: "#e6e8eb" }}>Average leg switches over the horizon (per path)</div>
-              {tickers.filter((t) => t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0).map((t) => (
+              {tickers.filter((t) => t.included && t.capPerContract > 0 && t.callIv > 0 && t.putIv > 0).map((t) => (
                 <span key={t.ticker} style={{ marginRight: 16 }}>
                   {t.ticker}: {realisticResult.avgAssignments[t.ticker]?.toFixed(1) ?? "0"} assigned, {realisticResult.avgCallAways[t.ticker]?.toFixed(1) ?? "0"} called away
                 </span>
