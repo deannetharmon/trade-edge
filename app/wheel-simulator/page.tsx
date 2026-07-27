@@ -54,6 +54,7 @@ type RealisticResult = {
   p10Timeline: number[];
   p90Timeline: number[];
   medianPremiumTimeline: number[]; // cumulative premium collected, median across paths
+  medianIdleTimeline: number[]; // idle cash at each cycle, median across paths
   avgAssignments: Record<string, number>; // avg # of CSP->CC switches per ticker
   avgCallAways: Record<string, number>; // avg # of CC->CSP switches per ticker
   cycles: number;
@@ -132,6 +133,7 @@ function runRealisticSimulation(
   const finals: number[] = [];
   const pathTimelines: number[][] = [];
   const premiumPathTimelines: number[][] = [];
+  const idlePathTimelines: number[][] = [];
   const assignCounts: Record<string, number[]> = {};
   const callAwayCounts: Record<string, number[]> = {};
   tickers.forEach((t) => { assignCounts[t.ticker] = []; callAwayCounts[t.ticker] = []; });
@@ -161,6 +163,7 @@ function runRealisticSimulation(
 
     const pathTimeline: number[] = [];
     const premiumPathTimeline: number[] = [];
+    const idlePathTimeline: number[] = [];
 
     for (let cycle = 0; cycle < numCycles; cycle++) {
       // 1. For every open position, collect premium for a new leg at current spot, then advance price and resolve assignment/call-away
@@ -238,11 +241,13 @@ function runRealisticSimulation(
 
       pathTimeline.push(totalCapital());
       premiumPathTimeline.push(cumulativePremium);
+      idlePathTimeline.push(idle);
     }
 
     finals.push(totalCapital());
     pathTimelines.push(pathTimeline);
     premiumPathTimelines.push(premiumPathTimeline);
+    idlePathTimelines.push(idlePathTimeline);
     tickers.forEach((t) => {
       assignCounts[t.ticker].push(assignedCount[t.ticker]);
       callAwayCounts[t.ticker].push(calledAwayCount[t.ticker]);
@@ -257,6 +262,7 @@ function runRealisticSimulation(
 
   const medianTimeline: number[] = [], p10Timeline: number[] = [], p90Timeline: number[] = [];
   const medianPremiumTimeline: number[] = [];
+  const medianIdleTimeline: number[] = [];
   for (let c = 0; c < numCycles; c++) {
     const vals = pathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
     medianTimeline.push(pct(vals, 0.5));
@@ -265,6 +271,9 @@ function runRealisticSimulation(
 
     const premVals = premiumPathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
     medianPremiumTimeline.push(pct(premVals, 0.5));
+
+    const idleVals = idlePathTimelines.map((pt) => pt[c]).sort((a, b) => a - b);
+    medianIdleTimeline.push(pct(idleVals, 0.5));
   }
 
   const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / (arr.length || 1);
@@ -278,7 +287,7 @@ function runRealisticSimulation(
   return {
     medianFinal, p10Final, p90Final,
     medianReturn: (medianFinal / startingCapital - 1) * 100,
-    medianTimeline, p10Timeline, p90Timeline, medianPremiumTimeline,
+    medianTimeline, p10Timeline, p90Timeline, medianPremiumTimeline, medianIdleTimeline,
     avgAssignments, avgCallAways,
     cycles: numCycles, numPaths,
   };
@@ -605,15 +614,17 @@ export default function WheelSimulator() {
 
   const mag7CapSum = tickers.filter((t) => t.group === "mag7" && t.included).reduce((sum, t) => sum + t.capPct, 0);
 
-  // Weekly income estimates: assumes each ticker is deployed up to its own cap and held
-  // continuously — a quick live projection, not a substitute for actually running a simulation
-  // (it ignores idle cash, group-cap interaction with other tickers, and compounding over time).
+  // Weekly income estimates: mirrors the actual allocator's rule that a ticker's first
+  // contract is always allowed if total starting capital can cover it — the % cap only
+  // limits additional contracts beyond the first. Still a quick live projection, not a
+  // substitute for actually running a simulation (ignores idle-cash timing, group-cap
+  // interaction with other tickers, and compounding over time).
   const T = dte / 365;
   const weeklyIncomeSimple = (t: TickerData) => {
     if (!t.capPerContract || !t.blendedRocPerCycle) return 0;
+    if (t.capPerContract > startingCapital) return 0; // can't afford even one contract with total capital
     const maxAlloc = startingCapital * (t.capPct / 100);
-    const contracts = Math.floor(maxAlloc / t.capPerContract);
-    if (contracts <= 0) return 0;
+    const contracts = Math.max(1, Math.floor(maxAlloc / t.capPerContract));
     return contracts * t.capPerContract * t.blendedRocPerCycle * (7 / dte);
   };
   const weeklyIncomeRealistic = (t: TickerData) => {
@@ -621,9 +632,9 @@ export default function WheelSimulator() {
     const strike = strikeForDelta("P", t.price, t.putIv, T, targetDelta / 100);
     const credit = bsPrice("P", t.price, strike, T, t.putIv);
     const capPerContractStrike = strike * 100;
+    if (capPerContractStrike > startingCapital) return 0;
     const maxAlloc = startingCapital * (t.capPct / 100);
-    const contracts = Math.floor(maxAlloc / capPerContractStrike);
-    if (contracts <= 0) return 0;
+    const contracts = Math.max(1, Math.floor(maxAlloc / capPerContractStrike));
     return contracts * credit * 100 * (7 / dte);
   };
   const totalWeeklySimple = tickers.filter((t) => t.included).reduce((sum, t) => sum + weeklyIncomeSimple(t), 0);
@@ -768,6 +779,11 @@ export default function WheelSimulator() {
 
           <MiniChart timeline={result.timeline} dte={dte} />
 
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 13, marginBottom: 6, color: "#e6e8eb" }}>Capital required over time (deployed vs. idle)</div>
+            <DeployedIdleChart timeline={result.timeline} dte={dte} />
+          </div>
+
           <div style={{ fontSize: 12, color: "#9aa0a6", marginTop: 8 }}>
             Ticker additions: {result.timeline.filter((t) => t.addedTicker).map((t) => `${t.addedTicker} (cycle ${t.cycle})`).join(", ") || "none — starting tickers only"}
           </div>
@@ -832,6 +848,15 @@ export default function WheelSimulator() {
                 totalTimeline={realisticResult.medianTimeline}
                 premiumTimeline={realisticResult.medianPremiumTimeline}
                 startingCapital={startingCapital}
+                dte={dte}
+              />
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 13, marginBottom: 6, color: "#e6e8eb" }}>Capital required over time (deployed vs. idle, median)</div>
+              <RealisticDeployedIdleChart
+                totalTimeline={realisticResult.medianTimeline}
+                idleTimeline={realisticResult.medianIdleTimeline}
                 dte={dte}
               />
             </div>
@@ -1254,6 +1279,188 @@ function StackedGrowthChart({
         <span><span style={{ color: "#22c55e" }}>■</span> Premium collected: {fmtUsd(finalPremium)}</span>
         <span><span style={{ color: "#f2a623" }}>■</span> Price appreciation: {fmtUsd(finalAppreciation)}</span>
         <span>dashed line = starting capital</span>
+      </div>
+    </div>
+  );
+}
+
+// Shows, at each cycle, how much of total capital is actually deployed into positions
+// vs. sitting idle waiting for a slot to open up (blocked by caps or contract sizing).
+// Answers "how much capital is required over time" using data the simple-mode sim already tracks.
+// Realistic-mode counterpart to DeployedIdleChart — same idea (capital actually committed
+// vs. idle cash waiting for a slot) but built from the median total/idle timelines a Monte
+// Carlo run produces, rather than a single simple-mode timeline.
+function RealisticDeployedIdleChart({
+  totalTimeline,
+  idleTimeline,
+  dte,
+}: {
+  totalTimeline: number[];
+  idleTimeline: number[];
+  dte: number;
+}) {
+  if (!totalTimeline.length || !idleTimeline.length) return null;
+  const w = 640, h = 200, padL = 68, padR = 20, padT = 20, padB = 30;
+
+  const deployed = totalTimeline.map((v, i) => v - idleTimeline[i]);
+  const idle = idleTimeline;
+  const totals = totalTimeline;
+  const max = Math.max(...totals);
+  const min = 0;
+  const range = max - min || 1;
+
+  const startDate = new Date();
+  const dateAt = (i: number) => {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i * dte);
+    return d;
+  };
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtUsdAxis = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
+
+  const n = totals.length;
+  const x = (i: number) => padL + (i / (n - 1 || 1)) * (w - padL - padR);
+  const y = (v: number) => h - padB - ((v - min) / range) * (h - padT - padB);
+
+  const deployedAreaPath =
+    deployed.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    ` L ${x(n - 1)} ${y(0)} L ${x(0)} ${y(0)} Z`;
+
+  const totalAreaPath =
+    totals.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    " " +
+    deployed.map((v, i) => `L ${x(n - 1 - i)} ${y(deployed[n - 1 - i])}`).join(" ") +
+    " Z";
+
+  const deployedPts = deployed.map((v, i) => `${x(i)},${y(v)}`);
+  const totalPts = totals.map((v, i) => `${x(i)},${y(v)}`);
+
+  const yTicks = [0, max / 2, max];
+  const xTickIdxs = [0, Math.floor((n - 1) / 2), n - 1];
+
+  const finalDeployed = deployed[deployed.length - 1] || 0;
+  const finalIdle = idle[idle.length - 1] || 0;
+
+  return (
+    <div style={{ maxWidth: 700, margin: "0 auto" }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6, display: "block" }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+            <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+              {fmtUsdAxis(v)}
+            </text>
+          </g>
+        ))}
+
+        <path d={deployedAreaPath} fill="#2563eb" opacity={0.3} stroke="none" />
+        <path d={totalAreaPath} fill="#6b7280" opacity={0.25} stroke="none" />
+
+        <polyline points={deployedPts.join(" ")} fill="none" stroke="#60a5fa" strokeWidth={2} />
+        <polyline points={totalPts.join(" ")} fill="none" stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="4 3" />
+
+        {xTickIdxs.map((i, idx) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={h - 8}
+            textAnchor={idx === 0 ? "start" : idx === xTickIdxs.length - 1 ? "end" : "middle"}
+            fontSize={10}
+            fill="#9aa0a6"
+          >
+            {fmtDate(dateAt(i))}
+          </text>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#9aa0a6", marginTop: 6 }}>
+        <span><span style={{ color: "#60a5fa" }}>■</span> Capital deployed (median): {fmtUsd(finalDeployed)}</span>
+        <span><span style={{ color: "#6b7280" }}>■</span> Idle cash (median): {fmtUsd(finalIdle)}</span>
+        <span>dashed line = total capital (median)</span>
+      </div>
+    </div>
+  );
+}
+
+function DeployedIdleChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: number }) {
+  if (!timeline.length) return null;
+  const w = 640, h = 200, padL = 68, padR = 20, padT = 20, padB = 30;
+
+  const deployed = timeline.map((t) => t.capital - t.idle);
+  const idle = timeline.map((t) => t.idle);
+  const totals = timeline.map((t) => t.capital);
+  const max = Math.max(...totals);
+  const min = 0;
+  const range = max - min || 1;
+
+  const startDate = new Date();
+  const dateAt = (i: number) => {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i * dte);
+    return d;
+  };
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtUsdAxis = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
+
+  const n = timeline.length;
+  const x = (i: number) => padL + (i / (n - 1 || 1)) * (w - padL - padR);
+  const y = (v: number) => h - padB - ((v - min) / range) * (h - padT - padB);
+
+  const deployedAreaPath =
+    deployed.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    ` L ${x(n - 1)} ${y(0)} L ${x(0)} ${y(0)} Z`;
+
+  const totalAreaPath =
+    totals.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(v)}`).join(" ") +
+    " " +
+    deployed.map((v, i) => `L ${x(n - 1 - i)} ${y(deployed[n - 1 - i])}`).join(" ") +
+    " Z";
+
+  const deployedPts = deployed.map((v, i) => `${x(i)},${y(v)}`);
+  const totalPts = totals.map((v, i) => `${x(i)},${y(v)}`);
+
+  const yTicks = [0, max / 2, max];
+  const xTickIdxs = [0, Math.floor((n - 1) / 2), n - 1];
+
+  const finalDeployed = deployed[deployed.length - 1] || 0;
+  const finalIdle = idle[idle.length - 1] || 0;
+
+  return (
+    <div style={{ maxWidth: 700, margin: "0 auto" }}>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6, display: "block" }}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+            <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+              {fmtUsdAxis(v)}
+            </text>
+          </g>
+        ))}
+
+        <path d={deployedAreaPath} fill="#2563eb" opacity={0.3} stroke="none" />
+        <path d={totalAreaPath} fill="#6b7280" opacity={0.25} stroke="none" />
+
+        <polyline points={deployedPts.join(" ")} fill="none" stroke="#60a5fa" strokeWidth={2} />
+        <polyline points={totalPts.join(" ")} fill="none" stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="4 3" />
+
+        {xTickIdxs.map((i, idx) => (
+          <text
+            key={i}
+            x={x(i)}
+            y={h - 8}
+            textAnchor={idx === 0 ? "start" : idx === xTickIdxs.length - 1 ? "end" : "middle"}
+            fontSize={10}
+            fill="#9aa0a6"
+          >
+            {fmtDate(dateAt(i))}
+          </text>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#9aa0a6", marginTop: 6 }}>
+        <span><span style={{ color: "#60a5fa" }}>■</span> Capital deployed: {fmtUsd(finalDeployed)}</span>
+        <span><span style={{ color: "#6b7280" }}>■</span> Idle cash: {fmtUsd(finalIdle)}</span>
+        <span>dashed line = total capital</span>
       </div>
     </div>
   );
