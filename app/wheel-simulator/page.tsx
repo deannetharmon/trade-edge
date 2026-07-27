@@ -421,10 +421,14 @@ export default function WheelSimulator() {
       .map((s) => s.trim().toUpperCase())
       .filter((s) => s && !tickers.some((t) => t.ticker === s));
     if (!added.length) return;
-    setTickers([
-      ...tickers,
-      ...added.map((t) => ({ ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct: 25, included: true })),
-    ]);
+    const existingSum = tickers.reduce((sum, t) => sum + t.capPct, 0);
+    let remaining = Math.max(0, 100 - existingSum);
+    const newTickers = added.map((t) => {
+      const capPct = Math.min(25, remaining);
+      remaining = Math.max(0, remaining - capPct);
+      return { ticker: t, group: "other" as const, price: 0, blendedRocPerCycle: 0, capPerContract: 0, callIv: 0, putIv: 0, annualGrowthPct: 0, capPct, included: true };
+    });
+    setTickers([...tickers, ...newTickers]);
     setExtraTickers("");
   };
 
@@ -720,9 +724,14 @@ export default function WheelSimulator() {
                   min={0}
                   max={25}
                   value={t.capPct}
-                  onChange={(e) => updateTicker(i, "capPct", Math.min(25, Math.max(0, parseFloat(e.target.value) || 0)))}
+                  onChange={(e) => {
+                    const raw = Math.min(25, Math.max(0, parseFloat(e.target.value) || 0));
+                    const othersSum = tickers.reduce((sum, tk, idx) => (idx === i ? sum : sum + tk.capPct), 0);
+                    const maxAllowed = Math.max(0, 100 - othersSum);
+                    updateTicker(i, "capPct", Math.min(raw, maxAllowed));
+                  }}
                   style={inputStyle(50)}
-                  title="Max share of total capital the auto-allocator can put into this ticker (0-25%)"
+                  title="Max share of total capital the auto-allocator can put into this ticker (0-25%, and the sum across all tickers can't exceed 100%)"
                 />
               </td>
               <td style={{ padding: "6px 10px", color: "#9aa0a6" }}>{fmtUsd(startingCapital * (t.capPct / 100))}</td>
