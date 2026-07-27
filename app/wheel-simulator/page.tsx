@@ -34,8 +34,9 @@ type SimResult = {
   finalCapital: number;
   totalReturn: number;
   cycles: number;
-  timeline: { cycle: number; capital: number; addedTicker?: string }[];
+  timeline: { cycle: number; capital: number; idle: number; addedTicker?: string }[];
   allocation: Record<string, number>;
+  maxIdleStreak: number;
 };
 
 function loadScenarios(): Scenario[] {
@@ -66,6 +67,8 @@ function runSimulation(
   tickers.forEach((t) => (allocated[t.ticker] = 0));
   let idle = startingCapital;
   const timeline: SimResult["timeline"] = [];
+  let currentIdleStreak = 0;
+  let maxIdleStreak = 0;
 
   const totalCapital = () => idle + Object.values(allocated).reduce((a, b) => a + b, 0);
   const groupTotal = (group: string) =>
@@ -83,6 +86,7 @@ function runSimulation(
     // 2. Try to deploy idle cash into the best eligible ticker(s), respecting caps
     let addedTicker: string | undefined;
     let deployedSomething = true;
+    let deployedThisCycle = false;
     while (deployedSomething) {
       deployedSomething = false;
       const tc = totalCapital();
@@ -112,10 +116,14 @@ function runSimulation(
         allocated[pick.ticker] += pick.capPerContract;
         idle -= pick.capPerContract;
         deployedSomething = true;
+        deployedThisCycle = true;
       }
     }
 
-    timeline.push({ cycle, capital: totalCapital(), addedTicker });
+    currentIdleStreak = deployedThisCycle ? 0 : currentIdleStreak + 1;
+    maxIdleStreak = Math.max(maxIdleStreak, currentIdleStreak);
+
+    timeline.push({ cycle, capital: totalCapital(), idle, addedTicker });
   }
 
   const finalCapital = totalCapital();
@@ -125,6 +133,7 @@ function runSimulation(
     cycles: numCycles,
     timeline,
     allocation: allocated,
+    maxIdleStreak,
   };
 }
 
@@ -333,10 +342,28 @@ export default function WheelSimulator() {
             <div>Cycles run: <b>{result.cycles}</b></div>
           </div>
 
-          <MiniChart timeline={result.timeline} />
+          {result.maxIdleStreak >= 8 && (
+            <div style={{ background: "#3a2a14", border: "1px solid #6b4a1e", borderRadius: 6, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#f2a623" }}>
+              Idle cash sat unused for {result.maxIdleStreak} consecutive cycles at some point — your caps may be too tight relative to contract sizes to deploy capital efficiently. Consider raising the per-ticker or group cap, or adding lower-cost tickers.
+            </div>
+          )}
+
+          <MiniChart timeline={result.timeline} dte={dte} />
 
           <div style={{ fontSize: 12, color: "#9aa0a6", marginTop: 8 }}>
             Ticker additions: {result.timeline.filter((t) => t.addedTicker).map((t) => `${t.addedTicker} (cycle ${t.cycle})`).join(", ") || "none — starting tickers only"}
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 12, color: "#9aa0a6" }}>
+            <div style={{ marginBottom: 4, color: "#e6e8eb" }}>Final allocation</div>
+            {Object.entries(result.allocation)
+              .filter(([, amt]) => amt > 0)
+              .sort((a, b) => b[1] - a[1])
+              .map(([ticker, amt]) => (
+                <span key={ticker} style={{ marginRight: 16 }}>
+                  {ticker}: {fmtUsd(amt)}
+                </span>
+              ))}
           </div>
 
           <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
@@ -380,26 +407,56 @@ export default function WheelSimulator() {
   );
 }
 
-function MiniChart({ timeline }: { timeline: SimResult["timeline"] }) {
+function MiniChart({ timeline, dte }: { timeline: SimResult["timeline"]; dte: number }) {
   if (!timeline.length) return null;
-  const w = 640, h = 160, pad = 20;
+  const w = 640, h = 200, padL = 60, padR = 20, padT = 20, padB = 30;
   const max = Math.max(...timeline.map((t) => t.capital));
   const min = Math.min(...timeline.map((t) => t.capital));
   const range = max - min || 1;
-  const pts = timeline.map((t, i) => {
-    const x = pad + (i / (timeline.length - 1 || 1)) * (w - pad * 2);
-    const y = h - pad - ((t.capital - min) / range) * (h - pad * 2);
-    return `${x},${y}`;
-  });
+
+  const startDate = new Date();
+  const dateAt = (cycleIdx: number) => {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + cycleIdx * dte);
+    return d;
+  };
+  const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  const fmtUsd = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+  const x = (i: number) => padL + (i / (timeline.length - 1 || 1)) * (w - padL - padR);
+  const y = (cap: number) => h - padB - ((cap - min) / range) * (h - padT - padB);
+
+  const pts = timeline.map((t, i) => `${x(i)},${y(t.capital)}`);
+  const yTicks = [min, (min + max) / 2, max];
+  const xTickIdxs = [0, Math.floor((timeline.length - 1) / 2), timeline.length - 1];
+
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ background: "#14161b", borderRadius: 6 }}>
+      {yTicks.map((v, i) => (
+        <g key={i}>
+          <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="#2a2e37" strokeWidth={1} />
+          <text x={padL - 8} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize={10} fill="#9aa0a6">
+            {fmtUsd(v)}
+          </text>
+        </g>
+      ))}
+
       <polyline points={pts.join(" ")} fill="none" stroke="#7ee2a8" strokeWidth={2} />
+
       {timeline.map((t, i) =>
         t.addedTicker ? (
-          <circle key={i} cx={pad + (i / (timeline.length - 1 || 1)) * (w - pad * 2)}
-            cy={h - pad - ((t.capital - min) / range) * (h - pad * 2)} r={3} fill="#f2a623" />
+          <g key={i}>
+            <circle cx={x(i)} cy={y(t.capital)} r={3.5} fill="#f2a623" />
+            <title>{`${t.addedTicker} added — cycle ${t.cycle} (${fmtDate(dateAt(i))}), capital ${fmtUsd(t.capital)}`}</title>
+          </g>
         ) : null
       )}
+
+      {xTickIdxs.map((i) => (
+        <text key={i} x={x(i)} y={h - 8} textAnchor="middle" fontSize={10} fill="#9aa0a6">
+          {fmtDate(dateAt(i))}
+        </text>
+      ))}
     </svg>
   );
 }
