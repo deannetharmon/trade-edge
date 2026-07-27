@@ -1,3 +1,4 @@
+// app/wheel-simulator/page.tsx
 "use client";
 import { useState, useEffect } from "react";
 import { getAccessToken, getQuote, getChain } from "@/lib/scans/tastytrade-client";
@@ -88,11 +89,18 @@ function runSimulation(
       const eligible = tickers
         .filter((t) => {
           if (idle < t.capPerContract) return false;
-          const newTickerAlloc = allocated[t.ticker] + t.capPerContract;
-          if (newTickerAlloc > tc * perTickerCapPct) return false;
+          const currentAlloc = allocated[t.ticker];
+          // Always allow the first contract in a ticker — caps only block additional contracts
+          if (currentAlloc > 0) {
+            const newTickerAlloc = currentAlloc + t.capPerContract;
+            if (newTickerAlloc > tc * perTickerCapPct) return false;
+          }
           if (t.group === "mag7") {
-            const newGroupAlloc = groupTotal("mag7") + t.capPerContract;
-            if (newGroupAlloc > tc * groupCapPct) return false;
+            const currentGroupAlloc = groupTotal("mag7");
+            if (currentGroupAlloc > 0) {
+              const newGroupAlloc = currentGroupAlloc + t.capPerContract;
+              if (newGroupAlloc > tc * groupCapPct) return false;
+            }
           }
           return true;
         })
@@ -154,12 +162,14 @@ export default function WheelSimulator() {
   const removeTicker = (ticker: string) => setTickers(tickers.filter((t) => t.ticker !== ticker));
 
   const fetchOne = async (idx: number) => {
-    const t = tickers[idx];
-    const next = [...tickers];
-    next[idx] = { ...t, fetching: true, error: "" };
-    setTickers(next);
+    setTickers((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], fetching: true, error: "" };
+      return next;
+    });
 
     try {
+      const t = tickers[idx];
       const token = await getAccessToken();
       const [price, chainData] = await Promise.all([
         getQuote(t.ticker, token),
@@ -199,20 +209,24 @@ export default function WheelSimulator() {
       const cspRoc = cspCap > 0 ? (cspCredit * 100) / cspCap : 0;
       const blended = (ccRoc + cspRoc) / 2;
 
-      const updated = [...tickers];
-      updated[idx] = {
-        ...t,
-        price: p,
-        capPerContract: p * 100,
-        blendedRocPerCycle: blended,
-        fetching: false,
-        error: "",
-      };
-      setTickers(updated);
+      setTickers((prev) => {
+        const next = [...prev];
+        next[idx] = {
+          ...next[idx],
+          price: p,
+          capPerContract: p * 100,
+          blendedRocPerCycle: blended,
+          fetching: false,
+          error: "",
+        };
+        return next;
+      });
     } catch (err: any) {
-      const updated = [...tickers];
-      updated[idx] = { ...t, fetching: false, error: err.message || "Fetch failed" };
-      setTickers(updated);
+      setTickers((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], fetching: false, error: err.message || "Fetch failed" };
+        return next;
+      });
     }
   };
 
