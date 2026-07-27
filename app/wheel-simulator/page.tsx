@@ -32,6 +32,8 @@ type Scenario = {
   tickers: TickerData[];
   savedAt: string;
   result?: SimResult;
+  totalWeeklySimple?: number; // snapshot of the live weekly-income estimate at save time
+  totalWeeklyRealistic?: number;
 };
 
 type SimResult = {
@@ -549,6 +551,7 @@ export default function WheelSimulator() {
       name: scenarioName.trim(),
       startingCapital, dte, horizonMonths, groupCapPct,
       tickers, savedAt: new Date().toISOString(), result,
+      totalWeeklySimple, totalWeeklyRealistic,
     };
     const updated = [...scenarios, s];
     setScenarios(updated);
@@ -852,7 +855,7 @@ export default function WheelSimulator() {
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#1b1e24", textAlign: "left" }}>
-                {["Name", "Start capital", "Horizon", "Tickers", "Final capital", "Total return", ""].map((h) => (
+                {["Name", "Start capital", "Horizon", "Tickers", "Final capital", "Total return", "Wkly $ (Simple)", "Wkly $ (Realistic)", ""].map((h) => (
                   <th key={h} style={{ padding: "6px 10px", borderBottom: "1px solid #2a2e37" }}>{h}</th>
                 ))}
               </tr>
@@ -894,6 +897,8 @@ export default function WheelSimulator() {
                   <td style={{ padding: "6px 10px", fontSize: 11, color: "#9aa0a6" }}>{s.tickers.map((t) => t.ticker).join(", ")}</td>
                   <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{s.result ? fmtUsd(s.result.finalCapital) : "—"}</td>
                   <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{s.result ? fmtPct(s.result.totalReturn) : "—"}</td>
+                  <td style={{ padding: "6px 10px", color: "#7ee2a8" }}>{s.totalWeeklySimple ? fmtUsd(s.totalWeeklySimple) : "—"}</td>
+                  <td style={{ padding: "6px 10px", color: "#a78bfa" }}>{s.totalWeeklyRealistic ? fmtUsd(s.totalWeeklyRealistic) : "—"}</td>
                   <td style={{ padding: "6px 10px" }}>
                     <button
                       onClick={() => { setEditingScenarioId(s.id); setEditingScenarioName(s.name); }}
