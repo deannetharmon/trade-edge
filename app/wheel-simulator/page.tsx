@@ -673,10 +673,25 @@ export default function WheelSimulator() {
         <p style={{ color: "#9aa0a6", fontSize: 13, marginTop: 0 }}>
           Models actual price movement (GBM, using each ticker's live IV) and the real wheel mechanic — a CSP that finishes in-the-money switches to holding shares and selling calls; a call that finishes in-the-money sells the shares and switches back to CSP. Strikes are re-selected each cycle at your target delta relative to the simulated spot, so premium changes as price and time move, not held constant. Requires live-fetched IV per ticker (fetch above first).
         </p>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
-          <label>Target delta % <input type="number" value={targetDelta} onChange={(e) => setTargetDelta(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
-          <label>Annual drift % <input type="number" value={annualDrift} onChange={(e) => setAnnualDrift(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
-          <label>Simulation paths <input type="number" value={numPaths} onChange={(e) => setNumPaths(Math.max(20, parseInt(e.target.value) || 20))} style={inputStyle(60)} /></label>
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12, fontSize: 13, alignItems: "flex-start" }}>
+          <div>
+            <label>Target delta % <input type="number" value={targetDelta} onChange={(e) => setTargetDelta(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+            <div style={{ fontSize: 11, color: "#9aa0a6", maxWidth: 200, marginTop: 4 }}>
+              How far OTM each strike is picked, same idea as delta on your broker's chain. Typical wheel range: 20-35. Higher = closer to the money, more premium, more frequent assignment/call-away.
+            </div>
+          </div>
+          <div>
+            <label>Annual drift % <input type="number" value={annualDrift} onChange={(e) => setAnnualDrift(parseFloat(e.target.value) || 0)} style={inputStyle(50)} /></label>
+            <div style={{ fontSize: 11, color: "#9aa0a6", maxWidth: 220, marginTop: 4 }}>
+              Assumed yearly price drift baked into the simulated price path. 0 = no directional bias (conservative default). Try ~8-10 to reflect long-run market drift, or negative to stress-test a downturn.
+            </div>
+          </div>
+          <div>
+            <label>Simulation paths <input type="number" value={numPaths} onChange={(e) => setNumPaths(Math.max(20, parseInt(e.target.value) || 20))} style={inputStyle(60)} /></label>
+            <div style={{ fontSize: 11, color: "#9aa0a6", maxWidth: 200, marginTop: 4 }}>
+              Number of random price paths averaged for the result. 200 is a reasonable default; higher (500-1000) gives smoother, more stable percentiles but takes longer to compute.
+            </div>
+          </div>
         </div>
         <button onClick={runRealistic} disabled={runningRealistic} style={{ ...btnStyle, background: "#7c3aed", color: "#fff", border: "none" }}>
           {runningRealistic ? "Running Monte Carlo…" : "Run realistic simulation"}
