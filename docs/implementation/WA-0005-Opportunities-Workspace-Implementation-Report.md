@@ -354,7 +354,142 @@ The round-4 implementation report (§2, §9, unmodified text preserved above wit
 - **Round 4's committed job-identity architecture (`screenerJobStore.ts`'s `lastResultsAffectingJobId`) and the Mission Control lifecycle signal plumbing itself (`beginRecommendationsEvaluation()`/`failRecommendationsEvaluation()`, threaded through `buildMissionControlViewModel.ts`) are unmodified this round** — round 5 fixed how `NewOpportunitiesSection` and `app/screener/page.tsx`'s own render gates CONSUME these existing signals, not the signals' production.
 - **No git write operation was performed** during this round — every change described in §10.7 remains an uncommitted working-tree change (`git status --short`, §10.8). `planning/SPRINT_STATUS.md` was NOT touched by round 5 (§10.6) — it is modified in `git status --short` solely because of the orchestrator's own prior, post-round-4 update, which predates this round's work.
 
-**Status: implementation complete and awaiting Product Owner review.** WA-0005 is not accepted, merged, or closed.
+**Historical round-5 status (superseded by §12):** that round was awaiting
+Product Owner review. WA-0005 is not accepted, complete, ready to merge,
+merged, or closed.
+
+## 12. Preview zero-analysis corrective round (2026-07-25)
+
+### 12.1 Observed failure, proven code path, and remaining hypothesis
+
+The repeat preview broad Ranked Scan completed with 9,425 results and no HTTP
+413, but Ranked Opportunities received a structurally successful aggregate
+with zero analyses.
+
+Code inspection proves:
+
+- `lib/scans/ranked-scan-runner.ts` deliberately returns the exhaustive Ranked
+  Scan population.
+- Ranked rows retain the checklist `qualified` flag.
+- `buildBatchedRecommendationTransportPlan()` passed that exhaustive
+  population to `screenResultsToAutopilotCandidates()`.
+- The canonical adapter deliberately skips every `!qualified` row. `qualified`
+  is used only for this adapter admission decision; it is not represented on
+  `AutopilotCandidate` and cannot alter downstream pipeline, decision, or
+  ranking semantics.
+- If all broad rows are unqualified, the plan contains zero candidates and
+  zero batches and the former transport returned success with an empty
+  `recommendations` array. No route, engine, aggregation, global ranking, or
+  publication step receives a candidate in that scenario.
+
+The engine was also inspected directly. It emits a `DecisionAnalysis` for
+pipeline validation failures and portfolio pre-gate blocks; it does not omit
+rejected candidates. Per-batch transport aggregation uses `push`, so an empty
+batch cannot overwrite earlier analyses. `availableCapital: 0` is applied only
+after aggregation in the Opportunity Engine and remains unchanged.
+
+Tests establish that this path is reproducible and that ranked-only admission
+allows real unqualified candidate structures to reach evaluation without
+adding a `qualified` property downstream. They do **not** establish that all
+9,425 deployed rows were eliminated this way.
+
+The deployed root cause therefore remains a leading hypothesis pending preview
+telemetry. Vercel runtime logs were not available in this workspace: no Vercel
+CLI/session is installed. The next preview must capture the new collection-
+derived summary described in §12.2.
+
+The displayed status counts (9,245 + 2 + 146 + 33 = 9,426) prove one overlapping
+classification relative to the 9,425-row population. Those labels/counts are
+not emitted anywhere in the authorized WA-0005 files or elsewhere in this
+checkout (`rg` found no such status-breakdown implementation). The categories
+are either overlapping or one producer has an off-by-one error; the current
+code cannot distinguish those cases. The producer must be identified from
+preview UI/runtime evidence or separately authorized when its exact path is
+known. No speculative counting rule was added. This discrepancy remains open
+and blocks final WA-0005 acceptance/merge, though it need not block an
+approved diagnostic preview.
+
+### 12.2 Narrow correction
+
+The mounted Screener explicitly passes its existing `screenMode === "rank"`
+provenance into the transport. For Ranked Scan only, an ephemeral adapter input
+copy sets the adapter's admission flag for rows with a real `bestCandidate`.
+The canonical output has no `qualified` field, so downstream qualification or
+decision semantics are not relabeled. Curated/filter scans retain the
+adapter's existing qualification behavior. Candidate adaptation,
+duplicate-affinity co-location, exact byte partitioning, sequential submission,
+route validation, engine rules, and canonical complete-set ranking remain
+unchanged.
+
+A non-empty scan that produces no canonical candidates now fails with the
+neutral message `Recommendation evaluation produced no canonical candidates.`
+A complete multi-batch evaluation returning zero analyses fails with
+`Recommendation evaluation completed without candidate analyses.` The
+transport never claims a prior publication exists. The mounted page adds
+prior-publication-preservation copy only when it actually holds prior
+opportunities; otherwise first-evaluation failures remain neutral. Both paths
+reach Mission Control's existing evaluation-failure lifecycle signal.
+
+Each completed, current Ranked evaluation emits one developer-safe structured
+console summary derived from the actual collections. It contains:
+
+- raw result count;
+- results with `bestCandidate`;
+- `qualified: true` and `qualified: false` counts;
+- canonical candidate and duplicate-affinity-group counts;
+- HTTP batch and submitted-candidate counts;
+- per-batch candidate and returned-analysis counts;
+- total returned analyses;
+- analyses passed through complete-set global ranking;
+- final published opportunity count.
+
+No symbols, candidates, contracts, account data, or request bodies are logged.
+This is the required evidence for deciding whether qualified filtering caused
+the deployed failure and, if not, locating the actual loss stage.
+
+The 900,000-byte ceiling, busy retry bounds, abort/supersession behavior,
+first/mid-evaluation kill switch, Targeted Scan exclusion, frozen
+`availableCapital: 0`, financial rules, and ranking rules are unchanged.
+
+### 12.3 Regression coverage added
+
+- Exhaustive checklist-unqualified Ranked rows reach canonical evaluation.
+- Curated/filter admission remains unchanged.
+- The downstream candidate is not falsely labeled qualified.
+- Stage diagnostics match the real source/result collections.
+- At least three sequential batches retain the exact expected analysis IDs,
+  with no loss or duplicates, across an empty intervening batch.
+- Later analyses append and canonical global ranking runs on the complete
+  aggregate, producing the expected complete-set order.
+- An all-empty successful aggregate becomes a truthful publication failure.
+- First no-candidate and no-analysis errors contain no prior-publication claim.
+- Zero capital retains a conditional/non-RECOMMENDED analysis.
+- The mounted Screener publishes the complete exhaustive Ranked aggregate.
+- The mounted summary includes every client-side adaptation, transport,
+  ranking, and publication count.
+- The mounted Screener preserves prior publication and exposes an alert when
+  a refresh completes with zero analyses; only that state says prior results
+  remain visible.
+
+Existing aggregation, global-ranking equivalence, byte-ceiling, structural
+validation, retry, abort, supersession, late-response, kill-switch, refresh,
+and prior-publication tests remain in place.
+
+### 12.4 Validation and acceptance state
+
+| Check | Command | Result |
+|---|---|---|
+| Focused transport + mounted page | `npm test -- lib/recommendations/__tests__/screenerRecommendationTransport.test.ts app/screener/__tests__/ScreenerPage.test.tsx` | Blocked before collection, exit 127: `vitest: command not found`. |
+| Complete suite (single attempt) | `npm test` | Blocked before collection, exit 127: `vitest: command not found`. |
+| TypeScript (single attempt) | `tsc --noEmit -p tsconfig.json` | Blocked immediately, exit 127: `command not found: tsc`. |
+| Production build (single attempt) | `npm run build` | Blocked before compilation, exit 127: `next: command not found`. |
+
+Dependencies were not inspected, installed, or repaired. These are environment
+blockers, not passing results and not product-code failures.
+
+WA-0005 remains unaccepted, unmerged, and awaiting Paul’s review plus a repeat
+Vercel broad-scan/refresh validation with the diagnostic summary captured. No
+files were staged, committed, pushed, merged, or stashed.
 
 ---
 

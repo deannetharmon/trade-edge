@@ -397,7 +397,7 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
     expect(screen.queryByText('No ranked opportunities to display.')).not.toBeInTheDocument();
   });
 
-  it('AC-18 (state 5): scan results existed, evaluation produced zero analyses -- distinct message, never the generic panel copy', async () => {
+  it('AC-18 (state 5): first evaluation with zero analyses fails truthfully without claiming prior results exist', async () => {
     kv.set('results', [makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -409,10 +409,11 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
     renderScreenerPage();
 
     await waitFor(() =>
-      expect(screen.getByText('Scan results existed, but the evaluation service produced no candidate analyses.')).toBeInTheDocument(),
+      expect(screen.getByText('Recommendation evaluation completed without candidate analyses.')).toBeInTheDocument(),
     );
+    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Candidates were analyzed, but none could be adapted or ranked.')).not.toBeInTheDocument();
-    expect(screen.queryByText('No ranked opportunities to display.')).not.toBeInTheDocument();
+    expect(screen.getByText('Recommendation evaluation completed without candidate analyses.').closest('[role="alert"]')).not.toBeNull();
   });
 });
 
@@ -503,7 +504,7 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
     expect(screen.getByText(/Available capital is not connected for this scan/)).toBeInTheDocument();
   });
 
-  it('state 5 (zero analyses at all): the capital-limitation notice still renders', async () => {
+  it('a first zero-analysis failure still renders the frozen capital-limitation notice', async () => {
     kv.set('results', [makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -515,8 +516,9 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
     renderScreenerPage();
 
     await waitFor(() =>
-      expect(screen.getByText('Scan results existed, but the evaluation service produced no candidate analyses.')).toBeInTheDocument(),
+      expect(screen.getByText('Recommendation evaluation completed without candidate analyses.')).toBeInTheDocument(),
     );
+    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Available capital is not connected for this scan/)).toBeInTheDocument();
   });
 
@@ -996,6 +998,173 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     expect(recommendationCalls).toHaveLength(1);
     expect(publishedAnalysisCounts).toEqual([2]);
     unsubscribe();
+  });
+
+  it('publishes the complete Ranked Scan aggregate when its real rows are checklist-unqualified', async () => {
+    const manager = renderRankedScanScreenerPage();
+    const submittedSymbols: string[] = [];
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      submittedSymbols.push(...candidates.map((candidate) => candidate.symbol));
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: candidates.map((candidate, index) =>
+              makeAnalysisForCandidate(candidate, index)),
+            duplicates: [],
+            candidatesScanned: candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    let task: any;
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Exhaustive ranked scan' }); });
+    act(() => {
+      manager.completeTask(task.id, {
+        results: [
+          makeScreenResult({
+            symbol: 'AAPL',
+            qualified: false,
+            ruleSetApplied: 'ranked-broad',
+            failReasons: ['Below fit threshold'],
+          }),
+          makeScreenResult({
+            symbol: 'MSFT',
+            qualified: false,
+            ruleSetApplied: 'ranked-broad',
+            failReasons: ['Risk threshold'],
+          }),
+        ],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
+    expect(submittedSymbols).toEqual(['AAPL', 'MSFT']);
+    const rankedSection = document.getElementById('ranked-opportunities')!;
+    expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
+    expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
+    expect(screen.queryByText('Scan results existed, but the evaluation service produced no candidate analyses.')).not.toBeInTheDocument();
+    expect(consoleInfo).toHaveBeenCalledWith(
+      '[WA-0005] ranked-opportunities evaluation summary',
+      expect.objectContaining({
+        rawResultCount: 2,
+        resultsWithBestCandidate: 2,
+        qualifiedTrueCount: 0,
+        qualifiedFalseCount: 2,
+        canonicalCandidateCount: 2,
+        duplicateAffinityGroupCount: 2,
+        httpBatchCount: 1,
+        submittedCandidateCount: 2,
+        returnedAnalysisCount: 2,
+        batchCandidateCounts: [2],
+        batchAnalysisCounts: [2],
+        globallyRankedAnalysisCount: 2,
+        publishedOpportunityCount: 2,
+      }),
+    );
+    consoleInfo.mockRestore();
+  });
+
+  it('treats an all-empty batch aggregate as evaluation failure and preserves the prior publication', async () => {
+    const manager = renderRankedScanScreenerPage();
+    let returnEmpty = false;
+    (globalThis.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/autopilot/recommendations') {
+        return Promise.reject(new Error('network disabled in test'));
+      }
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          result: {
+            recommendations: returnEmpty ? [] : candidates.map(makeAnalysisForCandidate),
+            duplicates: [],
+            candidatesScanned: candidates.length,
+            killSwitchActive: false,
+          },
+        }),
+      });
+    });
+
+    let first: any;
+    act(() => { first = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan' }); });
+    act(() => {
+      manager.completeTask(first.id, {
+        results: [makeScreenResult({ symbol: 'AAPL', ruleSetApplied: 'ranked-broad' })],
+        rawScanCache: [],
+      });
+    });
+    await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
+
+    returnEmpty = true;
+    let refresh: any;
+    act(() => { refresh = manager.createTask({ kind: 'ranked-scan', title: 'Empty evaluation refresh' }); });
+    act(() => {
+      manager.completeTask(refresh.id, {
+        results: [makeScreenResult({ symbol: 'MSFT', ruleSetApplied: 'ranked-broad' })],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText(/completed without candidate analyses/)).toBeInTheDocument());
+    expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL');
+    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(screen.getByText(/completed without candidate analyses/).closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByText(/last successfully published ranked opportunities remain visible/i)).toBeInTheDocument();
+  });
+
+  it('reports a first no-canonical-candidate evaluation without inventing prior publication', async () => {
+    const manager = renderRankedScanScreenerPage();
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let task: any;
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'No candidate ranked scan' }); });
+    act(() => {
+      manager.completeTask(task.id, {
+        results: [makeScreenResult({
+          qualified: false,
+          bestCandidate: null,
+          ruleSetApplied: 'ranked-broad',
+        })],
+        rawScanCache: [],
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText('Recommendation evaluation produced no canonical candidates.')).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
+    expect((globalThis.fetch as any).mock.calls.filter(
+      ([url]: [string]) => url === '/api/autopilot/recommendations',
+    )).toHaveLength(0);
+    expect(consoleInfo).toHaveBeenCalledWith(
+      '[WA-0005] ranked-opportunities evaluation summary',
+      expect.objectContaining({
+        rawResultCount: 1,
+        resultsWithBestCandidate: 0,
+        qualifiedTrueCount: 0,
+        qualifiedFalseCount: 1,
+        canonicalCandidateCount: 0,
+        duplicateAffinityGroupCount: 0,
+        httpBatchCount: 0,
+        submittedCandidateCount: 0,
+        returnedAnalysisCount: 0,
+        globallyRankedAnalysisCount: 0,
+        publishedOpportunityCount: 0,
+      }),
+    );
+    consoleInfo.mockRestore();
   });
 
   it('a broad result set makes multiple byte-bounded requests but publishes only once after the complete aggregate', async () => {

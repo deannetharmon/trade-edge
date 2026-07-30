@@ -260,6 +260,141 @@ describe('screener recommendation transport', () => {
     expect(new Set(observedIds).size).toBe(8);
   });
 
+  it('evaluates exhaustive Ranked Scan rows even when the legacy checklist flag is false', async () => {
+    const ranked = makeResult(1, {
+      qualified: false,
+      ruleSetApplied: 'ranked-broad',
+      failReasons: ['Below fit threshold'],
+    });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      return response({
+        result: {
+          recommendations: candidates.map((candidate) => makeAnalysis(candidate, 3)),
+          duplicates: [],
+          candidatesScanned: candidates.length,
+          killSwitchActive: false,
+        },
+      });
+    });
+
+    const body = await evaluateScreenResultsInBatches([ranked], {
+      fetch: fetchMock,
+      includeUnqualifiedCandidates: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(body.result.recommendations).toHaveLength(1);
+    expect(body.result.recommendations[0].recommendation.status).toBe('conditional');
+    expect(body.result.recommendations[0].candidate).not.toHaveProperty('qualified');
+    expect(body.diagnostics).toMatchObject({
+      rawResultCount: 1,
+      resultsWithBestCandidate: 1,
+      qualifiedTrueCount: 0,
+      qualifiedFalseCount: 1,
+      canonicalCandidateCount: 1,
+      duplicateAffinityGroupCount: 1,
+      httpBatchCount: 1,
+      submittedCandidateCount: 1,
+      returnedAnalysisCount: 1,
+      batchCandidateCounts: [1],
+      batchAnalysisCounts: [1],
+    });
+  });
+
+  it('retains exact analyses across an empty intervening batch and globally ranks only the complete aggregate', async () => {
+    const results = Array.from({ length: 6 }, (_, index) => makeResult(index));
+    let call = 0;
+    const expectedAnalyses: DecisionAnalysis[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      call += 1;
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      const analyses = call === 2
+        ? []
+        : candidates.map((candidate, index) => {
+            const score = 100 - (call * 10) - index;
+            const analysis = makeAnalysis(candidate, score);
+            expectedAnalyses.push(analysis);
+            return analysis;
+          });
+      return response({
+        result: {
+          recommendations: analyses,
+          duplicates: [],
+          candidatesScanned: candidates.length,
+          killSwitchActive: false,
+        },
+      });
+    });
+
+    const body = await evaluateScreenResultsInBatches(results, {
+      fetch: fetchMock,
+      maxRequestBytes: 1_000,
+    });
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+    const expectedIds = expectedAnalyses.map((analysis) => analysis.id);
+    const aggregateIds = body.result.recommendations.map((analysis) => analysis.id);
+    expect(aggregateIds).toEqual(expectedIds);
+    expect(new Set(aggregateIds).size).toBe(expectedIds.length);
+    expect(body.diagnostics.batchAnalysisCounts[0]).toBeGreaterThan(0);
+    expect(body.diagnostics.batchAnalysisCounts[1]).toBe(0);
+    expect(body.diagnostics.batchAnalysisCounts.slice(2).some((count) => count > 0)).toBe(true);
+    expect(body.diagnostics.returnedAnalysisCount).toBe(expectedIds.length);
+
+    const globallyRanked = opportunityRecommendationsFromApiResponse(body, new Date(0));
+    const canonicalCompleteSetRanking = opportunityRecommendationsFromApiResponse(
+      { result: { recommendations: [...expectedAnalyses].reverse() } },
+      new Date(0),
+    );
+    expect(globallyRanked.recommendations).toEqual(canonicalCompleteSetRanking.recommendations);
+  });
+
+  it('retains curated-scan qualification admission and reports a neutral first-evaluation failure', async () => {
+    const curated = makeResult(1, {
+      qualified: false,
+      ruleSetApplied: 'strict-curated',
+    });
+
+    expect(() => buildBatchedRecommendationTransportPlan([curated])).toThrow(
+      'Recommendation evaluation produced no canonical candidates.',
+    );
+    expect(() => buildBatchedRecommendationTransportPlan([curated])).not.toThrow(
+      /prior ranked-opportunity publication was preserved/,
+    );
+  });
+
+  it('treats a structurally successful all-empty evaluation as publication failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      result: {
+        recommendations: [],
+        duplicates: [],
+        candidatesScanned: 1,
+        killSwitchActive: false,
+      },
+    }));
+
+    const evaluation = evaluateScreenResultsInBatches([makeResult(1)], {
+      fetch: fetchMock,
+    });
+    await expect(evaluation).rejects.toThrow('completed without candidate analyses');
+    await expect(evaluation).rejects.not.toThrow(/prior ranked-opportunity publication was preserved/);
+  });
+
+  it('keeps zero capital from removing a conditional Ranked Scan analysis', async () => {
+    const result = makeResult(1, { qualified: false, ruleSetApplied: 'ranked-broad' });
+    const plan = buildBatchedRecommendationTransportPlan([result], RECOMMENDATION_SAFE_REQUEST_BYTES, true);
+    const analysis = makeAnalysis(plan.batches[0].candidates[0], 3);
+    const ranked = opportunityRecommendationsFromApiResponse(
+      { result: { recommendations: [analysis] } },
+      new Date(0),
+    );
+
+    expect(analysis.recommendation.status).toBe('conditional');
+    expect(ranked.recommendations).toHaveLength(1);
+    expect(ranked.recommendations[0].disposition).not.toBe('RECOMMENDED');
+  });
+
   it('preserves canonical complete-set global ranking after partitioned transport', async () => {
     const results = Array.from({ length: 12 }, (_, index) => makeResult(index));
     const allAnalyses: DecisionAnalysis[] = [];
