@@ -3211,10 +3211,16 @@ function BatchConfirmModal({
                 displayedExpectedPnlDollars: (i.closeIdentity.entryPricePointsPerUnit - parsed) * i.closeIdentity.quantity * 100,
               })
             : i.safetyCheck;
-          return { ...i, limitPrice: parsed, orderBody: updatedBody, safetyCheck: updatedSafetyCheck };
+          // PT-FIX-DRIFT: mark this item's price as operator-set -- both
+          // manual typing and the profit-capture slider (Snap to breakeven /
+          // Snap to fill) write into limitOverrides, so this flag covers
+          // both. The pre-submit drift guard below uses it to tell "you
+          // moved this on purpose" apart from a stale auto-computed default,
+          // and never silently substitutes a price you explicitly chose.
+          return { ...i, limitPrice: parsed, orderBody: updatedBody, safetyCheck: updatedSafetyCheck, isUserSet: true };
         }
       }
-      return i;
+      return { ...i, isUserSet: false };
     });
 
   const totalDebit = activeItems.reduce((s, i) => s + i.limitPrice, 0);
@@ -3298,13 +3304,32 @@ function BatchConfirmModal({
                 if (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') {
                   const pctFromLive = Math.abs(item.limitPrice - livePerContract) / livePerContract;
                   if (pctFromLive > 0.30) {
+                    // PT-FIX-DRIFT: an operator-set price (Snap to breakeven /
+                    // Snap to fill / manual override -- see isUserSet above)
+                    // must NEVER be silently swapped for a "marketable" price
+                    // just because it's far from live -- that silent swap is
+                    // exactly what turned a breakeven close into a
+                    // market-price fill with a large unintended loss. Block
+                    // the item instead, with both P&Ls shown, so the operator
+                    // decides on a resubmit rather than the code deciding for
+                    // them.
+                    if ((item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (item as any).isUserSet) {
+                      const yourPnl = (creditPerContract - item.limitPrice) * qty * 100;
+                      const livePnl = (creditPerContract - livePerContract) * qty * 100;
+                      throw new Error(
+                        `Blocked: your price $${item.limitPrice.toFixed(2)} (P&L $${yourPnl.toFixed(2)}) is ${(pctFromLive * 100).toFixed(0)}% from live $${livePerContract.toFixed(2)} (P&L $${livePnl.toFixed(2)}). Refresh the quote and resubmit to confirm.`
+                      );
+                    }
                     let freshLimit: number;
                     if (item.action === 'TAKE_PROFIT') {
                       freshLimit = Math.max(parseFloat(Math.min(creditPerContract * (1 - item.pos.profitTarget), livePerContract - 0.01).toFixed(2)), 0.01);
                     } else {
                       // CUT_LOSSES / CLOSE_ROLL: price to the marketable side
-                      // (balanced mid->natural) so the close fills. Fall back to
-                      // livePerContract if the per-leg optimizer can't quote.
+                      // (balanced mid->natural) so the close fills. Only
+                      // reached when the price was NOT operator-set -- i.e.
+                      // it's an auto-computed default that's gone stale.
+                      // Fall back to livePerContract if the per-leg
+                      // optimizer can't quote.
                       const optimized = await fetchCloseLimit(item.pos, token, 0.5).catch(() => null);
                       freshLimit = (optimized != null && optimized > 0)
                         ? parseFloat(Math.max(optimized, 0.01).toFixed(2))
@@ -3316,7 +3341,7 @@ function BatchConfirmModal({
                 }
               }
             } catch (priceCheckErr: any) {
-              if (String(priceCheckErr.message).includes('already hit') || String(priceCheckErr.message).includes('≥ live')) {
+              if (String(priceCheckErr.message).includes('already hit') || String(priceCheckErr.message).includes('≥ live') || String(priceCheckErr.message).includes('Blocked:')) {
                 throw priceCheckErr;
               }
               console.warn(`Pre-submit price check failed for ${item.pos.symbol}:`, priceCheckErr.message);
