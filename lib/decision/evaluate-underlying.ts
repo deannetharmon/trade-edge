@@ -1,4 +1,4 @@
-import { getDecisionHorizon } from '../market-intelligence/horizon';
+import { resolveDecisionHorizon } from '../market-intelligence/horizon';
 import { buildMarketStateEvidence } from '../market-intelligence/market-state';
 import type { PointInTimeMarketData } from '../market-intelligence/types';
 import { evaluateEventRisk, type KnownMarketEvent } from './event-risk';
@@ -25,7 +25,7 @@ export interface UnderlyingDecisionFoundation {
 }
 
 export function evaluateUnderlyingFoundation(input: EvaluateUnderlyingInput): UnderlyingDecisionFoundation {
-  const horizon = getDecisionHorizon(input.dte);
+  const horizon = resolveDecisionHorizon(input.dte).horizon;
   const marketState = buildMarketStateEvidence(input.marketData.bars);
   const setup = classifySetup(marketState);
   const horizonEnd = new Date(Date.parse(input.evaluatedAt) + input.dte * 86_400_000).toISOString();

@@ -9,7 +9,7 @@ import { evaluateIcThesis } from '../strategy-thesis/ic';
 import { evaluateStrategyEligibility } from '../strategy-eligibility';
 
 const bars = (count: number): PointInTimeBar[] => Array.from({ length: count }, (_, i) => ({
-  t: `2026-01-${String((i % 28) + 1).padStart(2, '0')}T21:00:00.000Z`,
+  t: i,
   o: 100 + i,
   h: 103 + i,
   l: 98 + i,
@@ -59,13 +59,13 @@ describe('SQ-0001A foundation invariants', () => {
   it('treats BPS and BCS independently rather than by a shared strategy result', () => {
     const state = evidence({ direction: 'BULLISH' });
     const setup = classifySetup(state);
-    expect(evaluateBpsThesis({ bucket: 'CORE', minDte: 21, maxDte: 45, version: 'research-v1' }, state, setup).evidenceState).toBe('SUPPORTIVE');
-    expect(evaluateBcsThesis({ bucket: 'CORE', minDte: 21, maxDte: 45, version: 'research-v1' }, state, setup).evidenceState).toBe('CONTRADICTORY');
+    expect(evaluateBpsThesis('CORE', state, setup).evidenceState).toBe('SUPPORTIVE');
+    expect(evaluateBcsThesis('CORE', state, setup).evidenceState).toBe('CONTRADICTORY');
   });
 
   it('requires IC to preserve side-specific weakness', () => {
     const state = evidence({ direction: 'BULLISH' });
-    const thesis = evaluateIcThesis({ bucket: 'CORE', minDte: 21, maxDte: 45, version: 'research-v1' }, state, classifySetup(state));
+    const thesis = evaluateIcThesis('CORE', state, classifySetup(state));
     expect(thesis.upperContainment).toBe('WEAK');
     expect(thesis.weakerSide).toBe('UPPER');
     expect(thesis.evidenceState).toBe('CONTRADICTORY');
@@ -73,7 +73,7 @@ describe('SQ-0001A foundation invariants', () => {
 
   it('keeps insufficient evidence categorical at eligibility', () => {
     const state = evidence({ direction: 'UNCERTAIN', regime: 'TRANSITION' });
-    const thesis = evaluateBpsThesis({ bucket: 'CORE', minDte: 21, maxDte: 45, version: 'research-v1' }, state, classifySetup(state));
+    const thesis = evaluateBpsThesis('CORE', state, classifySetup(state));
     const eligibility = evaluateStrategyEligibility({
       thesis,
       horizon: thesis.horizon,
@@ -86,7 +86,7 @@ describe('SQ-0001A foundation invariants', () => {
 
   it('blocks otherwise supportive thesis when a known binary event is in horizon', () => {
     const state = evidence({ direction: 'BULLISH' });
-    const thesis = evaluateBpsThesis({ bucket: 'CORE', minDte: 21, maxDte: 45, version: 'research-v1' }, state, classifySetup(state));
+    const thesis = evaluateBpsThesis('CORE', state, classifySetup(state));
     const eligibility = evaluateStrategyEligibility({
       thesis,
       horizon: thesis.horizon,
