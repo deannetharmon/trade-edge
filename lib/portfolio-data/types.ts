@@ -10,6 +10,7 @@
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 import type { PositionValuation } from '@/lib/positionValuation';
 import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
+import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence } from '@/lib/portfolio/stopLossPolicy';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
@@ -106,8 +107,46 @@ export interface Position {
   hasGtc: boolean;
   gtcOrderId: string | null;       // ID of the working profit-target GTC order
   gtcOrderPrice: number | null;    // current limit price on that GTC order
+  // Legacy display bucket, retained for backward compatibility with
+  // existing consumers (e.g. lib/portfolio-intelligence/health/score.ts).
+  // Derived FROM stopLossClassification -- see classifyPositionStopLoss's
+  // doc comment for the mapping. Do not add new logic against this field;
+  // use stopLossClassification/stopLossPolicy instead.
   stopLossStatus: StopStatus;
   stopLossPrice: number | null;
+  // TE-0002: canonical stop-loss model. `stopLossPolicy` is the recorded
+  // provenance for the CURRENTLY WORKING broker order when TradeEdge
+  // created/replaced it and the record still matches that order's id; null
+  // when no stop exists, or when the working order carries no matching
+  // TradeEdge-recorded policy (basis is then UNKNOWN -- never fabricated).
+  // `stopLossClassification` is the full 6-state classification (see
+  // lib/portfolio/stopLossPolicy.ts). `stopLossBreach` is the confirmation-
+  // aware breach evaluation used by getRecommendation() -- never a raw
+  // mid-OR-marketable check.
+  stopLossPolicy: StopLossPolicy | null;
+  stopLossClassification: StopClassification;
+  // Raw broker status string for the currently-matched stop order (e.g.
+  // 'Live', 'Filled') -- feeds mapBrokerStopStatus() so getRecommendation()
+  // can treat a broker-confirmed trigger/fill as authoritative. Null when
+  // there is no working stop order.
+  stopLossOrderStatus: string | null;
+  // TE-0002 corrective round 2: explicit per-leg/net bid-ask width evidence,
+  // computed once during loadPositions from real two-sided leg markets
+  // (never a mark/fallback price -- same "never fabricate" convention
+  // closeValue already follows). Feeds derivePositionQuoteQuality(), which
+  // replaces the old `pnlReliable && closeValue != null` heuristic that
+  // couldn't distinguish a narrow market from a genuinely wide one. Null
+  // when width couldn't be computed at all (e.g. no market data fetch
+  // occurred).
+  quoteWidthEvidence: QuoteWidthEvidence | null;
+  // Not persisted/stored -- always recomputed fresh from current
+  // currentValue/closeValue/snapshotHistory by getRecommendation() (and
+  // available to callers directly via lib/portfolio/stopLossPolicy's
+  // evaluateStopBreach + lib/portfolio-data/acquisition's
+  // buildStopBreachObservations). Optional here purely so intermediate
+  // Position construction in loadPositions() doesn't need to fabricate a
+  // value before snapshot history is attached.
+  stopLossBreachState?: StopBreachState;
   stockPrice: number | null;
   buffer: number | null;
   theta: number | null;
@@ -180,6 +219,20 @@ export interface PositionSnapshot {
   date: string;          // YYYY-MM-DD, the day this snapshot was taken
   dte: number;
   currentValue: number | null;
+  // TE-0002: marketable "if I closed now" buyback value, same convention as
+  // Position.closeValue. Optional/absent on snapshots captured before this
+  // field existed -- treated as "no marketable observation" (never
+  // backfilled/fabricated), which is exactly what evaluateStopBreach's
+  // observation model already expects for missing marketableValue.
+  closeValue?: number | null;
+  // TE-0002 corrective round 2: full ISO 8601 capture timestamp. Optional/
+  // absent on snapshots captured before this field existed, or if a caller
+  // only ever recorded the date. buildStopBreachObservations() treats its
+  // absence as `preciseTimestamp: false` -- a date-only historical entry
+  // remains valid CONTEXTUAL evidence but can never by itself satisfy an
+  // intraday stop-confirmation streak (see stopLossPolicy.ts's
+  // BreachObservation doc comment).
+  capturedAt?: string | null;
   pnl: number | null;
   pnlPct: number | null;
   iv: number | null;
@@ -204,10 +257,23 @@ export interface GtcOrder {
   id: string; price: string; stopPrice: string | null;
   orderType: string; timeInForce: string; legs: GtcOrderLeg[];
   complexOrderId?: string; // set when this order is part of a complex/OCO order
+  // TE-0002: raw broker status string (e.g. 'Live', 'Filled', 'Cancelled'),
+  // used to detect an authoritative broker-confirmed stop trigger/fill --
+  // see lib/portfolio/stopLossPolicy.ts's BrokerStopStatus. Null when the
+  // raw order payload didn't carry a status field.
+  status?: string | null;
 }
 
 
-export interface StopLossInfo { status: StopStatus; price: number | null; }
+export interface StopLossInfo {
+  status: StopStatus;
+  price: number | null;
+  // TE-0002 additions -- see the Position interface's doc comment.
+  policy: StopLossPolicy | null;
+  classification: StopClassification;
+  orderId: string | null;
+  orderStatus: string | null;
+}
 
 
 export interface PriceSupportAnalysis {
