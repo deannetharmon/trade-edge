@@ -11,10 +11,10 @@ import type {
   CheckResult, SpreadCandidate, TrendResult, ScreenResult,
   RankConfig, DimensionScore, RawScanEntry,
 } from '@/lib/scans/types';
-import type { RulesType, CspRulesType } from '@/lib/scans/constants';
+import type { RulesType, CspRulesType, CcRulesType } from '@/lib/scans/constants';
 import {
   INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
-  DEFAULT_RULES, DEFAULT_ETF_RULES, DEFAULT_CSP_RULES, YAHOO_INDEX_CHART_MAP,
+  DEFAULT_RULES, DEFAULT_ETF_RULES, DEFAULT_CSP_RULES, DEFAULT_CC_RULES, YAHOO_INDEX_CHART_MAP,
   BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY,
   ESTIMATED_EARNINGS_CYCLE_DAYS,
 } from '@/lib/scans/constants';
@@ -31,6 +31,9 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp } from '@/lib/scans/csp-finder';
+// TE-0007C — Covered Call as a first-class Screener strategy.
+import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
+import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
@@ -1389,6 +1392,91 @@ function runCspChecklist(
 }
 
 
+// ── CC — Covered Call (TE-0007C) ────────────────────────────────────────────
+// Same pattern as runCspChecklist above: a dedicated checklist builder, not
+// forced through the spread-shaped runChecklist(). Unlike CSP, eligibility is
+// gated by share-coverage CAPACITY (computed server-side by
+// /api/covered-call-capacity, passed in here), not by an IVR band -- CC has
+// no IVR floor/ceiling of its own. The capacity check is reported through the
+// shared `checks.ivr` slot (ScreenResult's checks shape is fixed and shared
+// across every strategy card; repurposing this slot avoids widening that
+// shared type for a single strategy's one extra concept, and the UI's
+// row-4 label already renders whatever `reason` text is supplied here).
+function runCcChecklist(
+  symbol: string,
+  chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification?: 'index' | 'etf' | 'stock' },
+  price: number | null,
+  metrics: any,
+  ccRules: CcRulesType,
+  capacity: CoveredCallCapacity,
+  trendResult?: TrendResult
+): ScreenResult {
+  const failReasons: string[] = [];
+  const ivrValue = metrics.ivRank;
+  const earningsDate = metrics.earningsExpectedDate;
+
+  const capacityCheck: CheckResult = capacity.availableCoveredContracts > 0
+    ? { status: 'pass', value: `${capacity.availableCoveredContracts}`, reason: `${capacity.sharesOwned} shares owned` }
+    : (() => {
+        failReasons.push(capacity.oversubscribed
+          ? 'Existing/working short calls already exceed share coverage'
+          : 'No available covered-call capacity — shares already fully covered');
+        return { status: 'fail' as const, value: '0', reason: 'No available capacity' };
+      })();
+
+  const earningsCheck: CheckResult = !earningsDate
+    ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
+    : (() => {
+        const d = daysUntil(earningsDate);
+        if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
+        if (d <= ccRules.DTE_MAX) { failReasons.push(`Earnings in ${d}d — within expiry window`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' }; }
+        return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
+      })();
+  const earningsWithinExpiry = earningsCheck.status === 'fail';
+
+  const bestCandidate = capacityCheck.status !== 'fail'
+    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, earningsWithinExpiry })
+    : null;
+  if (!bestCandidate && !failReasons.length) failReasons.push(`No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
+
+  const oiCheck: CheckResult = !bestCandidate
+    ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
+    : bestCandidate.shortOI >= ccRules.OI_MIN
+      ? { status: 'pass', value: `${bestCandidate.shortOI}`, reason: `≥ ${ccRules.OI_MIN} minimum` }
+      : { status: 'warn', value: `${bestCandidate.shortOI}`, reason: `Below ${ccRules.OI_MIN} — fills may be difficult` };
+
+  const deltaCheck: CheckResult = bestCandidate
+    ? { status: 'pass', value: `Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: `Target ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX}` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const creditCheck: CheckResult = bestCandidate
+    ? { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${capacity.availableCoveredContracts} contract(s) · $${bestCandidate.ccPremiumPerContract?.toFixed(2) ?? '—'}/contract` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const rocCheck: CheckResult = bestCandidate
+    ? { status: (bestCandidate.ccPeriodYieldOnShares ?? 0) >= 0.5 ? 'pass' : 'warn', value: `${bestCandidate.ccPeriodYieldOnShares?.toFixed(2) ?? '—'}%`, reason: `Annualized ${bestCandidate.ccAnnualizedYieldOnShares?.toFixed(0) ?? '—'}%` }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const popCheck: CheckResult = bestCandidate
+    ? { status: (bestCandidate.pop ?? 0) >= 65 ? 'pass' : 'warn', value: `${bestCandidate.pop?.toFixed(0) ?? '—'}%`, reason: '1 − |delta|, call side' }
+    : { status: 'pending', value: '—', reason: 'No candidate' };
+
+  const qualified = capacityCheck.status === 'pass'
+    && earningsCheck.status === 'pass'
+    && oiCheck.status !== 'fail'
+    && bestCandidate !== null;
+
+  return {
+    symbol, strategy: 'CC', price, ivr: ivrValue,
+    ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+    qualified, bestCandidate, failReasons,
+    earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
+    underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CC',
+    checks: { ivr: capacityCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CC' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CC' } },
+  };
+}
+
+
 // ── UI Helpers ─────────────────────────────────────────────────────────────
 const statusColor = (s: string) => s === 'pass' ? 'text-emerald-500' : s === 'fail' ? 'text-red-500' : s === 'warn' ? 'text-yellow-500' : 'text-slate-400';
 const statusIcon = (s: string) => s === 'pass' ? '✓' : s === 'fail' ? '✗' : s === 'warn' ? '⚠' : '—';
@@ -2429,6 +2517,13 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
       </div>
     );
   }
+  if (c.strategy === 'CC') {
+    return (
+      <div className="text-xs shrink-0">
+        <span className={th.label}>Call </span><span className={`${th.text} font-medium`}>{c.shortStrike}</span>
+      </div>
+    );
+  }
   if (c.strategy === 'PMCC') {
     return (
       <div className="text-xs shrink-0">
@@ -3299,6 +3394,8 @@ const strategyScores = useMemo(() => {
     ? 'bg-purple-500/15 border-purple-500 text-purple-400'
     : result.strategy === 'CSP'
     ? 'bg-amber-500/15 border-amber-500 text-amber-400'
+    : result.strategy === 'CC'
+    ? 'bg-cyan-500/15 border-cyan-500 text-cyan-400'
     : 'bg-blue-500/15 border-blue-500 text-blue-500';
 
   const isShortTerm = rules.DTE_MAX <= 29;
@@ -3517,14 +3614,14 @@ const strategyScores = useMemo(() => {
             </> : <>
               <div className="text-xs shrink-0 w-20">
                 <div>
-                  <span className={th.label}>{c.strategy === 'CSP' ? 'Premium ' : 'Credit '}</span>
-                  <span className={`${c.strategy === 'CSP' ? 'text-emerald-400' : getCreditColor(c, result.isEtf ?? false)} font-bold`}>
+                  <span className={th.label}>{(c.strategy === 'CSP' || c.strategy === 'CC') ? 'Premium ' : 'Credit '}</span>
+                  <span className={`${(c.strategy === 'CSP' || c.strategy === 'CC') ? 'text-emerald-400' : getCreditColor(c, result.isEtf ?? false)} font-bold`}>
                     ${(c.totalCredit ?? c.credit).toFixed(2)}
                   </span>
                 </div>
                 <div>
-                  <span className={th.label}>{c.strategy === 'CSP' ? 'Ann. ROC ' : 'Cr Ratio '}</span>
-                  {c.strategy === 'CSP' ? (
+                  <span className={th.label}>{(c.strategy === 'CSP' || c.strategy === 'CC') ? 'Ann. Yield ' : 'Cr Ratio '}</span>
+                  {(c.strategy === 'CSP' || c.strategy === 'CC') ? (
                     <span className={`${(c.annualizedRoc ?? 0) >= 20 ? 'text-emerald-400' : (c.annualizedRoc ?? 0) >= 10 ? 'text-yellow-400' : 'text-red-400'} font-medium`}>
                       {c.annualizedRoc != null ? `${c.annualizedRoc.toFixed(0)}%` : '—'}
                     </span>
@@ -3539,8 +3636,8 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>POP </span><span className={`${th.text} font-medium`}>{c.pop != null ? `${c.pop.toFixed(0)}%` : '—'}</span></div>
                   <div className="text-[10px]">
                     <span className={th.label}>ROC </span>
-                    <span className={`${c.strategy === 'CSP' ? th.text : getRocColor(c, result.isEtf ?? false)} font-medium`}>
-                      {c.roc.toFixed(c.strategy === 'CSP' ? 1 : 0)}%
+                    <span className={`${(c.strategy === 'CSP' || c.strategy === 'CC') ? th.text : getRocColor(c, result.isEtf ?? false)} font-medium`}>
+                      {c.roc.toFixed((c.strategy === 'CSP' || c.strategy === 'CC') ? 1 : 0)}%
                     </span>
                   </div>
               </div>
@@ -3789,6 +3886,28 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
+          {c && c.strategy === 'CC' && (
+            <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CC — Covered Call, Written Against Owned Shares</p>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div><span className={th.label}>Call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
+                <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
+                <div><span className={th.label}>Owned shares: </span><span className={th.text}>{c.ccSharesOwned ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(gross {c.ccGrossCoveredContracts ?? '—'} contracts)</span></div>
+                <div><span className={th.label}>Existing / working short calls: </span><span className={th.text}>{c.ccExistingShortCallContracts ?? 0} / {c.ccWorkingShortCallContracts ?? 0}</span></div>
+                <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
+                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span></div>
+                <div><span className={th.label}>Strike vs stock: </span><span className={th.text}>{c.ccStrikeVsStockPct != null ? `+${c.ccStrikeVsStockPct.toFixed(1)}%` : '—'}</span></div>
+                <div><span className={th.label}>Strike vs cost basis: </span><span className={th.text}>{c.ccStrikeVsCostBasisPct != null ? `${c.ccStrikeVsCostBasisPct >= 0 ? '+' : ''}${c.ccStrikeVsCostBasisPct.toFixed(1)}%` : 'Unavailable'}</span></div>
+                <div><span className={th.label}>Assignment proceeds: </span><span className={th.text}>${c.ccAssignmentProceeds?.toLocaleString() ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract, strike × 100)</span></div>
+                <div><span className={th.label}>Max upside if called away: </span><span className={th.text}>{c.ccMaxUpsideIfCalledAway != null ? `$${c.ccMaxUpsideIfCalledAway.toFixed(2)}/share` : 'Unavailable'}</span></div>
+                <div><span className={th.label}>Period / annualized yield: </span><span className={th.text}>{c.ccPeriodYieldOnShares?.toFixed(2) ?? '—'}% / {c.ccAnnualizedYieldOnShares?.toFixed(0) ?? '—'}%</span></div>
+              </div>
+              {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
+              {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
+              <p className={`text-[9px] text-cyan-400/80 pt-1`}>Written against shares you already own. Assignment would mean selling 100 shares/contract at ${c.shortStrike}. Only enter if that's an acceptable outcome.</p>
+            </div>
+          )}
+
           {result.failReasons.length > 0 && (
             <div className={`pt-2 border-t ${th.border}`}>
               <p className="text-[10px] text-red-500 font-medium">{result.failReasons.join(' · ')}</p>
@@ -3797,7 +3916,7 @@ const strategyScores = useMemo(() => {
 
           {/* Action Buttons */}
           <div className="flex gap-2 mt-2">
-            {c && c.strategy !== 'CSP' && (
+            {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
@@ -3805,7 +3924,7 @@ const strategyScores = useMemo(() => {
                 ⚡ TRADE THIS
               </button>
             )}
-            {c && c.strategy !== 'CSP' && (
+            {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
               <button
                 onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
                 className="flex-1 py-2.5 border border-emerald-600 hover:bg-emerald-500/10 text-emerald-400 rounded-xl text-xs font-medium tracking-wider transition-colors"
@@ -3820,6 +3939,15 @@ const strategyScores = useMemo(() => {
               // spread logic to a single-leg CSP. Deferred to a follow-up ticket.
               <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
                 Manual entry only — CSP trade placement and "Find Better" are not yet wired up
+              </p>
+            )}
+            {c && c.strategy === 'CC' && (
+              // TE-0007C scope: no live order placement. A covered call has
+              // different safety requirements than a spread order (proof of
+              // share coverage at execution time) — that belongs to a future
+              // ticket, not a reuse of the spread order flow.
+              <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
+                Analysis only — CC trade placement is not yet enabled
               </p>
             )}
           </div>
@@ -5352,6 +5480,18 @@ export default function Home() {
   const [pmccTickers, setPmccTickers] = useState('');
   const [cspTickers, setCspTickers] = useState('');
   const [cspCashOverride, setCspCashOverride] = useState('');
+  // TE-0007C — CC's scan universe comes from verified account holdings, not
+  // a free-form ticker list (unlike CSP/PMCC), so its state shape differs:
+  // no `ccTickers` string, just the holdings the API reports plus a
+  // hide-only filter that can narrow (never add to) that verified set.
+  const [ccEligibleHoldings, setCcEligibleHoldings] = useState<Array<{
+    symbol: string; sharesOwned: number; costBasis: number | null;
+    grossCoveredContracts: number; existingShortCallContracts: number;
+    workingShortCallContracts: number; availableCoveredContracts: number; oversubscribed: boolean;
+  }>>([]);
+  const [ccBlockedHoldings, setCcBlockedHoldings] = useState<string[]>([]);
+  const [ccHiddenSymbols, setCcHiddenSymbols] = useState<string[]>([]);
+  const [ccHoldingsLoading, setCcHoldingsLoading] = useState(false);
   // NOTE: results/rawScanCache/resultsCachedAt/screenMode used to read
   // localStorage directly inside these useState lazy initializers. That
   // runs synchronously on first render on BOTH server (no localStorage ->
@@ -5573,6 +5713,12 @@ export default function Home() {
   const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
   const handleCspChange = (v: string) => { setCspTickers(v); clearResultsCache(); try { localStorage.setItem(LS_CSP, v); } catch {} };
   const handleCspCashChange = (v: string) => { setCspCashOverride(v); try { localStorage.setItem(LS_CSP_CASH, v); } catch {} };
+  // Hide-only toggle: can only narrow ccEligibleHoldings (verified by the
+  // API), never introduce a symbol that lacks verified coverage -- the
+  // ticket's "manual symbol filter must never add an uncovered symbol."
+  const toggleCcSymbol = (symbol: string) => {
+    setCcHiddenSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
+  };
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
 
   const parseTickers = normalizeTickerInput;
@@ -5917,6 +6063,110 @@ export default function Home() {
     }
   };
 
+  // Scan CC-eligible holdings only (TE-0007C). Unlike runCspScan, the
+  // universe here is NOT a free-form ticker list -- it's fetched fresh from
+  // /api/covered-call-capacity (the ticket's "clear refresh/reload state")
+  // and filtered to symbols the trader hasn't hidden. Manual filtering can
+  // only narrow this set (toggleCcSymbol above), never add an uncovered
+  // symbol, because the scan loop only ever iterates over what the API
+  // returned as eligible.
+  const runCcScan = async () => {
+    setError('');
+    setCcHoldingsLoading(true);
+    setLoading(true);
+    startScreenerJob({
+      kind: 'cc', label: 'CC scan', total: 0,
+      status: 'Loading eligible holdings...', resultsHref: '/screener?mode=filter',
+    });
+    const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+    try {
+      pushStatus('Loading eligible holdings...');
+      const capRes = await fetch('/api/covered-call-capacity');
+      const capData = await capRes.json();
+      setCcHoldingsLoading(false);
+      if (capData.status !== 'ok') {
+        throw new Error(capData.error || 'Could not load covered-call capacity');
+      }
+      setCcEligibleHoldings(capData.eligibleHoldings);
+      setCcBlockedHoldings(capData.blockedHoldings);
+
+      const scannable = (capData.eligibleHoldings as typeof ccEligibleHoldings)
+        .filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
+      if (!scannable.length) {
+        setError('No eligible covered-call holdings with available capacity to scan.');
+        failScreenerJob('No eligible holdings');
+        return;
+      }
+      updateScreenerJob({ total: scannable.length });
+
+      pushStatus('Getting access token...');
+      const token = await getAccessToken();
+
+      pushStatus('Fetching market metrics...');
+      const symbols = scannable.map(h => h.symbol);
+      const metricsArray = await getMarketMetrics(symbols, token);
+      const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
+
+      const errResult = (symbol: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
+        symbol, strategy: 'CC', price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+        qualified: false, bestCandidate: null,
+        failReasons: [msg], trendResult,
+        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
+      });
+
+      const ccResults: ScreenResult[] = [];
+      for (const holding of scannable) {
+        const symbol = holding.symbol;
+        pushStatus(`Scanning CC ${symbol}...`);
+        try {
+          const classification = await classifyUnderlying(symbol, token);
+          const isEtf = classification === 'index' || classification === 'etf';
+          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
+          const [chainData, price] = await Promise.all([
+            getChain(symbol, token, DEFAULT_RULES, { min: DEFAULT_CC_RULES.DTE_MIN, max: DEFAULT_CC_RULES.DTE_MAX }),
+            getQuote(symbol, token),
+          ]);
+          let trendResult: TrendResult | undefined;
+          try { trendResult = await getTrend(symbol, isEtf); } catch {}
+          const capacity: CoveredCallCapacity = {
+            sharesOwned: holding.sharesOwned,
+            costBasis: holding.costBasis,
+            grossCoveredContracts: holding.grossCoveredContracts,
+            existingShortCallContracts: holding.existingShortCallContracts,
+            workingShortCallContracts: holding.workingShortCallContracts,
+            availableCoveredContracts: holding.availableCoveredContracts,
+            oversubscribed: holding.oversubscribed,
+          };
+          ccResults.push(runCcChecklist(symbol, chainData, price, metrics, DEFAULT_CC_RULES, capacity, trendResult));
+        } catch (e: any) {
+          ccResults.push(errResult(symbol, e.message));
+        }
+      }
+
+      setResults(prev => {
+        const merged = [...prev, ...ccResults];
+        const cacheTs = Date.now();
+        setResultsCachedAt(cacheTs);
+        idbSet(IDB_RESULTS_KEY, merged);
+        try {
+          localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
+        } catch {}
+        return merged;
+      });
+      completeScreenerJob({
+        resultCount: ccResults.length,
+        status: `${ccResults.length} CC result${ccResults.length === 1 ? '' : 's'} ready`,
+        resultsHref: '/screener?mode=filter',
+      });
+    } catch (e: any) {
+      setError(e.message);
+      failScreenerJob(e.message);
+    } finally {
+      setStatus('');
+      setLoading(false);
+    }
+  };
+
   // Post-scan, client-side filters for Filter mode -- same pattern as
   // Rank/Targeted, layered on top of (not replacing) the qualify/disqualify
   // grading: these chips narrow which qualified/disqualified cards show,
@@ -6052,6 +6302,53 @@ export default function Home() {
             <button onClick={runCspScan} disabled={loading || !parseTickers(cspTickers).length}
               className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40`}>
               {loading ? 'SCANNING...' : 'SCAN SELECTED FOR CSP'}
+            </button>
+          </div>
+
+          {/* CC — separate tool, own card (TE-0007C). Unlike CSP/PMCC, the
+              ticker universe is NOT a free-form list -- it's the account's
+              verified covered-call-eligible holdings, fetched fresh on each
+              scan. A manual filter can hide (never add) a symbol. */}
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
+            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>COVERED CALL — ELIGIBLE HOLDINGS</p>
+            {ccEligibleHoldings.length === 0 ? (
+              <p className={`text-[10px] ${th.textFaint}`}>
+                {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — run a scan to check your account.'}
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <p className={`text-[9px] ${th.textFaint}`}>
+                  {ccEligibleHoldings.length} holding{ccEligibleHoldings.length === 1 ? '' : 's'} ·{' '}
+                  {ccEligibleHoldings.reduce((sum, h) => sum + h.availableCoveredContracts, 0)} available contract
+                  {ccEligibleHoldings.reduce((sum, h) => sum + h.availableCoveredContracts, 0) === 1 ? '' : 's'}
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {ccEligibleHoldings.map(h => {
+                    const hidden = ccHiddenSymbols.includes(h.symbol);
+                    const blocked = h.availableCoveredContracts === 0;
+                    return (
+                      <button key={h.symbol} onClick={() => !blocked && toggleCcSymbol(h.symbol)} disabled={blocked}
+                        title={blocked ? 'Fully covered — no available capacity' : undefined}
+                        className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${
+                          blocked
+                            ? `${th.border} ${th.textFaint} line-through opacity-40 cursor-not-allowed`
+                            : hidden
+                            ? `${th.border} ${th.textFaint} line-through opacity-40`
+                            : 'border-cyan-600 text-cyan-300 bg-cyan-500/10'
+                        }`}>
+                        {h.symbol} <span className="opacity-60">({h.availableCoveredContracts})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {ccBlockedHoldings.length > 0 && (
+                  <p className={`text-[9px] ${th.textFaint}`}>Fully covered / blocked: {ccBlockedHoldings.join(', ')}</p>
+                )}
+              </div>
+            )}
+            <button onClick={runCcScan} disabled={loading}
+              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40`}>
+              {loading ? 'SCANNING...' : 'SCAN ELIGIBLE HOLDINGS FOR CC'}
             </button>
           </div>
 
