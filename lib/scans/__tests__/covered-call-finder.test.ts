@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { findBestCoveredCall } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
 import type { CcRulesType } from '../constants';
-import type { WheelChainResult } from '@/lib/wheel/chainSearch';
+import type { WheelChainResult, WheelChainLeg } from '@/lib/wheel/chainSearch';
 
 const RULES: CcRulesType = {
   DELTA_MIN: 0.20, DELTA_MAX: 0.35,
@@ -12,7 +12,9 @@ const RULES: CcRulesType = {
   OI_MIN: 100, BID_ASK_MAX: 0.20,
 };
 
-function makeChain(overrides: Partial<WheelChainResult> = {}): { expirations: string[]; chains: Record<string, any[]> } {
+type TestChain = { expirations: string[]; chains: Record<string, WheelChainLeg[]> };
+
+function makeChain(overrides: Partial<WheelChainResult> = {}): TestChain {
   const expDate = '2026-09-18'; // ~well outside "today" in test harness time, DTE computed dynamically by daysUntil
   return {
     expirations: [expDate],
@@ -23,13 +25,13 @@ function makeChain(overrides: Partial<WheelChainResult> = {}): { expirations: st
       ],
     },
     ...overrides,
-  } as any;
+  } as unknown as TestChain;
 }
 
 // Freezes a fixed 30-DTE window relative to "today" by constructing a chain
-// with a dynamically-computed near-term expiration, since findBestWheelContract
-// filters by real daysUntil().
-function chainWithDte(dte: number, opts: { strike?: number; delta?: number; oi?: number; bid?: number; ask?: number } = {}) {
+// with a dynamically-computed near-term expiration, since the finder's
+// selection loop filters by real daysUntil().
+function chainWithDte(dte: number, opts: { strike?: number; delta?: number; oi?: number; bid?: number; ask?: number } = {}): TestChain {
   const d = new Date();
   d.setDate(d.getDate() + dte);
   const expDate = d.toISOString().slice(0, 10);
@@ -120,8 +122,8 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     const dte = 30;
     const d = new Date(); d.setDate(d.getDate() + dte);
     const expDate = d.toISOString().slice(0, 10);
-    const legA = { strikePrice: 105, expirationDate: expDate, optionType: 'C', delta: 0.28, openInterest: 500, bid: 1.20, ask: 1.30, mid: 1.25, occSymbol: 'A' };
-    const legB = { strikePrice: 110, expirationDate: expDate, optionType: 'C', delta: 0.15, openInterest: 500, bid: 0.50, ask: 0.60, mid: 0.55, occSymbol: 'B' };
+    const legA = { strikePrice: 105, expirationDate: expDate, optionType: 'C' as const, delta: 0.28, openInterest: 500, bid: 1.20, ask: 1.30, mid: 1.25, occSymbol: 'A' };
+    const legB = { strikePrice: 110, expirationDate: expDate, optionType: 'C' as const, delta: 0.15, openInterest: 500, bid: 0.50, ask: 0.60, mid: 0.55, occSymbol: 'B' };
     const chainOrderA = { expirations: [expDate], chains: { [expDate]: [legA, legB] } };
     const chainOrderB = { expirations: [expDate], chains: { [expDate]: [legB, legA] } };
     const candA = findBestCoveredCall(chainOrderA, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
@@ -155,8 +157,8 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     // 0.21) is further from center but is the only ELIGIBLE strike, and
     // must be what gets returned.
     const legs = [
-      { strikePrice: 95, expirationDate: expDate, optionType: 'C', delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'ITM' },
-      { strikePrice: 108, expirationDate: expDate, optionType: 'C', delta: 0.21, openInterest: 500, bid: 0.80, ask: 0.90, mid: 0.85, occSymbol: 'OTM_VALID' },
+      { strikePrice: 95, expirationDate: expDate, optionType: 'C' as const, delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'ITM' },
+      { strikePrice: 108, expirationDate: expDate, optionType: 'C' as const, delta: 0.21, openInterest: 500, bid: 0.80, ask: 0.90, mid: 0.85, occSymbol: 'OTM_VALID' },
     ];
     const chain = { expirations: [expDate], chains: { [expDate]: legs } };
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
@@ -169,8 +171,8 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     const d = new Date(); d.setDate(d.getDate() + dte);
     const expDate = d.toISOString().slice(0, 10);
     const legs = [
-      { strikePrice: 102, expirationDate: expDate, optionType: 'C', delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'BELOW_BASIS' },
-      { strikePrice: 115, expirationDate: expDate, optionType: 'C', delta: 0.20, openInterest: 500, bid: 0.60, ask: 0.70, mid: 0.65, occSymbol: 'ABOVE_BASIS' },
+      { strikePrice: 102, expirationDate: expDate, optionType: 'C' as const, delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'BELOW_BASIS' },
+      { strikePrice: 115, expirationDate: expDate, optionType: 'C' as const, delta: 0.20, openInterest: 500, bid: 0.60, ask: 0.70, mid: 0.65, occSymbol: 'ABOVE_BASIS' },
     ];
     const chain = { expirations: [expDate], chains: { [expDate]: legs } };
     const capacityHighBasis = computeCoveredCallCapacity(500, 0, 0, 110); // cost basis 110
@@ -183,5 +185,114 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     const chain = chainWithDte(30, { strike: 105 });
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100, earningsWithinExpiry: true });
     expect(cand).toBeNull();
+  });
+});
+
+// ── TE-0007C corrective round: full-universe eligibility filtering ─────────
+// findBestCoveredCall previously called findBestWheelContract('own-writing-cc',
+// ...), which picks the single delta-closest strike FIRST, then validated
+// liquidity/quote-quality against only that one pick. These tests prove the
+// corrected flow filters the FULL chain for every hard gate before selecting
+// -- a preselected invalid contract can never suppress a different, eligible
+// one in the same chain.
+describe('TE-0007C corrective round: one-sided quotes and full-universe eligibility', () => {
+  function legAt(strike: number, opts: { delta?: number; oi?: number; bid?: number; ask?: number; occSymbol?: string }, expDate: string) {
+    return {
+      strikePrice: strike, expirationDate: expDate, optionType: 'C' as const,
+      delta: opts.delta ?? 0.28, openInterest: opts.oi ?? 500,
+      bid: opts.bid ?? 1.20, ask: opts.ask ?? 1.30,
+      mid: ((opts.bid ?? 1.20) + (opts.ask ?? 1.30)) / 2,
+      occSymbol: opts.occSymbol ?? `STRIKE${strike}`,
+    };
+  }
+  function nearTermExpDate(dte: number): string {
+    const d = new Date(); d.setDate(d.getDate() + dte);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Requirement 9: bid 0, ask positive is rejected.
+  it('9. bid 0 / ask positive (one-sided) is rejected', () => {
+    const chain = chainWithDte(30, { bid: 0, ask: 1.30 });
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  // Requirement 10: positive bid, ask 0 is rejected.
+  it('10. positive bid / ask 0 (one-sided) is rejected', () => {
+    const chain = chainWithDte(30, { bid: 1.20, ask: 0 });
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  // Requirement 11: non-finite and crossed quotes are rejected.
+  it('11a. non-finite bid/ask is rejected', () => {
+    const expDate = nearTermExpDate(30);
+    const chain = { expirations: [expDate], chains: { [expDate]: [legAt(105, { bid: NaN, ask: 1.30 }, expDate)] } };
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  it('11b. crossed market (ask < bid) is rejected', () => {
+    const chain = chainWithDte(30, { bid: 2.00, ask: 1.00 });
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  // Requirement 12: the delta-closest contract is illiquid, but a second
+  // eligible contract exists further from delta center — the second must be
+  // selected, not "no candidate."
+  it('12. delta-closest contract is illiquid (low OI); a second eligible contract is selected instead', () => {
+    const expDate = nearTermExpDate(30);
+    const deltaClosestButIlliquid = legAt(105, { delta: 0.275, oi: 5, occSymbol: 'ILLIQUID' }, expDate); // OI_MIN is 100
+    const secondEligible = legAt(110, { delta: 0.22, oi: 500, occSymbol: 'ELIGIBLE' }, expDate);
+    const chain = { expirations: [expDate], chains: { [expDate]: [deltaClosestButIlliquid, secondEligible] } };
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.shortStrike).toBe(110);
+    expect(cand!.shortOccSymbol).toBe('ELIGIBLE');
+  });
+
+  // Requirement 13: the delta-closest contract is one-sided, but a second
+  // valid contract exists — the second is selected.
+  it('13. delta-closest contract is one-sided (bid 0); a second valid contract is selected instead', () => {
+    const expDate = nearTermExpDate(30);
+    const deltaClosestButOneSided = legAt(105, { delta: 0.275, bid: 0, ask: 1.30, occSymbol: 'ONE_SIDED' }, expDate);
+    const secondValid = legAt(110, { delta: 0.22, bid: 0.55, ask: 0.60, occSymbol: 'VALID' }, expDate);
+    const chain = { expirations: [expDate], chains: { [expDate]: [deltaClosestButOneSided, secondValid] } };
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.shortStrike).toBe(110);
+    expect(cand!.shortOccSymbol).toBe('VALID');
+  });
+
+  // Requirement 14: no candidate is returned when every contract fails.
+  it('14. no candidate is returned when every contract in the chain fails eligibility', () => {
+    const expDate = nearTermExpDate(30);
+    const illiquid = legAt(105, { delta: 0.28, oi: 5 }, expDate);
+    const oneSided = legAt(110, { delta: 0.25, bid: 0, ask: 1.0 }, expDate);
+    const wrongDelta = legAt(115, { delta: 0.60 }, expDate);
+    const chain = { expirations: [expDate], chains: { [expDate]: [illiquid, oneSided, wrongDelta] } };
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  // Requirement 15 (finder half): even when multiple eligible contracts
+  // exist, the returned candidate's implied quantity never exceeds the
+  // capacity object's verified availableCoveredContracts.
+  it('15. selected candidate quantity never exceeds verified available capacity', () => {
+    const expDate = nearTermExpDate(30);
+    const chain = { expirations: [expDate], chains: { [expDate]: [legAt(105, {}, expDate), legAt(110, { delta: 0.22 }, expDate)] } };
+    const oneAvailable = computeCoveredCallCapacity(100, 0, 0, 90); // exactly 1 contract available
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: oneAvailable, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.ccAvailableCoveredContracts).toBe(1);
+    expect(cand!.credit).toBeCloseTo(cand!.ccPremiumPerContract! * 1, 2);
+  });
+
+  // Deterministic tie-breaking: two contracts equally close to the delta
+  // center — higher OI wins.
+  it('tie-break: equally delta-close contracts resolve by higher open interest', () => {
+    const expDate = nearTermExpDate(30);
+    const centerDelta = (RULES.DELTA_MIN + RULES.DELTA_MAX) / 2; // 0.275
+    const legLowOi = legAt(105, { delta: centerDelta - 0.02, oi: 150, occSymbol: 'LOW_OI' }, expDate);
+    const legHighOi = legAt(108, { delta: centerDelta + 0.02, oi: 900, occSymbol: 'HIGH_OI' }, expDate);
+    const chain = { expirations: [expDate], chains: { [expDate]: [legLowOi, legHighOi] } };
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
+    expect(cand?.shortOccSymbol).toBe('HIGH_OI');
   });
 });

@@ -173,6 +173,37 @@ Run against the rebased branch, with real repository access, Node, and the actua
 
 §10's "what was NOT validated" list (existing suites, full project `tsc`, `next build`) is now fully validated. §9 (manual acceptance against a live TastyTrade account) remains explicitly deferred to Dean, unchanged.
 
-## 14. Merge status
+## 14. Merge status (superseded by §15 corrective round below)
 
 Implemented, rebased onto current `main`, and validated on `feature/te-0007c-covered-call-screener` at commit `9f73af3`. **Not merged yet** — awaiting instruction, per this round's explicit "do not merge yet."
+
+## 15. Corrective round — real broker coverage evidence and candidate eligibility
+
+Commit `3e0ca46` was NOT merged. Final code review found that §1-14 above validated correct *logic* against idealized test fixtures that always supplied fields real broker responses do not reliably provide (a trustworthy `option-type` string, complete cost-basis on every lot, always-two-sided quotes). This round corrects five safety gaps those fixtures hid, all confined to `lib/scans/covered-call-capacity.ts` and `lib/scans/covered-call-finder.ts` plus one new shared module.
+
+### Original fixture/schema assumption vs. corrected broker normalization
+
+1. **Short-call/working-order classification.** Original fixtures always set `p['option-type'] === 'C'`. Real TastyTrade `/positions` and `/orders/live` legs cannot be assumed to carry a reliable `option-type` field — TradeEdge's own position processing (`lib/portfolio-data/acquisition.ts`) already derives call/put from the OCC symbol for this reason. Corrected: new `lib/optionSymbol.ts` exports a pure, framework-free `parseOccSymbol()`/`resolveOptionType()`/`resolveUnderlyingSymbol()` (kept out of `lib/portfolio-data/acquisition.ts` deliberately — `lib/scans/*` must stay decoupled from that larger, side-effectful module). `normalizeShortCallExposure()` and `normalizeWorkingCallReservations()` now trust an explicit valid field first, fall back to OCC-symbol parsing, and — critically — when a short option's type is genuinely undeterminable, conservatively fold it into exposure as if it were a call (it can only ever understate available capacity, never cause a naked-call recommendation) while flagging it via a new `unclassifiedSymbols` set surfaced as `CoveredCallCapacity.hasUnclassifiedExposure`.
+2. **Working order status/action matching.** Original fixtures always used exact-case `'Live'`/`'Sell to Open'`. Real broker values vary in casing/whitespace. Corrected: `normalizeToken()` does case/whitespace-insensitive matching without expanding the semantic set of accepted statuses/actions — matching robustness changed, not meaning. Buy-to-close legs never reserve new capacity.
+3. **Cost basis completeness.** Original `normalizeEquityHoldings()` averaged only lots with a valid basis and silently applied that partial average to ALL shares. Corrected: tracks `anyLotMissingBasis`; `costBasis` is `null` unless every contributing lot has a valid, positive basis; new `EquityHolding.costBasisComplete` / `CoveredCallCapacity.costBasisComplete` fields make the completeness state explicit and prevent basis-derived calculations (`ccStrikeVsCostBasisPct`, `ccMaxUpsideIfCalledAway`) from running against a partial average.
+4. **One-sided quotes.** Original `findBestCoveredCall()` rejected only when BOTH bid and ask were non-positive, accepting e.g. bid=0/ask>0 and computing a midpoint from it. Corrected: `isEligibleCcLeg()` requires `Number.isFinite(bid)`, `Number.isFinite(ask)`, `bid > 0`, `ask > 0`, `ask >= bid` — a one-sided, crossed, missing, or non-finite quote is never eligible.
+5. **Select-then-validate architecture.** Original flow filtered strikes below stock/cost-basis, picked the single delta-closest contract via `findBestWheelContract`, THEN applied liquidity/quote checks — returning null if that one pick failed even when another eligible contract existed. Corrected: new `selectBestEligibleCcContract()` filters the FULL candidate universe for every hard gate (call leg, DTE range, delta range, strike at/above stock price and complete cost basis, finite two-sided non-crossed quote, bid/ask width, minimum OI) first, then picks the best remaining candidate by delta-distance with documented deterministic tie-breakers (open interest, then bid/ask width, then DTE). `chainSearch.ts` itself and `findBestWheelContract` are unmodified (shared with Wheel/CSP, out of scope) — this module now owns its own selection loop instead of calling that single-shot function.
+
+### New tests (all 15 ticket-required scenarios plus a realistic end-to-end fixture)
+
+- `lib/__tests__/optionSymbol.test.ts` (11 tests): canonical OCC parser correctness and null-safety.
+- `lib/scans/__tests__/covered-call-capacity.test.ts`: extended with a `TE-0007C corrective round` describe block covering ticket items 1-8 and 15 (OCC-only short call/working order consume/reserve coverage, combined subtraction, unclassifiable-option conservative reservation, status/action casing normalization, buy-to-close non-reservation, partial-basis nullification, basis-dependent field suppression, capacity-never-exceeds-verified-evidence), plus a realistic end-to-end fixture shaped exactly like real `/positions` + `/orders/live` responses (space-padded OCC symbols, no `option-type` field, order legs shaped as `{symbol, action, quantity}`, a Cancelled duplicate proving no double-reservation).
+- `lib/scans/__tests__/covered-call-finder.test.ts`: extended with a `TE-0007C corrective round` describe block covering ticket items 9-14 (bid-0/ask-0/non-finite/crossed quote rejection, delta-closest-illiquid-but-second-eligible selection, delta-closest-one-sided-but-second-valid selection, no-candidate-when-all-fail, tie-break-by-OI).
+
+### Validation
+
+- `npx tsc --noEmit` — clean, zero errors (against real `tsconfig.json`/dependency graph in `~/build-workspace`).
+- Targeted: `optionSymbol.test.ts` + `covered-call-capacity.test.ts` + `covered-call-finder.test.ts` — **64 tests, all passing** (11 + 30 + 23).
+- Full suite: `npx vitest run --pool=threads --poolOptions.threads.maxThreads=4` — **102 test files, 1488 tests, all passing** (up from 101 files / 1456 tests in §13, reflecting this round's new tests plus the new `optionSymbol.test.ts` file).
+- `npx next build` — succeeds.
+
+### Scope discipline
+
+Only `lib/optionSymbol.ts` (new), `lib/__tests__/optionSymbol.test.ts` (new), `lib/scans/covered-call-capacity.ts`, `lib/scans/covered-call-finder.ts`, `lib/scans/__tests__/covered-call-capacity.test.ts`, `lib/scans/__tests__/covered-call-finder.test.ts`, and this report were touched. No other TE-0007C files were modified beyond what §1-14 already covered. The rebase onto `main` @ `6586ef7` from §12 is preserved unchanged. Unrelated untracked files present in the working tree (`cc_zero_candidates_fix.sh`, `docs/reviews/portfolio-position-metrics-audit.md`, `mode_param_fix.sh`, `switch_to_filter_mode_fix.sh`, `te0007c_import_path_fix.sh`) were left untouched and excluded from this round's commit.
+
+**Not pushed or merged**, per this round's explicit instruction. See final response for commit hash and changed-file list.

@@ -1,42 +1,133 @@
 // lib/scans/covered-call-finder.ts
 // TE-0007C — Covered Call as a first-class Screener strategy: candidate
-// selection. Deliberately thin, same convention as csp-finder.ts: the actual
-// delta/DTE contract search is NOT reimplemented here — it calls straight
-// into lib/wheel/chainSearch.ts's findBestWheelContract('own-writing-cc', ...),
-// the same function the Wheel page uses to hunt CC-writing strikes.
+// selection. Same convention as csp-finder.ts: the actual chain data comes
+// from lib/wheel/chainSearch.ts (fetchWheelChain), reusing the exact same
+// WheelChainResult/WheelChainLeg shapes the Wheel page's own CC-writing
+// search uses — no second chain-fetching implementation exists.
 //
-// This module owns only CC-specific selection rules on top of that search:
-// liquidity/quote-quality gates, "never select ITM by default", "never
-// recommend below cost basis", and turning the result into the shared
-// SpreadCandidate shape with CC-specific fields populated.
-import { findBestWheelContract, type WheelChainResult, type WheelDeltaTarget, type WheelDteTarget } from '@/lib/wheel/chainSearch';
+// TE-0007C corrective round: this module's own SELECTION loop is no longer
+// findBestWheelContract('own-writing-cc', ...) — that function picks a
+// single delta-closest contract FIRST, then this module validated liquidity/
+// quote-quality against only that one pick. If the delta-closest strike
+// happened to be illiquid or one-sided, the whole search returned "no
+// candidate" even when a second, slightly-less-delta-perfect contract in the
+// same chain was fully eligible. Per the corrective ticket: "Filter the full
+// candidate universe for every hard eligibility condition before choosing
+// the best contract." findBestWheelContract (still used unmodified by the
+// Wheel page itself — out of scope, not touched here) does not support that
+// two-phase filter-then-select shape, so this module now owns its own
+// selection loop, structured the same way (closest-|delta|-to-center wins)
+// but over the FULL set of already-eligible candidates, not a single
+// preselected one.
+import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 import type { SpreadCandidate } from './types';
 import type { CcRulesType } from './constants';
 import type { CoveredCallCapacity } from './covered-call-capacity';
 
-function toWheelChainResult(chain: { expirations: string[]; chains: Record<string, any[]> }): WheelChainResult {
-  return chain as unknown as WheelChainResult;
+function daysUntil(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
-// Filters OUT call legs below `minStrike` before the delta-closest search
-// runs, so findBestWheelContract only ever considers strikes that could
-// possibly qualify. Without this, findBestWheelContract picks whichever
-// single strike is closest to the target delta center across the whole
-// chain -- if THAT specific strike happens to sit below stock price or cost
-// basis, the old code discarded it and returned null, even when other
-// valid (if less delta-perfect) strikes existed in the same chain. Put legs
-// pass through untouched (this function is only ever used for CC's call-only
-// search).
-function filterChainByMinStrike(
-  chain: { expirations: string[]; chains: Record<string, any[]> },
-  minStrike: number | null,
-): { expirations: string[]; chains: Record<string, any[]> } {
-  if (minStrike == null) return chain;
-  const chains: Record<string, any[]> = {};
-  for (const [expDate, legs] of Object.entries(chain.chains)) {
-    chains[expDate] = legs.filter((leg: any) => leg.optionType !== 'C' || leg.strikePrice >= minStrike);
+export interface CcSelectedContract {
+  expirationDate: string;
+  dte: number;
+  strikePrice: number;
+  delta: number; // |delta|
+  bid: number;
+  ask: number;
+  mid: number;
+  openInterest: number;
+  occSymbol: string;
+}
+
+interface CcEligibilityParams {
+  deltaTarget: { min: number; max: number };
+  dteTarget: { min: number; max: number };
+  minStrike: number | null; // max(stockPrice, costBasis) — call must sit at/above this
+  oiMin: number;
+  bidAskMax: number;
+}
+
+// Hard gate check for ONE chain leg. Returns false for anything that must
+// never be counted as an eligible candidate, full stop — never a
+// warning/downgrade. Mirrors requirement #4's exact quote-validity contract:
+// a one-sided (bid <= 0 XOR ask <= 0), crossed (ask < bid), missing, or
+// non-finite quote can never support a reliable sell premium.
+function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): boolean {
+  if (leg.optionType !== 'C') return false;
+  if (leg.delta == null) return false;
+
+  const absDelta = Math.abs(leg.delta);
+  if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return false;
+
+  if (p.minStrike != null && leg.strikePrice < p.minStrike) return false;
+
+  // TE-0007C corrective round: strict two-sided, non-crossed, finite quote —
+  // replaces the old `bid <= 0 && ask <= 0` check, which accepted a
+  // one-sided quote (e.g. bid 0, ask > 0) and computed a midpoint off it.
+  if (!Number.isFinite(leg.bid) || !Number.isFinite(leg.ask)) return false;
+  if (!(leg.bid > 0) || !(leg.ask > 0)) return false;
+  if (leg.ask < leg.bid) return false; // crossed market
+
+  if (leg.ask - leg.bid > p.bidAskMax) return false;
+  if (leg.openInterest < p.oiMin) return false;
+
+  return true;
+}
+
+// Filters the FULL chain for every hard eligibility condition (call leg, DTE
+// window, delta window, strike floor, two-sided non-crossed finite quote,
+// bid/ask width, minimum OI), THEN selects the single best remaining
+// candidate by delta-distance-to-center. A contract that fails any gate is
+// simply never a candidate — it can never suppress a different, eligible
+// contract from being found. Deterministic tie-breakers when multiple
+// eligible contracts are equally close to the target delta center: (1)
+// higher open interest, (2) narrower bid/ask width, (3) earlier expiration
+// (lower DTE) — applied in that order so the result is reproducible.
+export function selectBestEligibleCcContract(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcEligibilityParams,
+): CcSelectedContract | null {
+  const deltaCenter = (params.deltaTarget.min + params.deltaTarget.max) / 2;
+
+  const eligible: CcSelectedContract[] = [];
+  for (const expDate of chain.expirations) {
+    const dte = daysUntil(expDate);
+    if (dte < params.dteTarget.min || dte > params.dteTarget.max) continue;
+
+    for (const leg of chain.chains[expDate] ?? []) {
+      if (!isEligibleCcLeg(leg, dte, params)) continue;
+      eligible.push({
+        expirationDate: expDate,
+        dte,
+        strikePrice: leg.strikePrice,
+        delta: Math.abs(leg.delta as number),
+        bid: leg.bid,
+        ask: leg.ask,
+        mid: leg.mid,
+        openInterest: leg.openInterest,
+        occSymbol: leg.occSymbol,
+      });
+    }
   }
-  return { expirations: chain.expirations, chains };
+
+  if (eligible.length === 0) return null;
+
+  eligible.sort((a, b) => {
+    const distA = Math.abs(a.delta - deltaCenter);
+    const distB = Math.abs(b.delta - deltaCenter);
+    if (distA !== distB) return distA - distB; // 1. closest to target delta center wins
+    if (a.openInterest !== b.openInterest) return b.openInterest - a.openInterest; // 2. higher OI wins
+    const widthA = a.ask - a.bid, widthB = b.ask - b.bid;
+    if (widthA !== widthB) return widthA - widthB; // 3. narrower bid/ask width wins
+    return a.dte - b.dte; // 4. earlier expiration wins
+  });
+
+  return eligible[0];
 }
 
 export interface CcFindParams {
@@ -52,8 +143,15 @@ export interface CcFindParams {
 // ticket: "Return no candidate rather than guessing or falling back to an
 // ineligible strike." Every rejection reason below is a hard gate, not a
 // warning — a candidate that fails any of these is NOT returned at all.
+//
+// TE-0007C corrective round: `costBasis` here is already null unless
+// covered-call-capacity.ts's normalizeEquityHoldings() confirmed EVERY
+// contributing share has a known basis (CoveredCallCapacity.
+// costBasisComplete) — so `minStrike`/`ccAssignmentWarning` below can treat
+// "costBasis != null" as "costBasis is verified complete," never a partial
+// average silently applied as if it covered the whole holding.
 export function findBestCoveredCall(
-  chain: { expirations: string[]; chains: Record<string, any[]> },
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
   params: CcFindParams,
 ): SpreadCandidate | null {
   // No capacity -> no candidate, full stop. This function must never search
@@ -61,34 +159,25 @@ export function findBestCoveredCall(
   if (params.capacity.availableCoveredContracts <= 0) return null;
   if (params.earningsWithinExpiry) return null;
 
-  const deltaTarget: WheelDeltaTarget = { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX };
-  const dteTarget: WheelDteTarget = { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX };
-
   // Never select ITM, never below cost basis -- enforced by filtering the
-  // SEARCH SPACE up front, not by validating a single already-chosen pick
-  // after the fact. See filterChainByMinStrike above.
+  // FULL SEARCH SPACE up front (see selectBestEligibleCcContract), not by
+  // validating a single already-chosen pick after the fact. This is what
+  // lets a second, less delta-perfect but fully eligible contract be found
+  // when the single delta-closest strike would otherwise fail a liquidity/
+  // quote/strike gate and (in the old flow) suppress the whole search.
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
   const candidateMins = [price, costBasis].filter((v): v is number => v != null);
   const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
-  const searchableChain = filterChainByMinStrike(chain, minStrike);
 
-  const best = findBestWheelContract(toWheelChainResult(searchableChain), 'own-writing-cc', deltaTarget, dteTarget);
+  const best = selectBestEligibleCcContract(chain, {
+    deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
+    dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
+    minStrike,
+    oiMin: params.rules.OI_MIN,
+    bidAskMax: params.rules.BID_ASK_MAX,
+  });
   if (!best) return null;
-
-  // Liquidity / quote-quality gates.
-  if (best.openInterest < params.rules.OI_MIN) return null;
-  if (best.bid <= 0 && best.ask <= 0) return null; // fully unusable quote
-  if (best.ask < best.bid) return null; // crossed market
-  if (best.ask - best.bid > params.rules.BID_ASK_MAX) return null;
-
-  // Defensive re-check only — filterChainByMinStrike above should already
-  // guarantee this, but a cheap belt-and-suspenders check here costs
-  // nothing and protects against a future edit to the filter logic
-  // silently reopening the ITM/below-cost-basis gap this function exists
-  // to close.
-  if (price != null && best.strikePrice < price) return null;
-  if (costBasis != null && best.strikePrice < costBasis) return null;
 
   const contracts = params.capacity.availableCoveredContracts;
   const premiumPerShare = parseFloat(best.mid.toFixed(4));
@@ -114,8 +203,13 @@ export function findBestCoveredCall(
   const ccLiquidityWarning = best.openInterest < params.rules.OI_MIN * 2
     ? `Open interest ${best.openInterest} is thin — fills may be difficult`
     : null;
+  // TE-0007C corrective round: fires both when cost basis is entirely
+  // unavailable AND when it's only partially known (costBasis is null in
+  // both cases — see CoveredCallCapacity.costBasisComplete) — a partial
+  // basis is exactly as unusable for assignment-economics display as a
+  // fully unknown one, so the warning text covers both explicitly.
   const ccAssignmentWarning = costBasis == null
-    ? 'Cost basis unavailable — assignment economics against your original cost could not be verified'
+    ? 'Cost basis unavailable or incomplete — assignment economics against your original cost could not be verified'
     : null;
 
   return {
