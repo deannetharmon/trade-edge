@@ -32,6 +32,13 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp } from '@/lib/scans/csp-finder';
+// TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
+// (normalized, deduped, ordered ticker list) replaces the separate CSP and
+// PMCC ticker boxes; every strategy launcher button reads this same array.
+import {
+  normalizeUniverse, saveOpportunityUniverse, parseLegacyCommaList,
+  hasCanonicalUniverse, migratePrimaryTickers,
+} from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
@@ -798,6 +805,12 @@ function saveRulesToStorage(rules: RulesType) {
 function saveEtfRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES_ETF, JSON.stringify(rules)); } catch {}
 }
+// TE-0007: LS_PMCC/LS_CSP are legacy-only as of the unified Opportunity
+// Universe — read once during the one-time migration (the "universe
+// migration" useEffect below, which calls migratePrimaryTickers() from
+// lib/screener/opportunityUniverse.ts), never written to again. Kept
+// defined (rather than deleted) purely so the migration's exact legacy
+// inputs stay traceable from this file.
 const LS_PMCC = 'hunter-tickers-pmcc';
 const LS_CSP = 'hunter-tickers-csp';
 const LS_CSP_CASH = 'hunter-csp-available-cash';
@@ -1965,6 +1978,14 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
 }
 
 // ── Strategy Box ──────────────────────────────────────────────────────────
+// TE-0007: no longer used by the Screener page (the separate CSP/PMCC
+// ticker cards it powered were replaced by the unified Opportunity
+// Universe card, which reuses WatchlistBox instead). Left defined,
+// unexported and dead, rather than deleted outright -- it's a nontrivial,
+// working, self-contained component (OCR + named save/load over a plain
+// string ticker list) that's cheap to keep for now in case a future
+// strategy-specific settings panel wants the same free-form-list pattern;
+// deleting it is a trivial follow-up if it's confirmed unneeded.
 function StrategyBox({ label, badge, badgeColor, borderFocus, value, onChange, strategy, disabled, onLoadPrompt, th }: {
   label: string;
   badge: string;
@@ -2170,7 +2191,15 @@ async function deleteWatchlistPreset(name: string): Promise<void> {
 }
 
 // ── Merge helper (array-native replacement for mergeTickers/tickersToString) ──
-// New symbols are classified automatically and added as inactive (opt-in).
+// New symbols are classified automatically and added active. TE-0007: this
+// used to default new tickers to inactive (opt-in via a second click)
+// before the Opportunity Universe existed. Now that this same list IS the
+// canonical universe every strategy button reads ("enter the companies
+// you are willing to evaluate, then choose a strategy"), a ticker you just
+// typed in needs to be immediately part of that universe -- requiring a
+// separate activation click for something you just explicitly added would
+// contradict the ticket's stated UX intent. The `active` checkbox remains
+// available afterward to opt a ticker back out without removing it.
 async function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[], token: string): Promise<WatchlistTicker[]> {
   const existingSymbols = new Set(existing.map(t => t.symbol));
   const symbolsToAdd = normalizeTickerInput(newSymbols.join(',')).filter(s => !existingSymbols.has(s));
@@ -2180,7 +2209,7 @@ async function mergeTickerLists(existing: WatchlistTicker[], newSymbols: string[
   const toAdd: WatchlistTicker[] = symbolsToAdd.map((symbol, i) => ({
     symbol,
     classification: classifications[i],
-    active: false,
+    active: true,
   }));
   return [...existing, ...toAdd];
 }
@@ -5483,9 +5512,22 @@ export default function Home() {
     setTickers(next);
     clearResultsCache();
     persistWatchlist(next);
+    // TE-0007: the primary ticker list IS the Opportunity Universe's
+    // backing state (active tickers = "willing to evaluate"). Keep the
+    // canonical mirror in sync on every change so it stays authoritative
+    // and testable independent of the richer WatchlistTicker[] shape.
+    saveOpportunityUniverse(next.filter(t => t.active).map(t => t.symbol));
   };
-  const [pmccTickers, setPmccTickers] = useState('');
-  const [cspTickers, setCspTickers] = useState('');
+  // TE-0007: One canonical Opportunity Universe, derived from the same
+  // `tickers` state the general/primary Screener list has always used.
+  // "Active" here means the same thing it always has for spread scanning
+  // ("include this ticker in the next run") -- it now also gates CSP/PMCC/
+  // Covered-Call universe membership, giving every strategy button the
+  // exact same normalized array. See lib/screener/opportunityUniverse.ts.
+  const opportunityUniverse = useMemo(
+    () => normalizeUniverse(tickers.filter(t => t.active).map(t => t.symbol)),
+    [tickers]
+  );
   const [cspCashOverride, setCspCashOverride] = useState('');
   // TE-0007C — CC's scan universe comes from verified account holdings, not
   // a free-form ticker list (unlike CSP/PMCC), so its state shape differs:
@@ -5592,11 +5634,70 @@ export default function Home() {
   }, []);
   useEffect(() => {
     try {
-      setPmccTickers(localStorage.getItem(LS_PMCC) || '');
-      setCspTickers(localStorage.getItem(LS_CSP) || '');
       setCspCashOverride(localStorage.getItem(LS_CSP_CASH) || '');
     } catch {}
   }, []);
+
+  // TE-0007 corrective pass (required correction 1): one-time Opportunity
+  // Universe migration. Runs only after the primary ticker list has
+  // finished loading (so `tickers` reflects the real loaded state, not a
+  // possibly-stale localStorage snapshot) and only when the canonical key
+  // doesn't exist yet (hasCanonicalUniverse()). The actual merge decision
+  // -- which legacy symbols get added, which get reactivated -- is made by
+  // migratePrimaryTickers(), the ONE canonical migration algorithm (see
+  // lib/screener/opportunityUniverse.ts); this effect only supplies inputs
+  // (tickers + the two legacy comma lists), resolves classification for
+  // any newly-added symbols, and applies the result. Guarded by a ref so
+  // it only ever runs once per mount.
+  //
+  // Fixes the exact defect from the corrective pass: a symbol already
+  // present in the primary list but inactive (e.g. MU) is reactivated when
+  // it's also found in a legacy CSP/PMCC list, instead of being silently
+  // left out of the migrated universe just because "it already existed."
+  const universeMigrationRanRef = useRef(false);
+  useEffect(() => {
+    if (watchlistLoading) return;
+    if (universeMigrationRanRef.current) return;
+    universeMigrationRanRef.current = true;
+    (async () => {
+      try {
+        if (hasCanonicalUniverse()) return; // already migrated
+        const legacyCsp = parseLegacyCommaList(localStorage.getItem(LS_CSP));
+        const legacyPmcc = parseLegacyCommaList(localStorage.getItem(LS_PMCC));
+
+        const migrated = migratePrimaryTickers<WatchlistTicker>(
+          tickers,
+          { csp: legacyCsp, pmcc: legacyPmcc },
+          symbol => ({ symbol, classification: 'pending', active: true })
+        );
+
+        const changed = migrated.length !== tickers.length || migrated.some((t, i) => t !== tickers[i]);
+        if (!changed) {
+          // Nothing to fold in -- still persist the mirror so this
+          // migration doesn't re-run on the next load.
+          saveOpportunityUniverse(tickers.filter(t => t.active).map(t => t.symbol));
+          return;
+        }
+
+        // Resolve real classification for newly-added ('pending') entries
+        // only -- reactivated existing entries already have a real
+        // classification and are left untouched.
+        const token = await getAccessToken();
+        const resolved = await Promise.all(
+          migrated.map(async t =>
+            t.classification === 'pending'
+              ? { ...t, classification: await classifyUnderlying(t.symbol, token).catch(() => 'stock' as const) }
+              : t
+          )
+        );
+        handleTickersChange(resolved);
+      } catch {
+        // best-effort — worst case the canonical key stays unset and this
+        // migration is retried on the next load.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistLoading]);
 
   // load cached scan state — runs once, strictly after mount/hydration.
   // This is the post-hydration counterpart to the plain-default
@@ -5731,8 +5832,9 @@ export default function Home() {
     idbDel(IDB_RESULTS_KEY);
     idbDel(IDB_TARGETED_RESULTS_KEY);
   };
-  const handlePmccChange = (v: string) => { setPmccTickers(v); clearResultsCache(); try { localStorage.setItem(LS_PMCC, v); } catch {} };
-  const handleCspChange = (v: string) => { setCspTickers(v); clearResultsCache(); try { localStorage.setItem(LS_CSP, v); } catch {} };
+  // TE-0007: handlePmccChange/handleCspChange removed — there is no
+  // separate PMCC/CSP ticker state left to change; both strategies read
+  // `opportunityUniverse`, updated via handleTickersChange above.
   const handleCspCashChange = (v: string) => { setCspCashOverride(v); try { localStorage.setItem(LS_CSP_CASH, v); } catch {} };
   // Hide-only toggle: can only narrow ccEligibleHoldings (verified by the
   // API), never introduce a symbol that lacks verified coverage -- the
@@ -5740,6 +5842,18 @@ export default function Home() {
   const toggleCcSymbol = (symbol: string) => {
     setCcHiddenSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
   };
+  // TE-0007: whether the Opportunity Universe is currently narrowing the CC
+  // scan below what's actually eligible -- drives the explicit "Scan all
+  // eligible holdings" override control (never invented capacity, only
+  // ever a wider view of the SAME verified `ccEligibleHoldings`).
+  const ccAllScannableHoldings = useMemo(
+    () => ccEligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol)),
+    [ccEligibleHoldings, ccHiddenSymbols]
+  );
+  const ccUniverseNarrowsCc = useMemo(
+    () => opportunityUniverse.length > 0 && ccAllScannableHoldings.some(h => !opportunityUniverse.includes(h.symbol)),
+    [opportunityUniverse, ccAllScannableHoldings]
+  );
   const showLoadPrompt = (state: Omit<LoadPromptState, 'show'>) => { setLoadPrompt({ show: true, ...state }); };
 
   const parseTickers = normalizeTickerInput;
@@ -5933,13 +6047,16 @@ export default function Home() {
     }
   };
 
-  // Scan PMCC tickers only — entirely separate action from runScreen/Run Hunter.
-  // PMCC results are appended to the existing results list (not replaced),
-  // so running PMCC after a watchlist scan adds to what's already shown.
+  // Scan PMCC using the canonical Opportunity Universe — entirely separate
+  // action from runScreen/Run Hunter. PMCC results are appended to the
+  // existing results list (not replaced), so running PMCC after a
+  // watchlist scan adds to what's already shown. TE-0007: no longer reads
+  // a separate PMCC-only ticker list; uses the same normalized array every
+  // other strategy button reads.
   const runPMCCScan = async () => {
-    const pmcc = parseTickers(pmccTickers);
+    const pmcc = opportunityUniverse;
     if (!pmcc.length) {
-      setError('No PMCC tickers to scan. Add a ticker to the PMCC list first.');
+      setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
     setError('');
@@ -6010,14 +6127,15 @@ export default function Home() {
     }
   };
 
-  // Scan CSP tickers only — entirely separate action from runScreen/Run Hunter,
-  // same pattern as runPMCCScan above. CSP results are appended to the
-  // existing results list, so they render through the exact same result-card
-  // UI as BPS/BCS/IC/PMCC (same look and feel, per DR-0001 §10).
+  // Scan CSP using the canonical Opportunity Universe — entirely separate
+  // action from runScreen/Run Hunter, same pattern as runPMCCScan above.
+  // CSP results are appended to the existing results list, so they render
+  // through the exact same result-card UI as BPS/BCS/IC/PMCC (same look
+  // and feel, per DR-0001 §10). TE-0007: no separate CSP-only ticker list.
   const runCspScan = async () => {
-    const csp = parseTickers(cspTickers);
+    const csp = opportunityUniverse;
     if (!csp.length) {
-      setError('No CSP tickers to scan. Add a ticker to the CSP list first.');
+      setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
     setError('');
@@ -6100,7 +6218,11 @@ export default function Home() {
   // only narrow this set (toggleCcSymbol above), never add an uncovered
   // symbol, because the scan loop only ever iterates over what the API
   // returned as eligible.
-  const runCcScan = async () => {
+  // TE-0007: bypassUniverse is the explicit "Scan all eligible holdings"
+  // override -- it bypasses ONLY the Opportunity Universe narrowing, never
+  // the underlying capacity verification (availableCoveredContracts > 0)
+  // or the hide-only ccHiddenSymbols filter, which still apply either way.
+  const runCcScan = async (bypassUniverse = false) => {
     setError('');
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
@@ -6148,10 +6270,26 @@ export default function Home() {
       setCcEligibleHoldings(eligibleHoldings);
       setCcBlockedHoldings(blockedHoldings);
 
-      const scannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
+      // TE-0007: the Opportunity Universe may narrow this set (intersect
+      // with verified eligible holdings) but can NEVER create eligibility
+      // -- a ticker typed into the shared box that isn't a verified,
+      // capacity-available holding is simply never in `eligibleHoldings`
+      // to begin with, so there's nothing to add here even if we wanted to.
+      const allScannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
+      const universeNarrows = opportunityUniverse.length > 0 && !bypassUniverse;
+      const universeSet = new Set(opportunityUniverse);
+      const scannable = universeNarrows ? allScannable.filter(h => universeSet.has(h.symbol)) : allScannable;
+
       if (!scannable.length) {
-        setError('No eligible covered-call holdings with available capacity to scan.');
-        failScreenerJob('No eligible holdings');
+        if (universeNarrows && allScannable.length > 0) {
+          const msg = 'No covered-call-eligible holdings match the current Opportunity Universe.';
+          setError(msg);
+          failScreenerJob(msg);
+          return;
+        }
+        const msg = 'No eligible covered-call holdings with available capacity to scan.';
+        setError(msg);
+        failScreenerJob(msg);
         return;
       }
       updateScreenerJob({ progressTotal: scannable.length });
@@ -6302,8 +6440,16 @@ export default function Home() {
       <div className="flex h-[calc(100vh-57px)]">
         {/* Sidebar */}
         <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-3 shrink-0`}>
-          {/* Watchlist + Scan — grouped together since the scan button acts directly on this list */}
+          {/* TE-0007: Opportunity Universe — the ONE canonical ticker list.
+              Replaces the previously-separate general/PMCC/CSP ticker
+              cards. Answers "which companies am I willing to evaluate";
+              the buttons below answer "which strategy should evaluate
+              them." Covered Calls is the one exception -- see its button's
+              help text -- the universe can narrow its eligible holdings
+              but can never create eligibility that verified share
+              ownership doesn't already support. */}
           <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
+            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>OPPORTUNITY UNIVERSE</p>
             <WatchlistBox
               tickers={tickers}
               onChange={handleTickersChange}
@@ -6314,52 +6460,69 @@ export default function Home() {
               }
               th={th}
             />
+            <p className={`text-[9px] ${th.textFaint}`}>
+              {opportunityUniverse.length} ticker{opportunityUniverse.length === 1 ? '' : 's'} in your Opportunity Universe
+            </p>
+            <p className={`text-[9px] ${th.textFaint} leading-relaxed`}>
+              Enter the companies you are willing to evaluate, then choose a strategy. Covered Calls use verified owned shares; the list can narrow them but cannot create coverage.
+            </p>
 
-            <button onClick={() => setShowRunModal(true)} disabled={loading}
-              className="w-full text-white py-2.5 rounded-lg text-xs font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
-              {loading ? 'SCANNING...' : <>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
-            </button>
-          </div>
-
-          {/* PMCC — separate tool, own card */}
-          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
-            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>PMCC LIST</p>
-            <StrategyBox label="PMCC" badge="BULLISH+" badgeColor="bg-purple-500/15 text-purple-400 border-purple-500" borderFocus="focus:border-purple-500" value={pmccTickers} onChange={handlePmccChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-            <button onClick={runPMCCScan} disabled={loading || !parseTickers(pmccTickers).length}
-              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40`}>
-              {loading ? 'SCANNING...' : 'SCAN SELECTED FOR PMCC'}
-            </button>
-          </div>
-
-          {/* CSP — separate tool, own card (TE-0007A). Same pattern as PMCC:
-              its own ticker list + scan button, results appended into the
-              shared `results` list so they render through the same cards. */}
-          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
-            <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>CSP LIST</p>
-            <StrategyBox label="CSP" badge="WHEEL ENTRY" badgeColor="bg-amber-500/15 text-amber-400 border-amber-500" borderFocus="focus:border-amber-500" value={cspTickers} onChange={handleCspChange} strategy="IC" disabled={loading} onLoadPrompt={showLoadPrompt} th={th} />
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1`}>AVAILABLE CASH (optional override)</p>
-              <input
-                type="number"
-                min={0}
-                placeholder="Auto-detect from account"
-                value={cspCashOverride}
-                onChange={e => handleCspCashChange(e.target.value)}
-                className={`w-full ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} focus:outline-none`}
-              />
-              <p className={`text-[8px] ${th.textFaint} mt-1`}>Leave blank to use your account&apos;s cash balance. Margin is never used by default.</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button onClick={() => setShowRunModal(true)} disabled={loading || !opportunityUniverse.length}
+                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
+                className="text-white py-2 rounded-lg text-[10px] font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
+                {loading ? 'SCANNING...' : 'FIND SPREADS'}
+              </button>
+              <button onClick={runCspScan} disabled={loading || !opportunityUniverse.length}
+                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
+                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                {loading ? 'SCANNING...' : 'FIND CSPs'}
+              </button>
+              <button onClick={() => runCcScan(false)} disabled={loading}
+                title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
+                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                {loading ? 'SCANNING...' : 'FIND COVERED CALLS'}
+              </button>
+              <button onClick={runPMCCScan} disabled={loading || !opportunityUniverse.length}
+                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
+                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                {loading ? 'SCANNING...' : 'FIND PMCCs'}
+              </button>
+              <button disabled
+                title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
+                className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border ${th.border} ${th.textFaint} opacity-50 cursor-not-allowed text-[10px]`}>
+                FIND LEAPS — COMING SOON
+              </button>
             </div>
-            <button onClick={runCspScan} disabled={loading || !parseTickers(cspTickers).length}
-              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40`}>
-              {loading ? 'SCANNING...' : 'SCAN SELECTED FOR CSP'}
-            </button>
+
+            {/* Strategy-specific settings — kept out of the launcher-button
+                row itself (TE-0007's "smallest change" guidance) but still
+                reachable without recreating a separate CSP ticker list. */}
+            <details className="text-[9px]">
+              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>CSP SETTINGS</summary>
+              <div className="mt-2">
+                <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1`}>AVAILABLE CASH (optional override)</p>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Auto-detect from account"
+                  value={cspCashOverride}
+                  onChange={e => handleCspCashChange(e.target.value)}
+                  className={`w-full ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} focus:outline-none`}
+                />
+                <p className={`text-[8px] ${th.textFaint} mt-1`}>Leave blank to use your account&apos;s cash balance. Margin is never used by default.</p>
+              </div>
+            </details>
           </div>
 
-          {/* CC — separate tool, own card (TE-0007C). Unlike CSP/PMCC, the
-              ticker universe is NOT a free-form list -- it's the account's
-              verified covered-call-eligible holdings, fetched fresh on each
-              scan. A manual filter can hide (never add) a symbol. */}
-          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
+          {/* CC status — compact, informational only (TE-0007C's verified-
+              holdings display). Not a separate ticker-list card: the CC
+              scan universe is never a free-form list, so there's nothing
+              to "consolidate" here beyond showing what the button above
+              will act on and offering the explicit "Scan all eligible
+              holdings" override when the Opportunity Universe is narrowing
+              it. */}
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-2`}>
             <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>COVERED CALL — ELIGIBLE HOLDINGS</p>
             {ccUnavailableReason ? (
               // TE-0007C final corrective pass: account-level data-integrity
@@ -6376,6 +6539,19 @@ export default function Home() {
               <p className={`text-[10px] ${th.textFaint}`}>
                 {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — run a scan to check your account.'}
               </p>
+            ) : ccUniverseNarrowsCc && ccAllScannableHoldings.every(h => !opportunityUniverse.includes(h.symbol)) ? (
+              // TE-0007: the Opportunity Universe currently overlaps none of
+              // the verified eligible holdings -- a real distinct empty
+              // state from "no eligible holdings at all," per the ticket.
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+                  No covered-call-eligible holdings match the current Opportunity Universe.
+                </p>
+                <button onClick={() => runCcScan(true)} disabled={loading}
+                  className="w-full text-[10px] font-bold tracking-widest py-1.5 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40">
+                  SCAN ALL ELIGIBLE HOLDINGS
+                </button>
+              </div>
             ) : (
               <div className="space-y-1.5">
                 <p className={`text-[9px] ${th.textFaint}`}>
@@ -6416,12 +6592,28 @@ export default function Home() {
                     ⚠ Some option exposure could not be classified. Available covered-call capacity was reduced conservatively.
                   </p>
                 )}
+                {ccUniverseNarrowsCc && (
+                  // TE-0007: explicit override -- bypasses ONLY the
+                  // Opportunity Universe narrowing, never capacity
+                  // verification. Only shown when the universe is actually
+                  // narrowing the eligible set.
+                  <button onClick={() => runCcScan(true)} disabled={loading}
+                    className="w-full text-[9px] font-medium tracking-wide py-1 rounded border border-cyan-600/50 text-cyan-300/80 hover:bg-cyan-500/10 transition-colors disabled:opacity-40">
+                    Scan all eligible holdings (ignore Opportunity Universe)
+                  </button>
+                )}
               </div>
             )}
-            <button onClick={runCcScan} disabled={loading}
-              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40`}>
-              {loading ? 'SCANNING...' : 'SCAN ELIGIBLE HOLDINGS FOR CC'}
-            </button>
+            {/* TE-0007 final corrective pass: this card used to also render
+                its own "SCAN ELIGIBLE HOLDINGS FOR CC" button -- a second
+                ordinary entry point for the exact same scan as the unified
+                launcher's "FIND COVERED CALLS" button above. Removed.
+                FIND COVERED CALLS is now the sole ordinary Covered Call
+                scan action; this card is status/output only (verified
+                capacity, blocked holdings, conservative-exposure warnings,
+                fail-closed state, per-symbol hide controls) plus the
+                explicit "Scan all eligible holdings" universe-bypass
+                override rendered above when it's actually applicable. */}
           </div>
 
           {/* Transient alerts — not boxed, so they read as messages rather than a fixed section */}
