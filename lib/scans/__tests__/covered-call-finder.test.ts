@@ -13,7 +13,7 @@ const RULES: CcRulesType = {
 };
 
 function makeChain(overrides: Partial<WheelChainResult> = {}): { expirations: string[]; chains: Record<string, any[]> } {
-  const expDate = '2026-09-18';
+  const expDate = '2026-09-18'; // ~well outside "today" in test harness time, DTE computed dynamically by daysUntil
   return {
     expirations: [expDate],
     chains: {
@@ -26,6 +26,9 @@ function makeChain(overrides: Partial<WheelChainResult> = {}): { expirations: st
   } as any;
 }
 
+// Freezes a fixed 30-DTE window relative to "today" by constructing a chain
+// with a dynamically-computed near-term expiration, since findBestWheelContract
+// filters by real daysUntil().
 function chainWithDte(dte: number, opts: { strike?: number; delta?: number; oi?: number; bid?: number; ask?: number } = {}) {
   const d = new Date();
   d.setDate(d.getDate() + dte);
@@ -52,7 +55,7 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     const chain = makeChain();
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
     expect(cand?.strategy).toBe('CC');
-    expect(cand?.shortStrike).toBe(105);
+    expect(cand?.shortStrike).toBe(105); // the call, not the 95 put
   });
 
   it('2. honors DTE and delta ranges', () => {
@@ -75,13 +78,13 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
   });
 
   it('4. rejects strikes below stock price', () => {
-    const chain = chainWithDte(30, { strike: 95 });
+    const chain = chainWithDte(30, { strike: 95 }); // ITM relative to stock price 100
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
   });
 
   it('5. rejects strikes below known cost basis', () => {
     const chain = chainWithDte(30, { strike: 105 });
-    const capacityHighBasis = computeCoveredCallCapacity(500, 0, 0, 110);
+    const capacityHighBasis = computeCoveredCallCapacity(500, 0, 0, 110); // cost basis above strike
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: capacityHighBasis, stockPrice: 100 })).toBeNull();
   });
 
@@ -91,18 +94,18 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
   });
 
   it('7. produces correct premium, yield, annualized yield, and assignment math', () => {
-    const chain = chainWithDte(36, { strike: 105, bid: 1.20, ask: 1.30 });
+    const chain = chainWithDte(36, { strike: 105, bid: 1.20, ask: 1.30 }); // mid 1.25
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
     expect(cand).not.toBeNull();
     expect(cand!.ccPremiumPerShare).toBeCloseTo(1.25, 4);
     expect(cand!.ccPremiumPerContract).toBeCloseTo(125, 2);
-    expect(cand!.ccPeriodYieldOnShares).toBeCloseTo(1.25, 4);
-    expect(cand!.ccAssignmentProceeds).toBeCloseTo(10500, 2);
+    expect(cand!.ccPeriodYieldOnShares).toBeCloseTo(1.25, 4); // 1.25/100*100
+    expect(cand!.ccAssignmentProceeds).toBeCloseTo(10500, 2); // 105*100
   });
 
   it('8. quantity never exceeds available covered contracts', () => {
     const chain = chainWithDte(30, { strike: 105 });
-    const capacityTwo = computeCoveredCallCapacity(250, 0, 0, 90);
+    const capacityTwo = computeCoveredCallCapacity(250, 0, 0, 90); // 2 available contracts
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: capacityTwo, stockPrice: 100 });
     expect(cand).not.toBeNull();
     expect(cand!.ccAvailableCoveredContracts).toBe(2);
@@ -110,6 +113,10 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
   });
 
   it('9. leg ordering does not affect open-short-call exposure (finder side)', () => {
+    // The finder itself doesn't compute exposure (that's covered-call-capacity's
+    // job) — this asserts findBestCoveredCall's own behavior is order-independent
+    // by feeding the same chain data in reversed leg order and getting an
+    // identical candidate.
     const dte = 30;
     const d = new Date(); d.setDate(d.getDate() + dte);
     const expDate = d.toISOString().slice(0, 10);
@@ -135,8 +142,41 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
 
   it('zero available capacity -> no candidate, no naked-call recommendation', () => {
     const chain = chainWithDte(30, { strike: 105 });
-    const zeroCapacity = computeCoveredCallCapacity(100, 1, 0, 90);
+    const zeroCapacity = computeCoveredCallCapacity(100, 1, 0, 90); // fully covered by existing short call
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: zeroCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  it('bug regression: delta-closest strike is below stock price, but a valid strike exists further from delta center', () => {
+    const dte = 30;
+    const d = new Date(); d.setDate(d.getDate() + dte);
+    const expDate = d.toISOString().slice(0, 10);
+    // Delta-closest to center (0.275) is the 95 strike (delta 0.30) -- but
+    // 95 < stockPrice(100), so it must be excluded. The 108 strike (delta
+    // 0.21) is further from center but is the only ELIGIBLE strike, and
+    // must be what gets returned.
+    const legs = [
+      { strikePrice: 95, expirationDate: expDate, optionType: 'C', delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'ITM' },
+      { strikePrice: 108, expirationDate: expDate, optionType: 'C', delta: 0.21, openInterest: 500, bid: 0.80, ask: 0.90, mid: 0.85, occSymbol: 'OTM_VALID' },
+    ];
+    const chain = { expirations: [expDate], chains: { [expDate]: legs } };
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.shortStrike).toBe(108);
+  });
+
+  it('bug regression: delta-closest strike is below cost basis, but a valid strike exists further from delta center', () => {
+    const dte = 30;
+    const d = new Date(); d.setDate(d.getDate() + dte);
+    const expDate = d.toISOString().slice(0, 10);
+    const legs = [
+      { strikePrice: 102, expirationDate: expDate, optionType: 'C', delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'BELOW_BASIS' },
+      { strikePrice: 115, expirationDate: expDate, optionType: 'C', delta: 0.20, openInterest: 500, bid: 0.60, ask: 0.70, mid: 0.65, occSymbol: 'ABOVE_BASIS' },
+    ];
+    const chain = { expirations: [expDate], chains: { [expDate]: legs } };
+    const capacityHighBasis = computeCoveredCallCapacity(500, 0, 0, 110); // cost basis 110
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: capacityHighBasis, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.shortStrike).toBe(115);
   });
 
   it('earnings within expiry window -> no candidate', () => {

@@ -18,6 +18,27 @@ function toWheelChainResult(chain: { expirations: string[]; chains: Record<strin
   return chain as unknown as WheelChainResult;
 }
 
+// Filters OUT call legs below `minStrike` before the delta-closest search
+// runs, so findBestWheelContract only ever considers strikes that could
+// possibly qualify. Without this, findBestWheelContract picks whichever
+// single strike is closest to the target delta center across the whole
+// chain -- if THAT specific strike happens to sit below stock price or cost
+// basis, the old code discarded it and returned null, even when other
+// valid (if less delta-perfect) strikes existed in the same chain. Put legs
+// pass through untouched (this function is only ever used for CC's call-only
+// search).
+function filterChainByMinStrike(
+  chain: { expirations: string[]; chains: Record<string, any[]> },
+  minStrike: number | null,
+): { expirations: string[]; chains: Record<string, any[]> } {
+  if (minStrike == null) return chain;
+  const chains: Record<string, any[]> = {};
+  for (const [expDate, legs] of Object.entries(chain.chains)) {
+    chains[expDate] = legs.filter((leg: any) => leg.optionType !== 'C' || leg.strikePrice >= minStrike);
+  }
+  return { expirations: chain.expirations, chains };
+}
+
 export interface CcFindParams {
   rules: CcRulesType;
   capacity: CoveredCallCapacity; // availableCoveredContracts caps quantity; never exceeded
@@ -43,7 +64,16 @@ export function findBestCoveredCall(
   const deltaTarget: WheelDeltaTarget = { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX };
   const dteTarget: WheelDteTarget = { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX };
 
-  const best = findBestWheelContract(toWheelChainResult(chain), 'own-writing-cc', deltaTarget, dteTarget);
+  // Never select ITM, never below cost basis -- enforced by filtering the
+  // SEARCH SPACE up front, not by validating a single already-chosen pick
+  // after the fact. See filterChainByMinStrike above.
+  const price = params.stockPrice;
+  const costBasis = params.capacity.costBasis;
+  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
+  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
+  const searchableChain = filterChainByMinStrike(chain, minStrike);
+
+  const best = findBestWheelContract(toWheelChainResult(searchableChain), 'own-writing-cc', deltaTarget, dteTarget);
   if (!best) return null;
 
   // Liquidity / quote-quality gates.
@@ -52,18 +82,12 @@ export function findBestCoveredCall(
   if (best.ask < best.bid) return null; // crossed market
   if (best.ask - best.bid > params.rules.BID_ASK_MAX) return null;
 
-  const price = params.stockPrice;
-  const costBasis = params.capacity.costBasis;
-
-  // Default strike behavior: never select an in-the-money call, and never
-  // recommend a strike below current stock price.
+  // Defensive re-check only — filterChainByMinStrike above should already
+  // guarantee this, but a cheap belt-and-suspenders check here costs
+  // nothing and protects against a future edit to the filter logic
+  // silently reopening the ITM/below-cost-basis gap this function exists
+  // to close.
   if (price != null && best.strikePrice < price) return null;
-
-  // Never recommend a strike below known cost basis. Missing cost basis does
-  // not by itself suppress the candidate — it's disclosed via the warning
-  // fields on the returned candidate instead (handled by the caller/UI,
-  // since this function has no warning-string field to attach it to besides
-  // ccAssignmentWarning below).
   if (costBasis != null && best.strikePrice < costBasis) return null;
 
   const contracts = params.capacity.availableCoveredContracts;
