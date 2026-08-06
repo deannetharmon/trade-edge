@@ -25,6 +25,7 @@ import {
 import {
   classificationCache, ttFetch, getAccessToken, classifyUnderlying,
   getMarketMetrics, getQuote, getChain, getAvailableCash,
+  getCoveredCallCapacityReport,
 } from '@/lib/scans/tastytrade-client';
 import {
   trySpreadAtWidth, findBestSpread, tryICSideAtWidth, findBestIC,
@@ -6080,27 +6081,34 @@ export default function Home() {
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
     try {
-      pushStatus('Loading eligible holdings...');
-      const capRes = await fetch('/api/covered-call-capacity');
-      const capData = await capRes.json();
-      setCcHoldingsLoading(false);
-      if (capData.status !== 'ok') {
-        throw new Error(capData.error || 'Could not load covered-call capacity');
-      }
-      setCcEligibleHoldings(capData.eligibleHoldings);
-      setCcBlockedHoldings(capData.blockedHoldings);
+      // Token first -- same order as every other scan function in this file.
+      // The earlier version of this function fetched holdings via a Next.js
+      // server API route before getting a token at all; that route used a
+      // different (cookie-based, server-side) auth mechanism this app's
+      // actual login flow never populates. Fixed to match CSP/PMCC/BPS.
+      pushStatus('Getting access token...');
+      const token = await getAccessToken();
 
-      const scannable = (capData.eligibleHoldings as typeof ccEligibleHoldings)
-        .filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
+      pushStatus('Loading eligible holdings...');
+      const capacityReport = await getCoveredCallCapacityReport(token);
+      setCcHoldingsLoading(false);
+      if (capacityReport.status !== 'ok') {
+        throw new Error('Could not load covered-call capacity — holdings or working-order data unavailable.');
+      }
+
+      const eligibleEntries = Object.entries(capacityReport.bySymbol).filter(([, c]) => c.grossCoveredContracts > 0);
+      const eligibleHoldings = eligibleEntries.map(([symbol, c]) => ({ symbol, ...c }));
+      const blockedHoldings = eligibleEntries.filter(([, c]) => c.availableCoveredContracts === 0).map(([symbol]) => symbol);
+      setCcEligibleHoldings(eligibleHoldings);
+      setCcBlockedHoldings(blockedHoldings);
+
+      const scannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
       if (!scannable.length) {
         setError('No eligible covered-call holdings with available capacity to scan.');
         failScreenerJob('No eligible holdings');
         return;
       }
       updateScreenerJob({ progressTotal: scannable.length });
-
-      pushStatus('Getting access token...');
-      const token = await getAccessToken();
 
       pushStatus('Fetching market metrics...');
       const symbols = scannable.map(h => h.symbol);
@@ -6128,15 +6136,11 @@ export default function Home() {
           ]);
           let trendResult: TrendResult | undefined;
           try { trendResult = await getTrend(symbol, isEtf); } catch {}
-          const capacity: CoveredCallCapacity = {
-            sharesOwned: holding.sharesOwned,
-            costBasis: holding.costBasis,
-            grossCoveredContracts: holding.grossCoveredContracts,
-            existingShortCallContracts: holding.existingShortCallContracts,
-            workingShortCallContracts: holding.workingShortCallContracts,
-            availableCoveredContracts: holding.availableCoveredContracts,
-            oversubscribed: holding.oversubscribed,
-          };
+          // capacityReport.bySymbol[symbol] IS already a CoveredCallCapacity --
+          // no need to reconstruct it field-by-field from the flattened
+          // eligibleHoldings array (that reconstruction was dead weight left
+          // over from the old server-route response shape).
+          const capacity: CoveredCallCapacity = capacityReport.bySymbol[symbol];
           ccResults.push(runCcChecklist(symbol, chainData, price, metrics, DEFAULT_CC_RULES, capacity, trendResult));
         } catch (e: any) {
           ccResults.push(errResult(symbol, e.message));

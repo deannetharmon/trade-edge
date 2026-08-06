@@ -1,6 +1,15 @@
 // lib/scans/tastytrade-client.ts
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
 import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './constants';
+// TE-0007C fix-forward: covered-call capacity must be fetched the same way
+// every other TastyTrade call in this file is -- browser-side, with the
+// bearer token from getAccessToken() -- not through a Next.js server route.
+// TastyTrade blocks Vercel's server IPs (see this file's other functions and
+// lib/wheel/chainSearch.ts), and the original app/api/covered-call-capacity
+// route used a *different*, cookie-based auth mechanism (lib/tokenStore.ts)
+// that isn't populated by this app's actual login flow. That route has been
+// deleted; buildCoveredCallCapacityReport (pure, no I/O) is reused here.
+import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from '../covered-call-capacity';
 import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
 
@@ -263,6 +272,38 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
 // fields app/engine/page.tsx already reads from the same endpoint, but picks
 // the cash-only fields (cash-available-to-withdraw / cash-balance) rather
 // than engine's obp (option/derivative buying power).
+// ── Covered-call capacity (TE-0007C) — client-side, same auth pattern as
+// getAvailableCash below. Fetches raw (unfiltered) positions + working
+// orders and delegates all math to the pure covered-call-capacity module.
+export async function getCoveredCallCapacityReport(token: string): Promise<CoveredCallCapacityReport> {
+  try {
+    const accountsData = await ttFetch('/customers/me/accounts', token);
+    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    if (!accountNumber) return { status: 'unavailable', bySymbol: {} };
+
+    let rawPositions: any[] | null = null;
+    try {
+      const positionsData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
+      rawPositions = positionsData?.data?.items ?? [];
+    } catch {
+      rawPositions = null;
+    }
+
+    let rawOrders: any[] | null = null;
+    try {
+      const ordersData = await ttFetch(`/accounts/${accountNumber}/orders/live`, token);
+      rawOrders = ordersData?.data?.items ?? [];
+    } catch {
+      rawOrders = null;
+    }
+
+    return buildCoveredCallCapacityReport(rawPositions, rawOrders);
+  } catch {
+    return { status: 'unavailable', bySymbol: {} };
+  }
+}
+
+
 export async function getAvailableCash(token: string): Promise<number | null> {
   try {
     const accountsData = await ttFetch('/customers/me/accounts', token);
