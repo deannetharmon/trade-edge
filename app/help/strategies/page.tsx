@@ -20,6 +20,18 @@ import {
 } from '@/lib/help/optionsStrategyReference';
 
 function cardBtnId(id: StrategyId) { return `strategy-card-open-${id}`; }
+function compareBtnId(id: StrategyId) { return `strategy-compare-open-${id}`; }
+const COMPARISON_HEADING_ID = 'strategy-comparison-heading';
+const RESULTS_HEADING_ID = 'strategy-results-heading';
+const GOAL_RADIO_NAME = 'strategy-goal';
+
+// HELP-0001 corrective pass: the accessible name for the compare toggle
+// must reflect its CURRENT effect, not always say "Add" — a checked box
+// whose action button still reads "Add X to comparison" contradicts its own
+// checked state for screen-reader users.
+function compareToggleLabel(displayName: string, compared: boolean): string {
+  return compared ? `Remove ${displayName} from comparison` : `Add ${displayName} to comparison`;
+}
 
 // ── Small shared bits ───────────────────────────────────────────────────────
 function RiskBadge({ label, th }: { label: string; th: typeof THEMES[Theme] }) {
@@ -93,7 +105,7 @@ function StrategyCard({
             checked={compared}
             onChange={() => onToggleCompare(strategy.strategyId)}
             className="w-3.5 h-3.5"
-            aria-label={`Add ${strategy.displayName} to comparison`}
+            aria-label={compareToggleLabel(strategy.displayName, compared)}
           />
           Compare
         </label>
@@ -129,7 +141,7 @@ function StrategyDetail({
               checked={compared}
               onChange={() => onToggleCompare(strategy.strategyId)}
               className="w-3.5 h-3.5"
-              aria-label={`Add ${strategy.displayName} to comparison`}
+              aria-label={compareToggleLabel(strategy.displayName, compared)}
             />
             Compare
           </label>
@@ -205,18 +217,24 @@ function ComparisonTray({
 }) {
   if (compareIds.length === 0) return null;
   const strategies = compareIds.map(id => getStrategy(id)!).filter(Boolean);
+  // HELP-0001 corrective pass: these are the six APPROVED primary
+  // comparison dimensions, each mapped directly onto an existing canonical
+  // content-model field (no ad-hoc summary strings invented here). Maximum
+  // profit and the dollar example of maximum loss are deliberately NOT
+  // shown here — they were substituted in for assignment/time-decay in the
+  // original delivery, which this pass corrects.
   const fields: Array<[string, (s: StrategyReferenceEntry) => string]> = [
-    ['Outlook', s => s.typicalOutlook],
-    ['Risk', s => s.mechanicalLabels.riskLabel],
-    ['Capital', s => s.mechanicalLabels.capitalType],
-    ['Structure', s => s.mechanicalLabels.positionShape],
-    ['Max profit', s => s.exampleOutputs.find(o => /maximum profit/i.test(o.label))?.value ?? '—'],
-    ['Max loss', s => s.exampleOutputs.find(o => /maximum loss|maximum theoretical loss/i.test(o.label))?.value ?? '—'],
+    ['Typical outlook', s => s.typicalOutlook],
+    ['Capital commitment', s => s.mechanicalLabels.capitalType],
+    ['Maximum-loss type', s => s.mechanicalLabels.riskLabel],
+    ['Assignment or exercise obligation', s => s.assignmentExercise],
+    ['Complexity and mechanics', s => s.mechanicalLabels.positionShape],
+    ['Time-decay tendency', s => s.timeDecay],
   ];
   return (
     <section aria-label="Strategy comparison" className={`border ${th.border} ${th.card} rounded-xl p-4 space-y-3`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest`}>
+        <h2 id={COMPARISON_HEADING_ID} tabIndex={-1} className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest outline-none`}>
           Comparing {strategies.length} strateg{strategies.length === 1 ? 'y' : 'ies'}
         </h2>
         <button type="button" onClick={onClear} className={`text-[10px] font-bold ${th.textFaint} hover:text-red-400 transition-colors`}>
@@ -233,7 +251,12 @@ function ComparisonTray({
         {strategies.map(s => (
           <div key={s.strategyId} className={`border ${th.border} rounded-lg p-3 space-y-2 min-w-0`}>
             <div className="flex items-start justify-between gap-2">
-              <button type="button" onClick={() => onOpen(s.strategyId)} className={`text-xs font-bold ${th.text} hover:text-blue-400 transition-colors text-left`}>
+              <button
+                id={compareBtnId(s.strategyId)}
+                type="button"
+                onClick={() => onOpen(s.strategyId)}
+                className={`text-xs font-bold ${th.text} hover:text-blue-400 transition-colors text-left`}
+              >
                 {s.displayName}
               </button>
               <button
@@ -266,32 +289,66 @@ export default function OptionsStrategyReferencePage() {
   useEffect(() => { setTheme(getSavedTheme()); }, []);
   const th = THEMES[theme];
 
+  // HELP-0001 corrective pass — goal-first information architecture:
+  // showing all 8 strategy cards as the default landing experience was
+  // flagged as wrong; the approved default is "no cards until a goal is
+  // chosen, with Browse all strategies as an explicit secondary action."
+  // `browseAll` is that explicit opt-in; it's independent of selectedGoalId
+  // so choosing a goal later and then returning to "no goal" doesn't leave
+  // the page in an ambiguous in-between state.
   const [selectedGoalId, setSelectedGoalId] = useState<GoalId | null>(null);
+  const [browseAll, setBrowseAll] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState<StrategyId | null>(null);
   const [compareIds, setCompareIds] = useState<StrategyId[]>([]);
   const [limitMessage, setLimitMessage] = useState('');
-  const lastOpenedFromRef = useRef<StrategyId | null>(null);
+  // Tracks the CONTROL that opened the current detail view -- a strategy
+  // card button and a comparison-tray strategy button are different DOM
+  // elements with different ids, and either can disappear out from under
+  // the detail view (a goal change can remove the card; removing the
+  // strategy from comparison removes the tray button) -- so both the kind
+  // and the id must be tracked to find (or fail to find) the right opener
+  // to refocus.
+  const lastOpenerRef = useRef<{ kind: 'card' | 'compare'; id: StrategyId } | null>(null);
 
+  const showingResults = selectedGoalId != null || browseAll;
   const visibleStrategies = useMemo(
-    () => (selectedGoalId ? getStrategiesForGoal(selectedGoalId) : STRATEGIES),
-    [selectedGoalId],
+    () => (selectedGoalId ? getStrategiesForGoal(selectedGoalId) : browseAll ? STRATEGIES : []),
+    [selectedGoalId, browseAll],
   );
 
-  const openDetail = useCallback((id: StrategyId) => {
-    lastOpenedFromRef.current = id;
+  const openDetailFromCard = useCallback((id: StrategyId) => {
+    lastOpenerRef.current = { kind: 'card', id };
+    setSelectedStrategyId(id);
+  }, []);
+
+  const openDetailFromCompare = useCallback((id: StrategyId) => {
+    lastOpenerRef.current = { kind: 'compare', id };
     setSelectedStrategyId(id);
   }, []);
 
   const closeDetail = useCallback(() => {
     setSelectedStrategyId(null);
-    // Restore focus to the card that opened this detail, per the
-    // accessibility requirement to move/preserve focus sensibly.
-    const openerId = lastOpenedFromRef.current;
-    if (openerId) {
-      requestAnimationFrame(() => {
-        document.getElementById(cardBtnId(openerId))?.focus();
-      });
-    }
+    const opener = lastOpenerRef.current;
+    // Restore focus to the exact control that opened this detail when it
+    // still exists; otherwise fall back, in order, to: the comparison
+    // heading, any remaining comparison-strategy control, the
+    // filtered-results heading, or the goal picker's first radio -- always
+    // a real, visible, focusable control, never a silent focus loss.
+    requestAnimationFrame(() => {
+      if (opener) {
+        const openerElId = opener.kind === 'card' ? cardBtnId(opener.id) : compareBtnId(opener.id);
+        const openerEl = document.getElementById(openerElId);
+        if (openerEl) { openerEl.focus(); return; }
+      }
+      const comparisonHeading = document.getElementById(COMPARISON_HEADING_ID);
+      if (comparisonHeading) { comparisonHeading.focus(); return; }
+      const anyCompareControl = document.querySelector<HTMLElement>('[id^="strategy-compare-open-"]');
+      if (anyCompareControl) { anyCompareControl.focus(); return; }
+      const resultsHeading = document.getElementById(RESULTS_HEADING_ID);
+      if (resultsHeading) { resultsHeading.focus(); return; }
+      const firstGoalRadio = document.querySelector<HTMLElement>(`input[name="${GOAL_RADIO_NAME}"]`);
+      firstGoalRadio?.focus();
+    });
   }, []);
 
   const toggleCompare = useCallback((id: StrategyId) => {
@@ -352,22 +409,41 @@ export default function OptionsStrategyReferencePage() {
               >
                 <input
                   type="radio"
-                  name="strategy-goal"
+                  name={GOAL_RADIO_NAME}
                   value={goal.id}
                   checked={selectedGoalId === goal.id}
-                  onChange={() => setSelectedGoalId(goal.id)}
+                  onChange={() => { setSelectedGoalId(goal.id); setBrowseAll(false); }}
                   className="w-3.5 h-3.5 shrink-0"
                 />
                 {goal.label}
               </label>
             ))}
           </div>
+          {/* HELP-0001 corrective pass: goal-first architecture. This is
+              the ONLY "browse all" control, deliberately kept outside the
+              six-option radiogroup above (it is not a 7th goal choice) so
+              the radiogroup itself always has exactly six members. */}
           {selectedGoalId ? (
-            <button type="button" onClick={() => setSelectedGoalId(null)} className={`text-[10px] font-bold ${th.textFaint} hover:text-blue-400 transition-colors mt-2`}>
-              Show all strategies
+            <button
+              type="button"
+              onClick={() => { setSelectedGoalId(null); setBrowseAll(true); }}
+              className={`text-[10px] font-bold ${th.textFaint} hover:text-blue-400 transition-colors mt-2`}
+            >
+              Browse all strategies
             </button>
+          ) : !browseAll ? (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <p className={`text-[10px] ${th.textFaint}`}>Choose a goal above, or</p>
+              <button
+                type="button"
+                onClick={() => setBrowseAll(true)}
+                className={`text-[10px] font-bold text-blue-400 hover:underline`}
+              >
+                Browse all strategies
+              </button>
+            </div>
           ) : (
-            <p className={`text-[10px] ${th.textFaint} mt-2`}>Showing all 8 strategies. Choose a goal above to filter.</p>
+            <p className={`text-[10px] ${th.textFaint} mt-2`}>Showing all 8 strategies.</p>
           )}
         </fieldset>
 
@@ -378,7 +454,7 @@ export default function OptionsStrategyReferencePage() {
           {limitMessage}
         </div>
 
-        <ComparisonTray compareIds={compareIds} th={th} onRemove={removeFromCompare} onClear={clearComparison} onOpen={openDetail} />
+        <ComparisonTray compareIds={compareIds} th={th} onRemove={removeFromCompare} onClear={clearComparison} onOpen={openDetailFromCompare} />
 
         {selectedStrategy ? (
           <StrategyDetail
@@ -388,9 +464,9 @@ export default function OptionsStrategyReferencePage() {
             onToggleCompare={toggleCompare}
             onBack={closeDetail}
           />
-        ) : (
+        ) : showingResults ? (
           <div>
-            <h2 className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest mb-2`}>
+            <h2 id={RESULTS_HEADING_ID} tabIndex={-1} className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest mb-2 outline-none`}>
               {selectedGoalId ? `Strategies for: ${GOALS.find(g => g.id === selectedGoalId)?.label}` : 'All strategies'}
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -401,12 +477,19 @@ export default function OptionsStrategyReferencePage() {
                   goalId={selectedGoalId}
                   th={th}
                   compared={compareIds.includes(s.strategyId)}
-                  onOpen={openDetail}
+                  onOpen={openDetailFromCard}
                   onToggleCompare={toggleCompare}
                 />
               ))}
             </div>
           </div>
+        ) : (
+          // HELP-0001 corrective pass: goal-first default -- no strategy
+          // cards render until a goal is chosen or "Browse all strategies"
+          // is explicitly activated (see the fieldset above).
+          <p className={`text-[11px] ${th.textFaint} text-center py-6`}>
+            Choose a goal above to see the relevant strategies, or browse the complete reference.
+          </p>
         )}
 
         <div className={`text-center text-[10px] ${th.textFaint} py-4 border-t ${th.border} space-y-0.5`}>

@@ -321,3 +321,65 @@ describe('no coupling to recommendation or execution modules', () => {
     expect(importLines).toEqual([]);
   });
 });
+
+// ── HELP-0001 corrective pass ───────────────────────────────────────────────
+describe('corrective pass: Bear Call Spread description accuracy', () => {
+  it('never describes the higher (protective) strike call as "more expensive"', () => {
+    const s = getStrategy('bear_call_spread')!;
+    const allText = [
+      s.plainSummary, s.maxProfitExplanation, s.maxLossExplanation, s.expirationBreakeven,
+      s.timeDecay, s.volatility, s.assignmentExercise, s.beginnerMisunderstanding,
+      ...s.useWhen, ...s.avoidWhen, ...s.caveats,
+    ].join(' ');
+    expect(allText).not.toMatch(/more expensive.*higher.strike/i);
+    expect(allText).not.toMatch(/higher.strike.*more expensive/i);
+  });
+
+  it('plainSummary correctly describes the long leg as a cheaper, higher-strike call bought as protection', () => {
+    const s = getStrategy('bear_call_spread')!;
+    expect(s.plainSummary).toMatch(/selling a lower-strike call and buying a cheaper, higher-strike call/i);
+  });
+});
+
+describe('corrective pass: PMCC downside/leverage language accuracy', () => {
+  const pmcc = () => getStrategy('poor_mans_covered_call')!;
+
+  it('does not claim the long call generally loses fewer dollars than 100 shares "due to leverage"', () => {
+    const s = pmcc();
+    const allText = [
+      s.plainSummary, s.maxProfitExplanation, s.maxLossExplanation, s.expirationBreakeven,
+      s.timeDecay, s.volatility, s.assignmentExercise, s.beginnerMisunderstanding,
+      ...s.useWhen, ...s.avoidWhen, ...s.caveats,
+      s.scenarioResponses.fallsSharply, s.scenarioResponses.staysNearPrice, s.scenarioResponses.risesSharply,
+    ].join(' ');
+    expect(allText).not.toMatch(/due to leverage/i);
+    expect(allText).not.toMatch(/loses? (fewer|less).{0,40}(dollars|shares).{0,40}leverage/i);
+  });
+
+  it('explains the initial dollar capital committed is generally lower than buying 100 shares', () => {
+    expect(pmcc().scenarioResponses.fallsSharply).toMatch(/smaller initial dollar capital committed/i);
+  });
+
+  it('explains the long call can still lose a large percentage of its value', () => {
+    expect(pmcc().scenarioResponses.fallsSharply).toMatch(/lose a large percentage of that value/i);
+  });
+
+  it('explains leverage amplifies percentage exposure and is not downside protection', () => {
+    const s = pmcc();
+    expect(s.scenarioResponses.fallsSharply).toMatch(/is not downside protection/i);
+    expect(s.scenarioResponses.fallsSharply).toMatch(/leverage amplifies your percentage exposure/i);
+  });
+
+  it('explains retained value near the starting price depends on time elapsed, IV, delta, and entry valuation', () => {
+    const s = pmcc().scenarioResponses.staysNearPrice;
+    expect(s).toMatch(/time elapsed/i);
+    expect(s).toMatch(/implied volatility/i);
+    expect(s).toMatch(/delta/i);
+    expect(s).toMatch(/valuation at which it was originally purchased/i);
+  });
+
+  it('does not unconditionally assert the long call "retains most of its value"', () => {
+    const s = pmcc().scenarioResponses.staysNearPrice;
+    expect(s).not.toMatch(/the long call retains most of its value/i);
+  });
+});

@@ -290,9 +290,9 @@ const STRATEGY_ENTRIES_BASE: Omit<StrategyReferenceEntry, 'applicableGoals'>[] =
       'Use a long-term call option instead of owning 100 shares, then sell short-term calls against it for income — a lower-capital stand-in for a covered call.',
     scenarioResponses: {
       fallsSharply:
-        'The long LEAPS call loses value (though typically less than 100 shares would, due to leverage) and the short call likely expires worthless — you can usually sell another short call next cycle, but a large enough drop can put the long call underwater.',
+        'The long LEAPS call loses value and can lose a large percentage of that value on a sharp decline. The smaller initial dollar capital committed versus buying 100 shares is not downside protection — leverage amplifies your percentage exposure, it does not reduce it. The short call likely expires worthless; you can usually sell another short call next cycle, but a large enough drop can leave the long call deep out of the money.',
       staysNearPrice:
-        'This is close to the ideal outcome — the short call likely expires worthless (or is closed cheaply), the long call retains most of its value, and you can sell another short call for the next cycle.',
+        'The short call likely expires worthless (or is closed cheaply) and you can typically sell another short call for the next cycle. How much value the long call retains is not automatic — it depends on time elapsed, implied volatility, the call\'s delta, and the valuation at which it was originally purchased, not just on the stock price being unchanged.',
       risesSharply:
         'The short call is likely assigned or must be bought back at a loss; while the long LEAPS call gains value, a sharp enough rally can outpace what the short call gives back, capping your net gain versus owning shares outright.',
     },
@@ -397,7 +397,7 @@ const STRATEGY_ENTRIES_BASE: Omit<StrategyReferenceEntry, 'applicableGoals'>[] =
     strategyId: 'bear_call_spread',
     displayName: 'Bear Call Spread',
     typicalOutlook: 'Bearish',
-    plainSummary: 'Collect a credit by selling a call and buying a more expensive, higher-strike call as protection — you profit if the stock stays below your short strike.',
+    plainSummary: 'Collect a credit by selling a lower-strike call and buying a cheaper, higher-strike call as protection — you profit if the stock stays below your short strike.',
     scenarioResponses: {
       fallsSharply: 'Both calls likely expire worthless and you keep the full $100 credit — a large decline does not increase your profit beyond the credit collected.',
       staysNearPrice: 'If the stock stays below the $50 short strike, both calls likely expire worthless and you keep the full $100 credit.',

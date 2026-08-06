@@ -3,8 +3,11 @@
 ## 1. Branch and commit
 
 **Branch:** `feature/help-options-strategy-reference`
-**Commit:** see final chat response for the exact hash (this report is committed in the same commit it describes, so its own hash can't be self-referenced without an amend loop).
+**Initial-delivery commit:** `106c3c6`
+**Corrective-pass commit:** see final chat response for the exact hash (this report is committed in the same commit it describes, so its own hash can't be self-referenced without an amend loop).
 **Base commit:** `daa3f08` (current `main` at the time this branch was cut, which already includes the merged TE-0007C corrective work — verified `main` == `origin/main` before branching, no divergence).
+
+See section 15 for the corrective pass performed after initial team review.
 
 Working tree was clean except one pre-existing untracked file, `docs/reviews/portfolio-position-metrics-audit.md`, which is unrelated to this ticket and was left untouched throughout.
 
@@ -102,9 +105,9 @@ PMCC deliberately does not carry a `Maximum profit` or `Breakeven` dollar figure
 
 `app/help/strategies/__tests__/OptionsStrategyReference.test.tsx` — **25 tests**: default 8-card render; goal selection and filtering (including the neutral-goal outlook overrides); opening the correct detail from a card (not a scroll target); focus moving to the detail heading; "Back to results" preserving the selected goal and restoring focus; comparison select/remove; the 3-strategy cap and 4th-attempt rejection (preserving the original three, exact required message, delivered via `role="status" aria-live="polite"`); "Clear comparison"; comparison state persisting through opening/closing a detail, including from the detail view's own checkbox; responsive class assertions for the grid, tray, and goal picker; radiogroup/checkbox accessible-name and selected-state checks; native disclosure-control presence; visible disclaimer/version/review-date; source-level isolation checks for both the new page and the Help entry point.
 
-**Total new tests: 69.**
+**Total new tests: 69 (initial delivery — see section 15.5/15.6 for the corrective pass's updated totals: 86 tests, 105 files / 1585 full-suite tests).**
 
-## 11. Complete validation results
+## 11. Complete validation results (initial delivery — see section 15.6 for the corrective pass's re-run results)
 
 - `npx tsc --noEmit` — clean, zero errors.
 - Targeted (`lib/help/__tests__/optionsStrategyReference.test.ts` + `app/help/strategies/__tests__/OptionsStrategyReference.test.tsx`): **69 tests, all passing.**
@@ -114,7 +117,7 @@ PMCC deliberately does not carry a `Maximum profit` or `Breakeven` dollar figure
 
 ## 12. Deviations from the approved design, and why
 
-- **No explicit 7th "reset" radio in the goal group.** The approved design specifies exactly six goal choices. Rather than adding an implicit 7th "All strategies" radio option (which would exceed "six goal choices" as stated), the default (no goal selected) state shows all 8 strategies unfiltered, and a separate, clearly-labeled "Show all strategies" button (outside the radiogroup) clears the selection back to that default. This keeps the radiogroup at exactly six options while still satisfying "provide a clear return to filtered results" and letting users browse the complete reference without being forced through a goal.
+- **No explicit 7th "reset" radio in the goal group.** The approved design specifies exactly six goal choices. Rather than adding an implicit 7th "All strategies" radio option (which would exceed "six goal choices" as stated), a separate, clearly-labeled "Browse all strategies" button (outside the radiogroup) is used instead. This keeps the radiogroup at exactly six options. **Superseded by section 15**: the initial delivery used this control to reset FROM an all-8-cards default; the corrective pass changed the default itself to goal-first (no cards until a goal or "Browse all strategies" is chosen) — the six-radios-plus-one-external-button shape is unchanged, only the default state is.
 - **Detail subsections default to expanded (`<details open>`).** The ticket requires a "complete expandable reference for every strategy." Defaulting every subsection open shows the complete reference immediately on opening a strategy (nothing hidden by default), while still giving users the ability to collapse sections they don't need — satisfying "expandable" without requiring an extra click to see the actual content.
 - **No URL/query-param deep-linking to a specific goal or strategy.** The ticket's navigation requirements (preserve goal across detail views, clear return to results, preserve comparison) are all satisfiable — and were implemented — as in-page component state; the ticket did not explicitly request shareable/bookmarkable URLs for a specific goal or strategy, and the existing codebase's own tab-state patterns (e.g., `app/portfolio/page.tsx`) do not two-way-sync state to the URL either, so this keeps the new page consistent with that convention. This can be added later without any content-model change if desired.
 - **`app/help/page.tsx`'s pre-existing, locally-duplicated `THEMES`/`getSavedTheme` were left as-is.** They are a pre-existing inconsistency (that page predates `lib/theme.ts`'s introduction elsewhere) unrelated to this ticket's scope; migrating them was not requested and risked unrelated visual/behavioral changes to the existing Help page, so only the new entry-point card was added using that file's existing local theme object for visual consistency with the rest of that page.
@@ -123,8 +126,75 @@ No other deviations. Every explicitly-required experience item (1–12), navigat
 
 ## 13. Isolation boundary
 
-`lib/help/optionsStrategyReference.ts` has zero imports (structurally enforced, tested). Neither it nor `app/help/strategies/page.tsx` nor the `app/help/page.tsx` entry point imports from or is imported by `lib/decision-engine`, `lib/opportunity-engine`, `lib/recommendations`, `lib/scans/*`, `lib/wheel/*`, or any trading `app/api/*` route — confirmed by source-level tests in addition to manual review. The recommendation engine does not consume this reference, per the ticket's explicit instruction not to wire that up in this round.
+`lib/help/optionsStrategyReference.ts` has zero imports and zero dependencies of its own — that part is structurally true and verified by a test that reads its own source. **Corrected claim (see section 15, item 7 of the corrective ticket):** having zero imports means this module cannot itself reach INTO any recommendation/execution code — it says nothing about whether some OTHER module might import FROM it. What is actually true, and what repository inspection and tests confirm, is narrower and accurate: as of this report, no file under `lib/decision-engine`, `lib/opportunity-engine`, `lib/recommendations`, `lib/scans/*`, `lib/wheel/*`, or any trading `app/api/*` route currently imports `lib/help/optionsStrategyReference.ts` or `app/help/strategies/page.tsx` (confirmed by a repository-wide search for those import paths). This is a point-in-time fact enforced by the existing tests re-running on every change to those files, not a guarantee that future code cannot introduce such an import — nothing in the language or build prevents another module from importing this one. The recommendation engine does not consume this reference, per the ticket's explicit instruction not to wire that up in this round.
 
 ## 14. Merge status
 
-Implemented and fully validated on `feature/help-options-strategy-reference`, based on `main` @ `daa3f08`. **Not pushed or merged**, per this ticket's explicit "stop after implementation, validation, and the report."
+Implemented and fully validated on `feature/help-options-strategy-reference`, based on `main` @ `daa3f08`. **Not pushed or merged**, per this ticket's explicit "stop after implementation, validation, and the report." Superseded by the corrective pass in section 15, also not pushed or merged.
+
+## 15. Corrective pass (post-review)
+
+A focused corrective round followed initial team review of commit `106c3c6`. This section documents the defects found and exactly what changed to fix them, per that review's explicit request to "correct only the findings below" and "update the implementation report honestly."
+
+### 15.1 Defects found
+
+1. **Bear Call Spread's `plainSummary` had the economics backwards.** It described the long (higher-strike, protective) call as "more expensive" than the short (lower-strike) call. Call premiums decrease as strike increases, so the higher-strike protective call is actually the *cheaper* leg — this is exactly why the position collects a net credit. Corrected to: "Collect a credit by selling a lower-strike call and buying a cheaper, higher-strike call as protection."
+2. **PMCC's downside language implied the long LEAPS call has an inherent leverage-based loss advantage over 100 shares.** The original `scenarioResponses.fallsSharply` said the long call "loses value... though typically less than 100 shares would, due to leverage," and `staysNearPrice` unconditionally asserted "the long call retains most of its value." Both overstate safety: a smaller initial dollar outlay is not the same as a smaller *percentage* loss, and leverage amplifies percentage exposure rather than protecting against it. Corrected to explicitly state: the initial dollar capital committed is generally lower than buying 100 shares; the long call can still lose a large percentage of its value; leverage amplifies percentage exposure and is not downside protection; and near-the-money retained value depends on time elapsed, implied volatility, delta, and the valuation at which the call was originally purchased — not on the stock price alone.
+3. **The comparison tray showed the wrong dimensions.** It substituted "Max profit" and "Max loss" (the dollar example figures) for two of the six approved primary dimensions — Assignment or exercise obligation and Time-decay tendency were missing entirely. Corrected: the tray now shows exactly the six approved dimensions (Typical outlook, Capital commitment, Maximum-loss type, Assignment or exercise obligation, Complexity and mechanics, Time-decay tendency), each mapped directly onto an existing canonical field (`typicalOutlook`, `mechanicalLabels.capitalType`, `mechanicalLabels.riskLabel`, `assignmentExercise`, `mechanicalLabels.positionShape`, `timeDecay` respectively) rather than any new ad-hoc summary text.
+4. **Focus restoration only ever looked for a strategy-CARD button.** Opening a detail from the comparison tray, then changing the goal filter so that strategy's card no longer existed, then returning, silently lost focus (it looked for an id that was never created for a tray-originated open). Corrected: the opener is now tracked as `{ kind: 'card' | 'compare', id }`, not just an id, so the correct element (card button vs. tray button — two different DOM elements with two different ids) is targeted. When the tracked opener element no longer exists at all, focus falls back in order to: the comparison-tray heading, any remaining comparison-tray strategy button, the filtered-results heading, or the goal picker's first radio — always a real, visible, focusable element.
+5. **The default landing state showed all 8 strategy cards immediately.** This was flagged as the wrong information architecture for a goal-first reference tool. Corrected — see 15.2.
+6. **The vacuous test assertion `!r.hasAttribute('checked') || r.getAttribute('checked') !== null || true`** in the original UI test suite was always `true` regardless of actual state (the trailing `|| true` made the whole expression tautological), so it never actually verified the initial radio state. Removed and replaced with a real assertion that every radio starts unchecked.
+7. **The compare checkbox's accessible name always read "Add X to comparison,"** even once checked, which contradicts a screen reader announcing "checked" alongside a name that says "Add." Corrected: the label now reads "Remove {strategy} from comparison" once checked.
+8. **Section 13's isolation-boundary claim overstated what "zero imports" proves.** Corrected above in section 13 itself.
+
+### 15.2 Chosen default goal/browse-all behavior
+
+Option (a) from the corrective ticket was implemented: **no strategy cards render until the user either selects a goal or explicitly activates "Browse all strategies."** Concretely:
+- Initial state: the disclaimer and the six-option goal radiogroup are visible; below them, a plain prompt reads "Choose a goal above to see the relevant strategies, or browse the complete reference," with "Browse all strategies" as an inline secondary action (a `<button>`, not a 7th radio).
+- Selecting any of the six goal radios immediately shows that goal's filtered cards (no need to "Browse all" first).
+- Activating "Browse all strategies" (from the initial prompt, or via the same-labeled control that replaces "Show all strategies" once a goal is active) shows all 8 cards with no goal filter.
+- The radiogroup always has exactly six members in both states; "Browse all strategies" never appears inside the `<fieldset>`.
+
+### 15.3 Corrected comparison dimensions
+
+The comparison tray's six rows, in order, each sourced directly from `StrategyReferenceEntry`:
+
+| Dimension label | Canonical field |
+|---|---|
+| Typical outlook | `typicalOutlook` |
+| Capital commitment | `mechanicalLabels.capitalType` |
+| Maximum-loss type | `mechanicalLabels.riskLabel` |
+| Assignment or exercise obligation | `assignmentExercise` |
+| Complexity and mechanics | `mechanicalLabels.positionShape` |
+| Time-decay tendency | `timeDecay` |
+
+No dollar example figures (maximum profit, maximum loss, breakeven) appear in the comparison tray.
+
+### 15.4 Focus-restoration fallback chain
+
+On "Back to results," in order:
+1. The exact opener control (card button via `strategy-card-open-{id}`, or comparison-tray button via `strategy-compare-open-{id}`), if it still exists in the DOM.
+2. The comparison-tray heading (`#strategy-comparison-heading`), if the tray is non-empty.
+3. Any remaining comparison-tray strategy button, if one exists.
+4. The filtered-results heading (`#strategy-results-heading`), if results are currently showing.
+5. The goal picker's first radio input, as the final, always-present fallback.
+
+### 15.5 New/changed tests
+
+- `lib/help/__tests__/optionsStrategyReference.test.ts`: +8 tests — Bear Call Spread never describes the higher strike as more expensive; PMCC never attributes a leverage-based dollar-loss advantage and covers all four required downside clarifications individually; PMCC no longer unconditionally claims the long call "retains most of its value." **Total: 52 tests** (was 44).
+- `app/help/strategies/__tests__/OptionsStrategyReference.test.tsx`: rewritten around the goal-first default (a `browseAll()` test helper reaches the all-8-cards state explicitly where prior tests assumed it as the default) and extended with: the goal-first initial-state tests (no cards, real unchecked-radio assertion, "Browse all strategies" outside the radiogroup); focus restoration from a card opener AND from a comparison-tray opener; the ticket's literal required regression (compare Covered Call → filter it out of the grid → reopen from the tray → Back to Results → focus lands on a valid control); a fallback-chain regression (opener removed entirely while its own detail is open); the six comparison-dimension test (exact labels, values sourced from the real records, no Max profit/Max loss); and the dynamic Add/Remove compare-label test. **Total: 34 tests** (was 25).
+- **Total tests in this ticket's two files: 86** (was 69); **14 net new tests added in this corrective pass** (8 + rewrite of 25 into 34, i.e. 9 net new UI tests plus the removal of the vacuous assertion from an existing test).
+
+### 15.6 Validation (corrective pass)
+
+- `npx tsc --noEmit` — clean, zero errors.
+- Targeted (`lib/help/__tests__/optionsStrategyReference.test.ts` + `app/help/strategies/__tests__/OptionsStrategyReference.test.tsx`): **86 tests, all passing** (52 + 34).
+- Full suite: `npx vitest run --pool=threads --poolOptions.threads.maxThreads=4` — **105 test files, 1585 tests, all passing** (up from 105 files / 1568 tests before this corrective pass — no new test files, only new/changed tests within the two existing ones).
+- `npx next build` — succeeds; `/help/strategies` still compiles and prerenders as a static route (13.6 kB page / 101 kB First Load JS).
+- `git diff --check` — clean, no whitespace errors.
+
+### 15.7 Scope discipline
+
+Only `lib/help/optionsStrategyReference.ts`, `app/help/strategies/page.tsx`, their two test files, and this report were touched in this corrective pass. `app/help/page.tsx` (the Help entry-point card) was not touched — the corrective ticket did not flag anything there. The pre-existing untracked file `docs/reviews/portfolio-position-metrics-audit.md` was left untouched.
+
+**Not pushed or merged.** See final chat response for the corrective commit hash and exact test totals.
