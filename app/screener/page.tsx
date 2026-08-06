@@ -5606,14 +5606,20 @@ export default function Home() {
   }, []);
 
   // TE-0005B: the global Task Status Bar's "Open Results" action links to
-  // /screener?mode=rank so a completed ranked-scan task reconnects (via
-  // useRankedScan's existing reconnect effect) regardless of whichever
-  // mode was last stored in localStorage above. Additive only — doesn't
+  // /screener?mode=<kind> so a completed scan's toast reliably lands the
+  // person on the mode that actually holds its results, regardless of
+  // whichever mode was last stored in localStorage above. Originally only
+  // handled 'rank' (ranked-scan reconnect); broadened here to also handle
+  // 'filter' and 'targeted', since CSP/PMCC/CC/BPS-BCS-IC filter-mode scans
+  // all set resultsHref: '/screener?mode=filter' and were silently landing
+  // on whatever mode was last active instead. Additive only — doesn't
   // change default behavior for anyone arriving without this param.
   useEffect(() => {
     try {
-      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'rank') {
-        setScreenMode('rank');
+      if (typeof window === 'undefined') return;
+      const modeParam = new URLSearchParams(window.location.search).get('mode');
+      if (modeParam === 'filter' || modeParam === 'rank' || modeParam === 'targeted') {
+        setScreenMode(modeParam);
       }
     } catch {}
   }, []);
