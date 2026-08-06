@@ -50,6 +50,18 @@ import { RankedScoreTierSummary } from '@/features/screener/components/RankedSco
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
 } from '@/lib/screener/screenerJobStore';
+// SCREENER-OI-0001 — canonical minimum-relevant-leg-OI filter + two-level
+// sort, shared by Ranked, Filtered, and Targeted result panels. See
+// lib/screener/screenerResultOrdering.ts for the full pure implementation
+// and docs/tickets/SCREENER-OI-0001-oi-and-sort.md for the ticket.
+import {
+  computeRelevantLegOI, evaluateOiEligibility, extractOiLegsFromSpreadCandidate,
+  sortItems, setPrimarySortField, setSecondarySortField, OI_PRESETS, MIN_OI_LABEL,
+  MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
+} from '@/lib/screener/screenerResultOrdering';
+import type {
+  SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
+} from '@/lib/screener/screenerResultOrdering';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
@@ -5161,13 +5173,109 @@ function calcTargetedEntryOtmPct(entry: TargetedScanEntry): number | null {
   return null;
 }
 
+// SCREENER-OI-0001 — maps a real SpreadCandidate/ScreenResult strategy
+// string onto the canonical OiStrategy union. Every strategy the Screener
+// actually produces candidates for today (CSP/CC/BPS/BCS/IC/PMCC) maps
+// 1:1 by identical string value. Returns null for anything else (defensive
+// -- e.g. a future/unknown strategy string) rather than guessing.
+function toOiStrategy(strategy: string): 'CSP' | 'CC' | 'BPS' | 'BCS' | 'IC' | 'PMCC' | null {
+  if (strategy === 'CSP' || strategy === 'CC' || strategy === 'BPS' || strategy === 'BCS' || strategy === 'IC' || strategy === 'PMCC') {
+    return strategy;
+  }
+  return null;
+}
+
+// SCREENER-OI-0001 — one shared, reusable "Minimum relevant-leg OI" +
+// two-level sort control block, used identically by Filtered, Ranked, and
+// Targeted results panels so the OI/sort UI (and its dedup rule) lives in
+// exactly one place, per the ticket's "do not duplicate OI interpretation or
+// comparator logic inside React components" requirement. Accent color is the
+// only thing that varies per mode, matching each panel's existing palette
+// (purple=Ranked, teal=Targeted, amber=Filtered).
+function OiAndSortControls({
+  th, minOi, setMinOi, sort, setSort, accent,
+}: {
+  th: typeof THEMES[Theme];
+  minOi: number;
+  setMinOi: (n: number) => void;
+  sort: SortSpec;
+  setSort: (s: SortSpec) => void;
+  accent: 'purple' | 'teal' | 'amber';
+}) {
+  const [customOi, setCustomOi] = useState<string>('');
+  const isPreset = OI_PRESETS.some(p => p.value === minOi);
+  const activeCls = accent === 'purple' ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+    : accent === 'teal' ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+    : 'border-amber-500 text-amber-300 bg-amber-500/15';
+  const hoverCls = accent === 'purple' ? 'hover:border-purple-500/50'
+    : accent === 'teal' ? 'hover:border-teal-500/50'
+    : 'hover:border-amber-500/50';
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={`text-[9px] ${th.textFaint} shrink-0`}>{MIN_OI_LABEL}</span>
+        {OI_PRESETS.map(p => (
+          <button key={p.label} onClick={() => { setMinOi(p.value); setCustomOi(''); }}
+            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+              isPreset && minOi === p.value ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
+            }`}>
+            {p.label}
+          </button>
+        ))}
+        <input
+          type="number"
+          min={0}
+          placeholder="Custom"
+          value={customOi}
+          onChange={e => {
+            setCustomOi(e.target.value);
+            const n = parseInt(e.target.value, 10);
+            if (Number.isFinite(n) && n >= 0) setMinOi(n);
+          }}
+          aria-label="Custom minimum relevant-leg OI"
+          className={`w-16 ${th.input} border ${!isPreset ? activeCls.split(' ')[0] : th.inputBorder} rounded px-1.5 py-0.5 text-[9px] ${th.text} text-center focus:outline-none`}
+        />
+        <span className={`text-[8px] ${th.textFaint} basis-full`}>{MIN_OI_HELPER_TEXT}</span>
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
+        {SORT_FIELDS.map(f => (
+          <button key={f} onClick={() => setSort(setPrimarySortField(sort, f))}
+            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+              sort.primary === f ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
+            }`}>
+            {SORT_FIELD_LABELS[f]}
+          </button>
+        ))}
+        <span className={`text-[9px] ${th.textFaint} shrink-0 ml-1`}>then</span>
+        <select
+          aria-label="Secondary sort field"
+          value={sort.secondary}
+          onChange={e => setSort(setSecondarySortField(sort, e.target.value as SecondarySortField))}
+          className={`text-[9px] ${th.input} border ${th.inputBorder} rounded px-1.5 py-0.5 ${th.text} focus:outline-none`}
+        >
+          <option value="none">None</option>
+          {SORT_FIELDS.filter(f => f !== sort.primary).map(f => (
+            <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
 function TargetedScanResultsPanel({
-  entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
+  entries, sortBy, setSortBy, secondarySort, setSecondarySort, minOi, setMinOi, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
 }: {
   entries: TargetedScanEntry[];
-  sortBy: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
-  setSortBy: (v: 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm') => void;
+  sortBy: SortField;
+  setSortBy: (v: SortField) => void;
+  secondarySort: SecondarySortField;
+  setSecondarySort: (v: SecondarySortField) => void;
+  minOi: number;
+  setMinOi: (v: number) => void;
   popMin: number;
   th: typeof THEMES[Theme];
   rankConfig: RankConfig;
@@ -5184,7 +5292,6 @@ function TargetedScanResultsPanel({
   const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
-  const [activeSort, setActiveSort]             = useState(sortBy);
   // Track scan identity so we reset filters only on genuinely new scan
   const scanIdRef = useRef(0);
   const lastLenRef = useRef(0);
@@ -5200,7 +5307,6 @@ function TargetedScanResultsPanel({
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
-    setActiveSort(sortBy);
     setResetKey(k => k + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanIdRef.current]);
@@ -5212,7 +5318,26 @@ function TargetedScanResultsPanel({
     setHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
   const toggleStrategy = (s: string) =>
     setActiveStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
-  const changeSort = (k: typeof activeSort) => { setActiveSort(k); setSortBy(k); };
+  const sortSpec: SortSpec = { primary: sortBy, secondary: secondarySort };
+  const setSortSpec = (next: SortSpec) => { setSortBy(next.primary); setSecondarySort(next.secondary); };
+
+  // SCREENER-OI-0001 — canonical OI-eligibility metrics for a Targeted
+  // entry, used by both the minimum-OI floor and the "Relevant-leg OI" sort
+  // field. Targeted mode only ever produces BPS/BCS/IC entries.
+  const getEntryOi = (e: TargetedScanEntry): OiEligibilityResult => {
+    const c = e.candidate;
+    return evaluateOiEligibility(extractOiLegsFromSpreadCandidate(e.strategy, c), minOi);
+  };
+  const getEntryMetrics = (e: TargetedScanEntry): SortableMetrics => ({
+    score: e.score,
+    pop: e.pop,
+    creditDollars: e.candidate.credit ?? null,
+    creditPct: e.candidate.creditRatio != null ? e.candidate.creditRatio * 100 : null,
+    rocPct: e.candidate.roc ?? null,
+    otmPct: calcTargetedEntryOtmPct(e),
+    relevantLegOI: computeRelevantLegOI(extractOiLegsFromSpreadCandidate(e.strategy, e.candidate)),
+    dte: e.dte,
+  });
 
   // ── Inline filter + sort — runs every render, no caching ───────────────
   const allSymbols = Array.from(new Set(entries.map(e => e.symbol))).sort();
@@ -5233,15 +5358,21 @@ function TargetedScanResultsPanel({
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
   if (activeTrendOnly) pool = pool.filter(e => e.strategy === e.primaryStrategy);
-  // 5. sort
-  pool.sort((a, b) => {
-  if (activeSort === 'pop')         return b.pop - a.pop;
-  if (activeSort === 'credit')      return (b.candidate.credit ?? 0) - (a.candidate.credit ?? 0);
-  if (activeSort === 'creditRatio') return (b.candidate.creditRatio ?? 0) - (a.candidate.creditRatio ?? 0);
-  if (activeSort === 'roc')         return b.candidate.roc - a.candidate.roc;
-  if (activeSort === 'otm')         return (calcTargetedEntryOtmPct(b) ?? -999) - (calcTargetedEntryOtmPct(a) ?? -999);
-  return b.score - a.score;
-});
+  // 5. SCREENER-OI-0001 — canonical minimum relevant-leg OI floor (fail-
+  // closed: missing OI on a required leg never passes a positive floor).
+  // Applied BEFORE the sort and BEFORE Show-Top-N, per the ticket.
+  const oiByEntry = new Map<TargetedScanEntry, OiEligibilityResult>();
+  pool = pool.filter(e => {
+    const oi = getEntryOi(e);
+    oiByEntry.set(e, oi);
+    return oi.eligible;
+  });
+  // 6. canonical two-level sort (score-band note: Score has never been a
+  // grouped/tolerance-based ranking dimension anywhere in this codebase —
+  // it's always been a flat descending sort by the raw scoreCandidate()
+  // value, and this module preserves that exactly; see
+  // lib/screener/screenerResultOrdering.ts for the full rule).
+  pool = sortItems(pool, sortSpec, getEntryMetrics);
 
   const totalVisible  = pool.length;
   const display       = pool.slice(0, showTopN);
@@ -5255,15 +5386,6 @@ function TargetedScanResultsPanel({
     { label: '> 60 · Far Out',      min: 61, max: 999 },
   ];
 
-  const sortLabels: { key: typeof activeSort; label: string }[] = [
-    { key: 'score',       label: 'Score'    },
-    { key: 'pop',         label: 'POP %'    },
-    { key: 'credit',      label: 'Credit $' },
-    { key: 'creditRatio', label: 'Credit %' },
-    { key: 'roc',         label: 'ROC %'    },
-    { key: 'otm',         label: 'OTM %'    },
-  ];
-
   return (
     <div className="flex flex-col" style={{ minHeight: 0 }}>
 
@@ -5275,24 +5397,11 @@ function TargetedScanResultsPanel({
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
         <p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
 
-        {/* Row 1: count + sort + show top */}
+        {/* Row 1: count + show top */}
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-[9px] text-teal-400 tracking-widest font-medium shrink-0">
             {display.length} of {totalVisible} SHOWN
           </p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[9px] ${th.textFaint}`}>Sort</span>
-            {sortLabels.map(sl => (
-              <button key={sl.key} onClick={() => changeSort(sl.key)}
-                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                  activeSort === sl.key
-                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
-                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
-                }`}>
-                {sl.label}
-              </button>
-            ))}
-          </div>
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint}`}>Show</span>
             {[25, 50, 100, 999].map(n => (
@@ -5307,6 +5416,9 @@ function TargetedScanResultsPanel({
             ))}
           </div>
         </div>
+
+        {/* Row 1b: SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
+        <OiAndSortControls th={th} minOi={minOi} setMinOi={setMinOi} sort={sortSpec} setSort={setSortSpec} accent="teal" />
 
         {/* Row 2: POP + strategy + trend filters */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -5426,6 +5538,11 @@ function TargetedScanResultsPanel({
                   const ar = entry.isEtf ? etfRules : rules;
                   const aligned = entry.strategy === entry.primaryStrategy;
                   const against = entry.trendResult?.strategy !== 'NO_TRADE' && !aligned && entry.strategy !== 'IC';
+                  // SCREENER-OI-0001 — a candidate can pass the relevant-leg
+                  // OI floor while its protective long leg is weaker; that
+                  // gets surfaced here as a diagnostic, distinct from the
+                  // eligibility decision itself (which already passed).
+                  const oiWarnings = oiByEntry.get(entry)?.protectiveLegWarnings ?? [];
                   return (
                     <div key={`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}`} className="flex items-start gap-2">
                       <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
@@ -5445,6 +5562,11 @@ function TargetedScanResultsPanel({
                           cachedEntry={entry.cachedEntry}
                           existingPositions={existingPositions}
                         />
+                        {oiWarnings.map((w, i) => (
+                          <p key={i} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
+                            ⚠ {w}
+                          </p>
+                        ))}
                       </div>
                     </div>
                   );
@@ -5574,6 +5696,13 @@ export default function Home() {
   const [runtimeEtfRules, setRuntimeEtfRules] = useState<RulesType>(getSavedEtfRules);
   const [rankConfig, setRankConfig] = useState<RankConfig>(getSavedRankConfig);
   const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>('filter');
+  // SCREENER-OI-0001 -- Filtered mode's minimum relevant-leg OI floor and
+  // two-level sort, applied to the qualified section after the existing
+  // qualified/IVR eligibility split (see the Filtered-mode results render
+  // below). Disqualified-section ordering is unaffected -- it's already an
+  // audit trail of *why* something didn't qualify, not a ranked results list.
+  const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
+  const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
 
   // ── OE-0002A: Best Opportunities state ────────────────────────────────────
   // Purely derived, in-memory state -- never persisted, never fabricated.
@@ -5618,13 +5747,23 @@ export default function Home() {
   const [rankHiddenSymbols, setRankHiddenSymbols] = useState<string[]>([]);
   const toggleRankSymbol = (sym: string) =>
     setRankHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
+  // SCREENER-OI-0001 -- minimum relevant-leg OI floor + two-level sort,
+  // canonical across Ranked/Filtered/Targeted (see lib/screener/
+  // screenerResultOrdering.ts). 0 == "Any" (no floor).
+  const [rankMinOi, setRankMinOi] = useState<number>(0);
+  const [rankSort, setRankSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
 
   // ── Targeted Scan state ────────────────────────────────────────────────────
   const [targetedDteMin, setTargetedDteMin] = useState<number>(21);
   const [targetedDteMax, setTargetedDteMax] = useState<number>(45);
   const [targetedPopMin, setTargetedPopMin] = useState<number>(70);
   const [targetedOtmMin, setTargetedOtmMin] = useState<number>(6); // matches Income Engine OTM floor default
-  const [targetedSortBy, setTargetedSortBy] = useState<'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm'>('score');
+  const [targetedSortBy, setTargetedSortBy] = useState<SortField>('score');
+  // SCREENER-OI-0001 -- secondary sort + minimum relevant-leg OI floor for
+  // Targeted mode's results panel. Primary sort field reuses the existing
+  // targetedSortBy state (retyped to the canonical SortField union).
+  const [targetedSecondarySort, setTargetedSecondarySort] = useState<SecondarySortField>('none');
+  const [targetedMinOi, setTargetedMinOi] = useState<number>(0);
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
@@ -6362,7 +6501,16 @@ export default function Home() {
   const [filterPopMin, setFilterPopMin] = useState<number>(0);
   const [filterOtmMin, setFilterOtmMin] = useState<number>(0);
   const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
-  const [filterStrategies, setFilterStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
+  // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
+  // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
+  // Since those strategies were never included in the default array AND had
+  // no toggle button to add them back, their results were silently excluded
+  // from the QUALIFIED/DISQUALIFIED sections entirely -- a pre-existing gap,
+  // not something this ticket set out to fix, but one that directly blocks
+  // this ticket's own "consistent [OI/sort] behavior across scan modes"
+  // requirement for those strategies in Filtered mode. Minimal, in-scope
+  // correction: include every strategy Filtered mode can actually produce.
+  const [filterStrategies, setFilterStrategies] = useState<string[]>(['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC']);
   const toggleFilterStrategy = (s: string) =>
     setFilterStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
   const [filterHiddenSymbols, setFilterHiddenSymbols] = useState<string[]>([]);
@@ -6392,8 +6540,50 @@ export default function Home() {
 
   const qualified = results.filter(r => r.qualified);
   const disqualified = results.filter(r => !r.qualified);
-  const filteredQualified = applyFilterModeChips(qualified);
+  const filteredQualifiedChips = applyFilterModeChips(qualified);
   const filteredDisqualified = applyFilterModeChips(disqualified);
+
+  // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
+  // sort, applied to the QUALIFIED section only. Eligibility filters
+  // (qualify/disqualify, then the existing chips above) run first, and this
+  // ordering runs after -- matching the ticket's "Filtered mode: apply all
+  // eligibility filters first, followed by the selected ordering." The
+  // disqualified section is left as-is: it's an audit trail of *why*
+  // something didn't qualify, not a ranked results list.
+  const calcFilteredOtmPct = (r: ScreenResult): number | null => {
+    const c = r.bestCandidate;
+    const price = r.price;
+    if (!c || price == null || price <= 0) return null;
+    if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
+    if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
+    if (c.strategy === 'IC' && c.shortCallStrike != null) {
+      return Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100);
+    }
+    if (c.strategy === 'CSP' && c.breakeven != null && price > 0) return ((price - c.shortStrike) / price) * 100;
+    return null;
+  };
+  const filteredOiByResult = new Map<ScreenResult, OiEligibilityResult>();
+  let filteredQualified = filteredQualifiedChips.filter(r => {
+    const strat = toOiStrategy(r.strategy);
+    if (!strat || !r.bestCandidate) return true; // strategies with no OI mapping are unaffected
+    const oi = evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), filteredMinOi);
+    filteredOiByResult.set(r, oi);
+    return oi.eligible;
+  });
+  filteredQualified = sortItems(filteredQualified, filteredSort, (r): SortableMetrics => {
+    const c = r.bestCandidate;
+    const strat = toOiStrategy(r.strategy);
+    return {
+      score: strat ? scoreCandidate(r, rankConfig)?.score ?? null : null,
+      pop: c?.pop ?? null,
+      creditDollars: c?.credit ?? null,
+      creditPct: c?.creditRatio != null ? c.creditRatio * 100 : null,
+      rocPct: c?.roc ?? null,
+      otmPct: calcFilteredOtmPct(r),
+      relevantLegOI: strat && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(strat, c)) : null,
+      dte: c?.dte ?? null,
+    };
+  });
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -6808,6 +6998,10 @@ export default function Home() {
                   entries={targetedResults}
                   sortBy={targetedSortBy}
                   setSortBy={setTargetedSortBy}
+                  secondarySort={targetedSecondarySort}
+                  setSecondarySort={setTargetedSecondarySort}
+                  minOi={targetedMinOi}
+                  setMinOi={setTargetedMinOi}
                   popMin={targetedPopMin}
                   th={th}
                   rankConfig={rankConfig}
@@ -6866,11 +7060,14 @@ export default function Home() {
                     <div className={`w-px h-4 ${th.border} border-l`} />
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
-                      {(['BPS', 'BCS', 'IC'] as const).map(s => {
+                      {(['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC'] as const).map(s => {
                         const on = filterStrategies.includes(s);
                         const c  = s === 'BPS' ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
                                  : s === 'BCS' ? 'border-red-600 text-red-400 bg-red-500/10'
-                                 :               'border-blue-600 text-blue-400 bg-blue-500/10';
+                                 : s === 'IC'  ? 'border-blue-600 text-blue-400 bg-blue-500/10'
+                                 : s === 'CSP' ? 'border-teal-600 text-teal-400 bg-teal-500/10'
+                                 : s === 'CC'  ? 'border-cyan-600 text-cyan-400 bg-cyan-500/10'
+                                 :               'border-purple-600 text-purple-400 bg-purple-500/10';
                         return (
                           <button key={s} onClick={() => toggleFilterStrategy(s)}
                             className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
@@ -6881,6 +7078,13 @@ export default function Home() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level
+                      sort, applied to the QUALIFIED section (see the comment above
+                      filteredQualified's derivation for why DISQUALIFIED is untouched). */}
+                  <div className="mb-3">
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
                   </div>
 
                   {allFilterSymbols.length > 1 && (
@@ -6913,17 +7117,23 @@ export default function Home() {
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
                       <div className="space-y-2">
                         {filteredQualified.map(r => (
-                          <ResultCard 
-                            key={`${r.symbol}-${r.strategy}`} 
-                            result={r} 
-                            th={th} 
-                            rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} 
-                            screenMode={screenMode} 
-                            rankConfig={rankConfig} 
-                            onTrade={setTradeResult} 
-                            cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} 
-                            existingPositions={existingPositions} 
-                          />
+                          <div key={`${r.symbol}-${r.strategy}`}>
+                            <ResultCard
+                              result={r}
+                              th={th}
+                              rules={r.isEtf ? runtimeEtfRules : runtimeStockRules}
+                              screenMode={screenMode}
+                              rankConfig={rankConfig}
+                              onTrade={setTradeResult}
+                              cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)}
+                              existingPositions={existingPositions}
+                            />
+                            {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
+                              <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
+                                ⚠ {w}
+                              </p>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -6955,7 +7165,38 @@ export default function Home() {
                 // array — same approach Targeted mode uses, so loosening a filter
                 // never requires a rescan. Order: DTE -> strategy -> POP -> OTM ->
                 // credit ratio, then slice to the Show-top count.
-                const filtered = results.filter(r => {
+                const calcRankedOtmPct = (r: ScreenResult): number | null => {
+                  const c = r.bestCandidate;
+                  const price = r.price;
+                  if (!c || price == null || price <= 0) return null;
+                  if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
+                  if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
+                  if (c.strategy === 'IC' && c.shortCallStrike != null) {
+                    return Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100);
+                  }
+                  return null;
+                };
+                const getRankedOi = (r: ScreenResult): OiEligibilityResult | null => {
+                  const strat = toOiStrategy(r.strategy);
+                  if (!strat || !r.bestCandidate) return null;
+                  return evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), rankMinOi);
+                };
+                const getRankedMetrics = (r: ScreenResult): SortableMetrics => {
+                  const c = r.bestCandidate;
+                  const strat = toOiStrategy(r.strategy);
+                  return {
+                    score: (strat ? scoreCandidate(r, rankConfig)?.score : null) ?? null,
+                    pop: c?.pop ?? null,
+                    creditDollars: c?.credit ?? null,
+                    creditPct: c?.creditRatio != null ? c.creditRatio * 100 : null,
+                    rocPct: c?.roc ?? null,
+                    otmPct: calcRankedOtmPct(r),
+                    relevantLegOI: strat && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(strat, c)) : null,
+                    dte: c?.dte ?? null,
+                  };
+                };
+
+                let filtered = results.filter(r => {
                   if (rankHiddenSymbols.includes(r.symbol)) return false;
                   const dte = r.bestCandidate?.dte ?? 0;
                   if (dte < rankDteMin || dte > rankDteMax) return false;
@@ -6965,18 +7206,24 @@ export default function Home() {
                     if ((c.pop ?? 0) < rankPopMin) return false;
                     if ((c.creditRatio ?? 0) * 100 < rankCreditRatioMin) return false;
                     if (rankOtmMin > 0) {
-                      const price = r.price;
-                      if (price == null || price <= 0) return false;
-                      const otmPct = c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
-                        : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
-                        : c.strategy === 'IC' && c.shortCallStrike != null
-                          ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
-                          : null;
+                      const otmPct = calcRankedOtmPct(r);
                       if (otmPct == null || otmPct < rankOtmMin) return false;
                     }
                   }
                   return true;
                 });
+                // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor,
+                // applied (fail-closed) before the sort and before Show Top N.
+                const rankOiByResult = new Map<ScreenResult, OiEligibilityResult>();
+                filtered = filtered.filter(r => {
+                  const oi = getRankedOi(r);
+                  if (oi) rankOiByResult.set(r, oi);
+                  return oi ? oi.eligible : true; // strategies with no OI mapping are unaffected
+                });
+                // Canonical two-level sort (see the module for the documented
+                // score-band rule: Score has always been a flat descending
+                // sort here, never grouped/tolerance-based -- unchanged).
+                filtered = sortItems(filtered, rankSort, getRankedMetrics);
                 const display = filtered.slice(0, rankTopN);
 
                 return (
@@ -7018,6 +7265,11 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
+                  <div className="mb-3">
+                    <OiAndSortControls th={th} minOi={rankMinOi} setMinOi={setRankMinOi} sort={rankSort} setSort={setRankSort} accent="purple" />
                   </div>
 
                   {/* Filter row 2 — POP / OTM / Credit Ratio / Strategy, same pattern as Targeted */}
@@ -7124,6 +7376,11 @@ export default function Home() {
                           </div>
                           <div className="flex-1">
                             <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                            {(rankOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
+                              <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
+                                ⚠ {w}
+                              </p>
+                            ))}
                           </div>
                         </div>
                       ))}
