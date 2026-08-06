@@ -6097,7 +6097,7 @@ export default function Home() {
         failScreenerJob('No eligible holdings');
         return;
       }
-      updateScreenerJob({ total: scannable.length });
+      updateScreenerJob({ progressTotal: scannable.length });
 
       pushStatus('Getting access token...');
       const token = await getAccessToken();
