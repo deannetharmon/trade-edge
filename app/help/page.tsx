@@ -80,6 +80,22 @@ export default function HelpPage() {
 
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
+        {/* Options Strategy Reference — entry point (HELP-0001) */}
+        <div className={`border ${th.border} ${th.card} rounded-xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3`}>
+          <div>
+            <p className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest mb-1`}>New — Options Strategy Reference</p>
+            <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
+              Pick a goal — like generating income from shares you own, or making a bullish trade with limited risk — and get a plain-English, mechanically accurate reference for every relevant strategy, with worked dollar examples and side-by-side comparisons. Educational only; not a recommendation.
+            </p>
+          </div>
+          <a
+            href="/help/strategies"
+            className="shrink-0 text-center text-[11px] font-bold tracking-widest py-2 px-4 rounded-lg border border-blue-500 text-blue-400 hover:bg-blue-500/10 transition-colors"
+          >
+            OPEN STRATEGY REFERENCE →
+          </a>
+        </div>
+
         {/* Overview */}
         <Section title="Overview" th={th}>
           <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
