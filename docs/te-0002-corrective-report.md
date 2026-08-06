@@ -65,6 +65,129 @@ A wide two-sided market can no longer become `RELIABLE` merely because a marketa
 - `npx vitest run` — 98 test files, 1332 tests, all passing.
 - `npx next build` — succeeds, 52/52 static pages generated.
 
+## Merge status (original corrective round)
+
+All three corrections implemented, tested, and validated. Branch `fix/stop-loss-canonical-policy` was merged to `main` at `6f962c8`.
+
+---
+
+# Round 3 — Stop Display Policy Must Not Become an Enforcement Policy
+
+**Branch:** `fix/te-0002-stop-trust-boundary`
+**Original commit:** `fe64ad3`, based on `main` @ `6f962c8` — **superseded**, see Rebase note below.
+**Post-rebase commit:** `a68c17a`, based on `main` @ `195f324` (current `main`, which now includes the merged PM-0001 branch — position-metrics correctness, base + corrective round + corrective round 2 debit P/L gate).
+**Scope:** One focused defect — an untrusted/display-only stop policy could reach the breach-enforcement path and produce a false `CUT_LOSSES`. No redesign of the six-state classification, breach-confirmation state machine, or `evaluateStopBreach`/`classifyStopLossPolicy` themselves — both are unchanged. This round adds a trust boundary in how their outputs are *consumed*, not in how they're computed.
+
+### Rebase note (post-approval)
+
+Round 3 was originally built and committed (`fe64ad3`) against local `main` at `6f962c8`, which at the time did **not** contain PM-0001 (PM-0001's round-2 commit, `195f324`, had only been committed locally on a separate, unmerged branch, and was never pushed). Once PM-0001 was merged and became current local/remote `main` at `195f324`, `fe64ad3` was rebased onto it:
+
+```
+git rebase main   # replaying fe64ad3 onto 195f324
+```
+
+Four files overlap between PM-0001 and this round: `app/portfolio/page.tsx`, `lib/portfolio-data/acquisition.ts`, `lib/portfolio-data/types.ts`, and `lib/portfolio-data/__tests__/stopLossWiring.test.ts`. Of these, three (`page.tsx`, `acquisition.ts`, `types.ts`) merged automatically with no textual conflict — PM-0001's changes (POP/IC/buffer fixes, `entryPriceEffect`, the debit `pnl` gate) and Round 3's changes (`stopLossPolicy`/`stopLossDisplayPolicy` split, `getRecommendation()`'s advisory evaluation, `isActionRelevant()`'s raw-threshold removal) touch disjoint regions of each file. Verified directly post-rebase (not merely assumed from a clean auto-merge): `entryPriceEffect`, `computePositionPnl`, `isNetDebit`, `computeCanonicalBuffer`, and `resolveOptionLegPrice` (PM-0001) all still present in `acquisition.ts`, alongside `stopLossDisplayPolicy`, `untrustedWorkingStop`, `displayStopEvaluation`, and the gated `enforcementPolicy` (Round 3); `types.ts` carries both `entryPriceEffect`/`putBufferPct` and `stopLossDisplayPolicy`; `page.tsx` carries both the `entryPriceEffect` debit-display guard and the corrected `isActionRelevant` `CUT_LOSSES` formula (`breached || atExtremeLoss || rec.action === 'CUT_LOSSES'`, with `describeStopLossPolicy` reading `pos.stopLossDisplayPolicy`).
+
+`lib/portfolio-data/__tests__/stopLossWiring.test.ts` did conflict (both sides append content after the same shared tail of the file) and was resolved manually, preserving **all** tests from both sides in sequence: the import block now pulls in both PM-0001's `positionMetrics` imports and Round 3's `buildUnknownProvenancePolicy`; the PM-0001 describe blocks (`P/L null propagation`, `debit-trade guard`, `full debit-structure acceptance (PM-0001 corrective round 2)`, `acquisition-CSP messaging unchanged`, `crossed-quote contract`) are unchanged and immediately followed by the `TE-0002 corrective round 3: stop display/enforcement trust boundary (MU production fixture)` describe block. No test from either side was dropped, weakened, or rewritten to accommodate the other.
+
+## Production failure
+
+MU 800/790 five-lot BPS put credit spread:
+
+| Field | Value |
+|---|---|
+| Credit received | $1,260 total ($2.52/spread) |
+| Canonical 2×-credit stop | $5.04/spread → $2,520 total |
+| Working broker stop | $3.15/spread → $1,575 total |
+| Stop classification | `TOO_TIGHT` |
+| Provenance | `UNKNOWN` (broker order not created by TradeEdge) |
+| Midpoint buyback | ~$1,750 total |
+| Underlying | ~$862, safely above the $800 short put (buffer > 0, no strike breach) |
+
+The canonical $2,520 threshold was never crossed. But because the $1,750 midpoint exceeded the *broker's own* $1,575 threshold, and enough distinctly-timed observations accumulated, the position eventually reached `CONFIRMED_BREACH` and both the Suggested Action text and the CUT_LOSSES button lit up — an incorrect recommendation rendered identically on both surfaces, not two independent bugs.
+
+## Root cause: a display fabrication reused as an enforcement input
+
+`classifyPositionStopLoss` (`lib/portfolio-data/acquisition.ts`) correctly classified the stop as `TOO_TIGHT`/`UNKNOWN_PROVENANCE`. For *display*, it also built a synthetic policy object via `buildUnknownProvenancePolicy()` so the UI could show a trigger price without a fabricated basis label — a legitimate, and already-documented, thing to do. The defect: that same display object was the *only* thing returned through `StopLossInfo.policy`/`Position.stopLossPolicy`, and `getRecommendation()` passed `pos.stopLossPolicy` straight into `evaluateStopBreach()` as the authoritative enforcement threshold, with no check that the policy behind it had ever been provenance-validated. The `Position.stopLossPolicy` doc comment *already said* this field should be null for an order TradeEdge doesn't recognize — the code just didn't implement that contract.
+
+## Fix: split enforcement from display
+
+**`lib/portfolio-data/types.ts`**
+- `Position.stopLossPolicy` is now documented and enforced as an ENFORCEMENT-TRUST boundary: non-null *only* when `stopLossClassification` is `ALIGNED` or `TOO_LOOSE` — the two classifications reachable only when a recorded TradeEdge policy's identity *and* live price both verify against the broker order. Every other classification (`NO_STOP`, `TOO_TIGHT`, `UNKNOWN_PROVENANCE`, `INVALID`) leaves this field `null`, independent of whether a raw broker trigger price exists.
+- New `Position.stopLossDisplayPolicy: StopLossPolicy | null` — always resolves to *some* policy object whenever a working stop exists (matched or the `buildUnknownProvenancePolicy()` fabrication), explicitly documented as display-only and never to be passed to `evaluateStopBreach()` as an authoritative threshold.
+- `StopLossInfo` gained the matching `displayPolicy` field alongside the now-gated `policy` field.
+
+**`lib/portfolio-data/acquisition.ts`**
+- `classifyPositionStopLoss`: computes `enforcementPolicy = (classification === 'ALIGNED' || classification === 'TOO_LOOSE') && matchedPolicy ? matchedPolicy : null` and returns it as `policy`; the previous unconditional `matchedPolicy ?? buildUnknownProvenancePolicy(...)` fabrication moved to the new `displayPolicy` field only.
+- `loadPositions()`'s Position construction: `stopLossPolicy: stopLoss.policy, stopLossDisplayPolicy: stopLoss.displayPolicy`.
+- `getRecommendation()`:
+  - `evaluateStopBreach({ policy: pos.stopLossPolicy, ... })` is unchanged in shape, but is now safe by construction — an untrusted policy can never reach it, so `evaluateStopBreach` can never confirm a breach off a threshold TradeEdge didn't set.
+  - A second, *capped* advisory evaluation runs only when `pos.stopLossPolicy == null` and classification is `TOO_TIGHT`/`UNKNOWN_PROVENANCE` and a display policy exists — using `pos.stopLossDisplayPolicy` as the threshold. Its result is read only to decide whether to surface `MANAGE` ("Verify stop — ..."); it is never assigned to `stopLossConfirmedBreach`, so even a `CONFIRMED_BREACH`-shaped result from this advisory evaluation can only ever downgrade to `MANAGE`, never escalate to `CUT_LOSSES`.
+  - Both hard-exit checks (`breached` on short-strike buffer, and the pre-existing `stopLossConfirmedBreach`) run exactly as before and are entirely untouched by this change — a genuine strike breach or a *trusted* confirmed stop breach still produces `CUT_LOSSES`.
+
+**`app/portfolio/page.tsx`**
+- `isActionRelevant`'s `CUT_LOSSES` branch previously ran its *own* independent `stopLossBreachedMid || stopLossBreachedMarketable` raw-threshold check against `pos.stopLossPrice`/`currentValue`/`closeValue` — entirely bypassing classification/provenance/confirmation logic. This was the second half of the production bug: even after fixing `getRecommendation()`, this button-relevance gate could still light up off the same untrusted $1,575 threshold on its own. Removed; the branch is now `breached || atExtremeLoss || rec.action === 'CUT_LOSSES'` — the identical, already-corrected canonical recommendation both surfaces now consume.
+- `describeStopLossPolicy(...)`'s call site switched from `pos.stopLossPolicy` to `pos.stopLossDisplayPolicy` so the card still shows the observed broker basis/trigger for an untrusted stop instead of falling back to "No stop order" text.
+
+## Decision-rule verification
+
+| Rule | Behavior after fix |
+|---|---|
+| `UNKNOWN_PROVENANCE` | May display broker trigger (via `stopLossDisplayPolicy`). Produces `MANAGE`/"Verify stop" when the untrusted threshold shows breach evidence. Never reaches `CONFIRMED_BREACH`/`CUT_LOSSES` — `pos.stopLossPolicy` is null, so `evaluateStopBreach()`'s authoritative path never runs on it. |
+| `TOO_TIGHT` | Same as above — `pos.stopLossPolicy` is null regardless of how tight the broker order is; the too-tight threshold can only ever produce a `MANAGE` advisory. |
+| `ALIGNED` / `TOO_LOOSE` (provenance-matched) | `pos.stopLossPolicy` is the real matched policy; `evaluateStopBreach()` behavior — broker-fill authority, hysteresis, dedup, confirmation streak — is completely unchanged. |
+| `NO_STOP` / `INVALID` | `pos.stopLossPolicy` is null (as it always was); `evaluateStopBreach()` returns `NO_STOP`; no stop-derived `CUT_LOSSES`. |
+| Independent hard exits | `breached` (short-strike buffer ≤ 0) and `veryLargeLoss && trendAgainst` are untouched — a genuine strike breach still fires `CUT_LOSSES` regardless of stop trust state. |
+
+## Regression tests added
+
+`lib/portfolio-data/__tests__/stopLossWiring.test.ts`:
+- Updated two existing `classifyPositionStopLoss` tests (`resolves an externally created stop with no TradeEdge metadata...`, `does not misattribute a recorded policy whose brokerOrderId no longer matches...`) to assert against the new `result.displayPolicy` for the fabricated/unmatched policy and `result.policy === null` for the enforcement field — locking the split contract at the classification layer.
+- New `TE-0002 corrective round 3: stop display/enforcement trust boundary (MU production fixture)` describe block, using the exact production numbers (BPS, qty 5, credit $1,260/$2.52 per contract, short/long 800/790, stock $862, broker stop $3.15, canonical $5.04, `currentValue` $1,750, `pnl` −$490/−38.9%):
+  - Fixture arithmetic sanity check against the reported numbers.
+  - `classifyPositionStopLoss`-level check: `$3.15` stop remains visible, classification is `TOO_TIGHT`, `displayPolicy` is `UNKNOWN`-basis/`UNKNOWN`-source, and `policy` (enforcement) is `null`.
+  - One observation above the untrusted $1,575 threshold does not produce `CUT_LOSSES`.
+  - Multiple precise, >5-minutes-apart observations above the untrusted threshold still do not produce `CUT_LOSSES`.
+  - A wide-market marketable-only observation above the untrusted threshold does not produce `CUT_LOSSES`.
+  - The resulting recommendation is `MANAGE` with a `/Verify stop/`-matching explanation.
+  - Even a broker-reported fill on the untrusted/unmatched stop does not escalate to `CUT_LOSSES` (conservative-by-design; documented as intentional — see "Scope notes" below).
+  - A contract-lock test proving the button-relevance formula (`breached || atExtremeLoss || rec.action === 'CUT_LOSSES'`, i.e. `isActionRelevant`'s post-fix `CUT_LOSSES` branch, verified by direct code inspection since that function isn't exported/importable from `app/portfolio/page.tsx` — same limitation as `loadPositions()` itself, per TC-0001's established finding) evaluates to `false` for the same fixture — both surfaces agree.
+  - **Controls:** a provenance-matched `ALIGNED` policy still confirms `CUT_LOSSES` after a valid observation streak; a broker-reported fill for a trusted `ALIGNED` policy remains authoritative; a genuinely breached short strike still produces its independent hard exit regardless of stop trust state.
+
+## Scope notes / limitations
+
+- The advisory (display-policy) evaluation in `getRecommendation()` uses `mapBrokerStopStatus(pos.stopLossOrderStatus)` for `brokerStopStatus`, same as the trusted path — so a genuine broker-reported fill on an *untrusted* stop still only ever surfaces as `MANAGE`/"Verify stop," never `CUT_LOSSES`. This is a deliberate, conservative choice: TradeEdge has no confirmed record of what that order represents, so it does not auto-treat even a real fill on it as a confirmed TradeEdge exit signal. Flagged here explicitly as a design decision, not an oversight, and is covered by its own regression test.
+- `isActionRelevant` (`app/portfolio/page.tsx`) is not exported and lives in a large client component that can't be imported into the vitest/node environment — its post-fix contract is locked via a code-inspection-verified formula test rather than a direct function-level test, consistent with the `loadPositions()` precedent already established in TC-0001's implementation report.
+
+## Validation (pre-rebase, superseded)
+
+Run against `fe64ad3` on `main` @ `6f962c8` (without PM-0001) — recorded here for history, superseded by the post-rebase validation below:
+- `npx tsc --noEmit` — clean, zero errors.
+- `npx vitest run` (full suite) — 99 test files, 1409 tests, all passing.
+- `npx next build` — succeeds.
+
+## Validation (post-rebase, on `a68c17a`, current)
+
+Base sanity check first: `git merge-base --is-ancestor 195f324 a68c17a` confirms PM-0001's round-2 commit is an ancestor of the rebased branch.
+
+- `npx tsc --noEmit` — clean, zero errors.
+- Targeted suites specified for this round:
+  - `lib/portfolio/__tests__/positionMetrics.test.ts` — 66 tests, passing (PM-0001's pure-function suite, unchanged).
+  - `lib/portfolio-data/__tests__/stopLossWiring.test.ts` — **48 tests, passing** (37 from PM-0001's `195f324` state + this round's ~11 net-new MU-fixture/contract tests — see Rebase note for the exact merge).
+  - `lib/portfolio/__tests__/stopLossPolicy.test.ts` — 33 tests, passing, unchanged.
+  - ES-0001 close-order safety suites — `lib/portfolio/__tests__/closeOrderSafety.test.ts` (46), `closeOrderSubmission.test.ts` (19), `pendingOrderReplacementSafety.test.ts` (35), `pendingOrderReplacementSubmission.test.ts` (23) — 123 tests total, all passing, unchanged.
+- `npx vitest run` (full suite, `--pool=threads --poolOptions.threads.maxThreads=4`) — **99 test files, 1424 tests, all passing.**
+  - Count check (per instruction, investigated rather than assumed): PM-0001's own reviewed baseline (`195f324` alone, before this round) was **99 files / 1413 tests**. This round added tests only to `stopLossWiring.test.ts` (37 → 48, +11) and no new test files. 1413 + 11 = 1424 — the combined total is exactly consistent with "all PM-0001 tests plus the new Round 3 tests," not a regression or a silently-dropped count.
+- `npx next build` — succeeds.
+
+## Post-rebase confirmation: enforcement/display separation intact
+
+Directly verified in the rebased `acquisition.ts`/`types.ts`/`page.tsx` (not merely inferred from a clean auto-merge):
+- `Position.stopLossPolicy` remains gated to `ALIGNED`/`TOO_LOOSE` only (`enforcementPolicy` in `classifyPositionStopLoss`, unchanged from the original Round 3 commit).
+- `Position.stopLossDisplayPolicy` remains the always-resolved, display-only field, still the only thing `describeStopLossPolicy(...)` in `page.tsx` reads.
+- `getRecommendation()`'s advisory (`displayStopEvaluation`/`untrustedWorkingStop`) still never feeds `stopLossConfirmedBreach`.
+- `isActionRelevant`'s `CUT_LOSSES` branch is still `breached || atExtremeLoss || rec.action === 'CUT_LOSSES'`, with no reintroduced raw-threshold check.
+
 ## Merge status
 
-All three corrections implemented, tested, and validated. Branch `fix/stop-loss-canonical-policy` is ready for merge review.
+Implemented, tested, and validated on `fix/te-0002-stop-trust-boundary` at commit `a68c17a` (rebased onto current `main` @ `195f324`, which includes merged PM-0001). **Not merged and not pushed** — awaiting review per instruction.

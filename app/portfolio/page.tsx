@@ -1602,19 +1602,22 @@ function isActionRelevant(pos: Position, action: ActionType, override?: Recommen
     const breached = pos.buffer != null && pos.buffer <= 0;
     // PI-0014: marketable evidence can only widen this gate, never narrow
     // it -- same OR-with-mid convention as getRecommendation()'s own
-    // stopLossBreached/veryLargeLoss above. See
-    // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+    // veryLargeLoss check. See docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
     const marketablePnlPct = computeMarketablePnlPct(pos);
     const atExtremeLoss = (pnlPct != null && pnlPct <= -200) || (marketablePnlPct != null && marketablePnlPct <= -200);
-    const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-    const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
-      ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
-      : false;
-    const stopLossBreachedMarketable = pos.stopLossPrice != null && pos.closeValue != null && shortQty > 0
-      ? pos.closeValue >= (pos.stopLossPrice * 100 * shortQty)
-      : false;
-    const stopLossBreached = stopLossBreachedMid || stopLossBreachedMarketable;
-    return breached || atExtremeLoss || stopLossBreached || rec.action === 'CUT_LOSSES';
+    // TE-0002 corrective round 3: this used to run its OWN raw
+    // stopLossPrice/currentValue/closeValue mid-OR-marketable threshold
+    // check here, independent of getRecommendation()'s trust-aware
+    // evaluateStopBreach() confirmation logic -- and independent of
+    // provenance/classification entirely. That let the CUT_LOSSES button
+    // light up off a raw, unconfirmed, possibly untrusted (TOO_TIGHT /
+    // UNKNOWN_PROVENANCE) broker stop price even when getRecommendation()
+    // itself no longer agreed. Both surfaces (this button and the
+    // Suggested Action text) must consume the SAME canonical
+    // recommendation, so the stop-loss contribution here is now `rec.action
+    // === 'CUT_LOSSES'` only -- the identical canonical, trust-gated
+    // evaluation getRecommendation() already performs.
+    return breached || atExtremeLoss || rec.action === 'CUT_LOSSES';
   }
   if (action === 'PLACE_GTC') {
     return !pos.hasGtc;
@@ -8239,7 +8242,14 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 // Renders the RECORDED policy -- never a "×credit" label
                 // fabricated by dividing price by credit for an
                 // unknown-provenance order (see describeStopLossPolicy).
-                const policyDescription = describeStopLossPolicy(pos.stopLossPolicy);
+                // TE-0002 corrective round 3: pos.stopLossPolicy is now the
+                // enforcement-trust-gated field (null for TOO_TIGHT/
+                // UNKNOWN_PROVENANCE) -- use the always-resolved display-only
+                // policy here so the card still shows the observed broker
+                // basis/trigger for an untrusted stop instead of "No stop
+                // order". Never pass this display policy into breach
+                // enforcement logic (see Position.stopLossDisplayPolicy).
+                const policyDescription = describeStopLossPolicy(pos.stopLossDisplayPolicy);
                 return (
                   <>
                     <p className={`text-xs font-bold ${cfg.cls}`}>

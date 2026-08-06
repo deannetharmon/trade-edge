@@ -694,7 +694,7 @@ export function classifyPositionStopLoss(
 ): StopLossInfo {
   const shortLeg = position.legs.find(l => l.direction === 'Short');
   if (!shortLeg?.symbol) {
-    return { status: 'unknown', price: null, policy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
   }
   // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
   const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
@@ -704,7 +704,7 @@ export function classifyPositionStopLoss(
   );
 
   if (!match) {
-    return { status: 'none', price: null, policy: null, classification: 'NO_STOP', orderId: null, orderStatus: null };
+    return { status: 'none', price: null, policy: null, displayPolicy: null, classification: 'NO_STOP', orderId: null, orderStatus: null };
   }
 
   const orderPrice = parseFloat(match.stopPrice ?? match.price);
@@ -745,13 +745,32 @@ export function classifyPositionStopLoss(
   // For display, always resolve to SOME StopLossPolicy object so the UI
   // never has to re-derive a basis from price/credit itself -- but an
   // unmatched/absent record resolves to an explicit UNKNOWN-basis policy,
-  // never a fabricated one.
+  // never a fabricated one. This is DISPLAY-ONLY -- see StopLossInfo's doc
+  // comment. It is never returned through the `policy` (enforcement) field.
   const displayPolicy = matchedPolicy ?? (orderTriggerPrice != null ? buildUnknownProvenancePolicy(orderTriggerPrice, match.id, match.complexOrderId ?? null) : null);
+
+  // TE-0002 corrective round 3: `policy` (enforcement) is now gated on
+  // classification, not merely on whether a matchedPolicy record exists.
+  // ALIGNED and TOO_LOOSE are the only two classifications reachable when
+  // the recorded policy's identity AND live price both check out against
+  // the broker order -- every other classification (including TOO_TIGHT and
+  // UNKNOWN_PROVENANCE, which CAN still occur even when matchedPolicy is
+  // non-null, e.g. a stale record whose price no longer matches what's
+  // actually live) must never reach evaluateStopBreach() as an
+  // authoritative threshold. See classifyStopLossPolicy's branches above:
+  // TOO_TIGHT/UNKNOWN_PROVENANCE can be returned from the "stale record"
+  // path even with a matchedPolicy in hand, precisely because the *price*
+  // provenance -- not just the order id -- failed to verify.
+  const enforcementPolicy =
+    (classification === 'ALIGNED' || classification === 'TOO_LOOSE') && matchedPolicy
+      ? matchedPolicy
+      : null;
 
   return {
     status: legacyStatus,
     price: orderTriggerPrice,
-    policy: displayPolicy,
+    policy: enforcementPolicy,
+    displayPolicy,
     classification,
     orderId: match.id || null,
     orderStatus: match.status ?? null,
@@ -1478,7 +1497,8 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         return match ? parseFloat(match.price) || null : null;
       })(),
       stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
-      stopLossPolicy: stopLoss.policy, stopLossClassification: stopLoss.classification,
+      stopLossPolicy: stopLoss.policy, stopLossDisplayPolicy: stopLoss.displayPolicy,
+      stopLossClassification: stopLoss.classification,
       stopLossOrderStatus: stopLoss.orderStatus,
       quoteWidthEvidence,
       stockPrice: stockPrices[symbol] ?? null,
@@ -1619,6 +1639,14 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
   // lib/portfolio/stopLossPolicy.ts's evaluateStopBreach. A single/
   // unconfirmed/wide-market-only reading downgrades to a MANAGE "verify
   // stop" recommendation instead of an emergency exit.
+  // TE-0002 corrective round 3: `pos.stopLossPolicy` is now the
+  // enforcement-trust-gated field (see Position.stopLossPolicy's doc
+  // comment) -- non-null ONLY for ALIGNED/TOO_LOOSE, provenance-validated
+  // policies. Passing it straight into evaluateStopBreach() is therefore
+  // safe: an untrusted/unmatched broker order (TOO_TIGHT, UNKNOWN_
+  // PROVENANCE, INVALID, NO_STOP) can never reach this call, so it can
+  // never produce CONFIRMED_BREACH / CUT_LOSSES from a threshold TradeEdge
+  // didn't set and hasn't verified.
   const stopBreachEvaluation = evaluateStopBreach({
     policy: pos.stopLossPolicy,
     quantity: shortQty,
@@ -1627,8 +1655,50 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
     quoteQuality: derivePositionQuoteQuality(pos),
   });
   const stopLossConfirmedBreach = stopBreachEvaluation.state === 'CONFIRMED_BREACH';
+
+  // Production incident (TE-0002 corrective round 3): a working broker stop
+  // that is TOO_TIGHT or UNKNOWN_PROVENANCE still deserves the trader's
+  // attention -- it's either materially tighter than the documented policy,
+  // or an order TradeEdge doesn't recognize at all -- but it must NEVER be
+  // capable of confirming a hard exit off a threshold TradeEdge never set.
+  // This advisory evaluation runs against the DISPLAY-only policy (which
+  // still carries the raw, unverified trigger price) purely to decide
+  // whether to surface a MANAGE "verify stop" recommendation; its result is
+  // deliberately never read into `stopLossConfirmedBreach` above, so even a
+  // CONFIRMED_BREACH-shaped result here can only ever downgrade to MANAGE,
+  // never escalate to CUT_LOSSES.
+  const untrustedWorkingStop =
+    pos.stopLossPolicy == null &&
+    (pos.stopLossClassification === 'TOO_TIGHT' || pos.stopLossClassification === 'UNKNOWN_PROVENANCE') &&
+    pos.stopLossDisplayPolicy != null;
+  const displayStopEvaluation = untrustedWorkingStop
+    ? evaluateStopBreach({
+        policy: pos.stopLossDisplayPolicy,
+        quantity: shortQty,
+        observations: buildStopBreachObservations(pos),
+        brokerStopStatus: mapBrokerStopStatus(pos.stopLossOrderStatus),
+        quoteQuality: derivePositionQuoteQuality(pos),
+      })
+    : null;
+  const displayStopNeedsAttention =
+    displayStopEvaluation != null &&
+    displayStopEvaluation.state !== 'NOT_BREACHED' &&
+    displayStopEvaluation.state !== 'NO_STOP';
+
   const stopLossNeedsVerification =
-    stopBreachEvaluation.state === 'VERIFY_STOP' || stopBreachEvaluation.state === 'PENDING_CONFIRMATION';
+    stopBreachEvaluation.state === 'VERIFY_STOP' ||
+    stopBreachEvaluation.state === 'PENDING_CONFIRMATION' ||
+    displayStopNeedsAttention;
+  // Which explanation to surface in the MANAGE detail line below -- prefer
+  // the trusted-policy evaluation's own message when IT is what triggered
+  // verification; otherwise attribute the message to the untrusted/tight
+  // working stop so the trader knows this isn't a TradeEdge-set threshold.
+  const stopVerifyExplanation =
+    stopBreachEvaluation.state === 'VERIFY_STOP' || stopBreachEvaluation.state === 'PENDING_CONFIRMATION'
+      ? stopBreachEvaluation.explanation
+      : displayStopEvaluation
+        ? `Working stop is ${pos.stopLossClassification === 'TOO_TIGHT' ? 'tighter than the documented policy' : 'of unknown provenance (not created by TradeEdge)'} — ${displayStopEvaluation.explanation}`
+        : stopBreachEvaluation.explanation;
 
   // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this
   if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
@@ -1648,7 +1718,7 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
   // Breach evidence exists but isn't confirmed (no broker fill, insufficient
   // observation history, or only a wide-market/degraded-quote reading) --
   // never escalate a single noisy snapshot straight to CUT_LOSSES.
-  if (stopLossNeedsVerification) return { action: 'MANAGE', detail: `Verify stop — ${stopBreachEvaluation.explanation}` };
+  if (stopLossNeedsVerification) return { action: 'MANAGE', detail: `Verify stop — ${stopVerifyExplanation}` };
   if (veryLargeLoss && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% and trend is adverse — exit or roll` };
 
   // Short-dated entry: maximize profit, but do not treat ordinary red P/L as a failure.

@@ -135,7 +135,39 @@ export interface Position {
   // lib/portfolio/stopLossPolicy.ts). `stopLossBreach` is the confirmation-
   // aware breach evaluation used by getRecommendation() -- never a raw
   // mid-OR-marketable check.
+  //
+  // TE-0002 corrective round 3: this field is an ENFORCEMENT-TRUST
+  // boundary, not just a display convenience -- it is non-null ONLY when
+  // stopLossClassification is 'ALIGNED' or 'TOO_LOOSE' (a live broker order
+  // whose identity AND recorded price both match a TradeEdge-created
+  // policy). For every other classification (NO_STOP, TOO_TIGHT,
+  // UNKNOWN_PROVENANCE, INVALID) this field is `null`, full stop --
+  // regardless of whether a raw broker trigger price exists. This is what
+  // lets getRecommendation() pass `stopLossPolicy` straight into
+  // evaluateStopBreach() as the authoritative enforcement threshold without
+  // re-checking classification itself: an unmatched/untrusted broker order
+  // can never reach evaluateStopBreach() through this field, so it can never
+  // produce CONFIRMED_BREACH / CUT_LOSSES from a threshold TradeEdge didn't
+  // set and hasn't verified. Production incident: a TOO_TIGHT, UNKNOWN
+  // -provenance broker stop (never created by TradeEdge, priced well inside
+  // the documented 2x-credit default) was previously stored here via
+  // buildUnknownProvenancePolicy() "for display," which silently promoted it
+  // into evaluateStopBreach()'s authoritative threshold and produced a false
+  // CUT_LOSSES. See stopLossDisplayPolicy for the display-only equivalent,
+  // and lib/portfolio/stopLossPolicy.ts's module doc for the full writeup.
   stopLossPolicy: StopLossPolicy | null;
+  // TE-0002 corrective round 3: DISPLAY-ONLY. Always resolves to SOME
+  // StopLossPolicy object whenever a working stop order exists (so the UI
+  // never has to re-derive a basis from price/credit itself) -- for an
+  // unmatched/untrusted order this is an explicit UNKNOWN-basis policy built
+  // by buildUnknownProvenancePolicy(), never a fabricated basis. This field
+  // must NEVER be passed to evaluateStopBreach() as an authoritative
+  // enforcement policy; getRecommendation() only ever uses it to build a
+  // capped, non-authoritative "verify stop" advisory (which can produce
+  // MANAGE but never CONFIRMED_BREACH/CUT_LOSSES) for TOO_TIGHT/
+  // UNKNOWN_PROVENANCE positions. Equal to stopLossPolicy whenever
+  // stopLossPolicy is non-null.
+  stopLossDisplayPolicy: StopLossPolicy | null;
   stopLossClassification: StopClassification;
   // Raw broker status string for the currently-matched stop order (e.g.
   // 'Live', 'Filled') -- feeds mapBrokerStopStatus() so getRecommendation()
@@ -291,7 +323,12 @@ export interface StopLossInfo {
   status: StopStatus;
   price: number | null;
   // TE-0002 additions -- see the Position interface's doc comment.
+  // TE-0002 corrective round 3: `policy` is now the ENFORCEMENT-TRUST-gated
+  // field (non-null only for ALIGNED/TOO_LOOSE); `displayPolicy` is the
+  // always-resolved display-only counterpart. See Position.stopLossPolicy /
+  // Position.stopLossDisplayPolicy's doc comments for the full contract.
   policy: StopLossPolicy | null;
+  displayPolicy: StopLossPolicy | null;
   classification: StopClassification;
   orderId: string | null;
   orderStatus: string | null;

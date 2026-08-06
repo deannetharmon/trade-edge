@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit, computeMarketablePnlPct } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
-import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy } from '@/lib/portfolio/stopLossPolicy';
+import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy, buildUnknownProvenancePolicy } from '@/lib/portfolio/stopLossPolicy';
 import { computeSignedNetPremium, isNetDebitStructure, computePositionPnl } from '@/lib/portfolio/positionMetrics';
 
 // ── Fixtures ────────────────────────────────────────────────────────────
@@ -78,6 +78,7 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     stopLossStatus: 'unknown',
     stopLossPrice: null,
     stopLossPolicy: null,
+    stopLossDisplayPolicy: null,
     stopLossClassification: 'NO_STOP',
     stopLossOrderStatus: null,
     quoteWidthEvidence: null,
@@ -121,19 +122,30 @@ describe('classifyPositionStopLoss (wiring)', () => {
 
   // 9. Externally created broker stop with no metadata: basis stays
   // UNKNOWN, never relabeled as credit-based.
-  it('resolves an externally created stop with no TradeEdge metadata to an UNKNOWN-basis display policy', () => {
+  //
+  // TE-0002 corrective round 3: `result.policy` is now the enforcement-
+  // trust-gated field -- null for an unmatched/UNKNOWN-provenance order.
+  // The UNKNOWN-basis fabrication this test locks down now lives on
+  // `result.displayPolicy` (display-only; never fed into breach
+  // enforcement). `result.policy` itself must be null here.
+  it('resolves an externally created stop with no TradeEdge metadata to an UNKNOWN-basis display policy, and null enforcement policy', () => {
     const order = gtcOrder({ id: 'ord-3', stopPrice: '5.00' });
     const result = classifyPositionStopLoss(positionInput, [order], null);
-    expect(result.policy?.anchorBasis).toBe('UNKNOWN');
-    expect(result.policy?.source).toBe('UNKNOWN');
+    expect(result.displayPolicy?.anchorBasis).toBe('UNKNOWN');
+    expect(result.displayPolicy?.source).toBe('UNKNOWN');
+    expect(result.policy).toBeNull();
   });
 
+  // TE-0002 corrective round 3: a stale/mismatched record must not leak
+  // into the enforcement field either, even though its (unmatched) identity
+  // is still visible via displayPolicy for the trader's context.
   it('does not misattribute a recorded policy whose brokerOrderId no longer matches the live order', () => {
     const stalePolicy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'old-order-id' });
     const order = gtcOrder({ id: 'new-order-id', stopPrice: '3.15' });
     const result = classifyPositionStopLoss(positionInput, [order], stalePolicy);
     expect(result.classification).not.toBe('ALIGNED');
-    expect(result.policy?.brokerOrderId).not.toBe('old-order-id');
+    expect(result.policy).toBeNull();
+    expect(result.displayPolicy?.brokerOrderId).not.toBe('old-order-id');
   });
 
   // 8. AI-created current-value stop: provenance and display remain
@@ -335,7 +347,7 @@ describe('getRecommendation: canonical stop-loss integration', () => {
   it('does not treat an unconfirmed single-snapshot stop crossing as a confirmed CUT_LOSSES', () => {
     const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' }); // $5.04 threshold
     const pos = makePosition({
-      stopLossPolicy: policy,
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
       stopLossPrice: 5.04,
       stopLossClassification: 'ALIGNED',
       stopLossOrderStatus: 'Live',
@@ -353,7 +365,7 @@ describe('getRecommendation: canonical stop-loss integration', () => {
   it('recommends CUT_LOSSES when the broker reports the stop order filled', () => {
     const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
     const pos = makePosition({
-      stopLossPolicy: policy,
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
       stopLossPrice: 5.04,
       stopLossClassification: 'ALIGNED',
       stopLossOrderStatus: 'Filled',
@@ -378,7 +390,7 @@ describe('getRecommendation: canonical stop-loss integration', () => {
       { date: '2026-08-03', capturedAt: '2026-08-03T14:00:00.000Z', dte: 43, currentValue: thresholdTotal + 20, closeValue: thresholdTotal + 20, pnl: -100, pnlPct: -8, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
     ];
     const pos = makePosition({
-      stopLossPolicy: policy,
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
       stopLossPrice: policy.triggerPrice,
       stopLossClassification: 'ALIGNED',
       stopLossOrderStatus: 'Live',
@@ -398,7 +410,7 @@ describe('getRecommendation: canonical stop-loss integration', () => {
     const pos = makePosition({
       strategy: 'PUT',
       intent: 'acquisition',
-      stopLossPolicy: policy,
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
       stopLossPrice: policy.triggerPrice,
       stopLossOrderStatus: 'Filled',
       currentValue: 999999,
@@ -412,7 +424,7 @@ describe('getRecommendation: canonical stop-loss integration', () => {
     const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
     const thresholdTotal = policy.triggerPrice * 100 * 5;
     const pos = makePosition({
-      stopLossPolicy: policy,
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
       stopLossPrice: policy.triggerPrice,
       stopLossClassification: 'ALIGNED',
       stopLossOrderStatus: 'Live',
@@ -671,5 +683,208 @@ describe('crossed-quote contract: closeValue / P&L / recommendations (PM-0001)',
     // getRecommendation must not independently re-derive a hit from credit/target alone.
     const rec = getRecommendation(pos, null);
     expect(rec.action).not.toBe('TAKE_PROFIT');
+  });
+});
+
+// ── TE-0002 corrective round 3: display/enforcement stop trust boundary ────
+// Production incident: MU 800/790 five-lot BPS. classifyPositionStopLoss
+// correctly determined the broker stop ($3.15/spread) was materially
+// tighter than the canonical 2x-credit threshold ($5.04/spread) AND carried
+// unknown provenance (never created by TradeEdge) -- but the fabricated
+// UNKNOWN-basis display policy was returned through the SAME field
+// getRecommendation() trusts for enforcement, so a midpoint reading above
+// the untrusted $1,575 broker threshold (well below the real $2,520
+// canonical threshold) could eventually confirm CUT_LOSSES. Fix: the
+// enforcement field (Position.stopLossPolicy) is now null whenever
+// classification isn't ALIGNED/TOO_LOOSE; a separate, explicitly-named
+// display-only field (stopLossDisplayPolicy) carries the fabricated-basis
+// policy for UI purposes only, and getRecommendation() caps any advisory
+// evaluation against it at MANAGE, never CUT_LOSSES.
+describe('TE-0002 corrective round 3: stop display/enforcement trust boundary (MU production fixture)', () => {
+  // Exact production numbers from the incident report.
+  const MU_QUANTITY = 5;
+  const MU_CREDIT_RECEIVED = 1260;
+  const MU_CREDIT_PER_CONTRACT = 2.52;
+  const MU_SHORT_STRIKE = 800;
+  const MU_LONG_STRIKE = 790;
+  const MU_STOCK_PRICE = 862;
+  const MU_BROKER_STOP = 3.15;
+  const MU_CANONICAL_STOP = 5.04; // 2.52 * 2
+  const MU_CURRENT_VALUE = 1750;
+  const MU_PNL = -490; // 1260 - 1750
+  const MU_PNL_PCT = (MU_PNL / MU_CREDIT_RECEIVED) * 100; // ~ -38.9%
+  const MU_BROKER_THRESHOLD_TOTAL = MU_BROKER_STOP * 100 * MU_QUANTITY; // 1575
+  const MU_CANONICAL_THRESHOLD_TOTAL = MU_CANONICAL_STOP * 100 * MU_QUANTITY; // 2520
+
+  const muShortLeg = () => leg({ symbol: 'MU   260918P00800000', strikePrice: MU_SHORT_STRIKE, avgOpenPrice: MU_CREDIT_PER_CONTRACT });
+  const muLongLeg = () => leg({ symbol: 'MU   260918P00790000', strikePrice: MU_LONG_STRIKE, direction: 'Long', avgOpenPrice: 0 });
+  const muPositionInput = { legs: [muShortLeg(), muLongLeg()], creditReceived: MU_CREDIT_RECEIVED, quantity: MU_QUANTITY };
+  const muGtcOrder = gtcOrder({
+    id: 'mu-stop-ord', stopPrice: String(MU_BROKER_STOP),
+    legs: [{ symbol: 'MU   260918P00800000', action: 'Buy to Close' }],
+    status: 'Live',
+  });
+
+  // Sanity check on the fixture's own arithmetic, matching the ticket's
+  // stated numbers exactly.
+  it('fixture arithmetic matches the reported production numbers', () => {
+    expect(MU_CREDIT_RECEIVED / (MU_QUANTITY * 100)).toBeCloseTo(MU_CREDIT_PER_CONTRACT, 2);
+    expect(MU_CANONICAL_STOP * 100 * MU_QUANTITY).toBe(2520);
+    expect(MU_BROKER_STOP * 100 * MU_QUANTITY).toBe(1575);
+    expect(MU_PNL_PCT).toBeCloseTo(-38.9, 1);
+    expect(MU_CURRENT_VALUE).toBeLessThan(MU_CANONICAL_THRESHOLD_TOTAL); // canonical threshold NOT breached
+    expect(MU_CURRENT_VALUE).toBeGreaterThanOrEqual(MU_BROKER_THRESHOLD_TOTAL); // untrusted threshold IS crossed
+  });
+
+  it('classifyPositionStopLoss: broker stop remains visible, classification is TOO_TIGHT, provenance is UNKNOWN, and the enforcement policy field is null', () => {
+    const result = classifyPositionStopLoss(muPositionInput, [muGtcOrder], null);
+    expect(result.price).toBe(MU_BROKER_STOP); // the observed $3.15 stop remains visible
+    expect(result.classification).toBe('TOO_TIGHT');
+    expect(result.displayPolicy?.anchorBasis).toBe('UNKNOWN'); // provenance remains unknown
+    expect(result.displayPolicy?.source).toBe('UNKNOWN');
+    expect(result.displayPolicy?.triggerPrice).toBe(MU_BROKER_STOP);
+    expect(result.policy).toBeNull(); // never returned through the enforcement field
+  });
+
+  // Wiring-level Position fixture matching exactly what loadPositions()
+  // would now assign for this incident (loadPositions itself can't be
+  // unit-tested directly -- see TC-0001's established finding, reused
+  // throughout this file).
+  function muPosition(overrides: Partial<Position> = {}): Position {
+    return makePosition({
+      symbol: 'MU',
+      strategy: 'BPS',
+      quantity: MU_QUANTITY,
+      legs: [muShortLeg(), muLongLeg()],
+      creditReceived: MU_CREDIT_RECEIVED,
+      stockPrice: MU_STOCK_PRICE,
+      buffer: 7.19, // (862 - 800) / 862 * 100, > 0 -- not a strike breach
+      stopLossPrice: MU_BROKER_STOP,
+      stopLossClassification: 'TOO_TIGHT',
+      stopLossPolicy: null, // enforcement: gated null for TOO_TIGHT
+      stopLossDisplayPolicy: buildUnknownProvenancePolicy(MU_BROKER_STOP, 'mu-stop-ord', null),
+      stopLossOrderStatus: 'Live',
+      currentValue: MU_CURRENT_VALUE,
+      closeValue: MU_CURRENT_VALUE,
+      pnl: MU_PNL,
+      pnlPct: MU_PNL_PCT,
+      pnlReliable: true,
+      hitTarget: false,
+      targetPrice: MU_CREDIT_RECEIVED * 0.5,
+      hasGtc: true,
+      snapshotHistory: [],
+      ...overrides,
+    });
+  }
+
+  it('one observation above the untrusted $1,575 threshold does not produce CUT_LOSSES', () => {
+    const rec = getRecommendation(muPosition(), null);
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  it('multiple precise observations more than five minutes apart above the untrusted threshold still do not produce CUT_LOSSES', () => {
+    const snapshotHistory: PositionSnapshot[] = [
+      { date: '2026-08-03', capturedAt: '2026-08-03T14:00:00.000Z', dte: 47, currentValue: MU_BROKER_THRESHOLD_TOTAL + 50, closeValue: MU_BROKER_THRESHOLD_TOTAL + 50, pnl: -515, pnlPct: -40.9, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
+      { date: '2026-08-04', capturedAt: '2026-08-04T14:00:00.000Z', dte: 46, currentValue: MU_BROKER_THRESHOLD_TOTAL + 75, closeValue: MU_BROKER_THRESHOLD_TOTAL + 75, pnl: -540, pnlPct: -42.9, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
+    ];
+    const rec = getRecommendation(muPosition({ snapshotHistory }), null);
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  it('a wide-market marketable-only observation above the untrusted threshold does not produce CUT_LOSSES', () => {
+    const rec = getRecommendation(
+      muPosition({
+        currentValue: MU_BROKER_THRESHOLD_TOTAL - 100, // mid still under the untrusted threshold
+        closeValue: MU_BROKER_THRESHOLD_TOTAL + 300,   // wide-market marketable spike over it
+      }),
+      null
+    );
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  it('the resulting recommendation is MANAGE with a clear "Verify stop" explanation', () => {
+    const rec = getRecommendation(muPosition(), null);
+    expect(rec.action).toBe('MANAGE');
+    expect(rec.detail).toMatch(/Verify stop/);
+  });
+
+  it('even a broker-reported fill on the untrusted/unmatched stop does not escalate to CUT_LOSSES (conservative: verify, don\'t auto-confirm an order TradeEdge cannot vouch for)', () => {
+    const rec = getRecommendation(muPosition({ stopLossOrderStatus: 'Filled' }), null);
+    expect(rec.action).not.toBe('CUT_LOSSES');
+    expect(rec.action).toBe('MANAGE');
+  });
+
+  // Contract check for BOTH UI surfaces: the CUT_LOSSES action-relevance
+  // gate (app/portfolio/page.tsx's isActionRelevant) is not exported and is
+  // embedded in a large client component that can't be imported into a
+  // node/vitest environment (same "wiring can't be unit-tested directly"
+  // limitation as loadPositions() itself -- see TC-0001). This locks the
+  // POST-FIX CONTRACT that function's CUT_LOSSES branch must satisfy
+  // (verified by direct code inspection at the cited location): relevance
+  // is `breached || atExtremeLoss || rec.action === 'CUT_LOSSES'`, with NO
+  // independent raw stopLossPrice/currentValue/closeValue threshold check
+  // of its own (that redundant, untrusted-classification-blind check was
+  // the second half of the production bug and has been removed). Proving
+  // getRecommendation() alone doesn't confirm CUT_LOSSES for this fixture
+  // (above) is therefore sufficient to prove BOTH surfaces agree.
+  it('the same MU fixture that is not CUT_LOSSES-relevant via getRecommendation is also not CUT_LOSSES-relevant via the button gate\'s post-fix formula', () => {
+    const pos = muPosition();
+    const rec = getRecommendation(pos, null);
+    const breached = pos.buffer != null && pos.buffer <= 0;
+    const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+    const atExtremeLoss = pnlPct != null && pnlPct <= -200; // MU_PNL_PCT is ~-38.9%, nowhere near -200%
+    const buttonRelevant = breached || atExtremeLoss || rec.action === 'CUT_LOSSES';
+    expect(buttonRelevant).toBe(false);
+  });
+
+  // ── Controls: trusted/independent behavior is unchanged ──────────────────
+
+  it('control: a provenance-matched ALIGNED policy still confirms CUT_LOSSES after a valid, distinctly-timed observation streak', () => {
+    const policy = buildOriginalCreditDefaultPolicy(MU_CREDIT_PER_CONTRACT, { brokerOrderId: 'mu-stop-ord' }); // $5.04 threshold, canonical
+    const snapshotHistory: PositionSnapshot[] = [
+      { date: '2026-08-03', capturedAt: '2026-08-03T14:00:00.000Z', dte: 47, currentValue: MU_CANONICAL_THRESHOLD_TOTAL + 20, closeValue: MU_CANONICAL_THRESHOLD_TOTAL + 20, pnl: -1260, pnlPct: -100, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
+    ];
+    const rec = getRecommendation(
+      muPosition({
+        stopLossClassification: 'ALIGNED',
+        stopLossPolicy: policy,
+        stopLossDisplayPolicy: policy,
+        stopLossPrice: policy.triggerPrice,
+        currentValue: MU_CANONICAL_THRESHOLD_TOTAL + 40,
+        closeValue: MU_CANONICAL_THRESHOLD_TOTAL + 40,
+        snapshotHistory,
+      }),
+      null
+    );
+    expect(rec.action).toBe('CUT_LOSSES');
+  });
+
+  it('control: a broker-reported fill/trigger for a trusted, provenance-matched ALIGNED policy remains authoritative', () => {
+    const policy = buildOriginalCreditDefaultPolicy(MU_CREDIT_PER_CONTRACT, { brokerOrderId: 'mu-stop-ord' });
+    const rec = getRecommendation(
+      muPosition({
+        stopLossClassification: 'ALIGNED',
+        stopLossPolicy: policy,
+        stopLossDisplayPolicy: policy,
+        stopLossPrice: policy.triggerPrice,
+        stopLossOrderStatus: 'Filled',
+        currentValue: MU_CANONICAL_THRESHOLD_TOTAL + 5,
+        closeValue: MU_CANONICAL_THRESHOLD_TOTAL + 5,
+        snapshotHistory: [],
+      }),
+      null
+    );
+    expect(rec.action).toBe('CUT_LOSSES');
+  });
+
+  it('control: a genuinely breached short strike still produces its independent hard-exit recommendation, regardless of stop trust state', () => {
+    const rec = getRecommendation(
+      muPosition({
+        buffer: -1, // short strike breached
+      }),
+      null
+    );
+    expect(rec.action).toBe('CUT_LOSSES');
+    expect(rec.detail).toMatch(/Short strike breached/);
   });
 });
