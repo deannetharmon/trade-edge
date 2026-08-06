@@ -5266,16 +5266,23 @@ function OiAndSortControls({
 }
 
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
+// SCREENER-OI-0001 corrective pass: Targeted mode explicitly does NOT get
+// the new canonical minimum-OI floor or two-level sort UI -- product
+// direction is that Targeted keeps its own established, strategy-specific
+// eligibility and ordering behavior unchanged. This local type/sort logic
+// is deliberately the same shape it was before SCREENER-OI-0001 (single
+// sort field, no OI floor) -- NOT a reimplementation of the canonical
+// module. The canonical module remains available in lib/screener/
+// screenerResultOrdering.ts for Targeted or a future scanner to adopt
+// later, but nothing in this panel calls it.
+type TargetedSortField = 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
+
 function TargetedScanResultsPanel({
-  entries, sortBy, setSortBy, secondarySort, setSecondarySort, minOi, setMinOi, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
+  entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
 }: {
   entries: TargetedScanEntry[];
-  sortBy: SortField;
-  setSortBy: (v: SortField) => void;
-  secondarySort: SecondarySortField;
-  setSecondarySort: (v: SecondarySortField) => void;
-  minOi: number;
-  setMinOi: (v: number) => void;
+  sortBy: TargetedSortField;
+  setSortBy: (v: TargetedSortField) => void;
   popMin: number;
   th: typeof THEMES[Theme];
   rankConfig: RankConfig;
@@ -5292,6 +5299,7 @@ function TargetedScanResultsPanel({
   const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
+  const [activeSort, setActiveSort]             = useState(sortBy);
   // Track scan identity so we reset filters only on genuinely new scan
   const scanIdRef = useRef(0);
   const lastLenRef = useRef(0);
@@ -5307,6 +5315,7 @@ function TargetedScanResultsPanel({
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
+    setActiveSort(sortBy);
     setResetKey(k => k + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanIdRef.current]);
@@ -5318,26 +5327,7 @@ function TargetedScanResultsPanel({
     setHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
   const toggleStrategy = (s: string) =>
     setActiveStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
-  const sortSpec: SortSpec = { primary: sortBy, secondary: secondarySort };
-  const setSortSpec = (next: SortSpec) => { setSortBy(next.primary); setSecondarySort(next.secondary); };
-
-  // SCREENER-OI-0001 — canonical OI-eligibility metrics for a Targeted
-  // entry, used by both the minimum-OI floor and the "Relevant-leg OI" sort
-  // field. Targeted mode only ever produces BPS/BCS/IC entries.
-  const getEntryOi = (e: TargetedScanEntry): OiEligibilityResult => {
-    const c = e.candidate;
-    return evaluateOiEligibility(extractOiLegsFromSpreadCandidate(e.strategy, c), minOi);
-  };
-  const getEntryMetrics = (e: TargetedScanEntry): SortableMetrics => ({
-    score: e.score,
-    pop: e.pop,
-    creditDollars: e.candidate.credit ?? null,
-    creditPct: e.candidate.creditRatio != null ? e.candidate.creditRatio * 100 : null,
-    rocPct: e.candidate.roc ?? null,
-    otmPct: calcTargetedEntryOtmPct(e),
-    relevantLegOI: computeRelevantLegOI(extractOiLegsFromSpreadCandidate(e.strategy, e.candidate)),
-    dte: e.dte,
-  });
+  const changeSort = (k: typeof activeSort) => { setActiveSort(k); setSortBy(k); };
 
   // ── Inline filter + sort — runs every render, no caching ───────────────
   const allSymbols = Array.from(new Set(entries.map(e => e.symbol))).sort();
@@ -5358,21 +5348,15 @@ function TargetedScanResultsPanel({
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
   if (activeTrendOnly) pool = pool.filter(e => e.strategy === e.primaryStrategy);
-  // 5. SCREENER-OI-0001 — canonical minimum relevant-leg OI floor (fail-
-  // closed: missing OI on a required leg never passes a positive floor).
-  // Applied BEFORE the sort and BEFORE Show-Top-N, per the ticket.
-  const oiByEntry = new Map<TargetedScanEntry, OiEligibilityResult>();
-  pool = pool.filter(e => {
-    const oi = getEntryOi(e);
-    oiByEntry.set(e, oi);
-    return oi.eligible;
-  });
-  // 6. canonical two-level sort (score-band note: Score has never been a
-  // grouped/tolerance-based ranking dimension anywhere in this codebase —
-  // it's always been a flat descending sort by the raw scoreCandidate()
-  // value, and this module preserves that exactly; see
-  // lib/screener/screenerResultOrdering.ts for the full rule).
-  pool = sortItems(pool, sortSpec, getEntryMetrics);
+  // 5. sort — unchanged single-field sort, pre-dating SCREENER-OI-0001.
+  pool.sort((a, b) => {
+  if (activeSort === 'pop')         return b.pop - a.pop;
+  if (activeSort === 'credit')      return (b.candidate.credit ?? 0) - (a.candidate.credit ?? 0);
+  if (activeSort === 'creditRatio') return (b.candidate.creditRatio ?? 0) - (a.candidate.creditRatio ?? 0);
+  if (activeSort === 'roc')         return b.candidate.roc - a.candidate.roc;
+  if (activeSort === 'otm')         return (calcTargetedEntryOtmPct(b) ?? -999) - (calcTargetedEntryOtmPct(a) ?? -999);
+  return b.score - a.score;
+});
 
   const totalVisible  = pool.length;
   const display       = pool.slice(0, showTopN);
@@ -5386,6 +5370,15 @@ function TargetedScanResultsPanel({
     { label: '> 60 · Far Out',      min: 61, max: 999 },
   ];
 
+  const sortLabels: { key: typeof activeSort; label: string }[] = [
+    { key: 'score',       label: 'Score'    },
+    { key: 'pop',         label: 'POP %'    },
+    { key: 'credit',      label: 'Credit $' },
+    { key: 'creditRatio', label: 'Credit %' },
+    { key: 'roc',         label: 'ROC %'    },
+    { key: 'otm',         label: 'OTM %'    },
+  ];
+
   return (
     <div className="flex flex-col" style={{ minHeight: 0 }}>
 
@@ -5397,11 +5390,24 @@ function TargetedScanResultsPanel({
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
         <p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
 
-        {/* Row 1: count + show top */}
+        {/* Row 1: count + sort + show top */}
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-[9px] text-teal-400 tracking-widest font-medium shrink-0">
             {display.length} of {totalVisible} SHOWN
           </p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[9px] ${th.textFaint}`}>Sort</span>
+            {sortLabels.map(sl => (
+              <button key={sl.key} onClick={() => changeSort(sl.key)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeSort === sl.key
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {sl.label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint}`}>Show</span>
             {[25, 50, 100, 999].map(n => (
@@ -5416,9 +5422,6 @@ function TargetedScanResultsPanel({
             ))}
           </div>
         </div>
-
-        {/* Row 1b: SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
-        <OiAndSortControls th={th} minOi={minOi} setMinOi={setMinOi} sort={sortSpec} setSort={setSortSpec} accent="teal" />
 
         {/* Row 2: POP + strategy + trend filters */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -5538,11 +5541,6 @@ function TargetedScanResultsPanel({
                   const ar = entry.isEtf ? etfRules : rules;
                   const aligned = entry.strategy === entry.primaryStrategy;
                   const against = entry.trendResult?.strategy !== 'NO_TRADE' && !aligned && entry.strategy !== 'IC';
-                  // SCREENER-OI-0001 — a candidate can pass the relevant-leg
-                  // OI floor while its protective long leg is weaker; that
-                  // gets surfaced here as a diagnostic, distinct from the
-                  // eligibility decision itself (which already passed).
-                  const oiWarnings = oiByEntry.get(entry)?.protectiveLegWarnings ?? [];
                   return (
                     <div key={`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}`} className="flex items-start gap-2">
                       <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
@@ -5562,11 +5560,6 @@ function TargetedScanResultsPanel({
                           cachedEntry={entry.cachedEntry}
                           existingPositions={existingPositions}
                         />
-                        {oiWarnings.map((w, i) => (
-                          <p key={i} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
-                            ⚠ {w}
-                          </p>
-                        ))}
                       </div>
                     </div>
                   );
@@ -5758,12 +5751,11 @@ export default function Home() {
   const [targetedDteMax, setTargetedDteMax] = useState<number>(45);
   const [targetedPopMin, setTargetedPopMin] = useState<number>(70);
   const [targetedOtmMin, setTargetedOtmMin] = useState<number>(6); // matches Income Engine OTM floor default
-  const [targetedSortBy, setTargetedSortBy] = useState<SortField>('score');
-  // SCREENER-OI-0001 -- secondary sort + minimum relevant-leg OI floor for
-  // Targeted mode's results panel. Primary sort field reuses the existing
-  // targetedSortBy state (retyped to the canonical SortField union).
-  const [targetedSecondarySort, setTargetedSecondarySort] = useState<SecondarySortField>('none');
-  const [targetedMinOi, setTargetedMinOi] = useState<number>(0);
+  // SCREENER-OI-0001 corrective pass: Targeted mode explicitly keeps its
+  // pre-existing, established single-field sort and does NOT get the new
+  // canonical minimum-OI floor or secondary sort -- see the note above
+  // TargetedScanResultsPanel.
+  const [targetedSortBy, setTargetedSortBy] = useState<TargetedSortField>('score');
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
@@ -6998,10 +6990,6 @@ export default function Home() {
                   entries={targetedResults}
                   sortBy={targetedSortBy}
                   setSortBy={setTargetedSortBy}
-                  secondarySort={targetedSecondarySort}
-                  setSecondarySort={setTargetedSecondarySort}
-                  minOi={targetedMinOi}
-                  setMinOi={setTargetedMinOi}
                   popMin={targetedPopMin}
                   th={th}
                   rankConfig={rankConfig}

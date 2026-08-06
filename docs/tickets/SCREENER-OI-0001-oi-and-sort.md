@@ -2,7 +2,9 @@
 
 ## Scope
 
-Add a user-selectable minimum relevant-leg open-interest (OI) filter and primary/secondary result sorting to the Screener, consistently across Ranked and Filtered scan modes, with the same canonical implementation available to Targeted mode (which already had an ad-hoc single-field sort).
+Add a user-selectable minimum relevant-leg open-interest (OI) filter and primary/secondary result sorting to the Screener. **Production integration is Ranked mode and Filtered mode only.**
+
+Targeted mode is explicitly out of scope for this ticket's user-facing controls: it keeps its pre-existing, established strategy-specific eligibility and single-field sort behavior, unchanged. The canonical pure OI/sort functions (`lib/screener/screenerResultOrdering.ts`) remain available for Targeted — or a future scanner — to adopt later, but nothing in Targeted's result panel calls them, and Targeted exposes neither the minimum-OI control nor the secondary sort field. This scope correction was made after an initial pass had wired the controls into all three modes; see `docs/reviews/SCREENER-OI-0001-implementation-report.md` for the regression tests proving the exclusion and the absence of any state leak between modes.
 
 ## Minimum OI control
 
@@ -29,9 +31,9 @@ Score-band note: no grouped/tolerance-based Score ranking exists anywhere in the
 
 ## Architecture
 
-One canonical, pure module: `lib/screener/screenerResultOrdering.ts`. Exports strategy-aware OI-eligibility evaluation, relevant-leg OI computation, a quote-validity diagnostic, sort-field selection/dedup helpers, a generic two-level `sortItems`, and a combined `filterAndSortByOi`/`filterSortAndSliceTop` pipeline. One shared UI component, `OiAndSortControls` (defined once in `app/screener/page.tsx`), renders identically in Filtered, Ranked, and Targeted result panels — filtering/sorting logic is never duplicated per component.
+One canonical, pure module: `lib/screener/screenerResultOrdering.ts`. Exports strategy-aware OI-eligibility evaluation, relevant-leg OI computation, a quote-validity diagnostic, sort-field selection/dedup helpers, a generic two-level `sortItems`, and a combined `filterAndSortByOi`/`filterSortAndSliceTop` pipeline. One shared UI component, `OiAndSortControls` (defined once in `app/screener/page.tsx`), renders identically in the Filtered and Ranked result panels — filtering/sorting logic is never duplicated per component. It is not rendered in the Targeted result panel.
 
-Ranked mode: filtering (existing chips + new OI floor) and both sort levels apply before "Show Top N." Filtered mode: existing eligibility (qualify/disqualify split + existing chips) applies first, then the OI floor and ordering, applied to the QUALIFIED section (the disqualified section remains an unfiltered audit trail). Targeted mode's pre-existing single-field sort was replaced with the canonical implementation and gained a secondary sort field and the same OI floor.
+Ranked mode: filtering (existing chips + new OI floor) and both sort levels apply before "Show Top N." Filtered mode: existing eligibility (qualify/disqualify split + existing chips) applies first, then the OI floor and ordering, applied to the QUALIFIED section (the disqualified section remains an unfiltered audit trail). Targeted mode keeps its pre-existing single-field sort and strategy-specific eligibility/ordering logic exactly as it was before this ticket — no OI floor, no secondary sort, no call into the canonical module. Switching the Screener's run-mode picker between Ranked/Filtered and Targeted never carries an OI floor or sort selection across modes; each mode's state is independent.
 
 ## Enabling correction (in scope)
 
@@ -39,4 +41,11 @@ Filtered mode's Strategy filter chip defaulted to `['BPS', 'BCS', 'IC']` and had
 
 ## Deviations
 
-Bull Call Spread and Long LEAPS Call are not implemented Screener scan strategies (no candidate-generation exists for them anywhere in the codebase, confirmed by investigation prior to implementation). Per product decision, this ticket implements and exhaustively unit-tests their canonical OI rule as pure functions, but does not build new scanning/candidate-generation for them — building two new full strategy scanners was judged out of scope for an OI/sort ticket. They remain unavailable in the live Screener UI, unchanged from before this ticket.
+Bull Call Spread and Long LEAPS Call are not implemented Screener scan strategies (no candidate-generation exists for them anywhere in the codebase, confirmed by investigation prior to implementation). Per product decision, this ticket implements and exhaustively unit-tests their canonical OI rule as pure functions, but does not build new scanning/candidate-generation for them — building two new full strategy scanners was judged out of scope for an OI/sort ticket. **They are not currently available as a Screener scan in any mode** (Filtered, Ranked, or Targeted), unchanged from before this ticket.
+
+## Backlog (out of scope for this ticket)
+
+- **Bull Call Spread first-class Screener scan** — candidate generation, eligibility checklist, and a scan action/mode entry for Bull Call Spread do not exist. The canonical OI rule and its tests are ready for a future scanner to adopt; the scanner itself is a separate, unscheduled backlog item.
+- **Long LEAPS Call first-class Screener scan** — same status: canonical OI rule implemented and tested, no candidate-generation or scan action exists, and building one is a separate, unscheduled backlog item.
+
+Neither strategy should be implied as an available Screener scan anywhere in product-facing documentation or UI copy until one of these backlog items is picked up.
