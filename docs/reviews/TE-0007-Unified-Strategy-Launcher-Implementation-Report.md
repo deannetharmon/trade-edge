@@ -1,7 +1,10 @@
 # TE-0007 — Unified Screener Launcher: Implementation Report
 
 **Branch:** `feature/te-0007-unified-strategy-launcher` (created from `main` @ `40f2b1a`, after TE-0007C's final corrective pass and the HELP-0001 corrective pass — both confirmed merged into `main` before this branch was cut).
-**Commit:** see final chat response for the exact hash (committed after this report; not pushed or merged — per delivery constraints).
+**Initial-delivery commit:** `55d6d9c`.
+**Corrective-pass commit:** see final chat response for the exact hash (committed after this report; not pushed or merged — per delivery constraints).
+
+> Sections 1–9 below describe the initial delivery (`55d6d9c`) as originally written. Section 12 documents the required corrective pass on top of it; where the corrective pass changed something described in an earlier section, section 12 is authoritative.
 
 ## 1. State ownership — before and after
 
@@ -100,4 +103,47 @@ The 10-step manual acceptance checklist from the ticket was exercised through `a
 - `app/screener/page.tsx` — modified. Unified Opportunity Universe card; canonical-universe wiring for Find Spreads/CSPs/PMCCs; CC intersection logic; LEAPS deferral button; removed `cspTickers`/`pmccTickers` state and handlers; `mergeTickerLists()` default-active change.
 - `app/screener/__tests__/UnifiedStrategyLauncher.test.tsx` — new. 16 tests (8 routing + 8 CC intersection).
 - `docs/tickets/TE-0007-unified-strategy-launcher.md` — new.
+- `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this file.
+
+## 12. Corrective pass (post-review, on top of `55d6d9c`)
+
+Two defects were found in review and required a corrective pass before push/merge. No financial calculations, qualification rules, Covered Call capacity protections, or strategy scan behavior were touched.
+
+### 12.1 Migration reactivation defect (required correction 1)
+
+**Defect.** `55d6d9c`'s production migration effect computed `legacyOnly` by filtering legacy CSP/PMCC symbols against `existingSymbols = new Set(tickers.map(t => t.symbol))` — i.e. "is this symbol present at all," regardless of its `active` flag. A symbol already present but inactive (e.g. `MU`) was therefore treated as "nothing to do," even when its presence in a legacy CSP/PMCC list proved it had previously been selected for scanning. The tested pure helper (`loadOrMigrateOpportunityUniverse`, operating on flat string arrays with no concept of `active`) computed the mathematically correct union and would have included `MU` — but production never called it; production had its own, separately-written, behaviorally different merge logic. The pure helper's passing tests gave false confidence about what the app actually did.
+
+**Exact failing scenario (from the ticket, now a passing regression test):** primary watchlist has `NKE` active and `MU` inactive; legacy CSP list has `MU`; no canonical key exists yet. Before the fix: migrated universe = `['NKE']` only, `MU` silently dropped. After the fix: migrated universe = `['NKE', 'MU']`, both active.
+
+**Fix.** `lib/screener/opportunityUniverse.ts` now exports exactly one migration algorithm, `migratePrimaryTickers<T extends MigratableTicker>(existing, legacy, makeNew)`, generic over any `{symbol, active}`-shaped ticker (so it operates directly on the real `WatchlistTicker[]` production uses — no separate flat-array variant exists anymore). For each legacy CSP/PMCC symbol: if absent, append it (active); if present but inactive, **reactivate** it in place; if present and already active, leave it untouched (same object reference — verified by test, so no needless downstream re-render/re-persist). No ticker is ever removed. `app/screener/page.tsx`'s migration effect now calls this function directly and only handles orchestration around it (resolving async classification for newly-added symbols, deciding whether anything actually changed before calling `handleTickersChange`). The previous flat-array `migrateOpportunityUniverse()` and its localStorage-coupled wrapper `loadOrMigrateOpportunityUniverse()` were deleted — there is no longer a second, differently-behaved migration path anywhere in the codebase.
+
+**Tests.**
+- `lib/screener/__tests__/opportunityUniverse.test.ts` — `migratePrimaryTickers` describe block, 9 tests, including the exact reactivation scenario, a PMCC-equivalent reactivation, no-op-on-already-active (reference equality), no duplication across overlapping CSP+PMCC symbols, three-way overlap (primary ∩ CSP ∩ PMCC), never-removes, order preservation, and idempotency (re-running against its own output is a no-op).
+- `app/screener/__tests__/OpportunityUniverseMigration.test.tsx` — new page-level regression file, 4 tests, rendering the real `ScreenerPage`:
+  1. The exact required scenario — verifies both `NKE` and `MU` appear in the canonical persisted universe, and that clicking Find CSPs sends both to the scan (proving both are active, not merely present).
+  2. Remount idempotency — unmounts and re-renders; the canonical universe and the scan input are unchanged, not doubled.
+  3. A legacy-PMCC-only ticker (no primary entry at all) is added and active.
+  4. Overlapping symbols across all three legacy sources (primary + CSP + PMCC) collapse to one active entry each, with nothing lost.
+
+### 12.2 Persistence authority (required correction 2)
+
+**Defect.** The original report (§1 above) described `hunter-opportunity-universe` as "the canonical persisted ticker universe" in a way that read as an independent source of truth, while the actually-rendered universe was always derived fresh from `tickers`/`hunter-watchlist`. Two things describable as "the authority" is itself a defect, independent of §12.1's bug.
+
+**Chosen model (smallest change — matches what the code already does functionally; this pass makes it explicit and consistent):** `tickers` (`WatchlistTicker[]`, persisted via `/api/watchlist` and mirrored to `localStorage['hunter-watchlist']`) is the **sole authority**. `hunter-opportunity-universe` is a **derived, write-only mirror** — written every time `tickers` changes (via `saveOpportunityUniverse()` inside `handleTickersChange`) and during migration, but **never read back by production UI code** to reconstruct the rendered universe or drive any strategy button. Its only two reads in the entire codebase are: (a) the migration gate (`hasCanonicalUniverse()` — "has migration already run"), and (b) tests, which read it as an observable proxy for "what did the app just persist" rather than as something the app depends on at runtime. This is now stated explicitly at the top of `lib/screener/opportunityUniverse.ts` and in this report, so there is one documented ownership model, not an implicit one that the code and the report described inconsistently.
+
+### 12.3 Validation (corrective pass)
+
+- **`tsc --noEmit`:** clean.
+- **Targeted:** `lib/screener/__tests__/opportunityUniverse.test.ts` — 20/20 passing (7 `normalizeUniverse` + 9 `migratePrimaryTickers` + 2 `hasCanonicalUniverse` + 1 `saveOpportunityUniverse`, all rewritten against the single canonical function — no divergent pure helper remains). `app/screener/__tests__/OpportunityUniverseMigration.test.tsx` — 4/4 passing (new). `app/screener/__tests__/UnifiedStrategyLauncher.test.tsx` — 16/16 still passing unchanged (confirms the migration fix didn't disturb routing/CC-intersection behavior).
+- **Full suite:** re-run in the same three batches as the initial delivery (sandbox time limits, not failures): `lib/**` 75 files / 1306 tests (up from 1298 — net +8 from the rewritten `opportunityUniverse.test.ts`, 12 → 20 tests), `components/**` + `features/**` 27 files / 251 tests (unchanged), `app/**` 6 files / 68 tests (up from 5 files / 64 tests — the new `OpportunityUniverseMigration.test.tsx`, +4). **Total: 108 files / 1625 tests, all passing** (up from 107 files / 1613 tests before this corrective pass).
+- **Production build:** succeeds (re-verified after the corrective pass).
+- **`git status --porcelain`:** clean except this branch's own files and the untouched, pre-existing, unrelated `docs/reviews/portfolio-position-metrics-audit.md`.
+
+### 12.4 Changed files (corrective pass, on top of §11)
+
+- `lib/screener/opportunityUniverse.ts` — rewritten: single `migratePrimaryTickers()` algorithm replaces the old flat `migrateOpportunityUniverse()`/`loadOrMigrateOpportunityUniverse()`; adds `hasCanonicalUniverse()`; documents the persistence-authority model.
+- `lib/screener/__tests__/opportunityUniverse.test.ts` — rewritten against the new function, 20 tests.
+- `app/screener/page.tsx` — migration effect rewritten to call `migratePrimaryTickers()` instead of its own ad hoc filter.
+- `app/screener/__tests__/OpportunityUniverseMigration.test.tsx` — new, 4 tests.
+- `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this section.
 - `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this file.

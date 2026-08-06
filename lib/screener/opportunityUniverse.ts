@@ -5,36 +5,41 @@
 // One canonical "Opportunity Universe" ticker list answers "which companies
 // am I willing to evaluate." Strategy launcher buttons (Find Spreads, Find
 // CSPs, Find Covered Calls, Find PMCCs) all read the SAME normalized array
-// produced here. This module is deliberately pure and framework-free (no
-// React, no localStorage access in the exported normalize/migrate
-// functions) so it can be unit tested deterministically; the small
-// load/save wrapper functions at the bottom are the only pieces that touch
-// `localStorage`, and they're thin enough not to need their own tests
-// beyond the ones that exercise them directly against jsdom's localStorage.
+// produced by deriving it from the primary ticker list.
 //
-// Migration (see migrateOpportunityUniverse): before this ticket, ticker
-// state was split three ways —
-//   - the general/primary Screener list (`hunter-watchlist`, richer
-//     WatchlistTicker[] shape, used by BPS/BCS/IC/Targeted/Rank scans)
-//   - a free-form comma-separated CSP list (`hunter-tickers-csp`)
-//   - a free-form comma-separated PMCC list (`hunter-tickers-pmcc`)
-// The canonical universe is the ordered, deduplicated union of all three,
-// computed once (the first time the new canonical key is read and doesn't
-// exist yet) so no previously-saved ticker is silently discarded. After
-// that first migration, the canonical key is authoritative and the legacy
-// keys are no longer written to (only left readable for a compatibility
-// period).
+// Persistence authority (TE-0007 corrective pass — required correction 2):
+// `tickers` (the WatchlistTicker[]-shaped primary Screener list, persisted
+// via /api/watchlist and mirrored to localStorage['hunter-watchlist']) is
+// the ONE authoritative source of truth. `LS_OPPORTUNITY_UNIVERSE` is not
+// an independent authority and production code never reads it back to
+// reconstruct UI state — it is a derived, write-only mirror of
+// `tickers.filter(active).map(symbol)`, persisted purely so the canonical
+// array is inspectable/testable independent of the richer ticker shape,
+// and so the migration-gate check ("has migration already run") has
+// somewhere durable to look. The Opportunity Universe rendered in the UI
+// and read by every strategy button is always computed fresh from
+// `tickers`, never from this mirror.
+//
+// Migration (see migratePrimaryTickers): before this ticket, ticker state
+// was split three ways — the general/primary Screener list, a free-form
+// comma-separated CSP list (`hunter-tickers-csp`), and a free-form
+// comma-separated PMCC list (`hunter-tickers-pmcc`). There is exactly ONE
+// canonical migration algorithm (migratePrimaryTickers below); production
+// (app/screener/page.tsx) and this module's tests both exercise that same
+// function — there is no separate, differently-behaved migration path.
 
 import { normalizeTickerToken } from '@/lib/scans/scan-utils';
 
-/** New canonical key. Read by loadOrMigrateOpportunityUniverse(), written
- *  by saveOpportunityUniverse(). This is the ONE new localStorage key the
- *  ticket calls for. */
+/** New canonical key — the derived, write-only mirror described above. */
 export const LS_OPPORTUNITY_UNIVERSE = 'hunter-opportunity-universe';
 
 /** Legacy keys, documented here so the exact migration inputs are traceable
  *  from one place. Left readable during a compatibility period; no longer
- *  written to once the canonical key exists. */
+ *  written to once migration has run. The legacy primary list
+ *  (`hunter-watchlist`) itself is NOT read directly by this module —
+ *  production passes its already-loaded, already-hydrated `tickers` state
+ *  into migratePrimaryTickers() instead of re-reading a possibly-stale
+ *  localStorage snapshot. */
 export const LS_LEGACY_PRIMARY_WATCHLIST = 'hunter-watchlist';
 export const LS_LEGACY_CSP_TICKERS = 'hunter-tickers-csp';
 export const LS_LEGACY_PMCC_TICKERS = 'hunter-tickers-pmcc';
@@ -43,11 +48,6 @@ export const LS_LEGACY_PMCC_TICKERS = 'hunter-tickers-pmcc';
  * Normalize a list of raw ticker strings into the canonical Opportunity
  * Universe shape: uppercase, trimmed, deduplicated, invalid/empty entries
  * rejected, deterministic input order preserved (first occurrence wins).
- *
- * Reuses the same per-token validation (normalizeTickerToken) as the
- * existing ticker-entry boxes so the universe accepts exactly the same
- * shapes (BRK-B, BF-B, one-character tickers like C/F/T/X/V, etc.) that
- * already work elsewhere in the Screener.
  */
 export function normalizeUniverse(symbols: string[]): string[] {
   const out: string[] = [];
@@ -63,81 +63,77 @@ export function normalizeUniverse(symbols: string[]): string[] {
   return out;
 }
 
-/**
- * Deterministic migration: ordered unique union of (1) existing primary
- * Screener tickers, (2) existing CSP tickers, (3) existing PMCC tickers —
- * in that exact order, so ties in de-duplication consistently keep the
- * primary list's ordering first. Pure — no I/O.
- */
-export function migrateOpportunityUniverse(legacy: {
-  primary: string[];
-  csp: string[];
-  pmcc: string[];
-}): string[] {
-  return normalizeUniverse([...legacy.primary, ...legacy.csp, ...legacy.pmcc]);
-}
-
 /** Parses a legacy free-form comma/whitespace-separated ticker string
  *  (the shape `hunter-tickers-csp` / `hunter-tickers-pmcc` were stored in)
- *  into raw candidate tokens for normalizeUniverse(). */
+ *  into raw candidate tokens. */
 export function parseLegacyCommaList(raw: string | null | undefined): string[] {
   if (!raw) return [];
   return raw.split(/[,\s]+/).filter(Boolean);
 }
 
-/** Extracts raw symbol candidates from a legacy `hunter-watchlist` JSON
- *  payload, tolerant of both the current WatchlistTicker[] shape and a
- *  plain string[] (defensive — in case of an even older cached shape). */
-export function extractLegacyPrimarySymbols(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((t: unknown) => {
-        if (typeof t === 'string') return t;
-        if (t && typeof t === 'object' && 'symbol' in t) {
-          const s = (t as { symbol: unknown }).symbol;
-          return typeof s === 'string' ? s : null;
-        }
-        return null;
-      })
-      .filter((s): s is string => Boolean(s));
-  } catch {
-    return [];
-  }
+export interface MigratableTicker {
+  symbol: string;
+  active: boolean;
 }
 
 /**
- * Loads the canonical Opportunity Universe, running the legacy migration
- * exactly once: only when LS_OPPORTUNITY_UNIVERSE does not already exist.
- * Once it exists, it is authoritative and this function never re-derives
- * it from the legacy keys again (repeated calls are idempotent).
+ * THE single canonical migration algorithm — pure, synchronous, fully
+ * tested. Production (app/screener/page.tsx) calls this exact function;
+ * there is no separate/parallel merge-and-reactivate logic anywhere else.
+ *
+ * Folds legacy CSP/PMCC ticker-list symbols into the existing primary
+ * ticker list:
+ *  - a legacy symbol not already present is appended (via `makeNew`) and
+ *    marked active.
+ *  - a legacy symbol already present is REACTIVATED if it was inactive —
+ *    its presence in a legacy CSP/PMCC list proves it was previously
+ *    selected for scanning, so "already exists in the primary list" is
+ *    not by itself a reason to leave it inactive and exclude it from the
+ *    migrated universe (this is the exact defect required correction 1
+ *    fixes: NKE active + MU inactive in the primary list, MU also in the
+ *    legacy CSP list, must migrate to NKE active + MU active, not silently
+ *    drop MU from the universe because it was "already present").
+ *  - a legacy symbol already present and already active is left untouched.
+ *  - no ticker is ever removed.
+ *  - existing tickers keep their original array order; newly-added legacy
+ *    symbols are appended afterward in normalizeUniverse's deterministic
+ *    order.
+ *  - idempotent: calling this again with the same inputs (including
+ *    against its own prior output) makes no further changes.
  */
-export function loadOrMigrateOpportunityUniverse(storage: Pick<Storage, 'getItem' | 'setItem'> = localStorage): string[] {
-  try {
-    const existing = storage.getItem(LS_OPPORTUNITY_UNIVERSE);
-    if (existing != null) {
-      const parsed = JSON.parse(existing);
-      return normalizeUniverse(Array.isArray(parsed) ? parsed : []);
+export function migratePrimaryTickers<T extends MigratableTicker>(
+  existing: T[],
+  legacy: { csp: string[]; pmcc: string[] },
+  makeNew: (symbol: string) => T
+): T[] {
+  const legacySymbols = normalizeUniverse([...legacy.csp, ...legacy.pmcc]);
+  const indexBySymbol = new Map(existing.map((t, i) => [t.symbol, i]));
+  const result = existing.slice();
+  for (const symbol of legacySymbols) {
+    const idx = indexBySymbol.get(symbol);
+    if (idx === undefined) {
+      indexBySymbol.set(symbol, result.length);
+      result.push(makeNew(symbol));
+    } else if (!result[idx].active) {
+      result[idx] = { ...result[idx], active: true };
     }
-  } catch {
-    // fall through to migration
   }
-
-  const primary = extractLegacyPrimarySymbols(safeGet(storage, LS_LEGACY_PRIMARY_WATCHLIST));
-  const csp = parseLegacyCommaList(safeGet(storage, LS_LEGACY_CSP_TICKERS));
-  const pmcc = parseLegacyCommaList(safeGet(storage, LS_LEGACY_PMCC_TICKERS));
-  const migrated = migrateOpportunityUniverse({ primary, csp, pmcc });
-
-  try { storage.setItem(LS_OPPORTUNITY_UNIVERSE, JSON.stringify(migrated)); } catch {}
-  return migrated;
+  return result;
 }
 
+/** True if migration has already produced (and persisted) a canonical
+ *  universe — the gate production uses to decide whether to run
+ *  migratePrimaryTickers() at all. */
+export function hasCanonicalUniverse(storage: Pick<Storage, 'getItem'> = localStorage): boolean {
+  try {
+    return storage.getItem(LS_OPPORTUNITY_UNIVERSE) != null;
+  } catch {
+    return false;
+  }
+}
+
+/** Writes the derived, write-only mirror. Never read back by production
+ *  UI code — see the persistence-authority note at the top of this file. */
 export function saveOpportunityUniverse(universe: string[], storage: Pick<Storage, 'setItem'> = localStorage): void {
   try { storage.setItem(LS_OPPORTUNITY_UNIVERSE, JSON.stringify(normalizeUniverse(universe))); } catch {}
-}
-
-function safeGet(storage: Pick<Storage, 'getItem'>, key: string): string | null {
-  try { return storage.getItem(key); } catch { return null; }
 }

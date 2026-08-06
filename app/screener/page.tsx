@@ -37,7 +37,7 @@ import { findBestCsp } from '@/lib/scans/csp-finder';
 // PMCC ticker boxes; every strategy launcher button reads this same array.
 import {
   normalizeUniverse, saveOpportunityUniverse, parseLegacyCommaList,
-  LS_OPPORTUNITY_UNIVERSE,
+  hasCanonicalUniverse, migratePrimaryTickers,
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
@@ -5637,14 +5637,22 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // TE-0007: one-time Opportunity Universe migration. Runs only after the
-  // primary ticker list has finished loading (so "existing primary
-  // Screener tickers" reflects the real loaded state) and only when the
-  // canonical key doesn't exist yet -- loadOrMigrateOpportunityUniverse()
-  // itself enforces the "don't overwrite / idempotent" rules; this effect's
-  // job is just to fold any CSP/PMCC-only legacy symbols into the visible
-  // `tickers` list so they don't silently vanish from the UI, then persist
-  // the canonical mirror. Guarded by a ref so it only ever runs once.
+  // TE-0007 corrective pass (required correction 1): one-time Opportunity
+  // Universe migration. Runs only after the primary ticker list has
+  // finished loading (so `tickers` reflects the real loaded state, not a
+  // possibly-stale localStorage snapshot) and only when the canonical key
+  // doesn't exist yet (hasCanonicalUniverse()). The actual merge decision
+  // -- which legacy symbols get added, which get reactivated -- is made by
+  // migratePrimaryTickers(), the ONE canonical migration algorithm (see
+  // lib/screener/opportunityUniverse.ts); this effect only supplies inputs
+  // (tickers + the two legacy comma lists), resolves classification for
+  // any newly-added symbols, and applies the result. Guarded by a ref so
+  // it only ever runs once per mount.
+  //
+  // Fixes the exact defect from the corrective pass: a symbol already
+  // present in the primary list but inactive (e.g. MU) is reactivated when
+  // it's also found in a legacy CSP/PMCC list, instead of being silently
+  // left out of the migrated universe just because "it already existed."
   const universeMigrationRanRef = useRef(false);
   useEffect(() => {
     if (watchlistLoading) return;
@@ -5652,18 +5660,36 @@ export default function Home() {
     universeMigrationRanRef.current = true;
     (async () => {
       try {
-        if (localStorage.getItem(LS_OPPORTUNITY_UNIVERSE) != null) return; // already migrated
+        if (hasCanonicalUniverse()) return; // already migrated
         const legacyCsp = parseLegacyCommaList(localStorage.getItem(LS_CSP));
         const legacyPmcc = parseLegacyCommaList(localStorage.getItem(LS_PMCC));
-        const existingSymbols = new Set(tickers.map(t => t.symbol));
-        const legacyOnly = normalizeUniverse([...legacyCsp, ...legacyPmcc]).filter(s => !existingSymbols.has(s));
-        if (legacyOnly.length > 0) {
-          const token = await getAccessToken();
-          const merged = await mergeTickerLists(tickers, legacyOnly, token);
-          handleTickersChange(merged);
-        } else {
+
+        const migrated = migratePrimaryTickers<WatchlistTicker>(
+          tickers,
+          { csp: legacyCsp, pmcc: legacyPmcc },
+          symbol => ({ symbol, classification: 'pending', active: true })
+        );
+
+        const changed = migrated.length !== tickers.length || migrated.some((t, i) => t !== tickers[i]);
+        if (!changed) {
+          // Nothing to fold in -- still persist the mirror so this
+          // migration doesn't re-run on the next load.
           saveOpportunityUniverse(tickers.filter(t => t.active).map(t => t.symbol));
+          return;
         }
+
+        // Resolve real classification for newly-added ('pending') entries
+        // only -- reactivated existing entries already have a real
+        // classification and are left untouched.
+        const token = await getAccessToken();
+        const resolved = await Promise.all(
+          migrated.map(async t =>
+            t.classification === 'pending'
+              ? { ...t, classification: await classifyUnderlying(t.symbol, token).catch(() => 'stock' as const) }
+              : t
+          )
+        );
+        handleTickersChange(resolved);
       } catch {
         // best-effort — worst case the canonical key stays unset and this
         // migration is retried on the next load.
