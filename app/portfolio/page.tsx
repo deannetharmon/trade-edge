@@ -61,6 +61,15 @@ import {
 // their literal ttPost/ttPostComplex call INSIDE its callback, so there is
 // no broker-reaching statement outside of it.
 import { submitCloseOrderIfSafe } from '@/lib/portfolio/closeOrderSubmission';
+import {
+  DEFAULT_ENTRY_STOP_MULTIPLE,
+  describeStopLossPolicy,
+  buildOriginalCreditDefaultPolicy,
+  buildCurrentValueAnchoredPolicy,
+  buildManualAbsolutePolicy,
+  type StopSource,
+} from '@/lib/portfolio/stopLossPolicy';
+import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -266,6 +275,7 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
       date: today,
       dte: p.dte,
       currentValue: p.currentValue,
+      closeValue: p.closeValue,
       pnl: p.pnl,
       pnlPct: p.pnlPct,
       iv: p.iv,
@@ -5875,6 +5885,18 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const [result, setResult]   = useState<'success' | 'error' | null>(null);
   const [resultMsg, setResultMsg] = useState('');
   const [stopPrice, setStopPrice] = useState('');
+  // TE-0002: tracks WHY the current stopPrice value is what it is, so
+  // submit() can persist accurate provenance instead of re-deriving a basis
+  // from price/credit after the fact. Starts DEFAULT (deterministic 2x
+  // credit / persisted-multiple prefill); flips to AI_SUGGESTION when the
+  // trader applies the AI's current-value-anchored suggestion verbatim, or
+  // MANUAL the moment they type into the stop price input themselves.
+  const [stopPriceSource, setStopPriceSource] = useState<StopSource>('DEFAULT');
+  // TE-0002: which anchor the current stopPrice is expressed relative to --
+  // needed alongside stopPriceSource because "MANUAL" alone doesn't say
+  // whether the trader edited the ×credit multiplier field (still
+  // credit-anchored) or typed a raw dollar trigger (no anchor at all).
+  const [stopBasisOverride, setStopBasisOverride] = useState<'ORIGINAL_CREDIT' | 'CURRENT_SPREAD_VALUE' | 'MANUAL_ABSOLUTE'>('ORIGINAL_CREDIT');
   const [gtcPrice,  setGtcPrice]  = useState('');
 
   // Modal position — fixed + viewport-aware, computed from the trigger
@@ -6053,22 +6075,32 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
       if (!mountedRef.current) return;
       const fresh = await fetchFreshPositionPrice(pos, token);
       if (!mountedRef.current) return;
+      // TE-0002 corrective round: a newly opened position (no working stop
+      // yet -- pos.stopLossClassification === 'NO_STOP') MUST default to
+      // the deterministic 2x-original-credit entry rule, never the
+      // persisted "last stop multiple" (which can be as low as 1.5x, or
+      // whatever was last typed for a different position/strategy). The
+      // persisted multiple remains a reasonable UX convenience default only
+      // when ADJUSTING an already-working stop.
+      const isNewStop = pos.stopLossClassification === 'NO_STOP';
+      const defaultMultiple = isNewStop ? DEFAULT_ENTRY_STOP_MULTIPLE : getLastStopMultiple(pos.strategy);
+      setStopPriceSource('DEFAULT');
+      setStopBasisOverride('ORIGINAL_CREDIT');
       if (fresh != null) {
         const perContract = fresh / (qty * 100);
         setLivePrice(perContract);
         console.log(`LIVE PRICE FETCH ${pos.symbol}: $${perContract.toFixed(4)}/contract`);
         // Set initial input defaults using live price. Anchored to credit
-        // (not live value) so the default is a consistent "1.5x what I
-        // collected" regardless of how much profit has already been
-        // captured — still respects the hard floor of live value + $0.01.
+        // so the default is a consistent "Nx what I collected" — still
+        // respects the hard floor of live value + $0.01.
         const initGtc  = Math.min(existingGtcPrice, perContract - 0.01);
-        const initStop = Math.max(creditPerContract * getLastStopMultiple(pos.strategy), perContract + 0.01);
+        const initStop = Math.max(creditPerContract * defaultMultiple, perContract + 0.01);
         setGtcPrice(Math.max(initGtc, gtcMin).toFixed(2));
         setStopPrice(Math.min(initStop, stopMax).toFixed(2));
       } else {
         setLivePriceError('Could not fetch live price — using estimates');
         setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-        const naiveStop = Math.max(creditPerContract * getLastStopMultiple(pos.strategy), stopMin);
+        const naiveStop = Math.max(creditPerContract * defaultMultiple, stopMin);
         setStopPrice(Math.min(naiveStop, stopMax).toFixed(2));
       }
     } catch (e: any) {
@@ -6076,8 +6108,12 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
       // Keep modal open even on price fetch failure — show error, use fallback values
       console.warn('SetStopLossButton live price fetch failed:', e.message);
       setLivePriceError(`Price fetch failed: ${e.message ?? 'unknown error'}`);
+      const isNewStop = pos.stopLossClassification === 'NO_STOP';
+      const fallbackMultiple = isNewStop ? DEFAULT_ENTRY_STOP_MULTIPLE : getLastStopMultiple(pos.strategy);
+      setStopPriceSource('DEFAULT');
+      setStopBasisOverride('ORIGINAL_CREDIT');
       setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
-      setStopPrice(Math.min(creditPerContract * getLastStopMultiple(pos.strategy), stopMax).toFixed(2));
+      setStopPrice(Math.min(creditPerContract * fallbackMultiple, stopMax).toFixed(2));
     } finally {
       if (mountedRef.current) setLivePriceLoading(false);
     }
@@ -6086,10 +6122,49 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
     if (mountedRef.current) fetchSuggestion();
   };
 
+  // TE-0002: builds the canonical StopLossPolicy record for the order
+  // TradeEdge is about to persist provenance for, from whichever anchor the
+  // trader actually used (default/×credit multiplier, applied AI
+  // suggestion, or a raw manual dollar edit) -- never re-derived later by
+  // dividing price by credit.
+  const buildSubmittedStopPolicy = (orderId: string, triggerPrice: number) => {
+    const nowIso = new Date().toISOString();
+    if (stopBasisOverride === 'CURRENT_SPREAD_VALUE') {
+      const anchor = effectiveLive ?? creditPerContract;
+      const multiple = anchor > 0 ? parseFloat((triggerPrice / anchor).toFixed(2)) : null;
+      return buildCurrentValueAnchoredPolicy(anchor, multiple ?? 1, { source: stopPriceSource, createdAt: nowIso, brokerOrderId: orderId });
+    }
+    if (stopBasisOverride === 'MANUAL_ABSOLUTE') {
+      return buildManualAbsolutePolicy(triggerPrice, { createdAt: nowIso, brokerOrderId: orderId });
+    }
+    const multiple = creditPerContract > 0 ? parseFloat((triggerPrice / creditPerContract).toFixed(2)) : DEFAULT_ENTRY_STOP_MULTIPLE;
+    return buildOriginalCreditDefaultPolicy(creditPerContract, { source: stopPriceSource, createdAt: nowIso, brokerOrderId: orderId, multiple });
+  };
+
+  // TE-0002: non-blocking persist -- a failed write means the NEXT load
+  // correctly classifies this order UNKNOWN_PROVENANCE (see
+  // classifyPositionStopLoss) rather than silently fabricating a basis, so
+  // there is no unsafe failure mode here worth blocking the trader on.
+  const persistStopPolicy = async (orderId: string, triggerPrice: number) => {
+    const shortLeg = pos.legs.find(l => l.direction === 'Short');
+    if (!shortLeg?.symbol) return;
+    const policy = buildSubmittedStopPolicy(orderId, triggerPrice);
+    const positionKey = positionStopPolicyKey(pos.accountNumber, shortLeg.symbol);
+    try {
+      await postStopPolicies([{ positionKey, policy }]);
+    } catch (e) {
+      console.warn('Stop policy persist failed (non-blocking):', e);
+    }
+  };
+
   const applySuggestion = () => {
     if (!suggestion) return;
     setGtcPrice(suggestion.gtcPrice.toFixed(2));
     setStopPrice(suggestion.stopPrice.toFixed(2));
+    // TE-0002: the AI suggestion is explicitly current-value-anchored (see
+    // STOP_GTC_SYSTEM_PROMPT) -- record that basis, not original credit.
+    setStopPriceSource('AI_SUGGESTION');
+    setStopBasisOverride('CURRENT_SPREAD_VALUE');
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -6277,6 +6352,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
           setResult('success');
           setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${orderId})`);
           if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+          await persistStopPolicy(orderId, stopTrigger);
         } catch (placeErr: any) {
           // The old order is already cancelled and the new one failed to go in —
           // the position is genuinely unprotected right now. Attempt one automatic
@@ -6300,6 +6376,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             }
             const restoreRes = restoreSubmission.result as any;
             const restoreId = String(restoreRes?.data?.order?.id ?? restoreRes?.data?.id ?? 'submitted');
+            await persistStopPolicy(restoreId, stopTrigger);
             setResult('error');
             setResultMsg(
               `OCO placement failed (${placeErr.message ?? 'unknown error'}). ` +
@@ -6343,6 +6420,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         setResult('success');
         setResultMsg(`Stop Limit placed @ trigger $${stopTrigger.toFixed(2)} (ID #${orderId})`);
         if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+        await persistStopPolicy(orderId, stopTrigger);
       }
       setOpen(false);
       setConfirming(false);
@@ -6360,8 +6438,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const btnLabel =
     result === 'success' ? '✓ Stop Set'       :
     result === 'error'   ? '✕ Failed'          :
-    pos.stopLossStatus === 'none'  ? '+ Set Stop'      :
-    pos.stopLossStatus === 'loose' ? '⚠ Update Stop'   :
+    pos.stopLossClassification === 'NO_STOP'    ? '+ Set Stop'      :
+    pos.stopLossClassification === 'TOO_LOOSE'  ? '⚠ Update Stop'   :
+    pos.stopLossClassification === 'TOO_TIGHT'  ? '⚠ Verify Stop'   :
     '✎ Stop';
 
   const stopParsed  = parseFloat(stopPrice || '0');
@@ -6392,8 +6471,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
           result === 'success' ? 'border-emerald-600 text-emerald-400' :
           result === 'error'   ? 'border-red-600 text-red-400' :
           open ? 'border-orange-500 text-orange-400 bg-orange-500/10' :
-          pos.stopLossStatus === 'none'  ? 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400' :
-          pos.stopLossStatus === 'loose' ? 'border-yellow-700 text-yellow-400 hover:border-orange-500 hover:text-orange-400' :
+          pos.stopLossClassification === 'NO_STOP'   ? 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400' :
+          pos.stopLossClassification === 'TOO_LOOSE' ? 'border-yellow-700 text-yellow-400 hover:border-orange-500 hover:text-orange-400' :
+          pos.stopLossClassification === 'TOO_TIGHT' ? 'border-orange-700 text-orange-400 hover:border-orange-500 hover:text-orange-400' :
           'border-slate-600 text-slate-400 hover:border-orange-500 hover:text-orange-400'
         }`}>
         {pos.structureAmbiguous ? 'BLOCKED' : btnLabel}
@@ -6561,6 +6641,11 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                   onChange={e => {
                     const mult = parseFloat(e.target.value);
                     if (!isNaN(mult) && creditPerContract > 0) setStopPrice((mult * creditPerContract).toFixed(2));
+                    // TE-0002: still an explicit choice of an original-credit
+                    // multiple -- record it as such, not as an opaque manual
+                    // absolute price.
+                    setStopPriceSource('MANUAL');
+                    setStopBasisOverride('ORIGINAL_CREDIT');
                   }}
                   onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
                   autoFocus={!needsOco}
@@ -6572,7 +6657,14 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                 <span className={`text-[10px] ${th.textFaint} shrink-0`}>× credit =</span>
                 <input
                   type="number" min={stopMin} max={stopMax} step="0.01" value={stopPrice}
-                  onChange={e => setStopPrice(e.target.value)}
+                  onChange={e => {
+                    setStopPrice(e.target.value);
+                    // TE-0002: a direct dollar edit is no longer expressed
+                    // relative to any anchor -- record it as a manual
+                    // absolute stop, never re-labeled "×credit" later.
+                    setStopPriceSource('MANUAL');
+                    setStopBasisOverride('MANUAL_ABSOLUTE');
+                  }}
                   onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
                   className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
                     stopError ? 'border-red-500' : th.inputBorder
@@ -8061,16 +8153,22 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <div className="border-t-2 border-amber-600/50 pt-1 border-r border-r-slate-700/40 pr-2">
               <p className={`text-[9px] ${th.textFaint}`}>Stop Loss</p>
               {(() => {
+                // TE-0002: driven by the canonical 6-state classification,
+                // not the legacy live/loose bucket -- a materially tight
+                // stop (e.g. 1.25x credit) is no longer displayed as
+                // healthy just because a broker order happens to exist.
                 const cfg =
-                  pos.stopLossStatus === 'live'  ? { icon: '✓', label: 'Stop',  cls: 'text-emerald-400' } :
-                  pos.stopLossStatus === 'loose' ? { icon: '⚠', label: 'Loose', cls: 'text-yellow-400'  } :
-                  pos.stopLossStatus === 'none'  ? { icon: '✕', label: 'None',  cls: 'text-red-400'     } :
-                                                   { icon: '—', label: '?',     cls: th.textFaint        };
-                const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-                const creditPerContract = shortQty > 0 ? pos.creditReceived / (shortQty * 100) : pos.creditReceived / 100;
-                const stopMultiple = pos.stopLossPrice != null && creditPerContract > 0
-                  ? (pos.stopLossPrice / creditPerContract).toFixed(1)
-                  : null;
+                  pos.stopLossClassification === 'ALIGNED'            ? { icon: '✓', label: 'Stop',          cls: 'text-emerald-400' } :
+                  pos.stopLossClassification === 'TOO_TIGHT'          ? { icon: '⚠', label: 'Too tight',     cls: 'text-orange-400'  } :
+                  pos.stopLossClassification === 'TOO_LOOSE'          ? { icon: '⚠', label: 'Too loose',     cls: 'text-yellow-400'  } :
+                  pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? { icon: '?', label: 'Unverified',    cls: 'text-yellow-400'  } :
+                  pos.stopLossClassification === 'INVALID'            ? { icon: '✕', label: 'Invalid',       cls: 'text-red-400'     } :
+                  pos.stopLossClassification === 'NO_STOP'            ? { icon: '✕', label: 'None',          cls: 'text-red-400'     } :
+                                                                          { icon: '—', label: '?',            cls: th.textFaint        };
+                // Renders the RECORDED policy -- never a "×credit" label
+                // fabricated by dividing price by credit for an
+                // unknown-provenance order (see describeStopLossPolicy).
+                const policyDescription = describeStopLossPolicy(pos.stopLossPolicy);
                 return (
                   <>
                     <p className={`text-xs font-bold ${cfg.cls}`}>
@@ -8079,8 +8177,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                         <span className={`ml-1 ${th.textFaint} text-[10px] font-normal`}>${pos.stopLossPrice.toFixed(2)}</span>
                       )}
                     </p>
-                    {stopMultiple != null && (
-                      <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{stopMultiple}× credit</p>
+                    {pos.stopLossPrice != null && (
+                      <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{policyDescription}</p>
                     )}
                   </>
                 );

@@ -45,6 +45,17 @@ import {
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
+import {
+  classifyStopLossPolicy,
+  evaluateStopBreach,
+  isWithinStopGracePeriod,
+  buildUnknownProvenancePolicy,
+  type StopLossPolicy,
+  type BreachObservation,
+  type BrokerStopStatus,
+  type QuoteQuality,
+} from '@/lib/portfolio/stopLossPolicy';
+import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
 
@@ -482,6 +493,9 @@ export function mapGtcOrder(o: any, parentTif?: string, parentComplexId?: string
     timeInForce: tif,
     legs,
     complexOrderId,
+    // TE-0002: raw broker status, used to detect an authoritative
+    // triggered/filled stop -- see mapBrokerStopStatus.
+    status: o?.status != null ? String(o.status) : null,
   };
 }
 
@@ -596,20 +610,140 @@ export async function fetchGtcOrders(accountNumber: string, token: string): Prom
 }
 
 
-export function classifyPositionStopLoss(position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>, gtcOrders: GtcOrder[]): StopLossInfo {
+// TE-0002 corrective round: replaces the old `live | loose` interpretation
+// (which classified EVERY stop at or below 2x credit as "live" -- so a
+// 1.25x-credit stop, materially tighter than the documented entry rule,
+// passed silently). Delegates classification to the canonical, pure
+// lib/portfolio/stopLossPolicy.ts module; this function's job is purely to
+// (1) find the matching broker order and (2) resolve whether TradeEdge has
+// a recorded policy for it that still matches its live order id.
+//
+// `recordedPolicy` is the caller-resolved provenance record for this
+// position's key (see stopPolicyStore.positionStopPolicyKey) -- passed in
+// rather than fetched here so this function stays synchronous/pure and
+// testable without a network mock. Callers that have no policy store
+// available (or are calling before the store has loaded) should pass
+// `null`, which correctly falls through to UNKNOWN_PROVENANCE/TOO_TIGHT.
+//
+// `stopLossStatus` (the legacy 'live'|'loose'|'none'|'unknown' bucket) is
+// still populated for backward compatibility with existing consumers (e.g.
+// lib/portfolio-intelligence/health/score.ts) -- derived FROM the new
+// classification, never the other way around:
+//   NO_STOP             -> 'none'
+//   ALIGNED              -> 'live'
+//   TOO_TIGHT             -> 'live'   (a working stop still exists; it is
+//                                      tighter than the deterministic
+//                                      default, which the health scorer
+//                                      doesn't need to distinguish from
+//                                      "has protection" -- getRecommendation
+//                                      and the UI use stopLossClassification
+//                                      directly for the corrected behavior)
+//   TOO_LOOSE             -> 'loose'  (matches the legacy "loose" meaning)
+//   UNKNOWN_PROVENANCE     -> 'unknown'
+//   INVALID                -> 'unknown'
+export function classifyPositionStopLoss(
+  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>,
+  gtcOrders: GtcOrder[],
+  recordedPolicy: StopLossPolicy | null = null,
+): StopLossInfo {
   const shortLeg = position.legs.find(l => l.direction === 'Short');
-  if (!shortLeg?.symbol) return { status: 'unknown', price: null };
+  if (!shortLeg?.symbol) {
+    return { status: 'unknown', price: null, policy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+  }
   // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
   const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
-  const stopThreshold = parseFloat((creditPerContract * 2).toFixed(2));
   const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
   const match = gtcOrders.find(order =>
     isStopOrder(order) && order.legs.some(leg => normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action))
   );
-  if (!match) return { status: 'none', price: null };
+
+  if (!match) {
+    return { status: 'none', price: null, policy: null, classification: 'NO_STOP', orderId: null, orderStatus: null };
+  }
+
   const orderPrice = parseFloat(match.stopPrice ?? match.price);
-  if (isNaN(orderPrice)) return { status: 'unknown', price: null };
-  return orderPrice <= stopThreshold + 0.02 ? { status: 'live', price: orderPrice } : { status: 'loose', price: orderPrice };
+  const hasStopOrder = true;
+  const orderTriggerPrice = isNaN(orderPrice) ? null : orderPrice;
+
+  // Only trust the recorded policy if it was created for THIS live order --
+  // a stale record (order replaced outside TradeEdge, or replaced by
+  // TradeEdge itself for a NEW order id) must never be misattributed. See
+  // classifyStopLossPolicy's doc comment: a mismatch already falls through
+  // to UNKNOWN_PROVENANCE/TOO_TIGHT on its own, but resolving it to `null`
+  // here keeps the returned `policy` (used for DISPLAY) honest too.
+  const matchedPolicy = recordedPolicy && recordedPolicy.brokerOrderId === match.id ? recordedPolicy : null;
+
+  const classification = classifyStopLossPolicy({
+    hasStopOrder,
+    orderTriggerPrice,
+    policy: matchedPolicy,
+    creditPerContract,
+  });
+
+  const legacyStatus: StopStatus =
+    classification === 'NO_STOP' ? 'none' :
+    classification === 'TOO_LOOSE' ? 'loose' :
+    classification === 'ALIGNED' || classification === 'TOO_TIGHT' ? 'live' :
+    'unknown';
+
+  // For display, always resolve to SOME StopLossPolicy object so the UI
+  // never has to re-derive a basis from price/credit itself -- but an
+  // unmatched/absent record resolves to an explicit UNKNOWN-basis policy,
+  // never a fabricated one.
+  const displayPolicy = matchedPolicy ?? (orderTriggerPrice != null ? buildUnknownProvenancePolicy(orderTriggerPrice, match.id) : null);
+
+  return {
+    status: legacyStatus,
+    price: orderTriggerPrice,
+    policy: displayPolicy,
+    classification,
+    orderId: match.id || null,
+    orderStatus: match.status ?? null,
+  };
+}
+
+// TE-0002: maps a raw broker order status string to the coarse
+// BrokerStopStatus evaluateStopBreach() consumes. Conservative by design --
+// anything not clearly a fill/trigger is 'WORKING' or 'UNKNOWN', never
+// treated as authoritative confirmation.
+export function mapBrokerStopStatus(rawStatus: string | null | undefined): BrokerStopStatus {
+  const s = String(rawStatus ?? '').trim().toLowerCase();
+  if (!s) return 'UNKNOWN';
+  if (s === 'filled' || s === 'triggered' || s.includes('fill')) return 'TRIGGERED';
+  if (['live', 'working', 'received', 'queued', 'routed', 'pending', 'contingent'].includes(s)) return 'WORKING';
+  return 'UNKNOWN';
+}
+
+// TE-0002: coarse quote-quality signal for the position's short leg,
+// reusing evidence the app already computes (pnlReliable, whether a
+// marketable/closeValue estimate exists at all) rather than inventing a new
+// bid/ask-spread-width metric. A missing/unreliable marketable estimate
+// means any marketable-only breach evidence must not be trusted on its own
+// -- see evaluateStopBreach's quoteQuality handling.
+export function derivePositionQuoteQuality(pos: Pick<Position, 'pnlReliable' | 'closeValue'>): QuoteQuality {
+  if (!pos.pnlReliable) return 'UNKNOWN';
+  return pos.closeValue != null ? 'RELIABLE' : 'DEGRADED';
+}
+
+// TE-0002: builds the confirmation-window observations evaluateStopBreach()
+// consumes from this position's persisted daily snapshot history plus the
+// current live read. Marketable (closeValue) history only exists on
+// snapshots captured after this field was added (see PositionSnapshot's doc
+// comment) -- older/missing entries simply contribute `marketableValue:
+// null`, which evaluateStopBreach already treats as "no evidence," never as
+// a false negative.
+export function buildStopBreachObservations(pos: Pick<Position, 'currentValue' | 'closeValue' | 'snapshotHistory'>): BreachObservation[] {
+  const historical: BreachObservation[] = (pos.snapshotHistory ?? []).map(snap => ({
+    at: snap.date,
+    midValue: snap.currentValue,
+    marketableValue: snap.closeValue ?? null,
+  }));
+  const current: BreachObservation = {
+    at: new Date().toISOString(),
+    midValue: pos.currentValue,
+    marketableValue: pos.closeValue,
+  };
+  return [...historical, current];
 }
 
 
@@ -797,6 +931,11 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   } catch {}
 
   const gtcOrders = await fetchGtcOrders(accountNumber, token);
+  // TE-0002: recorded stop-policy provenance, fetched once per load exactly
+  // like fetchEntrySnapshots(). Non-blocking on failure (fetchStopPolicies
+  // already swallows errors and returns {}), which correctly degrades every
+  // position to UNKNOWN_PROVENANCE rather than throwing.
+  const stopPolicies = await fetchStopPolicies();
   const gtcSymbols = new Set<string>();
   for (const order of gtcOrders) for (const leg of order.legs) {
     const parsed = parseOptionSymbol(leg.symbol);
@@ -1164,7 +1303,15 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const targetPrice = Math.abs(creditReceived) * profitTarget;
     const hitTarget = hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
 
-    const stopLoss = classifyPositionStopLoss({ legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity }, gtcOrders);
+    const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
+    const recordedStopPolicy = shortLegForPolicyKey
+      ? stopPolicies[positionStopPolicyKey(accountNumber, shortLegForPolicyKey.symbol)] ?? null
+      : null;
+    const stopLoss = classifyPositionStopLoss(
+      { legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity },
+      gtcOrders,
+      recordedStopPolicy,
+    );
 
     // Only treat earnings as relevant if it occurs on or before this position's expiration.
     // Tastytrade market-metrics can return the next earnings date within ~60 days;
@@ -1235,6 +1382,8 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         return match ? parseFloat(match.price) || null : null;
       })(),
       stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
+      stopLossPolicy: stopLoss.policy, stopLossClassification: stopLoss.classification,
+      stopLossOrderStatus: stopLoss.orderStatus,
       stockPrice: stockPrices[symbol] ?? null,
       buffer: (() => {
         const stock = stockPrices[symbol];
@@ -1351,21 +1500,26 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
   // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
   const veryLargeLoss = pnlPct <= -200 || (marketablePnlPct != null && marketablePnlPct <= -200);
   const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-  // stopLossPrice is a per-spread/per-contract option price (e.g. 1.56 = $156 per contract).
-  // currentValue is the total buyback value for the whole position, so scale the stop by contracts.
-  // PI-0014: stop-loss detection now checks EITHER the mid buyback value or
-  // the marketable/executable buyback value -- a stop-loss is an execution
-  // order, so it must be evaluated against execution reality, not just the
-  // theoretical mark. This can only make the stop fire more often, never
-  // less (an already-breached mid stop is never un-breached by marketable
-  // pricing).
-  const stopLossBreachedMid = pos.stopLossPrice != null && pos.currentValue != null && shortQty > 0
-    ? pos.currentValue >= (pos.stopLossPrice * 100 * shortQty)
-    : false;
-  const stopLossBreachedMarketable = pos.stopLossPrice != null && pos.closeValue != null && shortQty > 0
-    ? pos.closeValue >= (pos.stopLossPrice * 100 * shortQty)
-    : false;
-  const stopLossBreached = stopLossBreachedMid || stopLossBreachedMarketable;
+  // TE-0002 corrective round: replaces the old `stopLossBreachedMid ||
+  // stopLossBreachedMarketable` OR rule, which let EITHER a single noisy
+  // midpoint tick OR a single wide-market marketable estimate independently
+  // fire CUT_LOSSES. A stop is now only treated as breached when either the
+  // broker itself reports the stop order triggered/filled (authoritative,
+  // no grace period), or a sustained streak of confirming observations
+  // clears the required confirmation count -- see
+  // lib/portfolio/stopLossPolicy.ts's evaluateStopBreach. A single/
+  // unconfirmed/wide-market-only reading downgrades to a MANAGE "verify
+  // stop" recommendation instead of an emergency exit.
+  const stopBreachEvaluation = evaluateStopBreach({
+    policy: pos.stopLossPolicy,
+    quantity: shortQty,
+    observations: buildStopBreachObservations(pos),
+    brokerStopStatus: mapBrokerStopStatus(pos.stopLossOrderStatus),
+    quoteQuality: derivePositionQuoteQuality(pos),
+  });
+  const stopLossConfirmedBreach = stopBreachEvaluation.state === 'CONFIRMED_BREACH';
+  const stopLossNeedsVerification =
+    stopBreachEvaluation.state === 'VERIFY_STOP' || stopBreachEvaluation.state === 'PENDING_CONFIRMATION';
 
   // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this
   if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
@@ -1379,9 +1533,13 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
     return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% paper — acquisition intent, hold for assignment or expiry` };
   }
 
-  // Hard exits: breached strike, explicit stop breach, or very large loss.
+  // Hard exits: breached strike, confirmed stop breach, or very large loss.
   if (breached) return { action: 'CUT_LOSSES', detail: `Short strike breached — exit or roll immediately` };
-  if (stopLossBreached) return { action: 'CUT_LOSSES', detail: `Stop threshold reached — follow the risk plan` };
+  if (stopLossConfirmedBreach) return { action: 'CUT_LOSSES', detail: `Stop threshold reached — ${stopBreachEvaluation.explanation}` };
+  // Breach evidence exists but isn't confirmed (no broker fill, insufficient
+  // observation history, or only a wide-market/degraded-quote reading) --
+  // never escalate a single noisy snapshot straight to CUT_LOSSES.
+  if (stopLossNeedsVerification) return { action: 'MANAGE', detail: `Verify stop — ${stopBreachEvaluation.explanation}` };
   if (veryLargeLoss && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% and trend is adverse — exit or roll` };
 
   // Short-dated entry: maximize profit, but do not treat ordinary red P/L as a failure.
