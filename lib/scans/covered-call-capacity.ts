@@ -190,7 +190,7 @@ export function buildCoveredCallCapacityReport(
   const symbols = new Set([...Object.keys(holdings), ...Object.keys(shortCalls), ...Object.keys(workingCalls)]);
   const bySymbol: Record<string, CoveredCallCapacity> = {};
 
-  for (const symbol of symbols) {
+  for (const symbol of Array.from(symbols)) {
     const holding = holdings[symbol] ?? { sharesOwned: 0, costBasis: null };
     bySymbol[symbol] = computeCoveredCallCapacity(
       holding.sharesOwned,
