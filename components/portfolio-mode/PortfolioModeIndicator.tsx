@@ -203,7 +203,16 @@ export function PortfolioModeIndicator() {
           <button disabled aria-disabled> element at every breakpoint --
           only the visible text differs -- so disabled/aria-disabled
           semantics, focus behavior, and click-does-nothing behavior are
-          identical across desktop, tablet, and mobile. */}
+          identical across desktop, tablet, and mobile.
+          Rebase-integration pass: a bare compact "PAPER" next to "LIVE"
+          risked reading, at a glance on a small screen, as two candidate
+          active modes rather than one active mode and one disabled
+          option. The compact mobile text now also gets a line-through
+          and a small "unavailable" glyph, on top of the pre-existing
+          opacity/aria-disabled treatment, so unavailability doesn't rely
+          on color/opacity alone even at compact size. The full desktop
+          label already disambiguates via its own explanatory text and is
+          unchanged. */}
       <button
         type="button"
         disabled
@@ -214,7 +223,20 @@ export function PortfolioModeIndicator() {
         className="cursor-not-allowed rounded-full border border-current px-2 py-0.5 text-[10px] font-medium text-amber-300/40"
       >
         <span className="hidden sm:inline">{DISABLED_PAPER_LABEL}</span>
-        <span className="sm:hidden">PAPER</span>
+        <span className="sm:hidden inline-flex items-center gap-0.5 line-through decoration-2">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 12 12"
+            className="h-2.5 w-2.5 flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="6" cy="6" r="5" />
+            <line x1="2.3" y1="2.3" x2="9.7" y2="9.7" />
+          </svg>
+          PAPER
+        </span>
       </button>
     </div>
   );

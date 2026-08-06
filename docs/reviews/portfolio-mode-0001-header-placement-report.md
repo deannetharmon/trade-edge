@@ -4,6 +4,12 @@
 
 Moved the globally-mounted `PortfolioModeIndicator` from a fixed top-right position (`fixed right-4 top-4`), where it collided with theme/accent-color controls on the Screener and other routes, to a horizontally-centered fixed position (`fixed left-1/2 top-3 -translate-x-1/2`). This lands in the visually open center of every route's top band without requiring per-page cooperation, since no shared header component exists in this codebase (see Investigation, below).
 
+## Rebase-integration addendum
+
+Rebased onto `main` after locally merging `feature/te-0007-unified-strategy-launcher` into `main` (not pushed) so both the HELP-0001 and TE-0007 Unified Strategy Launcher work are present. The rebase itself was conflict-free (portfolio-mode's changes touch a disjoint set of files from TE-0007's `app/screener/page.tsx` and `lib/screener/` changes). Post-rebase re-verification found no new overlap risk: TE-0007's changes were confined to the Screener page's body content, not its header markup, so the header-overlap analysis from the original pass still holds unchanged.
+
+This pass also hardened the mobile-compact PAPER control: previously, on a LIVE-mode badge, the compact view showed bare "LIVE" next to bare "PAPER" text with only reduced opacity distinguishing the disabled one — legible but relying on color/opacity alone at a glance on a small screen. The compact "PAPER" text now also gets a line-through and a small circle-slash glyph, so unavailability reads unambiguously without needing the long desktop explanation. One new test added (`PortfolioModeIndicator.test.tsx`, now 30 tests) asserts the compact PAPER label carries the strike-through/glyph treatment while the LIVE label does not.
+
 ## Placement approach
 
 See `docs/tickets/PORTFOLIO-MODE-0001-header-placement.md` for the full investigation writeup and rationale. In short:
@@ -50,10 +56,10 @@ No visual browser tool was available in this environment. "Manual verification" 
 ## Validation results
 
 - `npx tsc --noEmit` — clean, no errors.
-- `PortfolioModeIndicator.test.tsx` — 29/29 passing.
-- Full test suite — 105 files / 1596 tests passing (run in batches: `lib` 74 files/1286 tests, `components features` 27 files/262 tests, `app` 4 files/48 tests). Only pre-existing, benign "network disabled in test" console noise.
+- `PortfolioModeIndicator.test.tsx` — 30/30 passing (post-rebase, +1 for the mobile disambiguation test).
+- Full test suite (post-rebase, main now includes TE-0007) — 109 files / 1648 tests passing (batches: `lib` 75 files/1306 tests, `components features` 27 files/263 tests, `app` 7 files/79 tests). Only pre-existing, benign "network disabled in test" / "indexedDB is not defined" console noise.
 - `git diff --check` — clean, no whitespace errors.
-- **Production build (`npx next build`) — not completed successfully in this environment.** Multiple attempts (foreground, properly-detached background with confirmed process survival, reduced V8 heap via `NODE_OPTIONS=--max-old-space-size=2048`, and a temporary build-workspace-only `next.config.js` with `typescript.ignoreBuildErrors`/`eslint.ignoreDuringBuilds` set to isolate the failure) all died silently at the same early "Creating an optimized production build ..." phase, with no error output and no exit code recorded — the signature of an out-of-memory kill rather than a code defect. The sandbox has 3.8Gi total RAM with typically under 1Gi genuinely free. This is a disclosed environment limitation, not a known TypeScript, lint, or runtime error: `tsc --noEmit` is clean and the full test suite passes. The temporary `next.config.js` change was made only in the scratch build workspace, never in the actual repo, and was reverted before commit (confirmed via diff against the original).
+- **Production build (`npx next build`) — not completed successfully in this environment**, across two separate validation passes and five distinct mitigation attempts total (plain foreground/background, reduced V8 heap at both 2048MB and 1536MB, single-worker/no-worker-threads via a temporary `experimental.cpus: 1` config, and isolating type-check/lint via a temporary `ignoreBuildErrors`/`ignoreDuringBuilds` config). Every attempt died silently at the identical earliest phase ("Creating an optimized production build ..."), with no error output and no exit code recorded — the signature of an out-of-memory kill, not a code defect. The sandbox has 3.8Gi total RAM with typically ~1Gi genuinely free and 0 swap. `tsc --noEmit` is clean and the full test suite passes; both temporary `next.config.js` workarounds were made only in the scratch build workspace, never the actual repo, and were reverted before commit (confirmed via diff against the original). This is disclosed as a persistent, disclosed environment limitation requiring a build in a higher-memory environment, per the ticket's own framing ("production build in an environment with sufficient memory").
 
 ## Scope boundaries respected
 

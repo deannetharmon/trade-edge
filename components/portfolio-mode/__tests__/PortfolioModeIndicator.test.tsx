@@ -287,6 +287,23 @@ describe('PortfolioModeIndicator', () => {
       // Compact form, shown below sm.
       expect(paperControl.querySelector('.sm\\:hidden')).toHaveTextContent('PAPER');
     });
+
+    it('the compact mobile "PAPER" text is visually distinguished as unavailable (not color/opacity alone), so it cannot be misread as a second active mode next to LIVE', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const paperControl = screen.getByTestId('portfolio-mode-paper-disabled');
+      const compact = paperControl.querySelector('.sm\\:hidden');
+      expect(compact).not.toBeNull();
+      // Struck-through text, not just dimmed color.
+      expect(compact?.className ?? '').toMatch(/line-through/);
+      // A non-text "unavailable" glyph accompanies the compact label.
+      expect(compact?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      // The LIVE label itself carries no such disabled treatment -- only
+      // one of the two badge segments reads as the active mode.
+      const liveLabel = screen.getByTestId('portfolio-mode-label');
+      expect(liveLabel.className).not.toMatch(/line-through/);
+    });
   });
 
   describe('header-placement corrective pass: no duplicate mount', () => {
