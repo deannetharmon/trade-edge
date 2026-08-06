@@ -10,7 +10,7 @@
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 import type { PositionValuation } from '@/lib/positionValuation';
 import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
-import type { StopLossPolicy, StopClassification, StopBreachState } from '@/lib/portfolio/stopLossPolicy';
+import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence } from '@/lib/portfolio/stopLossPolicy';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
@@ -130,6 +130,15 @@ export interface Position {
   // can treat a broker-confirmed trigger/fill as authoritative. Null when
   // there is no working stop order.
   stopLossOrderStatus: string | null;
+  // TE-0002 corrective round 2: explicit per-leg/net bid-ask width evidence,
+  // computed once during loadPositions from real two-sided leg markets
+  // (never a mark/fallback price -- same "never fabricate" convention
+  // closeValue already follows). Feeds derivePositionQuoteQuality(), which
+  // replaces the old `pnlReliable && closeValue != null` heuristic that
+  // couldn't distinguish a narrow market from a genuinely wide one. Null
+  // when width couldn't be computed at all (e.g. no market data fetch
+  // occurred).
+  quoteWidthEvidence: QuoteWidthEvidence | null;
   // Not persisted/stored -- always recomputed fresh from current
   // currentValue/closeValue/snapshotHistory by getRecommendation() (and
   // available to callers directly via lib/portfolio/stopLossPolicy's
@@ -216,6 +225,14 @@ export interface PositionSnapshot {
   // backfilled/fabricated), which is exactly what evaluateStopBreach's
   // observation model already expects for missing marketableValue.
   closeValue?: number | null;
+  // TE-0002 corrective round 2: full ISO 8601 capture timestamp. Optional/
+  // absent on snapshots captured before this field existed, or if a caller
+  // only ever recorded the date. buildStopBreachObservations() treats its
+  // absence as `preciseTimestamp: false` -- a date-only historical entry
+  // remains valid CONTEXTUAL evidence but can never by itself satisfy an
+  // intraday stop-confirmation streak (see stopLossPolicy.ts's
+  // BreachObservation doc comment).
+  capturedAt?: string | null;
   pnl: number | null;
   pnlPct: number | null;
   iv: number | null;

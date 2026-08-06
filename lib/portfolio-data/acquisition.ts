@@ -50,10 +50,13 @@ import {
   evaluateStopBreach,
   isWithinStopGracePeriod,
   buildUnknownProvenancePolicy,
+  matchesStopOrderIdentity,
+  classifyQuoteQuality,
   type StopLossPolicy,
   type BreachObservation,
   type BrokerStopStatus,
   type QuoteQuality,
+  type QuoteWidthEvidence,
 } from '@/lib/portfolio/stopLossPolicy';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
 
@@ -610,6 +613,36 @@ export async function fetchGtcOrders(accountNumber: string, token: string): Prom
 }
 
 
+// TE-0002 corrective round 2: resolves the ACTUAL nested stop-order id (and
+// the parent complex-order id) from a raw OCO submission response, using
+// the exact same collectRawOrders/mapGtcOrder/isStopOrder parsing this
+// module already applies to GET /complex-orders data -- so identity
+// resolved at submit time is guaranteed consistent with identity resolved
+// at reload time, rather than two independently-guessed parsing paths.
+//
+// Previously this defect persisted the PARENT complex-order id as the
+// recorded policy's `brokerOrderId`, but classifyPositionStopLoss matches
+// GtcOrder.id -- the nested stop leg's OWN id -- so the recorded policy
+// could never match on reload and silently fell back to
+// UNKNOWN_PROVENANCE/TOO_TIGHT even for a stop TradeEdge had just placed.
+//
+// Returns `stopOrderId: null` (never a fabricated id) if the broker
+// response doesn't echo back a parseable nested stop order -- callers must
+// still persist `complexOrderId` as a fallback identity signal in that
+// case; see matchesStopOrderIdentity.
+export function resolveOcoStopOrderId(complexOrderSubmissionResult: any): { complexOrderId: string | null; stopOrderId: string | null } {
+  const envelope = complexOrderSubmissionResult?.data?.['complex-order'] ?? complexOrderSubmissionResult?.data ?? null;
+  if (!envelope || typeof envelope !== 'object') return { complexOrderId: null, stopOrderId: null };
+
+  const complexOrderId = envelope.id != null ? String(envelope.id) : null;
+
+  const rawOrders = collectRawOrders({ data: { items: [envelope] } });
+  const reconstructed = rawOrders.map(o => mapGtcOrder(o, o._inheritedTif, o._parentComplexId));
+  const stopEntry = reconstructed.find(isStopOrder);
+
+  return { complexOrderId, stopOrderId: stopEntry?.id || null };
+}
+
 // TE-0002 corrective round: replaces the old `live | loose` interpretation
 // (which classified EVERY stop at or below 2x credit as "live" -- so a
 // 1.25x-credit stop, materially tighter than the documented entry rule,
@@ -671,7 +704,17 @@ export function classifyPositionStopLoss(
   // classifyStopLossPolicy's doc comment: a mismatch already falls through
   // to UNKNOWN_PROVENANCE/TOO_TIGHT on its own, but resolving it to `null`
   // here keeps the returned `policy` (used for DISPLAY) honest too.
-  const matchedPolicy = recordedPolicy && recordedPolicy.brokerOrderId === match.id ? recordedPolicy : null;
+  //
+  // TE-0002 corrective round 2: for an OCO-submitted stop, the recorded
+  // policy's `brokerOrderId` may only be the nested stop leg's own id (the
+  // one `match.id` here also carries -- see mapGtcOrder) -- but if that
+  // extraction wasn't possible at submission time, matchesStopOrderIdentity
+  // also accepts a match on the shared OCO `complexOrderId`, which is still
+  // a real, non-fabricated identity check (see that function's doc
+  // comment).
+  const matchedPolicy = recordedPolicy && matchesStopOrderIdentity(recordedPolicy, { id: match.id, complexOrderId: match.complexOrderId ?? null })
+    ? recordedPolicy
+    : null;
 
   const classification = classifyStopLossPolicy({
     hasStopOrder,
@@ -690,7 +733,7 @@ export function classifyPositionStopLoss(
   // never has to re-derive a basis from price/credit itself -- but an
   // unmatched/absent record resolves to an explicit UNKNOWN-basis policy,
   // never a fabricated one.
-  const displayPolicy = matchedPolicy ?? (orderTriggerPrice != null ? buildUnknownProvenancePolicy(orderTriggerPrice, match.id) : null);
+  const displayPolicy = matchedPolicy ?? (orderTriggerPrice != null ? buildUnknownProvenancePolicy(orderTriggerPrice, match.id, match.complexOrderId ?? null) : null);
 
   return {
     status: legacyStatus,
@@ -714,15 +757,18 @@ export function mapBrokerStopStatus(rawStatus: string | null | undefined): Broke
   return 'UNKNOWN';
 }
 
-// TE-0002: coarse quote-quality signal for the position's short leg,
-// reusing evidence the app already computes (pnlReliable, whether a
-// marketable/closeValue estimate exists at all) rather than inventing a new
-// bid/ask-spread-width metric. A missing/unreliable marketable estimate
-// means any marketable-only breach evidence must not be trusted on its own
-// -- see evaluateStopBreach's quoteQuality handling.
-export function derivePositionQuoteQuality(pos: Pick<Position, 'pnlReliable' | 'closeValue'>): QuoteQuality {
+// TE-0002 corrective round 2: `pnlReliable && closeValue != null` was
+// replaced -- it only proved quotes existed, not that they were narrow
+// enough to trust. Delegates to the canonical, pure
+// classifyQuoteQuality(), fed by the explicit per-leg/net bid-ask width
+// evidence computed once during loadPositions (see quoteWidthEvidence
+// above). A two-sided but materially wide market (the reported MU
+// condition -- $3-5-wide leg markets) now classifies DEGRADED, not
+// RELIABLE, so a marketable-only breach reading on it can never alone
+// confirm a stop -- see evaluateStopBreach's quoteQuality handling.
+export function derivePositionQuoteQuality(pos: Pick<Position, 'pnlReliable' | 'quoteWidthEvidence'>): QuoteQuality {
   if (!pos.pnlReliable) return 'UNKNOWN';
-  return pos.closeValue != null ? 'RELIABLE' : 'DEGRADED';
+  return classifyQuoteQuality(pos.quoteWidthEvidence ?? null);
 }
 
 // TE-0002: builds the confirmation-window observations evaluateStopBreach()
@@ -732,16 +778,26 @@ export function derivePositionQuoteQuality(pos: Pick<Position, 'pnlReliable' | '
 // comment) -- older/missing entries simply contribute `marketableValue:
 // null`, which evaluateStopBreach already treats as "no evidence," never as
 // a false negative.
+//
+// TE-0002 corrective round 2: `preciseTimestamp` is set from
+// `snap.capturedAt` (a real capture time, added alongside this correction)
+// -- a snapshot captured before that field existed only has a date-only
+// `date`, and is correctly marked imprecise: it remains valid CONTEXTUAL
+// evidence but evaluateStopBreach will never let it, combined with just the
+// current tick, fabricate a confirmed intraday streak. The current live
+// read is always precise.
 export function buildStopBreachObservations(pos: Pick<Position, 'currentValue' | 'closeValue' | 'snapshotHistory'>): BreachObservation[] {
   const historical: BreachObservation[] = (pos.snapshotHistory ?? []).map(snap => ({
-    at: snap.date,
+    at: snap.capturedAt ?? `${snap.date}T00:00:00.000Z`,
     midValue: snap.currentValue,
     marketableValue: snap.closeValue ?? null,
+    preciseTimestamp: snap.capturedAt != null,
   }));
   const current: BreachObservation = {
     at: new Date().toISOString(),
     midValue: pos.currentValue,
     marketableValue: pos.closeValue,
+    preciseTimestamp: true,
   };
   return [...historical, current];
 }
@@ -1291,6 +1347,41 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     }
     closeValue = closeValue * 100;
 
+    // TE-0002 corrective round 2: explicit spread-width evidence, computed
+    // directly from real two-sided leg markets -- `pnlReliable &&
+    // closeValue != null` alone only proves quotes exist, not that they're
+    // narrow. A leg with no real two-sided market (in oneSidedSymbols)
+    // makes the whole combo width unmeasurable (null), same "never
+    // fabricate" convention closeValue itself already follows.
+    let netWidthDollars: number | null = 0;
+    let crossed = false;
+    const legWidthsDollars: (number | null)[] = [];
+    for (const leg of legs) {
+      const qty = parseInt(leg['quantity'] ?? '1', 10);
+      const sym = leg.symbol?.replace(/\s+/g, '');
+      const bid = currentBids[sym];
+      const ask = currentAsks[sym];
+      if (oneSidedSymbols.has(sym) || bid == null || ask == null || bid <= 0 || ask <= 0) {
+        legWidthsDollars.push(null);
+        netWidthDollars = null;
+        continue;
+      }
+      if (ask < bid) crossed = true;
+      const legWidth = parseFloat((ask - bid).toFixed(4));
+      legWidthsDollars.push(legWidth);
+      if (netWidthDollars != null) netWidthDollars += legWidth * qty * 100;
+    }
+    const midForWidthPct = hasCurrentPrices ? Math.abs(currentValue) : null;
+    const netWidthPctOfMid = netWidthDollars != null && midForWidthPct != null && midForWidthPct > 0
+      ? parseFloat((netWidthDollars / midForWidthPct).toFixed(4))
+      : null;
+    const quoteWidthEvidence: QuoteWidthEvidence = {
+      legWidthsDollars,
+      netWidthDollars: netWidthDollars != null ? parseFloat(netWidthDollars.toFixed(2)) : null,
+      netWidthPctOfMid,
+      crossed,
+    };
+
     const anyLegUnpriceable = legs.some(
       (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
@@ -1384,6 +1475,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
       stopLossPolicy: stopLoss.policy, stopLossClassification: stopLoss.classification,
       stopLossOrderStatus: stopLoss.orderStatus,
+      quoteWidthEvidence,
       stockPrice: stockPrices[symbol] ?? null,
       buffer: (() => {
         const stock = stockPrices[symbol];

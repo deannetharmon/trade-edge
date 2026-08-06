@@ -58,6 +58,7 @@ describe('classifyStopLossPolicy', () => {
     const policy: StopLossPolicy = {
       triggerPrice: 3.15, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 1.25,
       source: 'MANUAL', createdAt: '2026-01-01T00:00:00.000Z', brokerOrderId: 'ord-1',
+      complexOrderId: null,
     };
     const result = classifyStopLossPolicy({
       hasStopOrder: true, orderTriggerPrice: 3.15, policy, creditPerContract: 2.52,
@@ -69,6 +70,7 @@ describe('classifyStopLossPolicy', () => {
     const policy: StopLossPolicy = {
       triggerPrice: 7.56, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 3,
       source: 'MANUAL', createdAt: '2026-01-01T00:00:00.000Z', brokerOrderId: 'ord-1',
+      complexOrderId: null,
     };
     const result = classifyStopLossPolicy({
       hasStopOrder: true, orderTriggerPrice: 7.56, policy, creditPerContract: 2.52,
@@ -96,6 +98,7 @@ describe('classifyStopLossPolicy', () => {
     const policy: StopLossPolicy = {
       triggerPrice: 9.99, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 2,
       source: 'DEFAULT', createdAt: null, brokerOrderId: 'ord-1',
+      complexOrderId: null,
     };
     const result = classifyStopLossPolicy({
       hasStopOrder: true, orderTriggerPrice: 9.99, policy, creditPerContract: 2.52,
@@ -150,8 +153,12 @@ describe('evaluateStopBreach', () => {
   const policy = buildOriginalCreditDefaultPolicy(2.52); // triggerPrice 5.04
   const thresholdTotal = policy.triggerPrice * 100 * shortQty; // 2520
 
-  const obs = (at: string, midValue: number | null, marketableValue: number | null): BreachObservation =>
-    ({ at, midValue, marketableValue });
+  const obs = (
+    at: string,
+    midValue: number | null,
+    marketableValue: number | null,
+    preciseTimestamp = true
+  ): BreachObservation => ({ at, midValue, marketableValue, preciseTimestamp });
 
   it('returns NO_STOP when there is no policy', () => {
     const result = evaluateStopBreach({ policy: null, quantity: shortQty, observations: [] });
@@ -243,6 +250,87 @@ describe('evaluateStopBreach', () => {
       quoteQuality: 'RELIABLE',
     });
     expect(result.state).toBe('NOT_BREACHED');
+  });
+
+  // ── TE-0002 corrective round 3: genuine confirmation window ────────────
+
+  it('counts a current read duplicated in today\'s snapshot once, not twice', () => {
+    const observations: BreachObservation[] = [
+      obs('2026-08-05T14:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10),
+      obs('2026-08-05T14:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'RELIABLE', requiredConfirmations: 2,
+    });
+    expect(result.streak).toBe(1);
+    expect(result.state).not.toBe('CONFIRMED_BREACH');
+  });
+
+  it('counts two readings inside the minimum confirmation interval once', () => {
+    const observations: BreachObservation[] = [
+      obs('2026-08-05T14:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10),
+      // Two minutes later -- well inside the 5-minute minimum interval.
+      obs('2026-08-05T14:02:00.000Z', thresholdTotal + 15, thresholdTotal + 15),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'RELIABLE', requiredConfirmations: 2,
+    });
+    expect(result.streak).toBe(1);
+    expect(result.state).not.toBe('CONFIRMED_BREACH');
+  });
+
+  it('confirms breach from two properly spaced, fresh, reliable, precisely-timed crossings', () => {
+    const observations: BreachObservation[] = [
+      obs('2026-08-05T09:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10),
+      // Six minutes later -- past the 5-minute minimum interval.
+      obs('2026-08-05T09:06:00.000Z', thresholdTotal + 20, thresholdTotal + 20),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'RELIABLE', requiredConfirmations: 2,
+    });
+    expect(result.state).toBe('CONFIRMED_BREACH');
+    expect(result.confirmedBy).toBe('OBSERVATION_STREAK');
+    expect(result.streak).toBe(2);
+  });
+
+  it('resets the streak after a hysteresis retreat even with otherwise well-spaced precise observations', () => {
+    const observations: BreachObservation[] = [
+      obs('2026-08-05T09:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10),
+      obs('2026-08-05T09:10:00.000Z', thresholdTotal + 20, thresholdTotal + 20),
+      // Fully retreats below the hysteresis floor -- breaks the streak.
+      obs('2026-08-05T09:20:00.000Z', thresholdTotal * 0.90, thresholdTotal * 0.90),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'RELIABLE', requiredConfirmations: 2,
+    });
+    expect(result.state).not.toBe('CONFIRMED_BREACH');
+    expect(result.state).toBe('NOT_BREACHED');
+  });
+
+  it('never combines an old imprecise daily snapshot with one current tick to fabricate confirmation', () => {
+    const observations: BreachObservation[] = [
+      // Old date-only daily snapshot, reconstructed at midnight -- not a
+      // genuine capture timestamp.
+      obs('2026-08-01T00:00:00.000Z', thresholdTotal + 10, thresholdTotal + 10, false),
+      // Today's single genuine live read.
+      obs('2026-08-05T14:00:00.000Z', thresholdTotal + 15, thresholdTotal + 15, true),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'RELIABLE', requiredConfirmations: 2,
+    });
+    expect(result.state).not.toBe('CONFIRMED_BREACH');
+    expect(result.streak).toBe(1);
+  });
+
+  it('treats a broker-reported trigger/fill as immediately authoritative regardless of observation freshness', () => {
+    const observations: BreachObservation[] = [
+      obs('2026-08-01T00:00:00.000Z', thresholdTotal - 500, thresholdTotal - 500, false),
+    ];
+    const result = evaluateStopBreach({
+      policy, quantity: shortQty, observations, quoteQuality: 'DEGRADED', brokerStopStatus: 'TRIGGERED',
+    });
+    expect(result.state).toBe('CONFIRMED_BREACH');
+    expect(result.confirmedBy).toBe('BROKER_ORDER');
   });
 });
 

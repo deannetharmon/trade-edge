@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations } from '../acquisition';
+import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
 import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy } from '@/lib/portfolio/stopLossPolicy';
 
@@ -78,6 +78,7 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     stopLossPolicy: null,
     stopLossClassification: 'NO_STOP',
     stopLossOrderStatus: null,
+    quoteWidthEvidence: null,
     stockPrice: 110,
     buffer: 13.6,
     theta: 0.5,
@@ -143,6 +144,112 @@ describe('classifyPositionStopLoss (wiring)', () => {
   });
 });
 
+// ── TE-0002 corrective round 2: OCO broker identity end-to-end ────────────
+// Required fixture: (1) an OCO submission response containing both the
+// parent complex-order id and the nested stop order's own id, (2) provenance
+// persisted after submission via resolveOcoStopOrderId, (3) broker orders
+// reconstructed the SAME way acquisition.ts reconstructs them on reload
+// (collectRawOrders/mapGtcOrder), (4) reload classification is ALIGNED, (5)
+// a stop replaced outside TradeEdge (new order id AND new complex-order id)
+// still comes back UNKNOWN_PROVENANCE, never misattributed to the stale
+// recorded policy.
+describe('OCO broker identity: submit -> persist -> reload (end-to-end)', () => {
+  const positionInput = { legs: [leg(), leg({ direction: 'Long', symbol: 'MU   260918P00090000' })], creditReceived: 1260, quantity: 5 };
+
+  function ocoEnvelope(opts: { complexId: string; profitOrderId: string; stopOrderId: string; stopTrigger: string }) {
+    return {
+      data: {
+        'complex-order': {
+          id: opts.complexId,
+          orders: [
+            {
+              id: opts.profitOrderId,
+              'order-type': 'Limit',
+              price: '1.26',
+              'time-in-force': 'GTC',
+              legs: [{ symbol: 'MU   260918P00095000', action: 'Buy to Close' }],
+            },
+            {
+              id: opts.stopOrderId,
+              'order-type': 'Stop Limit',
+              'stop-trigger': opts.stopTrigger,
+              'time-in-force': 'GTC',
+              status: 'Live',
+              legs: [{ symbol: 'MU   260918P00095000', action: 'Buy to Close' }],
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  // Reconstruct GtcOrder[] exactly the way fetchGtcOrders does at reload
+  // time: collectRawOrders walks the raw broker envelope, mapGtcOrder
+  // normalizes each nested order.
+  // Mirrors how fetchGtcOrders reconstructs orders from a real GET
+  // /accounts/{acct}/complex-orders response ({ data: { items: [...] } }) --
+  // the OCO submission fixture above uses the same nested envelope shape
+  // TastyTrade returns from that submission endpoint (data['complex-order']),
+  // so it's re-wrapped into the `items` shape here to match a genuine reload
+  // fetch, rather than inventing a second envelope format.
+  function reconstructGtcOrders(raw: any) {
+    const envelope = raw?.data?.['complex-order'] ?? raw?.data ?? null;
+    const rawOrders = collectRawOrders({ data: { items: envelope ? [envelope] : [] } });
+    return rawOrders.map(o => mapGtcOrder(o, o._inheritedTif, o._parentComplexId));
+  }
+
+  it('persists identity from the OCO response and classifies ALIGNED after reload via the same broker-order reconstruction', () => {
+    // 1. OCO submission response with parent + nested stop order ids.
+    const submissionResponse = ocoEnvelope({
+      complexId: 'complex-999',
+      profitOrderId: 'ord-profit-1',
+      stopOrderId: 'ord-stop-1',
+      stopTrigger: '5.04', // 2x credit ($2.52) -- deterministic entry default
+    });
+
+    // 2. Identity resolved and persisted after submission -- the nested
+    // stop leg's OWN id is captured, not the parent envelope id.
+    const { complexOrderId, stopOrderId } = resolveOcoStopOrderId(submissionResponse);
+    expect(complexOrderId).toBe('complex-999');
+    expect(stopOrderId).toBe('ord-stop-1');
+    const recordedPolicy = buildOriginalCreditDefaultPolicy(2.52, {
+      source: 'DEFAULT',
+      brokerOrderId: stopOrderId,
+      complexOrderId,
+    });
+
+    // 3. Broker orders reconstructed through the exact same
+    // collectRawOrders/mapGtcOrder parsing used on a real GET
+    // /complex-orders reload (a fresh raw envelope, not the submission
+    // response object, matching how the position gets re-fetched).
+    const reloadedOrders = reconstructGtcOrders(submissionResponse);
+    const stopEntry = reloadedOrders.find(o => o.id === 'ord-stop-1');
+    expect(stopEntry).toBeDefined();
+    expect(stopEntry?.complexOrderId).toBe('complex-999');
+
+    // 4. Reload classification remains ALIGNED for the TradeEdge-created
+    // stop.
+    const result = classifyPositionStopLoss(positionInput, reloadedOrders, recordedPolicy);
+    expect(result.classification).toBe('ALIGNED');
+    expect(result.status).toBe('live');
+
+    // 5. A replacement made OUTSIDE TradeEdge (brand-new order id AND a
+    // brand-new complex-order id) must still fail the identity check and
+    // fall back to UNKNOWN_PROVENANCE -- the stale recordedPolicy must
+    // never be misattributed to an unrelated order.
+    const replacementResponse = ocoEnvelope({
+      complexId: 'complex-000-external',
+      profitOrderId: 'ord-profit-external',
+      stopOrderId: 'ord-stop-external',
+      stopTrigger: '5.04',
+    });
+    const replacementOrders = reconstructGtcOrders(replacementResponse);
+    const replacementResult = classifyPositionStopLoss(positionInput, replacementOrders, recordedPolicy);
+    expect(replacementResult.classification).toBe('UNKNOWN_PROVENANCE');
+    expect(replacementResult.classification).not.toBe('ALIGNED');
+  });
+});
+
 describe('mapBrokerStopStatus', () => {
   it('maps Filled to TRIGGERED', () => {
     expect(mapBrokerStopStatus('Filled')).toBe('TRIGGERED');
@@ -157,15 +264,42 @@ describe('mapBrokerStopStatus', () => {
   });
 });
 
-describe('derivePositionQuoteQuality', () => {
-  it('is RELIABLE when pnl is reliable and a marketable value exists', () => {
-    expect(derivePositionQuoteQuality({ pnlReliable: true, closeValue: 100 })).toBe('RELIABLE');
+describe('derivePositionQuoteQuality (real spread-width evidence)', () => {
+  it('is RELIABLE when width evidence exists and both leg and net thresholds are narrow', () => {
+    const evidence = {
+      legWidthsDollars: [0.05, 0.05],
+      netWidthDollars: 50, // 5 contracts * 2 legs * $0.05 * 100
+      netWidthPctOfMid: 0.04,
+      crossed: false,
+    };
+    expect(derivePositionQuoteQuality({ pnlReliable: true, quoteWidthEvidence: evidence })).toBe('RELIABLE');
   });
-  it('is DEGRADED when pnl is reliable but no marketable value exists (one-sided market)', () => {
-    expect(derivePositionQuoteQuality({ pnlReliable: true, closeValue: null })).toBe('DEGRADED');
+
+  // Regression fixture for the reported MU condition: $3-5-wide leg
+  // markets. `pnlReliable && closeValue != null` alone used to call this
+  // RELIABLE merely because a marketable print existed -- it must not.
+  it('is DEGRADED for the reported MU condition ($3-5-wide leg markets) even though a marketable value exists', () => {
+    const evidence = {
+      legWidthsDollars: [3.20, 4.10], // MU-style wide leg markets
+      netWidthDollars: 3650, // wildly wide combo width at position scale
+      netWidthPctOfMid: 2.9, // 290% of mid -- nowhere near narrow
+      crossed: false,
+    };
+    expect(derivePositionQuoteQuality({ pnlReliable: true, quoteWidthEvidence: evidence })).toBe('DEGRADED');
   });
-  it('is UNKNOWN when pnl itself is unreliable', () => {
-    expect(derivePositionQuoteQuality({ pnlReliable: false, closeValue: 100 })).toBe('UNKNOWN');
+
+  it('is DEGRADED when the market is crossed regardless of width', () => {
+    const evidence = { legWidthsDollars: [0.02], netWidthDollars: 10, netWidthPctOfMid: 0.01, crossed: true };
+    expect(derivePositionQuoteQuality({ pnlReliable: true, quoteWidthEvidence: evidence })).toBe('DEGRADED');
+  });
+
+  it('is UNKNOWN when width evidence is entirely unavailable (one-sided market)', () => {
+    expect(derivePositionQuoteQuality({ pnlReliable: true, quoteWidthEvidence: null })).toBe('UNKNOWN');
+  });
+
+  it('is UNKNOWN when pnl itself is unreliable, even with narrow width evidence', () => {
+    const evidence = { legWidthsDollars: [0.05], netWidthDollars: 5, netWidthPctOfMid: 0.02, crossed: false };
+    expect(derivePositionQuoteQuality({ pnlReliable: false, quoteWidthEvidence: evidence })).toBe('UNKNOWN');
   });
 });
 
@@ -233,7 +367,11 @@ describe('getRecommendation: canonical stop-loss integration', () => {
     const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
     const thresholdTotal = policy.triggerPrice * 100 * 5; // 2520
     const snapshotHistory: PositionSnapshot[] = [
-      { date: '2026-08-03', dte: 43, currentValue: thresholdTotal + 20, closeValue: thresholdTotal + 20, pnl: -100, pnlPct: -8, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
+      // capturedAt makes this a PRECISE observation (see
+      // BreachObservation.preciseTimestamp) so it can actually contribute
+      // to the confirmation streak alongside today's live read -- a
+      // date-only entry could not.
+      { date: '2026-08-03', capturedAt: '2026-08-03T14:00:00.000Z', dte: 43, currentValue: thresholdTotal + 20, closeValue: thresholdTotal + 20, pnl: -100, pnlPct: -8, iv: null, ivr: null, theta: null, gamma: null, netDelta: null, netVega: null, pop: null, buffer: null, stockPrice: null },
     ];
     const pos = makePosition({
       stopLossPolicy: policy,

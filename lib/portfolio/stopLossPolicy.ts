@@ -47,7 +47,21 @@ export interface StopLossPolicy {
   multiple: number | null;
   source: StopSource;
   createdAt: string | null;
+  // The individual broker order id for the stop leg itself -- this is what
+  // classification prefers to match against (see matchesStopOrderIdentity).
   brokerOrderId: string | null;
+  // TE-0002 corrective round 2: an OCO stop is submitted as one nested order
+  // inside a parent complex order. The two ids are NOT interchangeable --
+  // TastyTrade's /orders/live + /complex-orders reconstruction (see
+  // acquisition.ts's collectRawOrders/mapGtcOrder) identifies the working
+  // stop by its OWN order id, never the parent's. `complexOrderId` is
+  // recorded as a secondary identity signal ONLY: when the broker response
+  // to an OCO submission doesn't clearly echo back the nested stop order's
+  // own id, matching falls back to "this order belongs to the same OCO
+  // envelope TradeEdge created," which is still a real identity check (a
+  // replacement made outside TradeEdge gets an entirely new complex-order
+  // id) -- never "accept any id."
+  complexOrderId: string | null;
 }
 
 // The six states the corrective mandate requires: no stop; working and
@@ -73,14 +87,18 @@ export const DEFAULT_ENTRY_STOP_MULTIPLE = 2;
 const PRICE_EPS = 0.02;
 const MATERIALITY_BAND = 0.10; // 10%
 
+export interface StopPolicyIdentityOpts {
+  brokerOrderId?: string | null;
+  complexOrderId?: string | null;
+}
+
 export function buildOriginalCreditDefaultPolicy(
   creditPerContract: number,
   opts: {
     source?: StopSource;
     createdAt?: string | null;
-    brokerOrderId?: string | null;
     multiple?: number;
-  } = {}
+  } & StopPolicyIdentityOpts = {}
 ): StopLossPolicy {
   const multiple = opts.multiple ?? DEFAULT_ENTRY_STOP_MULTIPLE;
   return {
@@ -91,13 +109,14 @@ export function buildOriginalCreditDefaultPolicy(
     source: opts.source ?? 'DEFAULT',
     createdAt: opts.createdAt ?? null,
     brokerOrderId: opts.brokerOrderId ?? null,
+    complexOrderId: opts.complexOrderId ?? null,
   };
 }
 
 export function buildCurrentValueAnchoredPolicy(
   currentValuePerContract: number,
   multiple: number,
-  opts: { source?: StopSource; createdAt?: string | null; brokerOrderId?: string | null } = {}
+  opts: { source?: StopSource; createdAt?: string | null } & StopPolicyIdentityOpts = {}
 ): StopLossPolicy {
   return {
     triggerPrice: parseFloat((currentValuePerContract * multiple).toFixed(2)),
@@ -107,12 +126,13 @@ export function buildCurrentValueAnchoredPolicy(
     source: opts.source ?? 'AI_SUGGESTION',
     createdAt: opts.createdAt ?? null,
     brokerOrderId: opts.brokerOrderId ?? null,
+    complexOrderId: opts.complexOrderId ?? null,
   };
 }
 
 export function buildManualAbsolutePolicy(
   triggerPrice: number,
-  opts: { createdAt?: string | null; brokerOrderId?: string | null } = {}
+  opts: { createdAt?: string | null } & StopPolicyIdentityOpts = {}
 ): StopLossPolicy {
   return {
     triggerPrice: parseFloat(triggerPrice.toFixed(2)),
@@ -122,16 +142,18 @@ export function buildManualAbsolutePolicy(
     source: 'MANUAL',
     createdAt: opts.createdAt ?? null,
     brokerOrderId: opts.brokerOrderId ?? null,
+    complexOrderId: opts.complexOrderId ?? null,
   };
 }
 
 // An order that exists at the broker but carries no TradeEdge-recorded
-// policy (never created by TradeEdge, or the recorded policy's
-// brokerOrderId no longer matches the live order -- e.g. it was replaced
-// outside the app). Basis is UNKNOWN; the caller must not invent one.
+// policy (never created by TradeEdge, or the recorded policy's identity no
+// longer matches the live order -- e.g. it was replaced outside the app).
+// Basis is UNKNOWN; the caller must not invent one.
 export function buildUnknownProvenancePolicy(
   triggerPrice: number,
-  brokerOrderId: string | null = null
+  brokerOrderId: string | null = null,
+  complexOrderId: string | null = null
 ): StopLossPolicy {
   return {
     triggerPrice: parseFloat(triggerPrice.toFixed(2)),
@@ -141,7 +163,26 @@ export function buildUnknownProvenancePolicy(
     source: 'UNKNOWN',
     createdAt: null,
     brokerOrderId,
+    complexOrderId,
   };
+}
+
+// TE-0002 corrective round 2: centralizes "does this recorded policy belong
+// to this live broker order" so acquisition.ts doesn't reimplement identity
+// matching inline. Prefers an exact match on the stop leg's OWN order id;
+// only falls back to the shared OCO complex-order id when the direct id
+// isn't recorded/matched. Both are real identity checks -- neither branch
+// accepts an unrelated id. A replacement made outside TradeEdge fails both
+// (different order id AND a different/absent complex-order id).
+export function matchesStopOrderIdentity(
+  policy: Pick<StopLossPolicy, 'brokerOrderId' | 'complexOrderId'>,
+  liveOrder: { id: string; complexOrderId?: string | null }
+): boolean {
+  if (policy.brokerOrderId != null && policy.brokerOrderId === liveOrder.id) return true;
+  if (policy.complexOrderId != null && liveOrder.complexOrderId != null && policy.complexOrderId === liveOrder.complexOrderId) {
+    return true;
+  }
+  return false;
 }
 
 export interface ClassifyStopInput {
@@ -237,17 +278,84 @@ export function describeStopLossPolicy(policy: StopLossPolicy | null): string {
   }
 }
 
-// ── Breach confirmation ─────────────────────────────────────────────────
+// ── Quote-quality evidence ──────────────────────────────────────────────
+// TE-0002 corrective round 2: `pnlReliable && closeValue != null` only
+// proves quotes EXIST -- it says nothing about whether they're narrow
+// enough to trust a marketable print as confirmation evidence. A two-sided
+// but $3-5-wide leg market (the reported MU condition) satisfied the old
+// check and was treated as RELIABLE, letting a single wide-market
+// marketable read count toward breach confirmation. This section adds
+// explicit, deterministic spread-width evidence.
 
 export type QuoteQuality = 'RELIABLE' | 'DEGRADED' | 'UNKNOWN';
 export type BrokerStopStatus = 'TRIGGERED' | 'WORKING' | 'UNKNOWN';
 
+// Deterministic thresholds. Both must hold for a quote to be treated as
+// narrow -- a position can have a tight NET percentage while still resting
+// on individual legs with genuinely wide, illiquid markets (or vice versa),
+// so neither measure alone is sufficient.
+export const QUOTE_WIDTH_THRESHOLDS = {
+  // Per-leg bid/ask width, dollars per contract. The reported MU condition
+  // ($3-5-wide leg markets) is roughly 6-10x this.
+  maxNarrowLegWidthDollars: 0.50,
+  // Net combo bid/ask width as a fraction of the position's own mid value.
+  maxNarrowNetWidthPctOfMid: 0.15,
+} as const;
+
+export interface QuoteWidthEvidence {
+  // Per-leg bid/ask widths in dollars/contract (ask - bid). `null` for a
+  // leg with no real two-sided market (see acquisition.ts's
+  // oneSidedSymbols) -- never fabricated from a mark/fallback price.
+  legWidthsDollars: readonly (number | null)[];
+  // Net combo width in dollars at position scale (matches
+  // Position.currentValue/closeValue's convention: sum of leg widths *
+  // quantity * 100). Null when ANY leg lacks a real two-sided market --
+  // a partial combo width is not meaningful evidence.
+  netWidthDollars: number | null;
+  // netWidthDollars as a fraction of the position's own mid value
+  // (Position.currentValue). Null when netWidthDollars or the mid value is
+  // unavailable/non-positive.
+  netWidthPctOfMid: number | null;
+  // True when any leg's ask < bid -- a crossed/stale/invalid market. Quote
+  // quality can never be RELIABLE when this is true, regardless of width.
+  crossed: boolean;
+}
+
+// Pure classification from the raw width evidence -- deterministic
+// thresholds only, no access to Position/network state. A wide two-sided
+// market (evidence exists, `crossed` is false) still classifies DEGRADED,
+// not RELIABLE, unless it clears BOTH width thresholds.
+export function classifyQuoteQuality(evidence: QuoteWidthEvidence | null): QuoteQuality {
+  if (!evidence) return 'UNKNOWN';
+  if (evidence.crossed) return 'DEGRADED';
+  if (evidence.netWidthDollars == null || evidence.netWidthPctOfMid == null) return 'UNKNOWN';
+
+  const legsNarrow = evidence.legWidthsDollars.length > 0 &&
+    evidence.legWidthsDollars.every(w => w != null && w <= QUOTE_WIDTH_THRESHOLDS.maxNarrowLegWidthDollars);
+  const netNarrow = evidence.netWidthPctOfMid <= QUOTE_WIDTH_THRESHOLDS.maxNarrowNetWidthPctOfMid;
+
+  return legsNarrow && netNarrow ? 'RELIABLE' : 'DEGRADED';
+}
+
 export interface BreachObservation {
-  at: string; // ISO timestamp, used only for ordering
+  // Full ISO 8601 timestamp. Observations reconstructed from a date-only
+  // daily snapshot (no time-of-day) should still supply a parseable
+  // timestamp (e.g. midnight UTC of that date) for ordering purposes, but
+  // MUST set `preciseTimestamp: false` -- see that field's doc comment.
+  at: string;
   // Total buyback value across the whole position (not per-contract), same
   // scale as Position.currentValue / Position.closeValue.
   midValue: number | null;
   marketableValue: number | null;
+  // TE-0002 corrective round 2: true only when `at` is a genuine capture
+  // timestamp (time-of-day is real, not a reconstructed midnight/date-only
+  // placeholder). An intraday confirmation streak may ONLY be built from
+  // `preciseTimestamp: true` observations -- an old date-only daily
+  // snapshot combined with one current tick must never fabricate a
+  // 2-observation confirmation. Date-only observations remain valid
+  // CONTEXTUAL evidence (may still be shown to the trader / used for
+  // trend context) but cannot themselves satisfy requiredConfirmations.
+  preciseTimestamp: boolean;
 }
 
 export type StopBreachState =
@@ -273,19 +381,29 @@ export interface EvaluateStopBreachInput {
   quoteQuality?: QuoteQuality;
   requiredConfirmations?: number;
   hysteresisPct?: number;
+  // TE-0002 corrective round 2: minimum elapsed time between two
+  // observations for them to count as SEPARATE confirmations. Observations
+  // closer together than this (e.g. two renders reading the same quote
+  // tick, or a duplicated same-day snapshot) collapse into one.
+  minConfirmationIntervalMs?: number;
 }
 
 const DEFAULT_REQUIRED_CONFIRMATIONS = 2;
 const DEFAULT_HYSTERESIS_PCT = 0.02;
+// Five minutes -- long enough that two renders of the same underlying quote
+// tick (or a duplicated same-day snapshot capture) never count as two
+// independent confirmations, short enough not to block a genuinely fast
+// adverse move within a trading session.
+const DEFAULT_MIN_CONFIRMATION_INTERVAL_MS = 5 * 60 * 1000;
 
 // Replaces `stopLossBreachedMid || stopLossBreachedMarketable`. A single
 // noisy snapshot (midpoint OR a wide-market marketable estimate) can never
 // alone produce CONFIRMED_BREACH. Only an authoritative broker fill/trigger,
-// or a sustained streak of `requiredConfirmations` consecutive observations
-// at/above threshold (with hysteresis so a brief retreat resets the
-// streak), counts as confirmed. Anything short of that downgrades to
-// VERIFY_STOP/PENDING_CONFIRMATION so the caller can map it to MANAGE
-// instead of CUT_LOSSES.
+// or a sustained streak of `requiredConfirmations` consecutive, distinctly-
+// timed, PRECISE observations at/above threshold (with hysteresis so a
+// brief retreat resets the streak), counts as confirmed. Anything short of
+// that downgrades to VERIFY_STOP/PENDING_CONFIRMATION so the caller can map
+// it to MANAGE instead of CUT_LOSSES.
 export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEvaluation {
   const {
     policy,
@@ -295,6 +413,7 @@ export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEv
     quoteQuality = 'UNKNOWN',
     requiredConfirmations = DEFAULT_REQUIRED_CONFIRMATIONS,
     hysteresisPct = DEFAULT_HYSTERESIS_PCT,
+    minConfirmationIntervalMs = DEFAULT_MIN_CONFIRMATION_INTERVAL_MS,
   } = input;
 
   if (!policy || !Number.isFinite(policy.triggerPrice) || policy.triggerPrice <= 0 || quantity <= 0) {
@@ -317,7 +436,14 @@ export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEv
   const thresholdTotal = policy.triggerPrice * 100 * quantity;
   const hysteresisFloor = thresholdTotal * (1 - hysteresisPct);
 
-  const newestFirst = [...observations].sort((a, b) => b.at.localeCompare(a.at));
+  // Freshness/ordering validation: drop anything with an unparseable
+  // timestamp entirely -- it cannot be placed in the confirmation window at
+  // all, and must not silently sort to either end.
+  const parsed = observations
+    .map(obs => ({ obs, ts: Date.parse(obs.at) }))
+    .filter((entry): entry is { obs: BreachObservation; ts: number } => Number.isFinite(entry.ts));
+
+  const newestFirstAll = [...parsed].sort((a, b) => b.ts - a.ts);
 
   const isEffectiveBreach = (obs: BreachObservation): boolean => {
     const midBreach = obs.midValue != null && obs.midValue >= thresholdTotal;
@@ -329,8 +455,25 @@ export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEv
     return quoteQuality === 'RELIABLE' ? (midBreach || marketableBreach) : midBreach;
   };
 
+  // Only precisely-timestamped observations can build a confirmation
+  // streak -- a date-only daily snapshot combined with one current tick
+  // must never fabricate a 2-observation confirmation (see
+  // BreachObservation.preciseTimestamp's doc comment).
+  const preciseNewestFirst = newestFirstAll.filter(e => e.obs.preciseTimestamp);
+
+  // Deduplicate: collapse observations that land within
+  // minConfirmationIntervalMs of an already-kept (more recent) observation
+  // -- two renders of the same tick, or a duplicated same-day capture, must
+  // count once, not twice.
+  const dedupedNewestFirst: typeof preciseNewestFirst = [];
+  for (const entry of preciseNewestFirst) {
+    const last = dedupedNewestFirst[dedupedNewestFirst.length - 1];
+    if (last && last.ts - entry.ts < minConfirmationIntervalMs) continue;
+    dedupedNewestFirst.push(entry);
+  }
+
   let streak = 0;
-  for (const obs of newestFirst) {
+  for (const { obs } of dedupedNewestFirst) {
     if (isEffectiveBreach(obs)) { streak++; continue; }
     const referenceValue = obs.midValue ?? obs.marketableValue;
     const retreated = referenceValue != null && referenceValue <= hysteresisFloor;
@@ -341,11 +484,15 @@ export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEv
   if (streak >= requiredConfirmations) {
     return {
       state: 'CONFIRMED_BREACH', confirmedBy: 'OBSERVATION_STREAK', streak, requiredConfirmations,
-      explanation: `Threshold confirmed across ${streak} consecutive observations.`,
+      explanation: `Threshold confirmed across ${streak} distinctly-timed observations.`,
     };
   }
 
-  const latest = newestFirst[0];
+  // "Latest" for messaging/NOT_BREACHED purposes uses the full observation
+  // set (imprecise daily snapshots are still valid CONTEXTUAL evidence of
+  // "is this position currently near/at the threshold") -- only the
+  // CONFIRMATION STREAK itself is restricted to precise, deduped readings.
+  const latest = newestFirstAll[0]?.obs;
   const latestMidBreach = latest?.midValue != null && latest.midValue >= thresholdTotal;
   const latestMarketableBreach = latest?.marketableValue != null && latest.marketableValue >= thresholdTotal;
 
@@ -357,22 +504,23 @@ export function evaluateStopBreach(input: EvaluateStopBreachInput): StopBreachEv
   }
 
   // Latest observation shows breach evidence, but confirmation requirements
-  // aren't met -- either not enough history exists, or (via isEffectiveBreach)
-  // the only evidence is a wide-market marketable spike a reliable mid read
-  // doesn't corroborate. Never issue a hard exit off a single/unconfirmed
-  // snapshot: downgrade instead.
-  if (observations.length < requiredConfirmations) {
+  // aren't met -- either not enough PRECISE, distinctly-timed history
+  // exists (an old date-only daily snapshot cannot substitute), or (via
+  // isEffectiveBreach) the only evidence is a wide-market marketable spike
+  // a reliable mid read doesn't corroborate. Never issue a hard exit off a
+  // single/unconfirmed snapshot: downgrade instead.
+  if (dedupedNewestFirst.length < requiredConfirmations) {
     return {
       state: 'VERIFY_STOP', confirmedBy: null, streak, requiredConfirmations,
       explanation: latestMarketableBreach && !latestMidBreach
-        ? 'Marketable (ask/bid) buyback crossed the stop, but midpoint has not, and confirmation history is unavailable — verify before treating this as an emergency exit.'
-        : 'Stop threshold reached on a single observation with no confirmation history — verify before treating this as an emergency exit.',
+        ? 'Marketable (ask/bid) buyback crossed the stop, but midpoint has not, and a confirmed intraday observation window is unavailable — verify before treating this as an emergency exit.'
+        : 'Stop threshold reached without a confirmed intraday observation window — verify before treating this as an emergency exit.',
     };
   }
 
   return {
     state: 'PENDING_CONFIRMATION', confirmedBy: null, streak, requiredConfirmations,
-    explanation: `Threshold reached on ${streak} of ${requiredConfirmations} required consecutive observations — awaiting confirmation.`,
+    explanation: `Threshold reached on ${streak} of ${requiredConfirmations} required distinctly-timed observations — awaiting confirmation.`,
   };
 }
 

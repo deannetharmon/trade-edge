@@ -70,6 +70,7 @@ import {
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
+import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -273,6 +274,11 @@ async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
     positionKey: p.key,
     snapshot: {
       date: today,
+      // TE-0002 corrective round 2: full capture timestamp, so this
+      // snapshot can participate in an intraday stop-confirmation streak
+      // (see stopLossPolicy.ts's BreachObservation.preciseTimestamp) rather
+      // than only ever counting as date-only contextual evidence.
+      capturedAt: new Date().toISOString(),
       dte: p.dte,
       currentValue: p.currentValue,
       closeValue: p.closeValue,
@@ -6122,33 +6128,45 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
     if (mountedRef.current) fetchSuggestion();
   };
 
+  // TE-0002 corrective round 2: identity for the order provenance is being
+  // recorded against. `orderId` MUST be the stop leg's own individual
+  // broker order id (never a parent complex-order id -- classification
+  // matches GtcOrder.id, which is always the individual order's id, see
+  // acquisition.ts's mapGtcOrder). `complexOrderId` is the OCO envelope id,
+  // recorded as a fallback identity signal for when a broker response
+  // doesn't clearly echo the nested order back (see
+  // resolveOcoStopOrderId/matchesStopOrderIdentity). For a plain (non-OCO)
+  // stop, complexOrderId is simply null.
+  interface StopOrderIdentity { orderId: string | null; complexOrderId: string | null }
+
   // TE-0002: builds the canonical StopLossPolicy record for the order
   // TradeEdge is about to persist provenance for, from whichever anchor the
   // trader actually used (default/×credit multiplier, applied AI
   // suggestion, or a raw manual dollar edit) -- never re-derived later by
   // dividing price by credit.
-  const buildSubmittedStopPolicy = (orderId: string, triggerPrice: number) => {
+  const buildSubmittedStopPolicy = (identity: StopOrderIdentity, triggerPrice: number) => {
     const nowIso = new Date().toISOString();
+    const idOpts = { brokerOrderId: identity.orderId, complexOrderId: identity.complexOrderId };
     if (stopBasisOverride === 'CURRENT_SPREAD_VALUE') {
       const anchor = effectiveLive ?? creditPerContract;
       const multiple = anchor > 0 ? parseFloat((triggerPrice / anchor).toFixed(2)) : null;
-      return buildCurrentValueAnchoredPolicy(anchor, multiple ?? 1, { source: stopPriceSource, createdAt: nowIso, brokerOrderId: orderId });
+      return buildCurrentValueAnchoredPolicy(anchor, multiple ?? 1, { source: stopPriceSource, createdAt: nowIso, ...idOpts });
     }
     if (stopBasisOverride === 'MANUAL_ABSOLUTE') {
-      return buildManualAbsolutePolicy(triggerPrice, { createdAt: nowIso, brokerOrderId: orderId });
+      return buildManualAbsolutePolicy(triggerPrice, { createdAt: nowIso, ...idOpts });
     }
     const multiple = creditPerContract > 0 ? parseFloat((triggerPrice / creditPerContract).toFixed(2)) : DEFAULT_ENTRY_STOP_MULTIPLE;
-    return buildOriginalCreditDefaultPolicy(creditPerContract, { source: stopPriceSource, createdAt: nowIso, brokerOrderId: orderId, multiple });
+    return buildOriginalCreditDefaultPolicy(creditPerContract, { source: stopPriceSource, createdAt: nowIso, multiple, ...idOpts });
   };
 
   // TE-0002: non-blocking persist -- a failed write means the NEXT load
   // correctly classifies this order UNKNOWN_PROVENANCE (see
   // classifyPositionStopLoss) rather than silently fabricating a basis, so
   // there is no unsafe failure mode here worth blocking the trader on.
-  const persistStopPolicy = async (orderId: string, triggerPrice: number) => {
+  const persistStopPolicy = async (identity: StopOrderIdentity, triggerPrice: number) => {
     const shortLeg = pos.legs.find(l => l.direction === 'Short');
     if (!shortLeg?.symbol) return;
-    const policy = buildSubmittedStopPolicy(orderId, triggerPrice);
+    const policy = buildSubmittedStopPolicy(identity, triggerPrice);
     const positionKey = positionStopPolicyKey(pos.accountNumber, shortLeg.symbol);
     try {
       await postStopPolicies([{ positionKey, policy }]);
@@ -6348,11 +6366,30 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             throw new Error(`Blocked by safety gate: ${ocoSubmission.reason}`);
           }
           const res = ocoSubmission.result as any;
-          const orderId = String(res?.data?.['complex-order']?.id ?? res?.data?.id ?? 'submitted');
+          // TE-0002 corrective round 2: was persisting the PARENT
+          // complex-order id here, which classification can never match
+          // (it matches the nested stop leg's OWN order id) -- resolve the
+          // real nested stop-order id from the response, using the exact
+          // same parsing collectRawOrders/mapGtcOrder applies on reload, so
+          // identity is guaranteed consistent both ways. If the broker
+          // response doesn't echo the nested order back clearly,
+          // complexOrderId is still recorded and used as a fallback
+          // identity match (see matchesStopOrderIdentity) -- never a
+          // fabricated id.
+          const { complexOrderId, stopOrderId } = resolveOcoStopOrderId(res);
+          const parentOrderId = String(res?.data?.['complex-order']?.id ?? res?.data?.id ?? 'submitted');
+          const displayOrderId = stopOrderId ?? parentOrderId;
           setResult('success');
-          setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${orderId})`);
+          setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${displayOrderId})`);
           if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
-          await persistStopPolicy(orderId, stopTrigger);
+          // Never fabricate `orderId` as the parent id when the nested stop
+          // leg couldn't be resolved -- complexOrderId (always available)
+          // remains a real, non-fabricated fallback identity match on its
+          // own; see matchesStopOrderIdentity.
+          await persistStopPolicy(
+            { orderId: stopOrderId, complexOrderId: complexOrderId ?? parentOrderId },
+            stopTrigger,
+          );
         } catch (placeErr: any) {
           // The old order is already cancelled and the new one failed to go in —
           // the position is genuinely unprotected right now. Attempt one automatic
@@ -6376,7 +6413,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             }
             const restoreRes = restoreSubmission.result as any;
             const restoreId = String(restoreRes?.data?.order?.id ?? restoreRes?.data?.id ?? 'submitted');
-            await persistStopPolicy(restoreId, stopTrigger);
+            // Plain (non-complex) order -- restoreId IS the individual
+            // stop order's own id, no complex-order envelope involved.
+            await persistStopPolicy({ orderId: restoreId, complexOrderId: null }, stopTrigger);
             setResult('error');
             setResultMsg(
               `OCO placement failed (${placeErr.message ?? 'unknown error'}). ` +
@@ -6420,7 +6459,9 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         setResult('success');
         setResultMsg(`Stop Limit placed @ trigger $${stopTrigger.toFixed(2)} (ID #${orderId})`);
         if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
-        await persistStopPolicy(orderId, stopTrigger);
+        // Plain (non-complex) order -- orderId IS the individual stop
+        // order's own id, no complex-order envelope involved.
+        await persistStopPolicy({ orderId, complexOrderId: null }, stopTrigger);
       }
       setOpen(false);
       setConfirming(false);
