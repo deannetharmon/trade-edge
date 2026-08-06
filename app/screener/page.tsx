@@ -806,10 +806,11 @@ function saveEtfRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES_ETF, JSON.stringify(rules)); } catch {}
 }
 // TE-0007: LS_PMCC/LS_CSP are legacy-only as of the unified Opportunity
-// Universe — read once during the one-time migration in
-// loadOrMigrateOpportunityUniverse(), never written to again. Kept defined
-// (rather than deleted) purely so the migration's exact legacy inputs stay
-// traceable from this file; see lib/screener/opportunityUniverse.ts.
+// Universe — read once during the one-time migration (the "universe
+// migration" useEffect below, which calls migratePrimaryTickers() from
+// lib/screener/opportunityUniverse.ts), never written to again. Kept
+// defined (rather than deleted) purely so the migration's exact legacy
+// inputs stay traceable from this file.
 const LS_PMCC = 'hunter-tickers-pmcc';
 const LS_CSP = 'hunter-tickers-csp';
 const LS_CSP_CASH = 'hunter-csp-available-cash';
@@ -6603,10 +6604,16 @@ export default function Home() {
                 )}
               </div>
             )}
-            <button onClick={() => runCcScan()} disabled={loading}
-              className={`w-full text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40`}>
-              {loading ? 'SCANNING...' : 'SCAN ELIGIBLE HOLDINGS FOR CC'}
-            </button>
+            {/* TE-0007 final corrective pass: this card used to also render
+                its own "SCAN ELIGIBLE HOLDINGS FOR CC" button -- a second
+                ordinary entry point for the exact same scan as the unified
+                launcher's "FIND COVERED CALLS" button above. Removed.
+                FIND COVERED CALLS is now the sole ordinary Covered Call
+                scan action; this card is status/output only (verified
+                capacity, blocked holdings, conservative-exposure warnings,
+                fail-closed state, per-symbol hide controls) plus the
+                explicit "Scan all eligible holdings" universe-bypass
+                override rendered above when it's actually applicable. */}
           </div>
 
           {/* Transient alerts — not boxed, so they read as messages rather than a fixed section */}

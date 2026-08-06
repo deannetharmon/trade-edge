@@ -2,9 +2,10 @@
 
 **Branch:** `feature/te-0007-unified-strategy-launcher` (created from `main` @ `40f2b1a`, after TE-0007C's final corrective pass and the HELP-0001 corrective pass — both confirmed merged into `main` before this branch was cut).
 **Initial-delivery commit:** `55d6d9c`.
-**Corrective-pass commit:** see final chat response for the exact hash (committed after this report; not pushed or merged — per delivery constraints).
+**First corrective-pass commit:** `c664a8f` (migration reactivation defect + persistence-authority documentation).
+**Second corrective-pass commit:** see final chat response for the exact hash (committed after this report; not pushed or merged — per delivery constraints).
 
-> Sections 1–9 below describe the initial delivery (`55d6d9c`) as originally written. Section 12 documents the required corrective pass on top of it; where the corrective pass changed something described in an earlier section, section 12 is authoritative.
+> Sections 1–9 below describe the initial delivery (`55d6d9c`) as originally written. Section 12 documents the first required corrective pass (`c664a8f`). Section 13 documents the second required corrective pass, on top of `c664a8f`. Earlier sections are left as originally written (not rewritten or hidden) — where a later section changed something an earlier one described, the later section is authoritative. In particular, §9's "manual acceptance" walkthrough and any earlier references to "SCAN ELIGIBLE HOLDINGS FOR CC" as a normal scan action are superseded by §13.
 
 ## 1. State ownership — before and after
 
@@ -146,4 +147,54 @@ Two defects were found in review and required a corrective pass before push/merg
 - `app/screener/page.tsx` — migration effect rewritten to call `migratePrimaryTickers()` instead of its own ad hoc filter.
 - `app/screener/__tests__/OpportunityUniverseMigration.test.tsx` — new, 4 tests.
 - `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this section.
-- `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this file.
+
+## 13. Second corrective pass — remove the duplicate ordinary Covered Call launch action
+
+`c664a8f` was approved, but review found that the page still rendered **two** ordinary entry points for the exact same Covered Call scan: `FIND COVERED CALLS` in the unified Opportunity Universe launcher (added in `55d6d9c`), and `SCAN ELIGIBLE HOLDINGS FOR CC`, a leftover button at the bottom of the eligible-holdings status card that had never been removed when the launcher consolidation happened. Both called `runCcScan()` — a second, redundant entry point for the same action, contradicting the unified-launcher design this whole ticket exists to deliver.
+
+### 13.1 Fix
+
+`app/screener/page.tsx`: deleted the `SCAN ELIGIBLE HOLDINGS FOR CC` button from the eligible-holdings status card. `FIND COVERED CALLS` (in the Opportunity Universe card) is now the sole ordinary Covered Call scan action. The status card keeps everything else it had: the verified-capacity summary line, the per-symbol holding chips with hide controls (`toggleCcSymbol`), the "Fully covered / blocked" disclosure, the conservative-exposure (`hasUnclassifiedExposure`) warning, the account-level fail-closed (`ccUnavailableReason`) blocking message, and the "Scan all eligible holdings" universe-bypass override — none of that status/output UI was touched.
+
+No change was needed to `runCcScan()`'s override logic (`bypassUniverse` parameter) — it already only affected the `universeNarrows`/`scannable` computation (§4 of this report); capacity verification (`availableCoveredContracts > 0`), the hide-only `ccHiddenSymbols` filter, and the account-level `ccUnavailableReason` fail-closed gate were already structurally independent of it and remain so. This pass added regression coverage proving that explicitly, rather than needing to change the logic itself.
+
+Also corrected a stale comment at the `LS_PMCC`/`LS_CSP` constant declarations that still referenced the deleted `loadOrMigrateOpportunityUniverse()` helper (removed in `c664a8f`'s corrective pass) — it now points to the `migratePrimaryTickers()`-based migration effect that actually replaced it.
+
+### 13.2 Tests
+
+- `app/screener/__tests__/CcCapacityGate.test.tsx` — updated `clickCcScan()` to drive the real `FIND COVERED CALLS` button instead of the now-removed `SCAN ELIGIBLE HOLDINGS FOR CC` button. Both of its pre-existing tests (unattributable-exposure blocking, conservative-exposure disclosure) pass unchanged otherwise — proving the fail-closed/disclosure behavior itself didn't move.
+- `app/screener/__tests__/SingleCoveredCallLaunchAction.test.tsx` — new, 11 tests, rendering the real page:
+  1. Exactly one button whose text matches "covered call" is rendered, and it reads `FIND COVERED CALLS`.
+  2. `SCAN ELIGIBLE HOLDINGS FOR CC` is absent.
+  3. The normal action still performs universe-intersection correctly (universe `[NKE, MU]`, eligible `[NKE, AAPL]` → scans only `NKE`).
+  4. The override does not render when the universe is empty.
+  5. The override does not render when the universe already covers every eligible holding (nothing to narrow).
+  6. The override renders when the universe is actually narrowing eligible holdings.
+  7. The override, once clicked, still excludes a zero-capacity holding.
+  8. The override, once clicked, still excludes a holding whose capacity is fully reserved by existing + working short calls.
+  9. The override, once clicked, still excludes a holding the trader hid via its chip.
+  10. Unattributable-exposure blocking still prevents any scan, and the override is not offered at all while blocked (the status card's blocking-message branch never reaches the override's render branch).
+  11. All pre-existing capacity-disclosure UI (conservative-exposure warning, blocked/fully-covered list, reduced-not-restored chip count) remains present and correct.
+
+### 13.3 Validation
+
+- **`tsc --noEmit`:** clean.
+- **Opportunity Universe tests** (`lib/screener/__tests__/opportunityUniverse.test.ts`): 20/20 passing, unchanged by this pass.
+- **Unified Strategy Launcher tests** (`app/screener/__tests__/UnifiedStrategyLauncher.test.tsx`): 16/16 passing, unchanged by this pass.
+- **Covered Call capacity and UI-gating tests**: `CcCapacityGate.test.tsx` 2/2 passing (updated to click the real button); `SingleCoveredCallLaunchAction.test.tsx` 11/11 passing (new); `OpportunityUniverseMigration.test.tsx` 4/4 passing (unaffected).
+- Combined targeted run across all five of the above files: **53/53 passing**.
+- **Full suite:** `lib/**` 75 files / 1306 tests (unchanged), `components/**` + `features/**` 27 files / 251 tests (unchanged), `app/**` 7 files / 79 tests (up from 6/68 — the new `SingleCoveredCallLaunchAction.test.tsx`, +11). **Total: 109 files / 1636 tests, all passing** (up from 108/1625 after the first corrective pass).
+- **Production build:** succeeds.
+- **`git diff --check`:** clean (exit 0), no whitespace errors.
+- **`git status --porcelain`:** clean except this branch's own files and the untouched, pre-existing, unrelated `docs/reviews/portfolio-position-metrics-audit.md`.
+
+### 13.4 Changed files (second corrective pass)
+
+- `app/screener/page.tsx` — removed the duplicate `SCAN ELIGIBLE HOLDINGS FOR CC` button; corrected the stale `loadOrMigrateOpportunityUniverse()` comment.
+- `app/screener/__tests__/CcCapacityGate.test.tsx` — updated to drive `FIND COVERED CALLS`.
+- `app/screener/__tests__/SingleCoveredCallLaunchAction.test.tsx` — new, 11 tests.
+- `docs/reviews/TE-0007-Unified-Strategy-Launcher-Implementation-Report.md` — this section.
+
+### 13.5 Confirmation
+
+Exactly one ordinary Covered Call launch action remains on the page: **`FIND COVERED CALLS`**, in the unified Opportunity Universe launcher. It is verified by an automated regression test (`SingleCoveredCallLaunchAction.test.tsx`, test 1) that queries all rendered buttons and asserts only one matches "covered call" in its accessible text.

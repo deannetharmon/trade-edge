@@ -12,6 +12,12 @@
 // This exercises app/screener/page.tsx's actual runCcScan() wiring (not a
 // reimplementation of it) by mocking only the network boundary
 // (lib/scans/tastytrade-client) and letting the real component logic run.
+//
+// TE-0007 final corrective pass: the ordinary Covered Call scan action is
+// now driven exclusively through the unified launcher's "FIND COVERED
+// CALLS" button (the eligible-holdings card's own duplicate "SCAN ELIGIBLE
+// HOLDINGS FOR CC" button was removed). clickCcScan() below drives that
+// real button.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
@@ -50,7 +56,7 @@ function renderScreener() {
 }
 
 async function clickCcScan() {
-  const button = await screen.findByRole('button', { name: /SCAN ELIGIBLE HOLDINGS FOR CC/i });
+  const button = await screen.findByRole('button', { name: 'FIND COVERED CALLS' });
   await userEvent.click(button);
 }
 
