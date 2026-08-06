@@ -207,3 +207,38 @@ Commit `3e0ca46` was NOT merged. Final code review found that §1-14 above valid
 Only `lib/optionSymbol.ts` (new), `lib/__tests__/optionSymbol.test.ts` (new), `lib/scans/covered-call-capacity.ts`, `lib/scans/covered-call-finder.ts`, `lib/scans/__tests__/covered-call-capacity.test.ts`, `lib/scans/__tests__/covered-call-finder.test.ts`, and this report were touched. No other TE-0007C files were modified beyond what §1-14 already covered. The rebase onto `main` @ `6586ef7` from §12 is preserved unchanged. Unrelated untracked files present in the working tree (`cc_zero_candidates_fix.sh`, `docs/reviews/portfolio-position-metrics-audit.md`, `mode_param_fix.sh`, `switch_to_filter_mode_fix.sh`, `te0007c_import_path_fix.sh`) were left untouched and excluded from this round's commit.
 
 **Not pushed or merged**, per this round's explicit instruction. See final response for commit hash and changed-file list.
+
+## 16. Final corrective pass — fail closed on unattributable exposure, surface conservative reservations
+
+Commit `da65ca6` was NOT merged. §15 closed five safety gaps but left one boundary open and one disclosure gap: `normalizeShortCallExposure()` and `normalizeWorkingCallReservations()` still silently `continue`d past a short option/working order they could not attribute to ANY underlying at all, and `CoveredCallCapacity.hasUnclassifiedExposure` was computed but never surfaced in `app/screener/page.tsx`.
+
+### Unclassified vs. unattributable — the categorical distinction
+
+- **Underlying known, option type unknown** ("unclassified"): the position/leg IS attributed to a specific symbol via `resolveUnderlyingSymbol()`, but neither the broker's `option-type` field nor the OCC symbol could classify it as put/call. This is safe to handle per-symbol: reserve the quantity conservatively as a call (§15's existing behavior, unchanged) and set `hasUnclassifiedExposure: true` for that one symbol. The report stays `status: 'ok'` — only that symbol's disclosed, reduced capacity is affected.
+- **Underlying unknown** ("unattributable"): `resolveUnderlyingSymbol()` itself returns `null` — no usable `underlying-symbol` field AND an absent/malformed/unparseable OCC symbol. There is no way to know which holding's capacity this short option or working order affects. No per-symbol fix is safe here, because the exposure could secretly belong to ANY symbol in the account. `normalizeShortCallExposure()`/`normalizeWorkingCallReservations()` now set `hasUnattributableExposure: true` and record a `warnings[]` entry instead of silently dropping the position/leg, and `buildCoveredCallCapacityReport()` fails the ENTIRE report closed (`status: 'unavailable'`, `bySymbol: {}`, `unavailableReason: UNATTRIBUTABLE_EXPOSURE_REASON`) — no holding is scanned while this is unresolved, not just the affected one.
+
+Both functions still only reach the attribution check for genuinely relevant records: an option-instrument, Short-direction, positive-quantity position (for short-call exposure), or a Live/Working, Sell-to-Open, option-shaped leg with positive quantity (for working reservations). A malformed cancelled/rejected/expired/filled order, a buy-to-close leg, or a non-option leg never reaches attribution and never blocks the report.
+
+### New UI warnings (`app/screener/page.tsx`)
+
+- **Account-level blocking message**: when `getCoveredCallCapacityReport()` returns `status: 'unavailable'` with `unavailableReason` set, the new `ccUnavailableReason` state renders `UNATTRIBUTABLE_EXPOSURE_REASON` verbatim in the CC eligible-holdings card (replacing the ordinary "no eligible holdings loaded yet" copy, which would misrepresent a data-integrity failure as an empty result) and in the shared error banner. `runCcScan()` returns immediately in this state — no market-data fetch, no symbol scanned.
+- **Per-symbol conservative-reservation disclosure**: symbol chips with `hasUnclassifiedExposure: true` render with an amber style, a `⚠` marker, and a tooltip; a summary warning line ("Some option exposure could not be classified. Available covered-call capacity was reduced conservatively.") appears below the chip list whenever any eligible holding has this flag. The same warning is repeated in the expanded CC candidate detail card via a new `SpreadCandidate.ccHasUnclassifiedExposure` field (wired from `CoveredCallCapacity.hasUnclassifiedExposure` in `covered-call-finder.ts`), since a candidate card can be viewed independently of the holdings card. Neither warning restores capacity — the reduced `availableCoveredContracts` number is what's shown and what caps the scan.
+
+### New tests (all 12 required scenarios)
+
+- `lib/scans/__tests__/covered-call-capacity.test.ts`, new `TE-0007C final corrective pass: fail closed on unattributable exposure` describe block: tests 1-8 and 11 (unattributable short option blocks the report; unattributable working STO blocks the report; malformed cancelled/rejected/expired/filled order does not block; malformed buy-to-close does not block; malformed non-option order does not block; known-underlying/unknown-type still reserves conservatively and stays usable; multiple valid holdings plus one unattributable short option/working order fails the ENTIRE report closed with no holding scanned; the prior round's OCC-only realistic fixture still passes).
+- `app/screener/__tests__/CcCapacityGate.test.tsx` (new file): tests 9-10, rendering the real `app/screener/page.tsx` component (wrapped in the app's actual `TaskProvider`/`CommandProvider`) with `lib/scans/tastytrade-client`'s network boundary mocked. Test 9 mocks an unavailable/unattributable capacity report, clicks "SCAN ELIGIBLE HOLDINGS FOR CC", and asserts the blocking message renders, the "no eligible holdings" copy does NOT render, and `getMarketMetrics` is never called (no holding scanned). Test 10 mocks an `ok` report with one symbol carrying `hasUnclassifiedExposure: true`, and asserts the disclosure warning renders while the symbol chip remains clickable and shows the reduced (not restored) available-contracts count.
+- Test 12 (all prior cost-basis/quote-quality/full-universe-selection regression tests remain passing) is satisfied by the full-suite run below, which includes every test from §15 unchanged.
+
+### Validation
+
+- `npx tsc --noEmit` — clean, zero errors.
+- Targeted (optionSymbol + capacity + finder + new UI wiring test): **75 tests, all passing** (11 + 39 + 23 + 2).
+- Full suite: `npx vitest run --pool=threads --poolOptions.threads.maxThreads=4` — **103 test files, 1499 tests, all passing** (up from 102 files / 1488 tests in §15 — the one new file plus the new capacity tests and existing-suite growth accounted for).
+- `npx next build` — succeeds.
+
+### Scope discipline
+
+Touched: `lib/scans/covered-call-capacity.ts`, `lib/scans/covered-call-finder.ts`, `lib/scans/types.ts`, `lib/scans/tastytrade-client.ts` (two `CoveredCallCapacityReport` literals updated for the new required `warnings` field — no behavior change), `app/screener/page.tsx`, `lib/scans/__tests__/covered-call-capacity.test.ts`, `app/screener/__tests__/CcCapacityGate.test.tsx` (new), and this report. No other files modified. Unrelated untracked files (`cc_zero_candidates_fix.sh`, `docs/reviews/portfolio-position-metrics-audit.md`, `mode_param_fix.sh`, `switch_to_filter_mode_fix.sh`, `te0007c_import_path_fix.sh`) remain untouched and excluded from this round's commit.
+
+**Not pushed or merged.** See final response for commit hash and changed-file list.

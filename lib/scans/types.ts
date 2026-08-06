@@ -57,6 +57,13 @@ export interface SpreadCandidate {
   ccBidAskWidth?: number;
   ccLiquidityWarning?: string | null;
   ccAssignmentWarning?: string | null;
+  // TE-0007C final corrective pass — mirrors CoveredCallCapacity.
+  // hasUnclassifiedExposure: true when some (attributable) option exposure
+  // for this symbol could not be classified call/put and was conservatively
+  // reserved as a call. The candidate is still valid/usable — this is a
+  // disclosure flag, not a rejection — but capacity display must not claim
+  // to be fully verified when this is true.
+  ccHasUnclassifiedExposure?: boolean;
 }
 
 

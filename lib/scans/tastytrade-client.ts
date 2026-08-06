@@ -279,7 +279,7 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
   try {
     const accountsData = await ttFetch('/customers/me/accounts', token);
     const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
-    if (!accountNumber) return { status: 'unavailable', bySymbol: {} };
+    if (!accountNumber) return { status: 'unavailable', bySymbol: {}, warnings: [] };
 
     let rawPositions: any[] | null = null;
     try {
@@ -299,7 +299,7 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
 
     return buildCoveredCallCapacityReport(rawPositions, rawOrders);
   } catch {
-    return { status: 'unavailable', bySymbol: {} };
+    return { status: 'unavailable', bySymbol: {}, warnings: [] };
   }
 }
 

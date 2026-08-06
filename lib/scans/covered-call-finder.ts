@@ -254,5 +254,6 @@ export function findBestCoveredCall(
     ccBidAskWidth: bidAskWidth,
     ccLiquidityWarning,
     ccAssignmentWarning,
+    ccHasUnclassifiedExposure: params.capacity.hasUnclassifiedExposure,
   };
 }

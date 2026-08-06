@@ -392,3 +392,153 @@ describe('TE-0007C corrective round: OCC-symbol-derived classification (no optio
     expect(mu.hasUnclassifiedExposure).toBe(false); // both option legs classified via OCC parsing
   });
 });
+
+// ── TE-0007C final corrective pass: fail closed on unattributable exposure ─
+// Distinguishes two categorically different failure modes:
+//   underlying UNKNOWN  -> cannot know which holding is affected -> the
+//     ENTIRE report must fail closed (status: 'unavailable').
+//   underlying KNOWN, option type unknown -> safe to reserve conservatively
+//     for that one symbol; the report stays usable (covered by the
+//     corrective-round describe block above, preserved unchanged).
+describe('TE-0007C final corrective pass: fail closed on unattributable exposure', () => {
+  const unattributableShortCall = (qty = 1): RawPositionLike => ({
+    'instrument-type': 'Equity Option',
+    // No underlying-symbol field AND an unparseable symbol -- genuinely
+    // cannot be attributed to any holding.
+    symbol: 'totally-malformed',
+    quantity: qty,
+    'quantity-direction': 'Short',
+  });
+
+  const unattributableWorkingStoCall = (qty = 1, status = 'Live', action = 'Sell to Open'): RawOrderLike => ({
+    status,
+    legs: [{ symbol: 'totally-malformed', action, quantity: qty }],
+  });
+
+  // Required test 1.
+  it('1. an existing short option with no underlying-symbol and an unparseable OCC symbol makes the capacity report unavailable', () => {
+    const exposure = normalizeShortCallExposure([unattributableShortCall(1)]);
+    expect(exposure.hasUnattributableExposure).toBe(true);
+    expect(exposure.bySymbol).toEqual({}); // never folded into any symbol
+
+    const report = buildCoveredCallCapacityReport([unattributableShortCall(1)], []);
+    expect(report.status).toBe('unavailable');
+    expect(report.bySymbol).toEqual({});
+    expect(report.unavailableReason).toMatch(/could not be matched to an underlying holding/i);
+  });
+
+  // Required test 2.
+  it('2. a working sell-to-open option with no underlying-symbol and an unparseable OCC symbol makes the capacity report unavailable', () => {
+    const reservations = normalizeWorkingCallReservations([unattributableWorkingStoCall(1)]);
+    expect(reservations.hasUnattributableExposure).toBe(true);
+    expect(reservations.bySymbol).toEqual({});
+
+    const report = buildCoveredCallCapacityReport([equity('NKE', 100, 'Long', 80)], [unattributableWorkingStoCall(1)]);
+    expect(report.status).toBe('unavailable');
+    expect(report.bySymbol).toEqual({});
+  });
+
+  // Required test 3.
+  it('3. a malformed cancelled/rejected/expired order does not block the report', () => {
+    for (const status of ['Cancelled', 'Rejected', 'Expired', 'Filled']) {
+      const reservations = normalizeWorkingCallReservations([unattributableWorkingStoCall(1, status)]);
+      expect(reservations.hasUnattributableExposure).toBe(false);
+    }
+    const report = buildCoveredCallCapacityReport(
+      [equity('NKE', 100, 'Long', 80)],
+      [unattributableWorkingStoCall(1, 'Cancelled')],
+    );
+    expect(report.status).toBe('ok');
+  });
+
+  // Required test 4.
+  it('4. a malformed buy-to-close order does not block the report', () => {
+    const reservations = normalizeWorkingCallReservations([unattributableWorkingStoCall(1, 'Live', 'Buy to Close')]);
+    expect(reservations.hasUnattributableExposure).toBe(false);
+    const report = buildCoveredCallCapacityReport(
+      [equity('NKE', 100, 'Long', 80)],
+      [unattributableWorkingStoCall(1, 'Live', 'Buy to Close')],
+    );
+    expect(report.status).toBe('ok');
+  });
+
+  // Required test 5.
+  it('5. a malformed non-option (equity) working order does not block the report', () => {
+    const equityOrder: RawOrderLike = {
+      status: 'Live',
+      legs: [{ symbol: 'totally-malformed', action: 'Sell to Open', 'instrument-type': 'Equity', quantity: 1 }],
+    };
+    const reservations = normalizeWorkingCallReservations([equityOrder]);
+    expect(reservations.hasUnattributableExposure).toBe(false);
+    const report = buildCoveredCallCapacityReport([equity('NKE', 100, 'Long', 80)], [equityOrder]);
+    expect(report.status).toBe('ok');
+  });
+
+  // Required test 6: known underlying, unknown option type stays a
+  // per-symbol conservative reservation, never escalates to unattributable.
+  it('6. known underlying + unknown option type reserves conservatively and keeps the report usable', () => {
+    const knownUnderlyingUnknownType: RawPositionLike = {
+      'instrument-type': 'Equity Option',
+      'underlying-symbol': 'IBM',
+      symbol: 'not-a-valid-occ-symbol',
+      quantity: 1,
+      'quantity-direction': 'Short',
+    };
+    const exposure = normalizeShortCallExposure([knownUnderlyingUnknownType]);
+    expect(exposure.hasUnattributableExposure).toBe(false);
+    expect(exposure.unclassifiedSymbols.has('IBM')).toBe(true);
+    expect(exposure.bySymbol.IBM).toBe(1);
+
+    const report = buildCoveredCallCapacityReport(
+      [equity('IBM', 300, 'Long', 150), knownUnderlyingUnknownType],
+      [],
+    );
+    expect(report.status).toBe('ok');
+    expect(report.bySymbol.IBM.hasUnclassifiedExposure).toBe(true);
+    expect(report.bySymbol.IBM.availableCoveredContracts).toBe(2); // gross 3 - 1 reserved
+  });
+
+  // Required test 7.
+  it('7. multiple valid holdings plus one unattributable open short option makes the ENTIRE report unavailable', () => {
+    const report = buildCoveredCallCapacityReport(
+      [
+        equity('AAPL', 500, 'Long', 150),
+        equity('MSFT', 300, 'Long', 200),
+        unattributableShortCall(1),
+      ],
+      [],
+    );
+    expect(report.status).toBe('unavailable');
+    expect(report.bySymbol).toEqual({}); // AAPL/MSFT are NOT scanned despite being individually valid
+  });
+
+  // Required test 8.
+  it('8. multiple valid holdings plus one unattributable working STO option makes the ENTIRE report unavailable', () => {
+    const report = buildCoveredCallCapacityReport(
+      [
+        equity('AAPL', 500, 'Long', 150),
+        equity('MSFT', 300, 'Long', 200),
+      ],
+      [unattributableWorkingStoCall(1)],
+    );
+    expect(report.status).toBe('unavailable');
+    expect(report.bySymbol).toEqual({});
+  });
+
+  // Required test 11: existing OCC-only realistic fixtures (from the prior
+  // corrective round) must still pass unchanged -- spot-check the exact
+  // end-to-end fixture here too, proving this pass didn't regress it.
+  it('11. existing OCC-only realistic fixture (MU, space-padded symbols, no option-type) continues to pass', () => {
+    const rawPositions: RawPositionLike[] = [
+      { 'instrument-type': 'Equity', symbol: 'MU', quantity: '300', 'quantity-direction': 'Long', 'average-open-price': '78.50' },
+      { 'instrument-type': 'Equity', symbol: 'MU', quantity: '200', 'quantity-direction': 'Long', 'average-open-price': '82.10' },
+      { 'instrument-type': 'Equity Option', symbol: 'MU    260918C00120000', quantity: '1', 'quantity-direction': 'Short' },
+    ];
+    const rawOrders: RawOrderLike[] = [
+      { status: 'Live', legs: [{ symbol: 'MU    260918C00130000', action: 'Sell to Open', quantity: '1' }] },
+    ];
+    const report = buildCoveredCallCapacityReport(rawPositions, rawOrders);
+    expect(report.status).toBe('ok');
+    expect(report.bySymbol.MU.availableCoveredContracts).toBe(3);
+  });
+});

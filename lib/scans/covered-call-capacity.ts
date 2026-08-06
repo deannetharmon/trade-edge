@@ -23,6 +23,21 @@
 //   3. Cost basis was computed as a weighted average over only the LOTS
 //      with known basis, then silently applied as if it covered every
 //      share — a partial basis was presented as a complete one.
+//
+// TE-0007C final corrective pass: the round above still had one open gap —
+// when an existing short option or working sell-to-open leg could not be
+// attributed to ANY underlying at all (no usable underlying-symbol field AND
+// an absent/malformed/unparseable OCC symbol), the position/leg was silently
+// `continue`d out of the aggregation entirely. That is categorically
+// different from "underlying known, option type unknown" (which is safe to
+// handle by conservative per-symbol reservation, see unclassifiedSymbols
+// below): if we don't even know WHICH holding a short option belongs to, no
+// amount of per-symbol conservatism helps — the capacity number for every
+// OTHER symbol in the account could still be wrong if this exposure secretly
+// belongs to one of them. The only safe response is to fail the entire
+// report closed (status: 'unavailable') and block CC scanning account-wide
+// until the exposure is resolved, rather than silently reporting some
+// symbols as scannable while an unattributed short option lurks unseen.
 
 import { resolveOptionType, resolveUnderlyingSymbol } from '@/lib/optionSymbol';
 
@@ -129,6 +144,19 @@ export interface ShortCallExposureResult {
   // positions could not be verified" rather than silently trusting a number
   // that is safe-by-construction but not a confirmed fact.
   unclassifiedSymbols: Set<string>;
+  // TE-0007C final corrective pass: true when at least one OPEN short option
+  // position (instrument-type option, quantity-direction Short, quantity >
+  // 0) could not be attributed to ANY underlying symbol at all — neither a
+  // usable underlying-symbol field nor a parseable OCC symbol. Unlike
+  // unclassifiedSymbols (underlying known, type unknown — safe to reserve
+  // conservatively), this case means we don't know WHICH symbol's capacity
+  // is affected, so no per-symbol fix is safe. bySymbol deliberately does
+  // NOT include this position's quantity anywhere — the caller must fail
+  // the whole report closed instead.
+  hasUnattributableExposure: boolean;
+  // Human-readable diagnostics for the unattributable case, suitable for
+  // logs and (via the report-level unavailableReason) the UI.
+  warnings: string[];
 }
 
 // Sums OPEN short equity/index call contracts per underlying symbol. Long
@@ -141,17 +169,31 @@ export interface ShortCallExposureResult {
 export function normalizeShortCallExposure(rawPositions: RawPositionLike[]): ShortCallExposureResult {
   const out: Record<string, number> = {};
   const unclassifiedSymbols = new Set<string>();
+  const warnings: string[] = [];
+  let hasUnattributableExposure = false;
 
   for (const p of rawPositions) {
     const instrumentType = p['instrument-type'];
     if (instrumentType !== 'Equity Option' && instrumentType !== 'Index Option') continue;
     if (p['quantity-direction'] !== 'Short') continue;
 
-    const symbol = resolveUnderlyingSymbol(p['underlying-symbol'], p.symbol);
-    if (!symbol) continue; // no way to attribute this position to any underlying at all
-
     const qty = Number(p.quantity ?? 0);
-    if (!(qty > 0)) continue;
+    if (!(qty > 0)) continue; // not actually open exposure — irrelevant to attribution
+
+    const symbol = resolveUnderlyingSymbol(p['underlying-symbol'], p.symbol);
+    if (!symbol) {
+      // TE-0007C final corrective pass: this is a genuinely OPEN short
+      // option (confirmed instrument type, Short direction, positive
+      // quantity) with no usable underlying-symbol field AND an
+      // unparseable/absent OCC symbol. We cannot know which holding's
+      // capacity this affects, so it must never be silently dropped —
+      // fail the whole report closed instead of continuing past it.
+      hasUnattributableExposure = true;
+      warnings.push(
+        `Existing short option position (symbol "${p.symbol ?? 'unknown'}") could not be attributed to an underlying holding — Covered Call capacity cannot be safely verified.`,
+      );
+      continue; // still never fold an unattributable qty into any symbol's bySymbol
+    }
 
     const optionType = resolveOptionType(p['option-type'], p.symbol);
     if (optionType === 'P') continue; // confirmed put — never consumes call coverage
@@ -166,7 +208,7 @@ export function normalizeShortCallExposure(rawPositions: RawPositionLike[]): Sho
 
     out[symbol] = (out[symbol] ?? 0) + qty;
   }
-  return { bySymbol: out, unclassifiedSymbols };
+  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, warnings };
 }
 
 // ── Working sell-to-open call reservations ─────────────────────────────────
@@ -175,6 +217,13 @@ export interface WorkingCallReservationResult {
   // Same meaning as ShortCallExposureResult.unclassifiedSymbols, but for
   // working sell-to-open legs whose call/put type couldn't be determined.
   unclassifiedSymbols: Set<string>;
+  // Same meaning as ShortCallExposureResult.hasUnattributableExposure, but
+  // for working sell-to-open legs whose underlying could not be resolved at
+  // all. Only relevant, live/working, sell-to-open, option-shaped legs are
+  // considered — a malformed leg on a cancelled/rejected/expired order, a
+  // buy-to-close leg, or a non-option leg never sets this.
+  hasUnattributableExposure: boolean;
+  warnings: string[];
 }
 
 // TE-0007C corrective round: broker status/action strings are normalized
@@ -201,6 +250,8 @@ const SELL_TO_OPEN_ACTION = 'sell to open';
 export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): WorkingCallReservationResult {
   const out: Record<string, number> = {};
   const unclassifiedSymbols = new Set<string>();
+  const warnings: string[] = [];
+  let hasUnattributableExposure = false;
 
   for (const order of rawOrders) {
     if (!OPEN_ORDER_STATUSES.has(normalizeToken(order.status))) continue;
@@ -210,11 +261,21 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
       const instrumentType = leg['instrument-type'];
       if (instrumentType && instrumentType !== 'Equity Option' && instrumentType !== 'Index Option') continue;
 
-      const symbol = resolveUnderlyingSymbol(leg['underlying-symbol'], leg.symbol);
-      if (!symbol) continue;
-
       const qty = Number(leg.quantity ?? 0);
-      if (!(qty > 0)) continue;
+      if (!(qty > 0)) continue; // not actually a working reservation — irrelevant to attribution
+
+      const symbol = resolveUnderlyingSymbol(leg['underlying-symbol'], leg.symbol);
+      if (!symbol) {
+        // TE-0007C final corrective pass: a genuinely live/working
+        // sell-to-open, option-shaped leg with positive quantity that we
+        // cannot attribute to any underlying. Same reasoning as the short-
+        // position case above — fail closed rather than silently drop it.
+        hasUnattributableExposure = true;
+        warnings.push(
+          `Working sell-to-open option order (symbol "${leg.symbol ?? 'unknown'}") could not be attributed to an underlying holding — Covered Call capacity cannot be safely verified.`,
+        );
+        continue;
+      }
 
       const optionType = resolveOptionType(leg['option-type'], leg.symbol);
       if (optionType === 'P') continue; // confirmed put leg — never reserves call capacity
@@ -226,7 +287,7 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
       out[symbol] = (out[symbol] ?? 0) + qty;
     }
   }
-  return { bySymbol: out, unclassifiedSymbols };
+  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, warnings };
 }
 
 // ── Capacity calculation ────────────────────────────────────────────────────
@@ -286,23 +347,54 @@ export type CapacityDataStatus = 'ok' | 'unavailable';
 export interface CoveredCallCapacityReport {
   status: CapacityDataStatus;
   bySymbol: Record<string, CoveredCallCapacity>;
+  // TE-0007C final corrective pass: account-level diagnostics. warnings is
+  // always present (possibly empty); unavailableReason is set only when
+  // status === 'unavailable' and carries a message suitable for direct UI
+  // display (see app/screener/page.tsx's blocking-message rendering) — not
+  // just logs.
+  warnings: string[];
+  unavailableReason?: string;
 }
+
+// TE-0007C final corrective pass: the exact, UI-facing reason shown when
+// open option exposure exists that cannot be matched to any underlying
+// holding. Kept as a single exported constant so the capacity module and
+// the UI never risk drifting out of sync on this specific wording.
+export const UNATTRIBUTABLE_EXPOSURE_REASON =
+  'Covered Call scan unavailable: open option exposure could not be matched to an underlying holding.';
 
 // Combines the three normalizers into a per-symbol capacity map. Returns
 // status:'unavailable' (not a zero-filled map) when either input is null —
 // per the ticket: "If holdings or working-order data cannot be loaded
-// reliably, return an unavailable/error state. Do not assume coverage."
+// reliably, return an unavailable/error state. Do not assume coverage." Also
+// returns status:'unavailable' when any existing short option or working
+// sell-to-open leg could not be attributed to ANY underlying at all — see
+// the module doc's "final corrective pass" note for why this must fail the
+// ENTIRE report closed rather than only the affected symbol: an
+// unattributed short option might secretly belong to any holding in the
+// account, so no other symbol's capacity can be trusted either until it's
+// resolved. No holding is scanned in this state.
 export function buildCoveredCallCapacityReport(
   rawPositions: RawPositionLike[] | null,
   rawOrders: RawOrderLike[] | null,
 ): CoveredCallCapacityReport {
   if (rawPositions == null || rawOrders == null) {
-    return { status: 'unavailable', bySymbol: {} };
+    return { status: 'unavailable', bySymbol: {}, warnings: [] };
   }
 
   const holdings = normalizeEquityHoldings(rawPositions);
   const shortCallResult = normalizeShortCallExposure(rawPositions);
   const workingCallResult = normalizeWorkingCallReservations(rawOrders);
+
+  if (shortCallResult.hasUnattributableExposure || workingCallResult.hasUnattributableExposure) {
+    return {
+      status: 'unavailable',
+      bySymbol: {},
+      warnings: [...shortCallResult.warnings, ...workingCallResult.warnings],
+      unavailableReason: UNATTRIBUTABLE_EXPOSURE_REASON,
+    };
+  }
+
   const shortCalls = shortCallResult.bySymbol;
   const workingCalls = workingCallResult.bySymbol;
 
@@ -323,5 +415,5 @@ export function buildCoveredCallCapacityReport(
     );
   }
 
-  return { status: 'ok', bySymbol };
+  return { status: 'ok', bySymbol, warnings: [] };
 }

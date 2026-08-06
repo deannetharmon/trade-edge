@@ -3905,6 +3905,12 @@ const strategyScores = useMemo(() => {
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
+              {c.ccHasUnclassifiedExposure && (
+                // TE-0007C final corrective pass: same disclosure as the
+                // eligible-holdings card, repeated here since a candidate
+                // card may be viewed/shared independently of that card.
+                <p className={`text-[9px] text-amber-400 font-medium pt-1`}>⚠ Some option exposure could not be classified. Available covered-call capacity was reduced conservatively.</p>
+              )}
               <p className={`text-[9px] text-cyan-400/80 pt-1`}>Written against shares you already own. Assignment would mean selling 100 shares/contract at ${c.shortStrike}. Only enter if that's an acceptable outcome.</p>
             </div>
           )}
@@ -5489,10 +5495,18 @@ export default function Home() {
     symbol: string; sharesOwned: number; costBasis: number | null;
     grossCoveredContracts: number; existingShortCallContracts: number;
     workingShortCallContracts: number; availableCoveredContracts: number; oversubscribed: boolean;
+    hasUnclassifiedExposure: boolean;
   }>>([]);
   const [ccBlockedHoldings, setCcBlockedHoldings] = useState<string[]>([]);
   const [ccHiddenSymbols, setCcHiddenSymbols] = useState<string[]>([]);
   const [ccHoldingsLoading, setCcHoldingsLoading] = useState(false);
+  // TE-0007C final corrective pass: account-level, data-integrity blocking
+  // state -- distinct from "no eligible holdings" (an ordinary empty
+  // result). Set only when buildCoveredCallCapacityReport() returns
+  // status:'unavailable' because open option exposure could not be matched
+  // to ANY underlying holding. Must never be presented as "no eligible
+  // holdings" -- see the UI block below.
+  const [ccUnavailableReason, setCcUnavailableReason] = useState<string | null>(null);
   // NOTE: results/rawScanCache/resultsCachedAt/screenMode used to read
   // localStorage directly inside these useState lazy initializers. That
   // runs synchronously on first render on BOTH server (no localStorage ->
@@ -6110,8 +6124,23 @@ export default function Home() {
       const capacityReport = await getCoveredCallCapacityReport(token);
       setCcHoldingsLoading(false);
       if (capacityReport.status !== 'ok') {
-        throw new Error('Could not load covered-call capacity — holdings or working-order data unavailable.');
+        // TE-0007C final corrective pass: an account-level unattributable-
+        // exposure failure is a data-integrity condition, not an ordinary
+        // "nothing to scan" result -- surface capacityReport.unavailableReason
+        // verbatim (set by buildCoveredCallCapacityReport) via ccUnavailableReason
+        // so the UI renders the explicit blocking message instead of the
+        // generic "No eligible holdings" empty state, and skip the scan
+        // entirely (no holding is scanned while this is unresolved).
+        const reason = capacityReport.unavailableReason
+          ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
+        setCcUnavailableReason(reason);
+        setCcEligibleHoldings([]);
+        setCcBlockedHoldings([]);
+        setError(reason);
+        failScreenerJob(reason);
+        return;
       }
+      setCcUnavailableReason(null);
 
       const eligibleEntries = Object.entries(capacityReport.bySymbol).filter(([, c]) => c.grossCoveredContracts > 0);
       const eligibleHoldings = eligibleEntries.map(([symbol, c]) => ({ symbol, ...c }));
@@ -6332,7 +6361,18 @@ export default function Home() {
               scan. A manual filter can hide (never add) a symbol. */}
           <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-3`}>
             <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium`}>COVERED CALL — ELIGIBLE HOLDINGS</p>
-            {ccEligibleHoldings.length === 0 ? (
+            {ccUnavailableReason ? (
+              // TE-0007C final corrective pass: account-level data-integrity
+              // failure -- open option exposure that couldn't be matched to a
+              // holding. Deliberately NOT the "no eligible holdings loaded
+              // yet" copy below, which would misrepresent this as an
+              // ordinary empty result. Scanning stays blocked (the button
+              // below still exists to retry, but runCcScan re-checks this
+              // same condition and will not scan while it's set).
+              <p className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">
+                {ccUnavailableReason}
+              </p>
+            ) : ccEligibleHoldings.length === 0 ? (
               <p className={`text-[10px] ${th.textFaint}`}>
                 {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — run a scan to check your account.'}
               </p>
@@ -6349,21 +6389,32 @@ export default function Home() {
                     const blocked = h.availableCoveredContracts === 0;
                     return (
                       <button key={h.symbol} onClick={() => !blocked && toggleCcSymbol(h.symbol)} disabled={blocked}
-                        title={blocked ? 'Fully covered — no available capacity' : undefined}
+                        title={blocked ? 'Fully covered — no available capacity' : h.hasUnclassifiedExposure ? 'Some option exposure could not be classified — capacity was reduced conservatively' : undefined}
                         className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${
                           blocked
                             ? `${th.border} ${th.textFaint} line-through opacity-40 cursor-not-allowed`
                             : hidden
                             ? `${th.border} ${th.textFaint} line-through opacity-40`
+                            : h.hasUnclassifiedExposure
+                            ? 'border-amber-500 text-amber-300 bg-amber-500/10'
                             : 'border-cyan-600 text-cyan-300 bg-cyan-500/10'
                         }`}>
-                        {h.symbol} <span className="opacity-60">({h.availableCoveredContracts})</span>
+                        {h.symbol} <span className="opacity-60">({h.availableCoveredContracts})</span>{h.hasUnclassifiedExposure ? ' ⚠' : ''}
                       </button>
                     );
                   })}
                 </div>
                 {ccBlockedHoldings.length > 0 && (
                   <p className={`text-[9px] ${th.textFaint}`}>Fully covered / blocked: {ccBlockedHoldings.join(', ')}</p>
+                )}
+                {ccEligibleHoldings.some(h => h.hasUnclassifiedExposure) && (
+                  // TE-0007C final corrective pass: per-symbol conservative-
+                  // reservation disclosure -- the report stays 'ok'/usable,
+                  // but the reduced capacity number must never be presented
+                  // as fully verified. Never restores capacity by itself.
+                  <p className="text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-1.5 leading-relaxed">
+                    ⚠ Some option exposure could not be classified. Available covered-call capacity was reduced conservatively.
+                  </p>
                 )}
               </div>
             )}
