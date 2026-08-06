@@ -47,7 +47,17 @@ export default function PaperTradingPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        {/* Header-placement corrective pass: below the md breakpoint this
+            row stacks (flex-col) with the title as the very first, full-
+            width, left-aligned content near the top of the viewport --
+            wide enough on typical phone widths to reach the horizontal
+            center where the globally-mounted, viewport-centered
+            PortfolioModeIndicator floats. At md and up this row is a
+            two-group (title left, link right) justify-between layout,
+            which already leaves the center clear, so no extra clearance
+            is added there. Minimal, targeted spacing correction -- not a
+            layout redesign. */}
+        <div className="mt-8 mb-6 flex flex-col gap-3 md:mt-0 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-400">TradeEdge</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-white md:text-4xl">Paper Portfolio</h1>

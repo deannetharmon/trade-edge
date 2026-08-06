@@ -188,6 +188,149 @@ describe('PortfolioModeIndicator', () => {
     });
   });
 
+  describe('header-placement corrective pass: centered, collision-safe positioning', () => {
+    it('the resolving placeholder no longer uses top-right corner positioning', () => {
+      mockPortfolioMode({ status: 'resolving', mode: null });
+      mockPathname('/dashboard');
+      const { container } = render(<PortfolioModeIndicator />);
+      const el = container.firstElementChild as HTMLElement;
+      expect(el.className).not.toMatch(/\bright-4\b/);
+      expect(el.className).not.toMatch(/\btop-4\b/);
+      // Centered via a symmetric, page-independent transform rather than a
+      // one-off right offset.
+      expect(el.className).toMatch(/left-1\/2/);
+      expect(el.className).toMatch(/-translate-x-1\/2/);
+    });
+
+    it('the invalid-state prompt uses the same centered positioning, not top-right', () => {
+      mockPortfolioMode({ status: 'invalid', mode: null, rawInvalidValue: 'x' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const el = screen.getByRole('alert');
+      expect(el.className).not.toMatch(/\bright-4\b/);
+      expect(el.className).toMatch(/left-1\/2/);
+    });
+
+    it('the ready/LIVE badge uses the same centered positioning, not top-right', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const el = screen.getByRole('status');
+      expect(el.className).not.toMatch(/\bright-4\b/);
+      expect(el.className).not.toMatch(/\btop-4\b/);
+      expect(el.className).toMatch(/left-1\/2/);
+      expect(el.className).toMatch(/-translate-x-1\/2/);
+    });
+
+    it('the unsupported-PAPER blocking overlay is unchanged -- still fixed inset-0, covering the full viewport', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'PAPER' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const overlay = screen.getByTestId('portfolio-mode-block');
+      expect(overlay.className).toMatch(/\bfixed\b/);
+      expect(overlay.className).toMatch(/\binset-0\b/);
+    });
+
+    it('the ready/LIVE badge has a stacking order above sticky page headers (z-index higher than the common z-50 header class)', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const el = screen.getByRole('status');
+      // Several routes' sticky headers use z-50; the indicator must paint
+      // above them, not get buried underneath.
+      expect(el.className).toMatch(/z-\[60\]/);
+    });
+  });
+
+  describe('header-placement corrective pass: accessible name and status semantics', () => {
+    it('the ready/LIVE badge is exposed as a status region with an accessible name (not communicated by color alone)', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const status = screen.getByRole('status');
+      expect(status).toHaveAccessibleName(/Portfolio mode: LIVE/i);
+    });
+
+    it('the invalid-state prompt keeps alert semantics', () => {
+      mockPortfolioMode({ status: 'invalid', mode: null, rawInvalidValue: 'x' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    it('the unsupported-PAPER blocking overlay keeps alertdialog semantics', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'PAPER' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      expect(screen.getByRole('alertdialog')).toHaveAccessibleName(/requires attention/i);
+    });
+
+    it('the disabled PAPER control keeps an accurate accessible name and disabled/aria-disabled state regardless of which text is visually shown at the current breakpoint', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const paperControl = screen.getByTestId('portfolio-mode-paper-disabled');
+      expect(paperControl).toHaveAccessibleName('PAPER — available after application integration');
+      expect(paperControl).toBeDisabled();
+      expect(paperControl).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('the compact mobile "PAPER" text and the full desktop explanation are both present in markup (CSS-only breakpoint switch, not two different DOM elements with different semantics)', () => {
+      mockPortfolioMode({ status: 'ready', mode: 'LIVE' });
+      mockPathname('/dashboard');
+      render(<PortfolioModeIndicator />);
+      const paperControl = screen.getByTestId('portfolio-mode-paper-disabled');
+      // Full explanation, shown sm and up.
+      expect(paperControl.querySelector('.sm\\:inline')).toHaveTextContent(
+        'PAPER — available after application integration',
+      );
+      // Compact form, shown below sm.
+      expect(paperControl.querySelector('.sm\\:hidden')).toHaveTextContent('PAPER');
+    });
+  });
+
+  describe('header-placement corrective pass: no duplicate mount', () => {
+    it('providers.tsx renders PortfolioModeIndicator exactly once, and no other tracked file renders it', () => {
+      const fs = require('node:fs') as typeof import('node:fs');
+      const path = require('node:path') as typeof import('node:path');
+      const repoRoot = path.resolve(__dirname, '../../..');
+
+      const providersSrc = fs.readFileSync(path.join(repoRoot, 'app/providers.tsx'), 'utf8');
+      const providersMatches = providersSrc.match(/<PortfolioModeIndicator\b/g) ?? [];
+      expect(providersMatches).toHaveLength(1);
+
+      // No other file under app/ or components/ (outside this component's
+      // own definition and tests) renders it a second time.
+      function collectTsxFiles(dir: string): string[] {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        let files: string[] = [];
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === 'node_modules' || entry.name === '.next') continue;
+            files = files.concat(collectTsxFiles(full));
+          } else if (entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx')) {
+            files.push(full);
+          }
+        }
+        return files;
+      }
+
+      const candidateDirs = [path.join(repoRoot, 'app'), path.join(repoRoot, 'components')];
+      const renderSites: string[] = [];
+      for (const dir of candidateDirs) {
+        for (const file of collectTsxFiles(dir)) {
+          if (file.endsWith('PortfolioModeIndicator.tsx')) continue; // the component's own definition, not a render site
+          const src = fs.readFileSync(file, 'utf8');
+          if (/<PortfolioModeIndicator\b/.test(src)) renderSites.push(file);
+        }
+      }
+      // Exactly one render site across the whole app/components tree, and
+      // it's the expected one -- providers.tsx.
+      expect(renderSites).toEqual([path.join(repoRoot, 'app/providers.tsx')]);
+    });
+  });
+
   describe('requirement 7: the shell cannot display PAPER while live-only application content remains available', () => {
     it('across every status, no rendered control ever calls setMode with PAPER', () => {
       const setMode = vi.fn();

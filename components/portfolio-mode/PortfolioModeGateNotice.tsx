@@ -29,15 +29,15 @@ export function PortfolioModeGateNotice({
   } else if (status === 'invalid') {
     heading = 'Portfolio mode needs to be resolved';
     body =
-      'Use the indicator in the top-right corner to choose LIVE or PAPER before continuing.';
+      'Use the indicator at the top of the page to choose LIVE or PAPER before continuing.';
   } else if (mode === 'PAPER') {
     heading = `${screenName}: Currently supports LIVE mode only`;
     body =
-      'Paper mode isn’t wired into this screen yet. Visit Paper Trading to view your simulated portfolio, or switch back to LIVE using the indicator in the top-right corner.';
+      'Paper mode isn’t wired into this screen yet. Visit Paper Trading to view your simulated portfolio, or switch back to LIVE using the indicator at the top of the page.';
   } else {
     heading = 'Portfolio mode unresolved';
     body =
-      'Use the indicator in the top-right corner to choose LIVE or PAPER before continuing.';
+      'Use the indicator at the top of the page to choose LIVE or PAPER before continuing.';
   }
 
   const accessibilityProps =
