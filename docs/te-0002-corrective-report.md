@@ -75,7 +75,7 @@ All three corrections implemented, tested, and validated. Branch `fix/stop-loss-
 
 **Branch:** `fix/te-0002-stop-trust-boundary`
 **Original commit:** `fe64ad3`, based on `main` @ `6f962c8` — **superseded**, see Rebase note below.
-**Post-rebase commit:** `a68c17a`, based on `main` @ `195f324` (current `main`, which now includes the merged PM-0001 branch — position-metrics correctness, base + corrective round + corrective round 2 debit P/L gate).
+**Post-rebase code tree:** validated at commit `a68c17a`, based on `main` @ `195f324` (which includes the merged PM-0001 branch — position-metrics correctness, base + corrective round + corrective round 2 debit P/L gate). `a68c17a` is not the final commit for this round: it was subsequently amended once already (to fold in this report) and is amended again by this report-only update. The final commit hash is not embedded in this document — it is supplied externally in the implementation-report response accompanying each amendment.
 **Scope:** One focused defect — an untrusted/display-only stop policy could reach the breach-enforcement path and produce a false `CUT_LOSSES`. No redesign of the six-state classification, breach-confirmation state machine, or `evaluateStopBreach`/`classifyStopLossPolicy` themselves — both are unchanged. This round adds a trust boundary in how their outputs are *consumed*, not in how they're computed.
 
 ### Rebase note (post-approval)
@@ -166,9 +166,11 @@ Run against `fe64ad3` on `main` @ `6f962c8` (without PM-0001) — recorded here 
 - `npx vitest run` (full suite) — 99 test files, 1409 tests, all passing.
 - `npx next build` — succeeds.
 
-## Validation (post-rebase, on `a68c17a`, current)
+## Validation (post-rebase, run against the `a68c17a` code tree, prior to this report-only amendment)
 
-Base sanity check first: `git merge-base --is-ancestor 195f324 a68c17a` confirms PM-0001's round-2 commit is an ancestor of the rebased branch.
+All checks below ran against the rebased code tree exactly as it stood at commit `a68c17a` — before this amendment, which changes `docs/te-0002-corrective-report.md` only and makes no code changes. No re-validation was run for this amendment; it is a documentation-only change on top of already-validated code.
+
+Base sanity check first: `git merge-base --is-ancestor 195f324 a68c17a` confirmed PM-0001's round-2 commit is an ancestor of the rebased branch.
 
 - `npx tsc --noEmit` — clean, zero errors.
 - Targeted suites specified for this round:
@@ -190,4 +192,4 @@ Directly verified in the rebased `acquisition.ts`/`types.ts`/`page.tsx` (not mer
 
 ## Merge status
 
-Implemented, tested, and validated on `fix/te-0002-stop-trust-boundary` at commit `a68c17a` (rebased onto current `main` @ `195f324`, which includes merged PM-0001). **Not merged and not pushed** — awaiting review per instruction.
+Implemented, tested, and validated on `fix/te-0002-stop-trust-boundary`, rebased onto `main` @ `195f324` (which includes merged PM-0001). Code review of the rebased implementation has passed. This report was subsequently amended once to fold itself into the rebase commit, and is amended again by this documentation-only change — each amendment produces a new commit hash. Per instruction, this document does not embed its own resulting commit hash; the current final commit hash is supplied externally in the implementation-report response for each round of changes. **Not merged and not pushed** — awaiting further instruction.
