@@ -4,6 +4,7 @@ import {
   computeCreditPerContract,
   computeSignedNetPremium,
   isNetDebitStructure,
+  computePositionPnl,
   computeSingleLegBreakeven,
   computeIcBreakevens,
   calcPositionPop,
@@ -81,6 +82,80 @@ describe('computeSignedNetPremium / isNetDebitStructure', () => {
   it('does not flag a genuine ~$0.00 credit as a debit (float-noise epsilon)', () => {
     expect(isNetDebitStructure(-0.001)).toBe(false);
     expect(isNetDebitStructure(0)).toBe(false);
+  });
+});
+
+// ── computePositionPnl (PM-0001 corrective round 2) ─────────────────────────
+// This is the EXACT formula acquisition.ts's loadPositions() calls (not a
+// reimplementation) -- these tests are a regression against the real
+// production/population calculation, not merely a test of the
+// isNetDebit -> entryPriceEffect mapping.
+describe('computePositionPnl', () => {
+  // Genuine credit-position control: ordinary credit P/L is unchanged by
+  // the isNetDebit gate (isNetDebit is false, so the formula behaves
+  // exactly as it did before round 2's fix).
+  it('control: computes ordinary credit-position pnl unchanged (credit - currentValue)', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: false,
+      hasCurrentPrices: true,
+      anyLegCrossed: false,
+      creditReceived: 1260,
+      currentValue: 1750,
+    });
+    expect(pnl).toBeCloseTo(1260 - 1750, 5); // -490, matches the MU fixture from the base PM-0001 report
+  });
+
+  // The defect this round fixes: a net-debit structure's creditReceived is
+  // floored to $0.00 by calculateSpreadCredit, so WITHOUT the isNetDebit
+  // gate this same call would have returned `0 - 1750 = -1750` -- a
+  // fabricated loss equal to the full buyback cost. It must return null.
+  it('a net-debit structure never produces pnl = -currentValue (the round-2 defect)', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: true,
+      hasCurrentPrices: true,
+      anyLegCrossed: false,
+      creditReceived: 0, // floored, as calculateSpreadCredit would produce for a debit
+      currentValue: 1750,
+    });
+    expect(pnl).toBeNull();
+    expect(pnl).not.toBe(-1750);
+  });
+
+  // Crossed-quote control: even a genuinely credit (non-debit) position
+  // must still produce pnl = null when a leg is crossed -- proves the
+  // isNetDebit fix didn't regress the crossed-quote guard from the prior
+  // corrective round.
+  it('control: a crossed-quote CREDIT position still produces pnl = null', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: false,
+      hasCurrentPrices: true,
+      anyLegCrossed: true,
+      creditReceived: 1260,
+      currentValue: 1750,
+    });
+    expect(pnl).toBeNull();
+  });
+
+  it('returns null when currentValue itself is unavailable, independent of the debit/crossed gates', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: false,
+      hasCurrentPrices: false,
+      anyLegCrossed: false,
+      creditReceived: 1260,
+      currentValue: 0,
+    });
+    expect(pnl).toBeNull();
+  });
+
+  it('a debit structure with a crossed leg is still null (both gates independently sufficient)', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: true,
+      hasCurrentPrices: true,
+      anyLegCrossed: true,
+      creditReceived: 0,
+      currentValue: 500,
+    });
+    expect(pnl).toBeNull();
   });
 });
 

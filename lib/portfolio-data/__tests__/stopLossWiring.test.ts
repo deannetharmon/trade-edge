@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit, computeMarketablePnlPct } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
 import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy } from '@/lib/portfolio/stopLossPolicy';
-import { computeSignedNetPremium, isNetDebitStructure } from '@/lib/portfolio/positionMetrics';
+import { computeSignedNetPremium, isNetDebitStructure, computePositionPnl } from '@/lib/portfolio/positionMetrics';
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
@@ -521,6 +521,93 @@ describe('debit-trade guard (PM-0001)', () => {
     const isDebit = isNetDebitStructure(computeSignedNetPremium(legs));
     const entryPriceEffect: Position['entryPriceEffect'] = isDebit ? 'Debit' : 'Credit';
     expect(entryPriceEffect).toBe('Credit');
+  });
+});
+
+// ── PM-0001 corrective round 2: full debit-structure acceptance list ───────
+// End-to-end wiring test: builds the exact Position shape loadPositions()
+// must now produce for a detected net-debit structure -- entryPriceEffect,
+// pnl (via the real computePositionPnl formula, not a reimplementation),
+// pnlPct, pop, hitTarget -- and proves getRecommendation cannot fire a
+// P/L-driven TAKE_PROFIT or CUT_LOSSES off any of it. loadPositions()
+// itself can't be unit-tested without a live TastyTrade session (see
+// TC-0001's prior finding); this locks the contract it must satisfy.
+describe('full debit-structure acceptance (PM-0001 corrective round 2)', () => {
+  const debitLegs = [
+    { direction: 'Short' as const, quantity: 1, avgOpenPrice: 1.00 },
+    { direction: 'Long' as const, quantity: 1, avgOpenPrice: 3.00 },
+  ];
+  const signedNetPremium = computeSignedNetPremium(debitLegs);
+  const isNetDebit = isNetDebitStructure(signedNetPremium);
+  const flooredCreditReceived = Math.max(0, signedNetPremium); // calculateSpreadCredit's actual floor
+  const currentValue = 250; // an arbitrary observational mid -- must NOT leak into pnl
+
+  it('detects this fixture as a debit', () => {
+    expect(isNetDebit).toBe(true);
+    expect(flooredCreditReceived).toBe(0);
+  });
+
+  it('produces entryPriceEffect "Debit", pnl null (via the real computePositionPnl formula), and pnlPct null', () => {
+    const entryPriceEffect: Position['entryPriceEffect'] = isNetDebit ? 'Debit' : 'Credit';
+    const pnl = computePositionPnl({
+      isNetDebit,
+      hasCurrentPrices: true,
+      anyLegCrossed: false,
+      creditReceived: flooredCreditReceived,
+      currentValue,
+    });
+    const pnlPct = flooredCreditReceived !== 0 && pnl != null ? (pnl / Math.abs(flooredCreditReceived)) * 100 : null;
+
+    expect(entryPriceEffect).toBe('Debit');
+    expect(pnl).toBeNull();
+    expect(pnl).not.toBe(-currentValue); // the exact round-2 defect
+    expect(pnlPct).toBeNull();
+  });
+
+  it('produces no P/L-driven TAKE_PROFIT or CUT_LOSSES recommendation, and pop/hitTarget stay unavailable', () => {
+    const pos = makePosition({
+      entryPriceEffect: 'Debit',
+      creditReceived: flooredCreditReceived,
+      currentValue,
+      pnl: null,        // per computePositionPnl above
+      pnlPct: null,
+      pnlReliable: false,
+      hitTarget: false, // acquisition.ts's isNetDebit guard forces this
+      targetPrice: 0,
+      pop: null,         // acquisition.ts's isNetDebit guard forces this
+      hasGtc: true,
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+      snapshotHistory: [],
+    });
+    expect(pos.pop).toBeNull();
+    expect(pos.hitTarget).toBe(false);
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).not.toBe('TAKE_PROFIT');
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  // Genuine credit-position control (wiring level): proves the isNetDebit
+  // gate added in round 2 does not over-suppress an ordinary credit
+  // position's P/L-driven recommendation -- a real profit can still surface
+  // TAKE_PROFIT exactly as before.
+  it('control: an ordinary credit position with hitTarget still reaches TAKE_PROFIT (gate is debit-specific, not over-broad)', () => {
+    const pos = makePosition({
+      entryPriceEffect: 'Credit',
+      creditReceived: 1260,
+      currentValue: 500,
+      pnl: 760,
+      pnlPct: 60.3,
+      pnlReliable: true,
+      hitTarget: true,
+      pop: 66,
+      hasGtc: true,
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+      snapshotHistory: [],
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).toBe('TAKE_PROFIT');
   });
 });
 

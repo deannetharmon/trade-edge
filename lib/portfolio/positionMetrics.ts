@@ -73,6 +73,31 @@ export function isNetDebitStructure(signedNetPremium: number): boolean {
   return signedNetPremium < -0.005;
 }
 
+export interface ComputePositionPnlInput {
+  isNetDebit: boolean;
+  hasCurrentPrices: boolean;
+  anyLegCrossed: boolean;
+  creditReceived: number;
+  currentValue: number;
+}
+
+// The EXACT pnl formula acquisition.ts's loadPositions() uses -- extracted
+// so the debit-guard/crossed-quote-guard interaction is unit-tested against
+// the real production calculation, not a reimplementation or a
+// mapping-only test.
+//
+// PM-0001 corrective round 2: this MUST gate on `isNetDebit`. Without it, a
+// net-debit structure's `creditReceived` (floored to $0.00 by
+// calculateSpreadCredit) silently produced `pnl = 0 - Math.abs(currentValue)`
+// -- a fabricated loss equal to the full buyback cost, exactly the defect
+// PM-0001 was meant to eliminate. The debit guard had already been applied
+// to `pop`/`targetPrice`/`hitTarget` but was missed here in round 1.
+export function computePositionPnl(input: ComputePositionPnlInput): number | null {
+  const { isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue } = input;
+  if (isNetDebit || !hasCurrentPrices || anyLegCrossed) return null;
+  return Math.abs(creditReceived) - Math.abs(currentValue);
+}
+
 // ── Breakevens ──────────────────────────────────────────────────────────────
 
 // Single-short-leg breakeven (CSP, lone short put/call, or one side of a

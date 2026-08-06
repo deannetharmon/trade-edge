@@ -70,6 +70,7 @@ import {
   computeCanonicalBuffer,
   resolveOptionLegPrice,
   resolveUnderlyingPrice,
+  computePositionPnl,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -1363,10 +1364,20 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const anyLegCrossed = legs.some(
       (l: any) => crossedSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
-    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed;
+    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
     const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
     const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
-    const pnl = (hasCurrentPrices && !anyLegCrossed) ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
+    // PM-0001 corrective round 2: computePositionPnl (lib/portfolio/
+    // positionMetrics.ts) is the single source for this formula -- it MUST
+    // gate on isNetDebit. Without that gate, a net-debit structure's
+    // creditReceived above (floored to $0.00 by calculateSpreadCredit)
+    // silently produced `pnl = 0 - Math.abs(currentValue)`, i.e. a
+    // fabricated loss equal to the full buyback cost -- exactly the defect
+    // the debit guard was meant to eliminate. Round 1 applied the guard to
+    // pop/targetPrice/hitTarget but missed it here; extracting the formula
+    // into a named, directly-tested function (rather than leaving it
+    // inline) is what let that gap be caught and regression-tested.
+    const pnl = computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue });
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
     // PM-0001 debit guard: a net-debit structure's `creditReceived` above is

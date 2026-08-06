@@ -241,11 +241,12 @@ entryPriceEffect: 'Credit' | 'Debit' | 'Unknown';
 ```
 Computed in `loadPositions()` from the same `isNetDebit` guard already introduced in the base commit: `positionLegs.length === 0 ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit')`. The ES-0001 canonical `identity` (signed entry economics) is unchanged — this field is purely an additional, honest display/decision tag alongside it.
 
-**`pnl` is no longer computed as `-currentValue` for a debit structure.** Previously `pnl = |creditReceived| - |currentValue|`, and for a debit `creditReceived` floors to `0`, so `pnl` silently became `-|currentValue|` — exactly the fabrication the ticket named. `pnl` is now gated the same way `pop`/`targetPrice`/`hitTarget` already were:
+**`pnl` was intended to no longer be computed as `-currentValue` for a debit structure, but this round's fix was incomplete — see §15 (corrective round 2) for the actual defect and its fix.** The commit reviewed at this point in the branch's history still gated `pnl` only on `hasCurrentPrices`/`anyLegCrossed`, not `isNetDebit`:
 ```ts
+// Round 1 (incomplete): missing the isNetDebit gate.
 const pnl = (hasCurrentPrices && !anyLegCrossed) ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
 ```
-Combined with the existing `isNetDebit` guard on `pop`/`targetPrice`/`hitTarget` from the base commit, a debit structure now has: POP `null`, target unavailable/inert, `hitTarget` forced `false`, `pnlPct` `null` (already gated on `creditReceived !== 0`, and a debit's floored `creditReceived` is `0`).
+For a debit structure, `creditReceived` floors to `0`, so this still silently produced `pnl = 0 - |currentValue| = -|currentValue|` — the exact fabrication the ticket named. Round 2 (§15) fixes this. `pop`/`targetPrice`/`hitTarget` WERE correctly gated on `isNetDebit` in this round.
 
 **Card display fix** (`app/portfolio/page.tsx`): the Credit metric now renders "Debit (unsupported)" instead of a dollar amount when `entryPriceEffect === 'Debit'`, so a debit structure's floored `$0.00` can never be read as a genuine zero-credit entry on the card itself.
 
@@ -264,14 +265,94 @@ Combined with the existing `isNetDebit` guard on `pop`/`targetPrice`/`hitTarget`
 - `npx next build` — succeeds (needed a second invocation to finish trace collection within the tool's time limit; webpack cache carried progress across both calls, same pattern as every prior build in this project).
 - TE-0002 (`stopLossPolicy.test.ts`, 33 tests) and ES-0001/ES-0002 suites (`closeOrderSafety`, `closeOrderSubmission`, `pendingOrderReplacement*`, `RecommendationService`) all pass unchanged.
 
-### 14.6 Corrected debit rendering behavior (summary)
+### 14.6 Corrected debit rendering behavior (summary, as of round 1 — see §15.5 for the corrected/verified version)
 
-| | Before corrective round | After corrective round |
+| | Before corrective round | After corrective round 1 |
 |---|---|---|
 | `Position.entryPriceEffect` | did not exist | `'Credit' \| 'Debit' \| 'Unknown'`, new field |
-| `pnl` for a debit structure | `-currentValue` (fabricated) | `null` |
+| `pnl` for a debit structure | `-currentValue` (fabricated) | **still `-currentValue`** — round 1's gate was missing `isNetDebit`; not actually fixed until round 2 (§15) |
 | Card Credit display for a debit | `$0.00` (indistinguishable from a real zero-credit trade) | "Debit (unsupported)" |
 | IC buffer with one side missing | returned the available side | `null` |
 | Crossed-leg midpoint | fabricated from crossed bid/ask | mark fallback only, or `null` |
 | Crossed-leg `closeValue` | could be built from crossed bid/ask | `null` (leg is one-sided) |
 | Crossed-leg `pnl`/`hitTarget`/recommendations | could fire off a mark-fallback mid | `null`/`false`/no P&L-driven action |
+
+This table is corrected here, in place, rather than silently rewritten — round 1's claim that `pnl` was fixed for the debit case was inaccurate; the row above documents exactly what was and wasn't true at that point in the branch's history.
+
+---
+
+## 15. Corrective round 2: the debit P/L gate
+
+**Defect found in review, on commit `71686a9`:** `acquisition.ts`'s `pnl` computation gated on `hasCurrentPrices`/`anyLegCrossed` but not `isNetDebit`:
+```ts
+const pnl =
+  hasCurrentPrices && !anyLegCrossed
+    ? Math.abs(creditReceived) - Math.abs(currentValue)
+    : null;
+```
+Because `calculateSpreadCredit()` floors a net-debit structure's `creditReceived` to `$0.00`, this still produced `pnl = 0 - Math.abs(currentValue) = -Math.abs(currentValue)` for a debit — the exact fabricated loss round 1 was supposed to eliminate. `pop`/`targetPrice`/`hitTarget` had correctly been gated on `isNetDebit`; `pnl` was missed.
+
+### 15.1 Fix
+
+```ts
+const pnl = (!isNetDebit && hasCurrentPrices && !anyLegCrossed) ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
+```
+`pnlReliable` was also tightened to include `!isNetDebit` (it previously could report `true` while `pnl` was `null` for a debit position, which is internally inconsistent):
+```ts
+const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
+```
+
+### 15.2 Extracted into a tested pure function
+
+Rather than leave the corrected formula inline, it's now a named, exported function in `lib/portfolio/positionMetrics.ts` — this is what let the round-1 gap be caught with a real regression test rather than another mapping-only test:
+```ts
+export function computePositionPnl(input: ComputePositionPnlInput): number | null {
+  const { isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue } = input;
+  if (isNetDebit || !hasCurrentPrices || anyLegCrossed) return null;
+  return Math.abs(creditReceived) - Math.abs(currentValue);
+}
+```
+`acquisition.ts` now calls `computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue })` instead of inlining the formula — the exact same function the tests below import and exercise.
+
+### 15.3 Tests added
+
+`lib/portfolio/__tests__/positionMetrics.test.ts`, `describe('computePositionPnl')` (5 tests) — a regression against the real production/population formula, not a mapping test:
+- **Genuine credit-position control:** `computePositionPnl({isNetDebit: false, ...})` still returns `credit - currentValue` unchanged (`1260 - 1750 = -490`, matching the base report's MU worked example).
+- **The round-2 defect itself:** a net-debit input (`isNetDebit: true, creditReceived: 0, currentValue: 1750`) returns `null` and is explicitly asserted `.not.toBe(-1750)`.
+- **Crossed-quote control:** a genuinely credit (non-debit) position with `anyLegCrossed: true` still returns `null` — proves the debit fix didn't regress round 1's crossed-quote guard.
+- Missing `currentValue`/`hasCurrentPrices: false` → `null`, independent of the other two gates.
+- A debit structure with a crossed leg → `null` (both gates independently sufficient).
+
+`lib/portfolio-data/__tests__/stopLossWiring.test.ts`, `describe('full debit-structure acceptance (PM-0001 corrective round 2)')` (4 tests) — end-to-end wiring-level acceptance list, since `loadPositions()` itself can't be unit-tested without a live TastyTrade session (same limitation TC-0001 already documented):
+- Confirms the fixture is detected as a debit and its floored credit is `0`.
+- `entryPriceEffect === 'Debit'`, `pnl` computed via the real `computePositionPnl` is `null` and explicitly `.not.toBe(-currentValue)`, `pnlPct === null`.
+- `getRecommendation` on a full `Position` fixture matching the debit contract (`pop: null`, `hitTarget: false`, `pnl: null`) never returns `TAKE_PROFIT` or `CUT_LOSSES`.
+- **Genuine credit-position control (wiring level):** an ordinary credit position with a real `hitTarget: true` still reaches `TAKE_PROFIT` — proves the `isNetDebit` gate is debit-specific, not over-broad.
+
+### 15.4 Missing/invalid leg entry premiums and `entryPriceEffect: 'Unknown'` — reviewed, deferred
+
+**Current behavior:** each leg's `avgOpenPrice` is parsed as `parseFloat(l['average-open-price'] ?? '0')` at leg-construction time (`acquisition.ts`, well before `computeSignedNetPremium` runs) — a genuinely missing broker field and a genuine `$0.00` premium are indistinguishable by the time `entryPriceEffect` is computed. A position with one leg missing its premium would have that leg's contribution silently treated as `0` in `computeSignedNetPremium`'s sum, and would collapse to `'Credit'` or `'Debit'` depending on the other legs' values, rather than `'Unknown'`.
+
+**This is a real, distinct gap from the one this round fixes** — it's a data-completeness problem at the broker-parsing boundary, not a units/gating defect in the P/L formulas. Fixing it honestly requires threading an "is this leg's premium actually present" signal from the raw broker leg (`l['average-open-price']` being `null`/`undefined`/unparseable, distinct from a parsed `0`) through `PositionLeg` construction and into `computeSignedNetPremium`/`entryPriceEffect` — a change to `PositionLeg`'s shape and every one of its ~15 construction sites in `acquisition.ts`, not a one-line fix.
+
+**Deferred, not implemented, per this round's explicit "do not broaden into general debit-strategy support" instruction and the missing-quote guards already in scope.** `entryPriceEffect` currently only distinguishes `'Credit'`/`'Debit'` (via `isNetDebit`) and `'Unknown'` for the empty-legs edge case (`positionLegs.length === 0`) — it does NOT yet detect a missing-but-nonzero-legs premium as `'Unknown'`. This is a known, named limitation, not a silent gap: track it as a follow-up ticket (e.g. "PM-0002: honest missing-premium propagation") if a broker feed with genuinely absent (not zero) `average-open-price` values is observed in practice.
+
+### 15.5 Validation (corrective round 2)
+
+- `npx tsc --noEmit` — clean, zero errors.
+- `npx vitest run` — **99 test files, 1413 tests, all passing** (up from 99 files/1404 tests — 9 net new tests).
+- `npx next build` — succeeds in a single pass.
+- TE-0002 (`stopLossPolicy.test.ts`, 33 tests) and ES-0001/ES-0002 suites all pass unchanged.
+
+### 15.6 Corrected debit rendering behavior (verified, final)
+
+| | Before PM-0001 | After round 1 (incomplete) | After round 2 (verified) |
+|---|---|---|---|
+| `Position.entryPriceEffect` | did not exist | `'Credit' \| 'Debit' \| 'Unknown'` | unchanged |
+| `pnl` for a debit structure | `-currentValue` (fabricated) | **still `-currentValue`** (gate missing `isNetDebit`) | **`null`**, verified by regression test against the real `computePositionPnl` formula |
+| `pnlPct` for a debit structure | non-null, derived from the fabricated `pnl` | non-null (same reason) | `null` |
+| `pop` for a debit structure | computed off a fabricated $0 breakeven | `null` (correctly gated in round 1) | unchanged |
+| `hitTarget` for a debit structure | could fire | `false` (correctly gated in round 1) | unchanged |
+| P&L-driven recommendation for a debit structure | could fire `TAKE_PROFIT`/`CUT_LOSSES` | could still fire, since `pnl`/`pnlPct` were non-null | cannot fire — verified by `getRecommendation` wiring test |
+| Card Credit display for a debit | `$0.00` | "Debit (unsupported)" | unchanged |
+| Missing/invalid leg premium → `entryPriceEffect` | collapses to `'Credit'`/`'Debit'` | unchanged | unchanged — reviewed, explicitly deferred (§15.4) |
