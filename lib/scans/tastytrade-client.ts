@@ -9,7 +9,7 @@ import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './cons
 // route used a *different*, cookie-based auth mechanism (lib/tokenStore.ts)
 // that isn't populated by this app's actual login flow. That route has been
 // deleted; buildCoveredCallCapacityReport (pure, no I/O) is reused here.
-import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from '../covered-call-capacity';
+import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from './covered-call-capacity';
 import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
 
