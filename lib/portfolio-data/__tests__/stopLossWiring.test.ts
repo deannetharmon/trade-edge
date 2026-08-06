@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder } from '../acquisition';
+import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
 import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy } from '@/lib/portfolio/stopLossPolicy';
+import { computeSignedNetPremium, isNetDebitStructure } from '@/lib/portfolio/positionMetrics';
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
@@ -81,6 +82,8 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     quoteWidthEvidence: null,
     stockPrice: 110,
     buffer: 13.6,
+    putBufferPct: 13.6,
+    callBufferPct: null,
     theta: 0.5,
     gamma: -0.02,
     earningsDate: null,
@@ -419,5 +422,103 @@ describe('getRecommendation: canonical stop-loss integration', () => {
     });
     const rec = getRecommendation(pos, null);
     expect(rec.action).toBe('MANAGE');
+  });
+});
+
+// ── PM-0001: P/L null propagation ───────────────────────────────────────────
+describe('getRecommendation: P/L null propagation (PM-0001)', () => {
+  // A missing leg quote must never let a threshold-based branch (take-profit
+  // or cut-losses) fire off a fabricated P/L. hitTarget is already forced
+  // false upstream (acquisition.ts's hasCurrentPrices gate); pnl/pnlPct are
+  // null. getRecommendation's pnlPct falls back to 0 for arithmetic safety,
+  // but 0 never crosses any of its take-profit (>=X%) or cut-loss (<=-X%)
+  // thresholds, so no P/L-driven action can fire.
+  it('does not return TAKE_PROFIT or CUT_LOSSES when currentValue/pnl are unavailable', () => {
+    const pos = makePosition({
+      currentValue: null,
+      closeValue: null,
+      pnl: null,
+      pnlPct: null,
+      pnlReliable: false,
+      hitTarget: false,
+      hasGtc: true,
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+      snapshotHistory: [],
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).not.toBe('TAKE_PROFIT');
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  it('falls through to a data-independent action (PLACE_GTC/HOLD/MANAGE) rather than a P/L threshold branch when P/L is unavailable', () => {
+    const pos = makePosition({
+      currentValue: null,
+      closeValue: null,
+      pnl: null,
+      pnlPct: null,
+      pnlReliable: false,
+      hitTarget: false,
+      hasGtc: false, // forces the "no GTC" branch, which is P/L-independent
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+      snapshotHistory: [],
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).toBe('PLACE_GTC');
+  });
+});
+
+// ── PM-0001: debit-trade guard ──────────────────────────────────────────────
+describe('debit-trade guard (PM-0001)', () => {
+  it('calculateSpreadCredit floors a net-debit structure to $0.00 for display', () => {
+    const legs = [
+      { direction: 'Short' as const, quantity: 1, avgOpenPrice: 1.00 },
+      { direction: 'Long' as const, quantity: 1, avgOpenPrice: 3.00 },
+    ];
+    expect(calculateSpreadCredit(legs)).toBe(0);
+  });
+
+  it('the guard (computeSignedNetPremium + isNetDebitStructure) detects the debit that the floored display value alone would hide', () => {
+    const legs = [
+      { direction: 'Short' as const, quantity: 1, avgOpenPrice: 1.00 },
+      { direction: 'Long' as const, quantity: 1, avgOpenPrice: 3.00 },
+    ];
+    const signed = computeSignedNetPremium(legs);
+    expect(signed).toBeLessThan(0);
+    expect(isNetDebitStructure(signed)).toBe(true);
+    // calculateSpreadCredit alone (0) cannot distinguish this debit from a
+    // genuine $0.00 credit trade -- that is exactly why loadPositions must
+    // use the signed guard, not infer isNetDebit from calculateSpreadCredit.
+    expect(calculateSpreadCredit(legs)).toBe(0);
+  });
+
+  it('a genuine net-credit structure is never flagged as a debit', () => {
+    const legs = [
+      { direction: 'Short' as const, quantity: 5, avgOpenPrice: 0.45 },
+    ];
+    const signed = computeSignedNetPremium(legs);
+    expect(isNetDebitStructure(signed)).toBe(false);
+  });
+});
+
+// ── PM-0001: acquisition-CSP messaging unchanged ────────────────────────────
+describe('getRecommendation: acquisition-CSP messaging unchanged (PM-0001)', () => {
+  it('still reports "% paper" HOLD detail text for a normal-credit acquisition CSP', () => {
+    const pos = makePosition({
+      strategy: 'PUT',
+      intent: 'acquisition',
+      creditReceived: 225,
+      currentValue: 200,
+      pnl: 25,
+      pnlPct: 11.1,
+      pnlReliable: true,
+      buffer: 4.2,
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).toBe('HOLD');
+    expect(rec.detail).toMatch(/% paper/);
   });
 });

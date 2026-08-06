@@ -71,6 +71,9 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
+// PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
+// per-metric coloring -- see computeEntryChangeTone's doc comment.
+import { computeEntryChangeTone } from '@/lib/portfolio/positionMetrics';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -2417,12 +2420,13 @@ function fmtPointChange(entry: number | null | undefined, current: number | null
   return `${sign}${Math.abs(diff).toFixed(digits)}${suffix}`;
 }
 
+// PM-0001: the favorable/unfavorable direction judgment itself now lives in
+// lib/portfolio/positionMetrics.ts's computeEntryChangeTone (pure,
+// unit-tested); this wrapper only maps that tone to a CSS class.
 function entryChangeColor(entry: number | null | undefined, current: number | null | undefined, goodWhenDown = true, fallback = 'text-slate-500'): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return fallback;
-  const diff = current - entry;
-  if (Math.abs(diff) < 0.01) return fallback;
-  const good = goodWhenDown ? diff < 0 : diff > 0;
-  return good ? 'text-emerald-400' : 'text-red-400';
+  const tone = computeEntryChangeTone(entry, current, goodWhenDown);
+  if (tone === 'neutral') return fallback;
+  return tone === 'good' ? 'text-emerald-400' : 'text-red-400';
 }
 
 function getShortLegs(pos: Position): PositionLeg[] {
@@ -8019,13 +8023,32 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               </p>
 
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), true, th.textFaint)}>
+                {/* PM-0001: POP increasing is favorable (green); decreasing
+                    is unfavorable (red) -- goodWhenDown=false, since a
+                    higher probability of profit is the good direction. The
+                    prior `true` treated a DECLINING POP as favorable, which
+                    is backwards. */}
+                <span className={entryChangeColor(pos.popAtEntry, getCurrentPop(pos), false, th.textFaint)}>
                   POP {fmtEntryNowMaybePct(pos.popAtEntry, getCurrentPop(pos), 0)}
                 </span>
               </p>
 
               <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
-                <span className={entryChangeColor(pos.deltaAtEntry, pos.netDelta, true, th.textFaint)}>
+                {/* PM-0001: colored by ABSOLUTE exposure magnitude, not raw
+                    signed direction -- a universal "down is good" rule on
+                    the signed delta doesn't distinguish shrinking exposure
+                    from growing (more negative) exposure. This is an
+                    exposure-risk signal (shrinking |delta| = favorable,
+                    growing |delta| = unfavorable), not a directional-thesis
+                    judgment; strategy/intent-aware interpretation is a
+                    later enhancement, not in this ticket's scope. Matches
+                    the same abs()-based pattern the Gamma/Vega rows below
+                    already use. */}
+                <span className={entryChangeColor(
+                  pos.deltaAtEntry != null ? Math.abs(pos.deltaAtEntry) : null,
+                  pos.netDelta != null ? Math.abs(pos.netDelta) : null,
+                  true, th.textFaint
+                )}>
                   Δ {fmtEntryNowDelta(pos.deltaAtEntry, pos.netDelta)}
                 </span>
               </p>

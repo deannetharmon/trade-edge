@@ -59,6 +59,17 @@ import {
   type QuoteWidthEvidence,
 } from '@/lib/portfolio/stopLossPolicy';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
+import {
+  CONTRACT_MULTIPLIER,
+  computeCreditPerContract,
+  computeSignedNetPremium,
+  isNetDebitStructure,
+  calcPositionPop,
+  computeSideBuffers,
+  computeCanonicalBuffer,
+  resolveOptionLegPrice,
+  resolveUnderlyingPrice,
+} from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
 
@@ -379,12 +390,12 @@ export function parseOptionSymbol(sym: string): { optionType: 'P' | 'C'; strikeP
 export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number {
   // Returns the actual net opening credit for the whole position in dollars.
   // TT leg prices are per-share option prices; multiply by contracts * 100.
-  const net = legs.reduce((sum, leg) => {
-    const qty = Math.abs(Number(leg.quantity) || 0);
-    const price = Number(leg.avgOpenPrice) || 0;
-    return sum + (leg.direction === 'Short' ? price * qty : -price * qty);
-  }, 0);
-  return Math.max(0, Math.round(net * 100 * 100) / 100);
+  // PM-0001: this floors a net debit to $0.00 for backward-compatible
+  // display -- callers that need to detect/guard against a debit structure
+  // (rather than just display a magnitude) must use computeSignedNetPremium
+  // + isNetDebitStructure on the SAME legs, not infer it from this floored
+  // value (see loadPositions' isNetDebit guard).
+  return Math.max(0, computeSignedNetPremium(legs));
 }
 
 
@@ -881,9 +892,17 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   }
 
   const allOptionSymbols = optionPositions.map((p: any) => p.symbol).filter(Boolean);
-  const currentPrices: Record<string, number> = {};
-  const currentBids: Record<string, number> = {};
-  const currentAsks: Record<string, number> = {};
+  // PM-0001: these previously defaulted an unpriceable leg to `0` instead of
+  // `null` -- a fabricated $0.00 that downstream currentValue/pnl/pnlPct/
+  // hitTarget computation could not distinguish from a real quote. All three
+  // maps are now `number | null`; resolveOptionLegPrice() returns `null`
+  // when neither a real two-sided midpoint nor a positive mark exists, which
+  // currentValue's existing `price == null` check already handles correctly
+  // (see below) -- this is a population-site fix, not a new downstream
+  // branch.
+  const currentPrices: Record<string, number | null> = {};
+  const currentBids: Record<string, number | null> = {};
+  const currentAsks: Record<string, number | null> = {};
   const unpriceableSymbols = new Set<string>();
   // Legs with no real two-sided market (missing bid or ask). currentBids/Asks
   // fall back to mark for these so the mid-based P&L (currentValue) still
@@ -907,12 +926,12 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           const bid = parseFloat(item.bid ?? '0');
           const ask = parseFloat(item.ask ?? '0');
           const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
-          const mid = (bid + ask) / 2;
           const twoSided = bid > 0 && ask > 0;
-          currentPrices[sym] = twoSided ? mid : mark > 0 ? mark : 0;
-          currentBids[sym] = twoSided ? bid : mark > 0 ? mark : 0;
-          currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : 0;
-          if (!twoSided && mark <= 0) unpriceableSymbols.add(sym);
+          const resolvedPrice = resolveOptionLegPrice(bid, ask, mark);
+          currentPrices[sym] = resolvedPrice;
+          currentBids[sym] = twoSided ? bid : mark > 0 ? mark : null;
+          currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : null;
+          if (resolvedPrice == null) unpriceableSymbols.add(sym);
           if (!twoSided) oneSidedSymbols.add(sym);
           const theta = parseFloat(item.theta ?? 'NaN');
           const gamma = parseFloat(item.gamma ?? 'NaN');
@@ -980,8 +999,10 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       for (const item of stockData?.data?.items ?? []) {
         const bid = parseFloat(item.bid ?? '0'); const ask = parseFloat(item.ask ?? '0');
         const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
-        const mid = (bid + ask) / 2;
-        stockPrices[item.symbol] = mid > 0 ? mid : mark > 0 ? mark : 0;
+        // PM-0001: never fabricate `ask / 2` when bid is 0, never use a
+        // crossed quote's midpoint, and never fall back to $0.00 -- see
+        // resolveUnderlyingPrice's doc comment.
+        stockPrices[item.symbol] = resolveUnderlyingPrice(bid, ask, mark);
       }
     }
   } catch {}
@@ -1159,89 +1180,12 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   let profitTargets: Record<string, number> = {};
   try { profitTargets = JSON.parse(localStorage.getItem(LS_PROFIT_TARGETS) ?? '{}'); } catch {}
 
-  // ── POP (probability of profit) ──────────────────────────────────────
-  // Breakeven-based estimate under lognormal price assumption, same approach
-  // as app/screener/page.tsx's calcSpreadPop. Extended here to cover every
-  // strategy type that can appear in an open portfolio (CSP included, plus
-  // the two-sided IC case), since screener only ever quotes new BPS/BCS.
-  const positionNormalCdf = (x: number): number => {
-    const sign = x < 0 ? -1 : 1;
-    const absX = Math.abs(x) / Math.sqrt(2);
-    const t = 1 / (1 + 0.3275911 * absX);
-    const a1 = 0.254829592;
-    const a2 = -0.284496736;
-    const a3 = 1.421413741;
-    const a4 = -1.453152027;
-    const a5 = 1.061405429;
-    const erfApprox =
-      sign *
-      (1 -
-        (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) *
-          t *
-          Math.exp(-absX * absX)));
-    return 0.5 * (1 + erfApprox);
-  };
-
-  // POP that price stays above a lower breakeven (short put / put-side breach level).
-  const positionPopAbove = (price: number, breakeven: number, dte: number, ivPct: number): number => {
-    const sigma = ivPct / 100;
-    const t = dte / 365;
-    const d2 = (Math.log(price / breakeven) - 0.5 * sigma * sigma * t) / (sigma * Math.sqrt(t));
-    return positionNormalCdf(d2) * 100;
-  };
-
-  // POP that price stays below an upper breakeven (short call / call-side breach level).
-  const positionPopBelow = (price: number, breakeven: number, dte: number, ivPct: number): number => {
-    const sigma = ivPct / 100;
-    const t = dte / 365;
-    const d2 = (Math.log(price / breakeven) - 0.5 * sigma * sigma * t) / (sigma * Math.sqrt(t));
-    return (1 - positionNormalCdf(d2)) * 100;
-  };
-
-  const calcPositionPop = (
-    strategy: string,
-    legs: PositionLeg[],
-    price: number | null,
-    creditReceived: number,
-    dte: number,
-    ivPct: number | null
-  ): number | null => {
-    if (price == null || price <= 0 || ivPct == null || ivPct <= 0 || dte <= 0) return null;
-
-    const creditPerShare = Math.abs(creditReceived) / 100;
-    const shortPut = legs.find(l => l.optionType === 'P' && l.direction === 'Short');
-    const shortCall = legs.find(l => l.optionType === 'C' && l.direction === 'Short');
-
-    if (strategy === 'PUT' || strategy === 'BPS') {
-      if (!shortPut) return null;
-      const breakeven = shortPut.strikePrice - creditPerShare;
-      if (breakeven <= 0) return null;
-      return positionPopAbove(price, breakeven, dte, ivPct);
-    }
-
-    if (strategy === 'CALL' || strategy === 'BCS') {
-      if (!shortCall) return null;
-      const breakeven = shortCall.strikePrice + creditPerShare;
-      return positionPopBelow(price, breakeven, dte, ivPct);
-    }
-
-    if (strategy === 'IC') {
-      if (!shortPut || !shortCall) return null;
-      // IC profits only while price stays between both breakevens. Total
-      // credit is split across both sides for a conservative breakeven
-      // estimate (matches how max profit is realized at expiration).
-      const putBreakeven = shortPut.strikePrice - creditPerShare / 2;
-      const callBreakeven = shortCall.strikePrice + creditPerShare / 2;
-      if (putBreakeven <= 0) return null;
-      const popAbovePut = positionPopAbove(price, putBreakeven, dte, ivPct);
-      const popBelowCall = positionPopBelow(price, callBreakeven, dte, ivPct);
-      // Probability of staying inside the range: sum of both one-sided
-      // breach probabilities subtracted from 100, floored at 0.
-      return Math.max(0, popAbovePut + popBelowCall - 100);
-    }
-
-    return null;
-  };
+  // PM-0001: POP (probability of profit) is now a pure, exported, unit-
+  // tested function -- see lib/portfolio/positionMetrics.ts's
+  // calcPositionPop. It's imported above rather than redefined here; the
+  // per-position call site below now passes the canonical quantity (fixing
+  // the per-share-vs-per-contract credit defect) and applies the debit-
+  // trade guard (isNetDebitStructure) before ever invoking it.
 
   let intentOverrides: Record<string, PositionIntent> = {};
   try {
@@ -1288,6 +1232,16 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     });
 
     const creditReceived = calculateSpreadCredit(positionLegs);
+
+    // PM-0001 (debit-trade guard): calculateSpreadCredit floors a net debit
+    // to $0.00 for backward-compatible display -- computed here from the
+    // SAME legs, without that flooring, so a debit structure can't silently
+    // enter credit-specific POP/target-price/hit-target formulas as though
+    // it were a legitimate zero-credit trade. This does not add
+    // debit-strategy support (out of scope); it only prevents the app's
+    // own economics from being fabricated when it encounters one.
+    const signedNetPremium = computeSignedNetPremium(positionLegs);
+    const isNetDebit = isNetDebitStructure(signedNetPremium);
 
     // ES-0001 (corrective round): the canonical close-order identity is
     // built directly from the resolved structure's own legs/economics, NOT
@@ -1391,8 +1345,14 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const pnl = hasCurrentPrices ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
-    const targetPrice = Math.abs(creditReceived) * profitTarget;
-    const hitTarget = hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    // PM-0001 debit guard: a net-debit structure's `creditReceived` above is
+    // a floored $0.00, not a real credit -- computing a target price or a
+    // "target hit" off that floored zero would fabricate a target ($0) that
+    // trivially "hits" on any non-negative P/L. targetPrice stays a number
+    // (the Position type's existing contract) but is 0 and inert; hitTarget
+    // is forced false so no take-profit recommendation can fire off it.
+    const targetPrice = isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
+    const hitTarget = !isNetDebit && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
 
     const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
     const recordedStopPolicy = shortLegForPolicyKey
@@ -1446,7 +1406,11 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       iv: ivMap[symbol] ?? null,
       hv30: hv30Map[symbol] ?? null,
       beta: betaMap[symbol] ?? null,
-      pop: calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, dte, ivMap[symbol] ?? null),
+      // PM-0001: canonicalQuantity is passed explicitly (never inferred from
+      // an arbitrary leg's own quantity -- see calcPositionPop's doc
+      // comment), and POP is never computed off a net-debit structure's
+      // floored $0.00 "credit" (isNetDebit guard).
+      pop: isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       hasGtc: (() => {
         // Check both the position symbol and its weekly option variant
@@ -1477,14 +1441,28 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       stopLossOrderStatus: stopLoss.orderStatus,
       quoteWidthEvidence,
       stockPrice: stockPrices[symbol] ?? null,
-      buffer: (() => {
-        const stock = stockPrices[symbol];
-        if (stock == null) return null;
-        const shorts = legs.filter((l: any) => l['quantity-direction'] === 'Short');
-        if (!shorts[0]) return null;
-        const shortStrike = parseOptionSymbol(shorts[0].symbol).strikePrice;
-        const optType = parseOptionSymbol(shorts[0].symbol).optionType;
-        return optType === 'P' ? ((stock - shortStrike) / stock) * 100 : ((shortStrike - stock) / stock) * 100;
+      // PM-0001: side-specific buffer evidence, resolved via `.find()` on
+      // optionType/direction (not `legs[0]`/`shorts[0]`) -- independent of
+      // broker leg-array ordering. `buffer` is the canonical collapsed
+      // value: put-only -> put side, call-only -> call side, IC -> MINIMUM
+      // of both sides (so `buffer <= 0` correctly flags a breach on EITHER
+      // side, not only when both are breached). `putBufferPct`/
+      // `callBufferPct` are retained on the Position for explanation UI and
+      // tests even though the collapsed card only shows `buffer`.
+      ...(() => {
+        const stock = stockPrices[symbol] ?? null;
+        const shortPutLeg = positionLegs.find(l => l.optionType === 'P' && l.direction === 'Short');
+        const shortCallLeg = positionLegs.find(l => l.optionType === 'C' && l.direction === 'Short');
+        const { putBufferPct, callBufferPct } = computeSideBuffers(
+          stock,
+          shortPutLeg?.strikePrice ?? null,
+          shortCallLeg?.strikePrice ?? null
+        );
+        return {
+          putBufferPct,
+          callBufferPct,
+          buffer: computeCanonicalBuffer(strategy, putBufferPct, callBufferPct),
+        };
       })(),
       theta: (() => {
         let net = 0; let any = false;

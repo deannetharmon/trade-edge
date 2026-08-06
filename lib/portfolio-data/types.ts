@@ -149,6 +149,16 @@ export interface Position {
   stopLossBreachState?: StopBreachState;
   stockPrice: number | null;
   buffer: number | null;
+  // PM-0001: side-specific OTM cushion evidence, independent of broker
+  // leg-array ordering (see lib/portfolio/positionMetrics.ts's
+  // computeSideBuffers). `buffer` above remains the canonical collapsed
+  // value (put-only -> put side; call-only -> call side; iron condor ->
+  // MINIMUM of both sides, so a breach on either side is reflected). These
+  // two fields are retained even when `buffer` is what the card displays,
+  // so explanation UI and tests can reference either side independently.
+  // Null when the applicable short strike or stock price is unavailable.
+  putBufferPct: number | null;
+  callBufferPct: number | null;
   theta: number | null;
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
