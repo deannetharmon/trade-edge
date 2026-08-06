@@ -34,6 +34,29 @@ export interface SpreadCandidate {
   assignmentPrice?: number;    // price paid per share if assigned (== strike)
   capitalBlocked?: boolean;    // true when requiredCash exceeds available cash
   capitalWarning?: string | null;
+
+  // CC-specific (TE-0007C) — covered call written against owned shares.
+  // shortStrike/shortDelta/shortOI/shortBid/shortAsk/roc/annualizedRoc/credit
+  // are reused from the shared fields above (see covered-call-finder.ts for
+  // exactly what each holds in the CC case); these ccXxx fields carry the
+  // capacity/cost-basis/warning data that has no existing shared home.
+  ccSharesOwned?: number;
+  ccGrossCoveredContracts?: number;
+  ccExistingShortCallContracts?: number;
+  ccWorkingShortCallContracts?: number;
+  ccAvailableCoveredContracts?: number;
+  ccCostBasis?: number | null;
+  ccPremiumPerShare?: number;
+  ccPremiumPerContract?: number;
+  ccPeriodYieldOnShares?: number | null;
+  ccAnnualizedYieldOnShares?: number | null;
+  ccStrikeVsStockPct?: number | null;
+  ccStrikeVsCostBasisPct?: number | null;
+  ccMaxUpsideIfCalledAway?: number | null;
+  ccAssignmentProceeds?: number;
+  ccBidAskWidth?: number;
+  ccLiquidityWarning?: string | null;
+  ccAssignmentWarning?: string | null;
 }
 
 

@@ -43,6 +43,20 @@ export const DEFAULT_CSP_RULES = {
 export type CspRulesType = typeof DEFAULT_CSP_RULES;
 
 
+// CC (Covered Call) — first-class strategy added in TE-0007C. Delta/DTE
+// defaults mirror Wheel's own call-writing defaults, same convention as
+// DEFAULT_CSP_RULES above, so the Screener's CC scan and Wheel's own-writing-cc
+// hunting stay aligned out of the box. No IVR field here (unlike CSP) --
+// eligibility for CC is driven by share-coverage capacity, not IVR banding;
+// the capacity gate lives in lib/scans/covered-call-capacity.ts instead.
+export const DEFAULT_CC_RULES = {
+  DELTA_MIN: 0.20, DELTA_MAX: 0.35,
+  DTE_MIN: 21, DTE_MAX: 45,
+  OI_MIN: 100, BID_ASK_MAX: 0.20,
+};
+export type CcRulesType = typeof DEFAULT_CC_RULES;
+
+
 export const YAHOO_INDEX_CHART_MAP: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
 
 
