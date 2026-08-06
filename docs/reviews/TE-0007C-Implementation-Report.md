@@ -147,3 +147,32 @@ before merging.
 - Unified TE-0007E refactor.
 - Portfolio-wide opportunity ranking.
 - Margin / naked-call support.
+
+## 12. Rebase onto current `main` (post-push corrective)
+
+`feature/te-0007c-covered-call-screener` had drifted behind `main`: it branched from `e42ba2e` (TE-0002 Round 4), but `main` subsequently advanced by two commits before this rebase:
+
+- `ec869a9` "Fix: Add 'cc' to ScreenerJobKind" — a Vercel build fix that went wrong in delivery: the commit's diff shows `lib/screener/screenerJobStore.ts`'s entire TypeScript content replaced by the raw text of a shell script (a patch script's contents were pasted directly into the `.ts` file instead of being executed against it). This briefly left `main` with a non-functional `screenerJobStore.ts`.
+- `6586ef7` "Repair main: restore screenerJobStore.ts, reapply 'cc' fix correctly" — restored the file from the last good commit and reapplied only the legitimate one-line change (adding `'cc'` to the `ScreenerJobKind` union).
+
+Independently, this feature branch had its own commit making the identical legitimate fix: `150d09c` "TE-0007C fix: add 'cc' to ScreenerJobKind" (a clean one-line diff, never corrupted — this branch was not involved in the `main` incident).
+
+**Rebase result.** Running `git rebase main` replayed this branch's 13 commits onto `main` @ `6586ef7`. Git's patch-id matching recognized that `150d09c`'s change was already present upstream (via `6586ef7`) and automatically dropped it as an empty/duplicate commit — no manual conflict resolution was needed for this file. Verified directly post-rebase:
+- `lib/screener/screenerJobStore.ts` on the rebased branch is byte-for-byte identical to `main`'s repaired version (`git diff 6586ef7 HEAD -- lib/screener/screenerJobStore.ts` is empty) — correct TypeScript content, `'cc'` present exactly once in the `ScreenerJobKind` union, no shell-script remnants.
+- The earlier `for (const symbol of Array.from(symbols))` fix in `lib/scans/covered-call-capacity.ts` (from the separate Vercel Set-iteration build failure) survived the rebase unchanged.
+
+New commit after rebase: `9f73af3`, based on `main` @ `6586ef7`.
+
+## 13. Combined validation (fills the gap flagged in §10)
+
+Run against the rebased branch, with real repository access, Node, and the actual `tsconfig.json`/dependency graph — closing the validation gap §10 explicitly flagged as unexecuted:
+
+- `npx tsc --noEmit` — clean, zero errors.
+- `npx vitest run` (full suite, `--pool=threads --poolOptions.threads.maxThreads=4`) — **101 test files, 1456 tests, all passing.** This includes the 30 CC-specific tests from §8 (now running as part of the real suite, not only the isolated harness) plus every pre-existing suite (TE-0002 Round 3/4 stop-loss trust boundary, PM-0001 position metrics, ES-0001 close-order safety, and all others) unchanged.
+- `npx next build` — succeeds. This is the same build step Vercel runs; it now passes cleanly including through `lib/screener/screenerJobStore.ts` and `lib/scans/covered-call-capacity.ts`, the two files implicated in the prior build failures.
+
+§10's "what was NOT validated" list (existing suites, full project `tsc`, `next build`) is now fully validated. §9 (manual acceptance against a live TastyTrade account) remains explicitly deferred to Dean, unchanged.
+
+## 14. Merge status
+
+Implemented, rebased onto current `main`, and validated on `feature/te-0007c-covered-call-screener` at commit `9f73af3`. **Not merged yet** — awaiting instruction, per this round's explicit "do not merge yet."
