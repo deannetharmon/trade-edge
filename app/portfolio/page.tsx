@@ -1599,25 +1599,22 @@ function isActionRelevant(pos: Position, action: ActionType, override?: Recommen
     return inProfit || pos.hitTarget || rec.action === 'TAKE_PROFIT';
   }
   if (action === 'CUT_LOSSES') {
-    const breached = pos.buffer != null && pos.buffer <= 0;
-    // PI-0014: marketable evidence can only widen this gate, never narrow
-    // it -- same OR-with-mid convention as getRecommendation()'s own
-    // veryLargeLoss check. See docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
-    const marketablePnlPct = computeMarketablePnlPct(pos);
-    const atExtremeLoss = (pnlPct != null && pnlPct <= -200) || (marketablePnlPct != null && marketablePnlPct <= -200);
-    // TE-0002 corrective round 3: this used to run its OWN raw
-    // stopLossPrice/currentValue/closeValue mid-OR-marketable threshold
-    // check here, independent of getRecommendation()'s trust-aware
-    // evaluateStopBreach() confirmation logic -- and independent of
-    // provenance/classification entirely. That let the CUT_LOSSES button
-    // light up off a raw, unconfirmed, possibly untrusted (TOO_TIGHT /
-    // UNKNOWN_PROVENANCE) broker stop price even when getRecommendation()
-    // itself no longer agreed. Both surfaces (this button and the
-    // Suggested Action text) must consume the SAME canonical
-    // recommendation, so the stop-loss contribution here is now `rec.action
-    // === 'CUT_LOSSES'` only -- the identical canonical, trust-gated
-    // evaluation getRecommendation() already performs.
-    return breached || atExtremeLoss || rec.action === 'CUT_LOSSES';
+    // TE-0002 Round 4: Cut Losses is a MANUAL action, independent of the
+    // canonical Suggested Action. A trader may cut losses on any position
+    // currently showing a real midpoint loss, even when getRecommendation()
+    // recommends MANAGE / WATCH / HOLD. This helper must not re-derive stop
+    // breaches, strike breaches, quote quality, trend, or loss severity --
+    // those signals belong solely to the canonical recommendation engine
+    // (getRecommendation()). Availability here is driven ONLY by:
+    //   (a) a real, currently-negative canonical midpoint P/L (pos.pnl),
+    //       never closeNowPnl or an independently computed marketable P/L
+    //       (a wide marketable quote must not, on its own, enable this), or
+    //   (b) the canonical recommendation itself already being CUT_LOSSES,
+    //       preserved so the button stays available when TradeEdge
+    //       recommends cutting losses even if pnl is null, zero, or
+    //       temporarily positive.
+    const hasCurrentLoss = pos.pnl != null && pos.pnl < 0;
+    return hasCurrentLoss || rec.action === 'CUT_LOSSES';
   }
   if (action === 'PLACE_GTC') {
     return !pos.hasGtc;
@@ -8291,12 +8288,21 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).map(action => {
             const meta = ACTION_META[action];
             if (!isActionRelevant(pos, action, rec)) return null;
+            // TE-0002 Round 4: the "suggested" marker is tied to THIS
+            // specific button, not to the row -- it must only appear when
+            // the canonical recommendation is exactly this action, so a
+            // manually-available Cut Losses button never looks suggested.
             return (
-              <button key={action}
-                onClick={e => { e.stopPropagation(); onExecute(pos, action); }}
-                className={`text-[9px] px-2.5 py-1 border rounded font-bold whitespace-nowrap transition-colors ${meta.btnClass}`}>
-                {meta.label}
-              </button>
+              <span key={action} className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={e => { e.stopPropagation(); onExecute(pos, action); }}
+                  className={`text-[9px] px-2.5 py-1 border rounded font-bold whitespace-nowrap transition-colors ${meta.btnClass}`}>
+                  {meta.label}
+                </button>
+                {action === rec.action && (
+                  <span className={`text-[9px] ${th.textFaint} whitespace-nowrap`}>← suggested</span>
+                )}
+              </span>
             );
           })}
           {/* Extend Profit — only show when profit ≥50% AND DTE ≥ 14 */}
@@ -8318,9 +8324,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <option value="acquisition">Intent: Acquire</option>
             <option value="neutral">Intent: Neutral</option>
           </select>
-          {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).includes(rec.action) && (
-            <span className={`text-[9px] ${th.textFaint} ml-1 shrink-0 whitespace-nowrap`}>← suggested</span>
-          )}
         </div>
 
         {/* PI-0005: Position Intelligence -- explains pos.recommendation /
