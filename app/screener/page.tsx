@@ -5929,6 +5929,13 @@ export default function Home() {
       return;
     }
     setError('');
+    // Switch to Filter mode immediately -- the same thing the main
+    // "SCAN SELECTED" button already does via RunModeModal's onRun handler
+    // before it calls runScreen(). Without this, PMCC/CSP/CC scans only set
+    // the toast's resultsHref link, leaving the visible UI on whatever mode
+    // (e.g. Rank) was last active until the person clicks "Open Results".
+    setScreenMode('filter');
+    try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setLoading(true);
     startScreenerJob({
       kind: 'pmcc', label: 'PMCC scan', total: pmcc.length,
@@ -6000,6 +6007,8 @@ export default function Home() {
       return;
     }
     setError('');
+    setScreenMode('filter');
+    try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setLoading(true);
     startScreenerJob({
       kind: 'csp', label: 'CSP scan', total: csp.length,
@@ -6079,6 +6088,8 @@ export default function Home() {
   // returned as eligible.
   const runCcScan = async () => {
     setError('');
+    setScreenMode('filter');
+    try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setCcHoldingsLoading(true);
     setLoading(true);
     startScreenerJob({
