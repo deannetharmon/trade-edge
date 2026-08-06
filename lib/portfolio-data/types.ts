@@ -64,6 +64,18 @@ export interface Position {
   // for a hard block.
   structureAmbiguous: boolean;
   structureBlockMessage: string | null;
+  // PM-0001 corrective round: `creditReceived` below floors a net debit to
+  // $0.00 for backward-compatible display (calculateSpreadCredit) -- that
+  // $0.00 must never be read as a genuine zero-credit entry.
+  // `entryPriceEffect` is the explicit, honest tag: 'Credit' for a real
+  // net-credit structure, 'Debit' for a detected net-debit structure (this
+  // ticket does not add debit-strategy support -- POP/targetPrice/hitTarget
+  // are all forced unavailable/inert for these, see loadPositions'
+  // isNetDebit guard), 'Unknown' only if the signed premium couldn't be
+  // computed at all. The ES-0001 canonical `identity` (signed entry
+  // economics) is unaffected by this field -- it remains the sole source
+  // for close/roll actions.
+  entryPriceEffect: 'Credit' | 'Debit' | 'Unknown';
   creditReceived: number;
   currentValue: number | null;
   closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)

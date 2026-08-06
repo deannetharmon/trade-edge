@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit } from '../acquisition';
+import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit, computeMarketablePnlPct } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
 import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy } from '@/lib/portfolio/stopLossPolicy';
 import { computeSignedNetPremium, isNetDebitStructure } from '@/lib/portfolio/positionMetrics';
@@ -47,6 +47,7 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     identity: null,
     structureAmbiguous: false,
     structureBlockMessage: null,
+    entryPriceEffect: 'Credit',
     creditReceived: 1260, // $2.52/contract * 5 * 100
     currentValue: 1200,
     closeValue: 1200,
@@ -500,6 +501,27 @@ describe('debit-trade guard (PM-0001)', () => {
     const signed = computeSignedNetPremium(legs);
     expect(isNetDebitStructure(signed)).toBe(false);
   });
+
+  // PM-0001 corrective round: entryPriceEffect is the explicit tag
+  // loadPositions derives from this same signed-premium guard --
+  // isNetDebit ? 'Debit' : 'Credit'. Locking the mapping here documents the
+  // wiring contract (loadPositions itself can't be unit-tested directly).
+  it('maps a debit structure to entryPriceEffect "Debit", never "Credit"', () => {
+    const legs = [
+      { direction: 'Short' as const, quantity: 1, avgOpenPrice: 1.00 },
+      { direction: 'Long' as const, quantity: 1, avgOpenPrice: 3.00 },
+    ];
+    const isDebit = isNetDebitStructure(computeSignedNetPremium(legs));
+    const entryPriceEffect: Position['entryPriceEffect'] = isDebit ? 'Debit' : 'Credit';
+    expect(entryPriceEffect).toBe('Debit');
+  });
+
+  it('maps a genuine credit structure to entryPriceEffect "Credit"', () => {
+    const legs = [{ direction: 'Short' as const, quantity: 5, avgOpenPrice: 0.45 }];
+    const isDebit = isNetDebitStructure(computeSignedNetPremium(legs));
+    const entryPriceEffect: Position['entryPriceEffect'] = isDebit ? 'Debit' : 'Credit';
+    expect(entryPriceEffect).toBe('Credit');
+  });
 });
 
 // ── PM-0001: acquisition-CSP messaging unchanged ────────────────────────────
@@ -520,5 +542,47 @@ describe('getRecommendation: acquisition-CSP messaging unchanged (PM-0001)', () 
     const rec = getRecommendation(pos, null);
     expect(rec.action).toBe('HOLD');
     expect(rec.detail).toMatch(/% paper/);
+  });
+});
+
+// ── PM-0001 corrective round: crossed option quotes ─────────────────────────
+// loadPositions() itself fetches live broker data and can't be unit-tested
+// directly (see TC-0001's implementation report: "realistically verifiable
+// only against a live TastyTrade session"). resolveOptionLegPrice's own
+// crossed-market behavior is covered directly in positionMetrics.test.ts;
+// these tests instead lock the WIRING CONTRACT loadPositions() must produce
+// for a crossed-quote leg -- closeValue/pnl/pnlPct null, hitTarget false --
+// by constructing exactly that Position shape and proving getRecommendation
+// (and computeMarketablePnlPct) cannot fabricate a decision from it.
+describe('crossed-quote contract: closeValue / P&L / recommendations (PM-0001)', () => {
+  it('a crossed-quote position produces no marketable P/L% (closeValue null per the contract)', () => {
+    const pos = makePosition({ closeValue: null, closeNowPnl: null });
+    expect(computeMarketablePnlPct(pos)).toBeNull();
+  });
+
+  it('does not return TAKE_PROFIT or CUT_LOSSES for a crossed-quote position (pnl/pnlPct null per the contract)', () => {
+    const pos = makePosition({
+      currentValue: null,   // crossed leg -> pnl forced null even if a mark exists for display
+      closeValue: null,
+      pnl: null,
+      pnlPct: null,
+      pnlReliable: false,
+      hitTarget: false,
+      hasGtc: true,
+      stopLossClassification: 'NO_STOP',
+      stopLossPolicy: null,
+      snapshotHistory: [],
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).not.toBe('TAKE_PROFIT');
+    expect(rec.action).not.toBe('CUT_LOSSES');
+  });
+
+  it('never reports a target hit for a crossed-quote position, per the contract', () => {
+    const pos = makePosition({ hitTarget: false, pnl: null, closeValue: null });
+    expect(pos.hitTarget).toBe(false);
+    // getRecommendation must not independently re-derive a hit from credit/target alone.
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).not.toBe('TAKE_PROFIT');
   });
 });

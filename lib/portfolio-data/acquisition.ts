@@ -65,6 +65,7 @@ import {
   computeSignedNetPremium,
   isNetDebitStructure,
   calcPositionPop,
+  findShortLegStrikes,
   computeSideBuffers,
   computeCanonicalBuffer,
   resolveOptionLegPrice,
@@ -910,6 +911,14 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   // (marketable)" is only meaningful when it's actually built from a real
   // ask (short leg) / bid (long leg), not a mark masquerading as both.
   const oneSidedSymbols = new Set<string>();
+  // PM-0001 corrective round: legs whose broker quote is genuinely CROSSED
+  // (ask < bid, a stale/bad tick) -- distinct from merely one-sided
+  // (missing bid or ask). currentPrices/currentValue may still show an
+  // observational mid built from a valid mark for these (see
+  // resolveOptionLegPrice), but no DECISION-DRIVING field (pnl, pnlPct,
+  // hitTarget, and therefore any P/L-threshold recommendation branch) may
+  // be computed from a crossed leg -- see the isNetDebit-style guard below.
+  const crossedSymbols = new Set<string>();
   const thetaMap: Record<string, number> = {};
   const gammaMap: Record<string, number> = {};
   const deltaMap: Record<string, number> = {};
@@ -926,13 +935,20 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           const bid = parseFloat(item.bid ?? '0');
           const ask = parseFloat(item.ask ?? '0');
           const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
-          const twoSided = bid > 0 && ask > 0;
+          // PM-0001 corrective round: a crossed market (ask < bid) is treated
+          // the same as one-sided everywhere -- it must never feed closeValue
+          // ("Close now (marketable)"), quote-width evidence, or a real
+          // two-sided currentBids/currentAsks pair. resolveOptionLegPrice
+          // already applies this same `ask >= bid` rule for the observational
+          // mid value (currentPrices), falling back to mark or null.
+          const twoSidedNonCrossed = bid > 0 && ask > 0 && ask >= bid;
           const resolvedPrice = resolveOptionLegPrice(bid, ask, mark);
           currentPrices[sym] = resolvedPrice;
-          currentBids[sym] = twoSided ? bid : mark > 0 ? mark : null;
-          currentAsks[sym] = twoSided ? ask : mark > 0 ? mark : null;
+          currentBids[sym] = twoSidedNonCrossed ? bid : mark > 0 ? mark : null;
+          currentAsks[sym] = twoSidedNonCrossed ? ask : mark > 0 ? mark : null;
           if (resolvedPrice == null) unpriceableSymbols.add(sym);
-          if (!twoSided) oneSidedSymbols.add(sym);
+          if (!twoSidedNonCrossed) oneSidedSymbols.add(sym);
+          if (bid > 0 && ask > 0 && ask < bid) crossedSymbols.add(sym);
           const theta = parseFloat(item.theta ?? 'NaN');
           const gamma = parseFloat(item.gamma ?? 'NaN');
           const delta = parseFloat(item.delta ?? 'NaN');
@@ -1339,10 +1355,18 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const anyLegUnpriceable = legs.some(
       (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
-    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable;
+    // PM-0001 corrective round: a crossed leg's mid may still be usable for
+    // an OBSERVATIONAL currentValue (mark fallback, see resolveOptionLegPrice
+    // above), but no decision-driving field derived from it (pnl, pnlPct,
+    // hitTarget, and therefore any P/L-threshold recommendation) may treat
+    // that observation as reliable.
+    const anyLegCrossed = legs.some(
+      (l: any) => crossedSymbols.has(l.symbol?.replace(/\s+/g, ''))
+    );
+    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed;
     const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
     const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
-    const pnl = hasCurrentPrices ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
+    const pnl = (hasCurrentPrices && !anyLegCrossed) ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
     // PM-0001 debit guard: a net-debit structure's `creditReceived` above is
@@ -1351,8 +1375,9 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // trivially "hits" on any non-negative P/L. targetPrice stays a number
     // (the Position type's existing contract) but is 0 and inert; hitTarget
     // is forced false so no take-profit recommendation can fire off it.
+    // Same forcing applies to a crossed leg -- see anyLegCrossed above.
     const targetPrice = isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
-    const hitTarget = !isNetDebit && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    const hitTarget = !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
 
     const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
     const recordedStopPolicy = shortLegForPolicyKey
@@ -1383,6 +1408,11 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       identity,
       structureAmbiguous,
       structureBlockMessage,
+      // PM-0001 corrective round: explicit, honest tag distinguishing a
+      // genuine net-credit structure from a detected net-debit one --
+      // `creditReceived` below is floored to $0.00 for the debit case and
+      // must never be read as though it were a real zero-credit entry.
+      entryPriceEffect: positionLegs.length === 0 ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit'),
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
@@ -1441,23 +1471,21 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       stopLossOrderStatus: stopLoss.orderStatus,
       quoteWidthEvidence,
       stockPrice: stockPrices[symbol] ?? null,
-      // PM-0001: side-specific buffer evidence, resolved via `.find()` on
-      // optionType/direction (not `legs[0]`/`shorts[0]`) -- independent of
-      // broker leg-array ordering. `buffer` is the canonical collapsed
-      // value: put-only -> put side, call-only -> call side, IC -> MINIMUM
-      // of both sides (so `buffer <= 0` correctly flags a breach on EITHER
-      // side, not only when both are breached). `putBufferPct`/
-      // `callBufferPct` are retained on the Position for explanation UI and
-      // tests even though the collapsed card only shows `buffer`.
+      // PM-0001: side-specific buffer evidence. Short put/call strikes are
+      // resolved via findShortLegStrikes() -- the SAME exported pure
+      // function the leg-order-invariance wiring test calls directly, not
+      // `legs[0]`/`shorts[0]` -- so the result is independent of broker
+      // leg-array ordering. `buffer` is the canonical collapsed value:
+      // put-only -> put side, call-only -> call side, IC -> MINIMUM of both
+      // sides, but ONLY when both are valid (PM-0001 corrective round: an
+      // IC can never be declared safe/breached from one-sided evidence --
+      // see computeCanonicalBuffer). `putBufferPct`/`callBufferPct` are
+      // retained on the Position for explanation UI and tests even though
+      // the collapsed card only shows `buffer`.
       ...(() => {
         const stock = stockPrices[symbol] ?? null;
-        const shortPutLeg = positionLegs.find(l => l.optionType === 'P' && l.direction === 'Short');
-        const shortCallLeg = positionLegs.find(l => l.optionType === 'C' && l.direction === 'Short');
-        const { putBufferPct, callBufferPct } = computeSideBuffers(
-          stock,
-          shortPutLeg?.strikePrice ?? null,
-          shortCallLeg?.strikePrice ?? null
-        );
+        const { shortPutStrike, shortCallStrike } = findShortLegStrikes(positionLegs);
+        const { putBufferPct, callBufferPct } = computeSideBuffers(stock, shortPutStrike, shortCallStrike);
         return {
           putBufferPct,
           callBufferPct,

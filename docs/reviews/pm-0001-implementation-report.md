@@ -183,3 +183,95 @@ callBufferPct: number | null;
 ## 13. Confirmation
 
 TE-0002's stop-loss policy behavior and ES-0001's order-safety protections are preserved exactly — no file either depends on was modified, and their full test suites pass unchanged as part of the 1391-test green run. This ticket is scoped to calculation correctness only: no Greek display units, risk thresholds, or Net Edge formula were touched, per the ticket's explicit exclusion.
+
+---
+
+## 14. Corrective round (before merge)
+
+A focused follow-up commit addressed four gaps found in review, on the same branch, before merge. No Greek units, Greek thresholds, Net Edge, TE-0002, or ES-0001 were touched.
+
+### 14.1 Complete IC buffer evidence required
+
+**Before:** `computeCanonicalBuffer('IC', ...)` returned whichever side was available when the other was `null` — an IC could be labeled "safe" or "breached" from only one side's evidence.
+
+**After:**
+```ts
+if (strategy === 'IC') {
+  if (putBufferPct == null || callBufferPct == null || !Number.isFinite(putBufferPct) || !Number.isFinite(callBufferPct)) {
+    return null;
+  }
+  return Math.min(putBufferPct, callBufferPct);
+}
+```
+An IC's canonical buffer is now `null` unless **both** sides are valid finite numbers — `getRecommendation`'s `buffer <= 0` breach check correctly treats `null` as "cannot classify," never as "safe by default."
+
+**Tests added** (`positionMetrics.test.ts`): put present/call missing → `null`; call present/put missing → `null`; both present → minimum; both missing → `null`.
+
+### 14.2 Crossed option quotes rejected
+
+**Before:** `resolveOptionLegPrice` used the midpoint whenever `bid > 0 && ask > 0`, with no check that `ask >= bid` — a crossed (stale/bad) quote could produce a fabricated midpoint.
+
+**After:**
+```ts
+export function resolveOptionLegPrice(bid, ask, mark) {
+  const twoSidedNonCrossed = bid > 0 && ask > 0 && ask >= bid;
+  if (twoSidedNonCrossed) return (bid + ask) / 2;
+  return mark > 0 ? mark : null;
+}
+```
+Same rule `resolveUnderlyingPrice` already applied to the underlying, now applied to option legs. In `acquisition.ts`, a genuinely crossed leg (`bid > 0 && ask > 0 && ask < bid`) is tracked in a new `crossedSymbols` set and is now also added to `oneSidedSymbols` — so it's excluded from `closeValue` (marketable) exactly like any other one-sided leg, and `closeValue` becomes `null` rather than being built from crossed bid/ask.
+
+Separately, a crossed leg now forces `pnl`, `pnlPct`, and `hitTarget` to be unavailable/false, even though the **observational** `currentValue`/mid may still use a mark fallback (matching the ticket's "midpoint observation uses mark" requirement) — a crossed quote's mark can be shown for display, but no decision-driving field may be computed from it:
+```ts
+const anyLegCrossed = legs.some(l => crossedSymbols.has(...));
+const pnl = (hasCurrentPrices && !anyLegCrossed) ? ... : null;
+const hitTarget = !isNetDebit && !anyLegCrossed && hasCurrentPrices && ...;
+```
+Because `pnlPct` derives from `pnl`, and `getRecommendation`'s `pnlPct` fallback (`0` when `null`) never crosses any take-profit/cut-loss threshold (the same property already verified for the debit guard in §8), a crossed quote cannot spuriously fire a take-profit or loss recommendation.
+
+**Tests added:**
+- `positionMetrics.test.ts` (pure): crossed bid/ask with valid mark → midpoint observation uses mark; crossed bid/ask without mark → `null`; crossed midpoint is never averaged even when the average would look plausible.
+- `stopLossWiring.test.ts` (wiring contract — `loadPositions()` itself can't be unit-tested without a live session, same limitation TC-0001 already documented; these lock the Position shape `loadPositions()` must produce for a crossed leg): `computeMarketablePnlPct` is `null` when `closeValue` is `null`; `getRecommendation` never returns `TAKE_PROFIT`/`CUT_LOSSES` when `pnl`/`pnlPct` are `null`; `hitTarget` stays `false` and cannot be independently re-derived by `getRecommendation`.
+
+### 14.3 Debit credit-metrics made explicitly unavailable
+
+**New `Position` field:**
+```ts
+entryPriceEffect: 'Credit' | 'Debit' | 'Unknown';
+```
+Computed in `loadPositions()` from the same `isNetDebit` guard already introduced in the base commit: `positionLegs.length === 0 ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit')`. The ES-0001 canonical `identity` (signed entry economics) is unchanged — this field is purely an additional, honest display/decision tag alongside it.
+
+**`pnl` is no longer computed as `-currentValue` for a debit structure.** Previously `pnl = |creditReceived| - |currentValue|`, and for a debit `creditReceived` floors to `0`, so `pnl` silently became `-|currentValue|` — exactly the fabrication the ticket named. `pnl` is now gated the same way `pop`/`targetPrice`/`hitTarget` already were:
+```ts
+const pnl = (hasCurrentPrices && !anyLegCrossed) ? Math.abs(creditReceived) - Math.abs(currentValue) : null;
+```
+Combined with the existing `isNetDebit` guard on `pop`/`targetPrice`/`hitTarget` from the base commit, a debit structure now has: POP `null`, target unavailable/inert, `hitTarget` forced `false`, `pnlPct` `null` (already gated on `creditReceived !== 0`, and a debit's floored `creditReceived` is `0`).
+
+**Card display fix** (`app/portfolio/page.tsx`): the Credit metric now renders "Debit (unsupported)" instead of a dollar amount when `entryPriceEffect === 'Debit'`, so a debit structure's floored `$0.00` can never be read as a genuine zero-credit entry on the card itself.
+
+**Tests added** (`stopLossWiring.test.ts`): the `isNetDebit`-to-`entryPriceEffect` mapping locks `'Debit'` for a detected debit and `'Credit'` for a genuine credit structure.
+
+### 14.4 Leg-order invariance: real wiring test
+
+**Before:** the "leg-order independent" test called `computeCanonicalBuffer('IC', 8.0, 3.0)` twice with the same pre-resolved arguments and asserted the results were equal to each other — a tautology (`a === a`) that never actually varied leg order and could not have caught an order-dependence bug.
+
+**After:** a new exported pure function, `findShortLegStrikes(legs)`, resolves short put/call strikes via `.find(optionType/direction)` — this is the exact function `acquisition.ts`'s `loadPositions()` now calls (replacing its inline `.find()` calls), not a reimplementation. The new `leg-order invariance (wiring-level, via findShortLegStrikes)` describe block builds the same 4-leg IC in original broker order and in fully-reversed order, runs both through `findShortLegStrikes` → `computeSideBuffers` → `computeCanonicalBuffer`, and asserts identical `putBufferPct`/`callBufferPct`/`buffer`/breach result for two scenarios (both sides safe; put side breached).
+
+### 14.5 Validation (corrective round)
+
+- `npx tsc --noEmit` — clean, zero errors.
+- `npx vitest run` — **99 test files, 1404 tests, all passing** (up from 99 files/1391 tests before this corrective round — 13 net new tests after replacing the one ineffective leg-order test).
+- `npx next build` — succeeds (needed a second invocation to finish trace collection within the tool's time limit; webpack cache carried progress across both calls, same pattern as every prior build in this project).
+- TE-0002 (`stopLossPolicy.test.ts`, 33 tests) and ES-0001/ES-0002 suites (`closeOrderSafety`, `closeOrderSubmission`, `pendingOrderReplacement*`, `RecommendationService`) all pass unchanged.
+
+### 14.6 Corrected debit rendering behavior (summary)
+
+| | Before corrective round | After corrective round |
+|---|---|---|
+| `Position.entryPriceEffect` | did not exist | `'Credit' \| 'Debit' \| 'Unknown'`, new field |
+| `pnl` for a debit structure | `-currentValue` (fabricated) | `null` |
+| Card Credit display for a debit | `$0.00` (indistinguishable from a real zero-credit trade) | "Debit (unsupported)" |
+| IC buffer with one side missing | returned the available side | `null` |
+| Crossed-leg midpoint | fabricated from crossed bid/ask | mark fallback only, or `null` |
+| Crossed-leg `closeValue` | could be built from crossed bid/ask | `null` (leg is one-sided) |
+| Crossed-leg `pnl`/`hitTarget`/recommendations | could fire off a mark-fallback mid | `null`/`false`/no P&L-driven action |

@@ -7938,7 +7938,14 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Credit</p>
-              <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${pos.creditReceived.toFixed(2)}</p>
+              {/* PM-0001 corrective round: a detected net-debit structure's
+                  creditReceived is a floored $0.00, not a genuine zero-credit
+                  entry -- never render it as though it were. */}
+              {pos.entryPriceEffect === 'Debit' ? (
+                <p className="text-xs font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>Debit (unsupported)</p>
+              ) : (
+                <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${pos.creditReceived.toFixed(2)}</p>
+              )}
             </div>
 
             {pos.closeNowPnl != null && (

@@ -223,6 +223,29 @@ export function calcPositionPop(
 
 // ── Side-specific buffer / breach evidence ──────────────────────────────────
 
+export interface ShortLegStrikes {
+  shortPutStrike: number | null;
+  shortCallStrike: number | null;
+}
+
+// Resolves the short put/call strikes used for side-specific buffer
+// evidence via `.find()` on optionType+direction -- NEVER `legs[0]`/
+// `shorts[0]` -- so the result is identical regardless of broker
+// leg-array ordering. This is the SAME function acquisition.ts's
+// loadPositions() calls (not a reimplementation), so a leg-order-
+// invariance test that calls this directly exercises the real
+// production resolution path.
+export function findShortLegStrikes(
+  legs: readonly { optionType: 'P' | 'C'; direction: 'Short' | 'Long'; strikePrice: number }[]
+): ShortLegStrikes {
+  const shortPut = legs.find(l => l.optionType === 'P' && l.direction === 'Short');
+  const shortCall = legs.find(l => l.optionType === 'C' && l.direction === 'Short');
+  return {
+    shortPutStrike: shortPut?.strikePrice ?? null,
+    shortCallStrike: shortCall?.strikePrice ?? null,
+  };
+}
+
 export interface SideBuffers {
   putBufferPct: number | null;
   callBufferPct: number | null;
@@ -254,11 +277,15 @@ export function computeSideBuffers(
 // Canonical single buffer value for the collapsed card/breach logic:
 // - Put-only strategy: put buffer.
 // - Call-only strategy: call buffer.
-// - Iron condor: MINIMUM of put and call buffers -- the position is
-//   breached the moment EITHER short strike is breached, not only when
-//   both are, so `canonicalBuffer <= 0` (the existing breach check in
-//   getRecommendation) is correct for ICs without any separate "any side"
-//   check needed downstream.
+// - Iron condor: MINIMUM of put and call buffers, but ONLY when BOTH sides
+//   are valid finite numbers -- PM-0001 corrective round: an IC with only
+//   one side's evidence is NOT "safe" or "breached" from that one side
+//   alone; declaring it so from incomplete two-sided evidence would be a
+//   fabrication in the opposite direction from the original "shorts[0]"
+//   defect this ticket already fixed. If either side is missing, the
+//   canonical IC buffer is `null` -- callers (e.g. getRecommendation's
+//   `buffer <= 0` breach check) must treat `null` as "cannot classify,"
+//   never as "safe by default."
 // - No valid short strike or stock price on the applicable side(s): null.
 export function computeCanonicalBuffer(
   strategy: string,
@@ -266,9 +293,12 @@ export function computeCanonicalBuffer(
   callBufferPct: number | null
 ): number | null {
   if (strategy === 'IC') {
-    if (putBufferPct == null && callBufferPct == null) return null;
-    if (putBufferPct == null) return callBufferPct;
-    if (callBufferPct == null) return putBufferPct;
+    if (
+      putBufferPct == null || callBufferPct == null ||
+      !Number.isFinite(putBufferPct) || !Number.isFinite(callBufferPct)
+    ) {
+      return null;
+    }
     return Math.min(putBufferPct, callBufferPct);
   }
   // Call-only strategies must use the call buffer, even if a put buffer
@@ -314,13 +344,23 @@ export function computeEntryChangeTone(
 
 // ── Quote-price resolution (never fabricate a 0) ────────────────────────────
 
-// Resolves a single option leg's current price. A 0 is never returned as a
-// stand-in for "unavailable" -- callers must treat `null` as "no reliable
-// price," which correctly propagates into currentValue/pnl/pnlPct/hitTarget
-// being unavailable rather than computed off a fabricated $0.00.
+// Resolves a single option leg's current (observational, mid-based) price.
+// A 0 is never returned as a stand-in for "unavailable" -- callers must
+// treat `null` as "no reliable price," which correctly propagates into
+// currentValue/pnl/pnlPct/hitTarget being unavailable rather than computed
+// off a fabricated $0.00.
+//
+// PM-0001 corrective round: requires `ask >= bid` (a real, non-crossed
+// two-sided market), matching resolveUnderlyingPrice's rule -- a crossed
+// option quote (ask < bid, a stale/bad tick) must not produce a midpoint.
+// For a crossed market this falls back to a valid positive broker mark for
+// an OBSERVATIONAL midpoint value, same as any other one-sided case; a
+// crossed market is never treated as a genuine two-sided market for
+// marketable-close purposes (see closeValue's oneSidedSymbols gate in
+// acquisition.ts, which now also marks a crossed leg one-sided).
 export function resolveOptionLegPrice(bid: number, ask: number, mark: number): number | null {
-  const twoSided = bid > 0 && ask > 0;
-  if (twoSided) return (bid + ask) / 2;
+  const twoSidedNonCrossed = bid > 0 && ask > 0 && ask >= bid;
+  if (twoSidedNonCrossed) return (bid + ask) / 2;
   return mark > 0 ? mark : null;
 }
 

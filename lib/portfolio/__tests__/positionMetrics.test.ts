@@ -7,6 +7,7 @@ import {
   computeSingleLegBreakeven,
   computeIcBreakevens,
   calcPositionPop,
+  findShortLegStrikes,
   computeSideBuffers,
   computeCanonicalBuffer,
   resolveOptionLegPrice,
@@ -275,12 +276,6 @@ describe('computeCanonicalBuffer', () => {
 
   // Reversing which side is "put"/"call" (i.e. leg-array order) never
   // changes the result, since both are passed as pre-resolved named values.
-  it('is leg-order independent -- swapping which argument is passed first does not apply here by construction', () => {
-    const a = computeCanonicalBuffer('IC', 8.0, 3.0);
-    const b = computeCanonicalBuffer('IC', 8.0, 3.0); // same call, order of resolution upstream is irrelevant
-    expect(a).toBe(b);
-  });
-
   it('put-only strategy uses the put buffer regardless of a stray call value', () => {
     expect(computeCanonicalBuffer('PUT', 4.2, 99)).toBeCloseTo(4.2, 5);
   });
@@ -291,6 +286,77 @@ describe('computeCanonicalBuffer', () => {
 
   it('returns null when neither side is applicable', () => {
     expect(computeCanonicalBuffer('IC', null, null)).toBeNull();
+  });
+
+  // PM-0001 corrective round: an IC must never be declared safe or breached
+  // from incomplete (one-sided) evidence.
+  it('IC: put buffer present, call buffer missing -> null (not the put value)', () => {
+    expect(computeCanonicalBuffer('IC', 8.0, null)).toBeNull();
+  });
+
+  it('IC: call buffer present, put buffer missing -> null (not the call value)', () => {
+    expect(computeCanonicalBuffer('IC', null, 3.0)).toBeNull();
+  });
+
+  it('IC: both sides present -> minimum of the two', () => {
+    expect(computeCanonicalBuffer('IC', 8.0, 3.0)).toBeCloseTo(3.0, 5);
+  });
+
+  it('IC: both sides missing -> null', () => {
+    expect(computeCanonicalBuffer('IC', null, null)).toBeNull();
+  });
+});
+
+// ── Leg-order invariance (wiring-level) ─────────────────────────────────────
+// PM-0001 corrective round: replaces the earlier ineffective "leg-order
+// independent" test, which called computeCanonicalBuffer with pre-resolved
+// values twice and asserted a tautology (a === a) -- it never actually
+// exercised leg-array ordering. This test constructs the SAME IC's raw legs
+// in both original and fully-reversed broker order, resolves short put/call
+// strikes through findShortLegStrikes() -- the exact function
+// acquisition.ts's loadPositions() calls, not a reimplementation -- and
+// proves putBufferPct/callBufferPct/canonical buffer/breach are identical
+// regardless of order.
+describe('leg-order invariance (wiring-level, via findShortLegStrikes)', () => {
+  const stockPrice = 100;
+  // A 4-leg IC: short put 95, long put 90, short call 105, long call 110.
+  const legsOriginalOrder = [
+    { optionType: 'P' as const, direction: 'Short' as const, strikePrice: 95 },
+    { optionType: 'P' as const, direction: 'Long' as const, strikePrice: 90 },
+    { optionType: 'C' as const, direction: 'Short' as const, strikePrice: 105 },
+    { optionType: 'C' as const, direction: 'Long' as const, strikePrice: 110 },
+  ];
+  const legsReversedOrder = [...legsOriginalOrder].reverse();
+
+  function resolveBufferAndBreach(legs: typeof legsOriginalOrder) {
+    const { shortPutStrike, shortCallStrike } = findShortLegStrikes(legs);
+    const { putBufferPct, callBufferPct } = computeSideBuffers(stockPrice, shortPutStrike, shortCallStrike);
+    const buffer = computeCanonicalBuffer('IC', putBufferPct, callBufferPct);
+    return { putBufferPct, callBufferPct, buffer, breached: buffer != null && buffer <= 0 };
+  }
+
+  it('produces identical putBufferPct, callBufferPct, canonical buffer, and breach result for original vs. fully-reversed leg order (both sides safe)', () => {
+    const original = resolveBufferAndBreach(legsOriginalOrder);
+    const reversed = resolveBufferAndBreach(legsReversedOrder);
+    expect(reversed).toEqual(original);
+    expect(original.putBufferPct).toBeCloseTo(5, 5);
+    expect(original.callBufferPct).toBeCloseTo(5, 5);
+    expect(original.buffer).toBeCloseTo(5, 5);
+    expect(original.breached).toBe(false);
+  });
+
+  it('produces identical results for original vs. reversed order when the put side is breached', () => {
+    const stockNearPut = 94; // below the 95 short put strike -> put side breached
+    const withStock = (legs: typeof legsOriginalOrder) => {
+      const { shortPutStrike, shortCallStrike } = findShortLegStrikes(legs);
+      const { putBufferPct, callBufferPct } = computeSideBuffers(stockNearPut, shortPutStrike, shortCallStrike);
+      const buffer = computeCanonicalBuffer('IC', putBufferPct, callBufferPct);
+      return { putBufferPct, callBufferPct, buffer, breached: buffer != null && buffer <= 0 };
+    };
+    const original = withStock(legsOriginalOrder);
+    const reversed = withStock(legsReversedOrder);
+    expect(reversed).toEqual(original);
+    expect(original.breached).toBe(true);
   });
 });
 
@@ -307,6 +373,22 @@ describe('resolveOptionLegPrice', () => {
   it('returns null (never 0) when neither a two-sided market nor a positive mark exists', () => {
     expect(resolveOptionLegPrice(0, 1.2, 0)).toBeNull();
     expect(resolveOptionLegPrice(0, 0, 0)).toBeNull();
+  });
+
+  // PM-0001 corrective round: crossed option quotes (ask < bid).
+  it('crossed bid/ask with a valid mark uses the mark for the observational midpoint value', () => {
+    expect(resolveOptionLegPrice(1.3, 1.1, 1.2)).toBeCloseTo(1.2, 5);
+  });
+
+  it('crossed bid/ask without a mark returns null (never the crossed midpoint)', () => {
+    expect(resolveOptionLegPrice(1.3, 1.1, 0)).toBeNull();
+  });
+
+  it('never averages a crossed bid/ask even when that average would look plausible', () => {
+    // (1.3+1.1)/2 = 1.2 would look like a normal midpoint -- must not be used.
+    const result = resolveOptionLegPrice(1.3, 1.1, 0);
+    expect(result).not.toBe(1.2);
+    expect(result).toBeNull();
   });
 });
 
