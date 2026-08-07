@@ -39,7 +39,7 @@ import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
-import { TaskProvider } from '@/components/tasks/TaskProvider';
+import { TaskProvider, useTaskManagerContext } from '@/components/tasks/TaskProvider';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
 
 const getCoveredCallCapacityReportMock = vi.fn<[], Promise<CoveredCallCapacityReport>>();
@@ -458,6 +458,70 @@ describe('SCREENER-RESULTS-0001 corrective: Targeted cancellation (4)', () => {
   });
 });
 
+describe('SCREENER-RESULTS-0001 final corrective: Ranked reconnection fail-closed fallback', () => {
+  // SCREENER-RESULTS-0001 final corrective — reconnecting to a completed
+  // ranked-scan task whose own stored `input` has no activeSymbols (a
+  // legacy task predating that field, or one dispatched with an empty
+  // watchlist) used to fall back to setResults(result.results) directly:
+  // unowned results displayed with no canonical session behind them, the
+  // exact trust-boundary bypass the review flagged. This drives that real
+  // scenario end-to-end through the TaskManager (no `input` at all on the
+  // seeded task) and asserts the page fails closed -- a clear error, no
+  // ranked results rendered.
+  // Seeding the task from a button click (rather than a mount-time effect)
+  // guarantees ScreenerPage's own useTaskManager subscription is already
+  // active before the task-created/started/completed events fire -- a
+  // mount-time effect on a sibling component can race ahead of that
+  // subscription and have its events silently missed.
+  function SeedLegacyRankedTask() {
+    const manager = useTaskManagerContext();
+    return (
+      <button
+        onClick={() => {
+          const task = manager.createTask({ kind: 'ranked-scan', title: 'Ranked Scan' }); // no `input`
+          manager.startTask(task.id);
+          manager.completeTask(task.id, {
+            results: [{
+              symbol: 'AAPL', strategy: 'BPS', price: 100, ivr: 40, qualified: true,
+              bestCandidate: null, failReasons: [],
+              checks: {
+                ivr: { status: 'pass', value: '-', reason: '-' }, earnings: { status: 'pass', value: '-', reason: '-' },
+                oi: { status: 'pass', value: '-', reason: '-' }, delta: { status: 'pass', value: '-', reason: '-' },
+                credit: { status: 'pass', value: '-', reason: '-' }, roc: { status: 'pass', value: '-', reason: '-' },
+                pop: { status: 'pass', value: '-', reason: '-' }, iv: { status: 'pass', value: '-', reason: '-' },
+                emClearance: { status: 'pass', value: '-', reason: '-' },
+              },
+            }],
+            rawScanCache: [],
+          });
+        }}
+      >
+        SEED LEGACY RANKED TASK
+      </button>
+    );
+  }
+
+  it('a completed ranked task with no recoverable scope (no input.activeSymbols) fails closed instead of displaying unowned results', async () => {
+    window.localStorage.setItem('hunter-screen-mode', 'rank');
+    render(
+      <TaskProvider>
+        <CommandProvider>
+          <SeedLegacyRankedTask />
+          <ScreenerPage />
+        </CommandProvider>
+      </TaskProvider>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'SEED LEGACY RANKED TASK' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/original scope could not be recovered/i)).toBeInTheDocument();
+    });
+    // No unowned result must ever reach the screen.
+    expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
+  });
+});
+
 describe('SCREENER-RESULTS-0001: CC scope-exclusion precision (16)', () => {
   it('selected-but-ineligible CC symbols (no verified shares vs fully covered) are both excluded and never scanned, without conflating the two reasons', async () => {
     getCoveredCallCapacityReportMock.mockResolvedValue({
@@ -595,5 +659,124 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     // And it must actually have been cleared, not merely rejected once.
     const restoredAgain = await restoreScanSession();
     expect(restoredAgain).toBeNull();
+  });
+
+  // SCREENER-RESULTS-0001 final corrective — rawScanCache and Targeted's own
+  // TargetedScanEntry[] IndexedDB cache are now stored as {sessionId,
+  // entries} and must only be adopted on the page when the stored sessionId
+  // exactly matches the validated, restored canonical session's own
+  // sessionId -- a valid session must never be paired with a DIFFERENT run's
+  // auxiliary cache data merely because both happen to be present.
+  it('rawScanCache restores only when its stored sessionId exactly matches the restored session; a mismatched cache is silently ignored', async () => {
+    installFakeIndexedDb();
+    const { createScanSession, recordSymbolEvaluated, completeSession } = await import('@/lib/screener/scanSession');
+    const { persistScanSession } = await import('@/lib/screener/scanSessionCache');
+
+    const emptyCheck = { status: 'pass' as const, value: '-', reason: '-' };
+    const checks = { ivr: emptyCheck, earnings: emptyCheck, oi: emptyCheck, delta: emptyCheck, credit: emptyCheck, roc: emptyCheck, pop: emptyCheck, iv: emptyCheck, emClearance: emptyCheck };
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    session = recordSymbolEvaluated(session, 'AAPL', [{
+      symbol: 'AAPL', strategy: 'BPS', price: 100, ivr: 40, qualified: true,
+      bestCandidate: null, failReasons: [], checks,
+    }]);
+    session = completeSession(session);
+    await persistScanSession(session);
+
+    // Seed rawScanCache under a DIFFERENT sessionId than the one just persisted.
+    await new Promise<void>(resolve => {
+      const req = (globalThis as any).indexedDB.open();
+      req.onsuccess = () => {
+        const tx = req.result.transaction('kv');
+        tx.objectStore().put({ sessionId: 'a-different-session-id', entries: [{ symbol: 'AAPL', strategy: 'BPS' }] }, 'rawScanCache');
+        tx.oncomplete = () => resolve();
+      };
+    });
+
+    renderScreener();
+
+    await waitFor(() => {
+      expect(screen.getByText(/↺ restored/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/⚡ cached/)).not.toBeInTheDocument();
+  });
+
+  it('rawScanCache restores and is adopted when its stored sessionId matches the restored session', async () => {
+    installFakeIndexedDb();
+    const { createScanSession, recordSymbolEvaluated, completeSession } = await import('@/lib/screener/scanSession');
+    const { persistScanSession } = await import('@/lib/screener/scanSessionCache');
+
+    const emptyCheck = { status: 'pass' as const, value: '-', reason: '-' };
+    const checks = { ivr: emptyCheck, earnings: emptyCheck, oi: emptyCheck, delta: emptyCheck, credit: emptyCheck, roc: emptyCheck, pop: emptyCheck, iv: emptyCheck, emClearance: emptyCheck };
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    session = recordSymbolEvaluated(session, 'AAPL', [{
+      symbol: 'AAPL', strategy: 'BPS', price: 100, ivr: 40, qualified: true,
+      bestCandidate: null, failReasons: [], checks,
+    }]);
+    session = completeSession(session);
+    await persistScanSession(session);
+
+    // Seed rawScanCache under the SAME sessionId as the persisted session.
+    await new Promise<void>(resolve => {
+      const req = (globalThis as any).indexedDB.open();
+      req.onsuccess = () => {
+        const tx = req.result.transaction('kv');
+        tx.objectStore().put({ sessionId: session.sessionId, entries: [{ symbol: 'AAPL', strategy: 'BPS' }] }, 'rawScanCache');
+        tx.oncomplete = () => resolve();
+      };
+    });
+
+    renderScreener();
+
+    await waitFor(() => {
+      expect(screen.getByText(/⚡ cached/)).toBeInTheDocument();
+    });
+  });
+
+  it("Targeted's own results cache restores only when its stored sessionId matches the restored Targeted session", async () => {
+    installFakeIndexedDb();
+    const { createScanSession, recordSymbolEvaluated, completeSession } = await import('@/lib/screener/scanSession');
+    const { persistScanSession } = await import('@/lib/screener/scanSessionCache');
+
+    let session = createScanSession({
+      mode: 'targeted', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    session = recordSymbolEvaluated(session, 'AAPL', [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
+    session = completeSession(session);
+    await persistScanSession(session);
+
+    // Seed the Targeted results cache under a DIFFERENT sessionId, with a
+    // distinctive symbol that appears nowhere else on the page by default.
+    await new Promise<void>(resolve => {
+      const req = (globalThis as any).indexedDB.open();
+      req.onsuccess = () => {
+        const tx = req.result.transaction('kv');
+        tx.objectStore().put(
+          { sessionId: 'a-different-session-id', entries: [{ symbol: 'ZZZZ', strategy: 'IC', score: 1 }] },
+          'targetedResults',
+        );
+        tx.oncomplete = () => resolve();
+      };
+    });
+
+    // Restoring directly into Targeted mode (via localStorage, the same
+    // mechanism the page itself uses to remember the last-active mode)
+    // avoids driving the RunModeModal, which would start a brand-new scan
+    // and supersede the very session this test is restoring.
+    window.localStorage.setItem('hunter-screen-mode', 'targeted');
+    renderScreener();
+
+    // Give the async restore effect (restoreScanSession + both idbGet calls)
+    // a chance to resolve, then confirm the mismatched cache's entry never
+    // reached the screen.
+    await screen.findByPlaceholderText(/Add tickers \(comma-separated\)/i);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByText('ZZZZ')).not.toBeInTheDocument();
   });
 });

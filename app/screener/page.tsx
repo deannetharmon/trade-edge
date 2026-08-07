@@ -5197,7 +5197,12 @@ async function runTargetedScan(
       setTargetedResults(entries);
       const cacheTs = Date.now();
       setTargetedResultsCachedAt(cacheTs);
-      idbSet(IDB_TARGETED_RESULTS_KEY, entries);
+      // SCREENER-RESULTS-0001 final corrective — tagged with the owning
+      // session's sessionId, same rationale as rawScanCache above: on
+      // restore, a valid canonical Targeted session must not be paired with
+      // a DIFFERENT Targeted run's rich TargetedScanEntry[] cards just
+      // because both happen to be sitting in IndexedDB.
+      idbSet(IDB_TARGETED_RESULTS_KEY, { sessionId: finalSession.sessionId, entries });
       try { localStorage.setItem(LS_TARGETED_RESULTS_CACHE_AT, String(cacheTs)); } catch {}
       persistScanSession(finalSession);
       completeScreenerJob({
@@ -6044,21 +6049,18 @@ export default function Home() {
   // persistScanSession() at write time, so the UI can honestly show it was
   // restored from cache rather than just produced live.
   useEffect(() => {
-    idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
-      if (cached) setRawScanCache(cached);
-    });
-    // SCREENER-RESULTS-0001 corrective — Targeted's own rich
-    // TargetedScanEntry[] cache used to restore completely independently of
-    // the canonical session: unvalidated, and with no reconciliation against
-    // whatever restoreScanSession() below decided was (or wasn't) a valid
-    // restored session. That made it a second, un-gated source of truth —
-    // a rejected/invalid/cross-strategy/non-targeted cached session
-    // wouldn't stop stale TargetedScanEntry[] cards from reappearing
-    // anyway. It's now restored only once restoreScanSession() itself has
-    // resolved AND agreed there's a valid, still-current, targeted-mode
-    // session to reconcile it with — the canonical session is the single
-    // gate for whether any cached results (Targeted's own cards, or
-    // `results` for every other mode below) are restored at all.
+    // SCREENER-RESULTS-0001 final corrective — both auxiliary IndexedDB
+    // caches (rawScanCache and Targeted's own TargetedScanEntry[] cache) used
+    // to restore either independently of the canonical session (rawScanCache,
+    // unconditionally, before this effect even knew whether a session would
+    // validate) or gated only on session MODE (Targeted's cache — "some
+    // valid targeted-mode session exists" is not the same guarantee as
+    // "THIS specific completed scan's session exists"). Either gap lets a
+    // valid, still-current session restore alongside a DIFFERENT run's
+    // cached data. Both caches are now written as {sessionId, entries} and
+    // restored only when the stored sessionId exactly matches the validated,
+    // still-current session's own sessionId — nothing is restored
+    // independently of, or merely "compatible with," the canonical session.
     restoreScanSession().then(session => {
       if (!session) return;
       // A scan may have already started (and begun superseding) before
@@ -6067,14 +6069,15 @@ export default function Home() {
       if (activeSessionIdRef.current != null) return;
       activeSessionIdRef.current = session.sessionId;
       setActiveSession(session);
+      // rawScanCache feeds applyRules() directly — executable state, not
+      // just display — so an exact sessionId match is required regardless
+      // of mode.
+      idbGet<{ sessionId: string; entries: RawScanEntry[] }>(IDB_RAW_SCAN_KEY).then(cached => {
+        if (cached && cached.sessionId === session.sessionId) setRawScanCache(cached.entries);
+      });
       if (session.mode === 'targeted') {
-        // Targeted mode's own TargetedScanEntry[] cache remains the source
-        // of its rendered cards; the session is its parallel accounting
-        // record. Only restored now that we know this exact session (same
-        // cache write, same completed scan) is what validated/restored —
-        // never independently of it.
-        idbGet<TargetedScanEntry[]>(IDB_TARGETED_RESULTS_KEY).then(cachedTargeted => {
-          if (cachedTargeted) setTargetedResults(cachedTargeted);
+        idbGet<{ sessionId: string; entries: TargetedScanEntry[] }>(IDB_TARGETED_RESULTS_KEY).then(cachedTargeted => {
+          if (cachedTargeted && cachedTargeted.sessionId === session.sessionId) setTargetedResults(cachedTargeted.entries);
         });
       } else {
         setResults(session.results);
@@ -6427,9 +6430,15 @@ export default function Home() {
       // applyRules() re-filter even though its session commit was rejected.
       // Moved inside the commit callback so a stale scan's cache write is
       // rejected by the exact same gate as everything else it produced.
+      // SCREENER-RESULTS-0001 final corrective — the IndexedDB record is now
+      // tagged with the owning session's sessionId. rawScanCache feeds
+      // applyRules() directly (executable state, not just display), so on
+      // restore it must be provably the SAME scan's data, not merely
+      // "whatever the last write happened to be" — see the restore effect
+      // below, which now requires an exact sessionId match.
       const committed = commitScanSession(session, () => {
         setRawScanCache(scanCache);
-        idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
+        idbSet(IDB_RAW_SCAN_KEY, { sessionId: session.sessionId, entries: scanCache }); // IndexedDB — full chain data can exceed localStorage's quota
         setResults(sortedResults);
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);

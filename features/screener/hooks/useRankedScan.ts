@@ -151,19 +151,16 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
           });
         });
       } else if (result) {
-        // No session could be constructed even from the task's own input
-        // (e.g. a legacy task created before this field existed, or one
-        // dispatched with an empty activeSymbols list) — falls back to the
-        // pre-existing direct-display behavior rather than fabricating a
-        // session for data this hook has no real scope information for.
-        setResults(result.results);
-        setRawScanCache(result.rawScanCache);
-        setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
-        completeScreenerJob({
-          resultCount: result.results.length,
-          status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
-          resultsHref: '/screener?mode=rank',
-        });
+        // SCREENER-RESULTS-0001 final corrective — no session could be
+        // constructed even from the task's own input (e.g. a legacy task
+        // created before `input` was stored, or one dispatched with an empty
+        // activeSymbols list). This used to fall back to displaying
+        // result.results directly, which is exactly the trust-boundary
+        // bypass the review flagged: unowned results with no canonical
+        // session backing them. Fail closed instead — surface a clear error
+        // and do not display the results.
+        setError('This ranked scan cannot be displayed: its original scope could not be recovered, so canonical accounting is unavailable. Start a new ranked scan.');
+        failScreenerJob('Ranked scan result missing scope data');
       } else {
         completeScreenerJob({ status: 'Ranked scan complete', resultsHref: '/screener?mode=rank' });
       }
