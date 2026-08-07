@@ -115,12 +115,23 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['NKE']); // MU not eligible, AAPL not in universe
   });
 
-  it('the override does NOT appear when the universe is empty (nothing to narrow)', async () => {
+  it('an empty universe blocks the ordinary scan and requires the explicit "scan all eligible holdings" override', async () => {
+    // SCREENER-RESULTS-0001 — an empty ordinary Opportunity Universe must
+    // never silently behave as the override. This test used to assert the
+    // old (buggy) implicit "scans everything" behavior and that no override
+    // control was needed since there was "nothing to narrow"; it now
+    // asserts the ticket-mandated fix: FIND COVERED CALLS does not scan at
+    // all with an empty universe, and the explicit override is what's
+    // required to reach every eligible holding.
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
     await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    expect(getMarketMetricsMock).not.toHaveBeenCalled();
+
+    const overrideBtn = await screen.findByRole('button', { name: /Scan all eligible holdings/i });
+    await userEvent.click(overrideBtn);
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /Scan all eligible holdings/i })).not.toBeInTheDocument();
+    expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'AAPL']));
   });
 
   it('the override does NOT appear when the universe already covers every eligible holding (nothing is being narrowed)', async () => {
@@ -221,6 +232,12 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
       MU: holding({ availableCoveredContracts: 0 }),
     });
     renderScreener();
+    // A non-empty universe covering both symbols so the ordinary scan runs
+    // (SCREENER-RESULTS-0001 — an empty universe no longer implicitly
+    // scans every eligible holding; this test is about the status card's
+    // disclosures, not the empty-universe override, so it needs a real
+    // universe to reach a completed scan).
+    await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 

@@ -63,6 +63,24 @@ import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
 
+// SCREENER-RESULTS-0001 — canonical scan-session model. This page owns the
+// single `activeSession` React state (see the block right after the other
+// top-level useState declarations below); scanSession.ts owns the shape and
+// the validated transitions. See lib/screener/scanSession.ts's module
+// header for the full set of invariants this wiring must honor.
+import {
+  createScanSession, recordSymbolEvaluated, recordSymbolFailed, recordSymbolSkipped,
+  completeSession, stopSession, errorSession, isSessionStale,
+  shouldGenerateRecommendationsForSession, computeSessionAccounting, formatSessionAccountingSummary,
+  validateSessionData, normalizeSymbols,
+  ScanSessionConstructionError, ScanSessionTransitionError,
+} from '@/lib/screener/scanSession';
+import type {
+  ScreenerScanSession, ScreenerScanMode, ScreenerRequestedStrategy, ScreenerScanScope,
+  ScreenerReasonCode, ScreenerSessionAccounting,
+} from '@/lib/screener/scanSession';
+import { persistScanSession, restoreScanSession, clearScanSessionCache } from '@/lib/screener/scanSessionCache';
+
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
 // existing, unmodified production pipeline:
@@ -986,7 +1004,6 @@ async function idbDel(key: string): Promise<void> {
     console.error('idbDel failed (non-blocking):', e);
   }
 }
-
 
 const DEFAULT_RANK_CONFIG: RankConfig = {
   weightMomentum: 25, weightIvr: 15, weightEmClearance: 15, weightRange: 15, weightTechnical: 10, weightLiquidity: 10, weightBuffer: 10,
@@ -4869,6 +4886,14 @@ async function runTargetedScan(
   setTargetedResults: (v: TargetedScanEntry[]) => void,
   setTargetedResultsCachedAt: (v: number | null) => void,
   cancelRef: React.MutableRefObject<boolean>,
+  // SCREENER-RESULTS-0001 — this function lives outside the Home() component
+  // and so cannot close over its `activeSession` state/ref directly; the
+  // two session-lifecycle entry points it needs are passed in instead. The
+  // pure transition functions themselves (recordSymbolEvaluated, etc.) are
+  // plain module-level imports and are called directly below, same as any
+  // other caller in this file.
+  beginSession: (scope: ScreenerScanScope) => ScreenerScanSession,
+  commitSession: (session: ScreenerScanSession, onCommit?: () => void) => boolean,
 ): Promise<void> {
   // PMCC excluded — different philosophy, not a spread strategy.
   // `primary` is a fallback label only — actual strategy exploration below
@@ -4893,21 +4918,36 @@ async function runTargetedScan(
   // in addition to the local status text this page already renders.
   const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
 
+  // SCREENER-RESULTS-0001 — 'spreads' session, targeted mode. No capacity-
+  // style eligibility gate, so eligibleSymbols === the universe. Targeted's
+  // OWN existing rendering (`entries`/`setTargetedResults`, unchanged below)
+  // remains the source of the rich per-candidate cards this mode has always
+  // shown; the session is a PARALLEL authoritative accounting record — see
+  // the ticket's explicit instruction that Targeted keeps its established
+  // filters/ordering unchanged.
+  let session = beginSession({ universeSymbols: symbols, eligibleSymbols: symbols });
+  const loopSymbols = session.plannedScanSymbols;
+  let wasCancelled = false;
+
   try {
     const token = await getAccessToken();
     pushStatus('Fetching market metrics...');
-    const metricsArray = await getMarketMetrics(allSymbols, token);
+    const metricsArray = await getMarketMetrics(loopSymbols, token);
     const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
     const entries: TargetedScanEntry[] = [];
 
-    for (let i = 0; i < strategyMap.length; i++) {
+    for (let i = 0; i < loopSymbols.length; i++) {
       if (cancelRef.current) {
         pushStatus(`Stopped — ${entries.length} results loaded`);
+        wasCancelled = true;
         break;
       }
-      const { symbol, primary } = strategyMap[i];
-      pushStatus(`Scanning ${symbol} (${i + 1}/${strategyMap.length})...`);
+      const symbol = loopSymbols[i];
+      const primary: 'BPS' | 'BCS' | 'IC' = 'IC';
+      pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
+      const entriesBeforeThisSymbol = entries.length;
+      let symbolThrew = false;
       try {
         const classification = await classifyUnderlying(symbol, token);
         const isEtf = classification === 'index' || classification === 'etf';
@@ -5124,23 +5164,52 @@ async function runTargetedScan(
         }
       } catch (e: any) {
         console.warn(`Targeted scan error for ${symbol}: ${e.message}`);
+        symbolThrew = true;
+      }
+
+      // SCREENER-RESULTS-0001 — exactly one canonical outcome per symbol,
+      // aggregating however many (expiration × strategy) entries this
+      // symbol's nested loop produced. A throw partway through does NOT
+      // discard candidates already found for this symbol — real, valid
+      // candidates are recorded as a real evaluation, never mislabeled as a
+      // failure just because a LATER expiration/strategy combination for
+      // the same symbol errored.
+      const symbolEntries = entries.slice(entriesBeforeThisSymbol);
+      if (symbolEntries.length > 0) {
+        session = recordSymbolEvaluated(session, symbol, symbolEntries.map(en => en.screenResult));
+      } else if (symbolThrew) {
+        session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
+      } else {
+        session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
       }
     }
 
     entries.sort((a, b) => b.score - a.score);
-    setTargetedResults(entries);
-    const cacheTs = Date.now();
-    setTargetedResultsCachedAt(cacheTs);
-    idbSet(IDB_TARGETED_RESULTS_KEY, entries);
-    try { localStorage.setItem(LS_TARGETED_RESULTS_CACHE_AT, String(cacheTs)); } catch {}
-    completeScreenerJob({
-      resultCount: entries.length,
-      status: `${entries.length} targeted result${entries.length === 1 ? '' : 's'} ready`,
-      resultsHref: '/screener?mode=targeted',
+    session = wasCancelled ? stopSession(session, 'CANCELLED') : completeSession(session);
+    const finalSession = session;
+    const committed = commitSession(finalSession, () => {
+      setTargetedResults(entries);
+      const cacheTs = Date.now();
+      setTargetedResultsCachedAt(cacheTs);
+      idbSet(IDB_TARGETED_RESULTS_KEY, entries);
+      try { localStorage.setItem(LS_TARGETED_RESULTS_CACHE_AT, String(cacheTs)); } catch {}
+      persistScanSession(finalSession);
+      completeScreenerJob({
+        resultCount: entries.length,
+        status: `${entries.length} targeted result${entries.length === 1 ? '' : 's'} ready`,
+        resultsHref: '/screener?mode=targeted',
+      });
     });
+    void committed;
   } catch (e: any) {
     setError(e.message);
     failScreenerJob(e.message);
+    if (session.status === 'running') {
+      try {
+        const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+        commitSession(errorSession(session, reasonCode));
+      } catch { /* session already terminal */ }
+    }
   } finally {
     setStatus(''); setLoading(false);
   }
@@ -5697,6 +5766,65 @@ export default function Home() {
   const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
   const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
 
+  // ── SCREENER-RESULTS-0001 — canonical scan-session wiring ────────────────
+  // `activeSession` is the single authoritative record for the currently
+  // active or most-recently-completed scan (see lib/screener/scanSession.ts
+  // module header). `activeSessionIdRef` mirrors `activeSession?.sessionId`
+  // in a ref so a long-running async scan function can synchronously check,
+  // at any await boundary, whether a NEWER session has since superseded it
+  // — React state reads inside an in-flight closure can be stale, a ref
+  // cannot. `results`/`targetedResults` remain the state the render tree
+  // actually reads (unchanged downstream consumers), but they are now
+  // populated FROM `session.results` at each transition rather than
+  // accumulated independently — see beginScanSession()/commitScanSession()
+  // below. This is also the strategy-isolation fix: because a new session
+  // REPLACES (never merges into) the previous one, a CSP scan's results can
+  // no longer end up displayed alongside a prior BPS/BCS/IC scan's results.
+  const [activeSession, setActiveSession] = useState<ScreenerScanSession | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+
+  // Starts a new session, immediately superseding whatever session was
+  // still 'running' (if any) via the canonical stopSession('SUPERSEDED')
+  // transition — never left dangling, never silently dropped. Sets the ref
+  // synchronously (before any await in the caller) so isSessionStale() and
+  // late-result checks are correct from the very first line of the caller.
+  const beginScanSession = (args: {
+    mode: ScreenerScanMode;
+    requestedStrategy: ScreenerRequestedStrategy;
+    scope: ScreenerScanScope;
+    scopeExclusionReasonCode?: ScreenerReasonCode | ((symbol: string) => ScreenerReasonCode);
+  }): ScreenerScanSession => {
+    setActiveSession(prev => {
+      if (prev && prev.status === 'running') {
+        // Best-effort supersession of a still-running prior session's React
+        // state; the prior async function's own stale-check (via the ref,
+        // updated below) is what actually prevents it from writing late
+        // results, not this alone.
+        try { stopSession(prev, 'SUPERSEDED'); } catch { /* already terminal */ }
+      }
+      return prev;
+    });
+    const session = createScanSession(args);
+    activeSessionIdRef.current = session.sessionId;
+    setActiveSession(session);
+    return session;
+  };
+
+  // Applies a validated transition (completeSession/stopSession/errorSession
+  // result) to React state IF this session is still the active one. A
+  // stale/superseded session's late transition is discarded here — this is
+  // the enforcement point for "ignore late results from an older session."
+  // `displayResults` lets callers with a richer per-entry shape (Targeted's
+  // TargetedScanEntry[]) update their own existing state in the same
+  // stale-checked commit, without the session model needing to know about
+  // that shape.
+  const commitScanSession = (session: ScreenerScanSession, onCommit?: () => void): boolean => {
+    if (isSessionStale(session.sessionId, activeSessionIdRef.current)) return false;
+    setActiveSession(session);
+    onCommit?.();
+    return true;
+  };
+
   // ── OE-0002A: Best Opportunities state ────────────────────────────────────
   // Purely derived, in-memory state -- never persisted, never fabricated.
   // 'idle' before any real scan results exist; 'loading' while the existing
@@ -5715,6 +5843,8 @@ export default function Home() {
     screenMode, tickers, rankConfig,
     setResults, setRawScanCache, setResultsCachedAt,
     setLoading, setStatus, setError,
+    beginSession: (scope) => beginScanSession({ mode: 'rank', requestedStrategy: 'spreads', scope }),
+    commitSession: commitScanSession,
   });
 
   const [stockPresetLabel, setStockPresetLabel] = useState<string>(() => {
@@ -5871,20 +6001,41 @@ export default function Home() {
   }, []);
 
   // rawScanCache + results + targetedResults restore — IndexedDB access is
-  // async, unlike the synchronous localStorage reads above. results moved
-  // here after Rank mode's larger result sets were found to silently
-  // exceed localStorage's quota; targetedResults never had any persistence
-  // at all until now (Targeted mode results disappeared on every
-  // navigation, unlike Filter/Rank which at least tried localStorage).
+  // async, unlike the synchronous localStorage reads above. rawScanCache
+  // (the full per-symbol chain cache, used only for instant re-filtering,
+  // never for accounting) and Targeted's own rich per-candidate
+  // TargetedScanEntry[] cache are restored exactly as before. SCREENER-
+  // RESULTS-0001: `results` (Filtered/Ranked/CSP/CC/PMCC) is now restored
+  // via the canonical session cache instead of its own independent
+  // IDB_RESULTS_KEY blob — restoreScanSession() runs validateSessionData()
+  // internally, so a malformed, cross-strategy, or unknown-schema cached
+  // session is rejected and cleared rather than silently trusted. A
+  // restored session is marked with cacheProvenance 'idb-cache' by
+  // persistScanSession() at write time, so the UI can honestly show it was
+  // restored from cache rather than just produced live.
   useEffect(() => {
     idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
       if (cached) setRawScanCache(cached);
     });
-    idbGet<ScreenResult[]>(IDB_RESULTS_KEY).then(cached => {
-      if (cached) setResults(cached);
-    });
     idbGet<TargetedScanEntry[]>(IDB_TARGETED_RESULTS_KEY).then(cached => {
       if (cached) setTargetedResults(cached);
+    });
+    restoreScanSession().then(session => {
+      if (!session) return;
+      // A scan may have already started (and begun superseding) before
+      // this async restore resolves; never let a restored session clobber
+      // an already-active one.
+      if (activeSessionIdRef.current != null) return;
+      activeSessionIdRef.current = session.sessionId;
+      setActiveSession(session);
+      // Targeted mode's own TargetedScanEntry[] restore (above) remains the
+      // source of its rendered cards; the session here is its parallel
+      // accounting record only, so it doesn't also drive `results` for
+      // Targeted (which never reads from `results` in the first place).
+      if (session.mode !== 'targeted') {
+        setResults(session.results);
+        if (session.cachedAt != null) setResultsCachedAt(session.cachedAt);
+      }
     });
   }, []);
 
@@ -5906,10 +6057,32 @@ export default function Home() {
   // so any consumer (today, the Dashboard) can read the current set without
   // this page knowing that consumer exists. Publishing is a side effect of
   // this page's own existing pipeline, not a second computation of it.
+  // SCREENER-RESULTS-0001 — Best Opportunities trust boundary. Two changes
+  // from the prior version: (1) the trigger/gate is
+  // shouldGenerateRecommendationsForSession(activeSession, activeSessionId)
+  // — never for a running, stopped, errored, stale, empty, or restored-
+  // invalid session, so a superseded or still-in-flight scan can never
+  // populate this panel; (2) only QUALIFIED results from that same
+  // completed session are sent, never the full qualified+disqualified
+  // `results` array the previous version sent — a disqualified/rejected
+  // candidate must never be able to surface here. The financial
+  // scoring/ranking itself (the API route, buildOpportunityRecommendations)
+  // is completely unmodified; only which results may reach it changed.
   useEffect(() => {
     let cancelled = false;
+    const eligible = shouldGenerateRecommendationsForSession(activeSession, activeSessionIdRef.current);
 
-    if (results.length === 0) {
+    if (!eligible || !activeSession) {
+      setOpportunityRecommendations([]);
+      setOpportunityGeneratedAt(undefined);
+      setOpportunityState('idle');
+      setOpportunityError('');
+      clearRecommendations();
+      return;
+    }
+
+    const qualifiedResults = activeSession.results.filter(r => r.qualified);
+    if (qualifiedResults.length === 0) {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
       setOpportunityState('idle');
@@ -5926,7 +6099,7 @@ export default function Home() {
         const response = await fetch('/api/autopilot/recommendations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ screenResults: results }),
+          body: JSON.stringify({ screenResults: qualifiedResults }),
         });
         const body = await response.json().catch(() => ({}));
 
@@ -5937,7 +6110,10 @@ export default function Home() {
         const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
         const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
 
-        if (!cancelled) {
+        // The session may have been superseded while this request was in
+        // flight — a stale response must never publish through to a newer
+        // session's display.
+        if (!cancelled && shouldGenerateRecommendationsForSession(activeSession, activeSessionIdRef.current)) {
           setOpportunityRecommendations(recommendations);
           setOpportunityGeneratedAt(generatedAt);
           setOpportunityState('loaded');
@@ -5954,7 +6130,7 @@ export default function Home() {
     })();
 
     return () => { cancelled = true; };
-  }, [results]);
+  }, [activeSession]);
 
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
@@ -6000,35 +6176,61 @@ export default function Home() {
   // Called instead of runScreen when rules change but tickers haven't changed.
   // Zero API calls — instant re-filter.
     // ── Apply rules client-side against cached raw scan data ──────────────────
+  // SCREENER-RESULTS-0001 — this was the clearest case of an "independent
+  // page-level result collection that can disagree with the session": it
+  // called setResults() directly from a recompute over rawScanCache,
+  // entirely bypassing session accounting. It now derives a fresh session
+  // from the SAME scope/plan as whatever session is currently active
+  // (rules changed, not the universe), so the accounting bar stays correct
+  // through a rules-only re-filter. A plannedScanSymbols member NOT present
+  // in rawScanCache (it never successfully raw-scanned originally — either
+  // a trend-gate zero-candidate evaluation or a real chain-fetch failure)
+  // carries forward that SAME original outcome, since new rules cannot
+  // retroactively change whether a chain fetch that already happened
+  // succeeded.
   const applyRules = useCallback((sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string) => {
     if (rawScanCache.length === 0) return;
+    const priorSession = activeSession;
+    if (!priorSession || priorSession.mode !== 'filter' || priorSession.requestedStrategy !== 'spreads') return;
 
-    const screenResults: ScreenResult[] = rawScanCache.map(entry => {
-      try {
-        return runChecklist(entry.symbol, entry.strategy, entry.metrics, entry.chainData, entry.price, sRules, entry.trendResult, sLabel, eRules, eLabel);
-      } catch (e: any) {
-        return {
-          symbol: entry.symbol, strategy: entry.strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null, qualified: false, bestCandidate: null,
-          failReasons: [e.message], trendResult: entry.trendResult,
-          checks: { ivr: { status: 'fail' as const, value: 'Error', reason: e.message }, earnings: { status: 'pending' as const, value: '—', reason: '—' }, oi: { status: 'pending' as const, value: '—', reason: '—' }, delta: { status: 'pending' as const, value: '—', reason: '—' }, credit: { status: 'pending' as const, value: '—', reason: '—' }, roc: { status: 'pending' as const, value: '—', reason: '—' }, pop: { status: 'pending' as const, value: '—', reason: '—' }, iv: { status: 'pending' as const, value: '—', reason: '—' }, emClearance: { status: 'pending' as const, value: '—', reason: '—' } }
-        };
+    let session = beginScanSession({ mode: 'filter', requestedStrategy: 'spreads', scope: priorSession.scope });
+    const rawBySymbol = new Map(rawScanCache.map(entry => [entry.symbol, entry]));
+    for (const symbol of session.plannedScanSymbols) {
+      const entry = rawBySymbol.get(symbol);
+      if (entry) {
+        try {
+          const result = runChecklist(entry.symbol, entry.strategy, entry.metrics, entry.chainData, entry.price, sRules, entry.trendResult, sLabel, eRules, eLabel);
+          session = recordSymbolEvaluated(session, symbol, [result]);
+        } catch (e: any) {
+          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
+        }
+      } else {
+        const priorOutcome = priorSession.symbolOutcomes.find(o => o.symbol === symbol);
+        if (priorOutcome?.status === 'failed') {
+          session = recordSymbolFailed(session, symbol, priorOutcome.reasonCode ?? 'MARKET_DATA_REQUEST_FAILED');
+        } else {
+          session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
+        }
       }
-    });
+    }
 
-    screenResults.sort((a, b) => {
-      if (a.qualified && !b.qualified) return -1;
-      if (!a.qualified && b.qualified) return 1;
-      return (b.ivr ?? 0) - (a.ivr ?? 0);
+    session = completeSession(session);
+    const finalSession = session;
+    commitScanSession(finalSession, () => {
+      const sortedResults = [...finalSession.results].sort((a, b) => {
+        if (a.qualified && !b.qualified) return -1;
+        if (!a.qualified && b.qualified) return 1;
+        return (b.ivr ?? 0) - (a.ivr ?? 0);
+      });
+      setResults(sortedResults);
+      const applyTs = Date.now();
+      setResultsCachedAt(applyTs);
+      persistScanSession(finalSession);
+      try {
+        localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
+      } catch {}
     });
-
-    setResults(screenResults);
-    const applyTs = Date.now();
-    setResultsCachedAt(applyTs);
-    idbSet(IDB_RESULTS_KEY, screenResults);
-    try {
-      localStorage.setItem(LS_RESULTS_CACHE_AT, String(applyTs));
-    } catch {}
-  }, [rawScanCache]);
+  }, [rawScanCache, activeSession]);
 
   // Live update when rules change
   useEffect(() => {
@@ -6061,26 +6263,31 @@ export default function Home() {
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
 
+    // SCREENER-RESULTS-0001 — 'spreads' session; a whole-watchlist scan has
+    // no capacity-style eligibility gate, so eligibleSymbols === the
+    // universe itself (every selected symbol is planned). `session` is
+    // threaded through the loop below as a local variable (never touched
+    // directly by page.tsx — only via the validated transition functions)
+    // and only committed to React state at completion/error, via
+    // commitScanSession()'s stale check.
+    const sessionMode: ScreenerScanMode = modeOverride === 'rank' ? 'rank' : 'filter';
+    let session = beginScanSession({
+      mode: sessionMode,
+      requestedStrategy: 'spreads',
+      scope: { universeSymbols: activeSymbols, eligibleSymbols: activeSymbols },
+    });
+    const loopSymbols = session.plannedScanSymbols;
+
     try {
       pushStatus('Getting access token...');
       const token = await getAccessToken();
 
-      const allSymbols = Array.from(new Set(activeSymbols));
-
       pushStatus('Fetching market metrics...');
-      const metricsArray = await getMarketMetrics(allSymbols, token);
+      const metricsArray = await getMarketMetrics(loopSymbols, token);
 
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      const screenResults: ScreenResult[] = [];
       const scanCache: RawScanEntry[] = [];
-
-      const errResult = (symbol: string, strategy: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
-        symbol, strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-        qualified: false, bestCandidate: null,
-        failReasons: [msg], trendResult,
-        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
-      });
 
       // getChain uses the appropriate rule set for DTE filtering — pass stock rules as base,
       // runChecklist will auto-select ETF rules internally per ticker
@@ -6095,9 +6302,9 @@ export default function Home() {
       // Trend is still fetched for Rank mode (used for the trend-alignment
       // badge and momentum scoring) but never used to skip a ticker.
       const isRankMode = (modeOverride ?? screenMode) === 'rank';
-      for (let i = 0; i < activeSymbols.length; i++) {
-        const symbol = activeSymbols[i];
-        pushStatus(`Scanning ${symbol} (${i + 1}/${activeSymbols.length})...`);
+      for (let i = 0; i < loopSymbols.length; i++) {
+        const symbol = loopSymbols[i];
+        pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
         const classification = await classifyUnderlying(symbol, token);
         const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
@@ -6106,8 +6313,11 @@ export default function Home() {
         // NO_TRADE (or trend fetch failure) means the chart didn't qualify —
         // skip this ticker entirely in Filter mode. Rank mode explores
         // regardless; a NO_TRADE chart can still have a real credit spread,
-        // and score (not the trend gate) decides where it lands.
+        // and score (not the trend gate) decides where it lands. This is a
+        // genuine evaluated-with-zero-candidates outcome (trend WAS
+        // checked), not a scope exclusion or a failure.
         if (!isRankMode && (!trendResult || trendResult.strategy === 'NO_TRADE')) {
+          session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
           continue;
         }
 
@@ -6120,14 +6330,21 @@ export default function Home() {
           ]);
           if (isRankMode) {
             scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
-            screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel));
+            const candidates = exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel);
+            session = candidates.length > 0
+              ? recordSymbolEvaluated(session, symbol, candidates)
+              : recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
           } else if (trendResult) {
             const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
             scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
-            screenResults.push(runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel));
+            const result = runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel);
+            session = recordSymbolEvaluated(session, symbol, [result]);
           }
         } catch (e: any) {
-          screenResults.push(errResult(symbol, trendResult?.strategy ?? 'BPS', e.message, trendResult));
+          // Real acquisition failure — recorded as 'failed' with an explicit
+          // reason, never fabricated into a synthetic ScreenResult that
+          // would silently sit alongside genuine evaluations.
+          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
       }
 
@@ -6135,43 +6352,50 @@ export default function Home() {
       setRawScanCache(scanCache);
       idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
 
-      // Remove duplicates and sort
-      const uniqueResults = (modeOverride ?? screenMode) === 'rank'
-        ? screenResults
-        : screenResults.filter((r, index, self) =>
-            index === self.findIndex(t => t.symbol === r.symbol && t.strategy === r.strategy)
-          );
-
-      if ((modeOverride ?? screenMode) === 'rank') {
+      session = completeSession(session);
+      const sortedResults = [...session.results];
+      if (sessionMode === 'rank') {
         // Sort by score descending; no-candidate results go to the bottom
-        uniqueResults.sort((a, b) => {
+        sortedResults.sort((a, b) => {
           const sA = scoreCandidate(a, rankConfig)?.score ?? 0;
           const sB = scoreCandidate(b, rankConfig)?.score ?? 0;
           return sB - sA;
         });
       } else {
-        uniqueResults.sort((a, b) => {
+        sortedResults.sort((a, b) => {
           if (a.qualified && !b.qualified) return -1;
           if (!a.qualified && b.qualified) return 1;
           return (b.ivr ?? 0) - (a.ivr ?? 0);
         });
       }
 
-      setResults(uniqueResults);
-      const cacheTs = Date.now();
-      setResultsCachedAt(cacheTs);
-      idbSet(IDB_RESULTS_KEY, uniqueResults); // IndexedDB — Rank mode's exhaustive result set can exceed localStorage's quota
-      try {
-        localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
-      } catch {}
-      completeScreenerJob({
-        resultCount: uniqueResults.length,
-        status: `${uniqueResults.length} result${uniqueResults.length === 1 ? '' : 's'} ready`,
-        resultsHref: '/screener?mode=filter',
+      const committed = commitScanSession(session, () => {
+        setResults(sortedResults);
+        const cacheTs = Date.now();
+        setResultsCachedAt(cacheTs);
+        persistScanSession(session);
+        try {
+          localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
+        } catch {}
+        completeScreenerJob({
+          resultCount: sortedResults.length,
+          status: `${sortedResults.length} result${sortedResults.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=filter',
+        });
       });
+      if (!committed) {
+        // Superseded by a newer scan while this one was in flight — its
+        // results must never overwrite whatever the newer session is
+        // showing. Nothing more to do; the newer scan owns the UI now.
+      }
     } catch (e: any) {
       setError(e.message);
       failScreenerJob(e.message);
+      const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+      try {
+        session = errorSession(session, reasonCode);
+        commitScanSession(session);
+      } catch { /* session already terminal (e.g. a supersession raced this catch) */ }
     } finally {
       setStatus('');
       setLoading(false);
@@ -6204,23 +6428,25 @@ export default function Home() {
       status: 'Starting PMCC scan...', resultsHref: '/screener?mode=filter',
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+
+    // SCREENER-RESULTS-0001 — 'pmcc' session, filter mode only. Replaces,
+    // never merges into, whatever session was previously active.
+    let session = beginScanSession({
+      mode: 'filter',
+      requestedStrategy: 'pmcc',
+      scope: { universeSymbols: pmcc, eligibleSymbols: pmcc },
+    });
+    const loopSymbols = session.plannedScanSymbols;
+
     try {
       pushStatus('Getting access token...');
       const token = await getAccessToken();
 
       pushStatus('Fetching market metrics...');
-      const metricsArray = await getMarketMetrics(pmcc, token);
+      const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      const errResult = (symbol: string, strategy: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
-        symbol, strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-        qualified: false, bestCandidate: null,
-        failReasons: [msg], trendResult,
-        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
-      });
-
-      const pmccResults: ScreenResult[] = [];
-      for (const symbol of pmcc) {
+      for (const symbol of loopSymbols) {
         pushStatus(`Scanning PMCC ${symbol}...`);
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
@@ -6228,30 +6454,37 @@ export default function Home() {
           let trendResult: TrendResult | undefined;
           const pmccIsEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
           try { trendResult = await getTrend(symbol, pmccIsEtfOrIndex); } catch {}
-          pmccResults.push(runPMCCChecklist(symbol, pmccChain, price, metrics, trendResult));
+          const result = runPMCCChecklist(symbol, pmccChain, price, metrics, trendResult);
+          session = recordSymbolEvaluated(session, symbol, [result]);
         } catch (e: any) {
-          pmccResults.push(errResult(symbol, 'PMCC', e.message));
+          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
       }
 
-      setResults(prev => {
-        const merged = [...prev, ...pmccResults];
+      session = completeSession(session);
+      const committed = commitScanSession(session, () => {
+        setResults(session.results);
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);
-        idbSet(IDB_RESULTS_KEY, merged);
+        persistScanSession(session);
         try {
           localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
         } catch {}
-        return merged;
+        completeScreenerJob({
+          resultCount: session.results.length,
+          status: `${session.results.length} PMCC result${session.results.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=filter',
+        });
       });
-      completeScreenerJob({
-        resultCount: pmccResults.length,
-        status: `${pmccResults.length} PMCC result${pmccResults.length === 1 ? '' : 's'} ready`,
-        resultsHref: '/screener?mode=filter',
-      });
+      void committed;
     } catch (e: any) {
       setError(e.message);
       failScreenerJob(e.message);
+      const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+      try {
+        session = errorSession(session, reasonCode);
+        commitScanSession(session);
+      } catch { /* session already terminal */ }
     } finally {
       setStatus('');
       setLoading(false);
@@ -6278,6 +6511,21 @@ export default function Home() {
       status: 'Starting CSP scan...', resultsHref: '/screener?mode=filter',
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+
+    // SCREENER-RESULTS-0001 — 'csp' session, filter mode only. A CSP launch
+    // REPLACES whatever session was previously active (never merges into
+    // it) — this is the strategy-isolation fix: CSP results can no longer
+    // end up displayed alongside a prior spread/CC/PMCC scan's results, and
+    // the launcher highlight (derived from activeSession.requestedStrategy
+    // below, in the render) can no longer silently drift back to
+    // "FIND SPREADS" after a CSP scan completes.
+    let session = beginScanSession({
+      mode: 'filter',
+      requestedStrategy: 'csp',
+      scope: { universeSymbols: csp, eligibleSymbols: csp },
+    });
+    const loopSymbols = session.plannedScanSymbols;
+
     try {
       pushStatus('Getting access token...');
       const token = await getAccessToken();
@@ -6289,18 +6537,10 @@ export default function Home() {
         : await getAvailableCash(token);
 
       pushStatus('Fetching market metrics...');
-      const metricsArray = await getMarketMetrics(csp, token);
+      const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      const errResult = (symbol: string, strategy: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
-        symbol, strategy, price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-        qualified: false, bestCandidate: null,
-        failReasons: [msg], trendResult,
-        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
-      });
-
-      const cspResults: ScreenResult[] = [];
-      for (const symbol of csp) {
+      for (const symbol of loopSymbols) {
         pushStatus(`Scanning CSP ${symbol}...`);
         try {
           const classification = await classifyUnderlying(symbol, token);
@@ -6312,30 +6552,37 @@ export default function Home() {
           ]);
           let trendResult: TrendResult | undefined;
           try { trendResult = await getTrend(symbol, isEtf); } catch {}
-          cspResults.push(runCspChecklist(symbol, chainData, price, metrics, DEFAULT_CSP_RULES, availableCash, trendResult));
+          const result = runCspChecklist(symbol, chainData, price, metrics, DEFAULT_CSP_RULES, availableCash, trendResult);
+          session = recordSymbolEvaluated(session, symbol, [result]);
         } catch (e: any) {
-          cspResults.push(errResult(symbol, 'CSP', e.message));
+          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
       }
 
-      setResults(prev => {
-        const merged = [...prev, ...cspResults];
+      session = completeSession(session);
+      const committed = commitScanSession(session, () => {
+        setResults(session.results);
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);
-        idbSet(IDB_RESULTS_KEY, merged);
+        persistScanSession(session);
         try {
           localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
         } catch {}
-        return merged;
+        completeScreenerJob({
+          resultCount: session.results.length,
+          status: `${session.results.length} CSP result${session.results.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=filter',
+        });
       });
-      completeScreenerJob({
-        resultCount: cspResults.length,
-        status: `${cspResults.length} CSP result${cspResults.length === 1 ? '' : 's'} ready`,
-        resultsHref: '/screener?mode=filter',
-      });
+      void committed; // superseded scans simply discard their own late results
     } catch (e: any) {
       setError(e.message);
       failScreenerJob(e.message);
+      const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+      try {
+        session = errorSession(session, reasonCode);
+        commitScanSession(session);
+      } catch { /* session already terminal */ }
     } finally {
       setStatus('');
       setLoading(false);
@@ -6364,6 +6611,15 @@ export default function Home() {
       status: 'Loading eligible holdings...', resultsHref: '/screener?mode=filter',
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
+    // Declared outside the try block (unlike the other four scan functions,
+    // where the session is constructed before any awaits) because CC's
+    // capacity/universe guard clauses below must run BEFORE a session
+    // exists — none of them are attempts against a real, in-flight session,
+    // so none of them should ever need to terminate one. Once the guards
+    // pass and a session IS constructed, the outer catch below still needs
+    // to reach it to close it out via errorSession() rather than leaving it
+    // stuck 'running' forever, hence the wider scope here.
+    let session: ScreenerScanSession | null = null;
     try {
       // Token first -- same order as every other scan function in this file.
       // The earlier version of this function fetched holdings via a Next.js
@@ -6407,12 +6663,28 @@ export default function Home() {
       // capacity-available holding is simply never in `eligibleHoldings`
       // to begin with, so there's nothing to add here even if we wanted to.
       const allScannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
-      const universeNarrows = opportunityUniverse.length > 0 && !bypassUniverse;
-      const universeSet = new Set(opportunityUniverse);
-      const scannable = universeNarrows ? allScannable.filter(h => universeSet.has(h.symbol)) : allScannable;
+      const eligibleSymbols = allScannable.map(h => h.symbol);
+
+      // SCREENER-RESULTS-0001 — an empty ORDINARY Opportunity Universe must
+      // never silently behave as "Scan all eligible holdings." Previously,
+      // `universeNarrows` was false whenever the universe was empty
+      // (`opportunityUniverse.length > 0 && !bypassUniverse`), which made
+      // `scannable` fall through to `allScannable` — i.e. every eligible
+      // holding — even though the trader never asked for that. The override
+      // must be an explicit choice (bypassUniverse === true), never inferred
+      // from an empty list.
+      if (!bypassUniverse && opportunityUniverse.length === 0) {
+        const msg = 'Your Opportunity Universe is empty. Add tickers to it, or use "Scan all eligible holdings" to scan every covered-call-eligible holding.';
+        setError(msg);
+        failScreenerJob(msg);
+        return;
+      }
+
+      const universeSymbols = bypassUniverse ? eligibleSymbols : opportunityUniverse;
+      const scannable = normalizeSymbols(universeSymbols).filter(s => new Set(eligibleSymbols).has(s));
 
       if (!scannable.length) {
-        if (universeNarrows && allScannable.length > 0) {
+        if (!bypassUniverse && eligibleSymbols.length > 0) {
           const msg = 'No covered-call-eligible holdings match the current Opportunity Universe.';
           setError(msg);
           failScreenerJob(msg);
@@ -6425,21 +6697,39 @@ export default function Home() {
       }
       updateScreenerJob({ progressTotal: scannable.length });
 
+      // SCREENER-RESULTS-0001 — precise per-symbol scope-exclusion reasons
+      // for every selected-but-not-planned symbol (TE-0007C protections,
+      // now expressed through the canonical model instead of an ad-hoc
+      // "no eligible holdings" message that couldn't distinguish WHY a
+      // given selected symbol didn't make it into the plan).
+      const capacityBySymbol = capacityReport.bySymbol;
+      const scopeExclusionReasonCode = (symbol: string): ScreenerReasonCode => {
+        if (ccHiddenSymbols.includes(symbol)) return 'CC_HIDDEN_BY_TRADER';
+        const capacity = capacityBySymbol[symbol];
+        if (!capacity || capacity.grossCoveredContracts <= 0) return 'CC_NO_SHARES_OWNED';
+        if (capacity.availableCoveredContracts <= 0) return 'CC_FULLY_COVERED';
+        return 'CC_NO_CAPACITY';
+      };
+
+      // `s` is a non-null local alias so TypeScript can track the session
+      // through every reassignment without the outer, catch-visible
+      // `session` variable's `| null` type getting in the way; `session` is
+      // kept in sync after every transition purely so the outer catch below
+      // can find and close out a session that was already constructed.
+      let s = beginScanSession({
+        mode: 'filter',
+        requestedStrategy: 'cc',
+        scope: { universeSymbols, eligibleSymbols, universeOverridden: bypassUniverse },
+        scopeExclusionReasonCode,
+      });
+      session = s;
+      const loopSymbols = s.plannedScanSymbols;
+
       pushStatus('Fetching market metrics...');
-      const symbols = scannable.map(h => h.symbol);
-      const metricsArray = await getMarketMetrics(symbols, token);
+      const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      const errResult = (symbol: string, msg: string, trendResult?: TrendResult): ScreenResult => ({
-        symbol, strategy: 'CC', price: null, ivr: null, ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-        qualified: false, bestCandidate: null,
-        failReasons: [msg], trendResult,
-        checks: { ivr: { status: 'fail', value: 'Error', reason: msg }, earnings: { status: 'pending', value: '—', reason: '—' }, oi: { status: 'pending', value: '—', reason: '—' }, delta: { status: 'pending', value: '—', reason: '—' }, credit: { status: 'pending', value: '—', reason: '—' }, roc: { status: 'pending', value: '—', reason: '—' }, pop: { status: 'pending', value: '—', reason: '—' }, iv: { status: 'pending', value: '—', reason: '—' }, emClearance: { status: 'pending', value: '—', reason: '—' } }
-      });
-
-      const ccResults: ScreenResult[] = [];
-      for (const holding of scannable) {
-        const symbol = holding.symbol;
+      for (const symbol of loopSymbols) {
         pushStatus(`Scanning CC ${symbol}...`);
         try {
           const classification = await classifyUnderlying(symbol, token);
@@ -6456,30 +6746,49 @@ export default function Home() {
           // eligibleHoldings array (that reconstruction was dead weight left
           // over from the old server-route response shape).
           const capacity: CoveredCallCapacity = capacityReport.bySymbol[symbol];
-          ccResults.push(runCcChecklist(symbol, chainData, price, metrics, DEFAULT_CC_RULES, capacity, trendResult));
+          const result = runCcChecklist(symbol, chainData, price, metrics, DEFAULT_CC_RULES, capacity, trendResult);
+          s = recordSymbolEvaluated(s, symbol, [result]);
         } catch (e: any) {
-          ccResults.push(errResult(symbol, e.message));
+          s = recordSymbolFailed(s, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
+        session = s;
       }
 
-      setResults(prev => {
-        const merged = [...prev, ...ccResults];
+      s = completeSession(s);
+      session = s;
+      const finalSession = s;
+      const committed = commitScanSession(finalSession, () => {
+        setResults(finalSession.results);
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);
-        idbSet(IDB_RESULTS_KEY, merged);
+        persistScanSession(finalSession);
         try {
           localStorage.setItem(LS_RESULTS_CACHE_AT, String(cacheTs));
         } catch {}
-        return merged;
+        completeScreenerJob({
+          resultCount: finalSession.results.length,
+          status: `${finalSession.results.length} CC result${finalSession.results.length === 1 ? '' : 's'} ready`,
+          resultsHref: '/screener?mode=filter',
+        });
       });
-      completeScreenerJob({
-        resultCount: ccResults.length,
-        status: `${ccResults.length} CC result${ccResults.length === 1 ? '' : 's'} ready`,
-        resultsHref: '/screener?mode=filter',
-      });
+      void committed;
     } catch (e: any) {
+      // Unattributable account-wide covered-call exposure is handled above
+      // (capacityReport.status !== 'ok', before any session exists) via the
+      // global fail-closed path, exactly as TE-0007C established — it is
+      // never reached here as a per-symbol scope exclusion. This catch is
+      // for real, unexpected failures — including one that happens after a
+      // session was already constructed, which must still be closed out via
+      // errorSession() rather than left stuck 'running' forever.
       setError(e.message);
       failScreenerJob(e.message);
+      if (session && session.status === 'running') {
+        try {
+          const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+          const errored = errorSession(session, reasonCode);
+          commitScanSession(errored);
+        } catch { /* session already terminal */ }
+      }
     } finally {
       setStatus('');
       setLoading(false);
@@ -6650,24 +6959,31 @@ export default function Home() {
             </p>
 
             <div className="grid grid-cols-2 gap-1.5">
+              {/* SCREENER-RESULTS-0001 — the highlighted launcher is derived
+                  from activeSession.requestedStrategy, never inferred from
+                  screenMode or a candidate's shape. Previously nothing
+                  tracked which strategy actually produced the visible
+                  results at all, so a CSP launch had no way to keep
+                  "FIND CSPs" (rather than "FIND SPREADS") marked as the
+                  active one once results returned. */}
               <button onClick={() => setShowRunModal(true)} disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className="text-white py-2 rounded-lg text-[10px] font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center" style={{ background: `var(--accent)` }}>
+                className={`text-white py-2 rounded-lg text-[10px] font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center ${activeSession?.requestedStrategy === 'spreads' ? 'ring-2 ring-white/70' : ''}`} style={{ background: `var(--accent)` }}>
                 {loading ? 'SCANNING...' : 'FIND SPREADS'}
               </button>
               <button onClick={runCspScan} disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'csp' ? 'bg-amber-500/20 ring-2 ring-amber-400' : ''}`}>
                 {loading ? 'SCANNING...' : 'FIND CSPs'}
               </button>
               <button onClick={() => runCcScan(false)} disabled={loading}
                 title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
-                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'cc' ? 'bg-cyan-500/20 ring-2 ring-cyan-400' : ''}`}>
                 {loading ? 'SCANNING...' : 'FIND COVERED CALLS'}
               </button>
               <button onClick={runPMCCScan} disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className="text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40 text-[10px]">
+                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'pmcc' ? 'bg-purple-500/20 ring-2 ring-purple-400' : ''}`}>
                 {loading ? 'SCANNING...' : 'FIND PMCCs'}
               </button>
               <button disabled
@@ -6721,6 +7037,25 @@ export default function Home() {
               <p className={`text-[10px] ${th.textFaint}`}>
                 {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — run a scan to check your account.'}
               </p>
+            ) : opportunityUniverse.length === 0 ? (
+              // SCREENER-RESULTS-0001 — an empty Opportunity Universe no
+              // longer silently scans every eligible holding (that was the
+              // exact bug this ticket fixes: "an empty ordinary Opportunity
+              // Universe must not silently behave as the override"). This
+              // is the explicit affordance for the override in that case —
+              // previously there was no dedicated empty-universe branch at
+              // all, so the override button never rendered here; the old
+              // (buggy) auto-scan-all behavior was the only way to reach
+              // every eligible holding from an empty universe.
+              <div className="space-y-1.5">
+                <p className={`text-[10px] ${th.textFaint}`}>
+                  Your Opportunity Universe is empty. FIND COVERED CALLS won&apos;t scan anything until you add tickers, or you can scan every eligible holding directly:
+                </p>
+                <button onClick={() => runCcScan(true)} disabled={loading}
+                  className="w-full text-[10px] font-bold tracking-widest py-1.5 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40">
+                  SCAN ALL ELIGIBLE HOLDINGS
+                </button>
+              </div>
             ) : ccUniverseNarrowsCc && ccAllScannableHoldings.every(h => !opportunityUniverse.includes(h.symbol)) ? (
               // TE-0007: the Opportunity Universe currently overlaps none of
               // the verified eligible holdings -- a real distinct empty
@@ -6916,6 +7251,19 @@ export default function Home() {
                     <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
                   )}
                   <span className={th.textFaint}>{screenMode === 'targeted' ? `${targetedResults.length} ENTRIES` : `${results.length} SCANNED`}</span>
+                  {/* SCREENER-RESULTS-0001 — canonical accounting summary,
+                      reconciling every selected symbol (never labeling
+                      attemptedCount as "scanned," never showing a fraction
+                      whose denominator merely repeats its own numerator).
+                      Rendered whenever activeSession's mode matches what's
+                      currently displayed, for every workflow (Filtered,
+                      Ranked, Targeted, CSP, CC, PMCC alike) — see
+                      lib/screener/scanSession.ts's formatSessionAccountingSummary. */}
+                  {activeSession && activeSession.mode === screenMode && (
+                    <span className={`${th.textFaint} border ${th.border} rounded px-1.5 py-0.5 text-[9px]`} title="Selected: your normalized universe. Planned: eligible and scheduled for this workflow. Attempted: evaluated + failed. Skipped: excluded from the plan or unresolved after a stop.">
+                      {formatSessionAccountingSummary(activeSession)}
+                    </span>
+                  )}
                   {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
                     <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
                       ↺ restored{' '}
@@ -6969,7 +7317,13 @@ export default function Home() {
               {/* OE-0002A: first production activation of OE-0001. Real,
                   ranked OpportunityRecommendation[] derived from this
                   page's own current scan results via the existing,
-                  unmodified pipeline -- see the effect above. */}
+                  unmodified pipeline -- see the effect above.
+                  SCREENER-RESULTS-0001: a disqualified/rejected candidate
+                  can never appear here (the effect above only ever sends
+                  qualified results) — when a completed session has results
+                  but none qualified, this shows the required explicit empty
+                  state instead of silently rendering nothing (which read as
+                  "no opinion yet" rather than "nothing qualified"). */}
               {results.length > 0 && (
                 <BestOpportunitiesPanel
                   recommendations={opportunityRecommendations}
@@ -6980,7 +7334,9 @@ export default function Home() {
                       ? (opportunityError || 'Unable to load ranked opportunities.')
                       : opportunityState === 'loading'
                         ? 'Ranking opportunities from these scan results…'
-                        : undefined
+                        : opportunityState === 'idle' && activeSession?.status === 'complete' && activeSession.results.every(r => !r.qualified)
+                          ? 'No qualified opportunities for this scan. Review the disqualified candidates and their reasons below.'
+                          : undefined
                   }
                 />
               )}
@@ -7409,7 +7765,7 @@ export default function Home() {
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession);
             } else if (mode === 'rank') {
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {

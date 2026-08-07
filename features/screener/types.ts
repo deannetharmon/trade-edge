@@ -7,6 +7,10 @@
 
 import type { RulesType } from '@/lib/scans/constants';
 import type { RankConfig, ScreenResult, RawScanEntry } from '@/lib/scans/types';
+// SCREENER-RESULTS-0001 — canonical scan-session lifecycle entry points.
+// This is a lib import (features -> lib), not a page.tsx-local type, so it
+// doesn't violate ADR-0004's "app -> features -> lib" direction.
+import type { ScreenerScanScope, ScreenerScanSession } from '@/lib/screener/scanSession';
 
 /** Structurally compatible with app/screener/page.tsx's WatchlistTicker. */
 export interface RankedScanTickerInput {
@@ -25,6 +29,11 @@ export interface UseRankedScanParams {
   setLoading: (loading: boolean) => void;
   setStatus: (status: string) => void;
   setError: (error: string) => void;
+  // SCREENER-RESULTS-0001 — same pattern as runTargetedScan in page.tsx:
+  // this hook cannot close over Home()'s activeSession state/ref directly,
+  // so the two lifecycle entry points it needs are passed in.
+  beginSession: (scope: ScreenerScanScope) => ScreenerScanSession;
+  commitSession: (session: ScreenerScanSession, onCommit?: () => void) => boolean;
 }
 
 export interface UseRankedScanResult {

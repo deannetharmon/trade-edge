@@ -4,7 +4,7 @@
 // Restored to the browser/TaskManager execution path after the experimental
 // server-side TastyTrade scan path hit authorization failures from Vercel.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCommandBus } from '@/hooks/useCommandBus';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { useTask } from '@/hooks/useTask';
@@ -19,17 +19,37 @@ import type { RulesType } from '@/lib/scans/constants';
 import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
 import type { StartRankedScanResult } from '@/lib/commands/command-handlers';
 import type { UseRankedScanParams, UseRankedScanResult } from '../types';
+// SCREENER-RESULTS-0001 — Ranked mode's per-symbol loop runs inside
+// lib/scans/ranked-scan-runner.ts, executed as a background task (and, per
+// TE-0002B, sometimes server-side) — this hook cannot reach into that loop
+// directly. Instead it reconstructs per-symbol outcomes from the runner's
+// already-real signals once the task completes: `rawScanCache` contains
+// exactly one entry per symbol whose chain/quote fetch actually succeeded
+// (mirroring runScreen's identical scanCache.push pattern in page.tsx), so
+// a planned symbol NOT in rawScanCache is a real acquisition failure, never
+// silently dropped or misrepresented as a zero-candidate evaluation.
+import {
+  recordSymbolEvaluated, recordSymbolFailed, completeSession, stopSession, errorSession,
+  type ScreenerScanSession,
+} from '@/lib/screener/scanSession';
+import { persistScanSession } from '@/lib/screener/scanSessionCache';
 
 export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult {
   const {
     screenMode, tickers, rankConfig,
     setResults, setRawScanCache, setResultsCachedAt,
     setLoading, setStatus, setError,
+    beginSession, commitSession,
   } = params;
 
   const { dispatch } = useCommandBus();
   const { tasks: allTasks } = useTaskManager();
   const [rankedScanTaskId, setRankedScanTaskId] = useState<string | null>(null);
+  // Holds the session across the async task lifecycle (start -> queued/
+  // running -> completed/failed/cancelled) — a plain ref, not state, since
+  // nothing here needs to re-render off it; only the completion handler
+  // below reads it.
+  const rankedSessionRef = useRef<ScreenerScanSession | null>(null);
 
   useEffect(() => {
     if (screenMode !== 'rank') return;
@@ -60,7 +80,49 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setLoading(false);
       setStatus('');
       const result = rankedScanTask.result as RankedScanResult | undefined;
-      if (result) {
+      const session = rankedSessionRef.current;
+      if (result && session) {
+        // SCREENER-RESULTS-0001 — reconstruct one canonical outcome per
+        // planned symbol from the runner's real signals: a symbol present
+        // in rawScanCache had a successful chain/quote fetch (mirrors
+        // runScreen's identical scanCache.push pattern), so it's recorded
+        // 'evaluated' with whatever real candidates the runner produced for
+        // it (zero is a valid, reasoned outcome). A planned symbol absent
+        // from rawScanCache never got a real evaluation — recorded
+        // 'failed', never silently dropped and never given a fabricated
+        // zero-candidate result.
+        const evaluatedSymbols = new Set(result.rawScanCache.map(e => e.symbol));
+        let s = session;
+        for (const symbol of s.plannedScanSymbols) {
+          if (evaluatedSymbols.has(symbol)) {
+            const symbolResults = result.results.filter(r => r.symbol === symbol);
+            s = symbolResults.length > 0
+              ? recordSymbolEvaluated(s, symbol, symbolResults)
+              : recordSymbolEvaluated(s, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
+          } else {
+            s = recordSymbolFailed(s, symbol, 'MARKET_DATA_REQUEST_FAILED');
+          }
+        }
+        s = completeSession(s);
+        rankedSessionRef.current = null;
+        const finalSession = s;
+        commitSession(finalSession, () => {
+          setResults(result.results);
+          setRawScanCache(result.rawScanCache);
+          setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
+          persistScanSession(finalSession);
+          completeScreenerJob({
+            resultCount: result.results.length,
+            status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
+            resultsHref: '/screener?mode=rank',
+          });
+        });
+      } else if (result) {
+        // Reconnected to an already-completed task this hook instance
+        // never itself started (e.g. after navigating away and back) — no
+        // tracked session exists to reconstruct outcomes into. Falls back
+        // to the pre-existing direct-display behavior rather than
+        // fabricating a session for data this hook never really "began."
         setResults(result.results);
         setRawScanCache(result.rawScanCache);
         setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
@@ -77,10 +139,25 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setStatus('');
       setError(rankedScanTask.error ?? 'Ranked scan failed');
       failScreenerJob(rankedScanTask.error ?? 'Ranked scan failed');
+      if (rankedSessionRef.current && rankedSessionRef.current.status === 'running') {
+        const reasonCode = /token/i.test(rankedScanTask.error ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
+        try {
+          const errored = errorSession(rankedSessionRef.current, reasonCode);
+          rankedSessionRef.current = null;
+          commitSession(errored);
+        } catch { /* session already terminal */ }
+      }
     } else if (rankedScanTask.status === 'cancelled') {
       setLoading(false);
       setStatus('');
       stopScreenerJob('Ranked scan cancelled');
+      if (rankedSessionRef.current && rankedSessionRef.current.status === 'running') {
+        try {
+          const stopped = stopSession(rankedSessionRef.current, 'CANCELLED');
+          rankedSessionRef.current = null;
+          commitSession(stopped);
+        } catch { /* session already terminal */ }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rankedScanTask, screenMode]);
@@ -98,6 +175,9 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
     setResultsCachedAt(null);
     setLoading(true);
     setStatus('Starting ranked scan...');
+    // SCREENER-RESULTS-0001 — 'spreads' session, rank mode. No capacity-
+    // style eligibility gate, so eligibleSymbols === the active watchlist.
+    rankedSessionRef.current = beginSession({ universeSymbols: activeSymbols, eligibleSymbols: activeSymbols });
     startScreenerJob({
       kind: 'rank',
       label: 'Ranked screener scan',
@@ -119,8 +199,15 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setStatus('');
       setError(res.error ?? 'Failed to start ranked scan');
       failScreenerJob(res.error ?? 'Failed to start ranked scan');
+      if (rankedSessionRef.current && rankedSessionRef.current.status === 'running') {
+        try {
+          const errored = errorSession(rankedSessionRef.current, 'MARKET_DATA_REQUEST_FAILED');
+          rankedSessionRef.current = null;
+          commitSession(errored);
+        } catch { /* session already terminal */ }
+      }
     }
-  }, [tickers, rankConfig, dispatch]);
+  }, [tickers, rankConfig, dispatch, beginSession, commitSession]);
 
   return { startRankedScan };
 }

@@ -55,6 +55,12 @@ function renderScreener() {
   );
 }
 
+async function addToUniverse(symbols: string) {
+  const input = await screen.findByPlaceholderText(/Add tickers \(comma-separated\)/i);
+  await userEvent.type(input, symbols);
+  await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+}
+
 async function clickCcScan() {
   const button = await screen.findByRole('button', { name: 'FIND COVERED CALLS' });
   await userEvent.click(button);
@@ -123,6 +129,10 @@ describe('TE-0007C final corrective pass: CC capacity gate wiring', () => {
     });
 
     renderScreener();
+    // SCREENER-RESULTS-0001 — an empty Opportunity Universe no longer
+    // implicitly scans every eligible holding, so NKE must be added
+    // explicitly for this capacity-disclosure test to reach a real scan.
+    await addToUniverse('NKE');
     await clickCcScan();
 
     // The eligible-holdings card must disclose the conservative reservation.

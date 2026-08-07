@@ -177,10 +177,19 @@ describe('TE-0007: Covered Call universe intersection', () => {
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['NKE']);
   });
 
-  it('2. empty universe, eligible [NKE, AAPL] → scans all eligible holdings', async () => {
+  it('2. empty universe never implicitly scans all eligible holdings; the explicit override does', async () => {
+    // SCREENER-RESULTS-0001 — an empty ordinary Opportunity Universe must
+    // never silently behave as "Scan all eligible holdings." This test used
+    // to assert exactly that (buggy) implicit behavior; it now asserts the
+    // ticket-mandated fix: no scan happens until the trader either adds
+    // tickers or explicitly clicks the override.
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
     await clickFindCoveredCalls();
+    expect(getMarketMetricsMock).not.toHaveBeenCalled();
+
+    const bypassBtn = await screen.findByRole('button', { name: /Scan all eligible holdings/i });
+    await userEvent.click(bypassBtn);
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'AAPL']));
     expect(getMarketMetricsMock.mock.calls[0][0]).toHaveLength(2);

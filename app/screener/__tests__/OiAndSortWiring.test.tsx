@@ -269,6 +269,10 @@ describe('SCREENER-OI-0001: 18. no regression to Covered Call capacity protectio
   it('a real CC scan still produces a qualified result, and the new minimum-OI floor narrows it exactly as configured -- capacity/eligibility gating is untouched', async () => {
     mockHoldingsAndChain();
     renderScreener();
+    // SCREENER-RESULTS-0001 — an empty Opportunity Universe no longer
+    // implicitly scans every eligible holding, so NKE must be added
+    // explicitly for this OI-floor test to reach a real scan.
+    await addToUniverse('NKE');
     await clickCcScan();
 
     await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
