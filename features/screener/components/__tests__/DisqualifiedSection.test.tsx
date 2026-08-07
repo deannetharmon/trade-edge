@@ -64,4 +64,22 @@ describe('DisqualifiedSection', () => {
     expect(screen.getByText(/IVR too low/)).toBeInTheDocument();
     expect(screen.getAllByText(/below minimum/).length).toBeGreaterThan(0); // pop check reason
   });
+
+  it('announces the section expand/collapse state via a polite live region', () => {
+    render(<DisqualifiedSection results={[result()]} hasQualifiedCandidates={true} />);
+    const sectionToggle = screen.getByRole('button', { name: /Disqualified \(1\)/ });
+    fireEvent.click(sectionToggle);
+    const statuses = screen.getAllByRole('status').map(el => el.textContent);
+    expect(statuses).toContain('Disqualified section expanded');
+  });
+
+  it('restores focus to the card toggle button when the card collapses', async () => {
+    render(<DisqualifiedSection results={[result({ failReasons: ['POP below minimum threshold', 'IVR too low'] })]} hasQualifiedCandidates={false} />);
+    const cardToggle = screen.getByRole('button', { name: /show checks/i });
+    fireEvent.click(cardToggle); // expand
+    const hideButton = screen.getByRole('button', { name: /hide checks/i });
+    fireEvent.click(hideButton); // collapse -- focus should return to the (same) toggle button
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    expect(screen.getByRole('button', { name: /show checks/i })).toHaveFocus();
+  });
 });

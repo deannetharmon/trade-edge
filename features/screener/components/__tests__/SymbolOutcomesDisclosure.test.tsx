@@ -81,4 +81,16 @@ describe('SymbolOutcomesDisclosure', () => {
     expect(screen.getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByText('Market-data request failed')).toBeInTheDocument();
   });
+
+  it('announces expand/collapse state via a polite live region and restores focus on collapse', async () => {
+    const s = session({ symbolOutcomes: [{ symbol: 'AAPL', status: 'failed', reasonCode: 'MARKET_DATA_REQUEST_FAILED', candidateCount: 0 }] });
+    render(<SymbolOutcomesDisclosure session={s} />);
+    const toggle = screen.getByRole('button', { name: /Symbols not producing candidates \(1\)/ });
+    fireEvent.click(toggle); // expand
+    expect(screen.getByRole('status')).toHaveTextContent('Symbols not producing candidates expanded');
+    fireEvent.click(toggle); // collapse
+    expect(screen.getByRole('status')).toHaveTextContent('Symbols not producing candidates collapsed');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    expect(toggle).toHaveFocus();
+  });
 });

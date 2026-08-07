@@ -9,9 +9,15 @@
 // Uses "Disqualified," never "Rejected" (no documented distinct product
 // meaning for "rejected" in this codebase). Never uses a red badge alone —
 // every collapsed card also carries the reason text.
+//
+// Corrective pass: every expand/collapse toggle here uses
+// useDisclosureA11y, which adds a polite live-region announcement of the
+// new state and returns focus to the trigger button on collapse (see that
+// module's header for why).
 
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
+import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export interface DisqualifiedSectionProps {
   results: ScreenResult[];
@@ -40,8 +46,11 @@ function DisqualifiedCard({
   result: ScreenResult;
   th: { border: string; textFaint: string; textMuted: string };
 }) {
-  const [expanded, setExpanded] = useState(false);
   const panelId = useId();
+  const { open: expanded, toggle, buttonRef, liveMessage } = useDisclosureA11y(
+    `${result.symbol} checks expanded`,
+    `${result.symbol} checks collapsed`,
+  );
   const [primaryReason, ...additional] = result.failReasons;
   const checkEntries = Object.entries(result.checks) as [string, ScreenResult['checks']['ivr']][];
   const failedChecks = checkEntries.filter(([, c]) => c.status === 'fail' || c.status === 'warn');
@@ -61,10 +70,11 @@ function DisqualifiedCard({
           <span className={`shrink-0 ${th.textFaint}`}>+{additional.length} more</span>
         )}
         <button
+          ref={buttonRef}
           type="button"
           aria-expanded={expanded}
           aria-controls={panelId}
-          onClick={() => setExpanded(v => !v)}
+          onClick={toggle}
           className={`shrink-0 text-[9px] px-2 py-1 border ${th.border} rounded ${th.textMuted} hover:border-slate-400`}
         >
           {expanded ? 'Hide checks' : 'Show checks'}
@@ -82,6 +92,7 @@ function DisqualifiedCard({
           ))}
         </div>
       )}
+      <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
     </div>
   );
 }
@@ -94,23 +105,29 @@ export function DisqualifiedSection({
   textMutedClassName = 'text-slate-300',
 }: DisqualifiedSectionProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
-  const [sectionOpen, setSectionOpen] = useState(!hasQualifiedCandidates);
   const panelId = useId();
+  const { open: sectionOpen, toggle: toggleSection, buttonRef, liveMessage } = useDisclosureA11y(
+    'Disqualified section expanded',
+    'Disqualified section collapsed',
+    !hasQualifiedCandidates,
+  );
 
   if (results.length === 0) return null;
 
   return (
     <section aria-label="Disqualified candidates" data-testid="disqualified-section">
       <button
+        ref={buttonRef}
         type="button"
         aria-expanded={sectionOpen}
         aria-controls={panelId}
-        onClick={() => setSectionOpen(v => !v)}
+        onClick={toggleSection}
         className={`w-full flex items-center justify-between text-[9px] tracking-widest uppercase font-bold ${th.textFaint} py-1`}
       >
         <span>Disqualified ({results.length})</span>
         <span aria-hidden="true">{sectionOpen ? '▾' : '▸'}</span>
       </button>
+      <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {sectionOpen && (
         <div id={panelId} className="space-y-2 mt-1">
           {results.map(r => (

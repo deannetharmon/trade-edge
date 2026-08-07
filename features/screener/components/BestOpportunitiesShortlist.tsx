@@ -7,8 +7,9 @@
 // shouldGenerateRecommendationsForSession() boundary) — this component does
 // not know how to reach a disqualified/rejected candidate.
 
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import type { BestOpportunityRow } from '../lib/bestOpportunityRows';
+import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export interface BestOpportunitiesShortlistProps {
   rows: BestOpportunityRow[];
@@ -32,8 +33,11 @@ function ShortlistRow({
   row: BestOpportunityRow;
   th: { border: string; textFaint: string; textMuted: string };
 }) {
-  const [expanded, setExpanded] = useState(false);
   const panelId = useId();
+  const { open: expanded, toggle, buttonRef, liveMessage } = useDisclosureA11y(
+    `${row.symbol} opportunity details expanded`,
+    `${row.symbol} opportunity details collapsed`,
+  );
   return (
     <div className={`border ${th.border} rounded-lg overflow-hidden`}>
       <div className="flex items-center gap-3 px-3 py-2 text-[10px]">
@@ -52,15 +56,17 @@ function ShortlistRow({
           <span className={`shrink-0 ${th.textFaint}`}>Confidence {row.decisionConfidence.toFixed(0)}</span>
         )}
         <button
+          ref={buttonRef}
           type="button"
           aria-expanded={expanded}
           aria-controls={panelId}
-          onClick={() => setExpanded(v => !v)}
+          onClick={toggle}
           className={`ml-auto shrink-0 text-[9px] px-2 py-1 border ${th.border} rounded ${th.textMuted} hover:border-slate-400`}
         >
           {expanded ? 'Hide details' : 'View details'}
         </button>
       </div>
+      <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {expanded && (
         <div id={panelId} className={`px-3 pb-3 space-y-1.5 border-t ${th.border}`}>
           <p className={`text-[10px] ${th.textMuted} leading-relaxed pt-2`}>{row.primaryReason}</p>

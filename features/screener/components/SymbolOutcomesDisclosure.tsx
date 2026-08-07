@@ -9,13 +9,14 @@
 // outcomes, not candidates, and are rendered in their own disclosure,
 // never mixed into the Disqualified section.
 
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import {
   REASON_CODE_LABELS,
   type ScreenerReasonCode,
   type ScreenerScanSession,
   type ScreenerSymbolOutcome,
 } from '@/lib/screener/scanSession';
+import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export interface SymbolOutcomesDisclosureProps {
   session: ScreenerScanSession;
@@ -83,25 +84,30 @@ export function SymbolOutcomesDisclosure({
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
 }: SymbolOutcomesDisclosureProps) {
-  const [open, setOpen] = useState(false);
   const panelId = useId();
   const groups = buildSymbolOutcomeGroups(session);
   const totalCount = groups.reduce((sum, g) => sum + g.entries.length, 0);
+  const { open, toggle, buttonRef, liveMessage } = useDisclosureA11y(
+    'Symbols not producing candidates expanded',
+    'Symbols not producing candidates collapsed',
+  );
 
   if (totalCount === 0) return null;
 
   return (
     <section aria-label="Symbols not producing candidates" data-testid="symbol-outcomes-disclosure">
       <button
+        ref={buttonRef}
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen(v => !v)}
+        onClick={toggle}
         className={`w-full flex items-center justify-between text-[9px] tracking-widest uppercase font-bold ${textFaintClassName} py-1`}
       >
         <span>Symbols not producing candidates ({totalCount})</span>
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>
       </button>
+      <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {open && (
         <div id={panelId} className="space-y-2 mt-1">
           {groups.map(group => (

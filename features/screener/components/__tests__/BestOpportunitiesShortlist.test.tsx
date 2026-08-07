@@ -55,4 +55,19 @@ describe('BestOpportunitiesShortlist', () => {
     expect(ids.has('c1')).toBe(true);
     expect(ids.has('c4')).toBe(false);
   });
+
+  it('announces row expand/collapse state via a polite live region', () => {
+    render(<BestOpportunitiesShortlist rows={[row()]} />);
+    const button = screen.getByRole('button', { name: /view details/i });
+    fireEvent.click(button);
+    expect(screen.getByRole('status')).toHaveTextContent('AAPL opportunity details expanded');
+  });
+
+  it('restores focus to the row toggle button when the row collapses', async () => {
+    render(<BestOpportunitiesShortlist rows={[row()]} />);
+    fireEvent.click(screen.getByRole('button', { name: /view details/i }));
+    fireEvent.click(screen.getByRole('button', { name: /hide details/i }));
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    expect(screen.getByRole('button', { name: /view details/i })).toHaveFocus();
+  });
 });

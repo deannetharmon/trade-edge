@@ -87,18 +87,22 @@ import { persistScanSession, restoreScanSession, clearScanSessionCache } from '@
 //   ScreenResult[] --(POST /api/autopilot/recommendations, existing route)-->
 //   DecisionAnalysis[] --(buildOpportunityRecommendations, existing TC-0001
 //   adapter+ranker wrapper, unmodified)--> OpportunityRecommendation[] -->
-//   BestOpportunitiesPanel (OE-0001, unmodified).
+//   BestOpportunitiesShortlist (SCREENER-UX-0001; previously
+//   BestOpportunitiesPanel, OE-0001).
 // No new persistence: recommendations are held in plain component state,
 // derived fresh from whatever `results` currently holds, and discarded on
 // unmount/navigation -- the same lifecycle `results` itself already has.
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
-import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
-// SCREENER-UX-0001: results-presentation redesign. Filtered-mode hierarchy
-// fix (filters/OI/sort relocated above Best Opportunities) plus the new
-// scan-identity, accounting, best-opportunities-shortlist, disqualified,
-// and symbol-outcomes presentation components. See
+// SCREENER-UX-0001: results-presentation redesign. Filtered/Ranked
+// hierarchy fix (filters/OI/sort relocated above Best Opportunities) plus
+// the new scan-identity, accounting, best-opportunities-shortlist,
+// disqualified, and symbol-outcomes presentation components.
+// BestOpportunitiesPanel (OE-0001) is no longer imported here -- every
+// mode that can show Best Opportunities now uses the collapsed
+// BestOpportunitiesShortlist instead; Targeted mode has no
+// OpportunityRecommendation source and shows neither. See
 // docs/tickets/SCREENER-UX-0001-results-presentation.md.
 import { ScanIdentityHeader } from '@/features/screener/components/ScanIdentityHeader';
 import { AccountingSummaryBar } from '@/features/screener/components/AccountingSummaryBar';
@@ -3640,31 +3644,46 @@ const strategyScores = useMemo(() => {
               {light.emoji} {scored.score} — {light.label}
             </span>
           )}
-          {strategyScores.length > 0 ? (
-  strategyScores.map(s => {
-    const badgeClass =
-      s.strategy === 'BPS'
-        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
-        : s.strategy === 'BCS'
-          ? 'bg-red-500/15 border-red-500 text-red-500'
-          : 'bg-blue-500/15 border-blue-500 text-blue-500';
-
-    const dimClass = s.score == null ? 'opacity-40' : s.current ? '' : 'opacity-75';
-
-    return (
-      <span
-        key={s.strategy}
-        title={s.score == null ? s.reason : `${s.strategy} score ${s.score}`}
-        className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold flex items-center gap-1 ${badgeClass} ${dimClass}`}
-      >
-        {s.strategy}
-        <span className="font-bold text-[9px]">
-          {s.score == null ? '—' : s.score}
-        </span>
-      </span>
-    );
-  })
-) : (
+          {strategyScores.length > 0 ? (() => {
+            // SCREENER-UX-0001 corrective pass: this candidate's actual
+            // structure (result.strategy, "current: true" below) must
+            // always read as its own single primary badge -- never
+            // indistinguishable from the other two strategies' scores,
+            // which are diagnostic-only comparisons over the same
+            // symbol/expiration, not alternate structures for this same
+            // candidate. No score/qualification calculation changed here,
+            // only which badge group each entry renders in and its label.
+            const primary = strategyScores.find(s => s.current);
+            const alternates = strategyScores.filter(s => !s.current);
+            const altBadgeClass = (strategy: string) =>
+              strategy === 'BPS' ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
+                : strategy === 'BCS' ? 'bg-red-500/15 border-red-500 text-red-500'
+                : 'bg-blue-500/15 border-blue-500 text-blue-500';
+            return (
+              <>
+                <span
+                  title={primary && primary.score != null ? `Strategy score (this candidate): ${primary.score}` : (primary?.reason ?? undefined)}
+                  className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}
+                >
+                  {result.strategy}
+                  {primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
+                </span>
+                {alternates.length > 0 && (
+                  <span className={`text-[8px] ${th.textFaint} shrink-0 tracking-wide`}>Alternative scores:</span>
+                )}
+                {alternates.map(s => (
+                  <span
+                    key={s.strategy}
+                    title={s.score == null ? s.reason : `${s.strategy} alternative score ${s.score} (not this candidate's structure)`}
+                    className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold flex items-center gap-1 opacity-60 ${altBadgeClass(s.strategy)}`}
+                  >
+                    {s.strategy}
+                    <span className="font-bold text-[9px]">{s.score == null ? '—' : s.score}</span>
+                  </span>
+                ))}
+              </>
+            );
+          })() : (
   <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
     {result.strategy}{scored && <span className="font-bold text-[9px]">{scored.score}</span>}
   </span>
@@ -6978,6 +6997,14 @@ export default function Home() {
 
   const qualified = results.filter(r => r.qualified);
   const disqualified = results.filter(r => !r.qualified);
+  // SCREENER-UX-0001 corrective pass: a scan that completed (or was
+  // stopped/errored) with zero ScreenResults is a real, distinct outcome
+  // from "no scan has run yet" -- it must still render the results panel
+  // (scan identity, accounting, and the required Best-Opportunities empty
+  // state) instead of falling through to the generic "ADD TICKERS" state.
+  const hasCompletedScanForCurrentMode = !!(
+    activeSession && activeSession.mode === screenMode && activeSession.status !== 'running'
+  );
   const filteredQualifiedChips = applyFilterModeChips(qualified);
   const filteredDisqualified = applyFilterModeChips(disqualified);
 
@@ -7358,7 +7385,14 @@ export default function Home() {
             </div>
           )}
 
-          {results.length === 0 && targetedResults.length === 0 && !loading && (
+          {/* SCREENER-UX-0001 corrective pass: a completed scan that
+              legitimately produced zero ScreenResults (every symbol
+              failed/was skipped/produced no candidate) must still render
+              the results panel -- including the required "no qualified
+              opportunities" empty state -- rather than looking identical
+              to "never ran a scan." hasCompletedScanForCurrentMode makes
+              that distinction explicit. */}
+          {results.length === 0 && targetedResults.length === 0 && !loading && !hasCompletedScanForCurrentMode && (
             <div className={`h-full flex flex-col items-center justify-center ${th.textFaint}`}>
               <div className="text-4xl mb-3 opacity-20">◈</div>
               <p className={`text-[10px] tracking-widest ${th.textMuted}`}>ADD TICKERS AND RUN HUNTER</p>
@@ -7367,7 +7401,7 @@ export default function Home() {
           )}
           {loading && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
 
-          {(results.length > 0 || targetedResults.length > 0) && (
+          {(results.length > 0 || targetedResults.length > 0 || hasCompletedScanForCurrentMode) && !loading && (
             <div className="space-y-4">
               {/* SCREENER-UX-0001 — item 1 of the required hierarchy: scan
                   identity always leads. Falls back to the prior static
@@ -7399,7 +7433,20 @@ export default function Home() {
                   ) : (
                     <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
                   )}
-                  <span className={th.textFaint}>{screenMode === 'targeted' ? `${targetedResults.length} ENTRIES` : `${results.length} SCANNED`}</span>
+                  {/* SCREENER-UX-0001 corrective pass: the non-targeted
+                      "${results.length} SCANNED" label reintroduced the
+                      exact scanned/attempted conflation this ticket exists
+                      to remove -- `results` is actually the evaluated
+                      candidate list, not a count of symbols scanned.
+                      AccountingSummaryBar's own "evaluated" segment below
+                      already states this precisely, so the label is
+                      removed rather than relabeled. Targeted mode's
+                      ENTRIES count is not a scanned/attempted conflation
+                      (targetedResults is genuinely a count of setups) and
+                      is kept. */}
+                  {screenMode === 'targeted' && (
+                    <span className={th.textFaint}>{targetedResults.length} ENTRIES</span>
+                  )}
                   {/* SCREENER-RESULTS-0001 — canonical accounting summary,
                       reconciling every selected symbol (never labeling
                       attemptedCount as "scanned," never showing a fraction
@@ -7500,12 +7547,23 @@ export default function Home() {
                   but none qualified, this shows the required explicit empty
                   state instead of silently rendering nothing (which read as
                   "no opinion yet" rather than "nothing qualified").
-                  SCREENER-UX-0001: Filtered mode uses the new collapsed
-                  top-3 BestOpportunitiesShortlist (item 4 of the required
-                  hierarchy); Ranked/Targeted keep the existing, unmodified
-                  BestOpportunitiesPanel per the ticket's documented scope
-                  decision. */}
-              {results.length > 0 && screenMode === 'filter' && (
+                  SCREENER-UX-0001 corrective pass: Ranked mode now also
+                  uses the collapsed top-3 BestOpportunitiesShortlist.
+                  session.results (and therefore `results`) holds both
+                  qualified and disqualified candidates -- see
+                  computeSessionAccounting's own qualifiedCandidateCount/
+                  disqualifiedCandidateCount split over the same array --
+                  so this filters to qualified-only before building rows,
+                  the same boundary Filtered mode's filteredQualified
+                  already enforces; a disqualified candidate can never
+                  reach a recommendation card in either mode. Targeted mode
+                  has no OpportunityRecommendation source of its own
+                  (opportunityRecommendations is derived from `results`,
+                  which Targeted never populates) and would show a
+                  meaningless/misleading empty state if wired to either
+                  Best-Opportunities component -- it is deliberately
+                  excluded, not merely deferred. */}
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'filter' && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
                   borderClassName={th.border}
@@ -7513,36 +7571,45 @@ export default function Home() {
                   textMutedClassName={th.textMuted}
                 />
               )}
-              {results.length > 0 && screenMode !== 'filter' && (
-                <BestOpportunitiesPanel
-                  recommendations={opportunityRecommendations}
-                  generatedAt={opportunityGeneratedAt}
-                  th={th}
-                  blockerNotice={
-                    opportunityState === 'error'
-                      ? (opportunityError || 'Unable to load ranked opportunities.')
-                      : opportunityState === 'loading'
-                        ? 'Ranking opportunities from these scan results…'
-                        : opportunityState === 'idle' && activeSession?.status === 'complete' && activeSession.results.every(r => !r.qualified)
-                          ? 'No qualified opportunities for this scan. Review the disqualified candidates and their reasons below.'
-                          : undefined
-                  }
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && (
+                <BestOpportunitiesShortlist
+                  rows={buildBestOpportunityRows(results.filter(r => r.qualified), opportunityRecommendations)}
+                  borderClassName={th.border}
+                  textFaintClassName={th.textFaint}
+                  textMutedClassName={th.textMuted}
                 />
               )}
 
               {screenMode === 'targeted' ? (
-                <TargetedScanResultsPanel
-                  entries={targetedResults}
-                  sortBy={targetedSortBy}
-                  setSortBy={setTargetedSortBy}
-                  popMin={targetedPopMin}
-                  th={th}
-                  rankConfig={rankConfig}
-                  rules={runtimeStockRules}
-                  etfRules={runtimeEtfRules}
-                  existingPositions={existingPositions}
-                  onTrade={setTradeResult}
-                />
+                <>
+                  <TargetedScanResultsPanel
+                    entries={targetedResults}
+                    sortBy={targetedSortBy}
+                    setSortBy={setTargetedSortBy}
+                    popMin={targetedPopMin}
+                    th={th}
+                    rankConfig={rankConfig}
+                    rules={runtimeStockRules}
+                    etfRules={runtimeEtfRules}
+                    existingPositions={existingPositions}
+                    onTrade={setTradeResult}
+                  />
+                  {/* SCREENER-UX-0001 corrective pass: item 7 of the
+                      required hierarchy, wired into Targeted mode.
+                      Targeted has no qualified/disqualified split (every
+                      entry TargetedScanResultsPanel receives already
+                      passed its own eligibility checks) and no
+                      OpportunityRecommendation source, but symbol-level
+                      failures/skips are still a real, session-level fact
+                      and belong in their own disclosure here too. */}
+                  {activeSession && activeSession.mode === 'targeted' && (
+                    <SymbolOutcomesDisclosure
+                      session={activeSession}
+                      borderClassName={th.border}
+                      textFaintClassName={th.textFaint}
+                    />
+                  )}
+                </>
               ) : screenMode === 'filter' ? (() => {
                 const topOpportunityRows = buildBestOpportunityRows(filteredQualified, opportunityRecommendations);
                 const topOpportunityIds = pickTopOpportunityIds(topOpportunityRows);
@@ -7824,6 +7891,28 @@ export default function Home() {
                         </div>
                       ))}
                   </div>
+                  {/* SCREENER-UX-0001 corrective pass: items 6-7 of the
+                      required hierarchy, wired into Ranked mode.
+                      `disqualified` (module-level, derived from `results`
+                      the same way Filtered mode's is -- see its
+                      declaration above) was never previously surfaced in
+                      Ranked mode; the ranked/scored list above is left
+                      completely untouched (no scanner/ranking-logic
+                      change), this is purely additive. */}
+                  <DisqualifiedSection
+                    results={disqualified}
+                    hasQualifiedCandidates={display.length > 0}
+                    borderClassName={th.border}
+                    textFaintClassName={th.textFaint}
+                    textMutedClassName={th.textMuted}
+                  />
+                  {activeSession && activeSession.mode === 'rank' && (
+                    <SymbolOutcomesDisclosure
+                      session={activeSession}
+                      borderClassName={th.border}
+                      textFaintClassName={th.textFaint}
+                    />
+                  )}
                 </div>
                 );
               })()}
