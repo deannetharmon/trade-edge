@@ -167,7 +167,7 @@ EXIT TYPE BREAKDOWN:
 ${(() => {
   const exitLabels: Record<string, string> = {
     TARGET_HIT:     'Target hit (50–75% profit — disciplined)',
-    SCRATCH_WIN:    'Scratch win (small gain below target)',
+    SCRATCH_WIN:    'Partial profit (positive return below target)',
     HELD_TO_EXPIRY: 'Held to expiry (win but gamma-risky)',
     MANAGED_LOSS:   'Managed loss (cut at planned stop — good)',
     TIME_STOP:      'Time stop (closed at ≤21 DTE)',
@@ -819,7 +819,7 @@ function DteAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof T
 function ExitAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEMES[Theme] }) {
   const exitDefs: { type: ExitType; label: string; desc: string; goodOrBad: 'good' | 'bad' | 'neutral' }[] = [
     { type: 'TARGET_HIT',     label: 'Target Hit',      desc: 'Closed at 50–75% profit — hit the target',        goodOrBad: 'good' },
-    { type: 'SCRATCH_WIN',    label: 'Scratch Win',     desc: 'Small gain below target — edge clipped early',     goodOrBad: 'neutral' },
+    { type: 'SCRATCH_WIN',    label: 'Partial Profit',  desc: 'Positive return below the planned profit target',     goodOrBad: 'neutral' },
     { type: 'HELD_TO_EXPIRY', label: 'Held to Expiry',  desc: 'Won but held ≥75% of duration — gamma risk',      goodOrBad: 'neutral' },
     { type: 'MANAGED_LOSS',   label: 'Managed Loss',    desc: 'Cut at planned 2× stop — disciplined loss',       goodOrBad: 'good' },
     { type: 'TIME_STOP',      label: 'Time Stop',       desc: 'Closed at ≤21 DTE — rule followed',               goodOrBad: 'neutral' },
