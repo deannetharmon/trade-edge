@@ -398,6 +398,66 @@ describe('SCREENER-RESULTS-0001: Best Opportunities trust boundary (10, 11, 12, 
   });
 });
 
+describe('SCREENER-RESULTS-0001 corrective: Targeted cancellation (4)', () => {
+  // SCREENER-RESULTS-0001 corrective — the ticket's scenario 4 ("cancellation-
+  // after-partial-attempt produces correct attempted/skipped totals") was
+  // previously only proven at the pure-function level
+  // (lib/screener/__tests__/scanSession.test.ts's own stopSession coverage).
+  // This drives the real STOP SCAN button through the real RunModeModal ->
+  // runTargetedScan wiring. Because Targeted's rendered header (which is
+  // where the canonical accounting summary lives) only appears once
+  // targetedResults has at least one real qualifying multi-leg candidate —
+  // a heavier fixture (a real Iron Condor/spread across multiple strikes)
+  // than this pass fabricates — this test instead asserts the reachable,
+  // still-real facts at the network boundary: exactly which planned
+  // symbols were fetched (attempted) vs never reached (skipped by the
+  // cancellation), and that the STOP SCAN control's own lifecycle (visible
+  // while running, gone once stopped) behaves correctly.
+  it('clicking STOP SCAN mid-flight halts further symbols; already-attempted symbols are not silently skipped', async () => {
+    const heldChain = deferred<any>();
+    // AAA resolves immediately (a real attempt, no candidate). BBB hangs on
+    // its chain fetch until the test explicitly resolves it, giving the
+    // test a window to click STOP SCAN while BBB is still in flight but
+    // already past this iteration's cancellation check (mirrors a real
+    // slow-network mid-scan cancellation). CCC must never be fetched at
+    // all once cancelled.
+    getChainMock.mockImplementation((symbol: string) => {
+      if (symbol === 'AAA') return Promise.resolve(emptyChain);
+      if (symbol === 'BBB') return heldChain.promise;
+      return Promise.resolve(emptyChain);
+    });
+
+    renderScreener();
+    await addToUniverse('AAA,BBB,CCC');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
+    await userEvent.click(await screen.findByRole('button', { name: /TARGETED/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
+
+    // BBB's fetch is now in flight -- AAA already completed (1 call), BBB
+    // has started (2nd call), CCC has not been reached yet.
+    await waitFor(() => expect(getChainMock).toHaveBeenCalledTimes(2));
+    expect(getChainMock.mock.calls.map(c => c[0])).toEqual(['AAA', 'BBB']);
+
+    const stopBtn = await screen.findByRole('button', { name: /STOP SCAN/i });
+    await userEvent.click(stopBtn);
+
+    // Let BBB's already-in-flight fetch resolve -- it was past the
+    // cancellation checkpoint for its own iteration, so it still completes
+    // as a real attempt (this is the exact "cancellation-after-partial-
+    // attempt" case: BBB is attempted, not skipped, even though the click
+    // happened while it was mid-flight).
+    heldChain.resolve(emptyChain);
+
+    // The loop's next iteration (CCC) checks cancelRef and breaks before
+    // ever calling getChain for it.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /STOP SCAN/i })).not.toBeInTheDocument());
+    expect(getChainMock).toHaveBeenCalledTimes(2);
+    expect(getChainMock.mock.calls.map(c => c[0])).toEqual(['AAA', 'BBB']);
+    expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('SCREENER-RESULTS-0001: CC scope-exclusion precision (16)', () => {
   it('selected-but-ineligible CC symbols (no verified shares vs fully covered) are both excluded and never scanned, without conflating the two reasons', async () => {
     getCoveredCallCapacityReportMock.mockResolvedValue({

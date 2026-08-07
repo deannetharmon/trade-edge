@@ -80,17 +80,45 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       setLoading(false);
       setStatus('');
       const result = rankedScanTask.result as RankedScanResult | undefined;
-      const session = rankedSessionRef.current;
+      let session = rankedSessionRef.current;
+      // SCREENER-RESULTS-0001 corrective — reconnecting to an already-
+      // completed task this hook instance never itself started (e.g. after
+      // navigating away and back) used to call setResults(result.results)
+      // directly, entirely bypassing the canonical session model (no
+      // ScreenerScanSession was ever created, so accounting, strategy
+      // isolation, and the cache-provenance/staleness guarantees all silently
+      // did not apply to a reconnected Ranked scan's display). The task
+      // itself always carries its own original input (see
+      // lib/commands/command-handlers.ts's START_RANKED_SCAN handler, which
+      // creates the task with `input` set to the exact RankedScanInput that
+      // was dispatched), so a session can be constructed here too —
+      // reconnection is no longer a special, session-less case.
+      if (!session && result) {
+        const activeSymbols = (rankedScanTask.input as RankedScanInput | undefined)?.activeSymbols;
+        if (activeSymbols?.length) {
+          session = beginSession({ universeSymbols: activeSymbols, eligibleSymbols: activeSymbols });
+        }
+      }
       if (result && session) {
         // SCREENER-RESULTS-0001 — reconstruct one canonical outcome per
-        // planned symbol from the runner's real signals: a symbol present
-        // in rawScanCache had a successful chain/quote fetch (mirrors
-        // runScreen's identical scanCache.push pattern), so it's recorded
-        // 'evaluated' with whatever real candidates the runner produced for
-        // it (zero is a valid, reasoned outcome). A planned symbol absent
-        // from rawScanCache never got a real evaluation — recorded
-        // 'failed', never silently dropped and never given a fabricated
-        // zero-candidate result.
+        // planned symbol from the runner's real signals. `rawScanCache`
+        // contains exactly one entry per symbol whose chain/quote fetch
+        // succeeded (lib/scans/ranked-scan-runner.ts pushes to it only
+        // immediately after its `Promise.all([getChain, getQuote])` for that
+        // symbol resolves — see the loop's try block). The runner's own
+        // catch block for that same try (its `errResult()` helper) still
+        // fabricates a disqualified ScreenResult for a symbol whose fetch
+        // failed and pushes it into `result.results` WITHOUT adding that
+        // symbol to `rawScanCache` — precisely because that push never runs
+        // on the failure path. So for a *completed* task specifically,
+        // absence from rawScanCache always means the acquisition Promise.all
+        // itself threw for that symbol (a real MARKET_DATA_REQUEST_FAILED),
+        // never a cancellation (a cancelled run fails/cancels the whole task,
+        // it never reaches 'completed' with a partial loop) and never a
+        // classifyUnderlying failure (thrown outside any try in the runner's
+        // loop, which likewise fails the whole task rather than completing
+        // it). This is recorded as 'failed', never silently dropped and
+        // never given a fabricated zero-candidate result.
         const evaluatedSymbols = new Set(result.rawScanCache.map(e => e.symbol));
         let s = session;
         for (const symbol of s.plannedScanSymbols) {
@@ -107,22 +135,27 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
         rankedSessionRef.current = null;
         const finalSession = s;
         commitSession(finalSession, () => {
-          setResults(result.results);
+          // Displays finalSession.results (the canonical, reconciled set),
+          // NOT the runner's raw result.results — the runner's own
+          // errResult() fabrication for a failed symbol must never reach the
+          // UI; recordSymbolFailed() above never adds anything to
+          // finalSession.results for that symbol, so it's excluded here too.
+          setResults(finalSession.results);
           setRawScanCache(result.rawScanCache);
           setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());
           persistScanSession(finalSession);
           completeScreenerJob({
-            resultCount: result.results.length,
-            status: `${result.results.length} ranked result${result.results.length === 1 ? '' : 's'} ready`,
+            resultCount: finalSession.results.length,
+            status: `${finalSession.results.length} ranked result${finalSession.results.length === 1 ? '' : 's'} ready`,
             resultsHref: '/screener?mode=rank',
           });
         });
       } else if (result) {
-        // Reconnected to an already-completed task this hook instance
-        // never itself started (e.g. after navigating away and back) — no
-        // tracked session exists to reconstruct outcomes into. Falls back
-        // to the pre-existing direct-display behavior rather than
-        // fabricating a session for data this hook never really "began."
+        // No session could be constructed even from the task's own input
+        // (e.g. a legacy task created before this field existed, or one
+        // dispatched with an empty activeSymbols list) — falls back to the
+        // pre-existing direct-display behavior rather than fabricating a
+        // session for data this hook has no real scope information for.
         setResults(result.results);
         setRawScanCache(result.rawScanCache);
         setResultsCachedAt(rankedScanTask.completedAt ? new Date(rankedScanTask.completedAt).getTime() : Date.now());

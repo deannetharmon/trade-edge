@@ -4894,6 +4894,12 @@ async function runTargetedScan(
   // other caller in this file.
   beginSession: (scope: ScreenerScanScope) => ScreenerScanSession,
   commitSession: (session: ScreenerScanSession, onCommit?: () => void) => boolean,
+  // SCREENER-RESULTS-0001 corrective — same staleness guard used by every
+  // in-component scan function (isScanCurrent): a superseded Targeted scan's
+  // catch/finally must not clobber a newer scan's shared loading/status/
+  // error UI. Passed in for the same closure reason as beginSession/
+  // commitSession above.
+  isCurrent: (session: ScreenerScanSession | null) => boolean,
 ): Promise<void> {
   // PMCC excluded — different philosophy, not a spread strategy.
   // `primary` is a fallback label only — actual strategy exploration below
@@ -5202,8 +5208,13 @@ async function runTargetedScan(
     });
     void committed;
   } catch (e: any) {
-    setError(e.message);
-    failScreenerJob(e.message);
+    // SCREENER-RESULTS-0001 corrective — same staleness guard as the other
+    // scan functions: a superseded Targeted scan's catch must not clobber
+    // a newer scan's loading/status/error/job state.
+    if (isCurrent(session)) {
+      setError(e.message);
+      failScreenerJob(e.message);
+    }
     if (session.status === 'running') {
       try {
         const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
@@ -5211,7 +5222,9 @@ async function runTargetedScan(
       } catch { /* session already terminal */ }
     }
   } finally {
-    setStatus(''); setLoading(false);
+    if (isCurrent(session)) {
+      setStatus(''); setLoading(false);
+    }
   }
 }
 
@@ -5825,6 +5838,23 @@ export default function Home() {
     return true;
   };
 
+  // SCREENER-RESULTS-0001 corrective — commitScanSession() already gates the
+  // SUCCESS path's results/cache writes against a stale/superseded session,
+  // but every scan function's catch/finally block was still unconditionally
+  // calling setLoading(false)/setStatus('')/setError()/job-status mutations
+  // even when its own session had already been superseded — a slow scan's
+  // late failure or cleanup could clobber a newer scan's loading/status/
+  // error UI after the newer scan had already taken over. This is the same
+  // identity check as commitScanSession(), reused for those shared-UI-state
+  // writes. `session == null` (a real exception before this invocation ever
+  // constructed a session, e.g. during Covered Call's pre-session capacity/
+  // universe guards) is treated as "still current" — the page-level loading
+  // gate only ever allows one scan-triggering button to be active at a time,
+  // so an invocation that never got far enough to create a session was, by
+  // construction, still the only one running.
+  const isScanCurrent = (session: ScreenerScanSession | null): boolean =>
+    session == null || !isSessionStale(session.sessionId, activeSessionIdRef.current);
+
   // ── OE-0002A: Best Opportunities state ────────────────────────────────────
   // Purely derived, in-memory state -- never persisted, never fabricated.
   // 'idle' before any real scan results exist; 'loading' while the existing
@@ -6017,9 +6047,18 @@ export default function Home() {
     idbGet<RawScanEntry[]>(IDB_RAW_SCAN_KEY).then(cached => {
       if (cached) setRawScanCache(cached);
     });
-    idbGet<TargetedScanEntry[]>(IDB_TARGETED_RESULTS_KEY).then(cached => {
-      if (cached) setTargetedResults(cached);
-    });
+    // SCREENER-RESULTS-0001 corrective — Targeted's own rich
+    // TargetedScanEntry[] cache used to restore completely independently of
+    // the canonical session: unvalidated, and with no reconciliation against
+    // whatever restoreScanSession() below decided was (or wasn't) a valid
+    // restored session. That made it a second, un-gated source of truth —
+    // a rejected/invalid/cross-strategy/non-targeted cached session
+    // wouldn't stop stale TargetedScanEntry[] cards from reappearing
+    // anyway. It's now restored only once restoreScanSession() itself has
+    // resolved AND agreed there's a valid, still-current, targeted-mode
+    // session to reconcile it with — the canonical session is the single
+    // gate for whether any cached results (Targeted's own cards, or
+    // `results` for every other mode below) are restored at all.
     restoreScanSession().then(session => {
       if (!session) return;
       // A scan may have already started (and begun superseding) before
@@ -6028,11 +6067,16 @@ export default function Home() {
       if (activeSessionIdRef.current != null) return;
       activeSessionIdRef.current = session.sessionId;
       setActiveSession(session);
-      // Targeted mode's own TargetedScanEntry[] restore (above) remains the
-      // source of its rendered cards; the session here is its parallel
-      // accounting record only, so it doesn't also drive `results` for
-      // Targeted (which never reads from `results` in the first place).
-      if (session.mode !== 'targeted') {
+      if (session.mode === 'targeted') {
+        // Targeted mode's own TargetedScanEntry[] cache remains the source
+        // of its rendered cards; the session is its parallel accounting
+        // record. Only restored now that we know this exact session (same
+        // cache write, same completed scan) is what validated/restored —
+        // never independently of it.
+        idbGet<TargetedScanEntry[]>(IDB_TARGETED_RESULTS_KEY).then(cachedTargeted => {
+          if (cachedTargeted) setTargetedResults(cachedTargeted);
+        });
+      } else {
         setResults(session.results);
         if (session.cachedAt != null) setResultsCachedAt(session.cachedAt);
       }
@@ -6134,6 +6178,17 @@ export default function Home() {
 
   const clearResultsCache = () => {
     setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
+    // SCREENER-RESULTS-0001 corrective — this used to clear every OTHER
+    // cache key (raw scan, legacy results, targeted results) but never the
+    // canonical session cache itself, and never the in-memory
+    // activeSession/activeSessionIdRef either. A "cleared" scan's session
+    // could therefore still be sitting in IndexedDB and reappear — with its
+    // now-stale accounting summary and launcher highlight still attached —
+    // on the very next page load's restore effect, even though every other
+    // trace of that scan had just been wiped.
+    setActiveSession(null);
+    activeSessionIdRef.current = null;
+    clearScanSessionCache();
     try { localStorage.removeItem(LS_RESULTS_CACHE_AT); localStorage.removeItem(LS_TARGETED_RESULTS_CACHE_AT); } catch {}
     idbDel(IDB_RAW_SCAN_KEY);
     idbDel(IDB_RESULTS_KEY);
@@ -6348,10 +6403,6 @@ export default function Home() {
         }
       }
 
-      // Store raw cache for instant re-filtering
-      setRawScanCache(scanCache);
-      idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
-
       session = completeSession(session);
       const sortedResults = [...session.results];
       if (sessionMode === 'rank') {
@@ -6369,7 +6420,16 @@ export default function Home() {
         });
       }
 
+      // SCREENER-RESULTS-0001 corrective — rawScanCache and its IndexedDB
+      // mirror used to be written here, BEFORE commitScanSession's stale
+      // check, so a superseded scan's late scanCache could still land in
+      // rawScanCache/IDB_RAW_SCAN_KEY and silently feed a later
+      // applyRules() re-filter even though its session commit was rejected.
+      // Moved inside the commit callback so a stale scan's cache write is
+      // rejected by the exact same gate as everything else it produced.
       const committed = commitScanSession(session, () => {
+        setRawScanCache(scanCache);
+        idbSet(IDB_RAW_SCAN_KEY, scanCache); // IndexedDB — full chain data can exceed localStorage's quota
         setResults(sortedResults);
         const cacheTs = Date.now();
         setResultsCachedAt(cacheTs);
@@ -6385,20 +6445,30 @@ export default function Home() {
       });
       if (!committed) {
         // Superseded by a newer scan while this one was in flight — its
-        // results must never overwrite whatever the newer session is
-        // showing. Nothing more to do; the newer scan owns the UI now.
+        // results (and its rawScanCache) must never overwrite whatever the
+        // newer session is showing. Nothing more to do; the newer scan owns
+        // the UI now.
       }
     } catch (e: any) {
-      setError(e.message);
-      failScreenerJob(e.message);
+      // SCREENER-RESULTS-0001 corrective — a superseded scan's own catch
+      // must not clobber the newer scan's loading/status/error/job state.
+      if (isScanCurrent(session)) {
+        setError(e.message);
+        failScreenerJob(e.message);
+      }
       const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
       try {
         session = errorSession(session, reasonCode);
         commitScanSession(session);
       } catch { /* session already terminal (e.g. a supersession raced this catch) */ }
     } finally {
-      setStatus('');
-      setLoading(false);
+      // SCREENER-RESULTS-0001 corrective — same staleness guard: a
+      // superseded scan's finally block must not reset loading/status back
+      // to idle after a newer scan has already set them for itself.
+      if (isScanCurrent(session)) {
+        setStatus('');
+        setLoading(false);
+      }
     }
   };
 
@@ -6478,16 +6548,23 @@ export default function Home() {
       });
       void committed;
     } catch (e: any) {
-      setError(e.message);
-      failScreenerJob(e.message);
+      // SCREENER-RESULTS-0001 corrective — same staleness guard as the
+      // other scan functions: a superseded PMCC scan's catch must not
+      // clobber a newer scan's loading/status/error/job state.
+      if (isScanCurrent(session)) {
+        setError(e.message);
+        failScreenerJob(e.message);
+      }
       const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
       try {
         session = errorSession(session, reasonCode);
         commitScanSession(session);
       } catch { /* session already terminal */ }
     } finally {
-      setStatus('');
-      setLoading(false);
+      if (isScanCurrent(session)) {
+        setStatus('');
+        setLoading(false);
+      }
     }
   };
 
@@ -6576,16 +6653,23 @@ export default function Home() {
       });
       void committed; // superseded scans simply discard their own late results
     } catch (e: any) {
-      setError(e.message);
-      failScreenerJob(e.message);
+      // SCREENER-RESULTS-0001 corrective — same staleness guard as
+      // runScreen()/runCcScan(): a superseded CSP scan's catch must not
+      // clobber a newer scan's loading/status/error/job state.
+      if (isScanCurrent(session)) {
+        setError(e.message);
+        failScreenerJob(e.message);
+      }
       const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
       try {
         session = errorSession(session, reasonCode);
         commitScanSession(session);
       } catch { /* session already terminal */ }
     } finally {
-      setStatus('');
-      setLoading(false);
+      if (isScanCurrent(session)) {
+        setStatus('');
+        setLoading(false);
+      }
     }
   };
 
@@ -6780,8 +6864,13 @@ export default function Home() {
       // for real, unexpected failures — including one that happens after a
       // session was already constructed, which must still be closed out via
       // errorSession() rather than left stuck 'running' forever.
-      setError(e.message);
-      failScreenerJob(e.message);
+      // SCREENER-RESULTS-0001 corrective — same staleness guard as
+      // runScreen(): a superseded CC scan's catch must not clobber a newer
+      // scan's loading/status/error/job state.
+      if (isScanCurrent(session)) {
+        setError(e.message);
+        failScreenerJob(e.message);
+      }
       if (session && session.status === 'running') {
         try {
           const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
@@ -6790,8 +6879,10 @@ export default function Home() {
         } catch { /* session already terminal */ }
       }
     } finally {
-      setStatus('');
-      setLoading(false);
+      if (isScanCurrent(session)) {
+        setStatus('');
+        setLoading(false);
+      }
     }
   };
 
@@ -7765,7 +7856,7 @@ export default function Home() {
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession, isScanCurrent);
             } else if (mode === 'rank') {
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {
