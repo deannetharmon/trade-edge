@@ -154,7 +154,7 @@ EXIT TYPE BREAKDOWN:
 ${(() => {
   const exitLabels: Record<string, string> = {
     TARGET_HIT:     'Target hit (50–75% profit — disciplined)',
-    SCRATCH_WIN:    'Scratch win (small gain below target)',
+    SCRATCH_WIN: 'Partial profit (positive return below target)',
     HELD_TO_EXPIRY: 'Held to expiry (win but gamma-risky)',
     MANAGED_LOSS:   'Managed loss (cut at planned stop — good)',
     TIME_STOP:      'Time stop (closed at ≤21 DTE)',
@@ -207,7 +207,7 @@ function fmtAge(ms: number): string {
 }
 function exitTypeColor(e: ExitType) {
   if (e === 'TARGET_HIT')     return 'text-emerald-400 border-emerald-700 bg-emerald-500/8';
-  if (e === 'SCRATCH_WIN')    return 'text-teal-400 border-teal-700 bg-teal-500/8';
+  if (e === 'SCRATCH_WIN') return 'Partial Profit';
   if (e === 'HELD_TO_EXPIRY') return 'text-orange-400 border-orange-700 bg-orange-500/8';
   if (e === 'MANAGED_LOSS')   return 'text-sky-400 border-sky-700 bg-sky-500/8';
   if (e === 'TIME_STOP')      return 'text-yellow-400 border-yellow-700 bg-yellow-500/8';
@@ -704,7 +704,7 @@ export default function TradeLogPage() {
               label="Exit Types"
               options={[
                 { value: 'TARGET_HIT',     label: 'Target Hit' },
-                { value: 'SCRATCH_WIN',    label: 'Scratch Win' },
+                { value: 'SCRATCH_WIN', label: 'Partial Profit' },
                 { value: 'HELD_TO_EXPIRY', label: 'Held to Expiry' },
                 { value: 'MANAGED_LOSS',   label: 'Managed Loss' },
                 { value: 'TIME_STOP',      label: 'Time Stop' },
