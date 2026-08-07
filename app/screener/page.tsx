@@ -116,7 +116,7 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 // strategy-launch button, replacing four separately drifting conditional
 // class strings. Selection is computed inline below from
 // activeSession?.requestedStrategy -- never tracked as separate state.
-import { LauncherButton } from '@/features/screener/components/LauncherButton';
+import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
@@ -7056,6 +7056,21 @@ export default function Home() {
     };
   });
 
+  // SCREENER-LAUNCHER-0001 corrective pass — identifies the ONE launcher
+  // whose own scan invocation is currently in flight, replacing the
+  // page-wide `loading` Boolean that previously made every launcher render
+  // "SCANNING..." simultaneously. Read-only and derived entirely from the
+  // canonical session: a session's status is 'running' only between
+  // beginScanSession() (the real invocation start -- for Spreads, only
+  // after RUN SCREENER is confirmed) and its completion/error/stop
+  // transition, and beginScanSession() always supersedes any prior running
+  // session first, so this can never resolve to more than one strategy at
+  // once. No new mutable state, no effect on scanner routing, session
+  // construction, qualification, or caching -- purely a render-time view of
+  // state that already exists.
+  const runningLauncher: LauncherStrategyId | null =
+    activeSession?.status === 'running' ? activeSession.requestedStrategy : null;
+
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       {/* Header */}
@@ -7137,46 +7152,70 @@ export default function Home() {
                   solid-filled regardless of selection while the other
                   three only ever got a translucent tint; LauncherButton
                   gives all four one shared unselected/selected visual
-                  model (see its own header comment). */}
+                  model (see its own header comment).
+
+                  SCREENER-LAUNCHER-0001 corrective pass — production defect:
+                  every launcher used to render its label from the page-wide
+                  `loading` Boolean (`loading ? 'SCANNING...' : label`), so
+                  ALL FOUR showed "SCANNING..." whenever any one scan ran.
+                  `runningLauncher` fixes this by identifying the ONE
+                  launcher whose own scan is actually in flight — derived
+                  read-only from the canonical session (`activeSession`),
+                  never a separate mutable flag: a session is 'running' only
+                  between beginScanSession() (called at the moment a real
+                  scan invocation starts — for Spreads, only after RUN
+                  SCREENER is confirmed, never merely from opening the
+                  config modal) and its completion/error/stop transition.
+                  beginScanSession() also immediately supersedes any prior
+                  still-running session, so this can never point at more
+                  than one launcher, and a slow/failed older scan can never
+                  clobber a newer one's running state — the same
+                  stale-session guarantee every other canonical-session
+                  consumer on this page already relies on. This performs NO
+                  scanning, session, or qualification logic of its own. */}
               <LauncherButton
                 strategy="spreads"
                 label="FIND SPREADS"
                 isSelected={activeSession?.requestedStrategy === 'spreads'}
+                isRunning={runningLauncher === 'spreads'}
                 onClick={() => setShowRunModal(true)}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
               >
-                {loading ? 'SCANNING...' : 'FIND SPREADS'}
+                {runningLauncher === 'spreads' ? 'SCANNING...' : 'FIND SPREADS'}
               </LauncherButton>
               <LauncherButton
                 strategy="csp"
                 label="FIND CSPs"
                 isSelected={activeSession?.requestedStrategy === 'csp'}
+                isRunning={runningLauncher === 'csp'}
                 onClick={runCspScan}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
               >
-                {loading ? 'SCANNING...' : 'FIND CSPs'}
+                {runningLauncher === 'csp' ? 'SCANNING...' : 'FIND CSPs'}
               </LauncherButton>
               <LauncherButton
                 strategy="cc"
                 label="FIND COVERED CALLS"
                 isSelected={activeSession?.requestedStrategy === 'cc'}
+                isRunning={runningLauncher === 'cc'}
                 onClick={() => runCcScan(false)}
                 disabled={loading}
                 title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
               >
-                {loading ? 'SCANNING...' : 'FIND COVERED CALLS'}
+                {runningLauncher === 'cc' ? 'SCANNING...' : 'FIND COVERED CALLS'}
               </LauncherButton>
               <LauncherButton
                 strategy="pmcc"
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
+                isRunning={runningLauncher === 'pmcc'}
                 onClick={runPMCCScan}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
               >
-                {loading ? 'SCANNING...' : 'FIND PMCCs'}
+                {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
               <button disabled
                 title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
