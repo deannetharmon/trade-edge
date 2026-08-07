@@ -71,7 +71,7 @@ import type {
 import {
   createScanSession, recordSymbolEvaluated, recordSymbolFailed, recordSymbolSkipped,
   completeSession, stopSession, errorSession, isSessionStale,
-  shouldGenerateRecommendationsForSession, computeSessionAccounting, formatSessionAccountingSummary,
+  shouldGenerateRecommendationsForSession,
   validateSessionData, normalizeSymbols,
   ScanSessionConstructionError, ScanSessionTransitionError,
 } from '@/lib/screener/scanSession';
@@ -95,6 +95,18 @@ import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
 import { BestOpportunitiesPanel } from '@/components/opportunity-engine/BestOpportunitiesPanel';
+// SCREENER-UX-0001: results-presentation redesign. Filtered-mode hierarchy
+// fix (filters/OI/sort relocated above Best Opportunities) plus the new
+// scan-identity, accounting, best-opportunities-shortlist, disqualified,
+// and symbol-outcomes presentation components. See
+// docs/tickets/SCREENER-UX-0001-results-presentation.md.
+import { ScanIdentityHeader } from '@/features/screener/components/ScanIdentityHeader';
+import { AccountingSummaryBar } from '@/features/screener/components/AccountingSummaryBar';
+import { FilteredResultControls, type FilterStrategy } from '@/features/screener/components/FilteredResultControls';
+import { BestOpportunitiesShortlist, pickTopOpportunityIds } from '@/features/screener/components/BestOpportunitiesShortlist';
+import { buildBestOpportunityRows } from '@/features/screener/lib/bestOpportunityRows';
+import { DisqualifiedSection } from '@/features/screener/components/DisqualifiedSection';
+import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolOutcomesDisclosure';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
@@ -7357,9 +7369,21 @@ export default function Home() {
 
           {(results.length > 0 || targetedResults.length > 0) && (
             <div className="space-y-4">
-              {screenMode === 'filter' && (
+              {/* SCREENER-UX-0001 — item 1 of the required hierarchy: scan
+                  identity always leads. Falls back to the prior static
+                  "⬢ FILTERED SCAN" label when no activeSession is available
+                  for the currently displayed mode (matches the same guard
+                  the accounting summary below has always used). */}
+              {activeSession && activeSession.mode === screenMode ? (
+                <ScanIdentityHeader
+                  mode={activeSession.mode}
+                  requestedStrategy={activeSession.requestedStrategy}
+                  accentClassName={screenMode === 'filter' ? 'text-amber-400' : th.text}
+                  textFaintClassName={th.textFaint}
+                />
+              ) : screenMode === 'filter' ? (
                 <p className="text-sm font-bold tracking-wide text-amber-400">⬢ FILTERED SCAN</p>
-              )}
+              ) : null}
               <div className="flex items-center justify-between">
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' ? (
@@ -7385,9 +7409,7 @@ export default function Home() {
                       Ranked, Targeted, CSP, CC, PMCC alike) — see
                       lib/screener/scanSession.ts's formatSessionAccountingSummary. */}
                   {activeSession && activeSession.mode === screenMode && (
-                    <span className={`${th.textFaint} border ${th.border} rounded px-1.5 py-0.5 text-[9px]`} title="Selected: your normalized universe. Planned: eligible and scheduled for this workflow. Attempted: evaluated + failed. Skipped: excluded from the plan or unresolved after a stop.">
-                      {formatSessionAccountingSummary(activeSession)}
-                    </span>
+                    <AccountingSummaryBar session={activeSession} borderClassName={th.border} textFaintClassName={th.textFaint} />
                   )}
                   {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
                     <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
@@ -7439,6 +7461,35 @@ export default function Home() {
                 }} />
               )}
 
+              {/* SCREENER-UX-0001 — Filtered mode: controls/filters (item 3)
+                  now render BEFORE Best Opportunities (item 4), fixing the
+                  hierarchy violation the ticket exists to correct. Ranked
+                  and Targeted modes are unchanged (their own filter rows
+                  already precede their result lists) — see the ticket's
+                  documented Filtered-mode-first scope decision. */}
+              {screenMode === 'filter' && (
+                <FilteredResultControls
+                  results={results}
+                  qualifiedTotal={qualified.length}
+                  filteredQualifiedCount={filteredQualified.length}
+                  popMin={filterPopMin}
+                  setPopMin={setFilterPopMin}
+                  otmMin={filterOtmMin}
+                  setOtmMin={setFilterOtmMin}
+                  creditRatioMin={filterCreditRatioMin}
+                  setCreditRatioMin={setFilterCreditRatioMin}
+                  strategies={filterStrategies as FilterStrategy[]}
+                  toggleStrategy={toggleFilterStrategy}
+                  hiddenSymbols={filterHiddenSymbols}
+                  toggleSymbol={toggleFilterSymbol}
+                  setHiddenSymbols={setFilterHiddenSymbols}
+                  th={th}
+                  oiAndSortControls={
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                  }
+                />
+              )}
+
               {/* OE-0002A: first production activation of OE-0001. Real,
                   ranked OpportunityRecommendation[] derived from this
                   page's own current scan results via the existing,
@@ -7448,8 +7499,21 @@ export default function Home() {
                   qualified results) — when a completed session has results
                   but none qualified, this shows the required explicit empty
                   state instead of silently rendering nothing (which read as
-                  "no opinion yet" rather than "nothing qualified"). */}
-              {results.length > 0 && (
+                  "no opinion yet" rather than "nothing qualified").
+                  SCREENER-UX-0001: Filtered mode uses the new collapsed
+                  top-3 BestOpportunitiesShortlist (item 4 of the required
+                  hierarchy); Ranked/Targeted keep the existing, unmodified
+                  BestOpportunitiesPanel per the ticket's documented scope
+                  decision. */}
+              {results.length > 0 && screenMode === 'filter' && (
+                <BestOpportunitiesShortlist
+                  rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
+                  borderClassName={th.border}
+                  textFaintClassName={th.textFaint}
+                  textMutedClassName={th.textMuted}
+                />
+              )}
+              {results.length > 0 && screenMode !== 'filter' && (
                 <BestOpportunitiesPanel
                   recommendations={opportunityRecommendations}
                   generatedAt={opportunityGeneratedAt}
@@ -7480,113 +7544,24 @@ export default function Home() {
                   onTrade={setTradeResult}
                 />
               ) : screenMode === 'filter' ? (() => {
-                const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
+                const topOpportunityRows = buildBestOpportunityRows(filteredQualified, opportunityRecommendations);
+                const topOpportunityIds = pickTopOpportunityIds(topOpportunityRows);
+                const topOpportunityKeys = new Set(
+                  topOpportunityRows.filter(row => topOpportunityIds.has(row.candidateId)).map(row => `${row.symbol}-${row.strategy}`),
+                );
                 return (
                 <>
-                  {/* Filter row -- POP / OTM / Credit Ratio / Strategy, same pattern as Rank/Targeted */}
-                  <div className="flex items-center gap-3 mb-3 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
-                      {[0, 50, 60, 70, 80].map(v => (
-                        <button key={v} onClick={() => setFilterPopMin(v)}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            filterPopMin === v
-                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                          }`}>
-                          {v === 0 ? 'Any' : `${v}%`}
-                        </button>
-                      ))}
-                    </div>
-                    <div className={`w-px h-4 ${th.border} border-l`} />
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
-                      {[0, 4, 8, 12, 16].map(v => (
-                        <button key={v} onClick={() => setFilterOtmMin(v)}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            filterOtmMin === v
-                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                          }`}>
-                          {v === 0 ? 'Any' : `${v}%`}
-                        </button>
-                      ))}
-                    </div>
-                    <div className={`w-px h-4 ${th.border} border-l`} />
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
-                      {[0, 15, 20, 25, 33].map(v => (
-                        <button key={v} onClick={() => setFilterCreditRatioMin(v)}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            filterCreditRatioMin === v
-                              ? 'border-amber-500 text-amber-300 bg-amber-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                          }`}>
-                          {v === 0 ? 'Any' : `${v}%`}
-                        </button>
-                      ))}
-                    </div>
-                    <div className={`w-px h-4 ${th.border} border-l`} />
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
-                      {(['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC'] as const).map(s => {
-                        const on = filterStrategies.includes(s);
-                        const c  = s === 'BPS' ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
-                                 : s === 'BCS' ? 'border-red-600 text-red-400 bg-red-500/10'
-                                 : s === 'IC'  ? 'border-blue-600 text-blue-400 bg-blue-500/10'
-                                 : s === 'CSP' ? 'border-teal-600 text-teal-400 bg-teal-500/10'
-                                 : s === 'CC'  ? 'border-cyan-600 text-cyan-400 bg-cyan-500/10'
-                                 :               'border-purple-600 text-purple-400 bg-purple-500/10';
-                        return (
-                          <button key={s} onClick={() => toggleFilterStrategy(s)}
-                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                              on ? c : `${th.border} ${th.textFaint} opacity-40`
-                            }`}>
-                            {s}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level
-                      sort, applied to the QUALIFIED section (see the comment above
-                      filteredQualified's derivation for why DISQUALIFIED is untouched). */}
-                  <div className="mb-3">
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
-                  </div>
-
-                  {allFilterSymbols.length > 1 && (
-                    <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Tickers</span>
-                      {allFilterSymbols.map(sym => {
-                        const hidden = filterHiddenSymbols.includes(sym);
-                        return (
-                          <button key={sym} onClick={() => toggleFilterSymbol(sym)}
-                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                              hidden
-                                ? `${th.border} ${th.textFaint} line-through opacity-40`
-                                : 'border-amber-600 text-amber-300 bg-amber-500/10'
-                            }`}>
-                            {sym} <span className="opacity-60">({results.filter(r => r.symbol === sym).length})</span>
-                          </button>
-                        );
-                      })}
-                      {filterHiddenSymbols.length > 0 && (
-                        <button onClick={() => setFilterHiddenSymbols([])}
-                          className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
-                          Show all
-                        </button>
-                      )}
-                    </div>
-                  )}
-
                   {filteredQualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
                       <div className="space-y-2">
-                        {filteredQualified.map(r => (
+                        {filteredQualified.map(r => {
+                          const isTopOpportunity = topOpportunityKeys.has(`${r.symbol}-${r.strategy}`);
+                          return (
                           <div key={`${r.symbol}-${r.strategy}`}>
+                            {isTopOpportunity && (
+                              <p className="text-[9px] font-bold text-emerald-400 mb-1" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>
+                            )}
                             <ResultCard
                               result={r}
                               th={th}
@@ -7603,29 +7578,24 @@ export default function Home() {
                               </p>
                             ))}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
-                  {filteredDisqualified.length > 0 && (
-                    <div>
-                      <p className={`text-[9px] ${th.textFaint} tracking-widest mb-2 font-medium`}>DISQUALIFIED</p>
-                      <div className="space-y-2">
-                        {filteredDisqualified.map(r => (
-                          <ResultCard 
-                            key={`${r.symbol}-${r.strategy}`} 
-                            result={r} 
-                            th={th} 
-                            rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} 
-                            screenMode={screenMode} 
-                            rankConfig={rankConfig} 
-                            onTrade={setTradeResult} 
-                            cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} 
-                            existingPositions={existingPositions} 
-                          />
-                        ))}
-                      </div>
-                    </div>
+                  <DisqualifiedSection
+                    results={filteredDisqualified}
+                    hasQualifiedCandidates={filteredQualified.length > 0}
+                    borderClassName={th.border}
+                    textFaintClassName={th.textFaint}
+                    textMutedClassName={th.textMuted}
+                  />
+                  {activeSession && activeSession.mode === 'filter' && (
+                    <SymbolOutcomesDisclosure
+                      session={activeSession}
+                      borderClassName={th.border}
+                      textFaintClassName={th.textFaint}
+                    />
                   )}
                 </>
                 );

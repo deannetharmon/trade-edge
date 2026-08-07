@@ -140,8 +140,16 @@ function qualifyingCspMetrics(symbols: string[]) {
   getMarketMetricsMock.mockResolvedValue(symbols.map(symbol => ({ symbol, ivRank: 50, earningsExpectedDate: null })));
 }
 
+// SCREENER-UX-0001: the single joined accounting <span title="Selected:
+// your normalized universe...."> was replaced by AccountingSummaryBar,
+// which renders each segment (selected/planned/attempted/evaluated/
+// failed/skipped/qualified/disqualified) as its own independently
+// tooltipped element -- see features/screener/components/
+// AccountingSummaryBar.tsx. This helper reads the whole bar's text content,
+// which still contains every "<n> <label>" substring the existing
+// assertions below match against (e.g. /2 selected/, /failed/).
 function accountingText() {
-  return screen.getByTitle(/Selected: your normalized universe/i).textContent ?? '';
+  return screen.getByTestId('accounting-summary-bar').textContent ?? '';
 }
 
 // Resolves control for a deferred network call -- lets a test start a scan,

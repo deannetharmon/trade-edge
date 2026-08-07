@@ -1,0 +1,123 @@
+// features/screener/components/DisqualifiedSection.tsx
+//
+// SCREENER-UX-0001 — "Disqualified candidates," item 6 in the required
+// hierarchy: an audit trail, not a second Best-Opportunities list.
+// Section-level collapse (default collapsed whenever qualified candidates
+// exist, per the ticket) with a count in the heading; each candidate is
+// itself collapsed by default, showing symbol/strategy/essential
+// structure/primary reason/additional-failure count without expanding.
+// Uses "Disqualified," never "Rejected" (no documented distinct product
+// meaning for "rejected" in this codebase). Never uses a red badge alone —
+// every collapsed card also carries the reason text.
+
+import { useId, useState } from 'react';
+import type { ScreenResult } from '@/lib/scans/types';
+
+export interface DisqualifiedSectionProps {
+  results: ScreenResult[];
+  /** Whether qualified candidates exist alongside these — when true, the
+   * section itself starts collapsed, per the ticket. */
+  hasQualifiedCandidates: boolean;
+  borderClassName?: string;
+  textFaintClassName?: string;
+  textMutedClassName?: string;
+}
+
+function essentialStructure(result: ScreenResult): string {
+  const c = result.bestCandidate;
+  if (!c) return '—';
+  if (c.strategy === 'CSP' || c.strategy === 'CC') return `${c.shortStrike} strike`;
+  if (c.strategy === 'IC' && c.shortCallStrike != null) {
+    return `${c.shortStrike}/${c.longStrike} · ${c.shortCallStrike}/${c.longCallStrike}`;
+  }
+  return `${c.shortStrike}/${c.longStrike}`;
+}
+
+function DisqualifiedCard({
+  result,
+  th,
+}: {
+  result: ScreenResult;
+  th: { border: string; textFaint: string; textMuted: string };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+  const [primaryReason, ...additional] = result.failReasons;
+  const checkEntries = Object.entries(result.checks) as [string, ScreenResult['checks']['ivr']][];
+  const failedChecks = checkEntries.filter(([, c]) => c.status === 'fail' || c.status === 'warn');
+
+  return (
+    <div className={`border ${th.border} rounded-lg overflow-hidden`}>
+      <div className="flex items-center gap-3 px-3 py-2 text-[10px]">
+        <span className="shrink-0 font-semibold w-14">{result.symbol}</span>
+        <span className={`shrink-0 ${th.textFaint} w-10`}>{result.strategy}</span>
+        <span className={`shrink-0 ${th.textFaint} w-28`}>{essentialStructure(result)}</span>
+        {/* Never a bare color badge -- the reason text itself is always
+            visible in the collapsed row, color is a secondary cue only. */}
+        <span className="flex-1 text-amber-400/90 truncate" title={primaryReason}>
+          {primaryReason ?? 'Did not qualify'}
+        </span>
+        {additional.length > 0 && (
+          <span className={`shrink-0 ${th.textFaint}`}>+{additional.length} more</span>
+        )}
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded(v => !v)}
+          className={`shrink-0 text-[9px] px-2 py-1 border ${th.border} rounded ${th.textMuted} hover:border-slate-400`}
+        >
+          {expanded ? 'Hide checks' : 'Show checks'}
+        </button>
+      </div>
+      {expanded && (
+        <div id={panelId} className={`px-3 pb-3 space-y-1 border-t ${th.border} pt-2`}>
+          {result.failReasons.map((reason, i) => (
+            <p key={i} className="text-[9px] text-amber-400/90">✕ {reason}</p>
+          ))}
+          {failedChecks.map(([name, check]) => (
+            <p key={name} className={`text-[9px] ${th.textFaint}`}>
+              <span className="uppercase tracking-wide">{name}</span>: {check.value} — {check.reason}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DisqualifiedSection({
+  results,
+  hasQualifiedCandidates,
+  borderClassName = 'border-slate-700',
+  textFaintClassName = 'text-slate-500',
+  textMutedClassName = 'text-slate-300',
+}: DisqualifiedSectionProps) {
+  const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
+  const [sectionOpen, setSectionOpen] = useState(!hasQualifiedCandidates);
+  const panelId = useId();
+
+  if (results.length === 0) return null;
+
+  return (
+    <section aria-label="Disqualified candidates" data-testid="disqualified-section">
+      <button
+        type="button"
+        aria-expanded={sectionOpen}
+        aria-controls={panelId}
+        onClick={() => setSectionOpen(v => !v)}
+        className={`w-full flex items-center justify-between text-[9px] tracking-widest uppercase font-bold ${th.textFaint} py-1`}
+      >
+        <span>Disqualified ({results.length})</span>
+        <span aria-hidden="true">{sectionOpen ? '▾' : '▸'}</span>
+      </button>
+      {sectionOpen && (
+        <div id={panelId} className="space-y-2 mt-1">
+          {results.map(r => (
+            <DisqualifiedCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
