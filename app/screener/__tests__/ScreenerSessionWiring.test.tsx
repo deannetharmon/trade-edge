@@ -779,4 +779,164 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(screen.queryByText('ZZZZ')).not.toBeInTheDocument();
   });
+
+  // SCREENER-RESULTS-0001 final corrective (race) — the sessionId match
+  // alone is not sufficient: session.sessionId is a value closed over at the
+  // moment the restore effect ran, and it never changes even after a newer
+  // scan supersedes it. If a NEW session becomes active while a restored
+  // session's own auxiliary-cache idbGet() is still in flight, the stale
+  // read resolving late must not be allowed to populate rawScanCache or
+  // targetedResults out from under the newer, now-active session. Building
+  // this requires holding one specific IndexedDB read open past the point
+  // where a real superseding action (clearResultsCache, via the same
+  // ticker-add flow every other test in this file already uses) has run.
+  function installFakeIndexedDbWithHold(holdKey: string) {
+    const dbData = new Map<string, Map<string, unknown>>();
+    let created = false;
+    const heldGets: Array<() => void> = [];
+    const db: any = {
+      objectStoreNames: { contains: (n: string) => dbData.has(n) },
+      createObjectStore(name: string) { dbData.set(name, new Map()); },
+      transaction(storeName: string) {
+        const map = dbData.get(storeName)!;
+        const tx: any = { oncomplete: null, onerror: null };
+        tx.objectStore = () => ({
+          get(key: string) {
+            const req: any = {};
+            const resolve = () => { req.result = map.get(key); req.onsuccess?.(); };
+            if (key === holdKey) heldGets.push(resolve);
+            else queueMicrotask(resolve);
+            return req;
+          },
+          put(value: unknown, key: string) {
+            map.set(key, value);
+            queueMicrotask(() => { tx.oncomplete?.(); });
+            return {};
+          },
+          delete(key: string) {
+            map.delete(key);
+            queueMicrotask(() => { tx.oncomplete?.(); });
+            return {};
+          },
+        });
+        return tx;
+      },
+      close() {},
+    };
+    (globalThis as any).indexedDB = {
+      open() {
+        const req: any = { result: db };
+        queueMicrotask(() => {
+          if (!created) { created = true; req.onupgradeneeded?.({ target: { result: db } }); }
+          req.onsuccess?.();
+        });
+        return req;
+      },
+    };
+    return {
+      releaseHeldGets: () => { heldGets.splice(0).forEach(fn => fn()); },
+      pendingHeldGets: () => heldGets.length,
+    };
+  }
+
+  // Testing this race against rawScanCache (rather than Targeted's own
+  // cache) is deliberate: a second Targeted scan would itself re-write
+  // IDB_TARGETED_RESULTS_KEY on completion (it's Targeted's OWN cache key),
+  // silently destroying the seeded stale record before the held read could
+  // ever resolve it -- masking the exact bug under test regardless of
+  // whether the guard is correct. rawScanCache is written only by runScreen
+  // (Filtered/Ranked spreads); a CSP scan (session B here) never touches it,
+  // so the seeded stale record survives to be raced against. The same
+  // '⚡ cached' / '↺ restored' badge used in the earlier (non-race)
+  // rawScanCache tests reflects rawScanCache.length directly, independent
+  // of screenMode, making it a reliable observation point.
+  it("a superseded session's late-resolving rawScanCache read is not adopted, even though its sessionId matches", async () => {
+    const { releaseHeldGets, pendingHeldGets } = installFakeIndexedDbWithHold('rawScanCache');
+    const { createScanSession, recordSymbolEvaluated, completeSession } = await import('@/lib/screener/scanSession');
+    const { persistScanSession } = await import('@/lib/screener/scanSessionCache');
+
+    const emptyCheck = { status: 'pass' as const, value: '-', reason: '-' };
+    const checks = { ivr: emptyCheck, earnings: emptyCheck, oi: emptyCheck, delta: emptyCheck, credit: emptyCheck, roc: emptyCheck, pop: emptyCheck, iv: emptyCheck, emClearance: emptyCheck };
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['QQQQ'], eligibleSymbols: ['QQQQ'] },
+    });
+    session = recordSymbolEvaluated(session, 'QQQQ', [{
+      symbol: 'QQQQ', strategy: 'BPS', price: 100, ivr: 40, qualified: true,
+      bestCandidate: null, failReasons: [], checks,
+    }]);
+    session = completeSession(session);
+    await persistScanSession(session);
+
+    // Seed rawScanCache under the CORRECT (matching) sessionId -- the
+    // mismatched-id case is already covered above. This test proves the
+    // sessionId match alone is not enough once the read resolves after
+    // supersession.
+    await new Promise<void>(resolve => {
+      const req = (globalThis as any).indexedDB.open();
+      req.onsuccess = () => {
+        const tx = req.result.transaction('kv');
+        tx.objectStore().put(
+          { sessionId: session.sessionId, entries: [{ symbol: 'QQQQ', strategy: 'BPS' }] },
+          'rawScanCache',
+        );
+        tx.oncomplete = () => resolve();
+      };
+    });
+
+    // A second, already-active watchlist ticker (a DIFFERENT symbol from
+    // the stale cache's 'QQQQ') is seeded directly via localStorage --
+    // driving this through the normal Add-ticker flow would call
+    // handleTickersChange -> clearResultsCache(), which deletes IndexedDB
+    // records outright and would make the held read resolve to nothing
+    // regardless of whether the race guard is correct.
+    window.localStorage.setItem('hunter-watchlist', JSON.stringify([{ symbol: 'ZTICK', active: true }]));
+    getChainMock.mockResolvedValue(emptyChain);
+
+    renderScreener();
+
+    // The canonical session itself (a separate, un-held IndexedDB key)
+    // restores and activates normally; only its rawScanCache read is being
+    // held back.
+    await screen.findByText('ZTICK');
+
+    // Wait until the restore effect has actually reached and issued its
+    // idbGet(IDB_RAW_SCAN_KEY) call (registered in heldGets) before starting
+    // the new scan below. The restore effect bails out early via
+    // `if (activeSessionIdRef.current != null) return;` if a newer scan has
+    // already claimed the ref -- starting the new scan too early would skip
+    // session A's restore (and its held read) entirely, making this test
+    // pass vacuously regardless of whether the race guard is correct.
+    await waitFor(() => {
+      expect(pendingHeldGets()).toBeGreaterThan(0);
+    });
+
+    // Start a real second scan (CSP, over ZTICK) -- this is the production
+    // path that advances activeSessionIdRef.current to a new session, and
+    // (unlike Targeted) never touches IDB_RAW_SCAN_KEY itself.
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+
+    // Wait for the new scan to fully COMPLETE (not just start) -- the
+    // trigger button relabels to "SCANNING..." while loading and only
+    // reverts to "FIND CSPs" once the new session has committed. Releasing
+    // the held read before this point risks masking the race with ordering
+    // noise rather than proving the guard.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'FIND CSPs' })).toBeInTheDocument();
+    });
+
+    // Now let the OLD (superseded) session's stale rawScanCache read
+    // resolve, well after the new scan has already taken over.
+    releaseHeldGets();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Even though its sessionId matched the session that was active when
+    // the read started, that session is no longer the active one by the
+    // time it resolves -- rawScanCache must still be empty, so the badge
+    // must read '↺ restored', never '⚡ cached'.
+    await waitFor(() => {
+      expect(screen.getByText(/↺ restored/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/⚡ cached/)).not.toBeInTheDocument();
+  });
 });

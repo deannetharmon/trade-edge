@@ -6071,13 +6071,38 @@ export default function Home() {
       setActiveSession(session);
       // rawScanCache feeds applyRules() directly — executable state, not
       // just display — so an exact sessionId match is required regardless
-      // of mode.
+      // of mode. SCREENER-RESULTS-0001 final corrective (race) — these
+      // idbGet() reads are async and can resolve well after this restore
+      // effect returns. A new scan may start (and supersede `session`) in
+      // that window; comparing only cached.sessionId === session.sessionId
+      // is not enough, because `session` is a closed-over local — it never
+      // changes even after activeSessionIdRef.current has moved on to a
+      // newer scan. Each callback must also re-check
+      // activeSessionIdRef.current === session.sessionId at resolution time,
+      // the same live check commitScanSession/isScanCurrent use elsewhere,
+      // so a since-superseded restore can never adopt its own stale cache.
+      // Array.isArray(...entries) guards against a malformed/corrupted
+      // IndexedDB record being trusted as real cache data.
       idbGet<{ sessionId: string; entries: RawScanEntry[] }>(IDB_RAW_SCAN_KEY).then(cached => {
-        if (cached && cached.sessionId === session.sessionId) setRawScanCache(cached.entries);
+        if (
+          cached &&
+          Array.isArray(cached.entries) &&
+          cached.sessionId === session.sessionId &&
+          activeSessionIdRef.current === session.sessionId
+        ) {
+          setRawScanCache(cached.entries);
+        }
       });
       if (session.mode === 'targeted') {
         idbGet<{ sessionId: string; entries: TargetedScanEntry[] }>(IDB_TARGETED_RESULTS_KEY).then(cachedTargeted => {
-          if (cachedTargeted && cachedTargeted.sessionId === session.sessionId) setTargetedResults(cachedTargeted.entries);
+          if (
+            cachedTargeted &&
+            Array.isArray(cachedTargeted.entries) &&
+            cachedTargeted.sessionId === session.sessionId &&
+            activeSessionIdRef.current === session.sessionId
+          ) {
+            setTargetedResults(cachedTargeted.entries);
+          }
         });
       } else {
         setResults(session.results);
