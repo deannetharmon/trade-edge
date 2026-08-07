@@ -252,10 +252,13 @@ describe('SCREENER-RESULTS-0001: strategy isolation (6, 8)', () => {
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expect(accountingText()).toMatch(/2 selected/));
 
+    // SCREENER-LAUNCHER-0001: selection is now asserted via aria-pressed
+    // (the shared LauncherButton's canonical selected-state signal) rather
+    // than a specific Tailwind ring class.
     const findCsps = screen.getByRole('button', { name: 'FIND CSPs' });
     const findSpreads = screen.getByRole('button', { name: 'FIND SPREADS' });
-    expect(findCsps.className).toMatch(/ring-amber-400/);
-    expect(findSpreads.className).not.toMatch(/ring-white\/70/);
+    expect(findCsps).toHaveAttribute('aria-pressed', 'true');
+    expect(findSpreads).toHaveAttribute('aria-pressed', 'false');
 
     // A CSP-typed strategy badge is rendered -- never relabeled as a
     // spread type, and no foreign-strategy result reached the live session
@@ -305,8 +308,8 @@ describe('SCREENER-RESULTS-0001: session supersession (5)', () => {
     // both, and the launcher highlight matches the newer session only.
     const findCsps = screen.getByRole('button', { name: 'FIND CSPs' });
     const findCc = screen.getByRole('button', { name: 'FIND COVERED CALLS' });
-    expect(findCsps.className).toMatch(/ring-amber-400/);
-    expect(findCc.className).not.toMatch(/ring-cyan-400/);
+    expect(findCsps).toHaveAttribute('aria-pressed', 'true');
+    expect(findCc).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getAllByText('CSP').length).toBeGreaterThan(0);
   });
 });
@@ -401,7 +404,7 @@ describe('SCREENER-RESULTS-0001: Best Opportunities trust boundary (10, 11, 12, 
     // Still the CSP session on display -- the stale response must not have
     // reverted the launcher highlight or the accounting summary.
     const findCsps = screen.getByRole('button', { name: 'FIND CSPs' });
-    expect(findCsps.className).toMatch(/ring-amber-400/);
+    expect(findCsps).toHaveAttribute('aria-pressed', 'true');
     expect(accountingText()).toMatch(/2 selected/);
   });
 });

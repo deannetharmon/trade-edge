@@ -111,6 +111,12 @@ import { BestOpportunitiesShortlist, pickTopOpportunityIds } from '@/features/sc
 import { buildBestOpportunityRows } from '@/features/screener/lib/bestOpportunityRows';
 import { DisqualifiedSection } from '@/features/screener/components/DisqualifiedSection';
 import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolOutcomesDisclosure';
+// SCREENER-LAUNCHER-0001: one consistent visual model (transparent+outlined
+// when unselected, solid-fill+white-text when selected) for every enabled
+// strategy-launch button, replacing four separately drifting conditional
+// class strings. Selection is computed inline below from
+// activeSession?.requestedStrategy -- never tracked as separate state.
+import { LauncherButton } from '@/features/screener/components/LauncherButton';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
@@ -7123,33 +7129,55 @@ export default function Home() {
             </p>
 
             <div className="grid grid-cols-2 gap-1.5">
-              {/* SCREENER-RESULTS-0001 — the highlighted launcher is derived
-                  from activeSession.requestedStrategy, never inferred from
-                  screenMode or a candidate's shape. Previously nothing
-                  tracked which strategy actually produced the visible
-                  results at all, so a CSP launch had no way to keep
-                  "FIND CSPs" (rather than "FIND SPREADS") marked as the
-                  active one once results returned. */}
-              <button onClick={() => setShowRunModal(true)} disabled={loading || !opportunityUniverse.length}
+              {/* SCREENER-RESULTS-0001 / SCREENER-LAUNCHER-0001 — the
+                  selected launcher is derived from
+                  activeSession.requestedStrategy alone, never inferred
+                  from screenMode, a candidate's shape, hover, focus, or the
+                  last-clicked element. Previously FIND SPREADS was always
+                  solid-filled regardless of selection while the other
+                  three only ever got a translucent tint; LauncherButton
+                  gives all four one shared unselected/selected visual
+                  model (see its own header comment). */}
+              <LauncherButton
+                strategy="spreads"
+                label="FIND SPREADS"
+                isSelected={activeSession?.requestedStrategy === 'spreads'}
+                onClick={() => setShowRunModal(true)}
+                disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className={`text-white py-2 rounded-lg text-[10px] font-bold tracking-widest transition-colors disabled:opacity-40 shadow-lg text-center ${activeSession?.requestedStrategy === 'spreads' ? 'ring-2 ring-white/70' : ''}`} style={{ background: `var(--accent)` }}>
+              >
                 {loading ? 'SCANNING...' : 'FIND SPREADS'}
-              </button>
-              <button onClick={runCspScan} disabled={loading || !opportunityUniverse.length}
+              </LauncherButton>
+              <LauncherButton
+                strategy="csp"
+                label="FIND CSPs"
+                isSelected={activeSession?.requestedStrategy === 'csp'}
+                onClick={runCspScan}
+                disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-amber-500 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'csp' ? 'bg-amber-500/20 ring-2 ring-amber-400' : ''}`}>
+              >
                 {loading ? 'SCANNING...' : 'FIND CSPs'}
-              </button>
-              <button onClick={() => runCcScan(false)} disabled={loading}
+              </LauncherButton>
+              <LauncherButton
+                strategy="cc"
+                label="FIND COVERED CALLS"
+                isSelected={activeSession?.requestedStrategy === 'cc'}
+                onClick={() => runCcScan(false)}
+                disabled={loading}
                 title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
-                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'cc' ? 'bg-cyan-500/20 ring-2 ring-cyan-400' : ''}`}>
+              >
                 {loading ? 'SCANNING...' : 'FIND COVERED CALLS'}
-              </button>
-              <button onClick={runPMCCScan} disabled={loading || !opportunityUniverse.length}
+              </LauncherButton>
+              <LauncherButton
+                strategy="pmcc"
+                label="FIND PMCCs"
+                isSelected={activeSession?.requestedStrategy === 'pmcc'}
+                onClick={runPMCCScan}
+                disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
-                className={`text-xs font-bold tracking-widest py-2 rounded-lg border border-purple-500 text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-40 text-[10px] ${activeSession?.requestedStrategy === 'pmcc' ? 'bg-purple-500/20 ring-2 ring-purple-400' : ''}`}>
+              >
                 {loading ? 'SCANNING...' : 'FIND PMCCs'}
-              </button>
+              </LauncherButton>
               <button disabled
                 title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
                 className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border ${th.border} ${th.textFaint} opacity-50 cursor-not-allowed text-[10px]`}>
