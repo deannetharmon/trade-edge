@@ -304,6 +304,13 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
 }
 
 
+/** @deprecated CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — reads only
+ * a single cash figure from an unvalidated `accounts[0]`, with no retained
+ * account identifier and no option-buying-power figure, so it cannot
+ * distinguish "verified $0 available" from "never actually checked" and
+ * cannot support the approved min(optionBuyingPower, cashBalance) capital
+ * model. Superseded by `getCspCapitalContext()` below for all CSP
+ * production callers. Kept only for any test/caller not yet migrated. */
 export async function getAvailableCash(token: string): Promise<number | null> {
   try {
     const accountsData = await ttFetch('/customers/me/accounts', token);
@@ -321,6 +328,74 @@ export async function getAvailableCash(token: string): Promise<number | null> {
     return Number.isFinite(cash) ? cash : null;
   } catch {
     return null;
+  }
+}
+
+
+// CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the minimum safe
+// production bridge to the approved capital model, built BEFORE the full
+// account-selection modal exists. This app has no persisted/explicit
+// "selected account" concept anywhere yet (no selection UI, no stored
+// preference) — so `accounts[0]` can never be trusted as "the trader's
+// selected account" the way the old getAvailableCash() implicitly treated
+// it. The only case this function will affirmatively resolve an account is
+// when the Tastytrade customer has EXACTLY ONE account: with a single
+// account there is no ambiguity to guess through, so its identifier is
+// retained and surfaced (never silently dropped). Zero accounts, more than
+// one account, or any fetch failure all fail closed to
+// `accountSelected: false` with every capital figure null — never a
+// fallback constant, never treated as unlimited. Once a real
+// selection UI exists it replaces the "exactly one account" heuristic
+// with an explicit trader choice; this function's shape (accountId +
+// optionBuyingPower + cashBalance) does not need to change when that
+// happens.
+export interface CspCapitalContext {
+  accountSelected: boolean;
+  accountId: string | null;
+  optionBuyingPower: number | null;
+  cashBalance: number | null;
+}
+
+const UNRESOLVED_CSP_CAPITAL: CspCapitalContext = {
+  accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null,
+};
+
+export async function getCspCapitalContext(token: string): Promise<CspCapitalContext> {
+  try {
+    const accountsData = await ttFetch('/customers/me/accounts', token);
+    const items = accountsData?.data?.items;
+    if (!Array.isArray(items) || items.length !== 1) {
+      // Zero accounts, an API/parse failure shaped as an empty/missing
+      // list, or more than one account with no trader-driven selection
+      // mechanism yet -- never guess which one is "the" account.
+      return UNRESOLVED_CSP_CAPITAL;
+    }
+
+    const accountNumber = items[0]?.account?.['account-number'];
+    if (!accountNumber || typeof accountNumber !== 'string') return UNRESOLVED_CSP_CAPITAL;
+
+    const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
+    const balData = balanceData?.data ?? {};
+
+    const bp = parseFloat(
+      balData['derivative-buying-power']
+      ?? balData['option-buying-power']
+      ?? 'NaN'
+    );
+    const cash = parseFloat(
+      balData['cash-available-to-withdraw']
+      ?? balData['cash-balance']
+      ?? 'NaN'
+    );
+
+    return {
+      accountSelected: true,
+      accountId: accountNumber,
+      optionBuyingPower: Number.isFinite(bp) ? bp : null,
+      cashBalance: Number.isFinite(cash) ? cash : null,
+    };
+  } catch {
+    return UNRESOLVED_CSP_CAPITAL;
   }
 }
 

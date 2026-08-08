@@ -1,7 +1,7 @@
 // app/screener/__tests__/LauncherSelectedState.test.tsx
 //
 // SCREENER-LAUNCHER-0001 — required test coverage proving all four enabled
-// strategy launchers (FIND SPREADS / FIND CSPs / FIND COVERED CALLS /
+// strategy launchers (FIND SPREADS / FIND CSPs / FIND CCs /
 // FIND PMCCs) share one consistent selected/unselected visual model, driven
 // solely by `activeSession?.requestedStrategy` (never screenMode, hover,
 // focus, or the last-clicked element), via the shared LauncherButton
@@ -38,6 +38,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: (...args: any[]) => getChainMock(...args),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -136,7 +137,7 @@ function launcherButtons() {
   return {
     spreads: screen.getByRole('button', { name: 'FIND SPREADS' }),
     csp: screen.getByRole('button', { name: 'FIND CSPs' }),
-    cc: screen.getByRole('button', { name: 'FIND COVERED CALLS' }),
+    cc: screen.getByRole('button', { name: 'FIND CCs' }),
     pmcc: screen.getByRole('button', { name: 'FIND PMCCs' }),
   };
 }
@@ -184,16 +185,17 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('csp'));
   });
 
-  it('4. a Covered Call session fills only FIND COVERED CALLS', async () => {
+  it('4. a Covered Call session fills only FIND CCs', async () => {
     getCoveredCallCapacityReportMock.mockResolvedValue({ status: 'ok', bySymbol: { NKE: holding() }, warnings: [] });
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
     renderScreener();
     await addToUniverse('NKE');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('cc'));
   });
@@ -217,10 +219,29 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     let session = createScanSession({
       mode: 'filter', requestedStrategy: 'csp',
       scope: { universeSymbols: ['NKE'], eligibleSymbols: ['NKE'] },
+      ruleSnapshot: (await import('@/lib/scans/cspRuleSnapshot')).buildCspRuleSnapshot(
+        (await import('@/lib/scans/constants')).DEFAULT_CSP_RULES,
+      ),
     });
+    // CSP-WORKFLOW-0001 core-correction pass -- a "qualified" CSP result
+    // must carry a real bestCandidate with the canonical market/account/mode
+    // qualification states (INVALID_CSP_QUALIFICATION now rejects a
+    // qualified CSP result with no bestCandidate at cache-restore time, same
+    // as production data would never produce one). Filter mode never gates
+    // on mode qualification, so cspModeQualification is NOT_APPLICABLE.
     session = recordSymbolEvaluated(session, 'NKE', [{
       symbol: 'NKE', strategy: 'CSP', price: 100, ivr: 40, qualified: true,
-      bestCandidate: null, failReasons: [], checks,
+      bestCandidate: {
+        strategy: 'CSP', expiration: '2026-09-18', dte: 30,
+        shortStrike: 95, longStrike: 0, shortDelta: -0.2,
+        credit: 1.5, spreadWidth: 0, creditRatio: 0, roc: 5, pop: 80,
+        shortOI: 500, longOI: 0,
+        cspMarketQualification: 'QUALIFIED',
+        cspAccountEligibility: 'ELIGIBLE',
+        cspModeQualification: 'NOT_APPLICABLE',
+        cspModeQualificationReasons: [],
+      },
+      failReasons: [], checks,
     }]);
     session = completeSession(session);
     await persistScanSession(session);
@@ -238,11 +259,12 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     await addToUniverse('NKE');
 
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('csp'));
 
     getMarketMetricsMock.mockClear();
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     // Selection now belongs entirely to the new (CC) canonical session --
     // never both, never left on the prior CSP session.
@@ -255,7 +277,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     renderScreener();
     await addToUniverse('NKE');
 
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('cc'));
 
@@ -267,11 +289,10 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     expectOnlyPressed('cc');
 
     // Closing the modal without running a scan: still unchanged. Scope the
-    // close click to the modal itself (via its "SCAN SELECTED" heading's
-    // container) -- the page has other unrelated "✕" buttons elsewhere.
-    const modalHeading = screen.getByText(/SCAN SELECTED/);
-    const modal = modalHeading.closest('div')!.parentElement!;
-    await userEvent.click(within(modal).getByRole('button', { name: '✕' }));
+    // close click to the modal itself (via its dialog role) -- the page has
+    // other unrelated close buttons elsewhere.
+    const modal = screen.getByRole('dialog', { name: /SCAN SELECTED/ });
+    await userEvent.click(within(modal).getByRole('button', { name: /close scan configuration/i }));
     await waitFor(() => expect(screen.queryByText(/SCAN SELECTED/)).not.toBeInTheDocument());
     expectOnlyPressed('cc');
   });
@@ -281,6 +302,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     await waitFor(() => {
@@ -307,9 +329,9 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     expect(await screen.findByRole('button', { name: 'FIND SPREADS' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'FIND COVERED CALLS' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'FIND CCs' })).not.toBeDisabled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalled());
   });
 

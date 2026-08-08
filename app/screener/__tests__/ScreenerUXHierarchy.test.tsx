@@ -35,6 +35,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: (...args: any[]) => getChainMock(...args),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -146,7 +147,7 @@ describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Ranked)'
     await addToUniverse('NKE,GHOST');
 
     await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-    await userEvent.click(await screen.findByRole('button', { name: /RANK/ }));
+    await userEvent.click(await screen.findByRole('radio', { name: /RANK/ }));
     await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
 
     await waitFor(() => expect(screen.getByTestId('accounting-summary-bar')).toBeInTheDocument());
@@ -169,25 +170,21 @@ describe('SCREENER-UX-0001 corrective pass: CSP isolation shares the Filtered-mo
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 
-    await waitFor(() => expect(screen.getByTestId('scan-identity-header')).toHaveTextContent('Cash-Secured Put Scan'));
+    await waitFor(() => expect(screen.getByTestId('scan-identity-header')).toHaveTextContent('Filtered Cash-Secured Put Scan'));
     expect(screen.getByTestId('accounting-summary-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('filtered-result-controls')).toBeInTheDocument();
+    expect(screen.getByTestId('csp-result-controls')).toBeInTheDocument();
     // A CSP-typed result must never surface with a spread badge (BPS/BCS/IC)
     // -- checked against the actual qualified-candidate badge only, since
-    // FilteredResultControls' own strategy filter row always shows every
-    // strategy's chip regardless of scan type (that's the filter UI, not a
-    // claim about what results exist) and would otherwise false-positive
-    // this assertion.
+    // CSP uses its own controls and must not render spread-strategy chips.
     await waitFor(() => {
       const badges = screen.getAllByText(/^(BPS|BCS|IC|CSP|CC|PMCC)$/).filter(
-        el => el.closest('[data-testid="filtered-result-controls"]') === null,
+        el => el.closest('[data-testid="csp-result-controls"]') === null,
       );
       expect(badges.length).toBeGreaterThan(0);
     });
-    const nonCspBadges = screen.getAllByText(/^(BPS|BCS|IC|CC|PMCC)$/).filter(
-      el => el.closest('[data-testid="filtered-result-controls"]') === null,
-    );
+    const nonCspBadges = screen.queryAllByText(/^(BPS|BCS|IC|CC|PMCC)$/);
     expect(nonCspBadges).toHaveLength(0);
   });
 });

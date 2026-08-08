@@ -105,6 +105,12 @@ export function decisionAnalysisToOpportunityCandidate(
 
   return {
     id: analysis.subject.id,
+    // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — analysis.candidate
+    // is the full original AutopilotCandidate (lib/decision-engine/types.ts
+    // DecisionAnalysis.candidate), which now carries screenerCandidateId
+    // when it was built by screenResultsToAutopilotCandidates(). Passed
+    // through unchanged, never re-derived.
+    screenerCandidateId: candidate.screenerCandidateId,
     source: toOpportunitySource(analysis.metadata.source),
     symbol,
     strategy,

@@ -192,6 +192,10 @@ export function evaluateOpportunityCandidate(
   return {
     recommendation: {
       candidateId: candidate.id,
+      // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — the canonical
+      // ScreenResult.candidateId, passed through unchanged; null (never
+      // guessed) when the candidate had none.
+      screenerCandidateId: candidate.screenerCandidateId ?? null,
       source: candidate.source,
       symbol: candidate.symbol,
       strategy: candidate.strategy,

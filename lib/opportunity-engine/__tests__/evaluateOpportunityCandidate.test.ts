@@ -101,6 +101,43 @@ describe('evaluateOpportunityCandidate', () => {
     expect(recommendation.ruleIds).toContain(OE_RULE_IDS.duplicateExposureDetected);
   });
 
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04 identity propagation) --
+  // third hop of the canonical candidateId chain: OpportunityCandidate ->
+  // OpportunityRecommendation.screenerCandidateId, unchanged, null (never
+  // guessed) when absent.
+  it('carries OpportunityCandidate.screenerCandidateId through unchanged to the recommendation', () => {
+    const candidate = buildOpportunityCandidateFixture({
+      status: 'recommended',
+      capitalRequired: 100,
+      candidateOverrides: { screenerCandidateId: 'occ:AMD240119P00415000' },
+    });
+    const { recommendation } = evaluateOpportunityCandidate({
+      candidate,
+      context: baseContext,
+      capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
+      conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
+    });
+    expect(recommendation.screenerCandidateId).toBe('occ:AMD240119P00415000');
+    expect(recommendation.candidateId).not.toBe(recommendation.screenerCandidateId);
+  });
+
+  it('the recommendation carries screenerCandidateId null, never fabricated, when the candidate had none', () => {
+    const candidate = buildOpportunityCandidateFixture({
+      status: 'recommended',
+      capitalRequired: 100,
+      candidateOverrides: { screenerCandidateId: undefined },
+    });
+    const { recommendation } = evaluateOpportunityCandidate({
+      candidate,
+      context: baseContext,
+      capitalRemainingBeforeThisCandidate: baseContext.availableCapital,
+      conflictDescriptions: [],
+      exposureDisclosures: noExposureDisclosures,
+    });
+    expect(recommendation.screenerCandidateId).toBeNull();
+  });
+
   it('recommends a clean, affordable, conflict-free, recommended-status candidate and reserves its capital', () => {
     const candidate = buildOpportunityCandidateFixture({ status: 'recommended', capitalRequired: 400 });
     const { recommendation, capitalConsumed } = evaluateOpportunityCandidate({

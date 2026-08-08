@@ -33,6 +33,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: vi.fn().mockResolvedValue({ expirations: [], chains: {}, isEtfOrIndex: false, classification: 'stock' }),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -68,6 +69,7 @@ async function waitForMigration(expectedLength: number) {
 
 async function clickFindCsps() {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 }
 
 beforeEach(() => {

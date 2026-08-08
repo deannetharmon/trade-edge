@@ -3,8 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(req: NextRequest) {
   const { results } = await req.json();
 
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — Candidate ID is the
+  // canonical ScreenResult.candidateId, propagated through unchanged so a
+  // CSV row is unambiguously traceable back to its exact originating
+  // contract.
   const headers = [
-    'Symbol', 'Strategy', 'Qualified', 'Price', 'IVR',
+    'Candidate ID', 'Symbol', 'Strategy', 'Qualified', 'Price', 'IVR',
     'Expiration', 'DTE', 'Short Strike', 'Long Strike',
     'Short Delta', 'Credit', 'ROC %', 'POP %', 'Short OI', 'Long OI',
     'Short Call Strike', 'Long Call Strike', 'Call Credit', 'Total Credit',
@@ -14,6 +18,7 @@ export async function POST(req: NextRequest) {
   const rows = results.map((r: any) => {
     const c = r.bestCandidate;
     return [
+      r.candidateId || '',
       r.symbol,
       r.strategy,
       r.qualified ? 'YES' : 'NO',

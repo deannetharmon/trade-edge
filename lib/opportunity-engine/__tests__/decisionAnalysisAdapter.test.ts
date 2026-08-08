@@ -92,6 +92,29 @@ describe('decisionAnalysisToOpportunityCandidate', () => {
     const noCandidateAnalysis = { ...analysis, candidate: undefined };
     expect(decisionAnalysisToOpportunityCandidate(noCandidateAnalysis)).toBeNull();
   });
+
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04 identity propagation) --
+  // this is the second hop of the canonical candidateId chain (ScreenResult
+  // -> AutopilotCandidate.screenerCandidateId -> here -> OpportunityCandidate
+  // -> OpportunityRecommendation -> Best Opportunities -> CSV). Confirms the
+  // id is carried through unchanged, never re-derived from this adapter's
+  // own `id`/`analysis.subject.id`.
+  it('carries AutopilotCandidate.screenerCandidateId through unchanged to OpportunityCandidate.screenerCandidateId', () => {
+    const analysis = buildDecisionAnalysisFixture({
+      candidate: buildCandidateFixture({ screenerCandidateId: 'occ:AMD240119P00415000' }),
+    });
+    const result = decisionAnalysisToOpportunityCandidate(analysis);
+    expect(result!.screenerCandidateId).toBe('occ:AMD240119P00415000');
+    expect(result!.id).not.toBe(result!.screenerCandidateId);
+  });
+
+  it('yields screenerCandidateId undefined, never fabricated, when the source candidate has none', () => {
+    const analysis = buildDecisionAnalysisFixture({
+      candidate: buildCandidateFixture({ screenerCandidateId: undefined }),
+    });
+    const result = decisionAnalysisToOpportunityCandidate(analysis);
+    expect(result!.screenerCandidateId).toBeUndefined();
+  });
 });
 
 describe('decisionAnalysesToOpportunityCandidates', () => {

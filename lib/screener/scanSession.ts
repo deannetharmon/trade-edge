@@ -88,6 +88,8 @@
 // RecommendationService) requires page.tsx wiring that does not exist yet.
 
 import type { ScreenResult } from '@/lib/scans/types';
+import { type CspRuleSnapshot, isValidCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
+import { isOverallCspQualified } from '@/lib/scans/cspQualification';
 
 export type ScreenerScanMode = 'filter' | 'rank' | 'targeted';
 
@@ -168,7 +170,7 @@ const STRATEGY_RESULT_TYPES: Record<ScreenerRequestedStrategy, ReadonlySet<strin
 // Ranked/Targeted workflows for csp/cc/pmcc — see module header.
 const STRATEGY_ALLOWED_MODES: Record<ScreenerRequestedStrategy, ReadonlySet<ScreenerScanMode>> = {
   spreads: new Set<ScreenerScanMode>(['filter', 'rank', 'targeted']),
-  csp: new Set<ScreenerScanMode>(['filter']),
+  csp: new Set<ScreenerScanMode>(['filter', 'rank', 'targeted']),
   cc: new Set<ScreenerScanMode>(['filter']),
   pmcc: new Set<ScreenerScanMode>(['filter']),
 };
@@ -188,7 +190,36 @@ const ALLOWED_SCOPE_EXCLUSION_REASON_CODES: ReadonlySet<ScreenerReasonCode> = ne
   'CC_HIDDEN_BY_TRADER',
 ]);
 
-const SCHEMA_VERSION = 3 as const;
+// CSP-WORKFLOW-0001 — bumped 3 -> 4 for the multi-candidate CSP session
+// changes: ScreenResult now carries candidateId (see lib/scans/types.ts)
+// and, for CSP, bestCandidate carries cspLiquidityClass/
+// cspMarketQualification/cspAccountEligibility/cspAdvisoryWarnings/
+// cspAvailableCapital/cspScore (lib/scans/cspQualification.ts,
+// lib/scans/cspScore.ts).
+//
+// CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — bumped 4 -> 5 to add
+// `ruleSnapshot`, the immutable CSP rule/config snapshot the original ticket
+// called for but the v3->v4 bump deferred (reasoning it depended on the
+// not-yet-built CSP configuration modal). That reasoning is rejected: every
+// CSP session already applies a concrete, known rule set (DEFAULT_CSP_RULES
+// today), so the stable snapshot TYPE can and should exist now, populated
+// from whatever rules actually ran -- the later configuration modal should
+// populate this SAME type (with `source: 'user'`) rather than requiring yet
+// another schema bump. See lib/scans/cspRuleSnapshot.ts for the type and
+// canonical builder.
+//
+// validateSessionData() below already fails closed on ANY schemaVersion
+// mismatch (see the UNKNOWN_SCHEMA_VERSION check), so each of these bumps is
+// sufficient on its own to invalidate every existing cached session —
+// including spreads/cc/pmcc sessions that did not themselves change —
+// rather than attempting a partial/selective migration. This is a
+// deliberate, repeated, one-time invalidation of other strategies' caches,
+// accepted per the ticket rather than treated as a regression. No historical
+// snapshot is ever fabricated for an old cache: an old-schema session fails
+// UNKNOWN_SCHEMA_VERSION and is discarded outright (see
+// lib/screener/scanSessionCache.ts's restoreScanSession()) before any code
+// path would need to backfill a `ruleSnapshot` for it.
+const SCHEMA_VERSION = 7 as const;
 
 // ── Symbol normalization ────────────────────────────────────────────────
 export function normalizeSymbols(symbols: string[]): string[] {
@@ -270,6 +301,14 @@ export interface ScreenerScanSession {
   cacheProvenance: 'live' | 'idb-cache';
   cachedAt: number | null;
   schemaVersion: typeof SCHEMA_VERSION;
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — the immutable rule/
+  // config snapshot for this session. Non-null for `requestedStrategy ===
+  // 'csp'` sessions (populated from whatever CSP rules actually ran, at
+  // construction time); null for every other strategy, which has no rule
+  // set to snapshot yet. Never mutated after construction, and never
+  // fabricated for a session restored from an older schema (which fails
+  // closed on schemaVersion mismatch before this field is ever read).
+  ruleSnapshot: CspRuleSnapshot | null;
 }
 
 // ── Construction ─────────────────────────────────────────────────────────
@@ -292,6 +331,13 @@ export function createScanSession(args: {
   // ACCESS_TOKEN_UNAVAILABLE, CANCELLED, SUPERSEDED, etc.) throws
   // ScanSessionConstructionError BEFORE any session object is built.
   scopeExclusionReasonCode?: ScreenerReasonCode | ((symbol: string) => ScreenerReasonCode);
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — the caller-supplied
+  // rule snapshot for this session (build via lib/scans/cspRuleSnapshot.ts's
+  // buildCspRuleSnapshot()). This module stays decoupled from CSP-specific
+  // rule internals -- it only stores what it's given. Omitted/undefined
+  // becomes `null` on the resulting session, which is the correct value for
+  // every non-CSP strategy today.
+  ruleSnapshot?: CspRuleSnapshot;
 }): ScreenerScanSession {
   if (!STRATEGY_ALLOWED_MODES[args.requestedStrategy].has(args.mode)) {
     throw new ScanSessionConstructionError(
@@ -343,6 +389,7 @@ export function createScanSession(args: {
     cacheProvenance: 'live',
     cachedAt: null,
     schemaVersion: SCHEMA_VERSION,
+    ruleSnapshot: args.ruleSnapshot ?? null,
   };
 
   for (const { symbol, reasonCode } of exclusions) {
@@ -587,8 +634,29 @@ export interface ScreenerSessionAccounting {
   failedCount: number;
   skippedCount: number;
   candidateCount: number;
+  /** Market-qualified count — `ScreenResult.qualified === true`. For CSP
+   * (CSP-WORKFLOW-0001 core correction, BLOCKER-01) this is MARKET
+   * qualification only and is deliberately NOT the same thing as
+   * account-actionability — a market-qualified CSP contract the trader
+   * cannot currently afford or verify capital for is still counted here. */
   qualifiedCandidateCount: number;
   disqualifiedCandidateCount: number;
+  /** CSP-WORKFLOW-0001 core correction (BLOCKER-01) — the count of results
+   * that are both market-qualified AND account-actionable (ELIGIBLE, or no
+   * account-eligibility concept at all for strategies that don't carry one
+   * yet — BPS/BCS/IC/CC/PMCC). Distinct from `qualifiedCandidateCount` so
+   * accounting never forces "is this a good trade" and "can THIS account
+   * afford it" into one Boolean. For every non-CSP strategy today this
+   * equals `qualifiedCandidateCount` exactly, since those results carry no
+   * `bestCandidate.cspAccountEligibility` value to disagree with market
+   * qualification. */
+  accountActionableCount: number;
+}
+
+function isAccountActionableResult(r: ScreenResult): boolean {
+  if (!r.qualified) return false;
+  const eligibility = r.bestCandidate?.cspAccountEligibility;
+  return eligibility == null || eligibility === 'ELIGIBLE';
 }
 
 export function computeSessionAccounting(session: ScreenerScanSession): ScreenerSessionAccounting {
@@ -598,6 +666,7 @@ export function computeSessionAccounting(session: ScreenerScanSession): Screener
   const candidateCount = session.symbolOutcomes.reduce((sum, o) => sum + o.candidateCount, 0);
   const qualifiedCandidateCount = session.results.filter(r => r.qualified).length;
   const disqualifiedCandidateCount = session.results.filter(r => !r.qualified).length;
+  const accountActionableCount = session.results.filter(isAccountActionableResult).length;
 
   return {
     selectedCount: session.selectedSymbols.length,
@@ -609,6 +678,7 @@ export function computeSessionAccounting(session: ScreenerScanSession): Screener
     candidateCount,
     qualifiedCandidateCount,
     disqualifiedCandidateCount,
+    accountActionableCount,
   };
 }
 
@@ -623,6 +693,13 @@ export function formatSessionAccountingSummary(session: ScreenerScanSession): st
   if (a.failedCount > 0) parts.push(`${a.failedCount} failed`);
   if (a.skippedCount > 0) parts.push(`${a.skippedCount} skipped`);
   parts.push(`${a.qualifiedCandidateCount} qualified`, `${a.disqualifiedCandidateCount} disqualified`);
+  // CSP-WORKFLOW-0001 core correction (BLOCKER-01) — only surfaced when it
+  // actually diverges from qualifiedCandidateCount (i.e. at least one
+  // market-qualified result is not account-actionable), so every
+  // non-CSP-account-aware session's summary text is byte-for-byte unchanged.
+  if (a.accountActionableCount !== a.qualifiedCandidateCount) {
+    parts.push(`${a.accountActionableCount} account-actionable`);
+  }
   return parts.join(' · ');
 }
 
@@ -668,7 +745,9 @@ export type SessionValidationError =
   | 'CANDIDATE_RECONCILIATION_FAILED'
   | 'RESULT_SYMBOL_NOT_IN_SESSION'
   | 'RESULT_STRATEGY_MISMATCH'
-  | 'INVALID_RESULT_SHAPE';
+  | 'INVALID_RESULT_SHAPE'
+  | 'INVALID_CSP_QUALIFICATION'
+  | 'INVALID_RULE_SNAPSHOT';
 
 export type SessionValidationResult =
   | { valid: true; session: ScreenerScanSession }
@@ -689,9 +768,23 @@ export function validateSessionData(data: unknown): SessionValidationResult {
 
   const strategyValid = typeof d.requestedStrategy === 'string' && VALID_STRATEGIES.has(d.requestedStrategy);
   if (!strategyValid) errors.push('INVALID_STRATEGY');
-
   const modeValid = typeof d.mode === 'string' && VALID_MODES.has(d.mode);
   if (!modeValid) errors.push('INVALID_MODE');
+
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — ruleSnapshot must be
+  // exactly one of: null (every non-CSP strategy today), or a structurally
+  // valid CspRuleSnapshot (CSP). A CSP session with a null/malformed
+  // snapshot, or a non-CSP session with a non-null snapshot, fails closed
+  // rather than being silently accepted or silently repaired.
+  if (strategyValid && d.requestedStrategy === 'csp') {
+    if (!isValidCspRuleSnapshot(d.ruleSnapshot)) {
+      errors.push('INVALID_RULE_SNAPSHOT');
+    } else if (modeValid && d.ruleSnapshot.mode !== d.mode) {
+      errors.push('INVALID_RULE_SNAPSHOT');
+    }
+  } else if (d.ruleSnapshot !== null) {
+    errors.push('INVALID_RULE_SNAPSHOT');
+  }
 
   if (strategyValid && modeValid) {
     const strategy = d.requestedStrategy as ScreenerRequestedStrategy;
@@ -872,6 +965,38 @@ export function validateSessionData(data: unknown): SessionValidationResult {
         if (!check.strategyOk) errors.push('RESULT_STRATEGY_MISMATCH');
         if (!check.qualifiedOk) errors.push('INVALID_RESULT_SHAPE');
         if (!check.failReasonsOk) errors.push('INVALID_RESULT_SHAPE');
+        if (d.requestedStrategy === 'csp' && r.bestCandidate == null) {
+          // A CSP result without a concrete contract can only represent a
+          // failed/disqualified evaluation. It must never restore as a
+          // qualified candidate, and it must explain why no candidate exists.
+          if (r.qualified !== false || !Array.isArray(r.failReasons) || r.failReasons.length === 0) {
+            errors.push('INVALID_CSP_QUALIFICATION');
+          }
+        } else if (d.requestedStrategy === 'csp') {
+          const candidate = r.bestCandidate as Record<string, unknown>;
+          const marketStates = new Set(['QUALIFIED','QUALIFIED_WITH_LIQUIDITY_WARNING','DISQUALIFIED_INVALID_QUOTE','DISQUALIFIED_POOR_LIQUIDITY','DISQUALIFIED_IVR','DISQUALIFIED_EARNINGS']);
+          const accountStates = new Set(['ELIGIBLE','INSUFFICIENT_CAPITAL','CAPITAL_UNVERIFIED','ACCOUNT_UNSELECTED','STRATEGY_NOT_PERMITTED']);
+          const modeStates = new Set(['NOT_APPLICABLE','PASSED','FAILED']);
+          const reasonsValid = Array.isArray(candidate.cspModeQualificationReasons)
+            && candidate.cspModeQualificationReasons.every(reason => typeof reason === 'string');
+          const statesValid = typeof candidate.cspMarketQualification === 'string' && marketStates.has(candidate.cspMarketQualification)
+            && typeof candidate.cspAccountEligibility === 'string' && accountStates.has(candidate.cspAccountEligibility)
+            && typeof candidate.cspModeQualification === 'string' && modeStates.has(candidate.cspModeQualification)
+            && reasonsValid;
+          const reasonsConsistent = statesValid
+            && (candidate.cspModeQualification === 'FAILED'
+              ? (candidate.cspModeQualificationReasons as string[]).length > 0
+              : (candidate.cspModeQualificationReasons as string[]).length === 0);
+          const modeConsistent = statesValid && (d.mode === 'targeted'
+            ? candidate.cspModeQualification !== 'NOT_APPLICABLE'
+            : candidate.cspModeQualification === 'NOT_APPLICABLE');
+          const overallConsistent = statesValid && typeof r.qualified === 'boolean'
+            && r.qualified === isOverallCspQualified(
+              candidate.cspMarketQualification as Parameters<typeof isOverallCspQualified>[0],
+              candidate.cspModeQualification as Parameters<typeof isOverallCspQualified>[1],
+            );
+          if (!statesValid || !reasonsConsistent || !modeConsistent || !overallConsistent) errors.push('INVALID_CSP_QUALIFICATION');
+        }
       }
     }
     if (!resultSymbolsValid) errors.push('RESULT_SYMBOL_NOT_IN_SESSION');
@@ -922,6 +1047,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       cacheProvenance: d.cacheProvenance as 'live' | 'idb-cache',
       cachedAt: (d.cachedAt ?? null) as number | null,
       schemaVersion: SCHEMA_VERSION,
+      ruleSnapshot: (d.ruleSnapshot ?? null) as CspRuleSnapshot | null,
     },
   };
 }

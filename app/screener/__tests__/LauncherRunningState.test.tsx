@@ -43,6 +43,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: (...args: any[]) => getChainMock(...args),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -92,7 +93,7 @@ function launcherButtons() {
   return {
     spreads: screen.getByRole('button', { name: 'FIND SPREADS' }),
     csp: screen.getByRole('button', { name: 'FIND CSPs' }),
-    cc: screen.getByRole('button', { name: 'FIND COVERED CALLS' }),
+    cc: screen.getByRole('button', { name: 'FIND CCs' }),
     pmcc: screen.getByRole('button', { name: 'FIND PMCCs' }),
   };
 }
@@ -116,7 +117,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     renderScreener();
     await addToUniverse('NVDA');
     const { spreads, csp, cc, pmcc } = launcherButtons();
-    for (const [btn, label] of [[spreads, 'FIND SPREADS'], [csp, 'FIND CSPs'], [cc, 'FIND COVERED CALLS'], [pmcc, 'FIND PMCCs']] as const) {
+    for (const [btn, label] of [[spreads, 'FIND SPREADS'], [csp, 'FIND CSPs'], [cc, 'FIND CCs'], [pmcc, 'FIND PMCCs']] as const) {
       expect(btn).toHaveTextContent(label);
       expect(btn).not.toHaveTextContent('SCANNING');
       expect(btn).toHaveAttribute('aria-pressed', 'false');
@@ -144,6 +145,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     );
 
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 
     // --- while the CSP scan is genuinely in flight ---
     const inFlight = launcherButtons();
@@ -153,7 +155,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     expect(inFlight.csp.className).toMatch(/text-black/);
 
     expect(inFlight.spreads).toHaveTextContent('FIND SPREADS');
-    expect(inFlight.cc).toHaveTextContent('FIND COVERED CALLS');
+    expect(inFlight.cc).toHaveTextContent('FIND CCs');
     expect(inFlight.pmcc).toHaveTextContent('FIND PMCCs');
     expect(inFlight.spreads).toHaveAttribute('aria-busy', 'false');
     expect(inFlight.cc).toHaveAttribute('aria-busy', 'false');
@@ -180,6 +182,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     const { csp, spreads } = launcherButtons();
@@ -224,10 +227,11 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
   });
 
   it('6. a failed scan invocation restores the normal label and clears aria-busy', async () => {
-    getAccessTokenMock.mockRejectedValueOnce(new Error('auth failed'));
     renderScreener();
     await addToUniverse('NKE');
+    getAccessTokenMock.mockRejectedValueOnce(new Error('auth failed'));
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 
     const { csp } = launcherButtons();
     await waitFor(() => expect(csp).toHaveTextContent('FIND CSPs'));
@@ -240,7 +244,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
     renderScreener();
     await addToUniverse('NKE');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     const { cc } = launcherButtons();
     await waitFor(() => expect(cc).toHaveAttribute('aria-pressed', 'true'));
@@ -265,6 +269,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     const { csp } = launcherButtons();
     await waitFor(() => expect(csp).toHaveAttribute('aria-pressed', 'true'));
@@ -291,9 +296,9 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     expect(await screen.findByRole('button', { name: 'FIND SPREADS' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'FIND COVERED CALLS' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'FIND CCs' })).not.toBeDisabled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalled());
   });
 });

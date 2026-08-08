@@ -23,6 +23,8 @@ import {
   type ScreenerScanSession,
 } from '../scanSession';
 import type { ScreenResult, CheckResult } from '@/lib/scans/types';
+import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
+import { DEFAULT_CSP_RULES } from '@/lib/scans/constants';
 
 const PENDING_CHECK: CheckResult = { status: 'pending', value: '—', reason: '—' };
 const emptyChecks = {
@@ -41,6 +43,7 @@ function ungatedSession(symbols: string[], strategy: 'spreads' | 'csp' | 'pmcc' 
   return createScanSession({
     mode: 'filter', requestedStrategy: strategy,
     scope: { universeSymbols: symbols, eligibleSymbols: symbols },
+    ...(strategy === 'csp' ? { ruleSnapshot: buildCspRuleSnapshot(DEFAULT_CSP_RULES) } : {}),
   });
 }
 
@@ -178,20 +181,23 @@ describe('mode/strategy compatibility', () => {
     }
   });
 
-  it('csp/cc/pmcc reject rank and targeted at construction', () => {
-    for (const strategy of ['csp', 'cc', 'pmcc'] as const) {
+  it('CC and PMCC reject rank and targeted, while CSP accepts all three approved modes', () => {
+    for (const strategy of ['cc', 'pmcc'] as const) {
       for (const mode of ['rank', 'targeted'] as const) {
         expect(() => createScanSession({ mode, requestedStrategy: strategy, scope: { universeSymbols: [], eligibleSymbols: [] } }))
           .toThrow(ScanSessionConstructionError);
       }
       expect(() => createScanSession({ mode: 'filter', requestedStrategy: strategy, scope: { universeSymbols: [], eligibleSymbols: [] } })).not.toThrow();
     }
+    for (const mode of ['filter', 'rank', 'targeted'] as const) {
+      expect(() => createScanSession({ mode, requestedStrategy: 'csp', scope: { universeSymbols: [], eligibleSymbols: [] }, ruleSnapshot: buildCspRuleSnapshot(DEFAULT_CSP_RULES, { mode }) })).not.toThrow();
+    }
   });
 
   it('cache validator rejects an invalid mode/strategy combination', () => {
-    const s = createScanSession({ mode: 'filter', requestedStrategy: 'csp', scope: { universeSymbols: [], eligibleSymbols: [] } });
+    const s = createScanSession({ mode: 'filter', requestedStrategy: 'cc', scope: { universeSymbols: [], eligibleSymbols: [] } });
     const done = completeSession(s);
-    const r = validateSessionData({ ...done, mode: 'rank' }); // CSP was never allowed to be Ranked
+    const r = validateSessionData({ ...done, mode: 'rank' });
     expect(r.valid).toBe(false);
     if (!r.valid) expect(r.errors).toContain('INVALID_MODE_STRATEGY_COMBINATION');
   });
@@ -257,8 +263,8 @@ describe('validateSessionData: minimum critical ScreenResult shape', () => {
   });
 
   it('accepts a result with valid symbol/strategy/qualified/failReasons even if other ScreenResult fields are absent', () => {
-    const minimal = { symbol: 'A', strategy: 'CSP', qualified: true, failReasons: [] };
-    let s = ungatedSession(['A']);
+    const minimal = { symbol: 'A', strategy: 'BPS', qualified: true, failReasons: [] };
+    let s = ungatedSession(['A'], 'spreads');
     // Bypass the real API to simulate a minimal-but-critically-valid cached result:
     const done = { ...completeSession(recordSymbolEvaluated(s, 'A', [minimal as any])) };
     const r = validateSessionData(done);
@@ -532,5 +538,353 @@ describe('validateSessionData: reserved scope-exclusion reason policy (round 4)'
     const failed = errorSession(s, 'CC_UNATTRIBUTABLE_EXPOSURE');
     const r = validateSessionData(failed);
     expect(r.valid).toBe(true);
+  });
+});
+
+// ── CSP-WORKFLOW-0001 core-correction pass (BLOCKER-01) ────────────────────
+// computeSessionAccounting must distinguish market-qualified count from
+// account-actionable count rather than forcing both meanings into one
+// Boolean. These are wiring-level tests over the real accounting function,
+// using synthetic CSP ScreenResults carrying the same
+// bestCandidate.cspAccountEligibility field runCspChecklist() populates in
+// production.
+function makeCspResult(symbol: string, qualified: boolean, cspAccountEligibility?: 'ELIGIBLE' | 'INSUFFICIENT_CAPITAL' | 'CAPITAL_UNVERIFIED' | 'ACCOUNT_UNSELECTED', cspMarketQualification?: 'QUALIFIED' | 'QUALIFIED_WITH_LIQUIDITY_WARNING'): ScreenResult {
+  return {
+    symbol, strategy: 'CSP', price: 100, ivr: 40, qualified,
+    bestCandidate: qualified ? {
+      strategy: 'CSP', expiration: '2026-01-19', dte: 35, shortStrike: 50, longStrike: 50,
+      shortDelta: 0.2, credit: 100, spreadWidth: 0, creditRatio: 0.2, roc: 2, pop: 80,
+      shortOI: 1000, longOI: 1000,
+      cspAccountEligibility, cspMarketQualification,
+    } : null,
+    failReasons: qualified ? [] : ['test disqualified'], checks: emptyChecks,
+  };
+}
+
+describe('computeSessionAccounting: BLOCKER-01 market-qualified vs account-actionable', () => {
+  it('market-qualified + eligible: accountActionableCount equals qualifiedCandidateCount', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['NKE'], eligibleSymbols: ['NKE'] },
+    });
+    s = recordSymbolEvaluated(s, 'NKE', [makeCspResult('NKE', true, 'ELIGIBLE', 'QUALIFIED')]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(1);
+    expect(acc.accountActionableCount).toBe(1);
+  });
+
+  it('market-qualified + insufficient capital: stays counted as qualified but NOT account-actionable', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    s = recordSymbolEvaluated(s, 'AAPL', [makeCspResult('AAPL', true, 'INSUFFICIENT_CAPITAL', 'QUALIFIED')]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(1);
+    expect(acc.accountActionableCount).toBe(0);
+    expect(acc.disqualifiedCandidateCount).toBe(0); // must NOT be mislabeled as market-disqualified
+  });
+
+  it('market-qualified + capital unverified: stays counted as qualified but NOT account-actionable', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['MSFT'], eligibleSymbols: ['MSFT'] },
+    });
+    s = recordSymbolEvaluated(s, 'MSFT', [makeCspResult('MSFT', true, 'CAPITAL_UNVERIFIED', 'QUALIFIED')]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(1);
+    expect(acc.accountActionableCount).toBe(0);
+    expect(acc.disqualifiedCandidateCount).toBe(0);
+  });
+
+  it('no account selected: stays counted as qualified but NOT account-actionable', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['TSLA'], eligibleSymbols: ['TSLA'] },
+    });
+    s = recordSymbolEvaluated(s, 'TSLA', [makeCspResult('TSLA', true, 'ACCOUNT_UNSELECTED', 'QUALIFIED')]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(1);
+    expect(acc.accountActionableCount).toBe(0);
+  });
+
+  it('non-CSP strategies (no cspAccountEligibility field): accountActionableCount always equals qualifiedCandidateCount', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['NVDA'], eligibleSymbols: ['NVDA'] },
+    });
+    s = recordSymbolEvaluated(s, 'NVDA', [makeResult('NVDA', 'BPS', true)]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(1);
+    expect(acc.accountActionableCount).toBe(1);
+  });
+
+  it('a market-disqualified result (qualified: false) is never counted as account-actionable regardless of any account field', () => {
+    let s = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+    });
+    s = recordSymbolEvaluated(s, 'AMD', [makeCspResult('AMD', false)]);
+    const done = completeSession(s);
+    const acc = computeSessionAccounting(done);
+    expect(acc.qualifiedCandidateCount).toBe(0);
+    expect(acc.accountActionableCount).toBe(0);
+    expect(acc.disqualifiedCandidateCount).toBe(1);
+  });
+
+  it('formatSessionAccountingSummary only surfaces the account-actionable label when it diverges from qualifiedCandidateCount', () => {
+    let eligibleSession = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['NKE'], eligibleSymbols: ['NKE'] },
+    });
+    eligibleSession = recordSymbolEvaluated(eligibleSession, 'NKE', [makeCspResult('NKE', true, 'ELIGIBLE', 'QUALIFIED')]);
+    const doneEligible = completeSession(eligibleSession);
+    expect(formatSessionAccountingSummary(doneEligible)).not.toContain('account-actionable');
+
+    let unverifiedSession = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['MSFT'], eligibleSymbols: ['MSFT'] },
+    });
+    unverifiedSession = recordSymbolEvaluated(unverifiedSession, 'MSFT', [makeCspResult('MSFT', true, 'CAPITAL_UNVERIFIED', 'QUALIFIED')]);
+    const doneUnverified = completeSession(unverifiedSession);
+    expect(formatSessionAccountingSummary(doneUnverified)).toContain('0 account-actionable');
+  });
+});
+
+describe('CSP-WORKFLOW-0001 core-correction (BLOCKER-06): canonical rule-snapshot schema field', () => {
+  const validSnapshot = {
+    mode: 'filter' as const, preset: 'balanced',
+    ivrMin: 30, ivrMax: 70, deltaMin: 0.15, deltaMax: 0.25,
+    dteMin: 30, dteMax: 45, oiMin: 500, bidAskMax: 0.10,
+    popMin: null, otmMin: null, rocMin: null,
+    rankPrimary: 'score' as const, rankSecondary: 'none' as const,
+    earningsPolicy: 'disqualify-within-expiration' as const,
+    capturedAt: '2026-08-01T00:00:00.000Z', source: 'default' as const,
+  };
+
+  it('createScanSession stores the caller-supplied ruleSnapshot unchanged for a CSP session', () => {
+    const session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    expect(session.ruleSnapshot).toEqual(validSnapshot);
+  });
+
+  it('createScanSession defaults ruleSnapshot to null when omitted (e.g. every non-CSP strategy today)', () => {
+    const session = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    expect(session.ruleSnapshot).toBeNull();
+  });
+
+  it('validateSessionData accepts a CSP session with a well-formed ruleSnapshot', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeCspResult('AMD', false)]);
+    const r = validateSessionData(completeSession(session));
+    expect(r.valid).toBe(true);
+    if (r.valid) expect(r.session.ruleSnapshot).toEqual(validSnapshot);
+  });
+
+  it('rejects a qualified CSP cache result with no bestCandidate or canonical qualification states', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeResult('AMD', 'CSP', true)]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
+  });
+
+  it('validateSessionData rejects a CSP session with a null ruleSnapshot', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['A'], eligibleSymbols: ['A'] },
+    });
+    session = recordSymbolEvaluated(session, 'A', [makeResult('A', 'CSP', true)]);
+    const r = validateSessionData(completeSession(session));
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('INVALID_RULE_SNAPSHOT');
+  });
+
+  it('validateSessionData rejects a rule snapshot whose mode differs from its CSP session', () => {
+    let session = createScanSession({
+      mode: 'rank', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: { ...validSnapshot, mode: 'filter' },
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeResult('AMD', 'CSP', true)]);
+    const r = validateSessionData(completeSession(session));
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('INVALID_RULE_SNAPSHOT');
+  });
+
+  it('validateSessionData fails closed (INVALID_RULE_SNAPSHOT) on a malformed ruleSnapshot -- never silently repaired or dropped', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeResult('AMD', 'CSP', true)]);
+    const tampered = { ...completeSession(session), ruleSnapshot: { ...validSnapshot, ivrMin: 'thirty' } };
+    const r = validateSessionData(tampered);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('INVALID_RULE_SNAPSHOT');
+  });
+
+  it('validateSessionData fails closed when a required snapshot field is missing entirely', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeResult('AMD', 'CSP', true)]);
+    const { dteMax, ...incomplete } = validSnapshot;
+    const tampered = { ...completeSession(session), ruleSnapshot: incomplete };
+    const r = validateSessionData(tampered);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('INVALID_RULE_SNAPSHOT');
+  });
+
+  it('validateSessionData fails closed when a non-CSP session unexpectedly carries a ruleSnapshot', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    session = recordSymbolEvaluated(session, 'AAPL', [makeResult('AAPL', 'BPS', true)]);
+    const tampered = { ...completeSession(session), ruleSnapshot: validSnapshot };
+    const r = validateSessionData(tampered);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('INVALID_RULE_SNAPSHOT');
+  });
+
+  it('an old-schema cached session (no ruleSnapshot field at all) fails closed on UNKNOWN_SCHEMA_VERSION, never fabricating a snapshot to backfill it', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [makeResult('AMD', 'CSP', true)]);
+    const completed = completeSession(session);
+    const { ruleSnapshot, ...withoutSnapshotField } = completed as any;
+    const staleSchema = { ...withoutSnapshotField, schemaVersion: 4 };
+    const r = validateSessionData(staleSchema);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.errors).toContain('UNKNOWN_SCHEMA_VERSION');
+  });
+
+  it.each([
+    ['filter', 'FAILED', ['target failed']],
+    ['rank', 'PASSED', []],
+  ] as const)('rejects %s cache results with contradictory %s mode qualification', (mode, qualification, reasons) => {
+    const snapshot = mode === 'rank'
+      ? { ...validSnapshot, mode, rankSecondary: 'rocPct' as const }
+      : validSnapshot;
+    let session = createScanSession({
+      mode, requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: snapshot,
+    });
+    const result = makeCspResult('AMD', qualification !== 'FAILED', 'ELIGIBLE', 'QUALIFIED');
+    result.bestCandidate = {
+      ...result.bestCandidate!, cspModeQualification: qualification,
+      cspModeQualificationReasons: [...reasons],
+    };
+    result.qualified = qualification !== 'FAILED';
+    result.failReasons = qualification === 'FAILED' ? ['target failed'] : [];
+    session = recordSymbolEvaluated(session, 'AMD', [result]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
+  });
+
+  it('rejects a Targeted cache result whose mode qualification is NOT_APPLICABLE', () => {
+    const snapshot = { ...validSnapshot, mode: 'targeted' as const, popMin: 70 };
+    let session = createScanSession({
+      mode: 'targeted', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: snapshot,
+    });
+    const result = makeCspResult('AMD', true, 'ELIGIBLE', 'QUALIFIED');
+    result.bestCandidate = {
+      ...result.bestCandidate!, cspModeQualification: 'NOT_APPLICABLE',
+      cspModeQualificationReasons: [],
+    };
+    session = recordSymbolEvaluated(session, 'AMD', [result]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
+  });
+
+  // Alan corrective review follow-up — INVALID_CSP_QUALIFICATION has four
+  // independent sub-checks (statesValid, reasonsConsistent, modeConsistent,
+  // overallConsistent). The tests above only exercise statesValid (missing
+  // bestCandidate) and modeConsistent (wrong mode-qualification state for
+  // the session's mode). These three close the remaining two.
+  it('rejects a Targeted FAILED result with an empty reasons array -- a failure must explain itself', () => {
+    const snapshot = { ...validSnapshot, mode: 'targeted' as const, popMin: 70 };
+    let session = createScanSession({
+      mode: 'targeted', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: snapshot,
+    });
+    const result = makeCspResult('AMD', false, 'ELIGIBLE', 'QUALIFIED');
+    result.bestCandidate = {
+      ...result.bestCandidate!, cspMarketQualification: 'QUALIFIED', cspAccountEligibility: 'ELIGIBLE',
+      cspModeQualification: 'FAILED', cspModeQualificationReasons: [],
+    };
+    session = recordSymbolEvaluated(session, 'AMD', [result]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
+  });
+
+  it('rejects a Targeted PASSED result that still carries failure reasons -- a pass must not explain a failure that did not happen', () => {
+    const snapshot = { ...validSnapshot, mode: 'targeted' as const, popMin: 70 };
+    let session = createScanSession({
+      mode: 'targeted', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: snapshot,
+    });
+    const result = makeCspResult('AMD', true, 'ELIGIBLE', 'QUALIFIED');
+    result.bestCandidate = {
+      ...result.bestCandidate!, cspMarketQualification: 'QUALIFIED', cspAccountEligibility: 'ELIGIBLE',
+      cspModeQualification: 'PASSED', cspModeQualificationReasons: ['POP 65% is below targeted minimum 70%'],
+    };
+    session = recordSymbolEvaluated(session, 'AMD', [result]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
+  });
+
+  it('rejects a result whose qualified flag contradicts isOverallCspQualified(market, mode) -- every state individually valid and mode-consistent, but qualified:false claimed for a QUALIFIED+NOT_APPLICABLE (i.e. actually-qualified) candidate', () => {
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'csp',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      ruleSnapshot: validSnapshot,
+    });
+    const result = makeCspResult('AMD', false, 'ELIGIBLE', 'QUALIFIED');
+    result.bestCandidate = {
+      ...result.bestCandidate!, cspMarketQualification: 'QUALIFIED', cspAccountEligibility: 'ELIGIBLE',
+      cspModeQualification: 'NOT_APPLICABLE', cspModeQualificationReasons: [],
+    };
+    // qualified:false is left as-is from makeCspResult('AMD', false, ...) --
+    // contradicts isOverallCspQualified('QUALIFIED', 'NOT_APPLICABLE') === true.
+    session = recordSymbolEvaluated(session, 'AMD', [result]);
+    const validation = validateSessionData(completeSession(session));
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
   });
 });

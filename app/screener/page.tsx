@@ -24,14 +24,17 @@ import {
 } from '@/lib/scans/scan-utils';
 import {
   classificationCache, ttFetch, getAccessToken, classifyUnderlying,
-  getMarketMetrics, getQuote, getChain, getAvailableCash,
-  getCoveredCallCapacityReport,
+  getMarketMetrics, getQuote, getChain, getCspCapitalContext,
+  getCoveredCallCapacityReport, type CspCapitalContext,
 } from '@/lib/scans/tastytrade-client';
 import {
   trySpreadAtWidth, findBestSpread, tryICSideAtWidth, findBestIC,
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
-import { findBestCsp } from '@/lib/scans/csp-finder';
+import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
+import { calculateCspScore } from '@/lib/scans/cspScore';
+import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
+import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
 // (normalized, deduped, ordered ticker list) replaces the separate CSP and
 // PMCC ticker boxes; every strategy launcher button reads this same array.
@@ -72,6 +75,7 @@ import {
   createScanSession, recordSymbolEvaluated, recordSymbolFailed, recordSymbolSkipped,
   completeSession, stopSession, errorSession, isSessionStale,
   shouldGenerateRecommendationsForSession,
+  computeSessionAccounting,
   validateSessionData, normalizeSymbols,
   ScanSessionConstructionError, ScanSessionTransitionError,
 } from '@/lib/screener/scanSession';
@@ -110,6 +114,7 @@ import { FilteredResultControls, type FilterStrategy } from '@/features/screener
 import { BestOpportunitiesShortlist, pickTopOpportunityIds } from '@/features/screener/components/BestOpportunitiesShortlist';
 import { buildBestOpportunityRows } from '@/features/screener/lib/bestOpportunityRows';
 import { DisqualifiedSection } from '@/features/screener/components/DisqualifiedSection';
+import { CspFundamentalsRow } from '@/features/screener/components/CspFundamentalsRow';
 import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolOutcomesDisclosure';
 // SCREENER-LAUNCHER-0001: one consistent visual model (transparent+outlined
 // when unselected, solid-fill+white-text when selected) for every enabled
@@ -117,6 +122,11 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 // class strings. Selection is computed inline below from
 // activeSession?.requestedStrategy -- never tracked as separate state.
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
+import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
+import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
+import { buildCspCsv } from '@/features/screener/lib/cspCsv';
+import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
+import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
@@ -1371,89 +1381,167 @@ function runPMCCChecklist(
 
 
 // ── CSP — Cash-Secured Put (TE-0007A) ───────────────────────────────────────
-// Follows the same pattern as runPMCCChecklist above: a strategy that isn't a
-// vertical spread gets its own dedicated checklist builder rather than being
-// forced through the spread-shaped runChecklist(). The actual contract search
-// is findBestCsp() (lib/scans/csp-finder.ts), which itself just calls Wheel's
-// findBestWheelContract — this function only turns that result into the same
-// ScreenResult shape every other strategy card already knows how to render.
+// CSP-WORKFLOW-0001 — runCspChecklist now returns ONE ScreenResult PER
+// DISCOVERED CONTRACT, not one per symbol. This is the BLOCKER-01 fix from
+// docs/reviews/FIND-CSP-Comprehensive-Code-Audit.md: TradeEdge previously
+// collapsed every symbol to at most one CSP candidate no matter how many
+// real, in-window puts existed on the chain (see the NKE/AMD evidence in
+// that audit). findAllCsp() (lib/scans/csp-finder.ts) now returns every
+// structurally valid candidate; this function maps each one into its own
+// ScreenResult, all recorded together via
+// recordSymbolEvaluated(session, symbol, results[]) at the call site.
+//
+// "Discovery before classification" (per the ticket): IVR and earnings no
+// longer short-circuit the search — every candidate is still discovered
+// first, then IVR/earnings-failing symbols get every one of their
+// candidates market-disqualified (DISQUALIFIED_IVR / DISQUALIFIED_EARNINGS)
+// with the real contract still visible for audit, instead of the search
+// never running at all.
 function runCspChecklist(
   symbol: string,
   chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification?: 'index' | 'etf' | 'stock' },
   price: number | null,
   metrics: any,
   cspRules: CspRulesType,
-  availableCash: number | null,
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the structured
+  // capital context (real account identifier + separately-verified
+  // optionBuyingPower/cashBalance), replacing the deprecated single
+  // availableCash number in the production path. findAllCsp() computes
+  // min(optionBuyingPower, cashBalance) itself; this function never derives
+  // capital math on its own.
+  capital: CspCapitalContext,
   trendResult?: TrendResult
-): ScreenResult {
-  const failReasons: string[] = [];
+): ScreenResult[] {
   const ivrValue = metrics.ivRank;
   const earningsDate = metrics.earningsExpectedDate;
 
   // IVR — CSP is undefined-risk (assignment), so per the Prosper rule set it
-  // has a hard upper cap at 70, unlike spreads which have no cap.
+  // has a hard upper cap at 70, unlike spreads which have no cap. This is
+  // now a per-symbol MARKET-QUALIFICATION classifier, not a discovery gate.
   const ivrCheck: CheckResult = ivrValue == null
     ? { status: 'warn', value: 'N/A', reason: 'Not available' }
     : ivrValue < cspRules.IVR_MIN
-      ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% below ${cspRules.IVR_MIN}% floor — premium too thin for the risk`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below ${cspRules.IVR_MIN}% minimum` }; })()
+      ? { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below ${cspRules.IVR_MIN}% minimum` }
       : ivrValue > cspRules.IVR_MAX
-        ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% above ${cspRules.IVR_MAX}% hard cap for CSP/naked puts`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Above ${cspRules.IVR_MAX}% hard cap — undefined risk` }; })()
+        ? { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Above ${cspRules.IVR_MAX}% hard cap — undefined risk` }
         : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: `Within ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range` };
+  const ivrMarketDisqualified = ivrCheck.status === 'fail';
 
   const earningsCheck: CheckResult = !earningsDate
     ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
     : (() => {
         const d = daysUntil(earningsDate);
         if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-        if (d <= cspRules.DTE_MAX) { failReasons.push(`Earnings in ${d}d — assignment risk into a binary event`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' }; }
+        if (d <= cspRules.DTE_MAX) return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' };
         return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
       })();
+  const earningsMarketDisqualified = earningsCheck.status === 'fail';
 
-  const bestCandidate = ivrCheck.status !== 'fail' && earningsCheck.status !== 'fail'
-    ? findBestCsp(chainData, price, { rules: cspRules, contracts: 1, availableCash })
-    : null;
-  if (!bestCandidate && !failReasons.length) failReasons.push(`No qualifying put found in delta ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX} / DTE ${cspRules.DTE_MIN}-${cspRules.DTE_MAX} window`);
+  // CSP-WORKFLOW-0001 — the search ALWAYS runs now (discovery before
+  // classification); IVR/earnings gates are passed in so every discovered
+  // candidate is correctly classified DISQUALIFIED_IVR / DISQUALIFIED_EARNINGS
+  // rather than never being looked for.
+  const cspFindAll = findAllCsp(chainData, price, {
+    rules: cspRules, contracts: 1,
+    capital: {
+      accountSelected: capital.accountSelected,
+      accountId: capital.accountId,
+      optionBuyingPower: capital.optionBuyingPower,
+      cashBalance: capital.cashBalance,
+    },
+    underlyingSymbol: symbol,
+    ivrMarketDisqualified, earningsMarketDisqualified,
+  });
 
-  const oiCheck: CheckResult = !bestCandidate
-    ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
-    : bestCandidate.shortOI >= cspRules.OI_MIN
-      ? { status: 'pass', value: `${bestCandidate.shortOI}`, reason: `≥ ${cspRules.OI_MIN} minimum` }
-      : { status: 'warn', value: `${bestCandidate.shortOI}`, reason: `Below ${cspRules.OI_MIN} — fills may be difficult` };
+  if (cspFindAll.results.length === 0) {
+    // Nothing structurally discoverable at all (no expiration/delta/valid
+    // quote match) — exactly one truthful ScreenResult, matching prior
+    // one-per-symbol behavior for the true "nothing exists" case.
+    const failReasons = [cspFindAll.disqualificationReason ?? `No put expiration found in the ${cspRules.DTE_MIN}-${cspRules.DTE_MAX} DTE window.`];
+    return [{
+      symbol, strategy: 'CSP', price, ivr: ivrValue,
+      ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+      qualified: false, bestCandidate: null, failReasons,
+      earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
+      underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
+      checks: { ivr: ivrCheck, earnings: earningsCheck, oi: { status: 'fail', value: 'None', reason: failReasons[0] }, delta: { status: 'pending', value: '—', reason: 'No candidate' }, credit: { status: 'pending', value: '—', reason: 'No candidate' }, roc: { status: 'pending', value: '—', reason: 'No candidate' }, pop: { status: 'pending', value: '—', reason: 'No candidate' }, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
+    }];
+  }
 
-  const deltaCheck: CheckResult = bestCandidate
-    ? { status: 'pass', value: `Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: `Target ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
+  // One ScreenResult per discovered candidate — the core multi-candidate fix.
+  return cspFindAll.results.map((r): ScreenResult => {
+    const c = r.candidate;
 
-  const creditCheck: CheckResult = bestCandidate
-    ? { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `Requires $${bestCandidate.requiredCash?.toLocaleString() ?? '—'} cash` }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
+    // CSP-WORKFLOW-0001 — attach the CSP-specific score (lib/scans/cspScore.ts).
+    // Every input is candidate-specific (this contract's own strike/OI/ROC/
+    // liquidity), so two contracts on the same symbol score independently.
+    // Fails closed: technicalFit/ivr/eventRisk are null (not fabricated
+    // neutral values) whenever the underlying data isn't available.
+    const otmPct = (price != null && Number.isFinite(price) && price > 0 && Number.isFinite(c.shortStrike))
+      ? ((price - c.shortStrike) / price) * 100
+      : null;
+    let earningsWithinExpiration: boolean | null = null;
+    if (!earningsDate) {
+      earningsWithinExpiration = false; // no known earnings at all
+    } else {
+      const d = daysUntil(earningsDate);
+      earningsWithinExpiration = d < 0 ? false : d <= c.dte;
+    }
+    c.cspScore = calculateCspScore({
+      pop: c.pop ?? null,
+      otmPct,
+      periodRocPct: Number.isFinite(c.roc) ? c.roc : null,
+      annualizedRocPct: c.annualizedRoc ?? null,
+      liquidityClass: c.cspLiquidityClass ?? null,
+      openInterest: Number.isFinite(c.shortOI) ? c.shortOI : null,
+      oiMin: cspRules.OI_MIN,
+      technicalFit: trendResult?.scores?.total ?? null,
+      ivr: ivrValue ?? null,
+      earningsWithinExpiration,
+    });
 
-  const rocCheck: CheckResult = bestCandidate
-    ? { status: bestCandidate.roc >= 1 ? 'pass' : 'warn', value: `${bestCandidate.roc.toFixed(1)}%`, reason: `Annualized ${bestCandidate.annualizedRoc?.toFixed(0) ?? '—'}%` }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
+    const failReasons: string[] = [];
+    if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% outside the ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range`);
+    if (r.marketQualification === 'DISQUALIFIED_EARNINGS') failReasons.push('Earnings within expiry window — assignment risk into a binary event');
+    if (r.marketQualification === 'DISQUALIFIED_POOR_LIQUIDITY') failReasons.push(c.cspLiquidityReason ?? 'Poor liquidity');
+    if (r.accountEligibility === 'INSUFFICIENT_CAPITAL') failReasons.push(c.capitalWarning ?? 'Insufficient cash for this CSP');
+    if (r.accountEligibility === 'CAPITAL_UNVERIFIED') failReasons.push('Capital could not be verified for the selected account.');
+    if (r.accountEligibility === 'ACCOUNT_UNSELECTED') failReasons.push('No account selected — capital could not be verified.');
+    failReasons.push(...r.advisoryWarnings);
 
-  const popCheck: CheckResult = bestCandidate
-    ? { status: (bestCandidate.pop ?? 0) >= 65 ? 'pass' : 'warn', value: `${bestCandidate.pop?.toFixed(0) ?? '—'}%`, reason: '1 − |delta|, put side' }
-    : { status: 'pending', value: '—', reason: 'No candidate' };
+    const oiCheck: CheckResult = c.cspOiPassing
+      ? { status: 'pass', value: `${c.shortOI}`, reason: `≥ ${cspRules.OI_MIN} minimum` }
+      : { status: 'warn', value: `${c.shortOI}`, reason: c.cspOiWarning ?? `Below ${cspRules.OI_MIN} — fills may be difficult` };
+    const deltaCheck: CheckResult = { status: 'pass', value: `Δ${c.shortDelta.toFixed(2)}`, reason: `Target ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` };
+    const creditCheck: CheckResult = { status: 'pass', value: `$${c.credit.toFixed(2)}`, reason: `Requires $${c.requiredCash?.toLocaleString() ?? '—'} cash` };
+    const rocCheck: CheckResult = { status: c.roc >= 1 ? 'pass' : 'warn', value: `${c.roc.toFixed(1)}%`, reason: `Annualized ${c.annualizedRoc?.toFixed(0) ?? '—'}%` };
+    const popCheck: CheckResult = { status: (c.pop ?? 0) >= 65 ? 'pass' : 'warn', value: `${c.pop?.toFixed(0) ?? '—'}%`, reason: '1 − |delta|, put side' };
 
-  // Capital check never disqualifies the candidate from being *found* — it's
-  // surfaced as a blocked/warned result instead, per DR-0001 §7.4.
-  if (bestCandidate?.capitalBlocked) failReasons.push(bestCandidate.capitalWarning ?? 'Insufficient cash for this CSP');
+    // CSP-WORKFLOW-0001 core-correction (BLOCKER-01) — `qualified` is now
+    // MARKET qualification ONLY (QUALIFIED or QUALIFIED_WITH_LIQUIDITY_
+    // WARNING), never conflated with account eligibility. A market-
+    // qualified-but-unaffordable/unverified/no-account-selected candidate
+    // remains in the qualified opportunity result set (bestCandidate is
+    // never null here) with a clear account-status label carried on
+    // `bestCandidate.cspAccountEligibility` — it must NOT be mislabeled as
+    // market-disqualified by falling into the `!qualified` disqualified
+    // bucket. Best-Opportunities-grade eligibility (strong market
+    // qualification AND verified account eligibility) is a stricter,
+    // separate boundary enforced downstream (see
+    // isBestOpportunitiesEligible() in lib/scans/cspQualification.ts and its
+    // callers) — never by this field alone.
+    const qualified = isMarketQualified(r.marketQualification);
 
-  const qualified = ivrCheck.status === 'pass'
-    && earningsCheck.status === 'pass'
-    && oiCheck.status !== 'fail'
-    && bestCandidate !== null
-    && !bestCandidate.capitalBlocked;
-
-  return {
-    symbol, strategy: 'CSP', price, ivr: ivrValue,
-    ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-    qualified, bestCandidate, failReasons,
-    earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
-    underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
-    checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
-  };
+    return {
+      symbol, strategy: 'CSP', price, ivr: ivrValue,
+      ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+      qualified, bestCandidate: c, failReasons,
+      earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
+      underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
+      candidateId: r.candidateId,
+      checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
+    };
+  });
 }
 
 
@@ -3779,6 +3867,17 @@ const strategyScores = useMemo(() => {
                       <span className={`font-bold ${getOiColor(c.longCallOI, rules.OI_MIN)}`}>{c.longCallOI ?? '—'}</span>
                     </div>
                   </>
+                ) : c.strategy === 'CSP' ? (
+                  // CSP-0002 — single-leg cash-secured put: only the short
+                  // put's OI is meaningful (the "relevant leg"). No
+                  // protective/long leg exists, so no second OI number
+                  // belongs here — c.longOI is only ever a copy of shortOI
+                  // for CSP (see csp-finder.ts), kept for shared-math safety,
+                  // never for display.
+                  <div>
+                    <span className={th.label}>OI </span>
+                    <span className={`font-bold ${getOiColor(c.shortOI, rules.OI_MIN)}`}>{c.shortOI ?? '—'}</span>
+                  </div>
                 ) : (
                   <div>
                     <span className={th.label}>OI </span>
@@ -3815,9 +3914,17 @@ const strategyScores = useMemo(() => {
             {result.qualified && <span onClick={e => e.stopPropagation()} className="shrink-0"><EntryCalendarButton result={result} th={th} rules={rules} /></span>}
             {isApproaching && <span className="text-[9px] text-yellow-500 border border-yellow-600 rounded px-1 py-0.5 shrink-0 font-medium">⚠ DTE</span>}
           </>}
-          {!result.qualified && result.failReasons.length > 0 && (
+          {/* CSP-WORKFLOW-0001 core correction (BLOCKER-01) — a market-
+              qualified CSP result (result.qualified === true) that is NOT
+              account-eligible must still show a clear, visible account-
+              status label on the collapsed row, not just inside the
+              expanded section below. Without this branch a capital-
+              insufficient/unverified/no-account-selected CSP candidate
+              would render with no summary-row indication at all that it
+              isn't actually tradeable in the selected account. */}
+          {(!result.qualified || (result.bestCandidate?.cspAccountEligibility != null && result.bestCandidate.cspAccountEligibility !== 'ELIGIBLE')) && result.failReasons.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-[10px] text-red-500 font-medium`}>{result.failReasons.slice(0, 2).join(' · ')}</span>
+              <span className={`text-[10px] ${result.qualified ? 'text-amber-500' : 'text-red-500'} font-medium`}>{result.failReasons.slice(0, 2).join(' · ')}</span>
               {hasEarningsBlock && result.earningsDate && <span onClick={e => e.stopPropagation()}><CalendarButton symbol={result.symbol} strategy={result.strategy} earningsDate={result.earningsDate} ivr={result.ivr} th={th} /></span>}
             </div>
           )}
@@ -3827,6 +3934,16 @@ const strategyScores = useMemo(() => {
           <div className={`${th.textFaint} text-xs`}>{expanded ? '▲' : '▼'}</div>
         </div>
       </div>
+
+      {/* CSP-0002 corrective pass — "Complete the CSP metric presentation":
+          Bid/Ask/Mid/Cash required/Breakeven previously lived only inside
+          the EXPANDED "CSP — Wheel Entry" section below, so a qualified CSP
+          card's collapsed row didn't show them (unlike the disqualified
+          audit card, which always has). Shown unconditionally here, mirroring
+          DisqualifiedSection's CspFundamentalsRow, so qualified and
+          disqualified CSP cards present identical fundamentals without
+          requiring an expand click. */}
+      {c && <CspFundamentalsRow candidate={c} price={result.price} textMutedClassName={th.textMuted} testId="csp-qualified-fundamentals" />}
 
       {/* Expanded Content */}
       {expanded && (
@@ -4244,34 +4361,27 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className={`${th.card} border ${th.border} rounded-2xl shadow-2xl w-[480px] p-6 flex flex-col gap-5`}>
-        <div className="relative flex items-center justify-center">
-          <p className={`text-sm font-bold tracking-widest text-center ${th.text}`}>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</p>
-          <button onClick={onClose} className={`absolute right-0 ${th.textFaint} hover:${th.text} text-lg leading-none`}>✕</button>
-        </div>
-
+  return (
+    <ScanModalShell
+      th={th}
+      titleId="run-mode-modal-title"
+      title={<>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
+      closeLabel="Close scan configuration"
+      onClose={onClose}
+    >
+      <div className="flex flex-col gap-5">
         {/* Mode selection */}
-        <div className="flex gap-2">
-          {([
-            { m: 'filter' as const, icon: '⊘', label: 'FILTER', desc: 'Gate by rules — pass/fail' },
-            { m: 'rank' as const, icon: '⬡', label: 'RANK', desc: 'Score & sort all tickers' },
-            { m: 'targeted' as const, icon: '⊕', label: 'TARGETED', desc: 'Deep scan by DTE + POP' },
-          ]).map(({ m, icon, label, desc }) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`flex-1 py-3 rounded-xl border text-xs font-bold tracking-wider transition-all ${
-                mode === m
-                  ? m === 'filter'   ? 'ac-bg-20 ac-btn'
-                  : m === 'rank'     ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                  :                    'bg-teal-500/20 border-teal-500 text-teal-300'
-                  : `${th.card} ${th.border} ${th.textFaint} hover:${th.textMuted}`
-              }`}>
-              {icon} {label}
-              <p className={`text-[9px] mt-1 font-normal opacity-70`}>{desc}</p>
-            </button>
-          ))}
-        </div>
+        <ScanModeRadioGroup
+          th={th}
+          ariaLabel="Scan mode"
+          value={mode}
+          onChange={setMode}
+          descriptions={{
+            filter: 'Gate by rules — pass/fail',
+            rank: 'Score & sort all tickers',
+            targeted: 'Deep scan by DTE + POP',
+          }}
+        />
 
         {/* Preset selection — filter mode */}
         {mode === 'filter' && (
@@ -4382,8 +4492,7 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
           RUN SCREENER →
         </button>
       </div>
-    </div>,
-    document.body
+    </ScanModalShell>
   );
 }
 
@@ -5317,7 +5426,7 @@ function toOiStrategy(strategy: string): 'CSP' | 'CC' | 'BPS' | 'BCS' | 'IC' | '
 // only thing that varies per mode, matching each panel's existing palette
 // (purple=Ranked, teal=Targeted, amber=Filtered).
 function OiAndSortControls({
-  th, minOi, setMinOi, sort, setSort, accent,
+  th, minOi, setMinOi, sort, setSort, accent, sortFields = SORT_FIELDS,
 }: {
   th: typeof THEMES[Theme];
   minOi: number;
@@ -5325,6 +5434,7 @@ function OiAndSortControls({
   sort: SortSpec;
   setSort: (s: SortSpec) => void;
   accent: 'purple' | 'teal' | 'amber';
+  sortFields?: readonly SortField[];
 }) {
   const [customOi, setCustomOi] = useState<string>('');
   const isPreset = OI_PRESETS.some(p => p.value === minOi);
@@ -5364,7 +5474,7 @@ function OiAndSortControls({
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
-        {SORT_FIELDS.map(f => (
+        {sortFields.map(f => (
           <button key={f} onClick={() => setSort(setPrimarySortField(sort, f))}
             className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
               sort.primary === f ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
@@ -5380,7 +5490,7 @@ function OiAndSortControls({
           className={`text-[9px] ${th.input} border ${th.inputBorder} rounded px-1.5 py-0.5 ${th.text} focus:outline-none`}
         >
           <option value="none">None</option>
-          {SORT_FIELDS.filter(f => f !== sort.primary).map(f => (
+          {sortFields.filter(f => f !== sort.primary).map(f => (
             <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
           ))}
         </select>
@@ -5805,8 +5915,18 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [scanLiveMessage, setScanLiveMessage] = useState('');
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
+  const [showCspRunModal, setShowCspRunModal] = useState(false);
+  const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
+    mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
+    popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
+  });
+  const [lastCspMode, setLastCspMode] = useState<CspScanRequest['mode']>('filter');
+  const [cspRequestsByMode, setCspRequestsByMode] = useState<CspScanRequestsByMode>({
+    filter: defaultCspRequest('filter'), rank: defaultCspRequest('rank'), targeted: defaultCspRequest('targeted'),
+  });
   const [tradeResult, setTradeResult] = useState<ScreenResult | null>(null);
   const [loadPrompt, setLoadPrompt] = useState<LoadPromptState>({ show: false, name: '', type: 'strategy' });
   const [runtimeStockRules, setRuntimeStockRules] = useState<RulesType>(getSavedRules);
@@ -5848,6 +5968,9 @@ export default function Home() {
     requestedStrategy: ScreenerRequestedStrategy;
     scope: ScreenerScanScope;
     scopeExclusionReasonCode?: ScreenerReasonCode | ((symbol: string) => ScreenerReasonCode);
+    // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — the immutable rule
+    // snapshot for this session, forwarded unchanged to createScanSession().
+    ruleSnapshot?: ReturnType<typeof buildCspRuleSnapshot>;
   }): ScreenerScanSession => {
     setActiveSession(prev => {
       if (prev && prev.status === 'running') {
@@ -6106,6 +6229,9 @@ export default function Home() {
       if (activeSessionIdRef.current != null) return;
       activeSessionIdRef.current = session.sessionId;
       setActiveSession(session);
+      if (session.requestedStrategy === 'csp' && session.mode === 'rank' && session.ruleSnapshot) {
+        setFilteredSort({ primary: 'score', secondary: session.ruleSnapshot.rankSecondary });
+      }
       // rawScanCache feeds applyRules() directly — executable state, not
       // just display — so an exact sessionId match is required regardless
       // of mode. SCREENER-RESULTS-0001 final corrective (race) — these
@@ -6130,7 +6256,7 @@ export default function Home() {
           setRawScanCache(cached.entries);
         }
       });
-      if (session.mode === 'targeted') {
+      if (session.mode === 'targeted' && session.requestedStrategy === 'spreads') {
         idbGet<{ sessionId: string; entries: TargetedScanEntry[] }>(IDB_TARGETED_RESULTS_KEY).then(cachedTargeted => {
           if (
             cachedTargeted &&
@@ -6190,7 +6316,27 @@ export default function Home() {
       return;
     }
 
-    const qualifiedResults = activeSession.results.filter(r => r.qualified);
+    // CSP-WORKFLOW-0001 core correction (BLOCKER-01) — Best Opportunities
+    // requires BOTH strong market qualification (strict QUALIFIED, not the
+    // QUALIFIED_WITH_LIQUIDITY_WARNING borderline-liquidity tier) AND
+    // verified account eligibility (ELIGIBLE). A market-qualified-but-
+    // unaffordable/unverified/no-account-selected CSP contract stays
+    // `qualified: true` (visible in the ordinary Qualified list — see
+    // runCspChecklist) but must not be sent into the recommendation
+    // pipeline that feeds Best Opportunities. Other strategies are
+    // unaffected: cspMarketQualification/cspAccountEligibility are
+    // undefined for them, so this filter reduces to the prior
+    // `r.qualified` behavior exactly.
+    const qualifiedResults = activeSession.results.filter(r => {
+      if (!r.qualified) return false;
+      const c = r.bestCandidate;
+      if (c?.cspMarketQualification === undefined) return true; // non-CSP strategy, unchanged
+      return isBestOpportunitiesEligible(
+        c.cspMarketQualification,
+        c.cspAccountEligibility ?? 'CAPITAL_UNVERIFIED',
+        c.cspModeQualification ?? 'NOT_APPLICABLE',
+      );
+    });
     if (qualifiedResults.length === 0) {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
@@ -6286,8 +6432,19 @@ export default function Home() {
   const parseTickers = normalizeTickerInput;
 
   const downloadCSV = () => {
-    const headers = ['Symbol','Strategy','Trend','Trend Subtype','Trend Confidence','Qualified','Price','IVR','Expiration','DTE','Short Put Strike','Long Put Strike','Put Width','Short Call Strike','Long Call Strike','Call Width','Short Delta','Credit','ROC%','POP%','Short OI','Long OI','Total Credit','Earnings Date','Fail Reasons'];
-    const rows = results.map(r => { const c = r.bestCandidate; return [r.symbol,r.strategy,r.trendResult?.trend||'',r.trendResult?.subtype||'',r.trendResult?.confidence!=null?r.trendResult.confidence.toFixed(0)+'%':'',r.qualified?'YES':'NO',r.price?.toFixed(2)||'',r.ivr?.toFixed(1)||'',c?.expiration||'',c?.dte||'',c?.shortStrike||'',c?.longStrike||'',c?.spreadWidth||'',c?.shortCallStrike||'',c?.longCallStrike||'',c?.callWidth||'',c?.shortDelta?.toFixed(2)||'',c?.credit?.toFixed(2)||'',c?.roc?.toFixed(0)||'',c?.pop?.toFixed(0)||'',c?.shortOI||'',c?.longOI||'',c?.totalCredit?.toFixed(2)||'',r.earningsDate||'',r.failReasons.join('; ')].map(v=>`"${v}"`).join(','); });
+    const csv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    if (activeSession?.requestedStrategy === 'csp') {
+      const blob = new Blob([buildCspCsv(results, activeSession)], { type: 'text/csv' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `csp-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+      return;
+    }
+    // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — Candidate ID is the
+    // canonical ScreenResult.candidateId, so a CSV row for one CSP contract
+    // is unambiguously traceable back to it even when other columns alone
+    // wouldn't disambiguate (e.g. two rows with the same strike text but
+    // different expirations after manual sorting/filtering downstream).
+    const headers = ['Candidate ID','Symbol','Strategy','Trend','Trend Subtype','Trend Confidence','Qualified','Price','IVR','Expiration','DTE','Short Put Strike','Long Put Strike','Put Width','Short Call Strike','Long Call Strike','Call Width','Short Delta','Credit','ROC%','POP%','Short OI','Long OI','Total Credit','Earnings Date','Fail Reasons'];
+    const rows = results.map(r => { const c = r.bestCandidate; return [r.candidateId||'',r.symbol,r.strategy,r.trendResult?.trend||'',r.trendResult?.subtype||'',r.trendResult?.confidence!=null?r.trendResult.confidence.toFixed(0)+'%':'',r.qualified?'YES':'NO',r.price?.toFixed(2)||'',r.ivr?.toFixed(1)||'',c?.expiration||'',c?.dte||'',c?.shortStrike||'',c?.longStrike||'',c?.spreadWidth||'',c?.shortCallStrike||'',c?.longCallStrike||'',c?.callWidth||'',c?.shortDelta?.toFixed(2)||'',c?.credit?.toFixed(2)||'',c?.roc?.toFixed(0)||'',c?.pop?.toFixed(0)||'',c?.shortOI||'',c?.longOI||'',c?.totalCredit?.toFixed(2)||'',r.earningsDate||'',r.failReasons.join('; ')].map(csv).join(','); });
     const blob = new Blob([[headers.join(','),...rows].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `hunter-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
   };
@@ -6340,6 +6497,20 @@ export default function Home() {
       const sortedResults = [...finalSession.results].sort((a, b) => {
         if (a.qualified && !b.qualified) return -1;
         if (!a.qualified && b.qualified) return 1;
+        // CSP-WORKFLOW-0001 core-correction (BLOCKER-03) — for CSP results,
+        // cspScore.total is the authoritative sort key, not ivr. A missing
+        // (UNAVAILABLE) score sorts after any available score, never as if
+        // it scored 0.
+        const aCsp = a.bestCandidate?.strategy === 'CSP' ? a.bestCandidate.cspScore : undefined;
+        const bCsp = b.bestCandidate?.strategy === 'CSP' ? b.bestCandidate.cspScore : undefined;
+        if (aCsp || bCsp) {
+          const aScore = aCsp?.scoreStatus === 'AVAILABLE' ? aCsp.total : null;
+          const bScore = bCsp?.scoreStatus === 'AVAILABLE' ? bCsp.total : null;
+          if (aScore == null && bScore == null) return (b.ivr ?? 0) - (a.ivr ?? 0);
+          if (aScore == null) return 1;
+          if (bScore == null) return -1;
+          return bScore - aScore;
+        }
         return (b.ivr ?? 0) - (a.ivr ?? 0);
       });
       setResults(sortedResults);
@@ -6481,6 +6652,19 @@ export default function Home() {
         sortedResults.sort((a, b) => {
           if (a.qualified && !b.qualified) return -1;
           if (!a.qualified && b.qualified) return 1;
+          // CSP-WORKFLOW-0001 core-correction (BLOCKER-03) — cspScore.total
+          // is the authoritative CSP sort key; a missing (UNAVAILABLE) score
+          // sorts after any available score, never as if it scored 0.
+          const aCsp = a.bestCandidate?.strategy === 'CSP' ? a.bestCandidate.cspScore : undefined;
+          const bCsp = b.bestCandidate?.strategy === 'CSP' ? b.bestCandidate.cspScore : undefined;
+          if (aCsp || bCsp) {
+            const aScore = aCsp?.scoreStatus === 'AVAILABLE' ? aCsp.total : null;
+            const bScore = bCsp?.scoreStatus === 'AVAILABLE' ? bCsp.total : null;
+            if (aScore == null && bScore == null) return (b.ivr ?? 0) - (a.ivr ?? 0);
+            if (aScore == null) return 1;
+            if (bScore == null) return -1;
+            return bScore - aScore;
+          }
           return (b.ivr ?? 0) - (a.ivr ?? 0);
         });
       }
@@ -6644,19 +6828,23 @@ export default function Home() {
   // CSP results are appended to the existing results list, so they render
   // through the exact same result-card UI as BPS/BCS/IC/PMCC (same look
   // and feel, per DR-0001 §10). TE-0007: no separate CSP-only ticker list.
-  const runCspScan = async () => {
+  const runCspScan = async (request: CspScanRequest) => {
     const csp = opportunityUniverse;
     if (!csp.length) {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
     setError('');
-    setScreenMode('filter');
-    try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
+    setLastCspMode(request.mode);
+    setCspRequestsByMode(prev => ({ ...prev, [request.mode]: request }));
+    setScanLiveMessage(`Cash-Secured Put ${request.mode} scan started for ${csp.length} selected tickers.`);
+    setScreenMode(request.mode);
+    if (request.mode === 'rank') setFilteredSort({ primary: 'score', secondary: request.rankSecondary });
+    try { localStorage.setItem(LS_SCREEN_MODE, request.mode); } catch {}
     setLoading(true);
     startScreenerJob({
       kind: 'csp', label: 'CSP scan', total: csp.length,
-      status: 'Starting CSP scan...', resultsHref: '/screener?mode=filter',
+      status: 'Starting CSP scan...', resultsHref: `/screener?mode=${request.mode}`,
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
 
@@ -6668,9 +6856,19 @@ export default function Home() {
     // below, in the render) can no longer silently drift back to
     // "FIND SPREADS" after a CSP scan completes.
     let session = beginScanSession({
-      mode: 'filter',
+      mode: request.mode,
       requestedStrategy: 'csp',
       scope: { universeSymbols: csp, eligibleSymbols: csp },
+      // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — every CSP session
+      // now carries the immutable snapshot of the rules that actually ran.
+      // Every CSP scan today applies exactly DEFAULT_CSP_RULES (there is no
+      // per-session override path yet), so a snapshot built from it here is
+      // faithful to what findAllCsp() below is about to apply.
+      ruleSnapshot: buildCspRuleSnapshot(request.rules, {
+        source: 'user', mode: request.mode, preset: request.preset,
+        popMin: request.popMin, otmMin: request.otmMin, rocMin: request.rocMin,
+        rankSecondary: request.rankSecondary,
+      }),
     });
     const loopSymbols = session.plannedScanSymbols;
 
@@ -6678,11 +6876,22 @@ export default function Home() {
       pushStatus('Getting access token...');
       const token = await getAccessToken();
 
-      pushStatus('Checking available cash...');
+      pushStatus('Checking available capital...');
+      // CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the manual cash
+      // override is an explicit trader assertion (typed in, not guessed
+      // from an unvalidated accounts[0]), so it is trusted as both sides of
+      // min(optionBuyingPower, cashBalance) and marked account-selected
+      // under a synthetic 'manual-override' identifier, preserving its
+      // prior always-wins behavior. Absent an override, capital is resolved
+      // from the real account via getCspCapitalContext(), which fails
+      // closed (accountSelected: false, every figure null) whenever there
+      // isn't exactly one verifiable Tastytrade account to attribute the
+      // balance to -- never accounts[0] guessed blindly, never a fallback
+      // constant.
       const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
-      const availableCash = Number.isFinite(manualCash as number)
-        ? (manualCash as number)
-        : await getAvailableCash(token);
+      const capital: CspCapitalContext = Number.isFinite(manualCash as number)
+        ? { accountSelected: true, accountId: 'manual-override', optionBuyingPower: manualCash as number, cashBalance: manualCash as number }
+        : await getCspCapitalContext(token);
 
       pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(loopSymbols, token);
@@ -6695,13 +6904,38 @@ export default function Home() {
           const isEtf = classification === 'index' || classification === 'etf';
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const [chainData, price] = await Promise.all([
-            getChain(symbol, token, DEFAULT_RULES, { min: DEFAULT_CSP_RULES.DTE_MIN, max: DEFAULT_CSP_RULES.DTE_MAX }),
+            getChain(symbol, token, DEFAULT_RULES, { min: request.rules.DTE_MIN, max: request.rules.DTE_MAX }),
             getQuote(symbol, token),
           ]);
           let trendResult: TrendResult | undefined;
           try { trendResult = await getTrend(symbol, isEtf); } catch {}
-          const result = runCspChecklist(symbol, chainData, price, metrics, DEFAULT_CSP_RULES, availableCash, trendResult);
-          session = recordSymbolEvaluated(session, symbol, [result]);
+          // CSP-WORKFLOW-0001 — one or more ScreenResults per symbol now
+          // (one per discovered contract); recordSymbolEvaluated already
+          // accepts an array and reconciles candidateCount against its
+          // length — see lib/screener/scanSession.ts.
+          const discovered = runCspChecklist(symbol, chainData, price, metrics, request.rules, capital, trendResult);
+          const results = discovered.map(result => {
+            const c = result.bestCandidate;
+            if (!c) return result;
+            const otm = price != null && price > 0 ? ((price - c.shortStrike) / price) * 100 : null;
+            const targetedFailures = [
+              request.popMin != null && (c.pop == null || c.pop < request.popMin) ? `POP ${c.pop?.toFixed(1) ?? 'unavailable'}% is below targeted minimum ${request.popMin}%` : null,
+              request.otmMin != null && (otm == null || otm < request.otmMin) ? `OTM ${otm?.toFixed(1) ?? 'unavailable'}% is below targeted minimum ${request.otmMin}%` : null,
+              request.rocMin != null && (c.roc == null || c.roc < request.rocMin) ? `Period ROC ${c.roc?.toFixed(1) ?? 'unavailable'}% is below targeted minimum ${request.rocMin}%` : null,
+            ].filter((v): v is string => v != null);
+            const modeQualification = request.mode !== 'targeted' ? 'NOT_APPLICABLE' as const
+              : targetedFailures.length === 0 ? 'PASSED' as const : 'FAILED' as const;
+            const nextCandidate = { ...c, cspModeQualification: modeQualification, cspModeQualificationReasons: targetedFailures };
+            return {
+              ...result,
+              bestCandidate: nextCandidate,
+              qualified: c.cspMarketQualification != null
+                ? isOverallCspQualified(c.cspMarketQualification, modeQualification)
+                : false,
+              failReasons: [...result.failReasons, ...targetedFailures],
+            };
+          });
+          session = recordSymbolEvaluated(session, symbol, results);
         } catch (e: any) {
           session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
@@ -6719,8 +6953,10 @@ export default function Home() {
         completeScreenerJob({
           resultCount: session.results.length,
           status: `${session.results.length} CSP result${session.results.length === 1 ? '' : 's'} ready`,
-          resultsHref: '/screener?mode=filter',
+          resultsHref: `/screener?mode=${request.mode}`,
         });
+        const accounting = computeSessionAccounting(session);
+        setScanLiveMessage(`Cash-Secured Put scan completed. ${accounting.evaluatedCount} symbols evaluated, ${accounting.qualifiedCandidateCount} candidates qualified, ${accounting.disqualifiedCandidateCount} candidates disqualified.`);
       });
       void committed; // superseded scans simply discard their own late results
     } catch (e: any) {
@@ -6729,6 +6965,7 @@ export default function Home() {
       // clobber a newer scan's loading/status/error/job state.
       if (isScanCurrent(session)) {
         setError(e.message);
+        setScanLiveMessage(`Cash-Secured Put scan failed. ${e.message}`);
         failScreenerJob(e.message);
       }
       const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
@@ -7011,8 +7248,9 @@ export default function Home() {
   const hasCompletedScanForCurrentMode = !!(
     activeSession && activeSession.mode === screenMode && activeSession.status !== 'running'
   );
-  const filteredQualifiedChips = applyFilterModeChips(qualified);
-  const filteredDisqualified = applyFilterModeChips(disqualified);
+  const cspNonFilterSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode !== 'filter';
+  const filteredQualifiedChips = cspNonFilterSession ? qualified : applyFilterModeChips(qualified);
+  const filteredDisqualified = cspNonFilterSession ? disqualified : applyFilterModeChips(disqualified);
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
   // sort, applied to the QUALIFIED section only. Eligibility filters
@@ -7034,18 +7272,28 @@ export default function Home() {
     return null;
   };
   const filteredOiByResult = new Map<ScreenResult, OiEligibilityResult>();
+  // Targeted CSP is fully defined by its immutable launch snapshot. It must
+  // not inherit the mutable Filter/Rank result controls that happen to live
+  // in this page component.
+  const cspTargetedSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode === 'targeted';
+  const effectiveFilteredMinOi = cspTargetedSession ? 0 : filteredMinOi;
+  const effectiveFilteredSort = cspTargetedSession
+    ? ({ primary: 'score', secondary: 'none' } as SortSpec)
+    : filteredSort;
   let filteredQualified = filteredQualifiedChips.filter(r => {
     const strat = toOiStrategy(r.strategy);
     if (!strat || !r.bestCandidate) return true; // strategies with no OI mapping are unaffected
-    const oi = evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), filteredMinOi);
+    const oi = evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), effectiveFilteredMinOi);
     filteredOiByResult.set(r, oi);
     return oi.eligible;
   });
-  filteredQualified = sortItems(filteredQualified, filteredSort, (r): SortableMetrics => {
+  filteredQualified = sortItems(filteredQualified, effectiveFilteredSort, (r): SortableMetrics => {
     const c = r.bestCandidate;
     const strat = toOiStrategy(r.strategy);
     return {
-      score: strat ? scoreCandidate(r, rankConfig)?.score ?? null : null,
+      score: c?.strategy === 'CSP'
+        ? (c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore.total : null)
+        : (strat ? scoreCandidate(r, rankConfig)?.score ?? null : null),
       pop: c?.pop ?? null,
       creditDollars: c?.credit ?? null,
       creditPct: c?.creditRatio != null ? c.creditRatio * 100 : null,
@@ -7073,6 +7321,7 @@ export default function Home() {
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 flex items-center justify-between sticky top-0 z-50 flex-col gap-0`}>
         <div className="flex items-center justify-between w-full pb-2">
@@ -7189,7 +7438,7 @@ export default function Home() {
                 label="FIND CSPs"
                 isSelected={activeSession?.requestedStrategy === 'csp'}
                 isRunning={runningLauncher === 'csp'}
-                onClick={runCspScan}
+                onClick={() => setShowCspRunModal(true)}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
               >
@@ -7197,14 +7446,14 @@ export default function Home() {
               </LauncherButton>
               <LauncherButton
                 strategy="cc"
-                label="FIND COVERED CALLS"
+                label="FIND CCs"
                 isSelected={activeSession?.requestedStrategy === 'cc'}
                 isRunning={runningLauncher === 'cc'}
                 onClick={() => runCcScan(false)}
                 disabled={loading}
                 title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
               >
-                {runningLauncher === 'cc' ? 'SCANNING...' : 'FIND COVERED CALLS'}
+                {runningLauncher === 'cc' ? 'SCANNING...' : 'FIND CCs'}
               </LauncherButton>
               <LauncherButton
                 strategy="pmcc"
@@ -7280,7 +7529,7 @@ export default function Home() {
               // every eligible holding from an empty universe.
               <div className="space-y-1.5">
                 <p className={`text-[10px] ${th.textFaint}`}>
-                  Your Opportunity Universe is empty. FIND COVERED CALLS won&apos;t scan anything until you add tickers, or you can scan every eligible holding directly:
+                  Your Opportunity Universe is empty. FIND CCs won&apos;t scan anything until you add tickers, or you can scan every eligible holding directly:
                 </p>
                 <button onClick={() => runCcScan(true)} disabled={loading}
                   className="w-full text-[10px] font-bold tracking-widest py-1.5 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40">
@@ -7355,8 +7604,8 @@ export default function Home() {
             {/* TE-0007 final corrective pass: this card used to also render
                 its own "SCAN ELIGIBLE HOLDINGS FOR CC" button -- a second
                 ordinary entry point for the exact same scan as the unified
-                launcher's "FIND COVERED CALLS" button above. Removed.
-                FIND COVERED CALLS is now the sole ordinary Covered Call
+                launcher's "FIND CCs" button above. Removed.
+                FIND CCs is now the sole ordinary Covered Call
                 scan action; this card is status/output only (verified
                 capacity, blocked holdings, conservative-exposure warnings,
                 fail-closed state, per-symbol hide controls) plus the
@@ -7374,7 +7623,7 @@ export default function Home() {
           )}
 
           {/* Last Rules Used — hidden in rank mode */}
-          {screenMode === 'filter' && (
+          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
             <div className={`${th.card} border ${th.border} rounded-xl p-3 text-[9px] space-y-1`}>
               <p className={`${th.textMuted} mb-2 tracking-widest font-medium`}>ACTIVE RULES</p>
               <div className="space-y-3">
@@ -7404,13 +7653,14 @@ export default function Home() {
               </div>
             </div>
           )}
+
         </div>
 
         {/* Main content */}
         <div className="flex-1 overflow-auto p-5">
 
           {/* Real-time Interactive Preset Filter Bar */}
-          {screenMode === 'filter' && (
+          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
             <div className={`mb-4 p-3 ${th.card} border ${th.border} rounded-xl flex items-center justify-between gap-4 flex-wrap`}>
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-bold uppercase tracking-wider ${th.textFaint}`}>Quick Rule Presets:</span>
@@ -7487,7 +7737,7 @@ export default function Home() {
               ) : null}
               <div className="flex items-center justify-between">
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
-                  {screenMode === 'filter' ? (
+                  {screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (
                     <>
                       <span className="text-emerald-500">{filteredQualified.length} of {qualified.length} QUALIFIED</span>
                       <span className={th.textFaint}>{filteredDisqualified.length} of {disqualified.length} DISQUALIFIED</span>
@@ -7511,7 +7761,7 @@ export default function Home() {
                       ENTRIES count is not a scanned/attempted conflation
                       (targetedResults is genuinely a count of setups) and
                       is kept. */}
-                  {screenMode === 'targeted' && (
+                  {screenMode === 'targeted' && activeSession?.requestedStrategy !== 'csp' && (
                     <span className={th.textFaint}>{targetedResults.length} ENTRIES</span>
                   )}
                   {/* SCREENER-RESULTS-0001 — canonical accounting summary,
@@ -7558,13 +7808,31 @@ export default function Home() {
                     </button>
                   )}
                   <button onClick={downloadCSV} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>↓ CSV</button>
-                  <button onClick={() => setShowRunModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-purple-500 hover:text-purple-400 transition-colors tracking-wider`}>
+                  <button onClick={() => activeSession?.requestedStrategy === 'csp' ? setShowCspRunModal(true) : setShowRunModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-purple-500 hover:text-purple-400 transition-colors tracking-wider`}>
                     {screenMode === 'filter' ? '⊘ Filter' : screenMode === 'rank' ? '⬡ Rank' : '⊕ Targeted'} ↺
                   </button>
                 </div>
               </div>
 
-              {screenMode === 'filter' && (
+              {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
+                <ActiveCspRules
+                  snapshot={activeSession.ruleSnapshot}
+                  onEdit={() => {
+                    const s = activeSession.ruleSnapshot!;
+                    const restored: CspScanRequest = {
+                      mode: s.mode, preset: s.preset,
+                      rules: { IVR_MIN: s.ivrMin, IVR_MAX: s.ivrMax, DELTA_MIN: s.deltaMin, DELTA_MAX: s.deltaMax, DTE_MIN: s.dteMin, DTE_MAX: s.dteMax, OI_MIN: s.oiMin, BID_ASK_MAX: s.bidAskMax },
+                      popMin: s.popMin, otmMin: s.otmMin, rocMin: s.rocMin,
+                      rankSecondary: s.rankSecondary,
+                    };
+                    setLastCspMode(s.mode);
+                    setCspRequestsByMode(prev => ({ ...prev, [s.mode]: restored }));
+                    setShowCspRunModal(true);
+                  }}
+                />
+              )}
+
+              {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
                 <SmartSuggestionsPanel results={results} rules={runtimeStockRules} th={th} onApplyAndRerun={(r) => {
                   setRuntimeStockRules(r);
                   if (rawScanCache.length > 0) {
@@ -7581,8 +7849,14 @@ export default function Home() {
                   and Targeted modes are unchanged (their own filter rows
                   already precede their result lists) — see the ticket's
                   documented Filtered-mode-first scope decision. */}
-              {screenMode === 'filter' && (
-                <FilteredResultControls
+              {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
+                activeSession?.requestedStrategy === 'csp' ? (
+                  <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
+                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
+                  </section>
+                ) : <FilteredResultControls
                   results={results}
                   qualifiedTotal={qualified.length}
                   filteredQualifiedCount={filteredQualified.length}
@@ -7630,7 +7904,7 @@ export default function Home() {
                   meaningless/misleading empty state if wired to either
                   Best-Opportunities component -- it is deliberately
                   excluded, not merely deferred. */}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'filter' && (
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
                   borderClassName={th.border}
@@ -7647,7 +7921,7 @@ export default function Home() {
                 />
               )}
 
-              {screenMode === 'targeted' ? (
+              {screenMode === 'targeted' && activeSession?.requestedStrategy !== 'csp' ? (
                 <>
                   <TargetedScanResultsPanel
                     entries={targetedResults}
@@ -7677,22 +7951,58 @@ export default function Home() {
                     />
                   )}
                 </>
-              ) : screenMode === 'filter' ? (() => {
+              ) : screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (() => {
                 const topOpportunityRows = buildBestOpportunityRows(filteredQualified, opportunityRecommendations);
                 const topOpportunityIds = pickTopOpportunityIds(topOpportunityRows);
-                const topOpportunityKeys = new Set(
-                  topOpportunityRows.filter(row => topOpportunityIds.has(row.candidateId)).map(row => `${row.symbol}-${row.strategy}`),
+                // CSP-WORKFLOW-0001 — match back to the ScreenResult being
+                // rendered via each row's `resultKey` (the ScreenResult's
+                // own candidateId for CSP; symbol+strategy for strategies
+                // not yet migrated), never a re-derived symbol+strategy key
+                // for CSP, which would collide across multiple contracts on
+                // the same symbol. Closes BLOCKER-02.
+                const topOpportunityResultKeys = new Set(
+                  topOpportunityRows.filter(row => topOpportunityIds.has(row.candidateId)).map(row => row.resultKey),
                 );
+                const renderQualifiedCandidate = (r: ScreenResult) => {
+                  const resultKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
+                  const isTopOpportunity = topOpportunityResultKeys.has(resultKey);
+                  return (
+                    <div key={resultKey}>
+                      {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
+                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                      {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
+                    </div>
+                  );
+                };
+                const cspExpirationGroups = activeSession?.requestedStrategy === 'csp'
+                  ? Array.from(filteredQualified.reduce((groups, result) => {
+                      const expiration = result.bestCandidate?.expiration ?? 'Unknown expiration';
+                      const group = groups.get(expiration) ?? [];
+                      group.push(result); groups.set(expiration, group); return groups;
+                    }, new Map<string, ScreenResult[]>()).entries()).sort(([a], [b]) => a.localeCompare(b))
+                  : [];
                 return (
                 <>
                   {filteredQualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
                       <div className="space-y-2">
-                        {filteredQualified.map(r => {
-                          const isTopOpportunity = topOpportunityKeys.has(`${r.symbol}-${r.strategy}`);
+                        {activeSession?.requestedStrategy === 'csp' ? cspExpirationGroups.map(([expiration, group]) => (
+                          <ExpirationDisclosure key={expiration} expiration={expiration}
+                            dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
+                            kind="qualified" defaultOpen borderClassName={th.border}>
+                            {group.map(renderQualifiedCandidate)}
+                          </ExpirationDisclosure>
+                        )) : filteredQualified.map(r => {
+                          // CSP-WORKFLOW-0001 — candidateId (when present,
+                          // i.e. CSP results) is the stable identity; other
+                          // strategies fall back to symbol+strategy exactly
+                          // as before, since they still produce at most one
+                          // ScreenResult per symbol.
+                          const resultKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
+                          const isTopOpportunity = topOpportunityResultKeys.has(resultKey);
                           return (
-                          <div key={`${r.symbol}-${r.strategy}`}>
+                          <div key={resultKey}>
                             {isTopOpportunity && (
                               <p className="text-[9px] font-bold text-emerald-400 mb-1" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>
                             )}
@@ -7720,17 +8030,18 @@ export default function Home() {
                   <DisqualifiedSection
                     results={filteredDisqualified}
                     hasQualifiedCandidates={filteredQualified.length > 0}
+                    groupByExpiration={activeSession?.requestedStrategy === 'csp'}
                     borderClassName={th.border}
                     textFaintClassName={th.textFaint}
                     textMutedClassName={th.textMuted}
                   />
-                  {activeSession && activeSession.mode === 'filter' && (
+                  {activeSession && (activeSession.requestedStrategy === 'csp' || activeSession.mode === 'filter') ? (
                     <SymbolOutcomesDisclosure
-                      session={activeSession}
+                      session={activeSession!}
                       borderClassName={th.border}
                       textFaintClassName={th.textFaint}
                     />
-                  )}
+                  ) : null}
                 </>
                 );
               })() : (() => {
@@ -8030,11 +8341,23 @@ export default function Home() {
           }}
         />
       )}
+      {showCspRunModal && (
+        <CspScanModal
+          th={th}
+          selectedTickerCount={opportunityUniverse.length}
+          initial={cspRequestsByMode[lastCspMode]}
+          requestsByMode={cspRequestsByMode}
+          onClose={() => {
+            setShowCspRunModal(false);
+            requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND CSPs"]')?.focus());
+          }}
+          onRun={(request) => {
+            setShowCspRunModal(false);
+            void runCspScan(request);
+          }}
+        />
+      )}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }
-
-
-
-
