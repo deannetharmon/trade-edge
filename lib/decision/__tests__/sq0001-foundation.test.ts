@@ -7,6 +7,7 @@ import { evaluateBpsThesis } from '../strategy-thesis/bps';
 import { evaluateBcsThesis } from '../strategy-thesis/bcs';
 import { evaluateIcThesis } from '../strategy-thesis/ic';
 import { evaluateCspThesis } from '../strategy-thesis/csp';
+import { evaluateCcThesis } from '../strategy-thesis/cc';
 import { evaluateStrategyEligibility } from '../strategy-eligibility';
 
 const bars = (count: number): PointInTimeBar[] => Array.from({ length: count }, (_, i) => ({
@@ -202,5 +203,118 @@ describe('SQ-0001A foundation invariants', () => {
       });
       expect(eligibility.status).toBe('ELIGIBLE');
     });
+  });
+
+  // TE-0007C-RECONCILE-0001 — the Covered Call thesis adapter.
+  describe('CC thesis adapter', () => {
+    it('is a genuinely independent function from both BCS and BPS', () => {
+      expect(evaluateCcThesis).not.toBe(evaluateBcsThesis);
+      expect(evaluateCcThesis).not.toBe(evaluateBpsThesis);
+    });
+
+    it('is contradicted by bullish underlying evidence -- high call-away risk', () => {
+      const state = evidence({ direction: 'BULLISH' });
+      const setup = classifySetup(state);
+      const thesis = evaluateCcThesis('CORE', state, setup);
+      expect(thesis.strategy).toBe('CC');
+      expect(thesis.evidenceState).toBe('CONTRADICTORY');
+      expect(thesis.callAwayRisk).toBe('HIGH');
+      expect(thesis.contradictingEvidence.some(r => /called away/i.test(r))).toBe(true);
+    });
+
+    it('is supportive on bearish or range evidence -- low call-away risk', () => {
+      const bearish = evidence({ direction: 'BEARISH' });
+      const bearishThesis = evaluateCcThesis('CORE', bearish, classifySetup(bearish));
+      expect(bearishThesis.evidenceState).toBe('SUPPORTIVE');
+      expect(bearishThesis.callAwayRisk).toBe('LOW');
+
+      const range = evidence({ direction: 'NEUTRAL', persistence: 0.4, regime: 'RANGE' });
+      const rangeThesis = evaluateCcThesis('CORE', range, classifySetup(range));
+      expect(rangeThesis.evidenceState).toBe('SUPPORTIVE');
+      expect(rangeThesis.callAwayRisk).toBe('LOW');
+    });
+
+    it('is contradicted by a chaotic setup, with unknown call-away risk', () => {
+      const state = evidence({ direction: 'UNCERTAIN', regime: 'CHAOTIC' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      expect(thesis.evidenceState).toBe('CONTRADICTORY');
+      expect(thesis.callAwayRisk).toBe('UNKNOWN');
+    });
+
+    it('is insufficient on transition/uncertain evidence', () => {
+      const state = evidence({ direction: 'UNCERTAIN', regime: 'TRANSITION' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      expect(thesis.evidenceState).toBe('INSUFFICIENT');
+      expect(thesis.callAwayRisk).toBe('UNKNOWN');
+    });
+
+    it('produces its own CC-specific evidence text, not BCS text relabeled', () => {
+      const state = evidence({ direction: 'BULLISH' });
+      const setup = classifySetup(state);
+      const bcsContradict = evaluateBcsThesis('CORE', state, setup).contradictingEvidence;
+      const ccContradict = evaluateCcThesis('CORE', state, setup).contradictingEvidence;
+      expect(ccContradict).not.toEqual(bcsContradict);
+    });
+  });
+
+  describe('CC foundation eligibility gate', () => {
+    it('blocks CC (INELIGIBLE) on bullish underlying evidence (high call-away risk)', () => {
+      const state = evidence({ direction: 'BULLISH' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      const eligibility = evaluateStrategyEligibility({
+        thesis, horizon: thesis.horizon, eventRisk: { hasKnownBinaryEvent: false },
+        modelVersion: 'sq0001-foundation', configVersion: 'research-v1',
+      });
+      expect(eligibility.status).toBe('INELIGIBLE');
+      expect(eligibility.strategy).toBe('CC');
+    });
+
+    it('keeps insufficient CC evidence categorically distinct from INELIGIBLE', () => {
+      const state = evidence({ direction: 'UNCERTAIN', regime: 'TRANSITION' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      const eligibility = evaluateStrategyEligibility({
+        thesis, horizon: thesis.horizon, eventRisk: { hasKnownBinaryEvent: false },
+        modelVersion: 'sq0001-foundation', configVersion: 'research-v1',
+      });
+      expect(eligibility.status).toBe('INSUFFICIENT_EVIDENCE');
+      expect(eligibility.status).not.toBe('INELIGIBLE');
+    });
+
+    it('blocks an otherwise-supportive CC thesis when a known binary event is in horizon', () => {
+      const state = evidence({ direction: 'BEARISH' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      expect(thesis.evidenceState).toBe('SUPPORTIVE');
+      const eligibility = evaluateStrategyEligibility({
+        thesis, horizon: thesis.horizon, eventRisk: { hasKnownBinaryEvent: true, eventType: 'EARNINGS' },
+        modelVersion: 'sq0001-foundation', configVersion: 'research-v1',
+      });
+      expect(eligibility.status).toBe('INELIGIBLE');
+      expect(eligibility.reasonCodes).toContain('KNOWN_BINARY_EVENT_IN_HORIZON');
+    });
+
+    it('is ELIGIBLE when evidence is supportive and there is no known binary event', () => {
+      const state = evidence({ direction: 'BEARISH' });
+      const thesis = evaluateCcThesis('CORE', state, classifySetup(state));
+      const eligibility = evaluateStrategyEligibility({
+        thesis, horizon: thesis.horizon, eventRisk: { hasKnownBinaryEvent: false },
+        modelVersion: 'sq0001-foundation', configVersion: 'research-v1',
+      });
+      expect(eligibility.status).toBe('ELIGIBLE');
+    });
+  });
+
+  // TE-0007C-RECONCILE-0001 §18 cross-strategy regression — every strategy
+  // now integrated with SQ-0001A must coexist without collision.
+  it('evaluateUnderlyingFoundation-equivalent set now spans BPS, BCS, IC, CSP, and CC with no cross-strategy leakage', () => {
+    const state = evidence({ direction: 'BULLISH' });
+    const setup = classifySetup(state);
+    const strategies = [
+      evaluateBpsThesis('CORE', state, setup).strategy,
+      evaluateBcsThesis('CORE', state, setup).strategy,
+      evaluateIcThesis('CORE', state, setup).strategy,
+      evaluateCspThesis('CORE', state, setup).strategy,
+      evaluateCcThesis('CORE', state, setup).strategy,
+    ];
+    expect(new Set(strategies)).toEqual(new Set(['BPS', 'BCS', 'IC', 'CSP', 'CC']));
   });
 });

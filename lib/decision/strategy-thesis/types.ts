@@ -39,4 +39,23 @@ export interface CspThesis extends StrategyThesisBase {
   threatenedSide: 'DOWNSIDE';
 }
 
-export type StrategyThesis = DirectionalSpreadThesis | IronCondorThesis | CspThesis;
+// TE-0007C-RECONCILE-0001 — a Covered Call starts from a fundamentally
+// different position than every other strategy here: the investor already
+// owns the shares before the call is ever considered. CC's foundation
+// question is not "is the underlying threatened" (there is no new capital
+// at risk from writing the call itself) but "is selling upside against
+// these already-owned shares consistent with current evidence, given the
+// risk the shares get called away." That is genuinely CC-specific — not a
+// BPS inversion, not a BCS relabel (BCS's question is about a new
+// undefined-risk short-call position; CC's is about assignment risk on
+// stock already held) — so it gets its own shape, keyed on call-away risk
+// rather than a threatened side.
+export interface CcThesis extends StrategyThesisBase {
+  strategy: 'CC';
+  /** Foundation-only, categorical read of assignment/call-away risk given
+   * current market-state evidence -- never a calibrated probability.
+   * 'UNKNOWN' when the setup evidence itself is chaotic or insufficient. */
+  callAwayRisk: 'LOW' | 'MODERATE' | 'HIGH' | 'UNKNOWN';
+}
+
+export type StrategyThesis = DirectionalSpreadThesis | IronCondorThesis | CspThesis | CcThesis;

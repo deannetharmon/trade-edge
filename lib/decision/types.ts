@@ -1,6 +1,6 @@
 import type { DecisionHorizon } from '../market-intelligence/horizon';
 
-export type Strategy = 'BPS' | 'BCS' | 'IC' | 'CSP';
+export type Strategy = 'BPS' | 'BCS' | 'IC' | 'CSP' | 'CC';
 export type EligibilityStatus = 'ELIGIBLE' | 'INELIGIBLE' | 'INSUFFICIENT_EVIDENCE';
 export type SetupClassification = 'BULLISH_CONTINUATION' | 'BEARISH_CONTINUATION' | 'BULLISH_REVERSAL' | 'BEARISH_REVERSAL' | 'RANGE' | 'TRANSITION' | 'CHAOTIC';
 

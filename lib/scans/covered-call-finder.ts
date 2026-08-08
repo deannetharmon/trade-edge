@@ -23,6 +23,8 @@ import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 import type { SpreadCandidate } from './types';
 import type { CcRulesType } from './constants';
 import type { CoveredCallCapacity } from './covered-call-capacity';
+import type { EligibilityDecision } from '@/lib/decision/types';
+import { buildCandidateId } from './candidateIdentity';
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -81,17 +83,25 @@ function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams
 
 // Filters the FULL chain for every hard eligibility condition (call leg, DTE
 // window, delta window, strike floor, two-sided non-crossed finite quote,
-// bid/ask width, minimum OI), THEN selects the single best remaining
-// candidate by delta-distance-to-center. A contract that fails any gate is
-// simply never a candidate — it can never suppress a different, eligible
-// contract from being found. Deterministic tie-breakers when multiple
-// eligible contracts are equally close to the target delta center: (1)
-// higher open interest, (2) narrower bid/ask width, (3) earlier expiration
-// (lower DTE) — applied in that order so the result is reproducible.
-export function selectBestEligibleCcContract(
+// bid/ask width, minimum OI), and returns every surviving candidate sorted
+// by preference (closest-to-target-delta-center first). A contract that
+// fails any gate is simply never a candidate — it can never suppress a
+// different, eligible contract from being found. Deterministic tie-breakers
+// when multiple eligible contracts are equally close to the target delta
+// center: (1) higher open interest, (2) narrower bid/ask width, (3) earlier
+// expiration (lower DTE) — applied in that order so the result is
+// reproducible.
+//
+// TE-0007C-RECONCILE-0001 — extracted so the full eligible-and-ranked
+// candidate universe can be retained (findAllCoveredCalls, below), not just
+// the single top pick. Behavior is byte-identical to what
+// selectBestEligibleCcContract computed inline before this extraction --
+// same gates, same sort, same tie-break order -- this is a pure
+// refactor, not a policy change.
+export function selectAllEligibleCcContracts(
   chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
   params: CcEligibilityParams,
-): CcSelectedContract | null {
+): CcSelectedContract[] {
   const deltaCenter = (params.deltaTarget.min + params.deltaTarget.max) / 2;
 
   const eligible: CcSelectedContract[] = [];
@@ -115,8 +125,6 @@ export function selectBestEligibleCcContract(
     }
   }
 
-  if (eligible.length === 0) return null;
-
   eligible.sort((a, b) => {
     const distA = Math.abs(a.delta - deltaCenter);
     const distB = Math.abs(b.delta - deltaCenter);
@@ -127,7 +135,23 @@ export function selectBestEligibleCcContract(
     return a.dte - b.dte; // 4. earlier expiration wins
   });
 
-  return eligible[0];
+  return eligible;
+}
+
+// Filters the FULL chain for every hard eligibility condition (call leg, DTE
+// window, delta window, strike floor, two-sided non-crossed finite quote,
+// bid/ask width, minimum OI), THEN selects the single best remaining
+// candidate by delta-distance-to-center. A contract that fails any gate is
+// simply never a candidate — it can never suppress a different, eligible
+// contract from being found. Deterministic tie-breakers when multiple
+// eligible contracts are equally close to the target delta center: (1)
+// higher open interest, (2) narrower bid/ask width, (3) earlier expiration
+// (lower DTE) — applied in that order so the result is reproducible.
+export function selectBestEligibleCcContract(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcEligibilityParams,
+): CcSelectedContract | null {
+  return selectAllEligibleCcContracts(chain, params)[0] ?? null;
 }
 
 export interface CcFindParams {
@@ -150,35 +174,18 @@ export interface CcFindParams {
 // costBasisComplete) — so `minStrike`/`ccAssignmentWarning` below can treat
 // "costBasis != null" as "costBasis is verified complete," never a partial
 // average silently applied as if it covered the whole holding.
-export function findBestCoveredCall(
-  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+// TE-0007C-RECONCILE-0001 — pure candidate-economics builder, extracted
+// unchanged from findBestCoveredCall's inline math so findAllCoveredCalls
+// (below) can build a SpreadCandidate for every retained contract, not just
+// the single best one. Every formula, rounding step, and field is
+// byte-identical to what findBestCoveredCall computed inline before this
+// extraction.
+function buildCcSpreadCandidate(
+  best: CcSelectedContract,
   params: CcFindParams,
-): SpreadCandidate | null {
-  // No capacity -> no candidate, full stop. This function must never search
-  // for or return a strike that would exceed available coverage.
-  if (params.capacity.availableCoveredContracts <= 0) return null;
-  if (params.earningsWithinExpiry) return null;
-
-  // Never select ITM, never below cost basis -- enforced by filtering the
-  // FULL SEARCH SPACE up front (see selectBestEligibleCcContract), not by
-  // validating a single already-chosen pick after the fact. This is what
-  // lets a second, less delta-perfect but fully eligible contract be found
-  // when the single delta-closest strike would otherwise fail a liquidity/
-  // quote/strike gate and (in the old flow) suppress the whole search.
-  const price = params.stockPrice;
-  const costBasis = params.capacity.costBasis;
-  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
-  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
-
-  const best = selectBestEligibleCcContract(chain, {
-    deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
-    dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
-    minStrike,
-    oiMin: params.rules.OI_MIN,
-    bidAskMax: params.rules.BID_ASK_MAX,
-  });
-  if (!best) return null;
-
+  price: number | null,
+  costBasis: number | null,
+): SpreadCandidate {
   const contracts = params.capacity.availableCoveredContracts;
   const premiumPerShare = parseFloat(best.mid.toFixed(4));
   const premiumPerContract = parseFloat((premiumPerShare * 100).toFixed(2));
@@ -256,4 +263,131 @@ export function findBestCoveredCall(
     ccAssignmentWarning,
     ccHasUnclassifiedExposure: params.capacity.hasUnclassifiedExposure,
   };
+}
+
+export function findBestCoveredCall(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcFindParams,
+): SpreadCandidate | null {
+  // No capacity -> no candidate, full stop. This function must never search
+  // for or return a strike that would exceed available coverage.
+  if (params.capacity.availableCoveredContracts <= 0) return null;
+  if (params.earningsWithinExpiry) return null;
+
+  // Never select ITM, never below cost basis -- enforced by filtering the
+  // FULL SEARCH SPACE up front (see selectBestEligibleCcContract), not by
+  // validating a single already-chosen pick after the fact. This is what
+  // lets a second, less delta-perfect but fully eligible contract be found
+  // when the single delta-closest strike would otherwise fail a liquidity/
+  // quote/strike gate and (in the old flow) suppress the whole search.
+  const price = params.stockPrice;
+  const costBasis = params.capacity.costBasis;
+  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
+  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
+
+  const best = selectBestEligibleCcContract(chain, {
+    deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
+    dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
+    minStrike,
+    oiMin: params.rules.OI_MIN,
+    bidAskMax: params.rules.BID_ASK_MAX,
+  });
+  if (!best) return null;
+
+  return buildCcSpreadCandidate(best, params, price, costBasis);
+}
+
+// ── SQ-0001A foundation gate + multi-candidate discovery ────────────────
+// TE-0007C-RECONCILE-0001.
+//
+// CcMarketQualification is the "CC Market Eligibility" axis from the frozen
+// architecture diagram: is the underlying/thesis evidence appropriate for
+// writing a call at all, independent of (a) whether this account owns
+// enough shares (that's capacity — CoveredCallCapacity, untouched by this
+// gate) and (b) whether a specific contract's economics are acceptable
+// (that's the existing hard gates in isEligibleCcLeg, also untouched).
+export type CcMarketQualification =
+  | 'QUALIFIED'
+  | 'DISQUALIFIED_FOUNDATION_INELIGIBLE'
+  | 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE';
+
+// Mirrors csp-finder.ts's marketQualificationFor exactly: an explicitly
+// supplied foundation decision can disqualify; a missing one (undefined/
+// null — no caller has wired real evidence in yet) never gates anything,
+// so every existing findBestCoveredCall caller is unaffected.
+function ccMarketQualificationFor(foundationEligibility?: EligibilityDecision | null): CcMarketQualification {
+  if (foundationEligibility) {
+    if (foundationEligibility.status === 'INSUFFICIENT_EVIDENCE') return 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE';
+    if (foundationEligibility.status === 'INELIGIBLE') return 'DISQUALIFIED_FOUNDATION_INELIGIBLE';
+  }
+  return 'QUALIFIED';
+}
+
+export interface CcFindAllParams extends CcFindParams {
+  /** Needed to build each candidate's stable identity. */
+  underlyingSymbol: string;
+  /** SQ-0001A foundation eligibility for this underlying/horizon — same
+   * once-per-symbol, optional, opt-in convention as csp-finder.ts's
+   * CspFindParams.foundationEligibility. */
+  foundationEligibility?: EligibilityDecision | null;
+}
+
+export interface CcCandidateResult {
+  candidateId: string;
+  candidate: SpreadCandidate;
+  marketQualification: CcMarketQualification;
+}
+
+// TE-0007C-RECONCILE-0001 — the multi-candidate discovery entry point the
+// frozen architecture requires ("discover → qualify → retain candidate
+// universe → rank"), sitting alongside (not replacing) the still-used
+// findBestCoveredCall. Retains EVERY contract that survives the existing
+// hard eligibility gates for this symbol, not just the single best — the
+// same "discovery before classification" shape CSP-WORKFLOW-0001
+// established for CSP. Capacity/earnings behavior deliberately matches
+// findBestCoveredCall's existing, already-approved short-circuit (zero
+// capacity or earnings-in-window means no candidate at all is returned,
+// not a disqualified-but-visible one) — changing that product behavior is
+// out of this work item's scope; see the reconciliation report's Remaining
+// Concerns for the question of whether CC should adopt CSP's
+// visible-but-disqualified-on-capacity presentation in a future ticket.
+export function findAllCoveredCalls(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcFindAllParams,
+): { results: CcCandidateResult[] } {
+  if (params.capacity.availableCoveredContracts <= 0) return { results: [] };
+  if (params.earningsWithinExpiry) return { results: [] };
+
+  const price = params.stockPrice;
+  const costBasis = params.capacity.costBasis;
+  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
+  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
+
+  const eligible = selectAllEligibleCcContracts(chain, {
+    deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
+    dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
+    minStrike,
+    oiMin: params.rules.OI_MIN,
+    bidAskMax: params.rules.BID_ASK_MAX,
+  });
+
+  // Computed once per symbol (per the params contract), applied uniformly
+  // to every candidate discovered for that symbol — mirrors csp-finder.ts's
+  // marketQualificationFor convention exactly.
+  const marketQualification = ccMarketQualificationFor(params.foundationEligibility);
+
+  const results: CcCandidateResult[] = eligible.map((best) => {
+    const candidate = buildCcSpreadCandidate(best, params, price, costBasis);
+    const candidateId = buildCandidateId({
+      occSymbol: best.occSymbol,
+      strategy: 'CC',
+      underlyingSymbol: params.underlyingSymbol,
+      expiration: best.expirationDate,
+      optionType: 'call',
+      strike: best.strikePrice,
+    });
+    return { candidateId, candidate, marketQualification };
+  });
+
+  return { results };
 }

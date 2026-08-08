@@ -7,6 +7,7 @@ import { evaluateBpsThesis } from './strategy-thesis/bps';
 import { evaluateBcsThesis } from './strategy-thesis/bcs';
 import { evaluateIcThesis } from './strategy-thesis/ic';
 import { evaluateCspThesis } from './strategy-thesis/csp';
+import { evaluateCcThesis } from './strategy-thesis/cc';
 import type { StrategyThesis } from './strategy-thesis/types';
 import { evaluateStrategyEligibility } from './strategy-eligibility';
 import type { DecisionTrace, EligibilityDecision, ModelIdentity } from './types';
@@ -37,6 +38,7 @@ export function evaluateUnderlyingFoundation(input: EvaluateUnderlyingInput): Un
     evaluateBcsThesis(horizon, marketState, setup),
     evaluateIcThesis(horizon, marketState, setup),
     evaluateCspThesis(horizon, marketState, setup),
+    evaluateCcThesis(horizon, marketState, setup),
   ];
 
   const eligibility = theses.map(thesis => evaluateStrategyEligibility({
