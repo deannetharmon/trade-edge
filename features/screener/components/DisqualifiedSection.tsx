@@ -18,6 +18,8 @@
 import { useId } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
+import { CspFundamentalsRow } from './CspFundamentalsRow';
+import { ExpirationDisclosure } from './ExpirationDisclosure';
 
 export interface DisqualifiedSectionProps {
   results: ScreenResult[];
@@ -27,6 +29,7 @@ export interface DisqualifiedSectionProps {
   borderClassName?: string;
   textFaintClassName?: string;
   textMutedClassName?: string;
+  groupByExpiration?: boolean;
 }
 
 function essentialStructure(result: ScreenResult): string {
@@ -47,9 +50,12 @@ function DisqualifiedCard({
   th: { border: string; textFaint: string; textMuted: string };
 }) {
   const panelId = useId();
+  const candidateLabel = result.bestCandidate
+    ? `${result.symbol} ${result.bestCandidate.expiration} ${result.bestCandidate.shortStrike} put`
+    : result.symbol;
   const { open: expanded, toggle, buttonRef, liveMessage } = useDisclosureA11y(
-    `${result.symbol} checks expanded`,
-    `${result.symbol} checks collapsed`,
+    `${candidateLabel} checks expanded`,
+    `${candidateLabel} checks collapsed`,
   );
   const [primaryReason, ...additional] = result.failReasons;
   const checkEntries = Object.entries(result.checks) as [string, ScreenResult['checks']['ivr']][];
@@ -75,11 +81,20 @@ function DisqualifiedCard({
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={toggle}
+          aria-label={`${expanded ? 'Hide' : 'Show'} checks for ${candidateLabel}`}
           className={`shrink-0 text-[9px] px-2 py-1 border ${th.border} rounded ${th.textMuted} hover:border-slate-400`}
         >
           {expanded ? 'Hide checks' : 'Show checks'}
         </button>
       </div>
+      {result.bestCandidate && (
+        <CspFundamentalsRow
+          candidate={result.bestCandidate}
+          price={result.price}
+          textMutedClassName={th.textMuted}
+          testId="csp-disqualified-fundamentals"
+        />
+      )}
       {expanded && (
         <div id={panelId} className={`px-3 pb-3 space-y-1 border-t ${th.border} pt-2`}>
           {result.failReasons.map((reason, i) => (
@@ -103,6 +118,7 @@ export function DisqualifiedSection({
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
   textMutedClassName = 'text-slate-300',
+  groupByExpiration = false,
 }: DisqualifiedSectionProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
   const panelId = useId();
@@ -130,8 +146,23 @@ export function DisqualifiedSection({
       <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {sectionOpen && (
         <div id={panelId} className="space-y-2 mt-1">
-          {results.map(r => (
-            <DisqualifiedCard key={`${r.symbol}-${r.strategy}`} result={r} th={th} />
+          {groupByExpiration ? Array.from(results.reduce((groups, result) => {
+            const expiration = result.bestCandidate?.expiration ?? 'Unknown expiration';
+            const group = groups.get(expiration) ?? [];
+            group.push(result); groups.set(expiration, group); return groups;
+          }, new Map<string, ScreenResult[]>()).entries()).sort(([a], [b]) => a.localeCompare(b)).map(([expiration, group]) => (
+            <ExpirationDisclosure key={expiration} expiration={expiration}
+              dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
+              kind="disqualified" defaultOpen={false} borderClassName={th.border}>
+              {group.map(r => <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} />)}
+            </ExpirationDisclosure>
+          )) : results.map(r => (
+            // CSP-WORKFLOW-0001 — candidateId (present for CSP results)
+            // disambiguates multiple disqualified contracts on the same
+            // symbol; other strategies fall back to symbol+strategy exactly
+            // as before, since they still produce at most one disqualified
+            // ScreenResult per symbol. Closes IMPORTANT-04.
+            <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} />
           ))}
         </div>
       )}

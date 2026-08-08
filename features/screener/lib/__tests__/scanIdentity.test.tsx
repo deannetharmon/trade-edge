@@ -11,13 +11,15 @@ describe('getScanIdentity', () => {
     expect(getScanIdentity('filter', 'spreads').title).toBe('Filtered Spread Scan');
     expect(getScanIdentity('rank', 'spreads').title).toBe('Ranked Spread Scan');
     expect(getScanIdentity('targeted', 'spreads').title).toBe('Targeted Spread Scan');
-    expect(getScanIdentity('filter', 'csp').title).toBe('Cash-Secured Put Scan');
+    expect(getScanIdentity('filter', 'csp').title).toBe('Filtered Cash-Secured Put Scan');
     expect(getScanIdentity('filter', 'cc').title).toBe('Covered Call Scan');
     expect(getScanIdentity('filter', 'pmcc').title).toBe('PMCC Scan');
   });
 
   it('csp/cc/pmcc titles do not vary by mode (they are filter-only workflows)', () => {
-    expect(getScanIdentity('filter', 'csp').title).toBe('Cash-Secured Put Scan');
+    expect(getScanIdentity('filter', 'csp').title).toBe('Filtered Cash-Secured Put Scan');
+    expect(getScanIdentity('rank', 'csp').title).toBe('Ranked Cash-Secured Put Scan');
+    expect(getScanIdentity('targeted', 'csp').title).toBe('Targeted Cash-Secured Put Scan');
   });
 
   it('includes independently legible mode and strategy labels', () => {

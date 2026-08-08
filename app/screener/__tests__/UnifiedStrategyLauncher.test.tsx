@@ -36,6 +36,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: vi.fn().mockResolvedValue({ expirations: [], chains: {}, isEtfOrIndex: false, classification: 'stock' }),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -79,15 +80,16 @@ describe('TE-0007: launcher routing', () => {
     await addToUniverse('NVDA');
     const findSpreads = await screen.findByRole('button', { name: 'FIND SPREADS' });
     await userEvent.click(findSpreads);
-    expect(await screen.findByRole('button', { name: /FILTER/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /RANK/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /TARGETED/ })).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /FILTER/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /RANK/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /TARGETED/ })).toBeInTheDocument();
   });
 
   it('2. Find CSPs passes the canonical Opportunity Universe to the CSP scan', async () => {
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'MU']));
   });
@@ -127,10 +129,12 @@ describe('TE-0007: launcher routing', () => {
     expect(getMarketMetricsMock).not.toHaveBeenCalled();
   });
 
-  it('7. clicking Find CSPs switches the visible results mode to filter', async () => {
+  it('7. confirming the default CSP modal selection switches the visible results mode to filter', async () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    expect(screen.getByRole('dialog', { name: 'CASH-SECURED PUT SCAN' })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(localStorage.getItem('hunter-screen-mode')).toBe('filter'));
   });
 
@@ -139,6 +143,7 @@ describe('TE-0007: launcher routing', () => {
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
     await waitFor(() => expect(startSpy).toHaveBeenCalled());
     const call = startSpy.mock.calls.find(c => c[0].kind === 'csp');
     expect(call).toBeTruthy();
@@ -165,7 +170,7 @@ describe('TE-0007: Covered Call universe intersection', () => {
   });
 
   async function clickFindCoveredCalls() {
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
   }
 
   it('1. universe [NKE, MU], eligible [NKE, AAPL] → scans only NKE', async () => {

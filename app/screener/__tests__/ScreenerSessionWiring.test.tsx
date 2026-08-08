@@ -58,6 +58,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: (...args: any[]) => getChainMock(...args),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -78,10 +79,11 @@ async function addToUniverse(symbols: string) {
 }
 
 async function clickCcScan() {
-  await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
 }
 async function clickCspScan() {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 }
 
 const holding = (overrides: Partial<CoveredCallCapacityReport['bySymbol'][string]> = {}) => ({
@@ -307,7 +309,7 @@ describe('SCREENER-RESULTS-0001: session supersession (5)', () => {
     // Only the CSP session's identity is now on display -- never a mix of
     // both, and the launcher highlight matches the newer session only.
     const findCsps = screen.getByRole('button', { name: 'FIND CSPs' });
-    const findCc = screen.getByRole('button', { name: 'FIND COVERED CALLS' });
+    const findCc = screen.getByRole('button', { name: 'FIND CCs' });
     expect(findCsps).toHaveAttribute('aria-pressed', 'true');
     expect(findCc).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getAllByText('CSP').length).toBeGreaterThan(0);
@@ -442,7 +444,7 @@ describe('SCREENER-RESULTS-0001 corrective: Targeted cancellation (4)', () => {
     await addToUniverse('AAA,BBB,CCC');
 
     await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-    await userEvent.click(await screen.findByRole('button', { name: /TARGETED/ }));
+    await userEvent.click(await screen.findByRole('radio', { name: /TARGETED/ }));
     await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
 
     // BBB's fetch is now in flight -- AAA already completed (1 call), BBB
@@ -628,10 +630,13 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
       mode: 'filter',
       requestedStrategy: 'csp',
       scope: { universeSymbols: ['NKE'], eligibleSymbols: ['NKE'] },
+      ruleSnapshot: (await import('@/lib/scans/cspRuleSnapshot')).buildCspRuleSnapshot(
+        (await import('@/lib/scans/constants')).DEFAULT_CSP_RULES,
+      ),
     });
     session = recordSymbolEvaluated(session, 'NKE', [{
-      symbol: 'NKE', strategy: 'CSP', price: 100, ivr: 40, qualified: true,
-      bestCandidate: null, failReasons: [], checks,
+      symbol: 'NKE', strategy: 'CSP', price: 100, ivr: 40, qualified: false,
+      bestCandidate: null, failReasons: ['No qualifying CSP contract'], checks,
     }]);
     session = completeSession(session);
 
@@ -644,6 +649,34 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     expect(restored!.results).toHaveLength(1);
     expect(restored!.cacheProvenance).toBe('idb-cache');
     expect(typeof restored!.cachedAt).toBe('number');
+  });
+
+  it('preserves a validated Rank secondary sort through session cache restoration', async () => {
+    installFakeIndexedDb();
+    const { createScanSession, recordSymbolEvaluated, completeSession } = await import('@/lib/screener/scanSession');
+    const { persistScanSession, restoreScanSession } = await import('@/lib/screener/scanSessionCache');
+    const { buildCspRuleSnapshot, isValidCspRuleSnapshot } = await import('@/lib/scans/cspRuleSnapshot');
+    const { DEFAULT_CSP_RULES } = await import('@/lib/scans/constants');
+    const snapshot = buildCspRuleSnapshot(DEFAULT_CSP_RULES, { mode: 'rank', rankSecondary: 'rocPct' });
+    expect(isValidCspRuleSnapshot(snapshot)).toBe(true);
+    let session = createScanSession({ mode: 'rank', requestedStrategy: 'csp', scope: { universeSymbols: ['NKE'], eligibleSymbols: ['NKE'] }, ruleSnapshot: snapshot });
+    const emptyCheck = { status: 'pass' as const, value: '-', reason: '-' };
+    const checks = { ivr: emptyCheck, earnings: emptyCheck, oi: emptyCheck, delta: emptyCheck, credit: emptyCheck, roc: emptyCheck, pop: emptyCheck, iv: emptyCheck, emClearance: emptyCheck };
+    session = recordSymbolEvaluated(session, 'NKE', [{
+      candidateId: 'nke-rank-put', symbol: 'NKE', strategy: 'CSP', price: 100, ivr: 40,
+      qualified: true, failReasons: [], checks,
+      bestCandidate: {
+        strategy: 'CSP', expiration: '2026-09-18', dte: 42, shortStrike: 95,
+        longStrike: 95, shortDelta: -0.2, credit: 1.5, spreadWidth: 0,
+        creditRatio: 0, roc: 1.58, pop: 80, shortOI: 500, longOI: 500,
+        cspMarketQualification: 'QUALIFIED', cspAccountEligibility: 'ELIGIBLE',
+        cspModeQualification: 'NOT_APPLICABLE', cspModeQualificationReasons: [],
+      },
+    }]);
+    await persistScanSession(completeSession(session));
+    const restored = await restoreScanSession();
+    expect(restored?.mode).toBe('rank');
+    expect(restored?.ruleSnapshot).toMatchObject({ rankPrimary: 'score', rankSecondary: 'rocPct' });
   });
 
   it('malformed/unknown-schema cached data is rejected and cleared, never trusted as a real session', async () => {
@@ -926,6 +959,7 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     // path that advances activeSessionIdRef.current to a new session, and
     // (unlike Targeted) never touches IDB_RAW_SCAN_KEY itself.
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 
     // Wait for the new scan to fully COMPLETE (not just start) -- the
     // trigger button relabels to "SCANNING..." while loading and only

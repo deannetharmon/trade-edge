@@ -52,6 +52,17 @@ export function AccountingSummaryBar({
     { key: 'qualified', label: 'qualified', value: a.qualifiedCandidateCount, tooltip: 'Qualified: candidates that passed every scan-time qualification rule.' },
     { key: 'disqualified', label: 'disqualified', value: a.disqualifiedCandidateCount, tooltip: 'Disqualified: evaluated candidates that failed one or more scan-time qualification rules.' },
   );
+  // CSP-WORKFLOW-0001 core correction (BLOCKER-01) — only shown when it
+  // diverges from qualifiedCandidateCount (i.e. at least one market-
+  // qualified candidate is not account-actionable, today only possible for
+  // CSP), matching formatSessionAccountingSummary's own divergence-only
+  // convention so every non-CSP-account-aware session's bar is unchanged.
+  if (a.accountActionableCount !== a.qualifiedCandidateCount) {
+    segments.push({
+      key: 'account-actionable', label: 'account-actionable', value: a.accountActionableCount,
+      tooltip: 'Account-actionable: market-qualified candidates that are ALSO affordable and verified for the selected account. A market-qualified candidate can be capital-insufficient, capital-unverified, or have no account selected and still count as Qualified above.',
+    });
+  }
 
   return (
     <div

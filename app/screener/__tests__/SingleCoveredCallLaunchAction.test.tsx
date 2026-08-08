@@ -5,7 +5,7 @@
 // page rendered two entry points for the exact same scan: "FIND COVERED
 // CALLS" in the unified Opportunity Universe launcher, and "SCAN ELIGIBLE
 // HOLDINGS FOR CC" in the eligible-holdings status card. The latter was
-// removed; "FIND COVERED CALLS" is now the sole ordinary Covered Call
+// removed; "FIND CCs" is now the sole ordinary Covered Call
 // scan action. The eligible-holdings card keeps all of its status
 // information (verified capacity, blocked holdings, conservative-exposure
 // warnings, fail-closed state, per-symbol hide controls) plus the
@@ -40,6 +40,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: vi.fn().mockResolvedValue({ expirations: [], chains: {}, isEtfOrIndex: false, classification: 'stock' }),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -88,16 +89,16 @@ afterEach(() => {
 });
 
 describe('TE-0007 final corrective pass: single ordinary Covered Call launch action', () => {
-  it('exactly one ordinary Covered Call scan action is rendered, and it is FIND COVERED CALLS', async () => {
+  it('exactly one ordinary Covered Call scan action is rendered, and it is FIND CCs', async () => {
     renderScreener();
     await screen.findByText('OPPORTUNITY UNIVERSE');
 
-    const candidates = screen.getAllByRole('button').filter(b => /covered call/i.test(b.textContent ?? ''));
+    const candidates = screen.getAllByRole('button').filter(b => /find ccs/i.test(b.textContent ?? ''));
     // Excludes per-symbol holding chips (e.g. "NKE (2)") and the
     // universe-bypass override ("Scan all eligible holdings...") --
-    // neither contains the phrase "covered call".
+    // neither contains the phrase "FIND CCs".
     expect(candidates).toHaveLength(1);
-    expect(candidates[0]).toHaveTextContent('FIND COVERED CALLS');
+    expect(candidates[0]).toHaveTextContent('FIND CCs');
   });
 
   it('the removed status-card action ("SCAN ELIGIBLE HOLDINGS FOR CC") is absent', async () => {
@@ -106,11 +107,11 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     expect(screen.queryByRole('button', { name: /SCAN ELIGIBLE HOLDINGS FOR CC/i })).not.toBeInTheDocument();
   });
 
-  it('the normal action (FIND COVERED CALLS) preserves verified universe-intersection behavior', async () => {
+  it('the normal action (FIND CCs) preserves verified universe-intersection behavior', async () => {
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
     await addToUniverse('NKE,MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['NKE']); // MU not eligible, AAPL not in universe
   });
@@ -120,12 +121,12 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     // never silently behave as the override. This test used to assert the
     // old (buggy) implicit "scans everything" behavior and that no override
     // control was needed since there was "nothing to narrow"; it now
-    // asserts the ticket-mandated fix: FIND COVERED CALLS does not scan at
+    // asserts the ticket-mandated fix: FIND CCs does not scan at
     // all with an empty universe, and the explicit override is what's
     // required to reach every eligible holding.
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     expect(getMarketMetricsMock).not.toHaveBeenCalled();
 
     const overrideBtn = await screen.findByRole('button', { name: /Scan all eligible holdings/i });
@@ -138,7 +139,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     mockHoldings({ NKE: holding(), MU: holding() });
     renderScreener();
     await addToUniverse('NKE,MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /Scan all eligible holdings/i })).not.toBeInTheDocument();
   });
@@ -147,7 +148,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
     await addToUniverse('NKE');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(await screen.findByRole('button', { name: /Scan all eligible holdings/i })).toBeInTheDocument();
   });
@@ -156,7 +157,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     mockHoldings({ NKE: holding({ availableCoveredContracts: 0 }), MU: holding(), AAPL: holding() });
     renderScreener();
     await addToUniverse('MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['MU']);
 
@@ -174,7 +175,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     });
     renderScreener();
     await addToUniverse('MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     getMarketMetricsMock.mockClear();
@@ -196,7 +197,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     mockHoldings({ NKE: holding(), MU: holding(), AAPL: holding() });
     renderScreener();
     await addToUniverse('MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     // Hide NKE via its chip (only visible once eligible holdings are loaded).
@@ -220,7 +221,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     });
     renderScreener();
     await addToUniverse('NKE');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(screen.getAllByText(UNATTRIBUTABLE_EXPOSURE_REASON).length).toBeGreaterThan(0));
     expect(getMarketMetricsMock).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /Scan all eligible holdings/i })).not.toBeInTheDocument();
@@ -238,7 +239,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     // disclosures, not the empty-universe override, so it needs a real
     // universe to reach a completed scan).
     await addToUniverse('NKE,MU');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND COVERED CALLS' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     // Conservative-exposure disclosure.

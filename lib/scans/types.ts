@@ -34,6 +34,68 @@ export interface SpreadCandidate {
   assignmentPrice?: number;    // price paid per share if assigned (== strike)
   capitalBlocked?: boolean;    // true when requiredCash exceeds available cash
   capitalWarning?: string | null;
+  // CSP-0002 corrective pass — the exact midpoint csp-finder.ts used to
+  // compute credit/breakeven/ROC (either the chain's supplied mid, when it
+  // falls within [bid, ask], or the canonical (bid+ask)/2 otherwise — see
+  // cspSearch.ts's deriveUsableMid). Presentation code should display this
+  // rather than recomputing (bid+ask)/2 itself, to guarantee the "Mid"
+  // shown on a card always matches the mid actually used in the math.
+  cspMid?: number;
+
+  // CSP-0002 — exhaustive-search diagnostics, carried onto the candidate so a
+  // structurally discovered but liquidity-disqualified put is never silently
+  // dropped. cspCandidateStatus is null only when no candidate at all could
+  // be structurally discovered (see lib/scans/cspSearch.ts).
+  cspCandidateStatus?: import('./cspSearch').CspCandidateStatus | null;
+  cspBidAskWidth?: number;      // ask - bid, dollars
+  cspBidAskWidthPct?: number;   // width as % of midpoint
+  cspOiPassing?: boolean;       // openInterest >= OI_MIN
+  cspBidAskPassing?: boolean;   // bidAskWidth <= BID_ASK_MAX -- the only CSP liquidity dimension that disqualifies
+  /** Truthful, value-bearing PRIMARY disqualification reason — populated
+   * only when the candidate fails to qualify (i.e. bid/ask width exceeds the
+   * configured maximum). Low OI alone never populates this field: per
+   * product policy it is a warning, not a disqualifier (see cspOiWarning). */
+  cspLiquidityReason?: string | null;
+  /** Independent, non-blocking warning shown whenever OI is below OI_MIN,
+   * regardless of whether the candidate otherwise qualifies. */
+  cspOiWarning?: string | null;
+  cspSearchDiagnostics?: import('./cspSearch').CspSearchDiagnostics;
+
+  // CSP-WORKFLOW-0001 — canonical multi-candidate identity + independent
+  // market-qualification / account-eligibility state (see
+  // docs/reviews/FIND-CSP-Comprehensive-Code-Audit.md §22-§23 and
+  // lib/scans/candidateIdentity.ts / lib/scans/cspQualification.ts).
+  /** Stable identity for this exact contract — OCC symbol when valid, else
+   * a validated strategy+underlying+expiration+type+strike composite. Must
+   * be used for React keys, Best Opportunities joins, CSV rows, and cache
+   * lookups instead of symbol/symbol+strategy. */
+  candidateId?: string;
+  cspLiquidityClass?: import('./cspQualification').CspLiquidityClass;
+  /** Independent of account eligibility — a market-qualified contract can
+   * still be account-ineligible (unaffordable/unverified) and must remain
+   * visible either way; see cspAccountEligibility. */
+  cspMarketQualification?: import('./cspQualification').CspMarketQualification;
+  /** Independent of market qualification — never used to alter the
+   * market-quality score. CAPITAL_UNVERIFIED is distinct from
+   * INSUFFICIENT_CAPITAL and must never be treated as unlimited capital. */
+  cspAccountEligibility?: import('./cspQualification').CspAccountEligibility;
+  /** Qualification imposed by the confirmed scan mode, independent of
+   * market structure and account eligibility. */
+  cspModeQualification?: import('./cspQualification').CspModeQualification;
+  cspModeQualificationReasons?: string[];
+  /** Non-disqualifying warnings (low OI, borderline liquidity, etc.) —
+   * separate from the single primary disqualification reason in
+   * cspLiquidityReason. */
+  cspAdvisoryWarnings?: string[];
+  /** min(broker-reported option buying power, broker-reported cash balance)
+   * for the selected account, or null when unverified. Never a fallback
+   * constant. */
+  cspAvailableCapital?: number | null;
+  /** CSP-specific score (lib/scans/cspScore.ts) — independent of account
+   * eligibility; never influenced by capital state. Undefined until IVR/
+   * technical/earnings inputs are threaded through by the caller (see
+   * app/screener/page.tsx's runCspChecklist). */
+  cspScore?: import('./cspScore').CspScoreResult;
 
   // CC-specific (TE-0007C) — covered call written against owned shares.
   // shortStrike/shortDelta/shortOI/shortBid/shortAsk/roc/annualizedRoc/credit
@@ -116,6 +178,14 @@ export interface ScreenResult {
   underlyingType?: 'index' | 'etf' | 'stock';
   ruleSetApplied?: string;
   checks: { ivr: CheckResult; earnings: CheckResult; oi: CheckResult; delta: CheckResult; credit: CheckResult; roc: CheckResult; pop: CheckResult; iv: CheckResult; emClearance: CheckResult; };
+  // CSP-WORKFLOW-0001 — one ScreenResult now represents exactly ONE
+  // contract for multi-candidate strategies (CSP today). `candidateId`
+  // mirrors `bestCandidate.candidateId` at the top level so React keys,
+  // Best Opportunities joins, CSV rows, and cache lookups never need to
+  // drill into bestCandidate (which is nullable) to find a stable identity.
+  // Undefined for strategies not yet migrated to per-contract results
+  // (BPS/BCS/IC/CC/PMCC still produce at most one ScreenResult per symbol).
+  candidateId?: string;
 }
 
 
@@ -149,5 +219,4 @@ export interface RawScanEntry {
   price: number | null;
   trendResult?: TrendResult;
 }
-
 

@@ -23,6 +23,11 @@ import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 function rec(overrides: Partial<OpportunityRecommendation> = {}): OpportunityRecommendation {
   return {
     candidateId: 'c1',
+    // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — the canonical join
+    // key. Matches result()'s default candidateId below so existing tests
+    // that don't care about identity still join correctly; tests that
+    // specifically exercise multiple CSP contracts override both.
+    screenerCandidateId: 'c1',
     source: 'screener',
     symbol: 'AAPL',
     strategy: 'BPS',
@@ -54,6 +59,7 @@ function result(overrides: Partial<ScreenResult> = {}): ScreenResult {
     bestCandidate: null,
     failReasons: [],
     checks: {} as any,
+    candidateId: 'c1',
     ...overrides,
   };
 }
@@ -109,5 +115,130 @@ describe('buildBestOpportunityRows', () => {
     expect(rows[0].strikeSummary).toBe('—');
     expect(rows[0].pop).toBeNull();
     expect(rows[0].otmPct).toBeNull();
+  });
+});
+
+describe('buildBestOpportunityRows — CSP-WORKFLOW-0001 core-correction (BLOCKER-03): cspScore is authoritative', () => {
+  function cspCandidate(overrides: Record<string, unknown> = {}) {
+    return {
+      strategy: 'CSP', expiration: '2026-09-18', dte: 30, shortStrike: 95, longStrike: 0,
+      shortDelta: -0.2, credit: 1.5, spreadWidth: 0, creditRatio: 0, roc: 5, pop: 80,
+      shortOI: 500, longOI: 0,
+      ...overrides,
+    } as any;
+  }
+
+  it('Best Opportunities uses cspScore.total (rounded), not the generic opportunityScoreTotal, for a CSP row', () => {
+    const results = [result({
+      strategy: 'CSP',
+      bestCandidate: cspCandidate({ cspScore: { scoreStatus: 'AVAILABLE', total: 72.6, components: {}, inputsUsed: [], missingInputs: [], scoreVersion: 'csp-score-v1' } }),
+    })];
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'CSP', opportunityScoreTotal: 12 })]);
+    expect(rows[0].opportunityScore).toBe(73); // rounded, not the generic 12
+  });
+
+  it('UI never displays a long floating-point score -- the CSP row score is always a whole number', () => {
+    const results = [result({
+      strategy: 'CSP',
+      bestCandidate: cspCandidate({ cspScore: { scoreStatus: 'AVAILABLE', total: 41.3333333, components: {}, inputsUsed: [], missingInputs: [], scoreVersion: 'csp-score-v1' } }),
+    })];
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'CSP' })]);
+    expect(Number.isInteger(rows[0].opportunityScore)).toBe(true);
+  });
+
+  it('a CSP candidate with an UNAVAILABLE cspScore is excluded from Best Opportunities entirely', () => {
+    const results = [result({
+      strategy: 'CSP',
+      bestCandidate: cspCandidate({ cspScore: { scoreStatus: 'UNAVAILABLE', total: null, components: {}, inputsUsed: [], missingInputs: ['technical'], scoreVersion: 'csp-score-v1' } }),
+    })];
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'CSP' })]);
+    expect(rows.length).toBe(0);
+  });
+
+  it('excludes a canonical Targeted failure from Best Opportunities even when its market and account states pass', () => {
+    const results = [result({
+      strategy: 'CSP', qualified: false,
+      bestCandidate: cspCandidate({
+        cspMarketQualification: 'QUALIFIED', cspAccountEligibility: 'ELIGIBLE',
+        cspModeQualification: 'FAILED', cspModeQualificationReasons: ['POP below 70%'],
+        cspScore: { scoreStatus: 'AVAILABLE', total: 90, components: {}, inputsUsed: [], missingInputs: [], scoreVersion: 'csp-score-v1' },
+      }),
+    })];
+    expect(buildBestOpportunityRows(results, [rec({ strategy: 'CSP' })])).toEqual([]);
+  });
+
+  it('CSP rows are re-ranked by cspScore.total (highest first), independent of the recommendation pipeline rank order', () => {
+    const results = [
+      result({ symbol: 'AAA', strategy: 'CSP', candidateId: 'aaa-1', bestCandidate: cspCandidate({ cspScore: { scoreStatus: 'AVAILABLE', total: 40, components: {}, inputsUsed: [], missingInputs: [], scoreVersion: 'csp-score-v1' } }) }),
+      result({ symbol: 'BBB', strategy: 'CSP', candidateId: 'bbb-1', bestCandidate: cspCandidate({ shortStrike: 100, cspScore: { scoreStatus: 'AVAILABLE', total: 90, components: {}, inputsUsed: [], missingInputs: [], scoreVersion: 'csp-score-v1' } }) }),
+    ];
+    const rows = buildBestOpportunityRows(results, [
+      rec({ candidateId: 'c1', screenerCandidateId: 'aaa-1', symbol: 'AAA', strategy: 'CSP', rank: 1, opportunityScoreTotal: 99 }),
+      rec({ candidateId: 'c2', screenerCandidateId: 'bbb-1', symbol: 'BBB', strategy: 'CSP', rank: 2, opportunityScoreTotal: 10 }),
+    ]);
+    expect(rows[0].symbol).toBe('BBB'); // cspScore 90 beats 40, despite generic rank/score saying the opposite
+    expect(rows[0].rank).toBe(1);
+    expect(rows[1].symbol).toBe('AAA');
+    expect(rows[1].rank).toBe(2);
+  });
+
+  it('a legacy/test CSP candidate with no cspScore at all (not yet computed) falls back to the generic score unchanged, for backward compatibility', () => {
+    const results = [result({ strategy: 'CSP', bestCandidate: cspCandidate() })]; // no cspScore field
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'CSP', opportunityScoreTotal: 55 })]);
+    expect(rows.length).toBe(1);
+    expect(rows[0].opportunityScore).toBe(55);
+  });
+
+  it('non-CSP strategies are unaffected -- opportunityScore remains the generic score, no exclusion', () => {
+    const results = [result({ strategy: 'BPS', bestCandidate: { strategy: 'BPS', expiration: '2026-09-18', dte: 30, shortStrike: 90, longStrike: 85, shortDelta: -0.2, credit: 1, spreadWidth: 5, creditRatio: 0.2, roc: 4, pop: 70, shortOI: 300, longOI: 100 } as any })];
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'BPS', opportunityScoreTotal: 66 })]);
+    expect(rows.length).toBe(1);
+    expect(rows[0].opportunityScore).toBe(66);
+  });
+});
+
+describe('buildBestOpportunityRows — CSP-WORKFLOW-0001 core-correction (BLOCKER-04): canonical candidateId propagation', () => {
+  function cspCandidate(overrides: Record<string, unknown> = {}) {
+    return {
+      strategy: 'CSP', expiration: '2026-09-18', dte: 30, shortStrike: 95, longStrike: 0,
+      shortDelta: -0.2, credit: 1.5, spreadWidth: 0, creditRatio: 0, roc: 5, pop: 80,
+      shortOI: 500, longOI: 0,
+      ...overrides,
+    } as any;
+  }
+
+  it('a CSP recommendation with no resolvable screenerCandidateId fails closed (excluded), never attached to an arbitrary same-symbol contract', () => {
+    const results = [result({ symbol: 'AMD', strategy: 'CSP', candidateId: 'occ:AMD240119P00415000', bestCandidate: cspCandidate() })];
+    const rows = buildBestOpportunityRows(results, [rec({ symbol: 'AMD', strategy: 'CSP', screenerCandidateId: 'occ:AMD240119P00430000' })]); // a different, non-matching contract id
+    expect(rows.length).toBe(0);
+  });
+
+  it('a CSP recommendation with no screenerCandidateId at all (undefined) also fails closed rather than guessing symbol+strategy', () => {
+    const results = [result({ symbol: 'AMD', strategy: 'CSP', candidateId: 'occ:AMD240119P00415000', bestCandidate: cspCandidate() })];
+    const rows = buildBestOpportunityRows(results, [rec({ symbol: 'AMD', strategy: 'CSP', screenerCandidateId: undefined })]);
+    expect(rows.length).toBe(0);
+  });
+
+  it('two CSP contracts on the same symbol never collide -- each recommendation joins to its own exact contract by candidateId, not symbol+strategy', () => {
+    const results = [
+      result({ symbol: 'AMD', strategy: 'CSP', candidateId: 'occ:AMD240119P00415000', bestCandidate: cspCandidate({ shortStrike: 415, credit: 3.1 }) }),
+      result({ symbol: 'AMD', strategy: 'CSP', candidateId: 'occ:AMD240119P00405000', bestCandidate: cspCandidate({ shortStrike: 405, credit: 1.8 }) }),
+    ];
+    const rows = buildBestOpportunityRows(results, [
+      rec({ candidateId: 'c1', screenerCandidateId: 'occ:AMD240119P00405000', symbol: 'AMD', strategy: 'CSP', rank: 1, primaryReason: 'for the 405 strike' }),
+      rec({ candidateId: 'c2', screenerCandidateId: 'occ:AMD240119P00415000', symbol: 'AMD', strategy: 'CSP', rank: 2, primaryReason: 'for the 415 strike' }),
+    ]);
+    expect(rows.length).toBe(2);
+    const row405 = rows.find(r => r.primaryReason === 'for the 405 strike');
+    const row415 = rows.find(r => r.primaryReason === 'for the 415 strike');
+    expect(row405?.strikeSummary).toBe('405');
+    expect(row415?.strikeSummary).toBe('415');
+  });
+
+  it('non-CSP strategies still join by symbol+strategy (not yet multi-candidate per ScreenResult), unaffected by the CSP fail-closed rule', () => {
+    const results = [result({ symbol: 'AAPL', strategy: 'BPS', candidateId: 'composite:BPS:AAPL:2026-09-18:P:90', bestCandidate: { strategy: 'BPS', expiration: '2026-09-18', dte: 30, shortStrike: 90, longStrike: 85, shortDelta: -0.2, credit: 1, spreadWidth: 5, creditRatio: 0.2, roc: 4, pop: 70, shortOI: 300, longOI: 100 } as any })];
+    const rows = buildBestOpportunityRows(results, [rec({ strategy: 'BPS', screenerCandidateId: undefined })]);
+    expect(rows.length).toBe(1);
+    expect(rows[0].strikeSummary).toBe('90/85');
   });
 });

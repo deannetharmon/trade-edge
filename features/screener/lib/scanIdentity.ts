@@ -27,17 +27,16 @@ const STRATEGY_LABELS: Record<ScreenerRequestedStrategy, string> = {
   pmcc: 'PMCC',
 };
 
-// The six exact titles required by SCREENER-UX-0001. csp/cc/pmcc are
-// Filtered-only in the canonical model (STRATEGY_ALLOWED_MODES in
-// scanSession.ts), so there are exactly six real (mode, requestedStrategy)
-// combinations in production — this table is exhaustive for all of them.
+// Titles are derived from the canonical session. CSP now supports all three
+// modes, so its mode must be explicit rather than hidden behind one generic
+// strategy title.
 function buildTitle(mode: ScreenerScanMode, requestedStrategy: ScreenerRequestedStrategy): string {
   if (requestedStrategy === 'spreads') {
     if (mode === 'filter') return 'Filtered Spread Scan';
     if (mode === 'rank') return 'Ranked Spread Scan';
     return 'Targeted Spread Scan';
   }
-  if (requestedStrategy === 'csp') return 'Cash-Secured Put Scan';
+  if (requestedStrategy === 'csp') return `${MODE_LABELS[mode]} Cash-Secured Put Scan`;
   if (requestedStrategy === 'cc') return 'Covered Call Scan';
   return 'PMCC Scan';
 }

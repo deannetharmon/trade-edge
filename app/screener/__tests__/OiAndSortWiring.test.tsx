@@ -62,6 +62,7 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getChain: (...args: any[]) => getChainMock(...args),
     classifyUnderlying: vi.fn().mockResolvedValue('stock'),
     getAvailableCash: vi.fn().mockResolvedValue(10000),
+    getCspCapitalContext: vi.fn().mockResolvedValue({ accountSelected: true, accountId: 'test-acct', optionBuyingPower: 10000, cashBalance: 10000 }),
   };
 });
 
@@ -124,14 +125,14 @@ async function addToUniverse(symbols: string) {
 }
 
 async function clickCcScan() {
-  const button = await screen.findByRole('button', { name: 'FIND COVERED CALLS' });
+  const button = await screen.findByRole('button', { name: 'FIND CCs' });
   await userEvent.click(button);
 }
 
 async function runRankedScan() {
   await addToUniverse('HIOI, LOOI');
   await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-  await userEvent.click(await screen.findByRole('button', { name: /⬡ RANK/ }));
+  await userEvent.click(await screen.findByRole('radio', { name: /RANK/ }));
   await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
 }
 
@@ -187,14 +188,14 @@ afterEach(() => {
 });
 
 describe('SCREENER-OI-0001: single canonical implementation, Ranked + Filtered only', () => {
-  it('OiAndSortControls is defined exactly once in page.tsx and rendered for Filtered and Ranked only (not Targeted)', () => {
+  it('OiAndSortControls is defined once and reused for spread Filtered, CSP Filtered, and Ranked (not Targeted)', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../page.tsx'), 'utf8');
     const definitions = src.match(/function OiAndSortControls\(/g) ?? [];
     expect(definitions).toHaveLength(1);
     const usages = src.match(/<OiAndSortControls\b/g) ?? [];
-    // Filtered + Ranked -- one shared control, two call sites. Targeted no
-    // longer renders it (scope-correction pass).
-    expect(usages.length).toBe(2);
+    // Spread Filtered + CSP Filtered + Ranked -- one shared implementation,
+    // three deliberate call sites. Targeted still never renders it.
+    expect(usages.length).toBe(3);
 
     // Precisely confirm neither call site is inside TargetedScanResultsPanel:
     // slice the function's own body out and check it directly.
@@ -225,7 +226,7 @@ describe('SCREENER-OI-0001: Targeted mode does not expose the OI/sort controls',
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-    await userEvent.click(await screen.findByRole('button', { name: /⊕ TARGETED/ }));
+    await userEvent.click(await screen.findByRole('radio', { name: /TARGETED/ }));
     // Targeted mode is now selected in the modal; closing without running
     // is sufficient to prove the picker itself never shows the new label,
     // and confirms Targeted's own DTE/POP/OTM controls are still present
@@ -342,9 +343,9 @@ describe('SCREENER-OI-0001: Targeted results are not reordered or excluded by Ra
     // bare "✕" also matches the two per-ticker remove buttons in the
     // Opportunity Universe sidebar (HIOI, LOOI) that this test added.
     await userEvent.click(await screen.findByRole('button', { name: /↺$/ }));
-    await userEvent.click(await screen.findByRole('button', { name: /⊕ TARGETED/ }));
-    const runModal = screen.getByText('SCAN SELECTED', { exact: false }).closest('div') as HTMLElement;
-    await userEvent.click(within(runModal).getByRole('button', { name: '✕' }));
+    await userEvent.click(await screen.findByRole('radio', { name: /TARGETED/ }));
+    const runModal = screen.getByRole('dialog', { name: /SCAN SELECTED/ });
+    await userEvent.click(within(runModal).getByRole('button', { name: /close scan configuration/i }));
 
     // Ranked mode's own OI floor (500) is still in effect -- untouched by
     // having briefly viewed the Targeted picker.

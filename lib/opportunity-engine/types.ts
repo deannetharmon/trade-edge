@@ -52,6 +52,15 @@ export interface OpportunityCandidate {
   // same candidate must produce the same id (required for "stable candidate
   // IDs produce stable results").
   id: string;
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — the canonical,
+  // stable per-contract identity from ScreenResult.candidateId, passed
+  // through unchanged from AutopilotCandidate.screenerCandidateId when
+  // the underlying DecisionAnalysis carries one. Undefined for
+  // candidates not sourced from a Screener ScreenResult (e.g. Hunter,
+  // repeat-trades, watchlist). Distinct from `id` above, which is this
+  // pipeline's own internal identity and not guaranteed to match the
+  // originating Screener contract's identity.
+  screenerCandidateId?: string;
   source: OpportunityCandidateSource;
   symbol: string;
   strategy: AutopilotStrategy;
@@ -118,6 +127,14 @@ export interface OpportunityContext {
 // recomputed score.
 export interface OpportunityRecommendation {
   candidateId: string;
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — see
+  // OpportunityCandidate.screenerCandidateId above. Carried through
+  // unchanged; null/undefined (never a guessed/derived value) when the
+  // source candidate had none. Optional (not required) so the many
+  // existing OpportunityRecommendation fixtures outside the Screener's own
+  // CSP pipeline (BestOpportunitiesPanel, mission-control, command-center,
+  // dailyBriefing) are unaffected by this addition.
+  screenerCandidateId?: string | null;
   source: OpportunityCandidateSource;
   symbol: string;
   strategy: AutopilotStrategy;

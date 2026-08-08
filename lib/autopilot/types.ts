@@ -123,6 +123,16 @@ export interface PaperAccount {
 
 export interface AutopilotCandidate {
   id: string;
+  // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — the canonical,
+  // stable per-contract identity from ScreenResult.candidateId
+  // (lib/scans/candidateIdentity.ts), carried through unchanged for
+  // callers that need to join back to the exact originating Screener
+  // contract (Best Opportunities, React keys, CSV, cache) rather than
+  // this module's own `id` (screen_${symbol}_${strategy}_${expiration}_
+  // ${shortStrike}, still used internally by this pipeline and left
+  // unchanged to avoid a wide blast radius across existing consumers).
+  // Undefined for candidates not sourced from a Screener ScreenResult.
+  screenerCandidateId?: string;
   strategy: AutopilotStrategy;
   symbol: string;
   underlyingPrice: number;

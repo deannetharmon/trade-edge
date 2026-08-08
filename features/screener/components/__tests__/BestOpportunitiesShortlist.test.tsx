@@ -13,7 +13,7 @@ import type { BestOpportunityRow } from '../../lib/bestOpportunityRows';
 
 function row(overrides: Partial<BestOpportunityRow> = {}): BestOpportunityRow {
   return {
-    candidateId: 'c1', rank: 1, symbol: 'AAPL', strategy: 'BPS', expiration: '2026-09-18', dte: 30,
+    candidateId: 'c1', resultKey: 'AAPL-BPS', rank: 1, symbol: 'AAPL', strategy: 'BPS', expiration: '2026-09-18', dte: 30,
     strikeSummary: '95/90', creditDebitLabel: '$1.50 credit', pop: 80, otmPct: 10, rocPct: 15,
     relevantLegOi: 500, opportunityScore: 85, decisionConfidence: 90, disposition: 'RECOMMENDED',
     primaryReason: 'Strong setup', supportingFactors: [], riskTradeoffs: [], portfolioConflicts: [],
@@ -24,7 +24,7 @@ function row(overrides: Partial<BestOpportunityRow> = {}): BestOpportunityRow {
 
 describe('BestOpportunitiesShortlist', () => {
   it('shows at most the top 3 rows collapsed by default', () => {
-    const rows = [1, 2, 3, 4, 5].map(n => row({ candidateId: `c${n}`, symbol: `SYM${n}`, rank: n }));
+    const rows = [1, 2, 3, 4, 5].map(n => row({ candidateId: `c${n}`, resultKey: `SYM${n}-BPS`, symbol: `SYM${n}`, rank: n }));
     render(<BestOpportunitiesShortlist rows={rows} />);
     expect(screen.getByText('SYM1')).toBeInTheDocument();
     expect(screen.getByText('SYM2')).toBeInTheDocument();

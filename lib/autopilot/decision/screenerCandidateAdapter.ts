@@ -167,6 +167,14 @@ export function screenResultsToAutopilotCandidates(
 
     candidates.push({
       id: `screen_${result.symbol}_${strategy}_${candidate.expiration}_${candidate.shortStrike}`,
+      // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — carry the
+      // canonical ScreenResult.candidateId through unchanged, so
+      // downstream joins never need to reparse `id` above (which is not a
+      // stable, canonical identity -- it's an ad hoc string local to this
+      // adapter) or fall back to symbol+strategy, which collides across
+      // multiple contracts on the same symbol (e.g. CSP's six-strike AMD
+      // fixture).
+      screenerCandidateId: result.candidateId,
       strategy,
       symbol: result.symbol,
       underlyingPrice: result.price ?? 0,

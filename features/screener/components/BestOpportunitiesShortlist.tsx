@@ -128,7 +128,11 @@ export function BestOpportunitiesShortlist({
         </div>
       ) : (
         <div className="space-y-1.5">
-          {visible.map(row => <ShortlistRow key={row.candidateId} row={row} th={th} />)}
+          {/* CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — keyed by
+              row.resultKey (the canonical ScreenResult.candidateId for CSP,
+              never re-derived), not row.candidateId (the recommendation
+              pipeline's own internal AutopilotCandidate id). */}
+          {visible.map(row => <ShortlistRow key={row.resultKey} row={row} th={th} />)}
         </div>
       )}
     </section>
