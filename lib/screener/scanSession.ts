@@ -974,7 +974,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
           }
         } else if (d.requestedStrategy === 'csp') {
           const candidate = r.bestCandidate as Record<string, unknown>;
-          const marketStates = new Set(['QUALIFIED','QUALIFIED_WITH_LIQUIDITY_WARNING','DISQUALIFIED_INVALID_QUOTE','DISQUALIFIED_POOR_LIQUIDITY','DISQUALIFIED_IVR','DISQUALIFIED_EARNINGS']);
+          const marketStates = new Set(['QUALIFIED','QUALIFIED_WITH_LIQUIDITY_WARNING','DISQUALIFIED_INVALID_QUOTE','DISQUALIFIED_POOR_LIQUIDITY','DISQUALIFIED_IVR','DISQUALIFIED_EARNINGS','DISQUALIFIED_FOUNDATION_INELIGIBLE','DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE']);
           const accountStates = new Set(['ELIGIBLE','INSUFFICIENT_CAPITAL','CAPITAL_UNVERIFIED','ACCOUNT_UNSELECTED','STRATEGY_NOT_PERMITTED']);
           const modeStates = new Set(['NOT_APPLICABLE','PASSED','FAILED']);
           const reasonsValid = Array.isArray(candidate.cspModeQualificationReasons)

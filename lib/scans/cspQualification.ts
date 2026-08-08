@@ -15,7 +15,15 @@ export type CspMarketQualification =
   | 'DISQUALIFIED_INVALID_QUOTE'
   | 'DISQUALIFIED_POOR_LIQUIDITY'
   | 'DISQUALIFIED_IVR'
-  | 'DISQUALIFIED_EARNINGS';
+  | 'DISQUALIFIED_EARNINGS'
+  // CSP-WORKFLOW-RECONCILE-0002 — SQ-0001A foundation gate outcomes. Kept as
+  // two distinct states (never collapsed into one another or into
+  // DISQUALIFIED_IVR/EARNINGS) because an INELIGIBLE foundation thesis
+  // (contradicted by evidence) and an INSUFFICIENT_EVIDENCE foundation
+  // thesis (no evidence either way) are different claims and must stay
+  // categorical all the way through to presentation.
+  | 'DISQUALIFIED_FOUNDATION_INELIGIBLE'
+  | 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE';
 
 export type CspAccountEligibility =
   | 'ELIGIBLE'

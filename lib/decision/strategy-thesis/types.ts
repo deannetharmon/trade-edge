@@ -26,4 +26,17 @@ export interface IronCondorThesis extends StrategyThesisBase {
   weakerSide: 'UPPER' | 'LOWER' | 'BALANCED' | 'UNKNOWN';
 }
 
-export type StrategyThesis = DirectionalSpreadThesis | IronCondorThesis;
+// CSP-WORKFLOW-RECONCILE-0002 — a cash-secured put is mechanically a single
+// short put: the position is threatened by the same downside evidence as a
+// BPS's short leg, but it is a genuinely distinct strategy (no long leg, no
+// defined max loss, different capital/assignment mechanics), so it gets its
+// own thesis shape rather than being reclassified as a BPS. Kept separate
+// from DirectionalSpreadThesis (whose `strategy` union is deliberately
+// closed to 'BPS' | 'BCS') so a CSP thesis can never be silently accepted
+// wherever a spread thesis is expected.
+export interface CspThesis extends StrategyThesisBase {
+  strategy: 'CSP';
+  threatenedSide: 'DOWNSIDE';
+}
+
+export type StrategyThesis = DirectionalSpreadThesis | IronCondorThesis | CspThesis;

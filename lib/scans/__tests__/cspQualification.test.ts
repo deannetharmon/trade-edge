@@ -27,6 +27,8 @@ describe('isMarketQualified — market qualification alone, independent of accou
   it('every DISQUALIFIED_* state is not market-qualified', () => {
     const disqualified: CspMarketQualification[] = [
       'DISQUALIFIED_INVALID_QUOTE', 'DISQUALIFIED_POOR_LIQUIDITY', 'DISQUALIFIED_IVR', 'DISQUALIFIED_EARNINGS',
+      // CSP-WORKFLOW-RECONCILE-0002 — the two SQ-0001A foundation-gate states.
+      'DISQUALIFIED_FOUNDATION_INELIGIBLE', 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE',
     ];
     for (const state of disqualified) expect(isMarketQualified(state)).toBe(false);
   });

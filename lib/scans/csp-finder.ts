@@ -22,6 +22,7 @@ import { searchCspCandidates, describeCspSearchOutcome, type CspSearchRules, typ
 import { classifyAccountEligibility, isMarketQualified, type CspAccountEligibility, type CspMarketQualification, type CspLiquidityClass } from './cspQualification';
 import type { SpreadCandidate } from './types';
 import type { CspRulesType } from './constants';
+import type { EligibilityDecision } from '@/lib/decision/types';
 
 export interface CspFindParams {
   rules: CspRulesType;
@@ -50,6 +51,21 @@ export interface CspFindParams {
    * discovered. */
   ivrMarketDisqualified?: boolean;
   earningsMarketDisqualified?: boolean;
+  /** CSP-WORKFLOW-RECONCILE-0002 — SQ-0001A foundation eligibility for this
+   * underlying/horizon (from evaluateUnderlyingFoundation's CSP thesis +
+   * evaluateStrategyEligibility, computed once per symbol upstream and
+   * applied uniformly to every candidate — same pattern as
+   * ivrMarketDisqualified/earningsMarketDisqualified above). This is the
+   * foundation gate: it can block CSP on bearish/chaotic underlying
+   * evidence before any contract is ranked, and that block cannot be
+   * overridden by a candidate's premium/ROC/score, since those are computed
+   * entirely downstream of marketQualification.
+   *
+   * null/undefined = foundation evidence was not evaluated for this call —
+   * NOT treated as passing, simply not gated at this call site. Every
+   * existing caller that hasn't wired this in yet keeps its current
+   * behavior unchanged. */
+  foundationEligibility?: EligibilityDecision | null;
 }
 
 // One discovered CSP contract, independently qualified/eligible/scored.
@@ -100,8 +116,20 @@ function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number): string[] {
 
 function marketQualificationFor(
   c: CspRawCandidate,
-  params: Pick<CspFindParams, 'ivrMarketDisqualified' | 'earningsMarketDisqualified'>,
+  params: Pick<CspFindParams, 'ivrMarketDisqualified' | 'earningsMarketDisqualified' | 'foundationEligibility'>,
 ): CspMarketQualification {
+  // SQ-0001A foundation gate is checked first — it is the most fundamental,
+  // strategy-agnostic evidence (does the underlying's directional/regime
+  // evidence, or a known binary event in the horizon, threaten the CSP
+  // thesis at all), evaluated before any CSP-specific liquidity/IVR/
+  // earnings classification. Only an explicitly-supplied decision can gate
+  // here; a candidate with no foundation evidence at all falls through to
+  // the existing CSP-specific checks unchanged.
+  const foundation = params.foundationEligibility;
+  if (foundation) {
+    if (foundation.status === 'INSUFFICIENT_EVIDENCE') return 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE';
+    if (foundation.status === 'INELIGIBLE') return 'DISQUALIFIED_FOUNDATION_INELIGIBLE';
+  }
   // Earnings checked before IVR — an earnings-within-window disqualification
   // is a harder, more specific reason than a generic IVR-band miss.
   if (params.earningsMarketDisqualified) return 'DISQUALIFIED_EARNINGS';

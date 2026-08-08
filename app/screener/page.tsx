@@ -1504,6 +1504,8 @@ function runCspChecklist(
     if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% outside the ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range`);
     if (r.marketQualification === 'DISQUALIFIED_EARNINGS') failReasons.push('Earnings within expiry window — assignment risk into a binary event');
     if (r.marketQualification === 'DISQUALIFIED_POOR_LIQUIDITY') failReasons.push(c.cspLiquidityReason ?? 'Poor liquidity');
+    if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INELIGIBLE') failReasons.push('Underlying market-state evidence contradicts a cash-secured put thesis for this horizon.');
+    if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE') failReasons.push('Insufficient underlying market-state evidence to evaluate a cash-secured put thesis for this horizon.');
     if (r.accountEligibility === 'INSUFFICIENT_CAPITAL') failReasons.push(c.capitalWarning ?? 'Insufficient cash for this CSP');
     if (r.accountEligibility === 'CAPITAL_UNVERIFIED') failReasons.push('Capital could not be verified for the selected account.');
     if (r.accountEligibility === 'ACCOUNT_UNSELECTED') failReasons.push('No account selected — capital could not be verified.');
