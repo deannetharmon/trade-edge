@@ -1,3 +1,16 @@
+
+const getPmccExtrinsicColor = (pct: number) => {
+  if (pct >= 80) return 'text-emerald-400';
+  if (pct >= 50) return 'text-yellow-400';
+  return 'text-red-400';
+};
+
+const getPmccDeltaColor = (delta: number) => {
+  if (delta >= 0.78) return 'text-emerald-400';
+  if (delta >= 0.70) return 'text-yellow-400';
+  return 'text-red-400';
+};
+
 // path: app/screener/page.tsx
 
 'use client';
@@ -3981,7 +3994,7 @@ const strategyScores = useMemo(() => {
             </div>
           )}
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {Object.entries(result.checks).map(([key, check]) => {
+            {Object.entries(result.checks).filter(([key]) => result.strategy !== 'PMCC' || (key !== 'iv' && key !== 'emClearance')).map(([key, check]) => {
       if (key === 'iv') {
         console.log('IV_RENDER_DEBUG', {
           symbol: result.symbol,
@@ -4067,14 +4080,14 @@ const strategyScores = useMemo(() => {
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>PMCC Structure</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className={th.label}>LEAPS long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ{c.longDelta?.toFixed(2)}</span></div>
+                <div><span className={th.label}>LEAP long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ{c.longDelta?.toFixed(2)}</span></div>
                 <div><span className={th.label}>Short call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · credit ${c.credit.toFixed(2)} · Δ{c.shortDelta.toFixed(2)}</span></div>
                 <div><span className={th.label}>Net debit: </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(capital at risk)</span></div>
                 <div><span className={th.label}>Max profit: </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(if stock reaches short strike)</span></div>
                 <div><span className={th.label}>Extrinsic capture: </span><span className={th.text}>{c.extrinsicCapture?.toFixed(0)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / LEAPS extrinsic)</span></div>
                 <div><span className={th.label}>ROC: </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / net debit)</span></div>
               </div>
-              <p className={`text-[9px] text-purple-400/80 pt-1`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAPS when the thesis changes.</p>
+              <p className={`text-[9px] text-purple-400/80 pt-1`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAP when the thesis changes.</p>
             </div>
           )}
 
