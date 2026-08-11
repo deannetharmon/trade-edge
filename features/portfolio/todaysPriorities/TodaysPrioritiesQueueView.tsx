@@ -41,6 +41,8 @@ import {
 import { partitionTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
 import type { TodaysPrioritiesQueue, TodaysPrioritiesQueueItem } from '@/lib/todays-priorities-queue';
 import { useUrlQueryParam } from './useUrlQueryParam';
+import { VerifyPricingObjectiveRefreshButton, type PricingRefreshOutcome } from '../components/VerifyPricingRefreshButton';
+import type { PortfolioRefreshResult } from '@/components/portfolio-data/PortfolioDataProvider';
 
 // Level-2 destination link (CES section 13.2) -- unchanged mechanics from
 // the single-level design this replaces: exact pos.key match for
@@ -119,9 +121,12 @@ export interface TodaysPrioritiesQueueViewProps {
   queue: TodaysPrioritiesQueue;
   loading: boolean;
   th: typeof THEMES[Theme];
+  onRefreshQuotes?: () => Promise<PortfolioRefreshResult>;
+  portfolioRefreshing?: boolean;
+  onPricingRefreshOutcome?: (outcome: PricingRefreshOutcome | null) => void;
 }
 
-export function TodaysPrioritiesQueueView({ queue, loading, th }: TodaysPrioritiesQueueViewProps) {
+export function TodaysPrioritiesQueueView({ queue, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome }: TodaysPrioritiesQueueViewProps) {
   const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
   const [stateLoaded, setStateLoaded] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
@@ -230,7 +235,17 @@ export function TodaysPrioritiesQueueView({ queue, loading, th }: TodaysPrioriti
                   else itemRefs.current.delete(item.stableKey);
                 }}
                 action={
-                  item.kind === 'attention' && item.attentionItem?.objective && isCompletable(item.attentionItem.objective) ? (
+                  item.kind === 'attention'
+                  && item.attentionItem?.objective?.ruleId === 'OBJ-VERIFY-PRICING'
+                  && onRefreshQuotes
+                  && onPricingRefreshOutcome ? (
+                    <VerifyPricingObjectiveRefreshButton
+                      objective={item.attentionItem.objective}
+                      portfolioRefreshing={portfolioRefreshing}
+                      onRefresh={onRefreshQuotes}
+                      onOutcome={onPricingRefreshOutcome}
+                    />
+                  ) : item.kind === 'attention' && item.attentionItem?.objective && isCompletable(item.attentionItem.objective) ? (
                     <button
                       type="button"
                       onClick={(e) => {

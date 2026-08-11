@@ -48,9 +48,11 @@ import type { DecisionReviewStore } from '@/lib/decision-review';
 import { buildDashboardComposition, type DashboardComposition } from '@/lib/portfolio-intelligence/dashboardComposition';
 
 export interface RefreshPositionsCallbacks {
-  // Called once, synchronously after the raw (pre-snapshot-history) load
-  // completes -- matches captureSnapshotsIfNeeded's original call site
-  // exactly (app/portfolio/page.tsx's own fetchPositions, before this move).
+  // Called with the raw broker positions only after this request has survived
+  // both latest-generation checks and canonical recomputation. This prevents
+  // a superseded request from writing stale snapshot side effects. The
+  // current capture intentionally becomes context for the next refresh; the
+  // current refresh evaluates against previously persisted history.
   onRawPositionsLoaded?: (positions: Position[]) => void;
   // Called once the snapshot-history attachment resolves -- matches
   // captureLifecycleSnapshotsIfNeeded's original call site exactly.
@@ -61,6 +63,26 @@ export type PortfolioRefreshResult =
   | { status: 'success'; positions: Position[] }
   | { status: 'error'; message: string }
   | { status: 'superseded' };
+
+// A pricing conflict is sticky across refreshes. Missing/one-sided/stale
+// evidence cannot silently clear a previously established Verify Pricing
+// disposition; only fresh, reliable, decision-eligible evidence (or the
+// position disappearing because it closed) may clear it.
+export function preservePricingVerificationLatch(previous: Position[], refreshed: Position[]): Position[] {
+  const previousByKey = new Map(previous.map(position => [position.key, position]));
+  return refreshed.map(position => {
+    const prior = previousByKey.get(position.key);
+    const wasVerifying = prior?.recommendation?.kind === 'verify-pricing';
+    const nowDecisionEligible = position.pricingDecisionEvidence?.marketableDecisionEligible === true;
+    if (!wasVerifying || nowDecisionEligible) return position;
+    return {
+      ...position,
+      recommendation: prior.recommendation,
+      portfolioObjective: prior.portfolioObjective,
+      liquidityTrapTriggered: prior.liquidityTrapTriggered,
+    };
+  });
+}
 
 export interface PortfolioDataContextValue {
   positions: Position[];
@@ -83,7 +105,7 @@ export interface PortfolioDataContextValue {
 const PortfolioDataContext = createContext<PortfolioDataContextValue | null>(null);
 
 export function PortfolioDataProvider({ children }: { children: ReactNode }) {
-  const [positions, setPositions] = useState<Position[]>([]);
+  const [positions, setPositionsState] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [balances, setBalances] = useState<PortfolioFinancialContext | null>(null);
   const [decisionReviews, setDecisionReviews] = useState<DecisionReviewStore>({});
@@ -94,6 +116,16 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
   // A slower, older broker response can never overwrite newer quote evidence,
   // and only the current request is allowed to clear the shared loading state.
   const refreshGenerationRef = useRef(0);
+  const positionsRef = useRef<Position[]>([]);
+  const setPositions = useCallback<Dispatch<SetStateAction<Position[]>>>((nextValue) => {
+    setPositionsState(previous => {
+      const next = typeof nextValue === 'function'
+        ? (nextValue as (previous: Position[]) => Position[])(previous)
+        : nextValue;
+      positionsRef.current = next;
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async (callbacks?: RefreshPositionsCallbacks): Promise<PortfolioRefreshResult> => {
     const generation = ++refreshGenerationRef.current;
@@ -114,7 +146,8 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       } catch (snapshotError) {
         console.error('Snapshot history fetch failed; recomputing from fresh broker positions:', snapshotError);
       }
-      const updated = attachSnapshotHistory(data, snapshotStore);
+      const recomputed = attachSnapshotHistory(data, snapshotStore);
+      const updated = preservePricingVerificationLatch(positionsRef.current, recomputed);
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
 
       callbacks?.onRawPositionsLoaded?.(data);
@@ -123,14 +156,15 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       setLastRefresh(new Date());
       callbacks?.onSnapshotHistoryAttached?.(updated);
       return { status: 'success', positions: updated };
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
-      if (e.message === 'Not authenticated' || e.message === 'Session expired') {
+      const message = e instanceof Error ? e.message : String(e ?? 'Portfolio refresh failed');
+      if (message === 'Not authenticated' || message === 'Session expired') {
         window.location.href = '/login';
-        return { status: 'error', message: e.message };
+        return { status: 'error', message };
       }
-      setError(e.message);
-      return { status: 'error', message: e.message };
+      setError(message);
+      return { status: 'error', message };
     } finally {
       if (generation === refreshGenerationRef.current) setLoading(false);
     }

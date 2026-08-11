@@ -99,6 +99,7 @@ import { buildDashboardComposition } from '@/lib/portfolio-intelligence/dashboar
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
 import { VerifyPricingRefreshButton } from '@/features/portfolio/components/VerifyPricingRefreshButton';
+import type { PricingRefreshOutcome } from '@/features/portfolio/components/VerifyPricingRefreshButton';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
@@ -7438,7 +7439,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, decisionReview, onSaveDecisionReview, focusKey }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReview, onSaveDecisionReview, focusKey }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -7448,6 +7449,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   onExecute: (pos: Position, action: ActionType) => void;
   onRefreshQuotes: ReturnType<typeof usePortfolioData>['refresh'];
   portfolioRefreshing: boolean;
+  onPricingRefreshOutcome: (outcome: PricingRefreshOutcome | null) => void;
   // PI-0008C: Decision Outcome Tracking -- the existing review for this
   // position (or null), and the save callback. Optional so any other caller
   // of PositionCard that predates this ticket keeps compiling unchanged;
@@ -8344,6 +8346,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             positionKey={pos.key}
             portfolioRefreshing={portfolioRefreshing}
             onRefresh={onRefreshQuotes}
+            onOutcome={onPricingRefreshOutcome}
           />
           {/* Intent — reference point for AI analysis (assignment = goal vs avoid) */}
           <select
@@ -8662,7 +8665,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, decisionReviews, onSaveDecisionReview, focusKey }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReviews, onSaveDecisionReview, focusKey }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -8672,6 +8675,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   onExecute: (pos: Position, action: ActionType) => void;
   onRefreshQuotes: ReturnType<typeof usePortfolioData>['refresh'];
   portfolioRefreshing: boolean;
+  onPricingRefreshOutcome: (outcome: PricingRefreshOutcome | null) => void;
   // PI-0008C: Decision Outcome Tracking -- optional so any other caller of
   // PositionSection that predates this ticket keeps compiling unchanged.
   decisionReviews?: DecisionReviewStore;
@@ -8726,6 +8730,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
             onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
             onRefreshQuotes={onRefreshQuotes}
             portfolioRefreshing={portfolioRefreshing}
+            onPricingRefreshOutcome={onPricingRefreshOutcome}
             decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
             onSaveDecisionReview={onSaveDecisionReview}
             focusKey={focusKey}
@@ -9069,6 +9074,9 @@ export default function PortfolioPage() {
   });
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
+  // PI-0014C: page-owned so the outcome survives removal of a resolved
+  // Verify Pricing button/card/objective after refreshed data is published.
+  const [pricingRefreshOutcome, setPricingRefreshOutcome] = useState<PricingRefreshOutcome | null>(null);
 
   // Trigger weekly behavior summarization silently on load
   useEffect(() => { summarizeBehaviorProfile().catch(() => {}); }, []);
@@ -9485,6 +9493,22 @@ export default function PortfolioPage() {
         </div>
       </div>
 
+      {pricingRefreshOutcome && (
+        <div
+          role={pricingRefreshOutcome.tone === 'error' ? 'alert' : 'status'}
+          className={`mx-6 mt-3 flex items-center justify-between rounded-lg border px-3 py-2 text-[11px] ${
+            pricingRefreshOutcome.tone === 'error'
+              ? 'border-red-600/60 bg-red-500/10 text-red-300'
+              : 'border-amber-600/60 bg-amber-500/10 text-amber-300'
+          }`}
+        >
+          <span>{pricingRefreshOutcome.message}</span>
+          <button type="button" onClick={() => setPricingRefreshOutcome(null)} className="ml-3 shrink-0 opacity-80 hover:opacity-100">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {activeTab === 'balances' && <BalancesTab />}
 
       {/* WA-0003: Today's Priorities -- the finite, completion-aware open
@@ -9493,7 +9517,14 @@ export default function PortfolioPage() {
           this page already computes; no new fetch, no new evaluation. Owns
           its own `priority` deep-link resolution (CES section 13.1). */}
       {activeTab === 'todays-priorities' && (
-        <TodaysPrioritiesQueueView queue={todaysPrioritiesQueue} loading={loading} th={th} />
+        <TodaysPrioritiesQueueView
+          queue={todaysPrioritiesQueue}
+          loading={loading}
+          th={th}
+          onRefreshQuotes={fetchPositions}
+          portfolioRefreshing={loading}
+          onPricingRefreshOutcome={setPricingRefreshOutcome}
+        />
       )}
 
       {/* WA-0004: Briefing -- the single canonical composition of Portfolio
@@ -9526,6 +9557,7 @@ export default function PortfolioPage() {
           th={th}
           onRefreshQuotes={fetchPositions}
           portfolioRefreshing={loading}
+          onPricingRefreshOutcome={setPricingRefreshOutcome}
         />
       )}
 
@@ -9649,6 +9681,7 @@ export default function PortfolioPage() {
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                         onRefreshQuotes={fetchPositions}
                         portfolioRefreshing={loading}
+                        onPricingRefreshOutcome={setPricingRefreshOutcome}
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                         focusKey={focusPositionKey}
                       />

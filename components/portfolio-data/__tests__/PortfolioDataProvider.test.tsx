@@ -40,7 +40,11 @@ function Harness() {
 }
 
 function position(key: string, recommendationKind: string): Position {
-  return { key, recommendation: { kind: recommendationKind } } as unknown as Position;
+  return {
+    key,
+    recommendation: { kind: recommendationKind },
+    pricingDecisionEvidence: { marketableDecisionEligible: recommendationKind !== 'verify-pricing' },
+  } as unknown as Position;
 }
 
 function deferred<T>() {
@@ -111,6 +115,77 @@ describe('PortfolioDataProvider refresh contract', () => {
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
     expect(olderCallback).not.toHaveBeenCalled();
     expect(newerCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses an older request superseded while waiting for snapshot history', async () => {
+    const olderSnapshots = deferred<Record<string, never[]>>();
+    acquisition.loadPositions
+      .mockResolvedValueOnce({ positions: [position('OLD', 'verify-pricing')], pendingOrders: [] })
+      .mockResolvedValueOnce({ positions: [position('NEW', 'watch')], pendingOrders: [] });
+    acquisition.fetchSnapshotStore
+      .mockReturnValueOnce(olderSnapshots.promise)
+      .mockResolvedValueOnce({});
+
+    let first!: PortfolioRefreshResult;
+    let second!: PortfolioRefreshResult;
+    let firstPending!: Promise<void>;
+    await act(async () => {
+      firstPending = context.refresh().then(value => { first = value; });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(acquisition.fetchSnapshotStore).toHaveBeenCalledTimes(1);
+
+    await act(async () => { second = await context.refresh(); });
+    await act(async () => {
+      olderSnapshots.resolve({});
+      await firstPending;
+    });
+
+    expect(second.status).toBe('success');
+    expect(first).toEqual({ status: 'superseded' });
+    expect(screen.getByTestId('keys')).toHaveTextContent('NEW');
+    expect(screen.getByTestId('keys')).not.toHaveTextContent('OLD');
+  });
+
+  it('recomputes and succeeds with empty contextual history when snapshot fetch fails', async () => {
+    const raw = position('MU', 'verify-pricing');
+    const recomputed = position('MU', 'verify-pricing');
+    acquisition.loadPositions.mockResolvedValue({ positions: [raw], pendingOrders: [] });
+    acquisition.fetchSnapshotStore.mockRejectedValue(new Error('Snapshot store unavailable'));
+    acquisition.attachSnapshotHistory.mockReturnValue([recomputed]);
+
+    let result!: PortfolioRefreshResult;
+    await act(async () => { result = await context.refresh(); });
+
+    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {});
+    expect(result).toEqual({ status: 'success', positions: [recomputed] });
+    expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
+  it('latches Verify Pricing when refreshed evidence is incomplete and clears only when eligible', async () => {
+    const previous = position('MU', 'verify-pricing');
+    const incomplete = {
+      ...position('MU', 'watch'),
+      pricingDecisionEvidence: { status: 'MID_ONLY', marketableDecisionEligible: false },
+    } as Position;
+    act(() => { context.setPositions([previous]); });
+    acquisition.loadPositions.mockResolvedValue({ positions: [incomplete], pendingOrders: [] });
+    acquisition.attachSnapshotHistory.mockReturnValue([incomplete]);
+
+    let result!: PortfolioRefreshResult;
+    await act(async () => { result = await context.refresh(); });
+    expect(result.status).toBe('success');
+    if (result.status === 'success') {
+      expect(result.positions[0].recommendation?.kind).toBe('verify-pricing');
+      expect(result.positions[0].pricingDecisionEvidence?.marketableDecisionEligible).toBe(false);
+    }
+
+    const eligible = position('MU', 'watch');
+    acquisition.loadPositions.mockResolvedValue({ positions: [eligible], pendingOrders: [] });
+    acquisition.attachSnapshotHistory.mockReturnValue([eligible]);
+    await act(async () => { result = await context.refresh(); });
+    if (result.status === 'success') expect(result.positions[0].recommendation?.kind).toBe('watch');
   });
 
   it('returns and exposes a truthful broker-refresh failure', async () => {

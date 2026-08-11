@@ -74,8 +74,11 @@ The internal numeric recommendation field remains available for existing ranking
 - `features/portfolio/components/__tests__/VerifyPricingRefreshButton.test.tsx`
 - `features/portfolio/components/TodaysPrioritiesWorkflow.tsx`
 - `features/portfolio/components/__tests__/TodaysPrioritiesWorkflow.test.tsx`
+- `features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx`
+- `features/portfolio/todaysPriorities/__tests__/TodaysPrioritiesQueueView.test.tsx`
 - `features/portfolio/intelligence/PositionIntelligencePanel.tsx`
 - `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts`
+- `lib/portfolio-intelligence/__tests__/positionObjective.test.ts`
 - `lib/portfolio-data/__tests__/pricingDecisionWiring.test.ts`
 - `features/portfolio/components/__tests__/PositionRecommendationBadge.test.tsx`
 - `features/portfolio/intelligence/__tests__/PositionIntelligencePanel.test.tsx`
@@ -153,3 +156,15 @@ The team returned the first continuation because its busy state was local to one
 Every position-card and Today's Priorities Verify Pricing action now consumes the shared provider loading state. The clicked action announces one of four truthful outcomes: failure with pricing still unverified, refresh completed but pricing remains unverified, recommendation updated, or position no longer open. “Executable quote” has been removed from user-facing Verify Pricing copy: the evidence is described as fresh broker leg quotes and a derived marketable estimate, explicitly not a firm complex-order quote or guaranteed fill price. The stable historical trigger ID remains `fresh-executable-quote`; its visible label and explanation use the corrected terminology.
 
 Corrective continuation focused validation passed 6 files / 50 tests; TypeScript and `git diff --check` were clean. The complete final diff was then reproduced on parent `99c07b1` in an isolated clean worktree. The first `TZ=UTC` full-suite run passed 2,092 tests and hit one timeout in the unrelated `ScreenerSessionWiring.test.tsx`; that exact file immediately passed 17/17 in isolation. One complete suite rerun then passed 150 files / 2,093 tests. The production build succeeded and generated the full route manifest. The unrelated Screener timing failure and non-fatal build-time Redis warnings are disclosed rather than hidden or attributed to PI-0014C.
+
+## Final approval correction: persistent verification and primary queue action
+
+The final team review identified that missing marketable evidence could remove an existing Verify Pricing recommendation: the conflict predicate required a non-null marketable P/L, so a refreshed one-sided or missing leg could fall back to `MID_ONLY`. The provider now applies a position-keyed verification latch after canonical recomputation. Once a position is in Verify Pricing, missing, stale, degraded, or otherwise decision-ineligible marketable evidence preserves its Verify Pricing recommendation/objective. The latch clears only when current evidence explicitly reports `marketableDecisionEligible: true`, or naturally disappears when the position is no longer returned because it closed. The refreshed evidence itself remains current and truthful; only the safety disposition is preserved.
+
+Refresh completion classification now inspects `pricingDecisionEvidence.marketableDecisionEligible` as well as recommendation kind. Incomplete evidence can never produce “Pricing verified.” A synchronous request ref blocks immediate same-control double clicks before React propagates shared loading.
+
+The action is now present on all three intended Portfolio surfaces: Position cards, the legacy Priority List, and the primary Today's Priorities queue. Outcome announcements have moved to page-owned state above the tab content, so “still unverified,” failure, recommendation-updated, and position-closed messages survive removal of the initiating card or objective and remain dismissible/accessibly announced.
+
+Provider regressions now cover supersession during broker loading, supersession while the older request is held in snapshot loading, snapshot-store failure with `{}` recomputation, typed failure, and the exact Verify Pricing → incomplete evidence → Verify Pricing latch followed by eligible-evidence release. The raw-position callback documentation now states its actual post-recomputation timing and conservative next-refresh snapshot semantics.
+
+Final-approval focused validation: 7 files / 69 tests passing; TypeScript clean. The exact final diff was then reproduced on parent `bb3dad7` in an isolated clean worktree: `git diff --check` was clean, the first `TZ=UTC` full-suite run passed 150 files / 2,098 tests with no retry, and the production build succeeded with the full route manifest. Non-fatal Redis connection warnings remained the only build-time environmental noise.

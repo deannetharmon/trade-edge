@@ -8,8 +8,8 @@
 // (exact stableKey match, highlight, fail-safe notice, same-position/
 // different-kind disambiguation).
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
@@ -103,6 +103,32 @@ afterEach(() => {
 });
 
 describe('TodaysPrioritiesQueueView: empty states', () => {
+  it('offers Refresh Quotes on the primary Today’s Priorities Verify Pricing item', async () => {
+    const user = userEvent.setup();
+    const objective = makeObjective({ ruleId: 'OBJ-VERIFY-PRICING', title: 'Verify Pricing: TEST' });
+    const dashboard = makeDashboard({ immediateAction: [makePrioritized({ objective, score: 90 })] });
+    const queue = buildTodaysPrioritiesQueue({ dashboard, generatedAt: GENERATED_AT });
+    const onRefreshQuotes = vi.fn().mockResolvedValue({
+      status: 'success',
+      positions: [{ key: 'pos_test', recommendation: { kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: true } }],
+    });
+    const onPricingRefreshOutcome = vi.fn();
+    render(
+      <TodaysPrioritiesQueueView
+        queue={queue}
+        loading={false}
+        th={THEMES.dark}
+        onRefreshQuotes={onRefreshQuotes}
+        portfolioRefreshing={false}
+        onPricingRefreshOutcome={onPricingRefreshOutcome}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    expect(onRefreshQuotes).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'Pricing verified; recommendation updated.' })));
+  });
+
   it('shows "Nothing needs your attention right now." when the open queue is empty', () => {
     const queue = buildTodaysPrioritiesQueue({ dashboard: makeDashboard(), generatedAt: GENERATED_AT });
     render(<TodaysPrioritiesQueueView queue={queue} loading={false} th={THEMES.dark} />);

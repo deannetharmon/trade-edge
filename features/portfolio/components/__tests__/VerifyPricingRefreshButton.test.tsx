@@ -18,8 +18,9 @@ const verifyPricingRecommendation: PortfolioRecommendation = {
 
 describe('VerifyPricingRefreshButton', () => {
   it('renders only for Verify Pricing recommendations', () => {
+    const onOutcome = vi.fn();
     const { rerender } = render(
-      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={vi.fn()} />,
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={vi.fn()} onOutcome={onOutcome} />,
     );
     expect(screen.getByRole('button', { name: /refresh quotes/i })).toBeInTheDocument();
 
@@ -29,6 +30,7 @@ describe('VerifyPricingRefreshButton', () => {
         positionKey="MU-spread"
         portfolioRefreshing={false}
         onRefresh={vi.fn()}
+        onOutcome={onOutcome}
       />,
     );
     expect(screen.queryByRole('button', { name: /refresh quotes/i })).not.toBeInTheDocument();
@@ -36,15 +38,18 @@ describe('VerifyPricingRefreshButton', () => {
 
   it('performs one refresh, exposes busy state, and permits no retry while in flight', async () => {
     let resolveRefresh!: () => void;
-    const onRefresh = vi.fn(() => new Promise<any>(resolve => { resolveRefresh = () => resolve({ status: 'success', positions: [{ key: 'MU-spread', recommendation: verifyPricingRecommendation }] }); }));
+    const onOutcome = vi.fn();
+    const onRefresh = vi.fn(() => new Promise<any>(resolve => { resolveRefresh = () => resolve({ status: 'success', positions: [{ key: 'MU-spread', recommendation: verifyPricingRecommendation, pricingDecisionEvidence: { marketableDecisionEligible: false } }] }); }));
     const { rerender } = render(
-      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} />,
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} onOutcome={onOutcome} />,
     );
 
     const button = screen.getByRole('button', { name: /refresh quotes/i });
     fireEvent.click(button);
+    fireEvent.click(button);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
     rerender(
-      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing onRefresh={onRefresh} />,
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing onRefresh={onRefresh} onOutcome={onOutcome} />,
     );
     fireEvent.click(button);
 
@@ -55,23 +60,25 @@ describe('VerifyPricingRefreshButton', () => {
 
     resolveRefresh();
     rerender(
-      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} />,
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} onOutcome={onOutcome} />,
     );
     await waitFor(() => expect(button).not.toBeDisabled());
-    expect(await screen.findByRole('status')).toHaveTextContent('pricing is still unverified');
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringMatching(/still unverified/i) })));
   });
 
   it('announces refresh failure and a successful recommendation transition', async () => {
+    const onOutcome = vi.fn();
     const { rerender } = render(
       <VerifyPricingRefreshButton
         recommendation={verifyPricingRecommendation}
         positionKey="MU-spread"
         portfolioRefreshing={false}
         onRefresh={vi.fn().mockResolvedValue({ status: 'error', message: 'Broker unavailable' })}
+        onOutcome={onOutcome}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('pricing remains unverified');
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ tone: 'error', message: expect.stringMatching(/pricing remains unverified/i) })));
 
     rerender(
       <VerifyPricingRefreshButton
@@ -80,11 +87,30 @@ describe('VerifyPricingRefreshButton', () => {
         portfolioRefreshing={false}
         onRefresh={vi.fn().mockResolvedValue({
           status: 'success',
-          positions: [{ key: 'MU-spread', recommendation: { ...verifyPricingRecommendation, kind: 'watch' } }],
+          positions: [{ key: 'MU-spread', recommendation: { ...verifyPricingRecommendation, kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: true } }],
         })}
+        onOutcome={onOutcome}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Pricing verified; recommendation updated');
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'Pricing verified; recommendation updated.' })));
+  });
+
+  it('never calls incomplete evidence verified even if recommendation kind changes', async () => {
+    const onOutcome = vi.fn();
+    render(
+      <VerifyPricingRefreshButton
+        recommendation={verifyPricingRecommendation}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
+        onRefresh={vi.fn().mockResolvedValue({
+          status: 'success',
+          positions: [{ key: 'MU-spread', recommendation: { ...verifyPricingRecommendation, kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: false } }],
+        })}
+        onOutcome={onOutcome}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringMatching(/still unverified/i) })));
   });
 });

@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import type { PortfolioObjective } from '@/lib/portfolio-intelligence';
 import { TodaysPriorities } from './TodaysPriorities';
-import { VerifyPricingObjectiveRefreshButton } from './VerifyPricingRefreshButton';
+import { VerifyPricingObjectiveRefreshButton, type PricingRefreshOutcome } from './VerifyPricingRefreshButton';
 import type { PortfolioRefreshResult } from '@/components/portfolio-data/PortfolioDataProvider';
 import {
   isCompletable,
@@ -37,9 +37,10 @@ export interface TodaysPrioritiesWorkflowProps {
   th: typeof THEMES[Theme];
   onRefreshQuotes?: () => Promise<PortfolioRefreshResult>;
   portfolioRefreshing?: boolean;
+  onPricingRefreshOutcome?: (outcome: PricingRefreshOutcome | null) => void;
 }
 
-export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuotes, portfolioRefreshing = false }: TodaysPrioritiesWorkflowProps) {
+export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome }: TodaysPrioritiesWorkflowProps) {
   const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
   // Guards against writing an empty {} back over real stored state before
   // the initial localStorage read completes (both run in the same tick on
@@ -100,12 +101,13 @@ export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuo
         th={th}
         title="Open Priorities"
         renderAction={(objective) => {
-          if (objective.ruleId === 'OBJ-VERIFY-PRICING' && onRefreshQuotes) {
+          if (objective.ruleId === 'OBJ-VERIFY-PRICING' && onRefreshQuotes && onPricingRefreshOutcome) {
             return (
               <VerifyPricingObjectiveRefreshButton
                 objective={objective}
                 portfolioRefreshing={portfolioRefreshing}
                 onRefresh={onRefreshQuotes}
+                onOutcome={onPricingRefreshOutcome}
               />
             );
           }

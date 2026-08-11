@@ -5,7 +5,7 @@
 // TodaysPriorities.test.tsx's style and fixture shape.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { THEMES } from '@/lib/theme';
@@ -62,8 +62,9 @@ describe('PI-0004C: TodaysPrioritiesWorkflow -- Open/Completed sections', () => 
     const user = userEvent.setup();
     const onRefreshQuotes = vi.fn().mockResolvedValue({
       status: 'success',
-      positions: [{ key: 'pos_amd', recommendation: { kind: 'watch' } }],
+      positions: [{ key: 'pos_amd', recommendation: { kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: true } }],
     });
+    const onPricingRefreshOutcome = vi.fn();
     const objective = makeObjective({
       type: 'MANAGE_POSITION',
       ruleId: 'OBJ-VERIFY-PRICING',
@@ -76,12 +77,13 @@ describe('PI-0004C: TodaysPrioritiesWorkflow -- Open/Completed sections', () => 
         th={THEMES.dark}
         onRefreshQuotes={onRefreshQuotes}
         portfolioRefreshing={false}
+        onPricingRefreshOutcome={onPricingRefreshOutcome}
       />,
     );
 
     await user.click(screen.getByRole('button', { name: /refresh quotes/i }));
     expect(onRefreshQuotes).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('status')).toHaveTextContent('Pricing verified; recommendation updated');
+    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'Pricing verified; recommendation updated.' })));
     expect(screen.queryByRole('button', { name: 'Mark Complete' })).not.toBeInTheDocument();
   });
 
