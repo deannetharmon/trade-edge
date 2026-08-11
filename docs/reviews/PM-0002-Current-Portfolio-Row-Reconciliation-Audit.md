@@ -239,7 +239,7 @@ The current pricing trust boundary is directionally sound, and the MU core sprea
 
 ## 12. Corrective implementation disposition
 
-Implemented on `fix/pm-0002-portfolio-row-correctness` in product commit `69a2d8f`:
+Implemented on `fix/pm-0002-portfolio-row-correctness` through product commit `ca3aa58`:
 
 - canonical recommendation presentation and sorting;
 - AI explanation separated from the canonical action;

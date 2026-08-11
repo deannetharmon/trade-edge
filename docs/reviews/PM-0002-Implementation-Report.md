@@ -6,6 +6,7 @@
 - Branch: `fix/pm-0002-portfolio-row-correctness`
 - Audit import: `afa6006`
 - Product/tests: `69a2d8f`
+- Final authority correction: `ca3aa58`
 - Push/merge: not performed
 
 ## Final architecture
@@ -75,7 +76,7 @@ The new presentation tests prove that Verify Pricing remains the public label an
 
 ## Changed files
 
-Product and tests in `69a2d8f`:
+Product and tests through `ca3aa58`:
 
 1. `app/portfolio/page.tsx`
 2. `features/portfolio/components/VerifyPricingRefreshButton.tsx`
@@ -102,6 +103,7 @@ Documentation:
 - Full suite: 152 files / 2,132 tests accounted for; 2,130 passed and two pre-existing `lib/scans/__tests__/cspSearch.test.ts` tie-break assertions failed.
 - Baseline proof: the same two CSP assertions fail unchanged on base `2e515ba` in the clean audit worktree (22/24 passing). PM-0002 did not modify CSP search or tests.
 - Production build: `npm run build` exited successfully after Next.js compiled and completed type/lint validation; only optional-platform SWC cache warnings appeared.
+- Post-correction validation: TypeScript passed again; canonical presentation + Portfolio page 2 files / 8 tests passed; diff check passed.
 
 ## Deviations and deferred decisions
 
