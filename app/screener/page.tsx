@@ -7906,7 +7906,9 @@ export default function Home() {
                   meaningless/misleading empty state if wired to either
                   Best-Opportunities component -- it is deliberately
                   excluded, not merely deferred. */}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && 
+                (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && 
+                activeSession?.requestedStrategy !== 'pmcc' && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
                   borderClassName={th.border}
