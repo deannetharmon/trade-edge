@@ -134,6 +134,23 @@ describe('PI-0014C acquisition-level verification continuity', () => {
 });
 
 describe('PM-0002 incomplete entry economics decision boundary', () => {
+  it('keeps a complete debit out of credit-oriented objective and Remaining Opportunity logic', () => {
+    const debit = position({
+      entryPriceEffect: 'Debit', entryCredit: 500, entryEconomicsComplete: true,
+      creditReceived: 0, pnl: null, pnlPct: null, closeNowPnl: null,
+      targetPrice: 0, hitTarget: false, hasGtc: false,
+    });
+    const result = scorePortfolioPositionObjective(debit, NOW);
+    expect(result.valuation).toBeNull();
+    expect(result.recommendation.kind).not.toBe('place-gtc');
+    expect(result.recommendation.kind).not.toBe('close-winner');
+    expect(result.recommendation.kind).not.toBe('close-loser');
+    expect(scorePortfolioRemainingOpportunity(debit)).toMatchObject({
+      opportunityCapturedPct: null,
+      remainingOpportunityPct: null,
+    });
+  });
+
   it('keeps compatibility zero out of valuation, remaining opportunity, and entry-dependent actions', () => {
     const incomplete = position({
       entryPriceEffect: 'Unknown', entryCredit: null, entryEconomicsComplete: false,

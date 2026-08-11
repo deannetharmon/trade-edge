@@ -118,7 +118,7 @@ Final clean-worktree validation after all corrections:
 
 - Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
 - Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **154 files / 2,147 tests passed; zero failures**.
+- Complete suite in one invocation: **154 files / 2,149 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.
@@ -133,3 +133,9 @@ The earlier two CSP tie-break failures did not recur in this final run; the fina
 - POP, Theta-minus-Gamma, and the 50%-target timing projection remain modeled estimates and are labeled as such.
 - Unresolved-pricing continuity remains in-session only.
 - Cross-session persistence and unrelated CSP tie-break behavior remain separate product decisions.
+
+## Final supported-credit boundary correction
+
+The final approval pass removed the remaining compatibility-field reads. Canonical objective scoring, Remaining Opportunity, stop classification, the exported legacy evaluator, compact-row credit/P&L, and Extend eligibility now require `hasSupportedCreditEntryEconomics()` and consume canonical `entryCredit`. A complete debit never enters credit-derived recommendation, Remaining Opportunity, target, GTC, stop, Take Profit, or Cut Losses logic; Close/Roll remains independently available through canonical close identity.
+
+The compact row now distinguishes the three states in the required order: incomplete provenance displays `Unavailable`, a known debit displays `Debit (unsupported)`, and a supported credit displays canonical `entryCredit`. Regression coverage deliberately supplies a mismatched legacy `creditReceived: 0` beside canonical `entryCredit: 1260` and proves both the displayed credit and P/L percentage use the canonical value. Additional tests prove complete debit acquisition produces no credit-oriented objective or Remaining Opportunity, debit/missing provenance cannot calibrate stop classification, and debit rows expose Close/Roll while hiding Take Profit, Place GTC, Cut Losses, Set Stop, and target projection.

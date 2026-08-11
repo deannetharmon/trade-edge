@@ -182,8 +182,8 @@ export function computeRawPositionValuation(pos: Position) {
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
 export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
-  const entryEconomicsComplete = hasCompleteEntryEconomics(pos);
-  const decisionPosition: Position = entryEconomicsComplete ? pos : {
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
+  const decisionPosition: Position = supportedCreditEntry ? pos : {
     ...pos,
     entryCredit: null,
     pnl: null,
@@ -194,7 +194,7 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
     targetPrice: 0,
     maxRiskReliable: false,
   };
-  const healthScore = entryEconomicsComplete ? (pos.healthScore ?? (
+  const healthScore = supportedCreditEntry ? (pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
       : undefined
@@ -211,8 +211,8 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // so intent selection sees the same number Position Intelligence displays,
   // computed fresh at render time -- nothing new persisted onto Position.
   const { remainingOpportunityPct } = calculateRemainingOpportunity({
-    creditReceived: entryEconomicsComplete ? pos.creditReceived : null,
-    pnlPct: entryEconomicsComplete ? normalizePositionObjectivePct(pos.pnlPct) : null,
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
+    pnlPct: supportedCreditEntry ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: healthScore?.score ?? null,
@@ -227,12 +227,12 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // this file already owns pos.closeNowPnl/pos.currentValue/pos.closeValue --
   // the Decision Engine only ever sees the already-normalized percentage,
   // never raw prices, matching how pnlPct itself is passed through today.
-  const marketablePnlPct = entryEconomicsComplete ? computeMarketablePnlPct(pos) : null;
+  const marketablePnlPct = supportedCreditEntry ? computeMarketablePnlPct(pos) : null;
   const valuation = computeRawPositionValuation(decisionPosition);
 
   const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective({
     ...decisionPosition,
-    creditReceived: entryEconomicsComplete ? pos.creditReceived : null,
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
     positionId: pos.key,
     healthScore,
     netEdgeDeclinePct,
@@ -258,13 +258,14 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
 // Intelligence call site -- nothing is persisted onto Position.
 export function scorePortfolioRemainingOpportunity(pos: Position) {
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
   return calculateRemainingOpportunity({
-    creditReceived: hasCompleteEntryEconomics(pos) ? pos.entryCredit ?? null : null,
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
     // Same fraction-vs-percent normalization evaluatePositionObjective()
     // already applies to these two fields before using them -- keeps this
     // metric's captured/remaining percentages consistent with the
     // recommendation engine's own reading of the same position.
-    pnlPct: hasCompleteEntryEconomics(pos) ? normalizePositionObjectivePct(pos.pnlPct) : null,
+    pnlPct: supportedCreditEntry ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: pos.healthScore?.score ?? null,
@@ -758,11 +759,11 @@ export function resolveOcoStopOrderId(complexOrderSubmissionResult: any): { comp
 //   UNKNOWN_PROVENANCE     -> 'unknown'
 //   INVALID                -> 'unknown'
 export function classifyPositionStopLoss(
-  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'> & { entryEconomicsComplete?: boolean },
+  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity' | 'entryCredit' | 'entryEconomicsComplete' | 'entryPriceEffect'>,
   gtcOrders: GtcOrder[],
   recordedPolicy: StopLossPolicy | null = null,
 ): StopLossInfo {
-  if (position.entryEconomicsComplete === false) {
+  if (!hasSupportedCreditEntryEconomics(position)) {
     return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
   }
   const shortLeg = position.legs.find(l => l.direction === 'Short');
@@ -770,7 +771,7 @@ export function classifyPositionStopLoss(
     return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
   }
   // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
-  const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
+  const creditPerContract = position.quantity > 0 ? position.entryCredit! / (position.quantity * 100) : position.entryCredit! / 100;
   const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
   const match = gtcOrders.find(order =>
     isStopOrder(order) && order.legs.some(leg => normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action))
@@ -1495,13 +1496,21 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // Same forcing applies to a crossed leg -- see anyLegCrossed above.
     const targetPrice = !entryEconomicsComplete || isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
     const hitTarget = entryEconomicsComplete && !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    const entryPriceEffect: Position['entryPriceEffect'] = !entryEconomicsComplete ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit');
 
     const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
     const recordedStopPolicy = shortLegForPolicyKey
       ? stopPolicies[positionStopPolicyKey(accountNumber, shortLegForPolicyKey.symbol)] ?? null
       : null;
     const stopLoss = classifyPositionStopLoss(
-      { legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity, entryEconomicsComplete },
+      {
+        legs: positionLegs,
+        creditReceived: Math.abs(creditReceived),
+        entryCredit,
+        entryEconomicsComplete,
+        entryPriceEffect,
+        quantity: canonicalQuantity,
+      },
       gtcOrders,
       recordedStopPolicy,
     );
@@ -1533,7 +1542,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // genuine net-credit structure from a detected net-debit one --
       // `creditReceived` below is floored to $0.00 for the debit case and
       // must never be read as though it were a real zero-credit entry.
-      entryPriceEffect: !entryEconomicsComplete ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit'),
+      entryPriceEffect,
       entryCredit: entryEconomicsComplete ? Math.abs(creditReceived) : null,
       entryEconomicsComplete,
       creditReceived: Math.abs(creditReceived),
@@ -1662,7 +1671,12 @@ export function isShortDateEntry(pos: Position): boolean {
 
 
 export function getRecommendation(pos: Position, trend: TrendResult | null): Recommendation {
-  const pnlPct = pos.pnl != null && pos.creditReceived !== 0 ? (pos.pnl / pos.creditReceived) * 100 : 0;
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
+  if (!supportedCreditEntry) {
+    return { action: 'MANAGE', detail: 'Credit-derived recommendation unavailable — supported net-credit entry economics are not established' };
+  }
+  const entryCredit = pos.entryCredit!;
+  const pnlPct = pos.pnl != null && entryCredit != null ? (pos.pnl / entryCredit) * 100 : 0;
   const targetPct = pos.profitTarget * 100;
   const trendAgainst = trend && ((pos.strategy === 'BPS' && trend.trend === 'downtrend') || (pos.strategy === 'BCS' && trend.trend === 'uptrend'));
   const trendAligns = trend && ((pos.strategy === 'BPS' && trend.trend === 'uptrend') || (pos.strategy === 'BCS' && trend.trend === 'downtrend') || (pos.strategy === 'IC' && trend.trend === 'sideways'));

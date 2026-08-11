@@ -7624,6 +7624,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const lifecycle = classifyPositionLifecycle(pos);
   const entryEconomicsComplete = hasCompleteEntryEconomics(pos);
   const creditEntryEconomicsComplete = hasSupportedCreditEntryEconomics(pos);
+  const displayEntryCredit = creditEntryEconomicsComplete ? canonicalEntryCredit(pos) : null;
 
   const shortPut = shortPuts[0] ?? null;
   const cspStrike = shortPut?.strikePrice ?? null;
@@ -8003,12 +8004,12 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               {/* PM-0001 corrective round: a detected net-debit structure's
                   creditReceived is a floored $0.00, not a genuine zero-credit
                   entry -- never render it as though it were. */}
-              {!creditEntryEconomicsComplete ? (
+              {!entryEconomicsComplete ? (
                 <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>Unavailable</p>
               ) : pos.entryPriceEffect === 'Debit' ? (
                 <p className="text-xs font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>Debit (unsupported)</p>
               ) : (
-                <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${pos.creditReceived.toFixed(2)}</p>
+                <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>{displayEntryCredit != null ? `$${displayEntryCredit.toFixed(2)}` : 'Unavailable'}</p>
               )}
             </div>
 
@@ -8034,9 +8035,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                     <p className={`text-xs font-bold ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                       {displayPnl >= 0 ? '+' : ''}${displayPnl.toFixed(0)}{isStale && <span className="text-[8px] opacity-50 ml-0.5">~</span>}
                     </p>
-                    {pos.creditReceived !== 0 && (
+                    {entryPnlPct({ ...pos, pnl: displayPnl }) != null && (
                       <p className={`font-normal text-[10px] ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
-                        ({displayPnl >= 0 ? '+' : ''}{(displayPnl / Math.abs(pos.creditReceived) * 100).toFixed(1)}%)
+                        ({displayPnl >= 0 ? '+' : ''}{entryPnlPct({ ...pos, pnl: displayPnl })!.toFixed(1)}%)
                       </p>
                     )}
                   </>
@@ -8386,7 +8387,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           })}
           {/* Extend Profit — only show when profit ≥50% AND DTE ≥ 14 */}
           {(() => {
-            const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+            const pnlPct = entryPnlPct(pos);
             const canExtend = pnlPct != null && pnlPct >= 50 && pos.dte >= 14;
             return canExtend ? <ExtendProfitButton pos={pos} th={th} /> : null;
           })()}

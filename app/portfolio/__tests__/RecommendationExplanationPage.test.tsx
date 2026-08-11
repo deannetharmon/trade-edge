@@ -32,7 +32,7 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
         ],
         identity: { positionKey: 'MU::2026-09-04', quantity: 5, signedEntryAmount: 1260, entryPriceEffect: 'Credit', legs: [] },
         structureAmbiguous: false, structureBlockMessage: null, entryPriceEffect: 'Credit', entryCredit: 1260,
-        entryEconomicsComplete: true, creditReceived: 1260, currentValue: 1600, closeValue: 3650, closeNowPnl: -2390,
+        entryEconomicsComplete: true, creditReceived: 0, currentValue: 1600, closeValue: 3650, closeNowPnl: -2390,
         pnl: -340, pnlPct: -26.98, pnlReliable: true, intent: 'income', plOpen: -340, targetPrice: 630,
         profitTarget: .5, maxRisk: 3740, maxRiskReliable: true, hitTarget: false, needsClose: false,
         entryDte: 30, entryDate: '2026-08-05', accountNumber: 'acct', ivr: 39, iv: 66, hv30: 40, beta: 1,
@@ -53,6 +53,8 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
     vi.stubGlobal('fetch', fetchSpy);
     render(<PortfolioModeProvider><PortfolioDataProvider><PortfolioPage /></PortfolioDataProvider></PortfolioModeProvider>);
     const button = await screen.findByRole('button', { name: /Explain Recommendation/i });
+    expect(screen.getByText('$1260.00')).toBeInTheDocument();
+    expect(screen.getByText('(-27.0%)')).toBeInTheDocument();
     fireEvent.click(button);
     await waitFor(() => expect(screen.getByText(/Current broker leg quotes are stale/i)).toBeInTheDocument());
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/api/analyze'))).toBe(false);
@@ -70,6 +72,9 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled')));
     render(<PortfolioModeProvider><PortfolioDataProvider><PortfolioPage /></PortfolioDataProvider></PortfolioModeProvider>);
     expect(await screen.findByRole('button', { name: /Close\/Roll/i })).toBeInTheDocument();
+    expect(screen.getByText('Debit (unsupported)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Take Profit/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Place GTC/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Cut Losses/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Set Stop/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/50% unlikely|~by/i)).not.toBeInTheDocument();

@@ -48,6 +48,8 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     structureAmbiguous: false,
     structureBlockMessage: null,
     entryPriceEffect: 'Credit',
+    entryCredit: 1260,
+    entryEconomicsComplete: true,
     creditReceived: 1260, // $2.52/contract * 5 * 100
     currentValue: 1200,
     closeValue: 1200,
@@ -94,7 +96,15 @@ function makePosition(overrides: Partial<Position> = {}): Position {
 }
 
 describe('classifyPositionStopLoss (wiring)', () => {
-  const positionInput = { legs: [leg(), leg({ direction: 'Long', symbol: 'MU   260918P00090000' })], creditReceived: 1260, quantity: 5 };
+  const positionInput = {
+    legs: [leg(), leg({ direction: 'Long', symbol: 'MU   260918P00090000' })],
+    creditReceived: 1260, entryCredit: 1260, entryEconomicsComplete: true, entryPriceEffect: 'Credit' as const, quantity: 5,
+  };
+
+  it('fails stop classification closed for debit and missing canonical provenance', () => {
+    expect(classifyPositionStopLoss({ ...positionInput, entryPriceEffect: 'Debit' }, [gtcOrder()], null).classification).toBe('INVALID');
+    expect(classifyPositionStopLoss({ ...positionInput, entryCredit: null }, [gtcOrder()], null).classification).toBe('INVALID');
+  });
 
   // 1. MU-style 5-lot BPS: credit $2.52/contract, working stop $3.15, no
   // TradeEdge-recorded policy for this order.
@@ -170,7 +180,10 @@ describe('classifyPositionStopLoss (wiring)', () => {
 // still comes back UNKNOWN_PROVENANCE, never misattributed to the stale
 // recorded policy.
 describe('OCO broker identity: submit -> persist -> reload (end-to-end)', () => {
-  const positionInput = { legs: [leg(), leg({ direction: 'Long', symbol: 'MU   260918P00090000' })], creditReceived: 1260, quantity: 5 };
+  const positionInput = {
+    legs: [leg(), leg({ direction: 'Long', symbol: 'MU   260918P00090000' })],
+    creditReceived: 1260, entryCredit: 1260, entryEconomicsComplete: true, entryPriceEffect: 'Credit' as const, quantity: 5,
+  };
 
   function ocoEnvelope(opts: { complexId: string; profitOrderId: string; stopOrderId: string; stopTrigger: string }) {
     return {
@@ -718,7 +731,10 @@ describe('TE-0002 corrective round 3: stop display/enforcement trust boundary (M
 
   const muShortLeg = () => leg({ symbol: 'MU   260918P00800000', strikePrice: MU_SHORT_STRIKE, avgOpenPrice: MU_CREDIT_PER_CONTRACT });
   const muLongLeg = () => leg({ symbol: 'MU   260918P00790000', strikePrice: MU_LONG_STRIKE, direction: 'Long', avgOpenPrice: 0 });
-  const muPositionInput = { legs: [muShortLeg(), muLongLeg()], creditReceived: MU_CREDIT_RECEIVED, quantity: MU_QUANTITY };
+  const muPositionInput = {
+    legs: [muShortLeg(), muLongLeg()], creditReceived: MU_CREDIT_RECEIVED, entryCredit: MU_CREDIT_RECEIVED,
+    entryEconomicsComplete: true, entryPriceEffect: 'Credit' as const, quantity: MU_QUANTITY,
+  };
   const muGtcOrder = gtcOrder({
     id: 'mu-stop-ord', stopPrice: String(MU_BROKER_STOP),
     legs: [{ symbol: 'MU   260918P00800000', action: 'Buy to Close' }],
