@@ -113,3 +113,39 @@ Documentation:
 - POP, theta-minus-gamma estimate, and the 50%-target projection formulas were not changed; their presentation is now explicitly modeled/heuristic.
 - Cross-session persistence of unresolved pricing remains out of scope.
 - The unrelated CSP tie-break failures require their own ticket; they were not repaired or weakened here.
+
+## Final team-review corrective pass
+
+The implementation was returned after the team identified that the first
+delivery protected the visible row more completely than several downstream
+consumers. The final corrective pass closes those gaps:
+
+- Missing entry economics now suppress valuation, Remaining Opportunity,
+  health-derived entry calculations, marketable P/L inputs, and all
+  entry-dependent objective triggers. The numeric `creditReceived = 0`
+  compatibility value is never treated as economic evidence by this path.
+- Position prompts and follow-up chat state entry credit, target, effective
+  basis, and max risk as unavailable when broker entry premiums are
+  incomplete; they no longer print plausible `$0.00` economics.
+- The Position card no longer invokes the legacy recommendation engine when
+  canonical state is absent. It fails closed as `Recommendation Unavailable`.
+- Every visible position-AI field is projected from the canonical
+  recommendation. Model-authored action, confidence, risk/catalyst, and rule
+  deviation prose cannot contradict the canonical action.
+- Broker-shaped five-lot Greek evidence is aggregated in one production
+  helper and tested through the same helper before the standard contract
+  multiplier is applied exactly once for display.
+- Delta is labeled as share-equivalent exposure, not a percentage.
+- Today’s Priorities, Priority List, and the Position row all pass the
+  pre-refresh oldest-leg broker timestamp into the shared refresh action, so
+  unchanged after-hours timestamps receive the same explanation everywhere.
+
+Additional regression coverage proves canonical fail-closed presentation,
+canonical AI projection, broker-shaped Greek aggregation, and that incomplete
+entry economics cannot produce valuation, Remaining Opportunity, Place GTC,
+Take Profit, or Cut Losses from the compatibility zero.
+
+Final corrective-pass validation: TypeScript passed; four focused files / 100
+tests passed; `git diff --check` passed. The earlier full-suite baseline
+exception remains exactly as documented above and was not reclassified as a
+green monolithic suite.

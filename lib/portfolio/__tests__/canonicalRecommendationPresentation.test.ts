@@ -4,6 +4,7 @@ import {
   canonicalRecommendationForCard,
   canonicalRecommendationPriority,
   canonicalRecommendationToAction,
+  projectCanonicalRecommendationForAi,
 } from '../canonicalRecommendationPresentation';
 
 function recommendation(kind: PortfolioRecommendation['kind'], label: string): PortfolioRecommendation {
@@ -18,7 +19,6 @@ describe('PM-0002 canonical recommendation presentation', () => {
   it('keeps Verify Pricing as the public label even though its compatible manual action bucket is MANAGE', () => {
     const result = canonicalRecommendationForCard(
       recommendation('verify-pricing', 'Verify Pricing'),
-      { action: 'HOLD', detail: 'legacy contradiction' },
     );
     expect(result).toEqual({ action: 'MANAGE', detail: 'Canonical next action', publicLabel: 'Verify Pricing' });
     expect(result.publicLabel).not.toBe('Manage');
@@ -36,5 +36,25 @@ describe('PM-0002 canonical recommendation presentation', () => {
       .toBeLessThan(canonicalRecommendationPriority(recommendation('verify-pricing', 'Verify Pricing')));
     expect(canonicalRecommendationPriority(recommendation('verify-pricing', 'Verify Pricing')))
       .toBeLessThan(canonicalRecommendationPriority(recommendation('hold', 'Hold')));
+  });
+
+  it('projects every visible AI field from canonical evidence', () => {
+    const projected = projectCanonicalRecommendationForAi(recommendation('hold', 'Hold'));
+    expect(projected).toMatchObject({
+      recommendation: 'HOLD',
+      confidence: 'LOW',
+      summary: 'Canonical next action',
+      reasoning: 'Canonical reason',
+      risks: [], catalysts: [], deviatesFromRules: false, deviationNote: null,
+    });
+    expect(JSON.stringify(projected)).not.toContain('Cut losses now');
+  });
+
+  it('fails closed instead of invoking a legacy recommendation when canonical state is absent', () => {
+    expect(canonicalRecommendationForCard(null)).toEqual({
+      action: 'WATCH',
+      detail: 'Canonical recommendation is unavailable. Refresh portfolio data before acting.',
+      publicLabel: 'Recommendation Unavailable',
+    });
   });
 });

@@ -44,6 +44,36 @@ export function toWholePositionVegaDollars(rawVega: number | null): number | nul
   return rawVega == null || !Number.isFinite(rawVega) ? null : rawVega * CONTRACT_MULTIPLIER;
 }
 
+export interface BrokerGreekLeg {
+  symbol?: string | null;
+  quantity?: string | number | null;
+  'quantity-direction'?: string | null;
+}
+
+export function aggregateBrokerPositionGreeks(
+  legs: BrokerGreekLeg[],
+  maps: { theta: Readonly<Record<string, number>>; gamma: Readonly<Record<string, number>>; delta: Readonly<Record<string, number>>; vega: Readonly<Record<string, number>> },
+) {
+  const sum = (map: Readonly<Record<string, number>>, shortSign: number, longSign: number, absolute: boolean): number | null => {
+    let total = 0;
+    let found = false;
+    for (const leg of legs) {
+      const value = map[leg.symbol?.replace(/\s+/g, '') ?? ''];
+      const quantity = Number.parseInt(String(leg.quantity ?? '1'), 10);
+      if (!Number.isFinite(value) || !Number.isFinite(quantity)) continue;
+      total += (leg['quantity-direction'] === 'Short' ? shortSign : longSign) * (absolute ? Math.abs(value) : value) * quantity;
+      found = true;
+    }
+    return found ? Number(total.toFixed(4)) : null;
+  };
+  return {
+    theta: sum(maps.theta, 1, -1, true),
+    gamma: sum(maps.gamma, -1, 1, true),
+    delta: sum(maps.delta, -1, 1, false),
+    vega: sum(maps.vega, -1, 1, true),
+  };
+}
+
 export function computeCspEffectiveBuyPrice(strike: number | null, perShareEntryPremium: number | null): number | null {
   if (
     strike == null || perShareEntryPremium == null ||

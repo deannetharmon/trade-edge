@@ -124,9 +124,10 @@ export interface TodaysPrioritiesQueueViewProps {
   onRefreshQuotes?: () => Promise<PortfolioRefreshResult>;
   portfolioRefreshing?: boolean;
   onPricingRefreshOutcome?: (outcome: PricingRefreshOutcome | null) => void;
+  quoteCapturedAtByPositionKey?: Readonly<Record<string, string | null>>;
 }
 
-export function TodaysPrioritiesQueueView({ queue, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome }: TodaysPrioritiesQueueViewProps) {
+export function TodaysPrioritiesQueueView({ queue, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome, quoteCapturedAtByPositionKey = {} }: TodaysPrioritiesQueueViewProps) {
   const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
   const [stateLoaded, setStateLoaded] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
@@ -244,6 +245,7 @@ export function TodaysPrioritiesQueueView({ queue, loading, th, onRefreshQuotes,
                       portfolioRefreshing={portfolioRefreshing}
                       onRefresh={onRefreshQuotes}
                       onOutcome={onPricingRefreshOutcome}
+                      beforeQuoteCapturedAt={quoteCapturedAtByPositionKey[item.subjectId ?? ''] ?? null}
                     />
                   ) : item.kind === 'attention' && item.attentionItem?.objective && isCompletable(item.attentionItem.objective) ? (
                     <button

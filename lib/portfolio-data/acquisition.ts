@@ -74,6 +74,7 @@ import {
   resolveUnderlyingPrice,
   computePositionPnl,
   parseBrokerEntryPremium,
+  aggregateBrokerPositionGreeks,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -160,6 +161,7 @@ export function derivePositionQuoteCapturedAt(
 // Null when currentValue or closeValue is unavailable, same convention
 // those two fields already follow.
 export function computeRawPositionValuation(pos: Position) {
+  if (pos.entryEconomicsComplete === false || pos.maxRiskReliable === false) return null;
   if (pos.currentValue == null || pos.closeValue == null) return null;
   return computePositionValuation({
     creditReceived: pos.creditReceived,
@@ -178,11 +180,23 @@ export function computeRawPositionValuation(pos: Position) {
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
 export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
-  const healthScore = pos.healthScore ?? (
+  const entryEconomicsComplete = pos.entryEconomicsComplete !== false;
+  const decisionPosition: Position = entryEconomicsComplete ? pos : {
+    ...pos,
+    entryCredit: null,
+    pnl: null,
+    pnlPct: null,
+    closeNowPnl: null,
+    pop: null,
+    hitTarget: false,
+    targetPrice: 0,
+    maxRiskReliable: false,
+  };
+  const healthScore = entryEconomicsComplete ? (pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
       : undefined
-  );
+  )) : undefined;
 
   // technicalAlignment is deliberately NOT wired in this slice: trend
   // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
@@ -195,8 +209,8 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // so intent selection sees the same number Position Intelligence displays,
   // computed fresh at render time -- nothing new persisted onto Position.
   const { remainingOpportunityPct } = calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    creditReceived: entryEconomicsComplete ? pos.creditReceived : null,
+    pnlPct: entryEconomicsComplete ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: healthScore?.score ?? null,
@@ -211,11 +225,12 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // this file already owns pos.closeNowPnl/pos.currentValue/pos.closeValue --
   // the Decision Engine only ever sees the already-normalized percentage,
   // never raw prices, matching how pnlPct itself is passed through today.
-  const marketablePnlPct = computeMarketablePnlPct(pos);
-  const valuation = computeRawPositionValuation(pos);
+  const marketablePnlPct = entryEconomicsComplete ? computeMarketablePnlPct(pos) : null;
+  const valuation = computeRawPositionValuation(decisionPosition);
 
   const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective({
-    ...pos,
+    ...decisionPosition,
+    creditReceived: entryEconomicsComplete ? pos.creditReceived : null,
     positionId: pos.key,
     healthScore,
     netEdgeDeclinePct,
@@ -242,12 +257,12 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
 export function scorePortfolioRemainingOpportunity(pos: Position) {
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
   return calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
+    creditReceived: pos.entryEconomicsComplete === false ? null : pos.creditReceived,
     // Same fraction-vs-percent normalization evaluatePositionObjective()
     // already applies to these two fields before using them -- keeps this
     // metric's captured/remaining percentages consistent with the
     // recommendation engine's own reading of the same position.
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    pnlPct: pos.entryEconomicsComplete === false ? null : normalizePositionObjectivePct(pos.pnlPct),
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: pos.healthScore?.score ?? null,
@@ -1502,6 +1517,10 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         ? rawEarningsDate
         : null;
 
+    const brokerGreeks = aggregateBrokerPositionGreeks(legs, {
+      theta: thetaMap, gamma: gammaMap, delta: deltaMap, vega: vegaMap,
+    });
+
     return {
       key, symbol, expDate, dte, strategy, legs: positionLegs,
       quantity: canonicalQuantity,
@@ -1597,50 +1616,10 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           buffer: computeCanonicalBuffer(strategy, putBufferPct, callBufferPct),
         };
       })(),
-      theta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = thetaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? Math.abs(val) * qty : -Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      gamma: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = gammaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netDelta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = deltaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -val * qty : val * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netVega: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = vegaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
+      theta: brokerGreeks.theta,
+      gamma: brokerGreeks.gamma,
+      netDelta: brokerGreeks.delta,
+      netVega: brokerGreeks.vega,
     };
   });
 

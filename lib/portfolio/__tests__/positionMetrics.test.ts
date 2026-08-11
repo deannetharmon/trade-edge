@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateBrokerPositionGreeks,
   CONTRACT_MULTIPLIER,
   computeCreditPerContract,
   computeSignedNetPremium,
@@ -42,6 +43,24 @@ describe('PM-0002 entry-premium provenance', () => {
 });
 
 describe('PM-0002 whole-position Greek units', () => {
+  it('reconciles broker-shaped five-lot spread legs before applying the display multiplier once', () => {
+    const short = 'MU260904P00800000';
+    const long = 'MU260904P00790000';
+    const raw = aggregateBrokerPositionGreeks([
+      { symbol: short, quantity: '5', 'quantity-direction': 'Short' },
+      { symbol: long, quantity: '5', 'quantity-direction': 'Long' },
+    ], {
+      theta: { [short]: -0.05, [long]: -0.03 },
+      gamma: { [short]: 0.002, [long]: 0.001 },
+      delta: { [short]: -0.20, [long]: -0.10 },
+      vega: { [short]: 0.08, [long]: 0.05 },
+    });
+    expect(raw).toEqual({ theta: 0.1, gamma: -0.005, delta: 0.5, vega: -0.15 });
+    expect(toWholePositionThetaDollars(raw.theta)).toBe(10);
+    expect(toWholePositionGammaShareEquivalent(raw.gamma)).toBe(-0.5);
+    expect(toWholePositionVegaDollars(raw.vega)).toBe(-15);
+  });
+
   it('applies the standard option multiplier exactly once', () => {
     expect(toWholePositionThetaDollars(0.23)).toBeCloseTo(23);
     expect(toWholePositionGammaShareEquivalent(-0.000405)).toBeCloseTo(-0.0405);

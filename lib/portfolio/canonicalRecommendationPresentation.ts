@@ -18,13 +18,51 @@ export function canonicalRecommendationToAction(kind: PortfolioRecommendationKin
 
 export function canonicalRecommendationForCard(
   canonical: PortfolioRecommendation | null | undefined,
-  fallback: Recommendation,
 ): Recommendation & { publicLabel: string } {
-  if (!canonical) return { ...fallback, publicLabel: fallback.action };
+  if (!canonical) return {
+    action: 'WATCH',
+    detail: 'Canonical recommendation is unavailable. Refresh portfolio data before acting.',
+    publicLabel: 'Recommendation Unavailable',
+  };
   return {
     action: canonicalRecommendationToAction(canonical.kind),
     detail: canonical.suggestedAction || canonical.primaryReason,
     publicLabel: canonical.label,
+  };
+}
+
+export interface CanonicalAiProjection {
+  recommendation: 'HOLD' | 'CLOSE' | 'ROLL' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'WATCH' | 'MANAGE';
+  confidence: 'LOW';
+  summary: string;
+  reasoning: string;
+  risks: string[];
+  catalysts: string[];
+  deviatesFromRules: false;
+  deviationNote: null;
+}
+
+export function projectCanonicalRecommendationForAi(canonical: PortfolioRecommendation): CanonicalAiProjection {
+  const recommendation: CanonicalAiProjection['recommendation'] = (() => {
+    switch (canonical.kind) {
+      case 'close-winner': return 'TAKE_PROFIT';
+      case 'close-loser': return 'CUT_LOSSES';
+      case 'roll-soon': return 'ROLL';
+      case 'hold':
+      case 'let-expire': return 'HOLD';
+      case 'watch': return 'WATCH';
+      default: return 'MANAGE';
+    }
+  })();
+  return {
+    recommendation,
+    confidence: 'LOW',
+    summary: canonical.suggestedAction || canonical.primaryReason,
+    reasoning: [canonical.primaryReason, ...canonical.supportingReasons].filter(Boolean).join(' '),
+    risks: [],
+    catalysts: [],
+    deviatesFromRules: false,
+    deviationNote: null,
   };
 }
 

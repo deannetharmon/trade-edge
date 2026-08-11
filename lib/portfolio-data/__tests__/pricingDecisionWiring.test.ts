@@ -5,6 +5,8 @@ import {
   derivePositionQuoteCapturedAt,
   extractBrokerQuoteTimestamp,
   MARKETABLE_QUOTE_MAX_AGE_MS,
+  scorePortfolioPositionObjective,
+  scorePortfolioRemainingOpportunity,
 } from '@/lib/portfolio-data/acquisition';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 
@@ -128,5 +130,25 @@ describe('PI-0014C acquisition-level verification continuity', () => {
       marketableDecisionEligible: false,
     });
     expect(assignmentCleared.recommendation?.primaryReason).toContain('current broker leg quotes are incomplete');
+  });
+});
+
+describe('PM-0002 incomplete entry economics decision boundary', () => {
+  it('keeps compatibility zero out of valuation, remaining opportunity, and entry-dependent actions', () => {
+    const incomplete = position({
+      entryPriceEffect: 'Unknown', entryCredit: null, entryEconomicsComplete: false,
+      creditReceived: 0, pnl: null, pnlPct: null, closeNowPnl: null,
+      targetPrice: 0, hitTarget: false, maxRisk: 500, maxRiskReliable: false,
+      hasGtc: false,
+    });
+    const result = scorePortfolioPositionObjective(incomplete, NOW);
+    expect(result.valuation).toBeNull();
+    expect(result.recommendation.kind).not.toBe('place-gtc');
+    expect(result.recommendation.kind).not.toBe('close-winner');
+    expect(result.recommendation.kind).not.toBe('close-loser');
+    expect(scorePortfolioRemainingOpportunity(incomplete)).toMatchObject({
+      opportunityCapturedPct: null,
+      remainingOpportunityPct: null,
+    });
   });
 });

@@ -51,11 +51,13 @@ export function VerifyPricingObjectiveRefreshButton({
   portfolioRefreshing,
   onRefresh,
   onOutcome,
+  beforeQuoteCapturedAt,
 }: {
   objective: PortfolioObjective;
   portfolioRefreshing: boolean;
   onRefresh: () => Promise<PortfolioRefreshResult>;
   onOutcome: (outcome: PricingRefreshOutcome | null) => void;
+  beforeQuoteCapturedAt?: string | null;
 }) {
   return (
     <RefreshQuotesAction
@@ -64,6 +66,7 @@ export function VerifyPricingObjectiveRefreshButton({
       portfolioRefreshing={portfolioRefreshing}
       onRefresh={onRefresh}
       onOutcome={onOutcome}
+      beforeQuoteCapturedAt={beforeQuoteCapturedAt}
     />
   );
 }

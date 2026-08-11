@@ -80,7 +80,7 @@ import {
   toWholePositionVegaDollars,
   computeCspEffectiveBuyPrice,
 } from '@/lib/portfolio/positionMetrics';
-import { canonicalRecommendationForCard } from '@/lib/portfolio/canonicalRecommendationPresentation';
+import { canonicalRecommendationForCard, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -92,7 +92,7 @@ import { canonicalRecommendationForCard } from '@/lib/portfolio/canonicalRecomme
 import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
 import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct, buildPricingVerificationGrounding } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
 // TC-0001: canonicalPriorities/todaysPrioritiesDashboard/topPriority/
 // averagePositionHealth/portfolioHealth/portfolioReview/dailyBriefing are now
 // all composed by this single shared function (also used by the new
@@ -1806,7 +1806,8 @@ For portfolio analysis:
 Be direct. Be honest. If a position is in trouble, say so. If a rule should be broken, explain why.`;
 
 function buildPositionPrompt(pos: Position, trend: TrendResult | null): string {
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
+  const entryComplete = pos.entryEconomicsComplete !== false;
+  const pnlPct = entryComplete && pos.pnl != null && pos.creditReceived > 0 ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
   const netEdge = netEdgeLive(pos);
   const netEdgePk = netEdgePeak(pos);
   const thetaDollars = pos.theta != null ? pos.theta * 100 : null;
@@ -1827,12 +1828,12 @@ function buildPositionPrompt(pos: Position, trend: TrendResult | null): string {
     (!!shortCall && !!longCall);
 
   const shortQty = Math.max(1, Math.abs(shortPut?.quantity ?? shortCall?.quantity ?? 1));
-  const creditPerContract = pos.creditReceived / 100 / shortQty;
+  const creditPerContract = entryComplete ? pos.creditReceived / 100 / shortQty : null;
   const currentBuybackPerContract = pos.currentValue != null ? pos.currentValue / 100 / shortQty : null;
-  const premiumCapturedPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+  const premiumCapturedPct = entryComplete && pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
 
   const effectiveAssignmentBasis =
-    isCspLike && shortPut
+    isCspLike && shortPut && creditPerContract != null
       ? shortPut.strikePrice - creditPerContract
       : null;
 
@@ -1874,12 +1875,12 @@ Assignment willing: ${assignmentWilling}
 Effective assignment basis: ${effectiveAssignmentBasis != null ? `$${effectiveAssignmentBasis.toFixed(2)}` : 'not applicable'}
 Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
-Credit received: $${pos.creditReceived.toFixed(2)} total | $${creditPerContract.toFixed(2)} per short contract
+Credit received: ${entryComplete ? `$${pos.creditReceived.toFixed(2)} total | $${creditPerContract!.toFixed(2)} per short contract` : 'unavailable — one or more broker entry premiums are missing'}
 Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${currentBuybackPerContract != null ? `$${currentBuybackPerContract.toFixed(2)} per short contract` : 'unknown'}
 P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}${pos.pnl != null && pos.pnlReliable && pos.buffer != null && pos.buffer >= 5 ? ' — NOTE: reliable does not mean actionable; a paper loss on a comfortably-OTM spread is normal (short vega + unearned time value), not a reason to close' : ''}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
-Profit target: ${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})
-Max risk: $${pos.maxRisk.toFixed(2)}
+Profit target: ${entryComplete ? `${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})` : 'unavailable — entry economics incomplete'}
+Max risk: ${entryComplete && pos.maxRiskReliable !== false ? `$${pos.maxRisk.toFixed(2)}` : 'unavailable — entry economics incomplete'}
 
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
@@ -2378,7 +2379,7 @@ function fmtEntryNowPct(entry: number | null | undefined, current: number | null
 
 function fmtEntryNowDelta(entry: number | null | undefined, current: number | null | undefined): string {
   if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)}%`;
+  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)} sh-eq`;
 }
 
 function fmtEntryNowTheta(entry: number | null | undefined, current: number | null | undefined): string {
@@ -2473,10 +2474,11 @@ function buildLegSnapshot(pos: Position): string {
 }
 
 function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): string {
+  const entryComplete = pos.entryEconomicsComplete !== false;
   const shortLegs = getShortLegs(pos);
   const primaryShort = shortLegs[0] ?? null;
-  const pnlCapture = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
-  const creditPerContract = primaryShort && Math.abs(primaryShort.quantity) > 0
+  const pnlCapture = entryComplete && pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+  const creditPerContract = !entryComplete ? null : primaryShort && Math.abs(primaryShort.quantity) > 0
     ? pos.creditReceived / (Math.abs(primaryShort.quantity) * 100)
     : pos.creditReceived / 100;
   const currentPerContract = primaryShort && Math.abs(primaryShort.quantity) > 0 && pos.currentValue != null
@@ -2509,15 +2511,15 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `OTM buffer to short strike: ${fmtPct(pos.buffer)}`,
     '',
     'P&L / PREMIUM',
-    `Total entry credit: ${fmtMoney(pos.creditReceived)}`,
+    `Total entry credit: ${entryComplete ? fmtMoney(pos.creditReceived) : 'unavailable — broker entry premium missing'}`,
     `Entry credit per short contract: ${fmtMoney(creditPerContract)}`,
     `Current buyback / mark value: ${fmtMoney(pos.currentValue)}`,
     `Current mark per short contract: ${fmtMoney(currentPerContract)}`,
     `Open P&L: ${fmtSignedMoney(pos.pnl)}`,
     `Profit captured: ${fmtPct(pnlCapture)}`,
-    `Profit target: ${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}`,
+    `Profit target: ${entryComplete ? `${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}` : 'unavailable — entry economics incomplete'}`,
     `Premium still above target buyback: ${fmtMoney(remainingToTarget)}`,
-    `Max risk: ${fmtMoney(pos.maxRisk)}`,
+    `Max risk: ${entryComplete && pos.maxRiskReliable !== false ? fmtMoney(pos.maxRisk) : 'unavailable — entry economics incomplete'}`,
     '',
     'GREEKS / VOLATILITY',
     `Delta: ${fmtSignedNum(pos.netDelta, 3)}`,
@@ -2583,10 +2585,8 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
 
 async function analyzePosition(pos: Position, trend: TrendResult | null): Promise<PositionAnalysis> {
   const prompt = buildPositionPrompt(pos, trend);
-  const raw = await callAI(prompt);
-  const parsed = JSON.parse(raw);
-  const pricingVerificationRequired = pos.pricingDecisionEvidence?.status === 'VERIFY_PRICING';
-  const pricingGrounding = pricingVerificationRequired ? buildPricingVerificationGrounding(parsed) : null;
+  await callAI(prompt);
+  const canonicalGrounding = pos.recommendation ? projectCanonicalRecommendationForAi(pos.recommendation) : null;
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
@@ -2595,14 +2595,14 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
     // PI-0014C: prompt grounding is backed by a deterministic boundary. A
     // model response cannot turn an untrusted pricing conflict into a hard
     // directional action even if it ignores the written instruction.
-    recommendation: pricingGrounding?.recommendation ?? parsed.recommendation,
-    confidence: pricingGrounding?.confidence ?? parsed.confidence,
-    summary: pricingGrounding?.summary ?? parsed.summary,
-    reasoning: pricingGrounding?.reasoning ?? parsed.reasoning,
-    risks: pricingGrounding?.risks ?? parsed.risks ?? [],
-    catalysts: pricingGrounding?.catalysts ?? parsed.catalysts ?? [],
-    deviatesFromRules: pricingGrounding?.deviatesFromRules ?? parsed.deviatesFromRules ?? false,
-    deviationNote: pricingGrounding?.deviationNote ?? parsed.deviationNote ?? null,
+    recommendation: canonicalGrounding?.recommendation ?? 'WATCH',
+    confidence: canonicalGrounding?.confidence ?? 'LOW',
+    summary: canonicalGrounding?.summary ?? 'Canonical recommendation unavailable.',
+    reasoning: canonicalGrounding?.reasoning ?? 'Refresh portfolio data before relying on position analysis.',
+    risks: canonicalGrounding?.risks ?? [],
+    catalysts: canonicalGrounding?.catalysts ?? [],
+    deviatesFromRules: canonicalGrounding?.deviatesFromRules ?? false,
+    deviationNote: canonicalGrounding?.deviationNote ?? null,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -7186,7 +7186,7 @@ function buildMovementSummary(pos: Position): MovementItem[] {
     if (Math.abs(diff) >= 0.02) {
       items.push({
         label: 'Delta',
-        detail: `Net delta shifted ${diff >= 0 ? '+' : ''}${(diff * 100).toFixed(0)}pt (${(priorDelta * 100).toFixed(0)}→${(pos.netDelta * 100).toFixed(0)}) — picked up more ${pos.netDelta >= 0 ? 'bullish' : 'bearish'} exposure`,
+        detail: `Net delta shifted ${diff >= 0 ? '+' : ''}${(diff * 100).toFixed(0)} share-equivalent (${(priorDelta * 100).toFixed(0)}→${(pos.netDelta * 100).toFixed(0)}) — picked up more ${pos.netDelta >= 0 ? 'bullish' : 'bearish'} exposure`,
         tone: 'neutral',
       });
     }
@@ -7538,9 +7538,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
   // PM-0002: the canonical evaluator remains authoritative before and after
   // AI analysis. AI is explanatory only and cannot replace the card action.
-  const rec = pos.recommendation
-    ? canonicalRecommendationForCard(pos.recommendation, { action: 'HOLD', detail: '' })
-    : canonicalRecommendationForCard(null, getRecommendation(pos, trend));
+  const rec = canonicalRecommendationForCard(pos.recommendation);
   const suggestedLabel = pos.recommendation?.label ?? ACTION_META[rec.action].label;
 
   // ── 50%-target projection (√time value-decay model) ──
@@ -9536,6 +9534,7 @@ export default function PortfolioPage() {
           onRefreshQuotes={fetchPositions}
           portfolioRefreshing={loading}
           onPricingRefreshOutcome={setPricingRefreshOutcome}
+          quoteCapturedAtByPositionKey={Object.fromEntries(positions.map(position => [position.key, position.quoteCapturedAt ?? null]))}
         />
       )}
 
@@ -9570,6 +9569,7 @@ export default function PortfolioPage() {
           onRefreshQuotes={fetchPositions}
           portfolioRefreshing={loading}
           onPricingRefreshOutcome={setPricingRefreshOutcome}
+          quoteCapturedAtByPositionKey={Object.fromEntries(positions.map(position => [position.key, position.quoteCapturedAt ?? null]))}
         />
       )}
 
