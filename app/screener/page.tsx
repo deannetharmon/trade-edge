@@ -1170,7 +1170,7 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 
 
 
-// PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
+// PMCC needs two DTE windows: long LEAP (70-180 DTE) and short near-term (21-50 DTE)
 async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
   const classification = await classifyUnderlying(symbol, token);
@@ -1220,7 +1220,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
 
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
-// Long a deep ITM call (LEAPS, 70-180 DTE, delta 0.70-0.85)
+// Long a deep ITM call (LEAP, 70-180 DTE, delta 0.70-0.85)
 // Short a near-term OTM call (21-50 DTE, delta 0.20-0.35)
 // Net debit trade: maximize extrinsic value capture on the short leg relative to long cost.
 // Key rule: short strike must be ABOVE the long strike.
@@ -1230,7 +1230,7 @@ function findBestPMCC(
   pmccChainData: { shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]> },
   price: number | null
 ): SpreadCandidate | null {
-  // 1. Find best long LEAPS leg: deep ITM call, delta 0.70-0.85, lowest extrinsic value (least theta waste)
+  // 1. Find best long LEAP leg: deep ITM call, delta 0.70-0.85, lowest extrinsic value (least theta waste)
   let bestLong: { strike: number; expDate: string; dte: number; delta: number; cost: number; extrinsic: number; oi: number; occSymbol: string } | null = null;
 
   for (const expDate of pmccChainData.longExpirations) {
@@ -1284,11 +1284,11 @@ function findBestPMCC(
     strategy: 'PMCC',
     // Short leg is "the expiration" shown in UI (near-term short call)
     expiration: bestShort.expDate, dte: bestShort.dte,
-    // longStrike = LEAPS long, shortStrike = near-term short
+    // longStrike = LEAP long, shortStrike = near-term short
     shortStrike: bestShort.strike, longStrike: bestLong.strike,
     shortDelta: bestShort.delta, longDelta: bestLong.delta,
     credit: bestShort.credit,        // short call premium collected
-    longCost: bestLong.cost,          // cost of the LEAPS leg
+    longCost: bestLong.cost,          // cost of the LEAP leg
     netDebit,
     spreadWidth: parseFloat((bestShort.strike - bestLong.strike).toFixed(2)),
     creditRatio: bestShort.credit / bestLong.cost,
@@ -1315,13 +1315,13 @@ function runPMCCChecklist(
   const ivrValue = metrics.ivRank;
   const earningsDate = metrics.earningsExpectedDate;
 
-  // IVR: PMCC works best in moderate IV (not too high — expensive LEAPS; not too low — thin short premium)
+  // IVR: PMCC works best in moderate IV (not too high — expensive LEAP; not too low — thin short premium)
   const ivrCheck: CheckResult = ivrValue == null
     ? { status: 'warn', value: 'N/A', reason: 'Not available' }
     : ivrValue < 20
-      ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% — too low, LEAPS overpriced relative to short premium`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: 'Below 20% — short call premium too thin' }; })()
+      ? (() => { failReasons.push(`IVR ${ivrValue.toFixed(1)}% — too low, LEAP overpriced relative to short premium`); return { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: 'Below 20% — short call premium too thin' }; })()
       : ivrValue > 70
-        ? { status: 'warn', value: `${ivrValue.toFixed(1)}%`, reason: 'High IVR — LEAPS cost elevated, size down' }
+        ? { status: 'warn', value: `${ivrValue.toFixed(1)}%`, reason: 'High IVR — LEAP cost elevated, size down' }
         : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: 'Moderate IV — good PMCC environment' };
 
   const earningsCheck: CheckResult = !earningsDate
@@ -1329,7 +1329,7 @@ function runPMCCChecklist(
     : (() => {
         const d = daysUntil(earningsDate);
         if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-        if (d < 35) { failReasons.push(`Earnings in ${d}d — avoid PMCC near binary event`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Within 35d — binary risk threatens LEAPS' }; }
+        if (d < 35) { failReasons.push(`Earnings in ${d}d — avoid PMCC near binary event`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Within 35d — binary risk threatens LEAP' }; }
         return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
       })();
 
@@ -1343,11 +1343,11 @@ function runPMCCChecklist(
       : { status: 'warn', value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`, reason: 'Low OI — fills may be difficult' };
 
   const deltaCheck: CheckResult = bestCandidate
-    ? { status: 'pass', value: `Long Δ${bestCandidate.longDelta?.toFixed(2) ?? '?'} / Short Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: 'LEAPS deep ITM + near-term OTM' }
+    ? { status: 'pass', value: `Long Δ${bestCandidate.longDelta?.toFixed(2) ?? '?'} / Short Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: 'LEAP deep ITM + near-term OTM' }
     : { status: 'pending', value: '—', reason: 'No candidate' };
 
   const creditCheck: CheckResult = bestCandidate
-    ? { status: 'pass', value: `Credit $${bestCandidate.credit.toFixed(2)} / Debit $${bestCandidate.netDebit?.toFixed(2) ?? '?'}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of LEAPS cost recouped` }
+    ? { status: 'pass', value: `Credit $${bestCandidate.credit.toFixed(2)} / Debit $${bestCandidate.netDebit?.toFixed(2) ?? '?'}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of LEAP cost recouped` }
     : { status: 'pending', value: '—', reason: 'No candidate' };
 
   const rocCheck: CheckResult = bestCandidate
@@ -3796,7 +3796,7 @@ const strategyScores = useMemo(() => {
               <div className="text-xs shrink-0 w-24"><span className={th.label}>Short Credit </span><span className="text-emerald-500 font-bold">${c.credit.toFixed(2)}</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Extrin. </span><span className={`${th.text} font-medium`}>{c.extrinsicCapture?.toFixed(0) ?? '—'}%</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Max P </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2) ?? '—'}</span></div>
-              <div className="text-xs shrink-0 w-20"><span className={th.label}>LEAPS </span><span className={`${th.text} font-medium`}>{c.longDte}d</span></div>
+              <div className="text-xs shrink-0 w-20"><span className={th.label}>LEAP </span><span className={`${th.text} font-medium`}>{c.longDte}d</span></div>
             </> : <>
               <div className="text-xs shrink-0 w-20">
                 <div>
@@ -3981,7 +3981,7 @@ const strategyScores = useMemo(() => {
             </div>
           )}
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {Object.entries(result.checks).map(([key, check]) => {
+            {Object.entries(result.checks).filter(([key]) => result.strategy !== 'PMCC' || (key !== 'iv' && key !== 'emClearance')).map(([key, check]) => {
       if (key === 'iv') {
         console.log('IV_RENDER_DEBUG', {
           symbol: result.symbol,
@@ -4067,16 +4067,16 @@ const strategyScores = useMemo(() => {
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>PMCC Structure</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className={th.label}>LEAPS long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ{c.longDelta?.toFixed(2)}</span></div>
+                <div><span className={th.label}>LEAP long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ{c.longDelta?.toFixed(2)}</span></div>
                 <div><span className={th.label}>Short call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · credit ${c.credit.toFixed(2)} · Δ{c.shortDelta.toFixed(2)}</span></div>
-                <div><span className={th.label}>Net debit: </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(capital at risk)</span></div>
+                <div><span className={th.label}>Net debit: </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]` }>(capital at risk)</span></div>
                 <div><span className={th.label}>Max profit: </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(if stock reaches short strike)</span></div>
-                <div><span className={th.label}>Extrinsic capture: </span><span className={th.text}>{c.extrinsicCapture?.toFixed(0)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / LEAPS extrinsic)</span></div>
+                <div><span className={th.label}>Extrinsic capture: </span><span className={th.text}>{c.extrinsicCapture?.toFixed(0)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / LEAP extrinsic)</span></div>
                 <div><span className={th.label}>ROC: </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / net debit)</span></div>
               </div>
-              <p className={`text-[9px] text-purple-400/80 pt-1`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAPS when the thesis changes.</p>
+              <p className={`text-[9px] text-purple-400/80 pt-1`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAP when the thesis changes.</p>
             </div>
-          )}
+          )}    
 
           {c && c.strategy === 'CSP' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
@@ -7469,9 +7469,9 @@ export default function Home() {
                 {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
               <button disabled
-                title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
+                title="Standalone LEAP scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
                 className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border ${th.border} ${th.textFaint} opacity-50 cursor-not-allowed text-[10px]`}>
-                FIND LEAPS — COMING SOON
+                FIND LEAP — COMING SOON
               </button>
             </div>
 
