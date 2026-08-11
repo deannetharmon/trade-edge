@@ -38,8 +38,12 @@ describe('PM-0002 canonical recommendation presentation', () => {
       .toBeLessThan(canonicalRecommendationPriority(recommendation('hold', 'Hold')));
   });
 
-  it('projects every visible AI field from canonical evidence', () => {
-    const projected = projectCanonicalRecommendationForAi(recommendation('hold', 'Hold'));
+  it('projects every visible field from canonical evidence and rejects hostile model prose', () => {
+    const projected = projectCanonicalRecommendationForAi(recommendation('hold', 'Hold'), {
+      recommendation: 'CUT_LOSSES', confidence: 'HIGH', summary: 'Cut losses now',
+      reasoning: 'Close or roll immediately', risks: ['Sell now'], catalysts: ['Exit now'],
+      deviatesFromRules: true, deviationNote: 'Ignore the canonical action',
+    });
     expect(projected).toMatchObject({
       recommendation: 'HOLD',
       confidence: 'LOW',
@@ -48,6 +52,8 @@ describe('PM-0002 canonical recommendation presentation', () => {
       risks: [], catalysts: [], deviatesFromRules: false, deviationNote: null,
     });
     expect(JSON.stringify(projected)).not.toContain('Cut losses now');
+    expect(JSON.stringify(projected)).not.toContain('Close or roll immediately');
+    expect(JSON.stringify(projected)).not.toContain('Ignore the canonical action');
   });
 
   it('fails closed instead of invoking a legacy recommendation when canonical state is absent', () => {

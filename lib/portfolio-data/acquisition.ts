@@ -115,7 +115,7 @@ export function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: numb
 // mid. See lib/positionValuation and
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
 export function computeMarketablePnlPct(pos: Position): number | null {
-  return pos.closeNowPnl != null && pos.creditReceived !== 0
+  return pos.entryEconomicsComplete !== false && pos.closeNowPnl != null && pos.creditReceived !== 0
     ? (pos.closeNowPnl / pos.creditReceived) * 100
     : null;
 }

@@ -104,13 +104,14 @@ afterEach(() => {
 
 describe('TodaysPrioritiesQueueView: empty states', () => {
   it('offers Refresh Quotes on the primary Today’s Priorities Verify Pricing item', async () => {
+    const quoteCapturedAt = '2026-08-10T20:00:00.000Z';
     const user = userEvent.setup();
     const objective = makeObjective({ ruleId: 'OBJ-VERIFY-PRICING', title: 'Verify Pricing: TEST' });
     const dashboard = makeDashboard({ immediateAction: [makePrioritized({ objective, score: 90 })] });
     const queue = buildTodaysPrioritiesQueue({ dashboard, generatedAt: GENERATED_AT });
     const onRefreshQuotes = vi.fn().mockResolvedValue({
       status: 'success',
-      positions: [{ key: 'pos_test', recommendation: { kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: true } }],
+      positions: [{ key: 'pos_test', recommendation: { kind: 'verify-pricing' }, pricingDecisionEvidence: { marketableDecisionEligible: false, marketableQuoteCapturedAt: quoteCapturedAt } }],
     });
     const onPricingRefreshOutcome = vi.fn();
     render(
@@ -121,12 +122,13 @@ describe('TodaysPrioritiesQueueView: empty states', () => {
         onRefreshQuotes={onRefreshQuotes}
         portfolioRefreshing={false}
         onPricingRefreshOutcome={onPricingRefreshOutcome}
+        quoteCapturedAtByPositionKey={{ pos_test: quoteCapturedAt }}
       />,
     );
 
     await user.click(screen.getByRole('button', { name: /refresh quotes/i }));
     expect(onRefreshQuotes).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'Pricing verified; recommendation updated.' })));
+    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining('broker quote timestamp did not advance') })));
   });
 
   it('shows "Nothing needs your attention right now." when the open queue is empty', () => {

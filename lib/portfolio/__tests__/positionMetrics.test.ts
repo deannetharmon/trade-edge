@@ -72,6 +72,30 @@ describe('PM-0002 whole-position Greek units', () => {
     expect(toWholePositionGammaShareEquivalent(NaN)).toBeNull();
     expect(toWholePositionVegaDollars(Infinity)).toBeNull();
   });
+
+  it('never defaults missing quantity or unknown direction while aggregating broker legs', () => {
+    const maps = { theta: { MU: -0.05 }, gamma: { MU: 0.002 }, delta: { MU: -0.2 }, vega: { MU: 0.08 } };
+    expect(aggregateBrokerPositionGreeks([{ symbol: 'MU', 'quantity-direction': 'Short' }], maps))
+      .toEqual({ theta: null, gamma: null, delta: null, vega: null });
+    expect(aggregateBrokerPositionGreeks([{ symbol: 'MU', quantity: '5', 'quantity-direction': 'Sell' }], maps))
+      .toEqual({ theta: null, gamma: null, delta: null, vega: null });
+  });
+
+  it('fails each Greek closed instead of forming a partial-position aggregate', () => {
+    const raw = aggregateBrokerPositionGreeks([
+      { symbol: 'SHORT', quantity: '5', 'quantity-direction': 'Short' },
+      { symbol: 'LONG', quantity: '5', 'quantity-direction': 'Long' },
+    ], {
+      theta: { SHORT: -0.05 },
+      gamma: { SHORT: 0.002, LONG: 0.001 },
+      delta: { SHORT: -0.2, LONG: -0.1 },
+      vega: { SHORT: 0.08, LONG: 0.05 },
+    });
+    expect(raw.theta).toBeNull();
+    expect(raw.gamma).toBe(-0.005);
+    expect(raw.delta).toBe(0.5);
+    expect(raw.vega).toBe(-0.15);
+  });
 });
 
 describe('PM-0002 CSP Effective Buy units', () => {

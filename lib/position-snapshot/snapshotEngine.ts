@@ -30,6 +30,7 @@ export function createPositionSnapshot(
     strategy: input.strategy,
     dte: input.dte,
     creditReceived: input.creditReceived,
+    entryEconomicsComplete: input.entryEconomicsComplete,
     closeValue: input.closeValue,
     delta: input.delta,
     pop: input.pop,

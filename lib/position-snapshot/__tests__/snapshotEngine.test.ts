@@ -22,6 +22,7 @@ function makeInput(overrides: Partial<PositionSnapshotInput> = {}): PositionSnap
     strategy: 'BPS',
     dte: 21,
     creditReceived: 200,
+    entryEconomicsComplete: true,
     closeValue: 50,
     delta: -0.15,
     pop: 78,

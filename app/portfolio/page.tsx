@@ -76,11 +76,15 @@ import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 import {
   computeEntryChangeTone,
   toWholePositionThetaDollars,
+  toWholePositionDeltaShares,
   toWholePositionGammaShareEquivalent,
   toWholePositionVegaDollars,
   computeCspEffectiveBuyPrice,
+  hasCompleteEntryEconomics,
+  canonicalEntryCredit,
+  entryPnlPct,
 } from '@/lib/portfolio/positionMetrics';
-import { canonicalRecommendationForCard, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
+import { canonicalRecommendationForCard, canonicalRecommendationToAction, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -339,7 +343,8 @@ function toPositionSnapshotInput(pos: Position): PositionSnapshotInput {
     symbol: pos.symbol,
     strategy: pos.strategy,
     dte: pos.dte,
-    creditReceived: pos.creditReceived,
+    creditReceived: canonicalEntryCredit(pos),
+    entryEconomicsComplete: hasCompleteEntryEconomics(pos),
     closeValue: pos.closeValue,
     delta: pos.netDelta,
     pop: pos.pop,
@@ -803,15 +808,15 @@ interface TradeRecord {
   symbol: string;
   strategy: string;
   action: string;
-  entryCredit: number;      // per-contract $ at entry (creditReceived / 100)
+  entryCredit: number | null;
   exitPrice: number;        // limit price at close
-  pnlPct: number;           // % of credit captured (positive = profit)
+  pnlPct: number | null;
   dte: number;              // DTE when action taken
   ivr: number | null;
   buffer: number | null;
   aiVerdict: 'GO' | 'CAUTION' | 'STOP' | null;
   aiOverridden: boolean;    // trader overrode a STOP verdict
-  outcome: 'WIN' | 'LOSS' | 'NEUTRAL'; // pnlPct >= 40 = WIN, <= -50 = LOSS
+  outcome: 'WIN' | 'LOSS' | 'NEUTRAL' | 'UNKNOWN';
 }
 
 interface SymbolProfile {
@@ -880,9 +885,8 @@ function recordTradeInMemory(
   overridden: boolean
 ) {
   const mem = readMemory();
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0
-    ? (pos.pnl / pos.creditReceived) * 100 : 0;
-  const outcome: TradeRecord['outcome'] = pnlPct >= 40 ? 'WIN' : pnlPct <= -50 ? 'LOSS' : 'NEUTRAL';
+  const pnlPct = entryPnlPct(pos);
+  const outcome: TradeRecord['outcome'] = pnlPct == null ? 'UNKNOWN' : pnlPct >= 40 ? 'WIN' : pnlPct <= -50 ? 'LOSS' : 'NEUTRAL';
 
   const record: TradeRecord = {
     id: crypto.randomUUID(),
@@ -890,7 +894,7 @@ function recordTradeInMemory(
     symbol: pos.symbol,
     strategy: pos.strategy,
     action,
-    entryCredit: pos.creditReceived / 100,
+    entryCredit: canonicalEntryCredit(pos) == null ? null : canonicalEntryCredit(pos)! / 100,
     exitPrice: limitPrice,
     pnlPct,
     dte: pos.dte,
@@ -913,10 +917,11 @@ function recordTradeInMemory(
   profile.recentTrades = [record, ...profile.recentTrades].slice(0, MEMORY_RAW_TRADES_PER_SYMBOL * 2);
   profile.tradeCount++;
   const allTrades = profile.recentTrades;
+  const classifiedTrades = allTrades.filter((trade): trade is TradeRecord & { pnlPct: number } => trade.pnlPct != null);
   const wins = allTrades.filter(t => t.outcome === 'WIN').length;
-  profile.winRate = allTrades.length > 0 ? wins / allTrades.length : 0;
-  profile.avgPnlPct = allTrades.length > 0
-    ? allTrades.reduce((s, t) => s + t.pnlPct, 0) / allTrades.length : 0;
+  profile.winRate = classifiedTrades.length > 0 ? wins / classifiedTrades.length : 0;
+  profile.avgPnlPct = classifiedTrades.length > 0
+    ? classifiedTrades.reduce((s, t) => s + t.pnlPct, 0) / classifiedTrades.length : 0;
   profile.lastUpdated = new Date().toISOString();
 
   // Update behavior profile
@@ -949,7 +954,7 @@ function buildMemoryContext(symbol: string, action: string): string {
       lines.push(`  Recent trades (newest first):`);
       profile.recentTrades.slice(0, MEMORY_RAW_TRADES_PER_SYMBOL).forEach(t => {
         const ago = Math.round((Date.now() - new Date(t.timestamp).getTime()) / 86400000);
-        lines.push(`    ${ago}d ago: ${t.strategy} ${t.action} — ${t.pnlPct.toFixed(1)}% P&L at ${t.dte} DTE, IVR ${t.ivr ?? '?'}, buffer ${t.buffer?.toFixed(1) ?? '?'}% → ${t.outcome}${t.aiVerdict ? ` (AI said ${t.aiVerdict}${t.aiOverridden ? ', overridden' : ''})` : ''}`);
+        lines.push(`    ${ago}d ago: ${t.strategy} ${t.action} — ${t.pnlPct == null ? 'P&L unavailable' : `${t.pnlPct.toFixed(1)}% P&L`} at ${t.dte} DTE, IVR ${t.ivr ?? '?'}, buffer ${t.buffer?.toFixed(1) ?? '?'}% → ${t.outcome}${t.aiVerdict ? ` (AI said ${t.aiVerdict}${t.aiOverridden ? ', overridden' : ''})` : ''}`);
       });
     }
   }
@@ -976,7 +981,7 @@ function buildMemoryContext(symbol: string, action: string): string {
     lines.push(`\nRECENT OTHER TRADES (for portfolio context):`);
     recentOther.forEach(t => {
       const ago = Math.round((Date.now() - new Date(t.timestamp).getTime()) / 86400000);
-      lines.push(`  ${ago}d ago: ${t.symbol} ${t.strategy} ${t.action} → ${t.outcome} (${t.pnlPct.toFixed(1)}%)`);
+      lines.push(`  ${ago}d ago: ${t.symbol} ${t.strategy} ${t.action} → ${t.outcome} (${t.pnlPct == null ? 'P&L unavailable' : `${t.pnlPct.toFixed(1)}%`})`);
     });
   }
 
@@ -994,7 +999,7 @@ Focus on: patterns (what worked, what didn't), typical P&L range, IVR conditions
 Be specific with numbers. Write in second person ("You typically...").
 
 Records:
-${toSummarize.map(t => `${t.strategy} ${t.action}: P&L ${t.pnlPct.toFixed(1)}%, DTE ${t.dte}, IVR ${t.ivr ?? '?'}, buffer ${t.buffer?.toFixed(1) ?? '?'}%, outcome ${t.outcome}`).join('\n')}
+${toSummarize.map(t => `${t.strategy} ${t.action}: P&L ${t.pnlPct == null ? 'unavailable' : `${t.pnlPct.toFixed(1)}%`}, DTE ${t.dte}, IVR ${t.ivr ?? '?'}, buffer ${t.buffer?.toFixed(1) ?? '?'}%, outcome ${t.outcome}`).join('\n')}
 
 Existing summary to merge with (if any): ${profile.historySummary ?? 'none'}
 
@@ -1040,7 +1045,7 @@ AI override rate: ${bp.overrideCount} overrides out of ${bp.totalTrades} STOP ve
 Override success rate: ${bp.overrideCount > 0 ? Math.round((bp.overrideWins / bp.overrideCount) * 100) : 0}%
 
 RECENT ACTIONS (${mem.recentActions.length} records):
-${mem.recentActions.map(t => `${t.symbol} ${t.strategy} ${t.action}: P&L ${t.pnlPct.toFixed(1)}%, DTE ${t.dte}, outcome ${t.outcome}${t.aiOverridden ? ' [overrode AI]' : ''}`).join('\n')}
+${mem.recentActions.map(t => `${t.symbol} ${t.strategy} ${t.action}: P&L ${t.pnlPct == null ? 'unavailable' : `${t.pnlPct.toFixed(1)}%`}, DTE ${t.dte}, outcome ${t.outcome}${t.aiOverridden ? ' [overrode AI]' : ''}`).join('\n')}
 
 Existing summary: ${bp.summary ?? 'none'}
 
@@ -1575,28 +1580,27 @@ async function ttPatch(path: string, token: string, body: unknown) {
 // Shared action-relevance gate — used by BOTH the per-card buttons and the bulk
 // action bar so they never diverge on which actions apply to a position.
 // `override` lets a caller supply an already-computed recommendation (e.g.
-// an AI-analyzed verdict for this specific card) instead of the function
-// deriving one from the rule engine. Omitting it preserves the original
-// rule-based behavior — the bulk action bar always omits it intentionally.
-function isActionRelevant(pos: Position, action: ActionType, override?: Recommendation): boolean {
-  const rec = override ?? getRecommendation(pos, null);
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : null;
+// the canonical action for this position. Manual availability is distinct
+// from the Suggested marker, but no legacy recommendation is recomputed here.
+function isActionRelevant(pos: Position, action: ActionType, canonicalAction?: ActionType | null): boolean {
+  if (pos.structureAmbiguous || !pos.identity) return false;
+  const entryComplete = hasCompleteEntryEconomics(pos);
   if (action === 'TAKE_PROFIT') {
     // Take Profit is a valid manual choice on ANY position currently in the
     // green — not only when the formal target is hit or the engine recommends
     // it. pnl > 0 is the gate; hitTarget / recommendation are kept so the
     // button still shows for at-target positions even if pnl rounds to 0.
     const inProfit = pos.pnl != null && pos.pnl > 0;
-    return inProfit || pos.hitTarget || rec.action === 'TAKE_PROFIT';
+    return entryComplete && (inProfit || pos.hitTarget || canonicalAction === 'TAKE_PROFIT');
   }
   if (action === 'CUT_LOSSES') {
     // TE-0002 Round 4: Cut Losses is a MANUAL action, independent of the
     // canonical Suggested Action. A trader may cut losses on any position
-    // currently showing a real midpoint loss, even when getRecommendation()
+    // currently showing a real midpoint loss, even when the canonical engine
     // recommends MANAGE / WATCH / HOLD. This helper must not re-derive stop
     // breaches, strike breaches, quote quality, trend, or loss severity --
     // those signals belong solely to the canonical recommendation engine
-    // (getRecommendation()). Availability here is driven ONLY by:
+    // Availability here is driven ONLY by:
     //   (a) a real, currently-negative canonical midpoint P/L (pos.pnl),
     //       never closeNowPnl or an independently computed marketable P/L
     //       (a wide marketable quote must not, on its own, enable this), or
@@ -1605,21 +1609,25 @@ function isActionRelevant(pos: Position, action: ActionType, override?: Recommen
     //       recommends cutting losses even if pnl is null, zero, or
     //       temporarily positive.
     const hasCurrentLoss = pos.pnl != null && pos.pnl < 0;
-    return hasCurrentLoss || rec.action === 'CUT_LOSSES';
+    return entryComplete && (hasCurrentLoss || canonicalAction === 'CUT_LOSSES');
   }
   if (action === 'PLACE_GTC') {
-    return !pos.hasGtc;
+    return entryComplete && !pos.hasGtc;
   }
-  // CLOSE_ROLL and anything else: always applicable.
-  return true;
+  // Close/Roll is a manual structural action, not a recommendation. It is
+  // available only when the canonical close identity independently proves
+  // quantity, legs, and signed entry economics.
+  return action === 'CLOSE_ROLL';
 }
 
 // Separate function so getRecommendation stays clean — called in PositionCard render
 function getExtendSignal(pos: Position): string | null {
   if (!pos.hasGtc) return null;
+  if (!hasCompleteEntryEconomics(pos)) return null;
   // Never suggest extending on short-dated entries — the goal is fast profit capture, not riding theta longer
   if (isShortDateEntry(pos)) return null;
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : 0;
+  const pnlPct = entryPnlPct(pos);
+  if (pnlPct == null) return null;
   // Only suggest extension when: profit > 50%, DTE > 25, IVR >= 35, buffer > 5%
   if (
     pnlPct >= 50 &&
@@ -1632,7 +1640,7 @@ function getExtendSignal(pos: Position): string | null {
   return null;
 }
 
-// ── AI Analysis ───────────────────────────────────────────────────────────
+// ── Canonical recommendation explanation ─────────────────────────────────
 const TRADING_CHAT_PROMPT = `You are a professional portfolio manager with three decades of experience trading options income strategies across multiple full market cycles. Your operating principle is capital preservation first, applied with a seasoned risk manager's judgment — not reflexively flagging every minor fluctuation as a reason to act. You advise a trader who uses the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints.
 
 You are in a live conversation about a specific position or portfolio. The trader has already seen a structured analysis. They are now asking follow-up questions to dig deeper.
@@ -2114,13 +2122,16 @@ Return JSON only in this exact shape:
 
 function buildPortfolioPrompt(positions: Position[]): string {
   const lines = positions.map(p => {
-    const pnlPct = p.pnl != null && p.creditReceived > 0 ? ((p.pnl / p.creditReceived) * 100).toFixed(0) : '?';
-    return `${p.symbol} ${p.strategy}: DTE ${p.dte}, P&L ${pnlPct}%, buffer ${p.buffer?.toFixed(1) ?? '?'}%, IVR ${p.ivr ?? '?'}, ${p.needsClose ? 'NEEDS CLOSE' : p.hitTarget ? 'TARGET HIT' : 'active'}`;
+    const pnlPct = entryPnlPct(p);
+    return `${p.symbol} ${p.strategy}: DTE ${p.dte}, P&L ${pnlPct == null ? 'unavailable (entry economics incomplete)' : `${pnlPct.toFixed(0)}%`}, buffer ${p.buffer?.toFixed(1) ?? '?'}%, IVR ${p.ivr ?? '?'}, ${p.needsClose ? 'NEEDS CLOSE' : p.hitTarget ? 'TARGET HIT' : 'active'}`;
   });
 
-  const totalCredit = positions.reduce((s, p) => s + p.creditReceived, 0);
-  const totalPnl = positions.reduce((s, p) => s + (p.pnl ?? 0), 0);
-  const totalAtRisk = positions.reduce((s, p) => s + p.maxRisk, 0);
+  const entryCompletePositions = positions.filter(hasCompleteEntryEconomics);
+  const excludedEntryCount = positions.length - entryCompletePositions.length;
+  const totalCredit = entryCompletePositions.reduce((s, p) => s + (canonicalEntryCredit(p) ?? 0), 0);
+  const totalPnl = entryCompletePositions.reduce((s, p) => s + (p.pnl ?? 0), 0);
+  const riskCompletePositions = entryCompletePositions.filter(p => p.maxRiskReliable !== false);
+  const totalAtRisk = riskCompletePositions.reduce((s, p) => s + p.maxRisk, 0);
   const portfolioGreeks = calculatePortfolioGreeks(positions);
   const urgentCount = positions.filter(p => p.needsClose || p.hitTarget || (p.buffer != null && p.buffer < 5)).length;
 
@@ -2128,9 +2139,9 @@ function buildPortfolioPrompt(positions: Position[]): string {
 
 PORTFOLIO SUMMARY:
 ${positions.length} open positions | ${urgentCount} requiring immediate attention
-Total credit collected: $${totalCredit.toFixed(2)}
-Current P&L: $${totalPnl.toFixed(2)} (${totalCredit > 0 ? ((totalPnl / totalCredit) * 100).toFixed(1) : 0}% of credit)
-Total at risk: $${totalAtRisk.toFixed(2)}
+Total credit collected: ${entryCompletePositions.length > 0 ? `$${totalCredit.toFixed(2)}` : 'unavailable'}${excludedEntryCount > 0 ? ` (${excludedEntryCount} position${excludedEntryCount === 1 ? '' : 's'} excluded: incomplete entry economics)` : ''}
+Current P&L: ${totalCredit > 0 ? `$${totalPnl.toFixed(2)} (${((totalPnl / totalCredit) * 100).toFixed(1)}% of credit)` : 'unavailable'}
+Total at risk: ${riskCompletePositions.length > 0 ? `$${totalAtRisk.toFixed(2)}` : 'unavailable'}${positions.length - riskCompletePositions.length > 0 ? ` (${positions.length - riskCompletePositions.length} position${positions.length - riskCompletePositions.length === 1 ? '' : 's'} excluded: unreliable entry/max-risk basis)` : ''}
 Net delta: ${portfolioGreeks.deltaShares != null ? `${portfolioGreeks.deltaShares.toFixed(0)} share-equivalent` : 'N/A'}
 Net theta/d: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/d` : 'N/A'}
 Net gamma: ${portfolioGreeks.gammaSharesPerDollar != null ? `${portfolioGreeks.gammaSharesPerDollar.toFixed(1)} shares per $1 move` : 'N/A'}
@@ -2217,12 +2228,16 @@ function isUpcomingEarningsRisk(earningsDate: string | null, expDate: string): b
   return earnings >= today && earnings <= expiry;
 }
 function buildVerdictPrompt(pos: Position, action: EvaluatedAction, detail?: string): string {
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0
-    ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
-  const creditPerContract = (pos.creditReceived / 100).toFixed(2);
+  const entryCredit = canonicalEntryCredit(pos);
+  if (entryCredit == null) {
+    throw new Error('Entry economics are unavailable; this action cannot be evaluated safely.');
+  }
+  const pnlPctValue = entryPnlPct(pos);
+  const pnlPct = pnlPctValue != null ? pnlPctValue.toFixed(1) : 'unknown';
+  const creditPerContract = (entryCredit / 100).toFixed(2);
 
   const actionDesc = action === 'EXTEND_PROFIT' && detail
-    ? `EXTEND_PROFIT — moving profit target from current to ${detail}% (new BTC price: $${((pos.creditReceived / 100) * (1 - parseInt(detail) / 100)).toFixed(2)})`
+    ? `EXTEND_PROFIT — moving profit target from current to ${detail}% (new BTC price: $${((entryCredit / 100) * (1 - parseInt(detail) / 100)).toFixed(2)})`
     : action === 'CLOSE_ROLL'
     ? `CLOSE_ROLL — close current position and re-enter next expiry`
     : action === 'TAKE_PROFIT'
@@ -2241,7 +2256,7 @@ ACTION: ${actionDesc}
 POSITION: ${pos.symbol} ${pos.strategy}
 DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => `${l.direction} ${l.strikePrice}${l.optionType}`).join(', ')}
-Credit (total): $${pos.creditReceived.toFixed(2)} | Per contract: $${creditPerContract}
+Credit (total): $${entryCredit.toFixed(2)} | Per contract: $${creditPerContract}
 Current buyback cost: $${pos.currentValue?.toFixed(2) ?? 'unknown'}
 P&L: $${pos.pnl?.toFixed(2) ?? 'unknown'} (${pnlPct}% of credit)
 Current profit target: ${Math.round(pos.profitTarget * 100)}%
@@ -2268,7 +2283,7 @@ Flags: ${[
     pos.hitTarget ? 'TARGET HIT' : '',
     pos.buffer != null && pos.buffer < 2 ? `CRITICAL BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? `TIGHT BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? `WATCH BUFFER ${pos.buffer.toFixed(1)}% at ${pos.dte} DTE` : '',
     isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? `UPCOMING EARNINGS ${pos.earningsDate}` : '',
-    (pos.pnl ?? 0) < -pos.creditReceived ? 'LOSS EXCEEDS 1X CREDIT' : '',
+    pos.pnl != null && pos.pnl < -entryCredit ? 'LOSS EXCEEDS 1X CREDIT' : '',
   ].filter(Boolean).join(', ') || 'None'}
 ${memoryContext ? `\n${memoryContext}` : ''}
 Give your verdict as JSON only.`;
@@ -2584,17 +2599,15 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
 }
 
 async function analyzePosition(pos: Position, trend: TrendResult | null): Promise<PositionAnalysis> {
-  const prompt = buildPositionPrompt(pos, trend);
-  await callAI(prompt);
+  void trend;
   const canonicalGrounding = pos.recommendation ? projectCanonicalRecommendationForAi(pos.recommendation) : null;
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
     loading: false,
     error: null,
-    // PI-0014C: prompt grounding is backed by a deterministic boundary. A
-    // model response cannot turn an untrusted pricing conflict into a hard
-    // directional action even if it ignores the written instruction.
+    // This panel is a deterministic explanation of the canonical decision.
+    // It makes no AI request and cannot import model-authored direction.
     recommendation: canonicalGrounding?.recommendation ?? 'WATCH',
     confidence: canonicalGrounding?.confidence ?? 'LOW',
     summary: canonicalGrounding?.summary ?? 'Canonical recommendation unavailable.',
@@ -3263,8 +3276,8 @@ function BatchConfirmModal({
     // Live per-item P&L from the CURRENT effective limit (override or item
     // default), matching the per-card display — not the frozen enrich-time
     // estPnl, which doesn't move when the limit is dragged/snapped/edited.
-    const q = i.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-    const creditPc = i.pos.creditReceived / (q * 100);
+    const q = i.closeIdentity!.quantity;
+    const creditPc = i.closeIdentity!.entryPricePointsPerUnit;
     const ovr = limitOverrides[i.pos.key];
     const effLimit = (ovr !== undefined && ovr !== '' && !isNaN(parseFloat(ovr)))
       ? parseFloat(ovr)
@@ -3328,9 +3341,9 @@ function BatchConfirmModal({
           if (!dryRun) {
             try {
               const liveTotal = await fetchFreshPositionPrice(item.pos, token);
-              const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
+              const qty = item.closeIdentity!.quantity;
               const livePerContract = liveTotal != null ? liveTotal / (qty * 100) : null;
-              const creditPerContract = item.pos.creditReceived / (qty * 100);
+              const creditPerContract = item.closeIdentity!.entryPricePointsPerUnit;
 
               if (livePerContract != null) {
                 if (item.action === 'PLACE_GTC' && item.limitPrice >= livePerContract) {
@@ -3591,10 +3604,11 @@ function BatchConfirmModal({
             results.push({ symbol: item.pos.symbol, action: item.action, orderId, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
           }
 
-          const _auditQty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-          const _creditPc = item.pos.creditReceived / (_auditQty * 100);
+          const _auditQty = item.closeIdentity!.quantity;
+          const _creditPc = item.closeIdentity!.entryPricePointsPerUnit;
+          const _entryTotal = _creditPc * _auditQty * 100;
           const _closeProfitPct = (item.action === 'TAKE_PROFIT' && _creditPc > 0 && item.estPnl != null)
-            ? Math.round(((item.pos.creditReceived - (item.limitPrice * _auditQty * 100)) / item.pos.creditReceived) * 100)
+            ? Math.round(((_entryTotal - (item.limitPrice * _auditQty * 100)) / _entryTotal) * 100)
             : undefined;
           writeAuditEntry({
             id: crypto.randomUUID(), timestamp: new Date().toISOString(),
@@ -3673,8 +3687,9 @@ function BatchConfirmModal({
             <div className="bg-yellow-500/10 border border-yellow-500/40 rounded-xl p-4">
               <p className="text-yellow-400 font-bold text-sm mb-3">⚠ Existing GTC Close Order Detected</p>
               {needsGtcConfirmation.map(item => {
-                const gtcProfit = item.pos.gtcOrderPrice != null && item.pos.creditReceived > 0
-                  ? Math.round(((item.pos.creditReceived - (item.pos.gtcOrderPrice * item.pos.quantity * 100)) / item.pos.creditReceived) * 100)
+                const entryTotal = canonicalEntryCredit(item.pos);
+                const gtcProfit = item.pos.gtcOrderPrice != null && entryTotal != null && entryTotal > 0
+                  ? Math.round(((entryTotal - (item.pos.gtcOrderPrice * item.pos.quantity * 100)) / entryTotal) * 100)
                   : null;
                 return (
                   <div key={item.pos.key} className="flex items-center justify-between py-2 border-b border-yellow-500/20 last:border-none">
@@ -3849,8 +3864,8 @@ function BatchConfirmModal({
                           />
                         </div>
                         {(() => {
-                          const q = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-                          const creditPc = item.pos.creditReceived / (q * 100);
+                          const q = item.closeIdentity!.quantity;
+                          const creditPc = item.closeIdentity!.entryPricePointsPerUnit;
                           const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
                           // Live P&L follows the current limit: credit kept minus cost to close.
                           const livePnl = parseFloat(((creditPc - effLimit) * q * 100).toFixed(2));
@@ -3881,7 +3896,7 @@ function BatchConfirmModal({
                           </div>
                         )}
                         <TakeProfitScale
-                          creditPerContract={item.closeIdentity?.entryPricePointsPerUnit ?? (item.pos.creditReceived / (item.pos.quantity * 100))}
+                          creditPerContract={item.closeIdentity!.entryPricePointsPerUnit}
                           quote={item.closeQuote ?? null}
                           limit={parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice}
                           onChange={(price) => setLimitOverrides(prev => ({ ...prev, [item.pos.key]: price.toFixed(2) }))}
@@ -3908,7 +3923,7 @@ function BatchConfirmModal({
                           {item.pos.legs.map(l => `${l.direction === 'Short' ? '−' : '+'}${l.quantity} ${l.optionType}${l.strikePrice}`).join('  ')}
                         </p>
                         <p className={`text-[9px] ${th.textFaint} mt-0.5`}>
-                          Entry {item.closeIdentity?.entryPriceEffect === 'Debit' ? 'debit' : 'credit'} ${(item.closeIdentity?.entryPricePointsPerUnit ?? (item.pos.creditReceived / item.pos.quantity / 100)).toFixed(2)}/ct
+                          Entry {item.closeIdentity!.entryPriceEffect === 'Debit' ? 'debit' : 'credit'} {item.closeIdentity!.entryPricePointsPerUnit.toFixed(2)}/ct
                           {' · '}Close limit ${item.limitPrice.toFixed(2)}/ct
                           {item.closeQuote?.netAsk != null && ` · Marketable (ask) $${item.closeQuote.netAsk.toFixed(2)}/ct`}
                           {' · fees excluded from all P&L figures shown here'}
@@ -4366,7 +4381,7 @@ function MemoryPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES[T
                           <span className={`${th.text} w-16 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{t.strategy}</span>
                           <span className={`${th.textFaint} flex-1`}>{t.action} @ {t.dte}d DTE</span>
                           <span className={`font-bold ${t.outcome === 'WIN' ? 'text-emerald-400' : t.outcome === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
-                            {t.pnlPct >= 0 ? '+' : ''}{t.pnlPct.toFixed(1)}%
+                            {t.pnlPct == null ? 'Unavailable' : `${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}
                           </span>
                           {t.aiVerdict && (
                             <span className={`${t.aiVerdict === 'STOP' ? 'text-red-400' : t.aiVerdict === 'CAUTION' ? 'text-yellow-400' : 'text-emerald-400'}`}>
@@ -4388,24 +4403,24 @@ function MemoryPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES[T
 }
 
 function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEMES[Theme] }) {
-  const totalCredit = positions.reduce((s, p) => s + p.creditReceived, 0);
-  const totalPnl = positions.reduce((s, p) => s + (p.pnl ?? p.plOpen ?? 0), 0);
-  const capturedPct = totalCredit > 0 ? (totalPnl / totalCredit) * 100 : 0;
-  const totalAtRisk = positions.reduce((s, p) => s + p.maxRisk, 0);
-  const totalTheta = positions.reduce((s, p) => {
-    if (p.currentValue != null && p.dte > 0) return s + p.currentValue / p.dte;
-    if (p.dte > 0) return s + p.creditReceived / p.dte;
-    return s;
-  }, 0);
+  const complete = positions.filter(hasCompleteEntryEconomics);
+  const totalCredit = complete.reduce((s, p) => s + (canonicalEntryCredit(p) ?? 0), 0);
+  const priced = complete.filter(p => (p.pnl ?? p.plOpen) != null);
+  const totalPnl = priced.reduce((s, p) => s + (p.pnl ?? p.plOpen ?? 0), 0);
+  const capturedPct = totalCredit > 0 && priced.length === complete.length ? (totalPnl / totalCredit) * 100 : null;
+  const reliableRisk = positions.filter(p => p.maxRiskReliable !== false && Number.isFinite(p.maxRisk));
+  const totalAtRisk = reliableRisk.reduce((s, p) => s + p.maxRisk, 0);
+  const totalTheta = sumNullable(positions, p => p.theta != null ? toWholePositionThetaDollars(p.theta) : null);
+  const omittedEntry = positions.length - complete.length;
 
   return (
     <div className={`grid grid-cols-5 border-b ${th.border}`}>
       {[
         { label: 'Open Positions', value: String(positions.length), sub: `${positions.length} position${positions.length !== 1 ? 's' : ''}`, color: th.text },
-        { label: 'Captured', value: `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(0)}`, sub: `of $${totalCredit.toFixed(0)} · ${capturedPct.toFixed(0)}%`, color: totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400' },
-        { label: `${positions.length > 0 ? Math.round(positions.reduce((s,p) => s + p.profitTarget, 0) / positions.length * 100) : 50}% Target`, value: `$${Math.round(positions.reduce((s,p) => s + p.targetPrice, 0))}`, sub: `${totalCredit > 0 ? Math.round((totalPnl / Math.max(positions.reduce((s,p) => s + p.targetPrice, 0), 1)) * 100) : 0}% of target`, color: 'text-yellow-400' },
-        { label: 'At Risk', value: `$${totalAtRisk.toFixed(0)}`, sub: 'max loss if expired', color: th.textMuted },
-        { label: 'Est. Theta/D', value: totalTheta > 0 ? `+$${totalTheta.toFixed(2)}` : '—', sub: 'daily decay', color: 'text-blue-400' },
+        { label: 'Captured', value: priced.length > 0 ? `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(0)}` : 'Unavailable', sub: capturedPct != null ? `of $${totalCredit.toFixed(0)} · ${capturedPct.toFixed(0)}%` : `${omittedEntry} incomplete entr${omittedEntry === 1 ? 'y' : 'ies'} excluded`, color: totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400' },
+        { label: 'Target', value: complete.length > 0 ? `$${Math.round(complete.reduce((s,p) => s + p.targetPrice, 0))}` : 'Unavailable', sub: omittedEntry > 0 ? `${omittedEntry} incomplete entr${omittedEntry === 1 ? 'y' : 'ies'} excluded` : 'entry-credit based', color: 'text-yellow-400' },
+        { label: 'At Risk', value: reliableRisk.length > 0 ? `$${totalAtRisk.toFixed(0)}` : 'Unavailable', sub: reliableRisk.length === positions.length ? 'expiry max-loss estimate' : `${positions.length - reliableRisk.length} unreliable excluded`, color: th.textMuted },
+        { label: 'Theta/D', value: totalTheta != null ? `${totalTheta >= 0 ? '+' : ''}$${totalTheta.toFixed(2)}` : 'Unavailable', sub: 'broker-position estimate', color: 'text-blue-400' },
       ].map((item, i, arr) => (
         <div key={item.label} className={`p-5 ${i < arr.length - 1 ? `border-r ${th.border}` : ''} flex flex-col items-center text-center`}>
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-2`}>{item.label}</p>
@@ -4903,11 +4918,11 @@ function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos:
       <div className="px-4 py-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-[9px] text-indigo-400 tracking-widest font-bold uppercase">AI Analysis</span>
+            <span className="text-[9px] text-indigo-400 tracking-widest font-bold uppercase">Recommendation Explanation</span>
             <span className="text-[10px] font-bold text-amber-300">
               → {pos.recommendation?.label ?? 'No canonical action'}
             </span>
-            <span className={`text-[9px] ${th.textFaint}`}>AI explanation · canonical action unchanged</span>
+            <span className={`text-[9px] ${th.textFaint}`}>Deterministic explanation · canonical action unchanged</span>
             {analysis.deviatesFromRules && (
               <span className="text-[9px] px-2 py-0.5 rounded border border-yellow-600/50 text-yellow-400 font-bold">
                 ⚡ Outside rules
@@ -4986,7 +5001,10 @@ function PortfolioAnalysisPanel({ analysis, positions, onClose, th }: {
     analysis.topRisks.length > 0 ? `\n**Portfolio risks:** ${analysis.topRisks.join(' · ')}` : '',
     analysis.thetaYield ? `\n**Theta yield:** ${analysis.thetaYield}` : '',
     ``,
-    `Positions: ${positions.map(p => `${p.symbol} ${p.strategy} (${p.dte}d, ${p.pnl != null ? ((p.pnl/p.creditReceived)*100).toFixed(0)+'% P&L' : 'no price'})`).join(', ')}`,
+    `Positions: ${positions.map(p => {
+      const pct = entryPnlPct(p);
+      return `${p.symbol} ${p.strategy} (${p.dte}d, ${pct != null ? `${pct.toFixed(0)}% P&L` : 'entry-relative P&L unavailable'})`;
+    }).join(', ')}`,
   ].filter(Boolean).join('\n');
 
   return (
@@ -5334,7 +5352,13 @@ function assessExtendConditions(pos: Position): {
   let score = 0;
 
   // P&L check — most important
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0 ? (pos.pnl / pos.creditReceived) * 100 : 0;
+  const pnlPct = entryPnlPct(pos);
+  if (pnlPct == null) {
+    return {
+      signal: 'bad', reasons: [],
+      warnings: ['Entry economics are unavailable — TradeEdge cannot assess or extend an entry-credit target safely'],
+    };
+  }
   if (pnlPct < 0) {
     warnings.push(`Position is at a loss (${pnlPct.toFixed(0)}%) — extending a losing position is rarely right`);
     score -= 3;
@@ -5398,10 +5422,11 @@ function ExtendProfitButton({ pos, th }: { pos: Position; th: typeof THEMES[Them
   const [verdictLoading, setVerdictLoading] = useState(false);
   const [selectedPct, setSelectedPct] = useState<number | null>(null);
 
-  if (!pos.hasGtc) return null;
+  if (!pos.hasGtc || !hasCompleteEntryEconomics(pos)) return null;
+  const entryCredit = canonicalEntryCredit(pos)!;
 
-  const currentTargetPct = pos.gtcOrderPrice != null && pos.creditReceived > 0
-    ? Math.round((1 - pos.gtcOrderPrice / (pos.creditReceived / 100)) * 100)
+  const currentTargetPct = pos.gtcOrderPrice != null && entryCredit > 0
+    ? Math.round((1 - pos.gtcOrderPrice / (entryCredit / 100)) * 100)
     : Math.round(pos.profitTarget * 100);
 
   const options = [55, 60, 65, 70, 75, 80, 85, 90].filter(pct => pct > currentTargetPct);
@@ -5453,7 +5478,7 @@ function ExtendProfitButton({ pos, th }: { pos: Position; th: typeof THEMES[Them
       if (!orderId) {
         throw new Error('Could not find a working GTC order for this position. It may have already been filled or cancelled. Refresh positions and try again.');
       }
-      const newPrice = parseFloat(((pos.creditReceived / 100) * (1 - targetPct / 100)).toFixed(2));
+      const newPrice = parseFloat(((entryCredit / 100) * (1 - targetPct / 100)).toFixed(2));
       await ttPatch(
         `/accounts/${pos.accountNumber}/orders/${orderId}`,
         token,
@@ -5537,7 +5562,7 @@ function ExtendProfitButton({ pos, th }: { pos: Position; th: typeof THEMES[Them
           {/* Target options */}
           <div className="space-y-1">
             {options.map(pct => {
-              const newPrice = ((pos.creditReceived / 100) * (1 - pct / 100)).toFixed(2);
+              const newPrice = ((entryCredit / 100) * (1 - pct / 100)).toFixed(2);
               const isSelected = selectedPct === pct;
               const isStop = verdict?.verdict === 'STOP' && verdict.confidence === 'HIGH';
               return (
@@ -5761,11 +5786,15 @@ OUTPUT FORMAT — JSON only, nothing else:
 }`;
 
 function buildStopGtcPrompt(pos: Position): string {
+  const entryCredit = canonicalEntryCredit(pos);
+  if (entryCredit == null) {
+    throw new Error('Entry economics are unavailable; GTC and stop prices cannot be derived safely.');
+  }
   const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-  const creditPerContract = pos.creditReceived / (qty * 100);
+  const creditPerContract = entryCredit / (qty * 100);
   const currentValuePerContract = pos.currentValue != null ? pos.currentValue / (qty * 100) : null;
-  const pnlPct = pos.pnl != null && pos.creditReceived > 0
-    ? ((pos.pnl / pos.creditReceived) * 100).toFixed(1) : 'unknown';
+  const pnlPctValue = entryPnlPct(pos);
+  const pnlPct = pnlPctValue != null ? pnlPctValue.toFixed(1) : 'unknown';
   const profitCaptured = currentValuePerContract != null
     ? parseFloat(((1 - currentValuePerContract / creditPerContract) * 100).toFixed(1))
     : null;
@@ -5789,7 +5818,7 @@ Expiry: ${pos.expDate} | DTE: ${pos.dte} | Entry DTE: ${pos.entryDte}
 Strikes: ${pos.legs.map(l => l.direction + ' ' + l.strikePrice + l.optionType).join(', ')}
 
 CREDIT AND P&L:
-Original credit: ${creditPerContract.toFixed(2)}/contract (${pos.creditReceived.toFixed(2)} total)
+Original credit: ${creditPerContract.toFixed(2)}/contract (${entryCredit.toFixed(2)} total)
 Current spread value: ${currentValuePerContract?.toFixed(2) ?? 'unknown'}/contract
 Profit captured: ${profitCaptured != null ? profitCaptured + '%' : pnlPct + '%'} of original credit
 P&L dollars: ${pos.pnl?.toFixed(2) ?? 'unknown'}
@@ -5867,6 +5896,8 @@ function saveLastStopMultiple(strategy: string, multiple: number) {
 
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const portfolioMode = usePortfolioMode();
+  const entryCredit = canonicalEntryCredit(pos);
+  if (entryCredit == null) return null;
 
   // ── Price bounds ──────────────────────────────────────────────────────────
   // All valid GTC and stop prices must respect these hard bounds derived from
@@ -5884,7 +5915,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   //   Minimum: current spread value + $0.01
 
   const qty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
-  const creditPerContract = pos.creditReceived / (qty * 100);
+  const creditPerContract = entryCredit / (qty * 100);
   // currentValue from pos is total across all contracts × 100
   // Per-contract spread value = currentValue / (qty * 100)
   const liveValuePerContract = pos.currentValue != null
@@ -6835,10 +6866,10 @@ function fmtThetaDisplay(theta: number | null): string {
 }
 
 function fmtDeltaDisplay(delta: number | null): string {
-  if (delta == null) return '—';
-  const pct = delta * 100;
-  const sign = pct >= 0 ? '+' : '-';
-  return `${sign}${Math.abs(pct).toFixed(0)}%`;
+  const shares = toWholePositionDeltaShares(delta);
+  if (shares == null) return '—';
+  const sign = shares >= 0 ? '+' : '-';
+  return `${sign}${Math.abs(shares).toFixed(0)} sh-eq`;
 }
 
 function fmtGammaDisplay(gamma: number | null): string {
@@ -8325,7 +8356,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
         <div className="flex items-center gap-1.5 shrink-0" style={{ flexWrap: 'nowrap' }}>
           {(['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[]).map(action => {
             const meta = ACTION_META[action];
-            if (!isActionRelevant(pos, action, rec)) return null;
+            if (!isActionRelevant(pos, action, pos.recommendation ? rec.action : null)) return null;
             // TE-0002 Round 4: the "suggested" marker is tied to THIS
             // specific button, not to the row -- it must only appear when
             // the canonical recommendation is exactly this action, so a
@@ -8398,7 +8429,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               : 'border-indigo-800 text-indigo-500 hover:border-indigo-600 hover:text-indigo-400'
           }`}>
           <span>◈</span>
-          <span>{analysisLoading ? 'Analyzing...' : showAnalysis && analysis ? 'Hide Analysis' : analysis ? 'Show Analysis' : 'Analyze with AI'}</span>
+          <span>{analysisLoading ? 'Preparing...' : showAnalysis && analysis ? 'Hide Explanation' : analysis ? 'Show Explanation' : 'Explain Recommendation'}</span>
         </button>
       </div>
 
@@ -8763,7 +8794,11 @@ function BulkActionBar({ selectedKeys, positions, onExecute, onClear, th }: {
   // selected position (same relevance gate the per-card buttons use). When
   // applied, it only runs on the positions it's actually relevant for.
   const allActions: ActionType[] = ['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'];
-  const actions = allActions.filter(action => selected.some(pos => isActionRelevant(pos, action)));
+  const actions = allActions.filter(action => selected.some(pos => isActionRelevant(
+    pos,
+    action,
+    pos.recommendation ? canonicalRecommendationToAction(pos.recommendation.kind) : null,
+  )));
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -8781,7 +8816,11 @@ function BulkActionBar({ selectedKeys, positions, onExecute, onClear, th }: {
             {actions.map(action => {
               const meta = ACTION_META[action];
               // Only run the action on positions it's actually relevant for.
-              const targets = selected.filter(pos => isActionRelevant(pos, action));
+              const targets = selected.filter(pos => isActionRelevant(
+                pos,
+                action,
+                pos.recommendation ? canonicalRecommendationToAction(pos.recommendation.kind) : null,
+              ));
               return (
                 <button key={action}
                   onClick={() => onExecute(targets.map(pos => ({ pos, action })))}
@@ -9367,7 +9406,9 @@ export default function PortfolioPage() {
     } catch {}
     setPositions(prev => prev.map(p => {
       if (p.key !== key) return p;
-      return { ...p, profitTarget: value, targetPrice: p.creditReceived * value, hitTarget: p.pnl != null && p.pnl >= p.creditReceived * value };
+      const entryCredit = canonicalEntryCredit(p);
+      if (entryCredit == null) return p;
+      return { ...p, profitTarget: value, targetPrice: entryCredit * value, hitTarget: p.pnl != null && p.pnl >= entryCredit * value };
     }));
   };
 

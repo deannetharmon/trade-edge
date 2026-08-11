@@ -24,6 +24,31 @@
 // explicitly instead of this default.
 export const CONTRACT_MULTIPLIER = 100;
 
+export interface EntryEconomicsLike {
+  entryEconomicsComplete?: boolean;
+  entryCredit?: number | null;
+  creditReceived: number;
+}
+
+export function hasCompleteEntryEconomics(position: EntryEconomicsLike): boolean {
+  return position.entryEconomicsComplete !== false
+    && Number.isFinite(position.entryCredit ?? position.creditReceived)
+    && (position.entryCredit ?? position.creditReceived) >= 0;
+}
+
+export function canonicalEntryCredit(position: EntryEconomicsLike): number | null {
+  if (!hasCompleteEntryEconomics(position)) return null;
+  const credit = position.entryCredit ?? position.creditReceived;
+  return Number.isFinite(credit) ? credit : null;
+}
+
+export function entryPnlPct(position: EntryEconomicsLike & { pnl?: number | null }): number | null {
+  const credit = canonicalEntryCredit(position);
+  return credit != null && credit > 0 && position.pnl != null && Number.isFinite(position.pnl)
+    ? (position.pnl / credit) * 100
+    : null;
+}
+
 export function parseBrokerEntryPremium(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const normalized = typeof value === 'string' ? value.trim() : value;
@@ -34,6 +59,10 @@ export function parseBrokerEntryPremium(value: unknown): number | null {
 
 export function toWholePositionThetaDollars(rawTheta: number | null): number | null {
   return rawTheta == null || !Number.isFinite(rawTheta) ? null : rawTheta * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionDeltaShares(rawDelta: number | null): number | null {
+  return rawDelta == null || !Number.isFinite(rawDelta) ? null : rawDelta * CONTRACT_MULTIPLIER;
 }
 
 export function toWholePositionGammaShareEquivalent(rawGamma: number | null): number | null {
@@ -54,17 +83,24 @@ export function aggregateBrokerPositionGreeks(
   legs: BrokerGreekLeg[],
   maps: { theta: Readonly<Record<string, number>>; gamma: Readonly<Record<string, number>>; delta: Readonly<Record<string, number>>; vega: Readonly<Record<string, number>> },
 ) {
+  const normalizedLegs = legs.map((leg) => ({
+    symbol: leg.symbol?.replace(/\s+/g, '') ?? '',
+    quantity: Number(leg.quantity),
+    direction: leg['quantity-direction'],
+  }));
+  if (normalizedLegs.length === 0 || normalizedLegs.some(leg =>
+    !leg.symbol || !Number.isInteger(leg.quantity) || leg.quantity <= 0
+    || (leg.direction !== 'Short' && leg.direction !== 'Long')
+  )) return { theta: null, gamma: null, delta: null, vega: null };
+
   const sum = (map: Readonly<Record<string, number>>, shortSign: number, longSign: number, absolute: boolean): number | null => {
     let total = 0;
-    let found = false;
-    for (const leg of legs) {
-      const value = map[leg.symbol?.replace(/\s+/g, '') ?? ''];
-      const quantity = Number.parseInt(String(leg.quantity ?? '1'), 10);
-      if (!Number.isFinite(value) || !Number.isFinite(quantity)) continue;
-      total += (leg['quantity-direction'] === 'Short' ? shortSign : longSign) * (absolute ? Math.abs(value) : value) * quantity;
-      found = true;
+    for (const leg of normalizedLegs) {
+      const value = map[leg.symbol];
+      if (!Number.isFinite(value)) return null;
+      total += (leg.direction === 'Short' ? shortSign : longSign) * (absolute ? Math.abs(value) : value) * leg.quantity;
     }
-    return found ? Number(total.toFixed(4)) : null;
+    return Number(total.toFixed(4));
   };
   return {
     theta: sum(maps.theta, 1, -1, true),

@@ -42,7 +42,12 @@ export interface CanonicalAiProjection {
   deviationNote: null;
 }
 
-export function projectCanonicalRecommendationForAi(canonical: PortfolioRecommendation): CanonicalAiProjection {
+export function projectCanonicalRecommendationForAi(
+  canonical: PortfolioRecommendation,
+  // Deliberately accepted only to make the trust boundary explicit and
+  // regression-testable. No model-authored field is projected into the UI.
+  _untrustedModelOutput?: unknown,
+): CanonicalAiProjection {
   const recommendation: CanonicalAiProjection['recommendation'] = (() => {
     switch (canonical.kind) {
       case 'close-winner': return 'TAKE_PROFIT';
