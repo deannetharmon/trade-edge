@@ -85,26 +85,24 @@ describe('PI-0014 fixture 1: real production failure (SMH-shaped BPS)', () => {
     expect(marketablePnlPct).toBeCloseTo(-124.8, 1);
   });
 
-  it('is classified LIQUIDITY_TRAP and routes an untrusted marketable-only breach to Verify Pricing', () => {
-    const { valuation, legacyRecommendation, objective, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
+  it('keeps the 20-DTE action primary while retaining unresolved pricing as secondary state', () => {
+    const { valuation, legacyRecommendation, objective, executionRealityPromoted, liquidityTrapTriggered, pricingDecisionEvidence } = evaluate(fixture);
     expect(valuation.liquidityTier).toBe('LIQUIDITY_TRAP');
     expect(executionRealityPromoted).toBe(false);
     expect(liquidityTrapTriggered).toBe(true);
-    expect(legacyRecommendation.label).toBe('Verify Pricing');
-    expect(legacyRecommendation.kind).toBe('verify-pricing');
-    expect(objective?.ruleId).toBe('OBJ-VERIFY-PRICING');
-    expect(objective?.reviewTriggers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'fresh-executable-quote' }),
-    ]));
-    expect(legacyRecommendation.urgency).toBe('high');
+    expect(legacyRecommendation.kind).toBe('roll-soon');
+    expect(objective?.ruleId).toBe('OBJ-MANAGE-21-DTE');
+    expect(pricingDecisionEvidence.verificationUnresolved).toBe(true);
+    expect(pricingDecisionEvidence.status).toBe('MARKETABLE_OBSERVATIONAL');
   });
 
-  it('states both valuations and why marketable evidence cannot control', () => {
-    const { legacyRecommendation } = evaluate(fixture);
-    expect(legacyRecommendation.primaryReason).toMatch(/Pricing conflict/);
-    expect(legacyRecommendation.primaryReason).toMatch(/-26%/);
-    expect(legacyRecommendation.primaryReason).toMatch(/-125%/);
-    expect(legacyRecommendation.primaryReason).toMatch(/not decision-eligible/);
+  it('retains both valuations and never allows the untrusted marketable loss to produce a hard exit', () => {
+    const { legacyRecommendation, pricingDecisionEvidence } = evaluate(fixture);
+    expect(legacyRecommendation.kind).not.toBe('close-loser');
+    expect(pricingDecisionEvidence.midPnlPct).toBeCloseTo(-25.8, 1);
+    expect(pricingDecisionEvidence.marketablePnlPct).toBeCloseTo(-124.8, 1);
+    expect(pricingDecisionEvidence.marketableDecisionEligible).toBe(false);
+    expect(pricingDecisionEvidence.verificationUnresolved).toBe(true);
   });
 });
 
@@ -260,7 +258,7 @@ describe('PI-0014 corrective closeout: missing/invalid marketable data preserves
         positionId: 'fixture-missing-1',
         symbol: 'TEST',
         strategy: 'BPS',
-        dte: 20,
+        dte: 30,
         buffer: 8,
         hasGtc: true,
         creditReceived: 500,
@@ -303,7 +301,9 @@ describe('PI-0014 corrective closeout: missing/invalid marketable data preserves
         positionId: 'fixture-missing-3',
         symbol: 'TEST',
         strategy: 'BCS',
-        dte: 20,
+        // Keep this fixture outside the independent DTE-management window so
+        // it isolates the pricing-verification policy being asserted.
+        dte: 30,
         buffer: 10,
         hasGtc: true,
         creditReceived: 600,
@@ -377,7 +377,9 @@ describe('PI-0014C: unknown liquidity/freshness cannot independently promote a h
         positionId: 'fixture-unknown-tier-1',
         symbol: 'TEST',
         strategy: 'BPS',
-        dte: 20,
+        // Outside the independent DTE-management window: this fixture is
+        // specifically about pricing evidence, not lifecycle precedence.
+        dte: 30,
         buffer: 8,
         hasGtc: true,
         creditReceived: 500,

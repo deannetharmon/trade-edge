@@ -100,6 +100,11 @@ export interface PortfolioPricingDecisionEvidence {
   marketableQuoteFreshness: PortfolioPricingFreshness;
   marketableQuoteCapturedAt: string | null;
   marketableDecisionEligible: boolean;
+  // Independent of the currently winning recommendation. True while an
+  // identified pricing conflict still lacks fresh, reliable marketable
+  // evidence, including while a higher-priority midpoint/assignment/
+  // earnings/DTE action is primary.
+  verificationUnresolved: boolean;
   controllingBasis: PortfolioPricingBasis;
   status: PortfolioPricingDecisionStatus;
 }
@@ -157,7 +162,7 @@ export interface PositionObjectiveInput {
   // acquisition pipeline. This preserves an unresolved pricing-verification
   // disposition across an incomplete refresh without copying stale decision
   // objects. Independent current rules still win below.
-  priorPricingVerificationRequired?: boolean;
+  priorPricingVerificationUnresolved?: boolean;
   // PI-0014 follow-up: this position's liquidity classification (see
   // lib/positionValuation's PositionValuation.liquidityTier), supplied so
   // this function -- not the valuation module -- can decide whether
@@ -734,6 +739,9 @@ export function evaluatePositionObjective(
     ((!midMaterialLoss && rawMarketableMaterialLoss) ||
       (!midWeakHealthLoss && rawMarketableWeakHealthLoss) ||
       (midProfitTargetReached && rawMarketableContradictsProfitTarget));
+  const pricingVerificationUnresolved =
+    !marketableDecisionEligible &&
+    (pricingConflictRequiresVerification || input.priorPricingVerificationUnresolved === true);
   const meaningfulUnprotectedProfit =
     shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14;
   const earningsUpcoming = isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now);
@@ -791,14 +799,6 @@ export function evaluatePositionObjective(
       'Review closing or rolling defensively.',
       supportingReasons, now, intentResult,
     );
-  } else if (pricingConflictRequiresVerification) {
-    legacy = makeLegacyRecommendation(
-      input, 'verify-pricing', 'high', 70,
-      `Pricing conflict: midpoint P/L is ${pnlPct?.toFixed(0) ?? 'unknown'}% of credit while marketable P/L is ${marketablePnlPct?.toFixed(0) ?? 'unknown'}%; the marketable quote is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness).`,
-      'Refresh broker leg quotes and verify the derived marketable estimate before making a loss-management decision; it is not a guaranteed fill price.',
-      supportingReasons, now,
-    );
-    legacy = { ...legacy, label: 'Verify Pricing' };
   } else if (weakHealthLoss) {
     legacy = makeLegacyRecommendation(
       input, 'close-loser', 'high', 84,
@@ -884,13 +884,12 @@ export function evaluatePositionObjective(
     'roll-soon',
     'let-expire',
   ]);
-  const latchedPricingVerification =
-    input.priorPricingVerificationRequired === true &&
-    !marketableDecisionEligible &&
+  const pricingVerificationIsPrimary =
+    pricingVerificationUnresolved &&
     legacy.kind !== 'verify-pricing' &&
     !independentCurrentKinds.has(legacy.kind);
 
-  if (latchedPricingVerification) {
+  if (pricingVerificationIsPrimary) {
     const currentEvidence = marketablePnlPct == null
       ? 'current broker leg quotes are incomplete, so no marketable estimate is available'
       : `the current marketable estimate is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness)`;
@@ -911,7 +910,7 @@ export function evaluatePositionObjective(
   // module's types.ts doc). Never fabricated true when liquidityTier is
   // absent.
   const liquidityTrapTriggered =
-    (executionRealityPromoted || pricingConflictRequiresVerification || latchedPricingVerification) &&
+    (executionRealityPromoted || pricingVerificationUnresolved) &&
     input.liquidityTier === 'LIQUIDITY_TRAP';
 
   const pricingDecisionEvidence: PortfolioPricingDecisionEvidence = {
@@ -921,12 +920,13 @@ export function evaluatePositionObjective(
     marketableQuoteFreshness,
     marketableQuoteCapturedAt: input.marketableQuoteCapturedAt ?? null,
     marketableDecisionEligible,
+    verificationUnresolved: pricingVerificationUnresolved,
     controllingBasis: executionRealityPromoted
       ? 'MARKETABLE'
       : pnlPct != null
         ? 'MID'
         : 'NONE',
-    status: pricingConflictRequiresVerification || latchedPricingVerification
+    status: pricingVerificationIsPrimary
       ? 'VERIFY_PRICING'
       : executionRealityPromoted
         ? 'MARKETABLE_CONFIRMED'

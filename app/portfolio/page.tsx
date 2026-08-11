@@ -105,6 +105,7 @@ import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/Todays
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
 import { PositionIntelligencePanel } from '@/features/portfolio/intelligence/PositionIntelligencePanel';
 import { PositionRiskBadges } from '@/features/portfolio/positions/PositionRiskBadges';
+import { PricingVerificationPendingNotice } from '@/features/portfolio/components/PricingVerificationPendingNotice';
 import { DecisionHistoryView } from '@/features/portfolio/decisionReview/DecisionHistoryView';
 import { upsertDecisionReview, latestReviewForPosition } from '@/lib/decision-review';
 import type { DecisionReview, DecisionReviewStore } from '@/lib/decision-review';
@@ -8309,6 +8310,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           pos.portfolioObjective is assignment- or earnings-exposed; see
           PositionRiskBadges.tsx for the exact predicates. */}
       <PositionRiskBadges objective={pos.portfolioObjective ?? null} th={th} />
+
+      <PricingVerificationPendingNotice
+        verificationUnresolved={pos.pricingDecisionEvidence?.verificationUnresolved === true}
+        recommendationKind={pos.recommendation?.kind}
+      />
 
       {/* Action + Analyze row */}
       <div className={`flex items-center px-4 py-2 border-t ${th.borderLight} overflow-x-auto`} style={{ flexWrap: 'nowrap' }}>

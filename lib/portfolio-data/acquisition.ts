@@ -175,7 +175,7 @@ export function computeRawPositionValuation(pos: Position) {
 // evidence object -- and `liquidityTrapTriggered`, owned by
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
-export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationRequired = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
+export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
@@ -224,7 +224,7 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
     marketableQuoteQuality: derivePositionQuoteQuality(pos),
     marketableQuoteFreshness: deriveMarketableQuoteFreshness(pos.quoteCapturedAt, now),
     marketableQuoteCapturedAt: pos.quoteCapturedAt,
-    priorPricingVerificationRequired,
+    priorPricingVerificationUnresolved,
   }, now);
 
   return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
@@ -282,8 +282,12 @@ export function attachSnapshotHistory(
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    const priorPricingVerificationRequired = previousByKey.get(p.key)?.recommendation?.kind === 'verify-pricing';
-    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationRequired);
+    const previous = previousByKey.get(p.key);
+    const priorPricingVerificationUnresolved =
+      previous?.pricingDecisionEvidence?.verificationUnresolved === true ||
+      previous?.pricingDecisionEvidence?.status === 'VERIFY_PRICING' ||
+      previous?.recommendation?.kind === 'verify-pricing';
+    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved);
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
 }

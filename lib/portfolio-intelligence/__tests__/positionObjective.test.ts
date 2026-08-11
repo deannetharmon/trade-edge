@@ -269,7 +269,7 @@ describe('PI-0014C: canonical pricing-verification continuity', () => {
       marketablePnlPct: null,
       marketableQuoteQuality: 'UNKNOWN',
       marketableQuoteFreshness: 'UNKNOWN',
-      priorPricingVerificationRequired: true,
+      priorPricingVerificationUnresolved: true,
     }), NOW);
     expect(result.legacyRecommendation.kind).toBe('verify-pricing');
     expect(result.legacyRecommendation.primaryReason).toContain('current broker leg quotes are incomplete');
@@ -278,16 +278,18 @@ describe('PI-0014C: canonical pricing-verification continuity', () => {
     expect(result.objective?.ruleId).toBe('OBJ-VERIFY-PRICING');
     expect(result.objective?.rationale).toContain('current broker leg quotes are incomplete');
     expect(result.pricingDecisionEvidence.status).toBe('VERIFY_PRICING');
+    expect(result.pricingDecisionEvidence.verificationUnresolved).toBe(true);
   });
 
   it('lets a current midpoint material-loss action supersede the latch', () => {
     const result = evaluatePositionObjective(baseInput({
       pnlPct: -110,
       marketablePnlPct: null,
-      priorPricingVerificationRequired: true,
+      priorPricingVerificationUnresolved: true,
     }), NOW);
     expect(result.legacyRecommendation.kind).toBe('close-loser');
     expect(result.pricingDecisionEvidence.controllingBasis).toBe('MID');
+    expect(result.pricingDecisionEvidence.verificationUnresolved).toBe(true);
   });
 
   it.each([
@@ -298,20 +300,90 @@ describe('PI-0014C: canonical pricing-verification continuity', () => {
     const result = evaluatePositionObjective(baseInput({
       ...overrides,
       marketablePnlPct: null,
-      priorPricingVerificationRequired: true,
+      priorPricingVerificationUnresolved: true,
     }), NOW);
     expect(result.legacyRecommendation.kind).toBe(expectedKind);
+    expect(result.pricingDecisionEvidence.verificationUnresolved).toBe(true);
   });
 
-  it('releases the latch when current marketable evidence is decision-eligible', () => {
+  it.each([
+    ['earnings', { dte: 25, earningsDate: '2026-07-15', expDate: '2026-08-05' }, 'earnings-risk'],
+    ['DTE management', { dte: 18 }, 'roll-soon'],
+  ])('lets %s win even when an ineligible marketable conflict value remains present', (_label, overrides, expectedKind) => {
+    const result = evaluatePositionObjective(baseInput({
+      ...overrides,
+      pnlPct: 10,
+      marketablePnlPct: -125,
+      marketableQuoteQuality: 'DEGRADED',
+      marketableQuoteFreshness: 'STALE',
+      priorPricingVerificationUnresolved: true,
+    }), NOW);
+    expect(result.legacyRecommendation.kind).toBe(expectedKind);
+    expect(result.pricingDecisionEvidence.verificationUnresolved).toBe(true);
+    expect(result.pricingDecisionEvidence.status).not.toBe('VERIFY_PRICING');
+  });
+
+  it('carries unresolved verification through assignment and restores Verify Pricing after assignment clears', () => {
+    const assignment = evaluatePositionObjective(baseInput({
+      dte: 5,
+      buffer: 1.5,
+      marketablePnlPct: null,
+      priorPricingVerificationUnresolved: true,
+    }), NOW);
+    expect(assignment.legacyRecommendation.kind).toBe('assignment-risk');
+    expect(assignment.pricingDecisionEvidence.verificationUnresolved).toBe(true);
+
+    const afterAssignment = evaluatePositionObjective(baseInput({
+      dte: 30,
+      buffer: 8,
+      marketablePnlPct: null,
+      priorPricingVerificationUnresolved: assignment.pricingDecisionEvidence.verificationUnresolved,
+    }), NOW);
+    expect(afterAssignment.legacyRecommendation.kind).toBe('verify-pricing');
+    expect(afterAssignment.pricingDecisionEvidence.verificationUnresolved).toBe(true);
+
+    const eligible = evaluatePositionObjective(baseInput({
+      pnlPct: 10,
+      marketablePnlPct: 12,
+      marketableQuoteQuality: 'RELIABLE',
+      marketableQuoteFreshness: 'FRESH',
+      priorPricingVerificationUnresolved: afterAssignment.pricingDecisionEvidence.verificationUnresolved,
+    }), NOW);
+    expect(eligible.legacyRecommendation.kind).toBe('hold');
+    expect(eligible.pricingDecisionEvidence.verificationUnresolved).toBe(false);
+  });
+
+  it.each([
+    ['midpoint loss', { pnlPct: -110, dte: 30 }, 'close-loser'],
+    ['DTE review', { pnlPct: 10, dte: 18 }, 'roll-soon'],
+  ])('restores Verify Pricing after a temporary %s action clears', (_label, actionOverrides, expectedKind) => {
+    const action = evaluatePositionObjective(baseInput({
+      ...actionOverrides,
+      marketablePnlPct: null,
+      priorPricingVerificationUnresolved: true,
+    }), NOW);
+    expect(action.legacyRecommendation.kind).toBe(expectedKind);
+    expect(action.pricingDecisionEvidence.verificationUnresolved).toBe(true);
+
+    const cleared = evaluatePositionObjective(baseInput({
+      pnlPct: 10,
+      dte: 30,
+      marketablePnlPct: null,
+      priorPricingVerificationUnresolved: action.pricingDecisionEvidence.verificationUnresolved,
+    }), NOW);
+    expect(cleared.legacyRecommendation.kind).toBe('verify-pricing');
+  });
+
+  it('releases unresolved verification when current marketable evidence is decision-eligible', () => {
     const result = evaluatePositionObjective(baseInput({
       pnlPct: 10,
       marketablePnlPct: 12,
       marketableQuoteQuality: 'RELIABLE',
       marketableQuoteFreshness: 'FRESH',
-      priorPricingVerificationRequired: true,
+      priorPricingVerificationUnresolved: true,
     }), NOW);
     expect(result.legacyRecommendation.kind).toBe('hold');
     expect(result.pricingDecisionEvidence.marketableDecisionEligible).toBe(true);
+    expect(result.pricingDecisionEvidence.verificationUnresolved).toBe(false);
   });
 });
