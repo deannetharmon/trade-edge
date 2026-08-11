@@ -75,6 +75,8 @@ import {
   computePositionPnl,
   parseBrokerEntryPremium,
   aggregateBrokerPositionGreeks,
+  hasCompleteEntryEconomics,
+  hasSupportedCreditEntryEconomics,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -115,8 +117,8 @@ export function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: numb
 // mid. See lib/positionValuation and
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
 export function computeMarketablePnlPct(pos: Position): number | null {
-  return pos.entryEconomicsComplete !== false && pos.closeNowPnl != null && pos.creditReceived !== 0
-    ? (pos.closeNowPnl / pos.creditReceived) * 100
+  return hasSupportedCreditEntryEconomics(pos) && pos.closeNowPnl != null && pos.entryCredit != null
+    ? (pos.closeNowPnl / pos.entryCredit) * 100
     : null;
 }
 
@@ -161,10 +163,10 @@ export function derivePositionQuoteCapturedAt(
 // Null when currentValue or closeValue is unavailable, same convention
 // those two fields already follow.
 export function computeRawPositionValuation(pos: Position) {
-  if (pos.entryEconomicsComplete === false || pos.maxRiskReliable === false) return null;
+  if (!hasSupportedCreditEntryEconomics(pos) || pos.maxRiskReliable === false || pos.entryCredit == null) return null;
   if (pos.currentValue == null || pos.closeValue == null) return null;
   return computePositionValuation({
-    creditReceived: pos.creditReceived,
+    creditReceived: pos.entryCredit,
     midValue: pos.currentValue,
     marketableValue: pos.closeValue,
     maxRisk: pos.maxRisk,
@@ -180,7 +182,7 @@ export function computeRawPositionValuation(pos: Position) {
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
 export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
-  const entryEconomicsComplete = pos.entryEconomicsComplete !== false;
+  const entryEconomicsComplete = hasCompleteEntryEconomics(pos);
   const decisionPosition: Position = entryEconomicsComplete ? pos : {
     ...pos,
     entryCredit: null,
@@ -257,12 +259,12 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
 export function scorePortfolioRemainingOpportunity(pos: Position) {
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
   return calculateRemainingOpportunity({
-    creditReceived: pos.entryEconomicsComplete === false ? null : pos.creditReceived,
+    creditReceived: hasCompleteEntryEconomics(pos) ? pos.entryCredit ?? null : null,
     // Same fraction-vs-percent normalization evaluatePositionObjective()
     // already applies to these two fields before using them -- keeps this
     // metric's captured/remaining percentages consistent with the
     // recommendation engine's own reading of the same position.
-    pnlPct: pos.entryEconomicsComplete === false ? null : normalizePositionObjectivePct(pos.pnlPct),
+    pnlPct: hasCompleteEntryEconomics(pos) ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: pos.healthScore?.score ?? null,

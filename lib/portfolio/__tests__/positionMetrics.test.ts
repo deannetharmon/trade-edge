@@ -21,10 +21,35 @@ import {
   toWholePositionGammaShareEquivalent,
   toWholePositionVegaDollars,
   computeCspEffectiveBuyPrice,
+  hasCompleteEntryEconomics,
+  hasSupportedCreditEntryEconomics,
+  canonicalEntryCredit,
+  entryPnlPct,
   type PopLeg,
 } from '../positionMetrics';
 
 describe('PM-0002 entry-premium provenance', () => {
+  it('requires explicit complete provenance and never falls back to compatibility credit', () => {
+    expect(hasCompleteEntryEconomics({ creditReceived: 1260 })).toBe(false);
+    expect(hasCompleteEntryEconomics({ entryEconomicsComplete: true, entryCredit: null, creditReceived: 1260 })).toBe(false);
+    expect(canonicalEntryCredit({ entryEconomicsComplete: true, entryCredit: null, creditReceived: 1260 })).toBeNull();
+    expect(hasCompleteEntryEconomics({ entryEconomicsComplete: true, entryCredit: 1260, creditReceived: 0 })).toBe(true);
+  });
+
+  it('keeps complete debit provenance but rejects it for credit-based math and actions', () => {
+    const debit = { entryEconomicsComplete: true, entryCredit: 500, entryPriceEffect: 'Debit' as const, creditReceived: 0, pnl: 100 };
+    expect(hasCompleteEntryEconomics(debit)).toBe(true);
+    expect(canonicalEntryCredit(debit)).toBe(500);
+    expect(hasSupportedCreditEntryEconomics(debit)).toBe(false);
+    expect(entryPnlPct(debit)).toBeNull();
+  });
+
+  it('accepts credit-based math only for explicit supported net-credit entries', () => {
+    const credit = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 1000, pnl: 250 };
+    expect(hasSupportedCreditEntryEconomics(credit)).toBe(true);
+    expect(entryPnlPct(credit)).toBe(25);
+  });
+
   it.each([undefined, null, '', '   ', 'not-a-price', NaN, Infinity, -1])('keeps unavailable broker value %p unavailable', value => {
     expect(parseBrokerEntryPremium(value)).toBeNull();
   });

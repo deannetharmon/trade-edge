@@ -13,7 +13,7 @@
 
 ### Entry economics are fail-closed
 
-`parseBrokerEntryPremium()` preserves the difference between a real broker zero and missing/invalid data. Production positions carry `entryCredit`, `entryEconomicsComplete`, `entryPriceEffect`, and `maxRiskReliable`. The old numeric `creditReceived` remains as a compatibility field, but the Portfolio feature no longer treats its fallback zero as evidence.
+`parseBrokerEntryPremium()` preserves the difference between a real broker zero and missing/invalid data. Production positions carry `entryCredit`, `entryEconomicsComplete`, `entryPriceEffect`, and `maxRiskReliable`. The old numeric `creditReceived` remains as a compatibility field, but the Portfolio feature no longer treats it as canonical evidence. Canonical provenance requires `entryEconomicsComplete === true` and a finite, non-null `entryCredit`; credit-derived targets, stops and actions additionally require `entryPriceEffect === 'Credit'` and a positive credit.
 
 When any required leg premium is unavailable:
 
@@ -31,7 +31,7 @@ The live acquisition regression uses a two-leg, five-contract broker-shaped fixt
 
 The compact row and expanded position intelligence consume `Position.recommendation`. Canonical sort priority is applied only after canonical recomputation. If a canonical recommendation is absent, the card says Recommendation Unavailable; it does not invoke the legacy recommendation engine.
 
-Manual structural actions remain visually distinct from the suggestion. Their availability is gated by canonical position identity and complete entry economics. The suggested marker appears only when the displayed action exactly matches the canonical action; Verify Pricing cannot mark an unrelated manual button.
+Manual structural actions remain visually distinct from the suggestion. Close/Roll is gated by canonical close identity rather than the credit-entry completeness gate. Credit-derived manual actions require explicit supported-credit provenance. The suggested marker appears only when the displayed action exactly matches the canonical action; Verify Pricing cannot mark an unrelated manual button.
 
 The former position-level “AI Analysis” control is now **Explain Recommendation**. It makes no AI request and renders a deterministic projection of current canonical evidence. The projector accepts hostile model-shaped input in its regression test and proves that action, confidence, summary, reasoning, risk, catalyst, and rule-deviation prose cannot enter the visible explanation. Follow-up chat remains a separate user-initiated AI feature and receives explicit unavailable values rather than fabricated entry economics.
 
@@ -84,27 +84,33 @@ Product and tests across PM-0002:
 
 1. `app/portfolio/page.tsx`
 2. `features/portfolio/components/VerifyPricingRefreshButton.tsx`
-3. `features/portfolio/components/__tests__/VerifyPricingRefreshButton.test.tsx`
-4. `features/portfolio/components/__tests__/TodaysPrioritiesWorkflow.test.tsx`
-5. `features/portfolio/todaysPriorities/__tests__/TodaysPrioritiesQueueView.test.tsx`
-6. `lib/portfolio-data/acquisition.ts`
-7. `lib/portfolio-data/types.ts`
-8. `lib/portfolio-data/__tests__/greekAcquisitionWiring.test.ts`
-9. `lib/portfolio/closeOrderSafety.ts`
-10. `lib/portfolio/positionLifecycle.ts`
-11. `lib/portfolio/positionMetrics.ts`
-12. `lib/portfolio/__tests__/positionMetrics.test.ts`
-13. `lib/portfolio/canonicalRecommendationPresentation.ts`
-14. `lib/portfolio/__tests__/canonicalRecommendationPresentation.test.ts`
-15. `lib/position-snapshot/types.ts`
-16. `lib/position-snapshot/snapshotEngine.ts`
-17. `lib/position-snapshot/__tests__/snapshotEngine.test.ts`
-18. `lib/decision-review/__tests__/outcomeAnalysis.test.ts`
+3. `features/portfolio/components/TodaysPrioritiesWorkflow.tsx`
+4. `features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx`
+5. `features/portfolio/components/__tests__/VerifyPricingRefreshButton.test.tsx`
+6. `features/portfolio/components/__tests__/TodaysPrioritiesWorkflow.test.tsx`
+7. `features/portfolio/todaysPriorities/__tests__/TodaysPrioritiesQueueView.test.tsx`
+8. `lib/portfolio-data/acquisition.ts`
+9. `lib/portfolio-data/types.ts`
+10. `lib/portfolio-data/__tests__/greekAcquisitionWiring.test.ts`
+11. `lib/portfolio-data/__tests__/pricingDecisionWiring.test.ts`
+12. `lib/portfolio/closeOrderSafety.ts`
+13. `lib/portfolio/positionLifecycle.ts`
+14. `lib/portfolio/positionMetrics.ts`
+15. `lib/portfolio/__tests__/positionMetrics.test.ts`
+16. `lib/portfolio/canonicalRecommendationPresentation.ts`
+17. `lib/portfolio/__tests__/canonicalRecommendationPresentation.test.ts`
+18. `lib/position-snapshot/types.ts`
+19. `lib/position-snapshot/index.ts`
+20. `lib/position-snapshot/snapshotEngine.ts`
+21. `lib/position-snapshot/__tests__/snapshotEngine.test.ts`
+22. `app/api/position-lifecycle-snapshots/route.ts`
+23. `app/portfolio/__tests__/RecommendationExplanationPage.test.tsx`
+24. `lib/decision-review/__tests__/outcomeAnalysis.test.ts`
 
 Documentation:
 
-19. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
-20. `docs/reviews/PM-0002-Implementation-Report.md`
+25. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
+26. `docs/reviews/PM-0002-Implementation-Report.md`
 
 ## Validation
 
@@ -112,7 +118,7 @@ Final clean-worktree validation after all corrections:
 
 - Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
 - Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **153 files / 2,140 tests passed; zero failures**.
+- Complete suite in one invocation: **154 files / 2,147 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.

@@ -27,24 +27,31 @@ export const CONTRACT_MULTIPLIER = 100;
 export interface EntryEconomicsLike {
   entryEconomicsComplete?: boolean;
   entryCredit?: number | null;
+  entryPriceEffect?: 'Credit' | 'Debit' | 'Unknown' | null;
   creditReceived: number;
 }
 
 export function hasCompleteEntryEconomics(position: EntryEconomicsLike): boolean {
-  return position.entryEconomicsComplete !== false
-    && Number.isFinite(position.entryCredit ?? position.creditReceived)
-    && (position.entryCredit ?? position.creditReceived) >= 0;
+  return position.entryEconomicsComplete === true
+    && position.entryCredit != null
+    && Number.isFinite(position.entryCredit)
+    && position.entryCredit >= 0;
 }
 
 export function canonicalEntryCredit(position: EntryEconomicsLike): number | null {
   if (!hasCompleteEntryEconomics(position)) return null;
-  const credit = position.entryCredit ?? position.creditReceived;
-  return Number.isFinite(credit) ? credit : null;
+  return position.entryCredit!;
+}
+
+/** True only for a supported, positive net-credit entry. */
+export function hasSupportedCreditEntryEconomics(position: EntryEconomicsLike): boolean {
+  const credit = canonicalEntryCredit(position);
+  return credit != null && credit > 0 && position.entryPriceEffect === 'Credit';
 }
 
 export function entryPnlPct(position: EntryEconomicsLike & { pnl?: number | null }): number | null {
-  const credit = canonicalEntryCredit(position);
-  return credit != null && credit > 0 && position.pnl != null && Number.isFinite(position.pnl)
+  const credit = hasSupportedCreditEntryEconomics(position) ? canonicalEntryCredit(position) : null;
+  return credit != null && position.pnl != null && Number.isFinite(position.pnl)
     ? (position.pnl / credit) * 100
     : null;
 }

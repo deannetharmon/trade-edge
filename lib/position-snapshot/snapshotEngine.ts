@@ -12,6 +12,26 @@ import type {
   PositionSnapshotInput,
 } from './types';
 
+/**
+ * Runtime boundary for stores written before PM-0002. Missing provenance is
+ * never inferred from the legacy numeric credit: it is normalized to an
+ * explicitly incomplete, nullable entry record.
+ */
+export function normalizePositionSnapshotStore(raw: unknown): PositionSnapshotStore {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const normalized: PositionSnapshotStore = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue;
+    normalized[key] = value.filter((item): item is PositionLifecycleSnapshot => !!item && typeof item === 'object')
+      .map((item) => {
+        const snapshot = item as PositionLifecycleSnapshot & { entryEconomicsComplete?: unknown };
+        const complete = snapshot.entryEconomicsComplete === true && snapshot.creditReceived != null && Number.isFinite(snapshot.creditReceived);
+        return { ...snapshot, entryEconomicsComplete: complete, creditReceived: complete ? snapshot.creditReceived : null };
+      });
+  }
+  return normalized;
+}
+
 function createSnapshotId(): string {
   return `psnap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
