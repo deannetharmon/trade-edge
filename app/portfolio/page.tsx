@@ -7538,7 +7538,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
   // PM-0002: the canonical evaluator remains authoritative before and after
   // AI analysis. AI is explanatory only and cannot replace the card action.
-  const rec = canonicalRecommendationForCard(pos.recommendation, getRecommendation(pos, trend));
+  const rec = pos.recommendation
+    ? canonicalRecommendationForCard(pos.recommendation, { action: 'HOLD', detail: '' })
+    : canonicalRecommendationForCard(null, getRecommendation(pos, trend));
   const suggestedLabel = pos.recommendation?.label ?? ACTION_META[rec.action].label;
 
   // ── 50%-target projection (√time value-decay model) ──
