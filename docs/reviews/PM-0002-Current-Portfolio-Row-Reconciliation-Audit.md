@@ -236,3 +236,18 @@ This audit recommends a corrective implementation ticket, not piecemeal UI edits
 **RETURN FOR CORRECTIVE IMPLEMENTATION AFTER TEAM APPROVAL OF UNITS AND MODEL POLICY.**
 
 The current pricing trust boundary is directionally sound, and the MU core spread arithmetic reconciles. The row nevertheless cannot be approved while it has two recommendation authorities and silently fabricated entry-premium zeros. Greek units, timestamp observability, and model labeling must also be resolved before the row can be described as trustworthy end to end.
+
+## 12. Corrective implementation disposition
+
+Implemented on `fix/pm-0002-portfolio-row-correctness` in product commit `69a2d8f`:
+
+- canonical recommendation presentation and sorting;
+- AI explanation separated from the canonical action;
+- nullable broker entry-premium provenance and fail-closed dependent metrics;
+- unit-safe CSP Effective Buy;
+- explicit whole-position Greek units with unapproved qualitative thresholds removed;
+- broker quote timestamp/age/quality/freshness adjacent to unresolved pricing;
+- unchanged-timestamp refresh outcome;
+- honest modeled/theoretical labels for affected row fields.
+
+The two pre-existing CSP search test failures recorded in the implementation report are outside PM-0002 and reproduce unchanged on base `2e515ba`.
