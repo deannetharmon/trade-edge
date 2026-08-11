@@ -138,10 +138,19 @@ export function DisqualifiedSection({
         aria-expanded={sectionOpen}
         aria-controls={panelId}
         onClick={toggleSection}
-        className={`w-full flex items-center justify-between text-[9px] tracking-widest uppercase font-bold ${th.textFaint} py-1`}
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border ${th.border} bg-slate-900/60 hover:bg-slate-800/80 transition-colors cursor-pointer text-left my-4`}
       >
-        <span>Disqualified ({results.length})</span>
-        <span aria-hidden="true">{sectionOpen ? '▾' : '▸'}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-200 tracking-wider uppercase">
+            Disqualified ({results.length})
+          </span>
+          <span className={`text-[10px] ${th.textFaint} font-normal normal-case`}>
+            — Click to review reasons why candidates failed criteria
+          </span>
+        </div>
+        <span className={`text-slate-400 text-xs transform transition-transform duration-200 ${sectionOpen ? 'rotate-180' : ''}`}>
+          ▼
+        </span>
       </button>
       <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {sectionOpen && (
