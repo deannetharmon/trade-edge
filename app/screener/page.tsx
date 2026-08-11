@@ -22,6 +22,9 @@ const getPmccDeltaColor = (delta: number) => {
 
 
 
+
+
+
 // ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
 // Mechanical extraction — moved, not rewritten. See docs/reviews/TE-0005A-Implementation-Report.md
 import type {
