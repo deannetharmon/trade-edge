@@ -1,3 +1,10 @@
+'use client';
+// path: app/screener/page.tsx
+
+
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
+import { createPortal } from 'react-dom';
 
 const getPmccExtrinsicColor = (pct: number) => {
   if (pct >= 80) return 'text-emerald-400';
@@ -11,12 +18,6 @@ const getPmccDeltaColor = (delta: number) => {
   return 'text-red-400';
 };
 
-// path: app/screener/page.tsx
-
-'use client';
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import Link from 'next/link';
-import { createPortal } from 'react-dom';
 
 // ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
 // Mechanical extraction — moved, not rewritten. See docs/reviews/TE-0005A-Implementation-Report.md
