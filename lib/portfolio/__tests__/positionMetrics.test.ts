@@ -15,8 +15,60 @@ import {
   resolveUnderlyingPrice,
   computeEntryChangeTone,
   clampPct,
+  parseBrokerEntryPremium,
+  toWholePositionThetaDollars,
+  toWholePositionGammaShareEquivalent,
+  toWholePositionVegaDollars,
+  computeCspEffectiveBuyPrice,
   type PopLeg,
 } from '../positionMetrics';
+
+describe('PM-0002 entry-premium provenance', () => {
+  it.each([undefined, null, '', '   ', 'not-a-price', NaN, Infinity, -1])('keeps unavailable broker value %p unavailable', value => {
+    expect(parseBrokerEntryPremium(value)).toBeNull();
+  });
+
+  it('preserves a genuine broker-reported zero', () => {
+    expect(parseBrokerEntryPremium(0)).toBe(0);
+    expect(parseBrokerEntryPremium('0')).toBe(0);
+  });
+
+  it('fails the whole signed entry calculation closed when any leg is unavailable', () => {
+    expect(computeSignedNetPremium([
+      { direction: 'Short', quantity: 5, avgOpenPrice: 40.01 },
+      { direction: 'Long', quantity: 5, avgOpenPrice: null },
+    ])).toBeNull();
+  });
+});
+
+describe('PM-0002 whole-position Greek units', () => {
+  it('applies the standard option multiplier exactly once', () => {
+    expect(toWholePositionThetaDollars(0.23)).toBeCloseTo(23);
+    expect(toWholePositionGammaShareEquivalent(-0.000405)).toBeCloseTo(-0.0405);
+    expect(toWholePositionVegaDollars(-0.15)).toBeCloseTo(-15);
+  });
+
+  it('fails closed for missing and non-finite values', () => {
+    expect(toWholePositionThetaDollars(null)).toBeNull();
+    expect(toWholePositionGammaShareEquivalent(NaN)).toBeNull();
+    expect(toWholePositionVegaDollars(Infinity)).toBeNull();
+  });
+});
+
+describe('PM-0002 CSP Effective Buy units', () => {
+  it('uses the per-share short-put premium and is quantity invariant', () => {
+    expect(computeCspEffectiveBuyPrice(440, 16.55)).toBeCloseTo(423.45);
+    // Contract count is deliberately absent: the per-share basis is the same
+    // for one contract or five contracts.
+    expect(computeCspEffectiveBuyPrice(440, 16.55)).not.toBeCloseTo(440 - 8275);
+  });
+
+  it('fails closed for missing/malformed economics and preserves genuine zero', () => {
+    expect(computeCspEffectiveBuyPrice(440, null)).toBeNull();
+    expect(computeCspEffectiveBuyPrice(NaN, 16.55)).toBeNull();
+    expect(computeCspEffectiveBuyPrice(440, 0)).toBe(440);
+  });
+});
 
 describe('CONTRACT_MULTIPLIER', () => {
   it('is the standard 100 shares/contract multiplier', () => {

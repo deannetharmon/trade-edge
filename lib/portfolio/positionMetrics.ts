@@ -24,6 +24,35 @@
 // explicitly instead of this default.
 export const CONTRACT_MULTIPLIER = 100;
 
+export function parseBrokerEntryPremium(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = typeof value === 'string' ? value.trim() : value;
+  if (normalized === '') return null;
+  const parsed = typeof normalized === 'number' ? normalized : Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+export function toWholePositionThetaDollars(rawTheta: number | null): number | null {
+  return rawTheta == null || !Number.isFinite(rawTheta) ? null : rawTheta * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionGammaShareEquivalent(rawGamma: number | null): number | null {
+  return rawGamma == null || !Number.isFinite(rawGamma) ? null : rawGamma * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionVegaDollars(rawVega: number | null): number | null {
+  return rawVega == null || !Number.isFinite(rawVega) ? null : rawVega * CONTRACT_MULTIPLIER;
+}
+
+export function computeCspEffectiveBuyPrice(strike: number | null, perShareEntryPremium: number | null): number | null {
+  if (
+    strike == null || perShareEntryPremium == null ||
+    !Number.isFinite(strike) || !Number.isFinite(perShareEntryPremium) ||
+    strike <= 0 || perShareEntryPremium < 0
+  ) return null;
+  return strike - perShareEntryPremium;
+}
+
 // Per-contract (or per-spread, for verticals/condors) credit in option
 // "points" -- e.g. $0.45 for a CSP sold at $0.45/share, or $2.52 for a
 // 5-lot BPS with $1,260 total credit. `totalCreditReceived` is the whole-
@@ -57,10 +86,17 @@ export function computeCreditPerContract(
 // $0.00 display credit would otherwise silently mask.
 export function computeSignedNetPremium(
   legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number }[]
-): number {
+): number;
+export function computeSignedNetPremium(
+  legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number | null }[]
+): number | null;
+export function computeSignedNetPremium(
+  legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number | null }[]
+): number | null {
+  if (legs.length === 0 || legs.some(leg => leg.avgOpenPrice == null || !Number.isFinite(leg.avgOpenPrice))) return null;
   const net = legs.reduce((sum, leg) => {
     const qty = Math.abs(Number(leg.quantity) || 0);
-    const price = Number(leg.avgOpenPrice) || 0;
+    const price = leg.avgOpenPrice as number;
     return sum + (leg.direction === 'Short' ? price * qty : -price * qty);
   }, 0);
   return Math.round(net * 100 * 100) / 100;
@@ -69,8 +105,8 @@ export function computeSignedNetPremium(
 // True when the raw (unfloored) net premium is actually a debit -- i.e. the
 // structure was opened for a net cost, not a net credit. Small epsilon
 // avoids float noise flagging a genuine ~$0.00 credit trade as a debit.
-export function isNetDebitStructure(signedNetPremium: number): boolean {
-  return signedNetPremium < -0.005;
+export function isNetDebitStructure(signedNetPremium: number | null): boolean {
+  return signedNetPremium != null && signedNetPremium < -0.005;
 }
 
 export interface ComputePositionPnlInput {

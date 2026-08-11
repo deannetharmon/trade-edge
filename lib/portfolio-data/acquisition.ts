@@ -46,6 +46,7 @@ import {
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
+import { canonicalRecommendationPriority } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import {
   classifyStopLossPolicy,
   evaluateStopBreach,
@@ -72,6 +73,7 @@ import {
   resolveOptionLegPrice,
   resolveUnderlyingPrice,
   computePositionPnl,
+  parseBrokerEntryPremium,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -276,7 +278,7 @@ export function attachSnapshotHistory(
   previousPositions: Position[] = [],
 ): Position[] {
   const previousByKey = new Map(previousPositions.map(position => [position.key, position]));
-  return positions.map(p => {
+  const enriched = positions.map(p => {
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
     const withHistory = { ...p, snapshotHistory: sorted };
@@ -289,6 +291,11 @@ export function attachSnapshotHistory(
       previous?.recommendation?.kind === 'verify-pricing';
     const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved);
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
+  });
+  return enriched.sort((a, b) => {
+    const aPriority = canonicalRecommendationPriority(a.recommendation);
+    const bPriority = canonicalRecommendationPriority(b.recommendation);
+    return aPriority - bPriority || a.dte - b.dte;
   });
 }
 
@@ -434,7 +441,7 @@ export function parseOptionSymbol(sym: string): { optionType: 'P' | 'C'; strikeP
 }
 
 
-export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number {
+export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number | null {
   // Returns the actual net opening credit for the whole position in dollars.
   // TT leg prices are per-share option prices; multiply by contracts * 100.
   // PM-0001: this floors a net debit to $0.00 for backward-compatible
@@ -442,7 +449,8 @@ export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'qua
   // (rather than just display a magnitude) must use computeSignedNetPremium
   // + isNetDebitStructure on the SAME legs, not infer it from this floored
   // value (see loadPositions' isNetDebit guard).
-  return Math.max(0, computeSignedNetPremium(legs));
+  const signed = computeSignedNetPremium(legs);
+  return signed == null ? null : Math.max(0, signed);
 }
 
 
@@ -733,10 +741,13 @@ export function resolveOcoStopOrderId(complexOrderSubmissionResult: any): { comp
 //   UNKNOWN_PROVENANCE     -> 'unknown'
 //   INVALID                -> 'unknown'
 export function classifyPositionStopLoss(
-  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>,
+  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'> & { entryEconomicsComplete?: boolean },
   gtcOrders: GtcOrder[],
   recordedPolicy: StopLossPolicy | null = null,
 ): StopLossInfo {
+  if (position.entryEconomicsComplete === false) {
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+  }
   const shortLeg = position.legs.find(l => l.direction === 'Short');
   if (!shortLeg?.symbol) {
     return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
@@ -933,7 +944,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         strikePrice: parsed.strikePrice,
         direction: l['quantity-direction'] as 'Short' | 'Long',
         quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
+        avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         createdAt: l['created-at'] ?? null,
       };
     });
@@ -1312,12 +1323,16 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         symbol: l.symbol, optionType: parsed.optionType, strikePrice: parsed.strikePrice,
         direction: l['quantity-direction'] as 'Short' | 'Long',
         quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
+        avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
       };
     });
 
-    const creditReceived = calculateSpreadCredit(positionLegs);
+    const entryCredit = calculateSpreadCredit(positionLegs);
+    const entryEconomicsComplete = entryCredit != null;
+    // Compatibility-only numeric field. All calculations below are gated by
+    // entryEconomicsComplete; no unavailable value is presented as $0.
+    const creditReceived = entryCredit ?? 0;
 
     // PM-0001 (debit-trade guard): calculateSpreadCredit floors a net debit
     // to $0.00 for backward-compatible display -- computed here from the
@@ -1436,7 +1451,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const anyLegCrossed = legs.some(
       (l: any) => crossedSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
-    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
+    const pnlReliable = entryEconomicsComplete && hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
     const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
     const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
     // PM-0001 corrective round 2: computePositionPnl (lib/portfolio/
@@ -1449,7 +1464,9 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // pop/targetPrice/hitTarget but missed it here; extracting the formula
     // into a named, directly-tested function (rather than leaving it
     // inline) is what let that gap be caught and regression-tested.
-    const pnl = computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue });
+    const pnl = entryEconomicsComplete
+      ? computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue })
+      : null;
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
     // PM-0001 debit guard: a net-debit structure's `creditReceived` above is
@@ -1459,15 +1476,15 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // (the Position type's existing contract) but is 0 and inert; hitTarget
     // is forced false so no take-profit recommendation can fire off it.
     // Same forcing applies to a crossed leg -- see anyLegCrossed above.
-    const targetPrice = isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
-    const hitTarget = !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    const targetPrice = !entryEconomicsComplete || isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
+    const hitTarget = entryEconomicsComplete && !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
 
     const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
     const recordedStopPolicy = shortLegForPolicyKey
       ? stopPolicies[positionStopPolicyKey(accountNumber, shortLegForPolicyKey.symbol)] ?? null
       : null;
     const stopLoss = classifyPositionStopLoss(
-      { legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity },
+      { legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity, entryEconomicsComplete },
       gtcOrders,
       recordedStopPolicy,
     );
@@ -1495,14 +1512,17 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // genuine net-credit structure from a detected net-debit one --
       // `creditReceived` below is floored to $0.00 for the debit case and
       // must never be read as though it were a real zero-credit entry.
-      entryPriceEffect: positionLegs.length === 0 ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit'),
+      entryPriceEffect: !entryEconomicsComplete ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit'),
+      entryCredit: entryEconomicsComplete ? Math.abs(creditReceived) : null,
+      entryEconomicsComplete,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
+      closeNowPnl: entryEconomicsComplete && hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
+      maxRiskReliable: entryEconomicsComplete,
       entryDte, entryDate: openedAt,
       // needsClose (the hard 21-DTE close-or-roll rule) applies ONLY to
       // defined-risk spreads. A CSP is never "close now" — assignment is a valid
@@ -1523,7 +1543,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // an arbitrary leg's own quantity -- see calcPositionPop's doc
       // comment), and POP is never computed off a net-debit structure's
       // floored $0.00 "credit" (isNetDebit guard).
-      pop: isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
+      pop: !entryEconomicsComplete || isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       hasGtc: (() => {
         // Check both the position symbol and its weekly option variant
@@ -1626,15 +1646,9 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
 
   positions = await attachEntrySnapshots(positions);
 
-  const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
   positions.sort((a, b) => {
     if (a.needsClose && !b.needsClose) return -1;
     if (!a.needsClose && b.needsClose) return 1;
-    const aRec = getRecommendation(a, null).action;
-    const bRec = getRecommendation(b, null).action;
-    const aPri = actionPriority[aRec] ?? 9;
-    const bPri = actionPriority[bRec] ?? 9;
-    if (aPri !== bPri) return aPri - bPri;
     return a.dte - b.dte;
   });
   return { positions, pendingOrders };

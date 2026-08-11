@@ -131,4 +131,35 @@ describe('VerifyPricingRefreshButton', () => {
       message: 'Quotes refreshed; this position is no longer open.',
     }));
   });
+
+  it('reports an unchanged broker timestamp instead of treating browser refresh time as fresh evidence', async () => {
+    const capturedAt = '2026-08-10T18:00:00.000Z';
+    const onOutcome = vi.fn();
+    render(
+      <VerifyPricingRefreshButton
+        recommendation={verifyPricingRecommendation}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
+        beforeQuoteCapturedAt={capturedAt}
+        onRefresh={vi.fn().mockResolvedValue({
+          status: 'success',
+          positions: [{
+            key: 'MU-spread',
+            recommendation: verifyPricingRecommendation,
+            pricingDecisionEvidence: {
+              marketableDecisionEligible: false,
+              marketableQuoteCapturedAt: capturedAt,
+              marketableQuoteQuality: 'DEGRADED',
+              marketableQuoteFreshness: 'STALE',
+            },
+          }],
+        })}
+        onOutcome={onOutcome}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: expect.stringMatching(/broker quote timestamp did not advance/i),
+    })));
+  });
 });

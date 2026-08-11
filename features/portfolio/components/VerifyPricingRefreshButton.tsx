@@ -11,6 +11,7 @@ interface RefreshActionProps {
   portfolioRefreshing: boolean;
   onRefresh: () => Promise<PortfolioRefreshResult>;
   onOutcome: (outcome: PricingRefreshOutcome | null) => void;
+  beforeQuoteCapturedAt?: string | null;
 }
 
 export interface PricingRefreshOutcome {
@@ -24,12 +25,14 @@ export function VerifyPricingRefreshButton({
   portfolioRefreshing,
   onRefresh,
   onOutcome,
+  beforeQuoteCapturedAt,
 }: {
   recommendation: PortfolioRecommendation | null | undefined;
   positionKey: string;
   portfolioRefreshing: boolean;
   onRefresh: () => Promise<PortfolioRefreshResult>;
   onOutcome: (outcome: PricingRefreshOutcome | null) => void;
+  beforeQuoteCapturedAt?: string | null;
 }) {
   return (
     <RefreshQuotesAction
@@ -38,6 +41,7 @@ export function VerifyPricingRefreshButton({
       portfolioRefreshing={portfolioRefreshing}
       onRefresh={onRefresh}
       onOutcome={onOutcome}
+      beforeQuoteCapturedAt={beforeQuoteCapturedAt}
     />
   );
 }
@@ -64,7 +68,7 @@ export function VerifyPricingObjectiveRefreshButton({
   );
 }
 
-function RefreshQuotesAction({ visible, positionKey, portfolioRefreshing, onRefresh, onOutcome }: RefreshActionProps) {
+function RefreshQuotesAction({ visible, positionKey, portfolioRefreshing, onRefresh, onOutcome, beforeQuoteCapturedAt }: RefreshActionProps) {
   const [requestedHere, setRequestedHere] = useState(false);
   const requestedRef = useRef(false);
 
@@ -90,7 +94,22 @@ function RefreshQuotesAction({ visible, positionKey, portfolioRefreshing, onRefr
           refreshedPosition.pricingDecisionEvidence?.marketableDecisionEligible !== true
           || refreshedPosition.recommendation?.kind === 'verify-pricing'
         ) {
-          onOutcome({ tone: 'status', message: 'Quotes refreshed; pricing is still unverified.' });
+          const evidence = refreshedPosition.pricingDecisionEvidence;
+          const afterTimestamp = evidence?.marketableQuoteCapturedAt ?? null;
+          const unchanged = beforeQuoteCapturedAt != null && afterTimestamp === beforeQuoteCapturedAt;
+          const ageMinutes = afterTimestamp == null
+            ? null
+            : Math.max(0, Math.floor((Date.now() - Date.parse(afterTimestamp)) / 60_000));
+          const reason = unchanged
+            ? 'the broker quote timestamp did not advance'
+            : afterTimestamp == null
+              ? 'one or more broker leg timestamps are missing'
+              : evidence?.marketableQuoteQuality !== 'RELIABLE'
+                ? `quote quality remains ${String(evidence?.marketableQuoteQuality ?? 'unknown').toLowerCase()}`
+                : evidence?.marketableQuoteFreshness !== 'FRESH'
+                  ? `the oldest broker leg quote is ${ageMinutes ?? '?'} minutes old`
+                  : 'the pricing conflict remains unresolved';
+          onOutcome({ tone: 'status', message: `Quotes refreshed, but ${reason}; pricing is still unverified.` });
         } else {
           onOutcome({ tone: 'status', message: 'Pricing verified; recommendation updated.' });
         }

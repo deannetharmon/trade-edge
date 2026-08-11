@@ -73,7 +73,14 @@ import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/st
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
-import { computeEntryChangeTone } from '@/lib/portfolio/positionMetrics';
+import {
+  computeEntryChangeTone,
+  toWholePositionThetaDollars,
+  toWholePositionGammaShareEquivalent,
+  toWholePositionVegaDollars,
+  computeCspEffectiveBuyPrice,
+} from '@/lib/portfolio/positionMetrics';
+import { canonicalRecommendationForCard } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -1565,25 +1572,6 @@ async function ttPatch(path: string, token: string, body: unknown) {
 // produces PLACE_GTC — that's a mechanical "no GTC order exists" fact, not
 // something the model reasons about — so callers should fall back to the
 // rule engine's PLACE_GTC check independently of this mapping when relevant.
-function mapAiRecommendationToAction(rec: PositionAnalysis['recommendation']): ActionType {
-  switch (rec) {
-    case 'CLOSE':
-    case 'ROLL':
-      return 'CLOSE_ROLL';
-    case 'TAKE_PROFIT':
-      return 'TAKE_PROFIT';
-    case 'CUT_LOSSES':
-      return 'CUT_LOSSES';
-    case 'WATCH':
-      return 'WATCH';
-    case 'MANAGE':
-      return 'MANAGE';
-    case 'HOLD':
-    default:
-      return 'HOLD';
-  }
-}
-
 // Shared action-relevance gate — used by BOTH the per-card buttons and the bulk
 // action bar so they never diverge on which actions apply to a position.
 // `override` lets a caller supply an already-computed recommendation (e.g.
@@ -4916,12 +4904,10 @@ function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos:
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-[9px] text-indigo-400 tracking-widest font-bold uppercase">AI Analysis</span>
-            <span className={`text-[10px] font-bold ${REC_COLOR[analysis.recommendation] ?? 'text-white'}`}>
-              → {analysis.recommendation.replace('_', ' ')}
+            <span className="text-[10px] font-bold text-amber-300">
+              → {pos.recommendation?.label ?? 'No canonical action'}
             </span>
-            <span className={`text-[9px] font-bold ${CONFIDENCE_COLOR[analysis.confidence] ?? 'text-slate-400'}`}>
-              {analysis.confidence} confidence
-            </span>
+            <span className={`text-[9px] ${th.textFaint}`}>AI explanation · canonical action unchanged</span>
             {analysis.deviatesFromRules && (
               <span className="text-[9px] px-2 py-0.5 rounded border border-yellow-600/50 text-yellow-400 font-bold">
                 ⚡ Outside rules
@@ -6843,7 +6829,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
 function fmtThetaDisplay(theta: number | null): string {
   if (theta == null) return '—';
-  const dollarsPerDay = theta * 100;
+  const dollarsPerDay = toWholePositionThetaDollars(theta)!;
   const sign = dollarsPerDay >= 0 ? '+' : '-';
   return `${sign}$${Math.abs(dollarsPerDay).toFixed(0)}/d`;
 }
@@ -6857,13 +6843,18 @@ function fmtDeltaDisplay(delta: number | null): string {
 
 function fmtGammaDisplay(gamma: number | null): string {
   if (gamma == null) return '—';
-  return Math.abs(gamma).toFixed(3);
+  const shareEquivalentPerDollar = toWholePositionGammaShareEquivalent(gamma)!;
+  if (shareEquivalentPerDollar !== 0 && Math.abs(shareEquivalentPerDollar) < 0.01) {
+    return `${shareEquivalentPerDollar > 0 ? '+' : '-'}<0.01`;
+  }
+  return `${shareEquivalentPerDollar >= 0 ? '+' : ''}${shareEquivalentPerDollar.toFixed(2)}`;
 }
 
 function fmtVegaDisplay(vega: number | null): string {
   if (vega == null) return '—';
-  const sign = vega >= 0 ? '+' : '-';
-  return `${sign}${Math.abs(vega).toFixed(2)}`;
+  const dollarsPerIvPoint = toWholePositionVegaDollars(vega)!;
+  const sign = dollarsPerIvPoint >= 0 ? '+' : '-';
+  return `${sign}$${Math.abs(dollarsPerIvPoint).toFixed(0)}`;
 }
 
 function thetaTint(theta: number | null): string {
@@ -7545,13 +7536,10 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     getTrend(pos.symbol, shortPutStrike).then(t => setTrend(t)).catch(() => {});
   }, [pos.symbol, pos.legs]);
 
-  // Once this position has been analyzed by AI, its verdict replaces the
-  // rule-based badge/button logic for this card only — the AI's reasoning
-  // is strictly richer once you've paid for it. Every other card (and this
-  // one, before Analyze is clicked) stays on the free, instant rule engine.
-  const rec: Recommendation = analysis
-    ? { action: mapAiRecommendationToAction(analysis.recommendation), detail: analysis.summary }
-    : getRecommendation(pos, trend);
+  // PM-0002: the canonical evaluator remains authoritative before and after
+  // AI analysis. AI is explanatory only and cannot replace the card action.
+  const rec = canonicalRecommendationForCard(pos.recommendation, getRecommendation(pos, trend));
+  const suggestedLabel = pos.recommendation?.label ?? ACTION_META[rec.action].label;
 
   // ── 50%-target projection (√time value-decay model) ──
   // An OTM spread's buyback value is mostly extrinsic (time) value, which
@@ -7594,11 +7582,12 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   const longCalls  = pos.legs.filter(l => l.optionType === 'C' && l.direction === 'Long');
 
   const lifecycle = classifyPositionLifecycle(pos);
+  const entryEconomicsComplete = pos.entryEconomicsComplete ?? pos.entryPriceEffect !== 'Unknown';
 
   const shortPut = shortPuts[0] ?? null;
   const cspStrike = shortPut?.strikePrice ?? null;
-  const cspPremium = shortPut?.avgOpenPrice ?? pos.creditReceived ?? 0;
-  const cspEffectiveBuyPrice = cspStrike != null ? cspStrike - cspPremium : null;
+  const cspPremium = shortPut?.avgOpenPrice ?? null;
+  const cspEffectiveBuyPrice = computeCspEffectiveBuyPrice(cspStrike, cspPremium);
   const cspCashRequired = cspStrike != null ? cspStrike * 100 * lifecycle.contracts : null;
   const cspAssignmentBuffer =
     cspStrike != null && pos.stockPrice != null && pos.stockPrice > 0
@@ -7924,8 +7913,10 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 {lifecycle.type === 'CSP' ? 'Eff Buy / Strike' : 'Strikes'}
               </p>
               <p className={`text-xs ${th.text}`} style={{ fontFamily: '"DM Mono", monospace' }}>
-                {lifecycle.type === 'CSP' && cspEffectiveBuyPrice != null && cspStrike != null
-                  ? `$${cspEffectiveBuyPrice.toFixed(2)} ← ${cspStrike}P`
+                {lifecycle.type === 'CSP'
+                  ? cspEffectiveBuyPrice != null && cspStrike != null
+                    ? `$${cspEffectiveBuyPrice.toFixed(2)} ← ${cspStrike}P`
+                    : `Unavailable ← ${cspStrike ?? '—'}P`
                   : strikesSummary()}
               </p>
             </div>
@@ -7937,14 +7928,14 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                 is established before Buyback/Credit, ahead of the value columns. */}
             {lifecycle.type !== 'CSP' ? (
               <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>Max Risk</p>
+                <p className={`text-[9px] ${th.textFaint}`}>Max Risk <span className="text-[7px]">(expiry est.)</span></p>
                 <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  ${pos.maxRisk.toLocaleString()}
+                  {(pos.maxRiskReliable ?? entryEconomicsComplete) ? `$${pos.maxRisk.toLocaleString()}` : 'Unavailable'}
                 </p>
               </div>
             ) : (
               <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>Cash Req</p>
+                <p className={`text-[9px] ${th.textFaint}`}>Cash Req <span className="text-[7px]">(fully secured)</span></p>
                 <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>
                   {cspCashRequired != null ? `$${cspCashRequired.toLocaleString()}` : '—'}
                 </p>
@@ -7952,13 +7943,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             )}
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>Buyback (mid)</p>
+              <p className={`text-[9px] ${th.textFaint}`}>Buyback (derived mid)</p>
               <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                 {pos.currentValue != null ? `$${pos.currentValue.toFixed(2)}` : '—'}
               </p>
               {pos.closeValue != null && (
                 <>
-                  <p className={`text-[9px] ${th.textFaint} mt-1`}>Close now (marketable)</p>
+                  <p className={`text-[9px] ${th.textFaint} mt-1`}>Derived marketable estimate</p>
                   <p className="text-xs font-bold text-orange-300" style={{ fontFamily: "'DM Mono', monospace" }}>
                     ${pos.closeValue.toFixed(2)}
                   </p>
@@ -7971,7 +7962,9 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               {/* PM-0001 corrective round: a detected net-debit structure's
                   creditReceived is a floored $0.00, not a genuine zero-credit
                   entry -- never render it as though it were. */}
-              {pos.entryPriceEffect === 'Debit' ? (
+              {!entryEconomicsComplete ? (
+                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>Unavailable</p>
+              ) : pos.entryPriceEffect === 'Debit' ? (
                 <p className="text-xs font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>Debit (unsupported)</p>
               ) : (
                 <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${pos.creditReceived.toFixed(2)}</p>
@@ -7980,7 +7973,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             {pos.closeNowPnl != null && (
               <div className="border-t-2 border-emerald-600/50 pt-1">
-                <p className={`text-[9px] ${th.textFaint}`}>Emergency Close P/L</p>
+                <p className={`text-[9px] ${th.textFaint}`}>Derived marketable P/L</p>
                 <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
                   {pos.closeNowPnl >= 0 ? '+' : ''}${pos.closeNowPnl.toFixed(2)}
                 </p>
@@ -7990,6 +7983,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>P/L Open</p>
               {(() => {
+                if (!entryEconomicsComplete) return <p className="text-xs text-amber-400">Unavailable</p>;
                 // Prefer pnl (live mid from market-data) over plOpen (EOD marks)
                 const displayPnl = pos.pnl ?? pos.plOpen;
                 const isStale = pos.pnl == null && pos.plOpen != null;
@@ -8010,8 +8004,10 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             <div onClick={e => e.stopPropagation()} className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>{Math.round(pos.profitTarget * 100)}% Target</p>
-              {editingTarget ? (
+              <p className={`text-[9px] ${th.textFaint}`}>{Math.round(pos.profitTarget * 100)}% Target <span className="text-[7px]">(model)</span></p>
+              {!entryEconomicsComplete ? (
+                <p className="text-xs text-amber-400">Unavailable</p>
+              ) : editingTarget ? (
                 <div className="flex items-center gap-1">
                   <input type="number" min="10" max="100" value={targetInput}
                     onChange={e => setTargetInput(e.target.value)}
@@ -8040,7 +8036,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             <div className="border-t-2 border-cyan-600/50 pt-1 border-r border-r-slate-700/40 pr-2" title={`Entry snapshot ${entrySnapshotAgeLabel(pos)}. Existing positions are captured from the first time this feature sees them.`}>
               <p className={`text-[9px] ${th.textFaint} flex items-center gap-1`}>
-                Trade Evolution
+                Trade Evolution <span className="text-[7px] opacity-60">(first tracked)</span>
                 {(() => {
                   const days = pos.entrySnapshotCreatedAt
                     ? Math.max(0, Math.round((Date.now() - new Date(pos.entrySnapshotCreatedAt).getTime()) / 86400000))
@@ -8150,7 +8146,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               className="relative group border-t-2 border-purple-600/50 pt-1"
               title={`Premium edge uses IV - HV30 when HV30 exists; otherwise it falls back to IVR. IV=${pos.iv ?? '—'}%, HV30=${pos.hv30 ?? '—'}%, IVR=${pos.ivr ?? '—'}`}
             >
-              <p className={`text-[9px] ${th.textFaint}`}>Net Edge <span className="text-[7px] opacity-60">~est</span></p>
+              <p className={`text-[9px] ${th.textFaint}`}>Theta−Gamma <span className="text-[7px] opacity-60">model</span></p>
 
               {/* 1. Net-edge dollar number, peak-relative color */}
               <p className={`text-xs font-bold leading-tight ${netEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
@@ -8188,13 +8184,13 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
               <div className="absolute bottom-full left-0 mb-2 z-50 hidden group-hover:block w-72 pointer-events-none">
                 <div className="bg-[#1a1a1a] border border-[#333] rounded-xl p-3 shadow-2xl text-[10px]">
-                  <p className="text-white font-bold mb-2 tracking-wide">NET DAILY EDGE</p>
-                  <p className="text-[#aaa] mb-1">Theta (collecting): {pos.theta != null ? `$${pos.theta.toFixed(0)}/d` : '—'}</p>
-                  <p className="text-[#aaa] mb-1">Gamma drag (est): {(() => { const t = pos.theta, n = netEdgeLive(pos); return (t != null && n != null) ? `$${(t - n).toFixed(0)}/d` : '—'; })()}</p>
+                  <p className="text-white font-bold mb-2 tracking-wide">MODELED THETA−GAMMA ESTIMATE</p>
+                  <p className="text-[#aaa] mb-1">Theta (collecting): {pos.theta != null ? `$${(pos.theta * 100).toFixed(0)}/d` : '—'}</p>
+                  <p className="text-[#aaa] mb-1">Gamma drag (est): {(() => { const t = toWholePositionThetaDollars(pos.theta), n = netEdgeLive(pos); return (t != null && n != null) ? `$${(t - n).toFixed(0)}/d` : '—'; })()}</p>
                   <p className="text-[#aaa] mb-1">Net edge: {(() => { const v = netEdgeLive(pos); return v == null ? '—' : `${v >= 0 ? '+' : ''}$${v.toFixed(0)}/d`; })()}</p>
                   <p className="text-[#aaa] mb-1">Peak: {(() => { const p = netEdgePeak(pos); return p == null ? '—' : `$${p.toFixed(0)}`; })()} · tracked {netEdgeDaysTracked(pos)}d</p>
                   <p className="text-[#888] mt-2">
-                    Theta you collect daily minus the expected daily cost of gamma (price movement). Approaching $0 means gamma is catching up — consider closing. Directional estimate; gets more reliable as snapshot history grows.
+                    Theta dollars per day minus modeled gamma cost under a one-standard-deviation IV move. This is a directional heuristic, not realized or guaranteed daily P/L.
                   </p>
                 </div>
               </div>
@@ -8202,32 +8198,26 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Theta</p>
-              <p className={`text-xs font-bold inline-block ${thetaTint(pos.theta)} ${thetaTextColor(pos.theta, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Raw theta: ${pos.theta.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Broker theta aggregate before the standard 100-share multiplier: ${pos.theta.toFixed(4)}` : undefined}>
                 {fmtThetaDisplay(pos.theta)}
               </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${thetaTextColor(pos.theta, th.textFaint)}`}>
-                {thetaLabel(pos.theta)}
-              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>whole position · $/day</p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Gamma</p>
-              <p className={`text-xs font-bold inline-block ${gammaTint(pos.gamma)} ${gammaTextColor(pos.gamma, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.gamma != null ? `Raw gamma: ${pos.gamma.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.gamma != null ? `Broker gamma aggregate before the standard 100-share multiplier: ${pos.gamma.toFixed(4)}` : undefined}>
                 {fmtGammaDisplay(pos.gamma)}
               </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${gammaTextColor(pos.gamma, th.textFaint)}`}>
-                {gammaLabel(pos.gamma)}
-              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>share-equivalent Δ / $1 move</p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Vega</p>
-              <p className={`text-xs font-bold inline-block ${vegaTint(pos.netVega)} ${vegaTextColor(pos.netVega, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netVega != null ? `Raw vega: ${pos.netVega.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netVega != null ? `Broker vega aggregate before the standard 100-share multiplier: ${pos.netVega.toFixed(4)}` : undefined}>
                 {fmtVegaDisplay(pos.netVega)}
               </p>
-              <p className={`text-[8px] mt-0.5 font-semibold ${vegaTextColor(pos.netVega, th.textFaint)}`}>
-                {vegaLabel(pos.netVega)}
-              </p>
+              <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>whole position · $/IV point</p>
             </div>
 
             <div className="border-t-2 border-purple-600/50 pt-1" title={pos.hv30 != null ? `HV30: ${pos.hv30}%` : undefined}>
@@ -8297,10 +8287,23 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <div className="border-t-2 border-slate-500/40 pt-1 overflow-hidden">
               <p className={`text-[9px] ${th.textFaint} whitespace-nowrap`}>Suggested</p>
               <div className="flex items-baseline gap-1.5 whitespace-nowrap overflow-hidden" title={rec.detail}>
-                <span className={`text-[10px] font-bold whitespace-nowrap shrink-0 ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
+                <span className={`text-[10px] font-bold whitespace-nowrap shrink-0 ${ACTION_META[rec.action].color}`}>{suggestedLabel}</span>
                 <span className={`text-[9px] ${th.textFaint} truncate`}>{rec.detail}</span>
               </div>
               {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight whitespace-nowrap truncate" title={sig}>{sig}</p> : null; })()}
+              {pos.pricingDecisionEvidence?.verificationUnresolved && (() => {
+                const captured = pos.pricingDecisionEvidence?.marketableQuoteCapturedAt ?? null;
+                const parsed = captured ? Date.parse(captured) : NaN;
+                const ageMinutes = Number.isFinite(parsed) ? Math.max(0, Math.floor((Date.now() - parsed) / 60_000)) : null;
+                return (
+                  <p className="text-[8px] text-amber-300 mt-0.5 leading-tight whitespace-nowrap truncate" title={captured ?? 'Broker timestamp unavailable'}>
+                    Broker legs: {captured ? new Date(captured).toLocaleTimeString() : 'timestamp unavailable'}
+                    {ageMinutes != null ? ` · ${ageMinutes}m old` : ''}
+                    {` · ${pos.pricingDecisionEvidence.marketableQuoteQuality.toLowerCase()}`}
+                    {` · ${pos.pricingDecisionEvidence.marketableQuoteFreshness.toLowerCase()}`}
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -8353,6 +8356,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             portfolioRefreshing={portfolioRefreshing}
             onRefresh={onRefreshQuotes}
             onOutcome={onPricingRefreshOutcome}
+            beforeQuoteCapturedAt={pos.pricingDecisionEvidence?.marketableQuoteCapturedAt ?? null}
           />
           {/* Intent — reference point for AI analysis (assignment = goal vs avoid) */}
           <select
@@ -8416,7 +8420,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <div key={i} className="flex items-center gap-4 flex-wrap">
                 <span className={`text-[10px] w-10 font-bold ${leg.direction === 'Short' ? 'text-red-400' : 'text-emerald-400'}`}>{leg.direction}</span>
                 <span className={`text-[10px] ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{leg.quantity}x {leg.strikePrice} {leg.optionType === 'P' ? 'Put' : 'Call'}</span>
-                <span className={`text-[10px] ${th.textFaint}`}>Avg open: <span className={th.text}>${leg.avgOpenPrice.toFixed(2)}</span></span>
+                <span className={`text-[10px] ${th.textFaint}`}>Avg open: <span className={th.text}>{leg.avgOpenPrice == null ? 'Unavailable' : `$${leg.avgOpenPrice.toFixed(2)}`}</span></span>
                 {leg.currentPrice != null && <span className={`text-[10px] ${th.textFaint}`}>Current: <span className={th.text}>${leg.currentPrice.toFixed(2)}</span></span>}
               </div>
             ))}
