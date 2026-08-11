@@ -43,6 +43,7 @@ Midpoint evidence that independently breaches policy remains effective. A fresh,
 - quote freshness
 - actual broker quote timestamp
 - marketable decision eligibility
+- unresolved verification provenance, independent of the currently winning recommendation
 - controlling basis (`MID`, `MARKETABLE`, or `NONE`)
 - decision status (`MID_ONLY`, `PRICING_AGREEMENT`, `MARKETABLE_OBSERVATIONAL`, `MARKETABLE_CONFIRMED`, or `VERIFY_PRICING`)
 
@@ -72,6 +73,8 @@ The internal numeric recommendation field remains available for existing ranking
 - `features/portfolio/components/PositionRecommendationBadge.tsx`
 - `features/portfolio/components/VerifyPricingRefreshButton.tsx`
 - `features/portfolio/components/__tests__/VerifyPricingRefreshButton.test.tsx`
+- `features/portfolio/components/PricingVerificationPendingNotice.tsx`
+- `features/portfolio/components/__tests__/PricingVerificationPendingNotice.test.tsx`
 - `features/portfolio/components/TodaysPrioritiesWorkflow.tsx`
 - `features/portfolio/components/__tests__/TodaysPrioritiesWorkflow.test.tsx`
 - `features/portfolio/todaysPriorities/TodaysPrioritiesQueueView.tsx`
@@ -185,8 +188,35 @@ Final completion validation was performed against the isolated detached worktree
 
 - Focused Portfolio/provider/portfolio-intelligence validation: 7 files / 134 tests passing.
 - TypeScript: `npx tsc --noEmit --incremental false` clean.
-- Full suite: 150 files / 2,105 tests passing under `TZ=UTC`. To avoid the sandbox's shared `node_modules/.vite` cache-write restriction and whole-suite memory pressure, the complete inventory ran in three non-overlapping accounting groups: `lib` reported 96 files / 1,638 tests (including four cross-root files), `app` reported 14 / 144, and `features components` reported 44 / 346; subtracting the four duplicated cross-root files / 23 tests reconciles exactly to 150 / 2,105.
+- Full suite: 150 files / 2,105 tests passing under `TZ=UTC`. To avoid the sandbox's shared `node_modules/.vite` cache-write restriction and whole-suite memory pressure, the complete inventory ran in three reconciled accounting groups: `lib` reported 96 files / 1,638 tests (including four cross-root files), `app` reported 14 / 144, and `features components` reported 44 / 346; subtracting the four duplicated cross-root files / 23 tests reconciles exactly to 150 / 2,105.
 - `git diff --check`: clean before commit.
 - Production build: successful; compilation, type validation, page-data collection, all 53 static pages, and the full route manifest completed. The previously disclosed non-fatal Redis connection-refused warnings were the only build-time environmental noise.
 
 The final report-only amendment does not alter the validated product or test code.
+
+## Narrow final correction: provenance survives temporary independent actions
+
+The implementation at `acca767` derived continuity only from the previous recommendation kind. That was insufficient: an unresolved Verify Pricing state could be temporarily superseded by assignment, midpoint-loss, earnings, or DTE management, then be forgotten on the next refresh if that independent condition cleared while broker leg quotes were still incomplete or unreliable.
+
+The canonical evidence contract now carries `verificationUnresolved` independently from the winning recommendation. `attachSnapshotHistory()` propagates that typed provenance by stable position key through each in-session refresh. `evaluatePositionObjective()` alone owns the transition:
+
+- An identified pricing conflict sets unresolved verification when current marketable evidence is not decision-eligible.
+- Assignment, midpoint-supported loss, earnings, roll-soon, and expiration actions remain primary while their own evidence applies.
+- During that supersession, the position card displays a secondary status that pricing verification remains pending.
+- If the independent condition clears while marketable evidence remains ineligible, a newly constructed Verify Pricing recommendation returns using only current evidence.
+- Fresh, reliable, decision-eligible marketable evidence clears unresolved verification.
+- Position disappearance clears it naturally because the closed position is no longer evaluated.
+
+No prior recommendation, objective, percentage, timestamp, rationale, or liquidity flag is copied. Backward-compatible recognition of the earlier `VERIFY_PRICING` status/recommendation kind is limited to deriving the boolean provenance during the active provider session. Cross-session persistence remains outside this ticket and is not claimed.
+
+Regression coverage now includes multi-refresh sequences for temporary assignment, midpoint-loss, and DTE actions; earnings precedence with incomplete and stale/degraded marketable evidence; stale-figure removal; eligible-evidence release; and an acquisition-level test exercising the real `attachSnapshotHistory → scorePortfolioPositionObjective → evaluatePositionObjective` chain. A component test locks the secondary pending-verification notice.
+
+Authoritative clean-tree validation was performed at product/test commit `02b8ab3`, isolated from all unrelated WA-0006 working changes:
+
+- Focused correction suite: 6 files / 70 tests passing.
+- TypeScript: `npx tsc --noEmit --incremental false` clean.
+- Complete reconciled inventory: 151 files / 2,114 tests. The three parallel groups reported `lib` 96/1,644, `app` 14/144, and `features components` 45/349; subtracting four duplicated cross-root files / 23 tests yields 151/2,114. Three unrelated Screener cases hit their five-second timeout during the concurrent run without assertion failures; their two exact files immediately passed 23/23 in isolation.
+- `git diff --check`: clean before commit.
+- Production build: successful on the warmed retry; compilation, type validation, page-data collection, all 53 static pages, and the full route manifest completed. The first attempt stopped after creating compilation artifacts without a final build marker and is not counted as successful. The previously disclosed Redis connection-refused warnings were non-fatal environmental noise on the successful run.
+
+This final report amendment is documentation-only over validated code commit `02b8ab3`.
