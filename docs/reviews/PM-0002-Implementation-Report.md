@@ -107,19 +107,20 @@ Product and tests across PM-0002:
 23. `app/portfolio/__tests__/RecommendationExplanationPage.test.tsx`
 24. `lib/decision-review/__tests__/outcomeAnalysis.test.ts`
 25. `lib/portfolio-data/__tests__/stopLossWiring.test.ts`
+26. `lib/portfolio-intelligence/dashboardComposition.ts`
+27. `lib/portfolio-intelligence/__tests__/dashboardComposition.test.ts`
 
 Documentation:
 
-26. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
-27. `docs/reviews/PM-0002-Implementation-Report.md`
+28. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
+29. `docs/reviews/PM-0002-Implementation-Report.md`
 
 ## Validation
 
 Final clean-worktree validation after all corrections:
 
-- Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
-- Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **154 files / 2,153 tests passed; zero failures**.
+- Final focused financial, acquisition, recommendation, and dashboard-composition cycle: **5 files / 111 tests passed**.
+- Complete suite in one invocation: **154 files / 2,154 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.
@@ -145,7 +146,7 @@ The compact row now distinguishes the three states in the required order: incomp
 
 The last approval correction closes unsupported debit valuation completely. `loadPositions()` now computes `closeNowPnl` only for a supported net-credit entry and marks `maxRiskReliable` true only under that same provenance. A complete debit therefore keeps its truthful `Debit (unsupported)` identity but receives neither a fabricated `-closeValue` marketable P/L nor a credit-formula Max Risk assertion. The Portfolio card independently enforces the same boundary: it suppresses Derived marketable P/L and renders Max Risk as `Unavailable` for debit or incomplete entries, even if stale compatibility fields are present.
 
-A realistic acquisition regression supplies a complete two-leg net-debit broker fixture and proves `closeNowPnl: null` and `maxRiskReliable: false`. The page-level debit regression deliberately supplies stale contradictory `closeNowPnl` and `maxRiskReliable` values and proves neither is presented as supported financial evidence. The final file inventory is 27 files and includes `lib/portfolio-data/__tests__/stopLossWiring.test.ts`.
+A realistic acquisition regression supplies a complete two-leg net-debit broker fixture and proves `closeNowPnl: null` and `maxRiskReliable: false`. The page-level debit regression deliberately supplies stale contradictory `closeNowPnl` and `maxRiskReliable` values and proves neither is presented as supported financial evidence. The final file inventory is 29 files and includes `lib/portfolio-data/__tests__/stopLossWiring.test.ts` plus the shared dashboard-composition boundary and its regression suite.
 
 ## Final downstream Max Risk correction
 
@@ -158,3 +159,25 @@ The helper regression proves every rejected provenance state and the supported-c
 `computeRawPositionValuation()` now obtains Max Risk only through `reliableSupportedMaxRisk()` and passes that returned value into `computePositionValuation()`. It returns `null` for debit, incomplete, and legacy records with omitted reliability; a supported-credit control still produces canonical valuation. This closes the last permissive Max Risk consumer.
 
 The Portfolio `At Risk` aggregate and generated analysis contexts now use testable pure summary/formatting functions from `positionMetrics.ts`. Output-level regressions prove that a mixed set containing supported credit, debit, incomplete entry, and legacy undefined-reliability records includes only the supported position in the aggregate, prints the correct exclusion count, and renders Max Risk unavailable for every unsupported position. Those same functions produce the live Portfolio-analysis and position follow-up Max Risk text, so their tested output and production output cannot drift independently.
+
+## Final dashboard-composition provenance correction
+
+The shared live Portfolio composition boundary now sanitizes Max Risk before any downstream portfolio builder sees it. `buildDashboardComposition()` derives one strict risk value per position through `reliableSupportedMaxRisk()` and applies it consistently to all four composition paths:
+
+- canonical portfolio-level concentration exposures include only supported, explicitly reliable net-credit risk;
+- position inputs supplied to the canonical priorities engine receive zero only as its required fail-closed numeric compatibility value, never the raw unsupported risk;
+- Today’s Priorities receives `capitalAtRisk: null` for unsupported provenance;
+- Portfolio Health concentration inputs exclude unsupported positions, and Portfolio Review receives `maxRisk: null` for them.
+
+The dashboard-composition regression supplies four simultaneous positions: one supported credit, one debit, one incomplete entry, and one legacy record with omitted reliability. With $10,000 net liquidity, only the supported $1,000 position contributes exposure (10%); all other symbols remain at zero concentration and cannot affect the maximum concentration value.
+
+### Repository-wide Max Risk consumer inventory
+
+The final production search classified every remaining TypeScript/TSX Max Risk read:
+
+- **Live open-position Portfolio boundaries:** acquisition valuation, compact row, At Risk aggregate, stop context, recommendation/portfolio/follow-up contexts, and dashboard composition all use the strict supported/reliable boundary.
+- **Generic downstream calculators:** `balancesNormalization.ts`, `buildPortfolioReview.ts`, and `computePositionValuation.ts` operate on caller-supplied numeric/null inputs. The live Portfolio callers now sanitize or filter those inputs before invoking them; these generic modules do not read broker entry provenance themselves.
+- **Acquisition calculation-only value:** `calculateMaxRisk()` may still compute a theoretical number, but acquisition publishes `maxRiskReliable: false` unless supported-credit provenance exists, and no live Portfolio consumer accepts the number without explicit reliability.
+- **Out of current Portfolio scope:** `app/rinse-repeat/page.tsx` calculates risk for a newly proposed spread from user-entered width/credit/quantity; it is not an open-position broker-provenance consumer.
+
+This closes the previously overstated “all consumers” claim with both code enforcement and an explicit inventory of the remaining generic or out-of-scope calculations.
