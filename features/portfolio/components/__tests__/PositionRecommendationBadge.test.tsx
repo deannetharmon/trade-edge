@@ -12,7 +12,7 @@ const recommendation: PortfolioRecommendation = {
   confidence: 70,
   primaryReason: 'Pricing conflict.',
   supportingReasons: [],
-  suggestedAction: 'Verify a fresh executable quote.',
+  suggestedAction: 'Refresh broker leg quotes and verify the marketable estimate.',
   computedAt: '2026-08-10T18:00:00.000Z',
 };
 

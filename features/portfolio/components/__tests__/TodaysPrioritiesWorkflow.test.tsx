@@ -58,6 +58,33 @@ afterEach(() => {
 });
 
 describe('PI-0004C: TodaysPrioritiesWorkflow -- Open/Completed sections', () => {
+  it('offers the canonical quote refresh directly on a Verify Pricing priority', async () => {
+    const user = userEvent.setup();
+    const onRefreshQuotes = vi.fn().mockResolvedValue({
+      status: 'success',
+      positions: [{ key: 'pos_amd', recommendation: { kind: 'watch' } }],
+    });
+    const objective = makeObjective({
+      type: 'MANAGE_POSITION',
+      ruleId: 'OBJ-VERIFY-PRICING',
+      title: 'Verify Pricing: AMD',
+    });
+    render(
+      <TodaysPrioritiesWorkflow
+        objectives={[objective]}
+        loading={false}
+        th={THEMES.dark}
+        onRefreshQuotes={onRefreshQuotes}
+        portfolioRefreshing={false}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    expect(onRefreshQuotes).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('status')).toHaveTextContent('Pricing verified; recommendation updated');
+    expect(screen.queryByRole('button', { name: 'Mark Complete' })).not.toBeInTheDocument();
+  });
+
   it('renders everything under Open Priorities when nothing is completed', () => {
     render(<TodaysPrioritiesWorkflow objectives={[makeObjective()]} loading={false} th={THEMES.dark} />);
     expect(screen.getByText('Open Priorities')).toBeInTheDocument();

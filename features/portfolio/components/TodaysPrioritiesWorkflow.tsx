@@ -19,6 +19,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { THEMES, Theme } from '@/lib/theme';
 import type { PortfolioObjective } from '@/lib/portfolio-intelligence';
 import { TodaysPriorities } from './TodaysPriorities';
+import { VerifyPricingObjectiveRefreshButton } from './VerifyPricingRefreshButton';
+import type { PortfolioRefreshResult } from '@/components/portfolio-data/PortfolioDataProvider';
 import {
   isCompletable,
   loadPriorityWorkflowState,
@@ -33,9 +35,11 @@ export interface TodaysPrioritiesWorkflowProps {
   objectives: PortfolioObjective[] | null;
   loading: boolean;
   th: typeof THEMES[Theme];
+  onRefreshQuotes?: () => Promise<PortfolioRefreshResult>;
+  portfolioRefreshing?: boolean;
 }
 
-export function TodaysPrioritiesWorkflow({ objectives, loading, th }: TodaysPrioritiesWorkflowProps) {
+export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuotes, portfolioRefreshing = false }: TodaysPrioritiesWorkflowProps) {
   const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
   // Guards against writing an empty {} back over real stored state before
   // the initial localStorage read completes (both run in the same tick on
@@ -95,8 +99,17 @@ export function TodaysPrioritiesWorkflow({ objectives, loading, th }: TodaysPrio
         loading={loading}
         th={th}
         title="Open Priorities"
-        renderAction={(objective) =>
-          isCompletable(objective) ? (
+        renderAction={(objective) => {
+          if (objective.ruleId === 'OBJ-VERIFY-PRICING' && onRefreshQuotes) {
+            return (
+              <VerifyPricingObjectiveRefreshButton
+                objective={objective}
+                portfolioRefreshing={portfolioRefreshing}
+                onRefresh={onRefreshQuotes}
+              />
+            );
+          }
+          return isCompletable(objective) ? (
             <button
               type="button"
               onClick={(e) => {
@@ -107,8 +120,8 @@ export function TodaysPrioritiesWorkflow({ objectives, loading, th }: TodaysPrio
             >
               Mark Complete
             </button>
-          ) : null
-        }
+          ) : null;
+        }}
       />
 
       {completed.length > 0 && (

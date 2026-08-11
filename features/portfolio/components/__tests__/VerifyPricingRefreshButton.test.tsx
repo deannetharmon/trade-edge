@@ -13,19 +13,21 @@ const verifyPricingRecommendation: PortfolioRecommendation = {
   confidence: 70,
   primaryReason: 'The current quote is not decision-eligible.',
   supportingReasons: [],
-  suggestedAction: 'Verify a fresh executable quote.',
+  suggestedAction: 'Refresh broker leg quotes and verify the marketable estimate.',
 };
 
 describe('VerifyPricingRefreshButton', () => {
   it('renders only for Verify Pricing recommendations', () => {
     const { rerender } = render(
-      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} onRefresh={vi.fn()} />,
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={vi.fn()} />,
     );
     expect(screen.getByRole('button', { name: /refresh quotes/i })).toBeInTheDocument();
 
     rerender(
       <VerifyPricingRefreshButton
         recommendation={{ ...verifyPricingRecommendation, kind: 'watch' }}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
         onRefresh={vi.fn()}
       />,
     );
@@ -34,11 +36,16 @@ describe('VerifyPricingRefreshButton', () => {
 
   it('performs one refresh, exposes busy state, and permits no retry while in flight', async () => {
     let resolveRefresh!: () => void;
-    const onRefresh = vi.fn(() => new Promise<void>(resolve => { resolveRefresh = resolve; }));
-    render(<VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} onRefresh={onRefresh} />);
+    const onRefresh = vi.fn(() => new Promise<any>(resolve => { resolveRefresh = () => resolve({ status: 'success', positions: [{ key: 'MU-spread', recommendation: verifyPricingRecommendation }] }); }));
+    const { rerender } = render(
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} />,
+    );
 
     const button = screen.getByRole('button', { name: /refresh quotes/i });
     fireEvent.click(button);
+    rerender(
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing onRefresh={onRefresh} />,
+    );
     fireEvent.click(button);
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
@@ -47,7 +54,37 @@ describe('VerifyPricingRefreshButton', () => {
     expect(button).toHaveTextContent('REFRESHING QUOTES...');
 
     resolveRefresh();
+    rerender(
+      <VerifyPricingRefreshButton recommendation={verifyPricingRecommendation} positionKey="MU-spread" portfolioRefreshing={false} onRefresh={onRefresh} />,
+    );
     await waitFor(() => expect(button).not.toBeDisabled());
-    expect(button).toHaveAttribute('aria-busy', 'false');
+    expect(await screen.findByRole('status')).toHaveTextContent('pricing is still unverified');
+  });
+
+  it('announces refresh failure and a successful recommendation transition', async () => {
+    const { rerender } = render(
+      <VerifyPricingRefreshButton
+        recommendation={verifyPricingRecommendation}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
+        onRefresh={vi.fn().mockResolvedValue({ status: 'error', message: 'Broker unavailable' })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('pricing remains unverified');
+
+    rerender(
+      <VerifyPricingRefreshButton
+        recommendation={verifyPricingRecommendation}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
+        onRefresh={vi.fn().mockResolvedValue({
+          status: 'success',
+          positions: [{ key: 'MU-spread', recommendation: { ...verifyPricingRecommendation, kind: 'watch' } }],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Pricing verified; recommendation updated');
   });
 });

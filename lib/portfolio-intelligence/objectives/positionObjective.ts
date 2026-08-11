@@ -450,8 +450,8 @@ function buildReviewTriggers(
       }];
     case 'verify-pricing':
       return [{
-        id: 'fresh-executable-quote', label: 'Fresh executable quote received', triggerType: 'price',
-        explanation: 'Re-evaluate only after every leg has a fresh, reliable, two-sided quote and the pricing conflict can be resolved.',
+        id: 'fresh-executable-quote', label: 'Fresh broker leg quotes received', triggerType: 'price',
+        explanation: 'Re-evaluate only after every leg has a fresh, reliable, two-sided quote and the derived marketable estimate resolves the pricing conflict. This is not a firm complex-order quote or guaranteed fill price.',
       }];
   }
 }
@@ -522,8 +522,8 @@ function buildPortfolioAndIncomeImpact(
       };
     case 'verify-pricing':
       return {
-        portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'The position remains under review because current executable pricing is not trustworthy enough to support a directional action.' },
-        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income decision is supported until a fresh executable quote resolves the pricing conflict.' },
+        portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'The position remains under review because the current marketable estimate is not trustworthy enough to support a directional action.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income decision is supported until fresh broker leg quotes produce a reliable marketable estimate.' },
       };
   }
 }
@@ -790,7 +790,7 @@ export function evaluatePositionObjective(
     legacy = makeLegacyRecommendation(
       input, 'verify-pricing', 'high', 70,
       `Pricing conflict: midpoint P/L is ${pnlPct?.toFixed(0) ?? 'unknown'}% of credit while marketable P/L is ${marketablePnlPct?.toFixed(0) ?? 'unknown'}%; the marketable quote is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness).`,
-      'Verify a fresh, executable close quote before making a loss-management decision.',
+      'Refresh broker leg quotes and verify the derived marketable estimate before making a loss-management decision; it is not a guaranteed fill price.',
       supportingReasons, now,
     );
     legacy = { ...legacy, label: 'Verify Pricing' };
@@ -860,7 +860,7 @@ export function evaluatePositionObjective(
     legacy = {
       ...legacy,
       supportingReasons: [
-        `Executable pricing is materially worse than mid: ${marketablePnlPct.toFixed(0)}% vs ${pnlPct.toFixed(0)}% of credit -- wide bid/ask changed this recommendation.`,
+        `The marketable estimate is materially worse than mid: ${marketablePnlPct.toFixed(0)}% vs ${pnlPct.toFixed(0)}% of credit -- wide bid/ask changed this recommendation.`,
         ...legacy.supportingReasons,
       ].slice(0, 4),
     };

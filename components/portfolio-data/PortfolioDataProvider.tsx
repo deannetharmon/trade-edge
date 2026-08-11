@@ -12,10 +12,11 @@
 // pipeline -- there is no second live TastyTrade acquisition path anywhere
 // in the app.
 //
-// `refresh()` reproduces app/portfolio/page.tsx's original `fetchPositions`
-// sequence exactly (same two setPositions calls, same fire-and-forget
-// snapshot-history attachment), with the two snapshot-capture side effects
-// (captureSnapshotsIfNeeded/captureLifecycleSnapshotsIfNeeded) now injected
+// PI-0014C strengthens `refresh()` into a latest-request-wins, typed
+// completion contract. Broker positions are not published until snapshot
+// history has been attached and canonical health/recommendation/objective
+// fields have been recomputed. The two snapshot-capture side effects
+// (captureSnapshotsIfNeeded/captureLifecycleSnapshotsIfNeeded) remain injected
 // as optional callbacks rather than called inline -- those two functions
 // were NOT part of the acquisition pipeline's dependency closure (verified:
 // they are never called by loadPositions/attachSnapshotHistory/etc.) and
@@ -32,8 +33,8 @@
 
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import type { Position, PendingOrder } from '@/lib/portfolio-data/types';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import type { Position, PendingOrder, PositionSnapshot } from '@/lib/portfolio-data/types';
 import {
   loadPositions,
   loadAccountBalances,
@@ -56,6 +57,11 @@ export interface RefreshPositionsCallbacks {
   onSnapshotHistoryAttached?: (positions: Position[]) => void;
 }
 
+export type PortfolioRefreshResult =
+  | { status: 'success'; positions: Position[] }
+  | { status: 'error'; message: string }
+  | { status: 'superseded' };
+
 export interface PortfolioDataContextValue {
   positions: Position[];
   pendingOrders: PendingOrder[];
@@ -69,7 +75,7 @@ export interface PortfolioDataContextValue {
   setPendingOrders: Dispatch<SetStateAction<PendingOrder[]>>;
   setDecisionReviews: Dispatch<SetStateAction<DecisionReviewStore>>;
   setError: Dispatch<SetStateAction<string>>;
-  refresh: (callbacks?: RefreshPositionsCallbacks) => Promise<void>;
+  refresh: (callbacks?: RefreshPositionsCallbacks) => Promise<PortfolioRefreshResult>;
   refreshBalances: () => Promise<void>;
   refreshDecisionReviews: () => Promise<void>;
 }
@@ -84,36 +90,49 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  // Monotonic request identity makes every portfolio refresh latest-wins.
+  // A slower, older broker response can never overwrite newer quote evidence,
+  // and only the current request is allowed to clear the shared loading state.
+  const refreshGenerationRef = useRef(0);
 
-  const refresh = useCallback(async (callbacks?: RefreshPositionsCallbacks) => {
+  const refresh = useCallback(async (callbacks?: RefreshPositionsCallbacks): Promise<PortfolioRefreshResult> => {
+    const generation = ++refreshGenerationRef.current;
     setLoading(true);
     setError('');
     try {
       const { positions: data, pendingOrders: pendingData } = await loadPositions();
-      setPositions(data);
+      if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
+
+      // A refresh is not complete until canonical health, pricing evidence,
+      // recommendation, and objective fields have been rebuilt. Snapshot
+      // history is contextual; if that endpoint fails, recompute from the
+      // fresh broker positions with an empty store rather than publishing raw
+      // positions or pretending recommendation reevaluation completed.
+      let snapshotStore: Record<string, PositionSnapshot[]> = {};
+      try {
+        snapshotStore = await fetchSnapshotStore();
+      } catch (snapshotError) {
+        console.error('Snapshot history fetch failed; recomputing from fresh broker positions:', snapshotError);
+      }
+      const updated = attachSnapshotHistory(data, snapshotStore);
+      if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
+
+      callbacks?.onRawPositionsLoaded?.(data);
+      setPositions(updated);
       setPendingOrders(pendingData);
       setLastRefresh(new Date());
-      callbacks?.onRawPositionsLoaded?.(data);
-      // Load snapshot history and attach it to positions (non-blocking; if it
-      // fails the cards simply render without peak/trend context) -- same
-      // fire-and-forget shape as the original fetchPositions.
-      fetchSnapshotStore()
-        .then(store => {
-          setPositions(prev => {
-            const updated = attachSnapshotHistory(prev, store);
-            callbacks?.onSnapshotHistoryAttached?.(updated);
-            return updated;
-          });
-        })
-        .catch(e => console.error('Snapshot history fetch failed (non-blocking):', e));
+      callbacks?.onSnapshotHistoryAttached?.(updated);
+      return { status: 'success', positions: updated };
     } catch (e: any) {
+      if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
       if (e.message === 'Not authenticated' || e.message === 'Session expired') {
         window.location.href = '/login';
-        return;
+        return { status: 'error', message: e.message };
       }
       setError(e.message);
+      return { status: 'error', message: e.message };
     } finally {
-      setLoading(false);
+      if (generation === refreshGenerationRef.current) setLoading(false);
     }
   }, []);
 

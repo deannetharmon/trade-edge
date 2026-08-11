@@ -1965,7 +1965,7 @@ Marketable decision-eligible: ${pos.pricingDecisionEvidence?.marketableDecisionE
 Controlling valuation basis: ${pos.pricingDecisionEvidence?.controllingBasis ?? 'NONE'}
 Pricing decision status: ${pos.pricingDecisionEvidence?.status ?? 'MID_ONLY'}
 - A marketable value that is not decision-eligible is observational only. It may justify VERIFY PRICING, but it may not independently justify CUT LOSSES, CLOSE, or a profit-target veto.
-- If status is VERIFY_PRICING, do not convert it into a directional HOLD/CLOSE/ROLL judgment. Ask for a fresh executable quote first.
+- If status is VERIFY_PRICING, do not convert it into a directional HOLD/CLOSE/ROLL judgment. Ask for fresh, reliable broker leg quotes and a new marketable estimate first; this is not a firm complex-order quote or guaranteed fill price.
 Your job here is different from the rule engine's: explain WHY this call is (or isn't) appropriate using the live market/greeks/trend/support data below -- the texture and judgment a fixed rule can't apply -- rather than summarizing the same reason in different words. If you agree with the call, say specifically what in the data below confirms it. If you'd go further, less far, or disagree, say so plainly and explain why using that data. Do not simply restate "${pos.recommendation ? pos.recommendation.primaryReason : 'the rule engine’s reason'}" in your own words.
 
 EXPERT DECISION CHECKLIST:
@@ -7438,7 +7438,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, decisionReview, onSaveDecisionReview, focusKey }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, decisionReview, onSaveDecisionReview, focusKey }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -7446,7 +7446,8 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   onProfitTargetChange: (key: string, value: number) => void;
   onIntentChange: (key: string, intent: PositionIntent) => void;
   onExecute: (pos: Position, action: ActionType) => void;
-  onRefreshQuotes: () => Promise<void>;
+  onRefreshQuotes: ReturnType<typeof usePortfolioData>['refresh'];
+  portfolioRefreshing: boolean;
   // PI-0008C: Decision Outcome Tracking -- the existing review for this
   // position (or null), and the save callback. Optional so any other caller
   // of PositionCard that predates this ticket keeps compiling unchanged;
@@ -8338,7 +8339,12 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             return canExtend ? <ExtendProfitButton pos={pos} th={th} /> : null;
           })()}
           <SetStopLossButton pos={pos} th={th} />
-          <VerifyPricingRefreshButton recommendation={pos.recommendation} onRefresh={onRefreshQuotes} />
+          <VerifyPricingRefreshButton
+            recommendation={pos.recommendation}
+            positionKey={pos.key}
+            portfolioRefreshing={portfolioRefreshing}
+            onRefresh={onRefreshQuotes}
+          />
           {/* Intent — reference point for AI analysis (assignment = goal vs avoid) */}
           <select
             value={pos.intent}
@@ -8656,7 +8662,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, decisionReviews, onSaveDecisionReview, focusKey }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, decisionReviews, onSaveDecisionReview, focusKey }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -8664,7 +8670,8 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   onIntentChange: (key: string, intent: PositionIntent) => void;
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
-  onRefreshQuotes: () => Promise<void>;
+  onRefreshQuotes: ReturnType<typeof usePortfolioData>['refresh'];
+  portfolioRefreshing: boolean;
   // PI-0008C: Decision Outcome Tracking -- optional so any other caller of
   // PositionSection that predates this ticket keeps compiling unchanged.
   decisionReviews?: DecisionReviewStore;
@@ -8718,6 +8725,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
             key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle}
             onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
             onRefreshQuotes={onRefreshQuotes}
+            portfolioRefreshing={portfolioRefreshing}
             decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
             onSaveDecisionReview={onSaveDecisionReview}
             focusKey={focusKey}
@@ -9512,7 +9520,13 @@ export default function PortfolioPage() {
           logic here), just rendered on its own tab instead of inline above
           Positions. */}
       {activeTab === 'priorities' && (
-        <TodaysPrioritiesWorkflow objectives={canonicalPriorities?.objectives ?? null} loading={loading} th={th} />
+        <TodaysPrioritiesWorkflow
+          objectives={canonicalPriorities?.objectives ?? null}
+          loading={loading}
+          th={th}
+          onRefreshQuotes={fetchPositions}
+          portfolioRefreshing={loading}
+        />
       )}
 
       {/* PI-0008C: Decision History -- ticket #6's basic Portfolio subpage
@@ -9634,6 +9648,7 @@ export default function PortfolioPage() {
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
                         onRefreshQuotes={fetchPositions}
+                        portfolioRefreshing={loading}
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                         focusKey={focusPositionKey}
                       />

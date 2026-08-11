@@ -67,7 +67,13 @@ The internal numeric recommendation field remains available for existing ranking
 - `lib/portfolio-data/types.ts`
 - `lib/portfolio-data/acquisition.ts`
 - `app/portfolio/page.tsx`
+- `components/portfolio-data/PortfolioDataProvider.tsx`
+- `components/portfolio-data/__tests__/PortfolioDataProvider.test.tsx`
 - `features/portfolio/components/PositionRecommendationBadge.tsx`
+- `features/portfolio/components/VerifyPricingRefreshButton.tsx`
+- `features/portfolio/components/__tests__/VerifyPricingRefreshButton.test.tsx`
+- `features/portfolio/components/TodaysPrioritiesWorkflow.tsx`
+- `features/portfolio/components/__tests__/TodaysPrioritiesWorkflow.test.tsx`
 - `features/portfolio/intelligence/PositionIntelligencePanel.tsx`
 - `lib/portfolio-intelligence/__tests__/pi0014MarketablePricingFixtures.test.ts`
 - `lib/portfolio-data/__tests__/pricingDecisionWiring.test.ts`
@@ -108,7 +114,7 @@ The team returned the first implementation for a focused corrective pass. The or
 
 Corrections made:
 
-- `VERIFY_PRICING` is now a first-class `PortfolioRecommendationKind` (`verify-pricing`) with stable rule ID `OBJ-VERIFY-PRICING`, `MANAGE_POSITION` objective type, a fresh-executable-quote review trigger, pricing-specific impact text, management choices, and lifecycle text. It no longer masquerades downstream as the health-driven `OBJ-WATCH-POSITION` rule.
+- `VERIFY_PRICING` is now a first-class `PortfolioRecommendationKind` (`verify-pricing`) with stable rule ID `OBJ-VERIFY-PRICING`, `MANAGE_POSITION` objective type, a stable `fresh-executable-quote` trigger identifier whose user-facing label requests fresh broker leg quotes, pricing-specific impact text, management choices, and lifecycle text. It no longer masquerades downstream as the health-driven `OBJ-WATCH-POSITION` rule.
 - The AI trust boundary now uses deterministic copy that accepts no model-authored summary or reasoning. When pricing verification is required, a hostile `CLOSE`/`ROLL`/`CUT LOSSES` model response cannot leak directional prose or high confidence into the visible result.
 - Today's Priorities identifies this deterministic rule as `Rule Strength: Deterministic` and does not display the internal fixed value as a measured confidence percentage. Other recommendation types retain their existing confidence presentation.
 - Quote age and future-skew tolerances now live in `DEFAULT_POSITION_MANAGEMENT_POLICY`; acquisition imports the canonical policy rather than defining a private magic number. The 120-second boundary is recommendation-only and is documented as allowing ordinary polling/network delay while still requiring a recent broker observation. It does not authorize order execution.
@@ -142,4 +148,8 @@ Final validation was performed from an isolated clean worktree reproducing the c
 
 Dean approved a direct Refresh Quotes action for Verify Pricing. The position card now renders that action only for the typed `verify-pricing` recommendation. Activating it invokes the existing canonical Portfolio Data Provider refresh once, which re-fetches broker positions and rebuilds recommendations from the returned evidence. The control disables and exposes `aria-busy` while the request is in flight, preventing duplicate clicks. There is no timer and no automatic retry loop. If the refreshed evidence remains stale, incomplete, or unreliable, the recomputed position remains Verify Pricing and the action remains available; if evidence becomes decision-eligible, the normal recommendation replaces it.
 
-Continuation validation: 4 focused files / 30 tests passing, TypeScript clean, and `git diff --check` clean. The new component tests prove typed conditional rendering, one-shot invocation, duplicate-click suppression, and accessible busy state. The previously completed clean full-suite and production-build results remain recorded above; this isolated UI continuation did not rerun them.
+The team returned the first continuation because its busy state was local to one card, the provider resolved before recommendation recomputation, and provider errors were indistinguishable from success at the control. The corrected provider now uses a monotonic request generation: only the newest portfolio refresh may publish positions or clear shared loading, so an older broker response cannot overwrite newer evidence. It awaits snapshot-history attachment and canonical health/recommendation/objective recomputation before returning a typed `success`, `error`, or `superseded` result. If snapshot history is unavailable, it recomputes from fresh broker positions with an empty contextual store rather than publishing raw positions.
+
+Every position-card and Today's Priorities Verify Pricing action now consumes the shared provider loading state. The clicked action announces one of four truthful outcomes: failure with pricing still unverified, refresh completed but pricing remains unverified, recommendation updated, or position no longer open. “Executable quote” has been removed from user-facing Verify Pricing copy: the evidence is described as fresh broker leg quotes and a derived marketable estimate, explicitly not a firm complex-order quote or guaranteed fill price. The stable historical trigger ID remains `fresh-executable-quote`; its visible label and explanation use the corrected terminology.
+
+Corrective continuation focused validation passed 6 files / 50 tests; TypeScript and `git diff --check` were clean. The complete final diff was then reproduced on parent `99c07b1` in an isolated clean worktree. The first `TZ=UTC` full-suite run passed 2,092 tests and hit one timeout in the unrelated `ScreenerSessionWiring.test.tsx`; that exact file immediately passed 17/17 in isolation. One complete suite rerun then passed 150 files / 2,093 tests. The production build succeeded and generated the full route manifest. The unrelated Screener timing failure and non-fatal build-time Redis warnings are disclosed rather than hidden or attributed to PI-0014C.

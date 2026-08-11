@@ -230,7 +230,7 @@ describe('PI-0014 supplementary: marketable pricing vetoes a false profit target
     const { legacyRecommendation, executionRealityPromoted } = evaluate(fixture);
     expect(legacyRecommendation.kind).not.toBe('close-winner');
     expect(executionRealityPromoted).toBe(true);
-    expect(legacyRecommendation.supportingReasons[0]).toMatch(/Executable pricing is materially worse than mid/);
+    expect(legacyRecommendation.supportingReasons[0]).toMatch(/marketable estimate is materially worse than mid/i);
   });
 });
 
@@ -433,7 +433,8 @@ describe('PI-0014C MU 800/790 five-lot pricing-conflict regression', () => {
     expect(result.legacyRecommendation.kind).toBe('verify-pricing');
     expect(result.legacyRecommendation.label).toBe('Verify Pricing');
     expect(result.legacyRecommendation.urgency).toBe('high');
-    expect(result.legacyRecommendation.suggestedAction).toMatch(/fresh, executable close quote/i);
+    expect(result.legacyRecommendation.suggestedAction).toMatch(/refresh broker leg quotes/i);
+    expect(result.legacyRecommendation.suggestedAction).toMatch(/not a guaranteed fill price/i);
     expect(result.executionRealityPromoted).toBe(false);
     expect(result.liquidityTrapTriggered).toBe(true);
     expect(result.pricingDecisionEvidence.status).toBe('VERIFY_PRICING');
