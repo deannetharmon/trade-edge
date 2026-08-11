@@ -98,6 +98,7 @@ import { buildDashboardComposition } from '@/lib/portfolio-intelligence/dashboar
 // (already had all three) and calls into this module, never the reverse.
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { PositionRecommendationBadge } from '@/features/portfolio/components/PositionRecommendationBadge';
+import { VerifyPricingRefreshButton } from '@/features/portfolio/components/VerifyPricingRefreshButton';
 import { PositionHealthBadge } from '@/features/portfolio/components/PositionHealthBadge';
 import { TodaysPrioritiesWorkflow } from '@/features/portfolio/components/TodaysPrioritiesWorkflow';
 import { DailyPortfolioBriefing } from '@/features/portfolio/briefing/DailyPortfolioBriefing';
@@ -7437,7 +7438,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, decisionReview, onSaveDecisionReview, focusKey }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, decisionReview, onSaveDecisionReview, focusKey }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -7445,6 +7446,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   onProfitTargetChange: (key: string, value: number) => void;
   onIntentChange: (key: string, intent: PositionIntent) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  onRefreshQuotes: () => Promise<void>;
   // PI-0008C: Decision Outcome Tracking -- the existing review for this
   // position (or null), and the save callback. Optional so any other caller
   // of PositionCard that predates this ticket keeps compiling unchanged;
@@ -8336,6 +8338,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             return canExtend ? <ExtendProfitButton pos={pos} th={th} /> : null;
           })()}
           <SetStopLossButton pos={pos} th={th} />
+          <VerifyPricingRefreshButton recommendation={pos.recommendation} onRefresh={onRefreshQuotes} />
           {/* Intent — reference point for AI analysis (assignment = goal vs avoid) */}
           <select
             value={pos.intent}
@@ -8653,7 +8656,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, decisionReviews, onSaveDecisionReview, focusKey }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, decisionReviews, onSaveDecisionReview, focusKey }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -8661,6 +8664,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   onIntentChange: (key: string, intent: PositionIntent) => void;
   groupAction: ActionType; onGroupAction: (positions: Position[], action: ActionType) => void;
   onExecute: (pos: Position, action: ActionType) => void;
+  onRefreshQuotes: () => Promise<void>;
   // PI-0008C: Decision Outcome Tracking -- optional so any other caller of
   // PositionSection that predates this ticket keeps compiling unchanged.
   decisionReviews?: DecisionReviewStore;
@@ -8713,6 +8717,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
           <PositionCard
             key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle}
             onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
+            onRefreshQuotes={onRefreshQuotes}
             decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
             onSaveDecisionReview={onSaveDecisionReview}
             focusKey={focusKey}
@@ -9628,6 +9633,7 @@ export default function PortfolioPage() {
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
                         onExecute={(pos, action) => openBatch([{ pos, action }])}
+                        onRefreshQuotes={fetchPositions}
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                         focusKey={focusPositionKey}
                       />

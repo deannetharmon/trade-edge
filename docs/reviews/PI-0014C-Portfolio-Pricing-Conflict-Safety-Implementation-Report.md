@@ -134,6 +134,12 @@ Confidence provenance is now canonical in `buildRecommendationExplanation()`: `O
 
 `derivePositionQuoteCapturedAt()` now returns `null` for an empty leg list rather than reducing an empty array. The helper-level scope of timestamp testing is stated accurately above.
 
-The 120-second value remains the centralized initial recommendation-only default. **Explicit Product Owner approval of that threshold is still pending**; it must not be represented as an approved trading-policy constant until Dean approves it. No execution path is authorized by this value.
+Dean approved 120 seconds as the initial recommendation-only quote-freshness threshold on 2026-08-10. It remains a monitored policy default, not execution authority: a quote outside the boundary suppresses directional guidance and produces Verify Pricing.
 
 Final validation was performed from an isolated clean worktree reproducing the complete PI-0014C diff on parent `088b73f`: focused validation passed 8 files / 71 tests, the full suite passed 148 files / 2,086 tests under `TZ=UTC`, TypeScript completed cleanly, `git diff --check` was clean, and the production build succeeded. The build emitted the previously disclosed Redis connection warnings but completed normally and generated the full route manifest.
+
+## Product-owner continuation: one-shot quote refresh
+
+Dean approved a direct Refresh Quotes action for Verify Pricing. The position card now renders that action only for the typed `verify-pricing` recommendation. Activating it invokes the existing canonical Portfolio Data Provider refresh once, which re-fetches broker positions and rebuilds recommendations from the returned evidence. The control disables and exposes `aria-busy` while the request is in flight, preventing duplicate clicks. There is no timer and no automatic retry loop. If the refreshed evidence remains stale, incomplete, or unreliable, the recomputed position remains Verify Pricing and the action remains available; if evidence becomes decision-eligible, the normal recommendation replaces it.
+
+Continuation validation: 4 focused files / 30 tests passing, TypeScript clean, and `git diff --check` clean. The new component tests prove typed conditional rendering, one-shot invocation, duplicate-click suppression, and accessible busy state. The previously completed clean full-suite and production-build results remain recorded above; this isolated UI continuation did not rerun them.
