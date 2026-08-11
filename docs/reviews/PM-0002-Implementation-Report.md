@@ -119,7 +119,7 @@ Final clean-worktree validation after all corrections:
 
 - Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
 - Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **154 files / 2,150 tests passed; zero failures**.
+- Complete suite in one invocation: **154 files / 2,151 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.
@@ -146,3 +146,9 @@ The compact row now distinguishes the three states in the required order: incomp
 The last approval correction closes unsupported debit valuation completely. `loadPositions()` now computes `closeNowPnl` only for a supported net-credit entry and marks `maxRiskReliable` true only under that same provenance. A complete debit therefore keeps its truthful `Debit (unsupported)` identity but receives neither a fabricated `-closeValue` marketable P/L nor a credit-formula Max Risk assertion. The Portfolio card independently enforces the same boundary: it suppresses Derived marketable P/L and renders Max Risk as `Unavailable` for debit or incomplete entries, even if stale compatibility fields are present.
 
 A realistic acquisition regression supplies a complete two-leg net-debit broker fixture and proves `closeNowPnl: null` and `maxRiskReliable: false`. The page-level debit regression deliberately supplies stale contradictory `closeNowPnl` and `maxRiskReliable` values and proves neither is presented as supported financial evidence. The final file inventory is 27 files and includes `lib/portfolio-data/__tests__/stopLossWiring.test.ts`.
+
+## Final downstream Max Risk correction
+
+All Max Risk consumers now use one pure fail-closed boundary, `reliableSupportedMaxRisk()`. It returns a value only when entry provenance is explicitly complete, the entry is a supported positive net credit, `maxRiskReliable === true`, and the value is finite and non-negative. The compact row, Portfolio `At Risk` aggregate, position recommendation prompt, portfolio-analysis prompt, and follow-up context all use this boundary. Debit, incomplete, missing-credit, and legacy records with omitted reliability therefore cannot surface a credit-formula Max Risk anywhere in the current Portfolio experience.
+
+The helper regression proves every rejected provenance state and the supported-credit control. The acquisition fixture now represents an economically coherent debit put spread: long the higher-strike 800 put for $2 and short the lower-strike 790 put for $1. It continues to prove that acquisition publishes neither marketable P/L nor reliable Max Risk for unsupported debit economics.

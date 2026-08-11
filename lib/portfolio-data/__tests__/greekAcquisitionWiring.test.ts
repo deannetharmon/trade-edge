@@ -110,7 +110,9 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
   it('does not fabricate marketable P/L or reliable max risk for a complete but unsupported debit entry', async () => {
     broker.ttFetch.mockImplementation(async (path: string) => {
       if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
-      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Short', '1.00'), leg(LONG, 'Long', '2.00')] } };
+      // Long the higher-strike 800P for $2 and short the lower-strike 790P
+      // for $1: an economically coherent $1 debit put spread.
+      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Long', '2.00'), leg(LONG, 'Short', '1.00')] } };
       if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
         { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.07', gamma: '0.001', delta: '-0.20', vega: '0.08', 'updated-at': '2026-08-11T15:59:30.000Z' },
         { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.05', 'updated-at': '2026-08-11T15:59:35.000Z' },

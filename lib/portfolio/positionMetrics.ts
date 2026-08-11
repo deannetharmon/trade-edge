@@ -56,6 +56,23 @@ export function entryPnlPct(position: EntryEconomicsLike & { pnl?: number | null
     : null;
 }
 
+/**
+ * Returns a max-risk value only when it is explicitly reliable and grounded
+ * in supported net-credit entry economics. Compatibility/legacy fields,
+ * debit structures, and omitted reliability provenance all fail closed.
+ */
+export function reliableSupportedMaxRisk(
+  position: EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean },
+): number | null {
+  return hasSupportedCreditEntryEconomics(position)
+    && position.maxRiskReliable === true
+    && position.maxRisk != null
+    && Number.isFinite(position.maxRisk)
+    && position.maxRisk >= 0
+    ? position.maxRisk
+    : null;
+}
+
 export function parseBrokerEntryPremium(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const normalized = typeof value === 'string' ? value.trim() : value;

@@ -25,6 +25,7 @@ import {
   hasSupportedCreditEntryEconomics,
   canonicalEntryCredit,
   entryPnlPct,
+  reliableSupportedMaxRisk,
   type PopLeg,
 } from '../positionMetrics';
 
@@ -48,6 +49,15 @@ describe('PM-0002 entry-premium provenance', () => {
     const credit = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 1000, pnl: 250 };
     expect(hasSupportedCreditEntryEconomics(credit)).toBe(true);
     expect(entryPnlPct(credit)).toBe(25);
+  });
+
+  it('exposes max risk only for explicit supported credit provenance and reliability', () => {
+    const supported = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 0, maxRisk: 4000, maxRiskReliable: true };
+    expect(reliableSupportedMaxRisk(supported)).toBe(4000);
+    expect(reliableSupportedMaxRisk({ ...supported, entryPriceEffect: 'Debit' })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, entryEconomicsComplete: false })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, maxRiskReliable: undefined })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, entryCredit: null })).toBeNull();
   });
 
   it.each([undefined, null, '', '   ', 'not-a-price', NaN, Infinity, -1])('keeps unavailable broker value %p unavailable', value => {

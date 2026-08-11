@@ -84,6 +84,7 @@ import {
   hasSupportedCreditEntryEconomics,
   canonicalEntryCredit,
   entryPnlPct,
+  reliableSupportedMaxRisk,
 } from '@/lib/portfolio/positionMetrics';
 import { canonicalRecommendationForCard, canonicalRecommendationToAction, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
@@ -1890,7 +1891,7 @@ Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${current
 P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}${pos.pnl != null && pos.pnlReliable && pos.buffer != null && pos.buffer >= 5 ? ' — NOTE: reliable does not mean actionable; a paper loss on a comfortably-OTM spread is normal (short vega + unearned time value), not a reason to close' : ''}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
 Profit target: ${entryComplete ? `${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})` : 'unavailable — entry economics incomplete'}
-Max risk: ${entryComplete && pos.maxRiskReliable !== false ? `$${pos.maxRisk.toFixed(2)}` : 'unavailable — entry economics incomplete'}
+Max risk: ${reliableSupportedMaxRisk(pos) != null ? `$${reliableSupportedMaxRisk(pos)!.toFixed(2)}` : 'unavailable — supported credit entry and reliable max-risk basis not established'}
 
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
@@ -2132,8 +2133,8 @@ function buildPortfolioPrompt(positions: Position[]): string {
   const excludedEntryCount = positions.length - entryCompletePositions.length;
   const totalCredit = entryCompletePositions.reduce((s, p) => s + (canonicalEntryCredit(p) ?? 0), 0);
   const totalPnl = entryCompletePositions.reduce((s, p) => s + (p.pnl ?? 0), 0);
-  const riskCompletePositions = entryCompletePositions.filter(p => p.maxRiskReliable !== false);
-  const totalAtRisk = riskCompletePositions.reduce((s, p) => s + p.maxRisk, 0);
+  const riskCompletePositions = positions.filter(p => reliableSupportedMaxRisk(p) != null);
+  const totalAtRisk = riskCompletePositions.reduce((s, p) => s + reliableSupportedMaxRisk(p)!, 0);
   const portfolioGreeks = calculatePortfolioGreeks(positions);
   const urgentCount = positions.filter(p => p.needsClose || p.hitTarget || (p.buffer != null && p.buffer < 5)).length;
 
@@ -2491,7 +2492,6 @@ function buildLegSnapshot(pos: Position): string {
 }
 
 function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): string {
-  const entryComplete = hasCompleteEntryEconomics(pos);
   const creditEntryComplete = hasSupportedCreditEntryEconomics(pos);
   const entryCredit = canonicalEntryCredit(pos);
   const shortLegs = getShortLegs(pos);
@@ -2538,7 +2538,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `Profit captured: ${fmtPct(pnlCapture)}`,
     `Profit target: ${creditEntryComplete ? `${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}` : 'unavailable — supported credit entry not established'}`,
     `Premium still above target buyback: ${fmtMoney(remainingToTarget)}`,
-    `Max risk: ${entryComplete && pos.maxRiskReliable !== false ? fmtMoney(pos.maxRisk) : 'unavailable — entry economics incomplete'}`,
+    `Max risk: ${reliableSupportedMaxRisk(pos) != null ? fmtMoney(reliableSupportedMaxRisk(pos)) : 'unavailable — supported credit entry and reliable max-risk basis not established'}`,
     '',
     'GREEKS / VOLATILITY',
     `Delta: ${fmtSignedNum(pos.netDelta, 3)}`,
@@ -4412,8 +4412,8 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
   const priced = complete.filter(p => (p.pnl ?? p.plOpen) != null);
   const totalPnl = priced.reduce((s, p) => s + (p.pnl ?? p.plOpen ?? 0), 0);
   const capturedPct = totalCredit > 0 && priced.length === complete.length ? (totalPnl / totalCredit) * 100 : null;
-  const reliableRisk = positions.filter(p => p.maxRiskReliable !== false && Number.isFinite(p.maxRisk));
-  const totalAtRisk = reliableRisk.reduce((s, p) => s + p.maxRisk, 0);
+  const reliableRisk = positions.filter(p => reliableSupportedMaxRisk(p) != null);
+  const totalAtRisk = reliableRisk.reduce((s, p) => s + reliableSupportedMaxRisk(p)!, 0);
   const totalTheta = sumNullable(positions, p => p.theta != null ? toWholePositionThetaDollars(p.theta) : null);
   const omittedEntry = positions.length - complete.length;
 
@@ -6554,7 +6554,10 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const suggStopLossDollars  = suggestion ? clean$((suggestion.stopPrice - creditPerContract) * qty * 100) : null;
   // Breakeven context: how far the stop sits from true max risk, so "2.5x credit"
   // isn't read as the whole loss story on a defined-risk spread.
-  const stopPctOfMaxRisk = pos.maxRisk > 0 ? (Math.abs(stopLossDollars) / pos.maxRisk) * 100 : null;
+  const reliableMaxRisk = reliableSupportedMaxRisk(pos);
+  const stopPctOfMaxRisk = reliableMaxRisk != null && reliableMaxRisk > 0
+    ? (Math.abs(stopLossDollars) / reliableMaxRisk) * 100
+    : null;
 
   return (
     <div className="relative">
@@ -6782,7 +6785,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               )}
               {!stopError && stopPctOfMaxRisk != null && (
                 <p className={`text-[9px] ${th.textFaint} ml-28`}>
-                  = {stopPctOfMaxRisk.toFixed(0)}% of max risk (${pos.maxRisk.toFixed(2)})
+                  = {stopPctOfMaxRisk.toFixed(0)}% of max risk (${reliableMaxRisk!.toFixed(2)})
                 </p>
               )}
             </div>
@@ -7972,7 +7975,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Max Risk <span className="text-[7px]">(expiry est.)</span></p>
                 <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {creditEntryEconomicsComplete && pos.maxRiskReliable === true ? `$${pos.maxRisk.toLocaleString()}` : 'Unavailable'}
+                  {reliableSupportedMaxRisk(pos) != null ? `$${reliableSupportedMaxRisk(pos)!.toLocaleString()}` : 'Unavailable'}
                 </p>
               </div>
             ) : (
