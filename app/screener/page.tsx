@@ -145,6 +145,19 @@ import { publishRecommendations, clearRecommendations } from '@/lib/recommendati
 type Theme = 'dark' | 'medium' | 'light';
 const LS_THEME = 'hunter-theme';
 
+// - PMCC Colors-----
+const getPmccExtrinsicColor = (pct: number) => {
+  if (pct >= 80) return 'text-emerald-400';
+  if (pct >= 50) return 'text-yellow-400';
+  return 'text-red-400';
+};
+
+const getPmccDeltaColor = (delta: number) => {
+  if (delta >= 0.78) return 'text-emerald-400';
+  if (delta >= 0.70) return 'text-yellow-400';
+  return 'text-red-400';
+};
+
 // ── Accent Colors ──────────────────────────────────────────────────────────
 const LS_ACCENT = 'hunter-accent';
 
