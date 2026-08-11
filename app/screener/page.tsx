@@ -4064,19 +4064,18 @@ const strategyScores = useMemo(() => {
           )}
 
           {c && c.strategy === 'PMCC' && (
-            <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
-              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>PMCC Structure</p>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className={th.label}>LEAP long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ{c.longDelta?.toFixed(2)}</span></div>
+            <div className={`px-4 pb-3 pt-2 border-t ${th.border} bg-purple-950/10`}>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                <div><span className={th.label}>LEAP long call: </span><span className={th.text}>{c.longStrike}C exp {c.longExpiration} ({c.longDte}d) · cost ${c.longCost?.toFixed(2)} · Δ<span className={getPmccDeltaColor(c.longDelta ?? 0)}>{c.longDelta?.toFixed(2)}</span></span></div>
                 <div><span className={th.label}>Short call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · credit ${c.credit.toFixed(2)} · Δ{c.shortDelta.toFixed(2)}</span></div>
-                <div><span className={th.label}>Net debit: </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]` }>(capital at risk)</span></div>
-                <div><span className={th.label}>Max profit: </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(if stock reaches short strike)</span></div>
-                <div><span className={th.label}>Extrinsic capture: </span><span className={th.text}>{c.extrinsicCapture?.toFixed(0)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / LEAP extrinsic)</span></div>
-                <div><span className={th.label}>ROC: </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(short credit / net debit)</span></div>
+                <div><span className={th.label}>Net debit: </span><span className="text-white font-bold">${c.netDebit?.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]` }>(capital at risk)</span></div>
+                <div><span className={th.label}>Max profit: </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2)}</span></div>
+                <div><span className={th.label}>Extrinsic capture: </span><span className={`font-bold ${getPmccExtrinsicColor(c.extrinsicCapture ?? 0)}`}>{c.extrinsicCapture?.toFixed(0)}%</span><span className={`${th.textFaint} ml-1 text-[10px]` }>(short credit / LEAP extrinsic)</span></div>
+                <div><span className={th.label}>ROC: </span><span className={th.text}>{c.roc.toFixed(1)}%</span></div>
               </div>
-              <p className={`text-[9px] text-purple-400/80 pt-1`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAP when the thesis changes.</p>
+              <p className={`text-[9px] text-purple-400/80 pt-1.5`}>Roll the short call at 21 DTE or 50% profit. Never let the short call go deep ITM. Exit the LEAP when the thesis changes.</p>
             </div>
-          )}    
+          )}
 
           {c && c.strategy === 'CSP' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
