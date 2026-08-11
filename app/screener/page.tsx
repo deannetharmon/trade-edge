@@ -3947,8 +3947,8 @@ const strategyScores = useMemo(() => {
           requiring an expand click. */}
       {c && <CspFundamentalsRow candidate={c} price={result.price} textMutedClassName={th.textMuted} testId="csp-qualified-fundamentals" />}
 
-      {/* Expanded Content */}
-      {expanded && (
+     {/* Expanded Content / Permanent View for PMCC */}
+      {(expanded || result.strategy === 'PMCC') && (
         <div className={`border-t ${th.border} px-4 py-3 space-y-3`}>
           {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{t.reason}</div>}
 
