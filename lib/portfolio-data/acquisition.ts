@@ -77,6 +77,7 @@ import {
   aggregateBrokerPositionGreeks,
   hasCompleteEntryEconomics,
   hasSupportedCreditEntryEconomics,
+  reliableSupportedMaxRisk,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -163,13 +164,14 @@ export function derivePositionQuoteCapturedAt(
 // Null when currentValue or closeValue is unavailable, same convention
 // those two fields already follow.
 export function computeRawPositionValuation(pos: Position) {
-  if (!hasSupportedCreditEntryEconomics(pos) || pos.maxRiskReliable === false || pos.entryCredit == null) return null;
+  const maxRisk = reliableSupportedMaxRisk(pos);
+  if (maxRisk == null || pos.entryCredit == null) return null;
   if (pos.currentValue == null || pos.closeValue == null) return null;
   return computePositionValuation({
     creditReceived: pos.entryCredit,
     midValue: pos.currentValue,
     marketableValue: pos.closeValue,
-    maxRisk: pos.maxRisk,
+    maxRisk,
   });
 }
 

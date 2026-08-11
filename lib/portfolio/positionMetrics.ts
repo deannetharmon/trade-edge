@@ -73,6 +73,39 @@ export function reliableSupportedMaxRisk(
     : null;
 }
 
+export function summarizeReliableSupportedMaxRisk(
+  positions: Array<EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean }>,
+) {
+  const values = positions
+    .map(reliableSupportedMaxRisk)
+    .filter((value): value is number => value != null);
+  return {
+    total: values.reduce((sum, value) => sum + value, 0),
+    includedCount: values.length,
+    excludedCount: positions.length - values.length,
+  };
+}
+
+export const MAX_RISK_UNAVAILABLE_COPY = 'unavailable — supported credit entry and reliable max-risk basis not established';
+
+export function formatReliableSupportedMaxRisk(
+  position: EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean },
+): string {
+  const value = reliableSupportedMaxRisk(position);
+  return value == null ? MAX_RISK_UNAVAILABLE_COPY : `$${value.toFixed(2)}`;
+}
+
+export function formatPortfolioMaxRiskContext(
+  positions: Array<EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean }>,
+): string {
+  const summary = summarizeReliableSupportedMaxRisk(positions);
+  const value = summary.includedCount > 0 ? `$${summary.total.toFixed(2)}` : 'unavailable';
+  const excluded = summary.excludedCount > 0
+    ? ` (${summary.excludedCount} position${summary.excludedCount === 1 ? '' : 's'} excluded: unreliable entry/max-risk basis)`
+    : '';
+  return `Total at risk: ${value}${excluded}`;
+}
+
 export function parseBrokerEntryPremium(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const normalized = typeof value === 'string' ? value.trim() : value;

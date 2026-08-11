@@ -26,6 +26,10 @@ import {
   canonicalEntryCredit,
   entryPnlPct,
   reliableSupportedMaxRisk,
+  summarizeReliableSupportedMaxRisk,
+  formatReliableSupportedMaxRisk,
+  formatPortfolioMaxRiskContext,
+  MAX_RISK_UNAVAILABLE_COPY,
   type PopLeg,
 } from '../positionMetrics';
 
@@ -58,6 +62,25 @@ describe('PM-0002 entry-premium provenance', () => {
     expect(reliableSupportedMaxRisk({ ...supported, entryEconomicsComplete: false })).toBeNull();
     expect(reliableSupportedMaxRisk({ ...supported, maxRiskReliable: undefined })).toBeNull();
     expect(reliableSupportedMaxRisk({ ...supported, entryCredit: null })).toBeNull();
+  });
+
+  it('fails aggregate At Risk and generated contexts closed for debit, incomplete, and legacy reliability', () => {
+    const supported = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 0, maxRisk: 4000, maxRiskReliable: true };
+    const debit = { ...supported, entryPriceEffect: 'Debit' as const };
+    const incomplete = { ...supported, entryEconomicsComplete: false };
+    const legacy = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 1000, maxRisk: 4000 };
+
+    expect(summarizeReliableSupportedMaxRisk([supported, debit, incomplete, legacy])).toEqual({
+      total: 4000,
+      includedCount: 1,
+      excludedCount: 3,
+    });
+    expect(formatPortfolioMaxRiskContext([supported, debit, incomplete, legacy]))
+      .toBe('Total at risk: $4000.00 (3 positions excluded: unreliable entry/max-risk basis)');
+    expect(formatReliableSupportedMaxRisk(supported)).toBe('$4000.00');
+    expect(formatReliableSupportedMaxRisk(debit)).toBe(MAX_RISK_UNAVAILABLE_COPY);
+    expect(formatReliableSupportedMaxRisk(incomplete)).toBe(MAX_RISK_UNAVAILABLE_COPY);
+    expect(formatReliableSupportedMaxRisk(legacy)).toBe(MAX_RISK_UNAVAILABLE_COPY);
   });
 
   it.each([undefined, null, '', '   ', 'not-a-price', NaN, Infinity, -1])('keeps unavailable broker value %p unavailable', value => {

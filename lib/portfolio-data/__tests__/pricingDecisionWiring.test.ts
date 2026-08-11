@@ -7,6 +7,7 @@ import {
   MARKETABLE_QUOTE_MAX_AGE_MS,
   scorePortfolioPositionObjective,
   scorePortfolioRemainingOpportunity,
+  computeRawPositionValuation,
 } from '@/lib/portfolio-data/acquisition';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 
@@ -134,6 +135,17 @@ describe('PI-0014C acquisition-level verification continuity', () => {
 });
 
 describe('PM-0002 incomplete entry economics decision boundary', () => {
+  it('requires explicit supported-credit Max Risk provenance for raw valuation', () => {
+    const supported = position({
+      entryEconomicsComplete: true, entryCredit: 50, entryPriceEffect: 'Credit',
+      maxRisk: 450, maxRiskReliable: true, currentValue: 45, closeValue: 55,
+    });
+    expect(computeRawPositionValuation(supported)).not.toBeNull();
+    expect(computeRawPositionValuation({ ...supported, maxRiskReliable: undefined })).toBeNull();
+    expect(computeRawPositionValuation({ ...supported, entryPriceEffect: 'Debit' })).toBeNull();
+    expect(computeRawPositionValuation({ ...supported, entryEconomicsComplete: false })).toBeNull();
+  });
+
   it('keeps a complete debit out of credit-oriented objective and Remaining Opportunity logic', () => {
     const debit = position({
       entryPriceEffect: 'Debit', entryCredit: 500, entryEconomicsComplete: true,

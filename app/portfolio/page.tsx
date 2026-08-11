@@ -85,6 +85,9 @@ import {
   canonicalEntryCredit,
   entryPnlPct,
   reliableSupportedMaxRisk,
+  summarizeReliableSupportedMaxRisk,
+  formatReliableSupportedMaxRisk,
+  formatPortfolioMaxRiskContext,
 } from '@/lib/portfolio/positionMetrics';
 import { canonicalRecommendationForCard, canonicalRecommendationToAction, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
@@ -1891,7 +1894,7 @@ Current buyback: $${pos.currentValue?.toFixed(2) ?? 'unknown'} total | ${current
 P&L: ${pos.pnl != null ? `$${pos.pnl.toFixed(2)} (${pnlPct}% of credit)` : 'unknown'} ${pos.pnl != null ? (pos.pnlReliable ? '[RELIABLE mark]' : '[QUOTE ARTIFACT — illiquid/one-sided legs; trust geometry over this number]') : ''}${pos.pnl != null && pos.pnlReliable && pos.buffer != null && pos.buffer >= 5 ? ' — NOTE: reliable does not mean actionable; a paper loss on a comfortably-OTM spread is normal (short vega + unearned time value), not a reason to close' : ''}
 Premium captured: ${premiumCapturedPct != null ? `${premiumCapturedPct.toFixed(1)}%` : 'unknown'}
 Profit target: ${entryComplete ? `${Math.round(pos.profitTarget * 100)}% ($${pos.targetPrice.toFixed(2)})` : 'unavailable — entry economics incomplete'}
-Max risk: ${reliableSupportedMaxRisk(pos) != null ? `$${reliableSupportedMaxRisk(pos)!.toFixed(2)}` : 'unavailable — supported credit entry and reliable max-risk basis not established'}
+Max risk: ${formatReliableSupportedMaxRisk(pos)}
 
 MARKET DATA:
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
@@ -2133,8 +2136,6 @@ function buildPortfolioPrompt(positions: Position[]): string {
   const excludedEntryCount = positions.length - entryCompletePositions.length;
   const totalCredit = entryCompletePositions.reduce((s, p) => s + (canonicalEntryCredit(p) ?? 0), 0);
   const totalPnl = entryCompletePositions.reduce((s, p) => s + (p.pnl ?? 0), 0);
-  const riskCompletePositions = positions.filter(p => reliableSupportedMaxRisk(p) != null);
-  const totalAtRisk = riskCompletePositions.reduce((s, p) => s + reliableSupportedMaxRisk(p)!, 0);
   const portfolioGreeks = calculatePortfolioGreeks(positions);
   const urgentCount = positions.filter(p => p.needsClose || p.hitTarget || (p.buffer != null && p.buffer < 5)).length;
 
@@ -2144,7 +2145,7 @@ PORTFOLIO SUMMARY:
 ${positions.length} open positions | ${urgentCount} requiring immediate attention
 Total credit collected: ${entryCompletePositions.length > 0 ? `$${totalCredit.toFixed(2)}` : 'unavailable'}${excludedEntryCount > 0 ? ` (${excludedEntryCount} position${excludedEntryCount === 1 ? '' : 's'} excluded: incomplete entry economics)` : ''}
 Current P&L: ${totalCredit > 0 ? `$${totalPnl.toFixed(2)} (${((totalPnl / totalCredit) * 100).toFixed(1)}% of credit)` : 'unavailable'}
-Total at risk: ${riskCompletePositions.length > 0 ? `$${totalAtRisk.toFixed(2)}` : 'unavailable'}${positions.length - riskCompletePositions.length > 0 ? ` (${positions.length - riskCompletePositions.length} position${positions.length - riskCompletePositions.length === 1 ? '' : 's'} excluded: unreliable entry/max-risk basis)` : ''}
+${formatPortfolioMaxRiskContext(positions)}
 Net delta: ${portfolioGreeks.deltaShares != null ? `${portfolioGreeks.deltaShares.toFixed(0)} share-equivalent` : 'N/A'}
 Net theta/d: ${portfolioGreeks.thetaPerDay != null ? `$${portfolioGreeks.thetaPerDay.toFixed(0)}/d` : 'N/A'}
 Net gamma: ${portfolioGreeks.gammaSharesPerDollar != null ? `${portfolioGreeks.gammaSharesPerDollar.toFixed(1)} shares per $1 move` : 'N/A'}
@@ -2538,7 +2539,7 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `Profit captured: ${fmtPct(pnlCapture)}`,
     `Profit target: ${creditEntryComplete ? `${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}` : 'unavailable — supported credit entry not established'}`,
     `Premium still above target buyback: ${fmtMoney(remainingToTarget)}`,
-    `Max risk: ${reliableSupportedMaxRisk(pos) != null ? fmtMoney(reliableSupportedMaxRisk(pos)) : 'unavailable — supported credit entry and reliable max-risk basis not established'}`,
+    `Max risk: ${formatReliableSupportedMaxRisk(pos)}`,
     '',
     'GREEKS / VOLATILITY',
     `Delta: ${fmtSignedNum(pos.netDelta, 3)}`,
@@ -4412,8 +4413,7 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
   const priced = complete.filter(p => (p.pnl ?? p.plOpen) != null);
   const totalPnl = priced.reduce((s, p) => s + (p.pnl ?? p.plOpen ?? 0), 0);
   const capturedPct = totalCredit > 0 && priced.length === complete.length ? (totalPnl / totalCredit) * 100 : null;
-  const reliableRisk = positions.filter(p => reliableSupportedMaxRisk(p) != null);
-  const totalAtRisk = reliableRisk.reduce((s, p) => s + reliableSupportedMaxRisk(p)!, 0);
+  const riskSummary = summarizeReliableSupportedMaxRisk(positions);
   const totalTheta = sumNullable(positions, p => p.theta != null ? toWholePositionThetaDollars(p.theta) : null);
   const omittedEntry = positions.length - complete.length;
 
@@ -4423,7 +4423,7 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
         { label: 'Open Positions', value: String(positions.length), sub: `${positions.length} position${positions.length !== 1 ? 's' : ''}`, color: th.text },
         { label: 'Captured', value: priced.length > 0 ? `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(0)}` : 'Unavailable', sub: capturedPct != null ? `of $${totalCredit.toFixed(0)} · ${capturedPct.toFixed(0)}%` : `${omittedEntry} incomplete entr${omittedEntry === 1 ? 'y' : 'ies'} excluded`, color: totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400' },
         { label: 'Target', value: complete.length > 0 ? `$${Math.round(complete.reduce((s,p) => s + p.targetPrice, 0))}` : 'Unavailable', sub: omittedEntry > 0 ? `${omittedEntry} incomplete entr${omittedEntry === 1 ? 'y' : 'ies'} excluded` : 'entry-credit based', color: 'text-yellow-400' },
-        { label: 'At Risk', value: reliableRisk.length > 0 ? `$${totalAtRisk.toFixed(0)}` : 'Unavailable', sub: reliableRisk.length === positions.length ? 'expiry max-loss estimate' : `${positions.length - reliableRisk.length} unreliable excluded`, color: th.textMuted },
+        { label: 'At Risk', value: riskSummary.includedCount > 0 ? `$${riskSummary.total.toFixed(0)}` : 'Unavailable', sub: riskSummary.excludedCount === 0 ? 'expiry max-loss estimate' : `${riskSummary.excludedCount} unreliable excluded`, color: th.textMuted },
         { label: 'Theta/D', value: totalTheta != null ? `${totalTheta >= 0 ? '+' : ''}$${totalTheta.toFixed(2)}` : 'Unavailable', sub: 'broker-position estimate', color: 'text-blue-400' },
       ].map((item, i, arr) => (
         <div key={item.label} className={`p-5 ${i < arr.length - 1 ? `border-r ${th.border}` : ''} flex flex-col items-center text-center`}>

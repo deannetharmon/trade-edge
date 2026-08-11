@@ -119,7 +119,7 @@ Final clean-worktree validation after all corrections:
 
 - Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
 - Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **154 files / 2,151 tests passed; zero failures**.
+- Complete suite in one invocation: **154 files / 2,153 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.
@@ -152,3 +152,9 @@ A realistic acquisition regression supplies a complete two-leg net-debit broker 
 All Max Risk consumers now use one pure fail-closed boundary, `reliableSupportedMaxRisk()`. It returns a value only when entry provenance is explicitly complete, the entry is a supported positive net credit, `maxRiskReliable === true`, and the value is finite and non-negative. The compact row, Portfolio `At Risk` aggregate, position recommendation prompt, portfolio-analysis prompt, and follow-up context all use this boundary. Debit, incomplete, missing-credit, and legacy records with omitted reliability therefore cannot surface a credit-formula Max Risk anywhere in the current Portfolio experience.
 
 The helper regression proves every rejected provenance state and the supported-credit control. The acquisition fixture now represents an economically coherent debit put spread: long the higher-strike 800 put for $2 and short the lower-strike 790 put for $1. It continues to prove that acquisition publishes neither marketable P/L nor reliable Max Risk for unsupported debit economics.
+
+## Final canonical-valuation and output proof
+
+`computeRawPositionValuation()` now obtains Max Risk only through `reliableSupportedMaxRisk()` and passes that returned value into `computePositionValuation()`. It returns `null` for debit, incomplete, and legacy records with omitted reliability; a supported-credit control still produces canonical valuation. This closes the last permissive Max Risk consumer.
+
+The Portfolio `At Risk` aggregate and generated analysis contexts now use testable pure summary/formatting functions from `positionMetrics.ts`. Output-level regressions prove that a mixed set containing supported credit, debit, incomplete entry, and legacy undefined-reliability records includes only the supported position in the aggregate, prints the correct exclusion count, and renders Max Risk unavailable for every unsupported position. Those same functions produce the live Portfolio-analysis and position follow-up Max Risk text, so their tested output and production output cannot drift independently.
