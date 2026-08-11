@@ -106,11 +106,12 @@ Product and tests across PM-0002:
 22. `app/api/position-lifecycle-snapshots/route.ts`
 23. `app/portfolio/__tests__/RecommendationExplanationPage.test.tsx`
 24. `lib/decision-review/__tests__/outcomeAnalysis.test.ts`
+25. `lib/portfolio-data/__tests__/stopLossWiring.test.ts`
 
 Documentation:
 
-25. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
-26. `docs/reviews/PM-0002-Implementation-Report.md`
+26. `docs/reviews/PM-0002-Current-Portfolio-Row-Reconciliation-Audit.md`
+27. `docs/reviews/PM-0002-Implementation-Report.md`
 
 ## Validation
 
@@ -118,7 +119,7 @@ Final clean-worktree validation after all corrections:
 
 - Focused financial, acquisition, recommendation, snapshot, and refresh wiring cycle: 7 files / 142 tests passed.
 - Adjacent Portfolio/stop/pricing cycle: 6 files / 98 tests passed.
-- Complete suite in one invocation: **154 files / 2,149 tests passed; zero failures**.
+- Complete suite in one invocation: **154 files / 2,150 tests passed; zero failures**.
 - TypeScript: `npx tsc --noEmit --incremental false` passed.
 - Diff validation: `git diff --check` passed.
 - Production build: `npm run build` passed; all 53 pages generated. Redis connection warnings occurred during static generation because the isolated environment blocks external Redis access, but they did not fail or alter the build.
@@ -139,3 +140,9 @@ The earlier two CSP tie-break failures did not recur in this final run; the fina
 The final approval pass removed the remaining compatibility-field reads. Canonical objective scoring, Remaining Opportunity, stop classification, the exported legacy evaluator, compact-row credit/P&L, and Extend eligibility now require `hasSupportedCreditEntryEconomics()` and consume canonical `entryCredit`. A complete debit never enters credit-derived recommendation, Remaining Opportunity, target, GTC, stop, Take Profit, or Cut Losses logic; Close/Roll remains independently available through canonical close identity.
 
 The compact row now distinguishes the three states in the required order: incomplete provenance displays `Unavailable`, a known debit displays `Debit (unsupported)`, and a supported credit displays canonical `entryCredit`. Regression coverage deliberately supplies a mismatched legacy `creditReceived: 0` beside canonical `entryCredit: 1260` and proves both the displayed credit and P/L percentage use the canonical value. Additional tests prove complete debit acquisition produces no credit-oriented objective or Remaining Opportunity, debit/missing provenance cannot calibrate stop classification, and debit rows expose Close/Roll while hiding Take Profit, Place GTC, Cut Losses, Set Stop, and target projection.
+
+## Final debit valuation correction
+
+The last approval correction closes unsupported debit valuation completely. `loadPositions()` now computes `closeNowPnl` only for a supported net-credit entry and marks `maxRiskReliable` true only under that same provenance. A complete debit therefore keeps its truthful `Debit (unsupported)` identity but receives neither a fabricated `-closeValue` marketable P/L nor a credit-formula Max Risk assertion. The Portfolio card independently enforces the same boundary: it suppresses Derived marketable P/L and renders Max Risk as `Unavailable` for debit or incomplete entries, even if stale compatibility fields are present.
+
+A realistic acquisition regression supplies a complete two-leg net-debit broker fixture and proves `closeNowPnl: null` and `maxRiskReliable: false`. The page-level debit regression deliberately supplies stale contradictory `closeNowPnl` and `maxRiskReliable` values and proves neither is presented as supported financial evidence. The final file inventory is 27 files and includes `lib/portfolio-data/__tests__/stopLossWiring.test.ts`.

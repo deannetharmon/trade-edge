@@ -1531,6 +1531,12 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const brokerGreeks = aggregateBrokerPositionGreeks(legs, {
       theta: thetaMap, gamma: gammaMap, delta: deltaMap, vega: vegaMap,
     });
+    const resolvedEntryCredit = entryEconomicsComplete ? Math.abs(creditReceived) : null;
+    const supportedCreditEntry =
+      entryEconomicsComplete &&
+      entryPriceEffect === 'Credit' &&
+      resolvedEntryCredit != null &&
+      resolvedEntryCredit > 0;
 
     return {
       key, symbol, expDate, dte, strategy, legs: positionLegs,
@@ -1543,16 +1549,16 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // `creditReceived` below is floored to $0.00 for the debit case and
       // must never be read as though it were a real zero-credit entry.
       entryPriceEffect,
-      entryCredit: entryEconomicsComplete ? Math.abs(creditReceived) : null,
+      entryCredit: resolvedEntryCredit,
       entryEconomicsComplete,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: entryEconomicsComplete && hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
+      closeNowPnl: supportedCreditEntry && hasCloseValue ? resolvedEntryCredit - Math.abs(closeValue) : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
-      maxRiskReliable: entryEconomicsComplete,
+      maxRiskReliable: supportedCreditEntry,
       entryDte, entryDate: openedAt,
       // needsClose (the hard 21-DTE close-or-roll rule) applies ONLY to
       // defined-risk spreads. A CSP is never "close now" — assignment is a valid

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
@@ -73,6 +73,10 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
     render(<PortfolioModeProvider><PortfolioDataProvider><PortfolioPage /></PortfolioDataProvider></PortfolioModeProvider>);
     expect(await screen.findByRole('button', { name: /Close\/Roll/i })).toBeInTheDocument();
     expect(screen.getByText('Debit (unsupported)')).toBeInTheDocument();
+    expect(screen.queryByText('Derived marketable P/L')).not.toBeInTheDocument();
+    const maxRisk = screen.getByText(/Max Risk/i).closest('div');
+    expect(maxRisk).not.toBeNull();
+    expect(within(maxRisk!).getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Take Profit/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Place GTC/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Cut Losses/i })).not.toBeInTheDocument();

@@ -7972,7 +7972,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Max Risk <span className="text-[7px]">(expiry est.)</span></p>
                 <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {(pos.maxRiskReliable ?? entryEconomicsComplete) ? `$${pos.maxRisk.toLocaleString()}` : 'Unavailable'}
+                  {creditEntryEconomicsComplete && pos.maxRiskReliable === true ? `$${pos.maxRisk.toLocaleString()}` : 'Unavailable'}
                 </p>
               </div>
             ) : (
@@ -8013,7 +8013,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
               )}
             </div>
 
-            {pos.closeNowPnl != null && (
+            {creditEntryEconomicsComplete && pos.closeNowPnl != null && (
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Derived marketable P/L</p>
                 <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>

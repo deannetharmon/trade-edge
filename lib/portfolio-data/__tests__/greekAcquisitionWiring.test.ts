@@ -106,4 +106,25 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
     expect(pos.recommendation?.kind).not.toBe('place-gtc');
     expect(pos.identity).toBeNull();
   });
+
+  it('does not fabricate marketable P/L or reliable max risk for a complete but unsupported debit entry', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
+      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Short', '1.00'), leg(LONG, 'Long', '2.00')] } };
+      if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
+        { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.07', gamma: '0.001', delta: '-0.20', vega: '0.08', 'updated-at': '2026-08-11T15:59:30.000Z' },
+        { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.05', 'updated-at': '2026-08-11T15:59:35.000Z' },
+      ] } };
+      if (path.startsWith('/market-data/by-type?equity=MU')) return { data: { items: [{ symbol: 'MU', bid: '861.50', ask: '861.70', mark: '861.60' }] } };
+      if (path.startsWith('/market-metrics?')) return { data: { items: [] } };
+      return { data: { items: [] } };
+    });
+    const { positions } = await loadPositions();
+    expect(positions[0]).toMatchObject({
+      entryEconomicsComplete: true,
+      entryPriceEffect: 'Debit',
+      closeNowPnl: null,
+      maxRiskReliable: false,
+    });
+  });
 });
