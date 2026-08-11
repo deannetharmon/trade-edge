@@ -30,7 +30,7 @@ Marketable evidence may promote or veto an action only when all of these are tru
 
 Missing timestamps are `UNKNOWN`; page-load time is never substituted. A materially future timestamp is also `UNKNOWN`.
 
-If marketable evidence changes an action-material threshold but is not eligible, the canonical result is `VERIFY_PRICING`. The compatibility recommendation is `watch`/`MANAGE`, labeled **Verify Pricing**, with high urgency. It cannot independently produce `CUT_LOSSES`, `CLOSE`, or veto a midpoint profit target.
+If marketable evidence changes an action-material threshold but is not eligible, the canonical result is `VERIFY_PRICING`. The recommendation kind is `verify-pricing`; its canonical objective is `OBJ-VERIFY-PRICING` / `MANAGE_POSITION`, labeled **Verify Pricing**, with high urgency. It cannot independently produce `CUT_LOSSES`, `CLOSE`, or veto a midpoint profit target.
 
 Midpoint evidence that independently breaches policy remains effective. A fresh, reliable marketable breach may still promote the recommendation, and the explanation then names the marketable basis plus both P/L percentages.
 
@@ -46,7 +46,7 @@ Midpoint evidence that independently breaches policy remains effective. A fresh,
 - controlling basis (`MID`, `MARKETABLE`, or `NONE`)
 - decision status (`MID_ONLY`, `PRICING_AGREEMENT`, `MARKETABLE_OBSERVATIONAL`, `MARKETABLE_CONFIRMED`, or `VERIFY_PRICING`)
 
-The contract is attached to each enriched Portfolio position and passed to Portfolio AI prompts. A deterministic post-model guard forces `MANAGE` when the status is `VERIFY_PRICING`, so prompt noncompliance cannot turn an untrusted pricing conflict into a directional hard action.
+The contract is attached to each enriched Portfolio position and passed to Portfolio AI prompts. A deterministic post-model projector forces `MANAGE`/`LOW`, replaces summary and reasoning, clears risks and catalysts, and resets rule-deviation fields when status is `VERIFY_PRICING`. No model-authored visible analysis field survives that boundary.
 
 ## Confidence presentation
 
@@ -60,7 +60,7 @@ The internal numeric recommendation field remains available for existing ranking
 - A trader's manually available Cut Losses button remains based on real midpoint loss as previously approved; this ticket changes recommendation authority, not manual control.
 - RSI, Bollinger Bands, trend enrichment, and broader technical-context work remain a separate backlog item.
 
-## Files changed by PI-0014C
+## Complete PI-0014C file inventory
 
 - `lib/portfolio-intelligence/objectives/positionObjective.ts`
 - `lib/portfolio-intelligence/index.ts`
@@ -73,6 +73,19 @@ The internal numeric recommendation field remains available for existing ranking
 - `lib/portfolio-data/__tests__/pricingDecisionWiring.test.ts`
 - `features/portfolio/components/__tests__/PositionRecommendationBadge.test.tsx`
 - `features/portfolio/intelligence/__tests__/PositionIntelligencePanel.test.tsx`
+- `features/portfolio/dashboard/TodaysPrioritiesDashboard.tsx`
+- `features/portfolio/dashboard/__tests__/TodaysPrioritiesDashboard.test.tsx`
+- `features/portfolio/intelligence/managementChoices.ts`
+- `features/portfolio/intelligence/nextLifecycleEvent.ts`
+- `lib/portfolio-intelligence/pricingVerification.ts`
+- `lib/portfolio-intelligence/__tests__/pricingVerification.test.ts`
+- `lib/portfolio-intelligence/policies/defaults.ts`
+- `lib/portfolio-intelligence/policies/types.ts`
+- `lib/portfolio-intelligence/ruleIds.ts`
+- `lib/portfolio-intelligence/types.ts`
+- `lib/todaysPriorities/explanation.ts`
+- `lib/todaysPriorities/__tests__/explanation.test.ts`
+- `lib/morning-briefing/types.ts`
 
 ## Validation
 
@@ -99,7 +112,7 @@ Corrections made:
 - The AI trust boundary now uses deterministic copy that accepts no model-authored summary or reasoning. When pricing verification is required, a hostile `CLOSE`/`ROLL`/`CUT LOSSES` model response cannot leak directional prose or high confidence into the visible result.
 - Today's Priorities identifies this deterministic rule as `Rule Strength: Deterministic` and does not display the internal fixed value as a measured confidence percentage. Other recommendation types retain their existing confidence presentation.
 - Quote age and future-skew tolerances now live in `DEFAULT_POSITION_MANAGEMENT_POLICY`; acquisition imports the canonical policy rather than defining a private magic number. The 120-second boundary is recommendation-only and is documented as allowing ordinary polling/network delay while still requiring a recent broker observation. It does not authorize order execution.
-- Broker timestamp extraction and oldest-leg aggregation are exported acquisition helpers used by production. A realistic two-leg Tastytrade market-data fixture proves `updated-at`/`received-at` propagation, symbol normalization, oldest-leg selection, and fail-closed behavior when any leg lacks provenance.
+- Broker timestamp extraction and oldest-leg aggregation are exported acquisition helpers used by production. A realistic two-leg Tastytrade-shaped helper fixture proves `updated-at`/`received-at` parsing, symbol normalization, oldest-leg selection, and fail-closed behavior when any leg lacks provenance. This is helper-level coverage plus code inspection of `loadPositions()`, not an end-to-end mocked `ttFetch → Position → pricingDecisionEvidence` test.
 
 New focused coverage includes canonical rule/trigger identity, hostile AI output, deterministic confidence presentation, real-shaped broker timestamp propagation, and the existing MU pricing-conflict regression.
 
@@ -112,3 +125,15 @@ Final clean-tree validation was performed by reproducing only the PI-0014C corre
 - `git diff --check`: clean.
 
 The first clean-tree full-suite run in the workstation's `America/Denver` timezone produced two unrelated CSP search failures whose fixtures expected 40 DTE but calculated 41. The exact CSP file passed 24/24 under UTC, and the entire suite was then rerun under UTC and passed 2,085/2,085. PI-0014C does not modify CSP search. This pre-existing timezone dependence is disclosed rather than attributed to PI-0014C. Build-time Redis connection-refused warnings were non-fatal in the isolated environment; the build completed successfully.
+
+## Final completeness pass
+
+Frank's second review found that the first corrective guard still allowed model-authored `risks`, `catalysts`, `deviatesFromRules`, and `deviationNote` to render. The final projector now accepts the parsed model object only to enforce the trust boundary and returns deterministic values for every visible analysis field. The adversarial test supplies directional content in every field and verifies that none survives.
+
+Confidence provenance is now canonical in `buildRecommendationExplanation()`: `OBJ-VERIFY-PRICING` returns `{ provenance: 'RULE_CONSTANT', score: null, label: 'Deterministic' }`. Today's Priorities consumes that shared contract rather than locally inferring from the rule ID, and Morning Briefing receives a nullable score instead of converting the internal compatibility constant into measured “Moderate” confidence.
+
+`derivePositionQuoteCapturedAt()` now returns `null` for an empty leg list rather than reducing an empty array. The helper-level scope of timestamp testing is stated accurately above.
+
+The 120-second value remains the centralized initial recommendation-only default. **Explicit Product Owner approval of that threshold is still pending**; it must not be represented as an approved trading-policy constant until Dean approves it. No execution path is authorized by this value.
+
+Final validation was performed from an isolated clean worktree reproducing the complete PI-0014C diff on parent `088b73f`: focused validation passed 8 files / 71 tests, the full suite passed 148 files / 2,086 tests under `TZ=UTC`, TypeScript completed cleanly, `git diff --check` was clean, and the production build succeeded. The build emitted the previously disclosed Redis connection warnings but completed normally and generated the full route manifest.

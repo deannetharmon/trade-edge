@@ -73,7 +73,14 @@ describe('buildRecommendationExplanation', () => {
   it('separates confidence from priority and labels it deterministically', () => {
     const result = buildRecommendationExplanation(prioritized());
 
-    expect(result.confidence).toEqual({ score: 92, label: 'Very High' });
+    expect(result.confidence).toEqual({ provenance: 'DECISION_SCORE', score: 92, label: 'Very High' });
+  });
+
+  it('marks Verify Pricing as a deterministic rule without fabricating measured confidence', () => {
+    const result = buildRecommendationExplanation(prioritized({
+      objective: objective({ type: 'MANAGE_POSITION', ruleId: 'OBJ-VERIFY-PRICING', confidence: 70 }),
+    }));
+    expect(result.confidence).toEqual({ provenance: 'RULE_CONSTANT', score: null, label: 'Deterministic' });
   });
 
   it('prefers quantified evidence and removes generic priority boilerplate', () => {

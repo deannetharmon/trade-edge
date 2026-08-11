@@ -2595,7 +2595,7 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
   const raw = await callAI(prompt);
   const parsed = JSON.parse(raw);
   const pricingVerificationRequired = pos.pricingDecisionEvidence?.status === 'VERIFY_PRICING';
-  const pricingGrounding = pricingVerificationRequired ? buildPricingVerificationGrounding() : null;
+  const pricingGrounding = pricingVerificationRequired ? buildPricingVerificationGrounding(parsed) : null;
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
@@ -2608,10 +2608,10 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
     confidence: pricingGrounding?.confidence ?? parsed.confidence,
     summary: pricingGrounding?.summary ?? parsed.summary,
     reasoning: pricingGrounding?.reasoning ?? parsed.reasoning,
-    risks: parsed.risks ?? [],
-    catalysts: parsed.catalysts ?? [],
-    deviatesFromRules: parsed.deviatesFromRules ?? false,
-    deviationNote: parsed.deviationNote ?? null,
+    risks: pricingGrounding?.risks ?? parsed.risks ?? [],
+    catalysts: pricingGrounding?.catalysts ?? parsed.catalysts ?? [],
+    deviatesFromRules: pricingGrounding?.deviatesFromRules ?? parsed.deviatesFromRules ?? false,
+    deviationNote: pricingGrounding?.deviationNote ?? parsed.deviationNote ?? null,
     generatedAt: new Date().toISOString(),
   };
 }

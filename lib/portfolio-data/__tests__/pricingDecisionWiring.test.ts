@@ -38,6 +38,7 @@ describe('PI-0014C broker quote freshness', () => {
       [{ symbol: 'MU  260904P00800000' }, { symbol: 'MU  260904P00790000' }],
       { MU260904P00800000: '2026-08-10T17:59:45.000Z' },
     )).toBeNull();
+    expect(derivePositionQuoteCapturedAt([], {})).toBeNull();
   });
   it('fails closed when a real broker timestamp is absent or invalid', () => {
     expect(deriveMarketableQuoteFreshness(null, NOW)).toBe('UNKNOWN');

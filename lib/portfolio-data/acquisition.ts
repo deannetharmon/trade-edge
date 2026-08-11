@@ -143,6 +143,7 @@ export function derivePositionQuoteCapturedAt(
   legs: Array<{ symbol?: string | null }>,
   quoteCapturedAtBySymbol: Readonly<Record<string, string>>,
 ): string | null {
+  if (legs.length === 0) return null;
   const legQuoteTimes = legs.map((leg) => quoteCapturedAtBySymbol[leg.symbol?.replace(/\s+/g, '') ?? ''] ?? null);
   return legQuoteTimes.every((value): value is string => value != null)
     ? legQuoteTimes.reduce((oldest, value) => Date.parse(value) < Date.parse(oldest) ? value : oldest)

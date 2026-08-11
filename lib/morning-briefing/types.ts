@@ -24,7 +24,7 @@ export type AttentionSource =
 
 export interface AttentionExplanation {
   confidenceLabel: string;
-  confidenceScore: number;
+  confidenceScore: number | null;
   decisionDrivers: string[];
   whyNow: string[];
 }

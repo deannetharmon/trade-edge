@@ -1,7 +1,7 @@
 import type { PortfolioObjective, PortfolioObjectiveEvidence, PortfolioObjectiveReviewTrigger } from '@/lib/portfolio-intelligence';
 import type { PrioritizedObjective } from './dashboard';
 
-export type RecommendationConfidenceLabel = 'Very High' | 'High' | 'Moderate' | 'Low';
+export type RecommendationConfidenceLabel = 'Very High' | 'High' | 'Moderate' | 'Low' | 'Deterministic';
 
 export interface RecommendationDriver {
   id: string;
@@ -14,10 +14,9 @@ export interface RecommendationDriver {
 export interface RecommendationExplanation {
   drivers: RecommendationDriver[];
   whyNow: string[];
-  confidence: {
-    score: number;
-    label: RecommendationConfidenceLabel;
-  };
+  confidence:
+    | { provenance: 'RULE_CONSTANT'; score: null; label: 'Deterministic' }
+    | { provenance: 'DECISION_SCORE'; score: number; label: Exclude<RecommendationConfidenceLabel, 'Deterministic'> };
 }
 
 const MAX_DECISION_DRIVERS = 4;
@@ -30,7 +29,7 @@ const GENERIC_REASON_PATTERNS = [
   /^low confidence recommendation$/i,
 ];
 
-function confidenceLabel(score: number): RecommendationConfidenceLabel {
+function confidenceLabel(score: number): Exclude<RecommendationConfidenceLabel, 'Deterministic'> {
   if (score >= 90) return 'Very High';
   if (score >= 75) return 'High';
   if (score >= 55) return 'Moderate';
@@ -80,12 +79,12 @@ function topDrivers(objective: PortfolioObjective, reasons: string[]): Recommend
 }
 
 export function buildRecommendationExplanation(item: PrioritizedObjective): RecommendationExplanation {
+  const deterministicRule = item.objective.ruleId === 'OBJ-VERIFY-PRICING';
   return {
     drivers: topDrivers(item.objective, item.reasons),
     whyNow: item.objective.reviewTriggers.map(triggerText).filter(Boolean).slice(0, MAX_WHY_NOW_ITEMS),
-    confidence: {
-      score: item.objective.confidence,
-      label: confidenceLabel(item.objective.confidence),
-    },
+    confidence: deterministicRule
+      ? { provenance: 'RULE_CONSTANT', score: null, label: 'Deterministic' }
+      : { provenance: 'DECISION_SCORE', score: item.objective.confidence, label: confidenceLabel(item.objective.confidence) },
   };
 }

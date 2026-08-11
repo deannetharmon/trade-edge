@@ -57,7 +57,7 @@ export function PriorityRankedList({
           const tierStyle = TIER_STYLE[tier];
           const impact = objective.portfolioImpact;
           const explanation = buildRecommendationExplanation(item);
-          const isDeterministicPricingVerification = objective.ruleId === 'OBJ-VERIFY-PRICING';
+          const isDeterministicRule = explanation.confidence.provenance === 'RULE_CONSTANT';
 
           return (
             <div key={objective.id} className={`rounded-xl border ${th.border} ${th.card} p-3`}>
@@ -78,14 +78,14 @@ export function PriorityRankedList({
                   </div>
                   <div
                     className={`border-l ${th.borderLight} pl-3 text-right`}
-                    title={isDeterministicPricingVerification ? 'Deterministic pricing-verification rule' : 'Confidence in this specific recommendation — not a ranking'}
+                    title={isDeterministicRule ? 'Deterministic pricing-verification rule' : 'Confidence in this specific recommendation — not a ranking'}
                   >
                     <span className={`block text-[8px] uppercase tracking-widest ${th.textFaint}`}>
-                      {isDeterministicPricingVerification ? 'Rule Strength' : 'Decision Confidence'}
+                      {isDeterministicRule ? 'Rule Strength' : 'Decision Confidence'}
                     </span>
                     <span className={`mt-0.5 block text-[10px] font-medium normal-case ${th.textMuted}`}>
-                      {isDeterministicPricingVerification ? 'Deterministic' : explanation.confidence.label}
-                      {!isDeterministicPricingVerification && <span className={`ml-1 text-[9px] ${th.textFaint}`}>({explanation.confidence.score}%)</span>}
+                      {explanation.confidence.label}
+                      {explanation.confidence.score != null && <span className={`ml-1 text-[9px] ${th.textFaint}`}>({explanation.confidence.score}%)</span>}
                     </span>
                   </div>
                 </div>
