@@ -41,6 +41,7 @@ import {
   buildPortfolioFinancialContext,
   calculateRemainingOpportunity,
   normalizePositionObjectivePct,
+  DEFAULT_POSITION_MANAGEMENT_POLICY,
 } from '@/lib/portfolio-intelligence';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
@@ -116,7 +117,7 @@ export function computeMarketablePnlPct(pos: Position): number | null {
     : null;
 }
 
-export const MARKETABLE_QUOTE_MAX_AGE_MS = 120_000;
+export const MARKETABLE_QUOTE_MAX_AGE_MS = DEFAULT_POSITION_MANAGEMENT_POLICY.marketableQuoteMaxAgeMs;
 
 export function deriveMarketableQuoteFreshness(
   quoteCapturedAt: string | null | undefined,
@@ -128,8 +129,24 @@ export function deriveMarketableQuoteFreshness(
   const ageMs = now.getTime() - capturedMs;
   // A future timestamp is not proof of freshness; tolerate only ordinary
   // sub-second clock skew.
-  if (ageMs < -1_000) return 'UNKNOWN';
+  if (ageMs < -DEFAULT_POSITION_MANAGEMENT_POLICY.marketableQuoteFutureSkewToleranceMs) return 'UNKNOWN';
   return ageMs <= MARKETABLE_QUOTE_MAX_AGE_MS ? 'FRESH' : 'STALE';
+}
+
+export function extractBrokerQuoteTimestamp(item: Record<string, unknown>): string | null {
+  const rawQuoteTime = item['updated-at'] ?? item['received-at'] ?? item.timestamp ?? null;
+  if (typeof rawQuoteTime !== 'string' || !Number.isFinite(Date.parse(rawQuoteTime))) return null;
+  return new Date(rawQuoteTime).toISOString();
+}
+
+export function derivePositionQuoteCapturedAt(
+  legs: Array<{ symbol?: string | null }>,
+  quoteCapturedAtBySymbol: Readonly<Record<string, string>>,
+): string | null {
+  const legQuoteTimes = legs.map((leg) => quoteCapturedAtBySymbol[leg.symbol?.replace(/\s+/g, '') ?? ''] ?? null);
+  return legQuoteTimes.every((value): value is string => value != null)
+    ? legQuoteTimes.reduce((oldest, value) => Date.parse(value) < Date.parse(oldest) ? value : oldest)
+    : null;
 }
 
 
@@ -977,10 +994,8 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
           // PI-0014C: retain only a timestamp actually supplied by the
           // broker payload. Never replace a missing value with Date.now().
-          const rawQuoteTime = item['updated-at'] ?? item['received-at'] ?? item.timestamp ?? null;
-          if (typeof rawQuoteTime === 'string' && Number.isFinite(Date.parse(rawQuoteTime))) {
-            quoteCapturedAtBySymbol[sym] = new Date(rawQuoteTime).toISOString();
-          }
+          const quoteTimestamp = extractBrokerQuoteTimestamp(item);
+          if (quoteTimestamp) quoteCapturedAtBySymbol[sym] = quoteTimestamp;
           // PM-0001 corrective round: a crossed market (ask < bid) is treated
           // the same as one-sided everywhere -- it must never feed closeValue
           // ("Close now (marketable)"), quote-width evidence, or a real
@@ -1397,14 +1412,9 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       netWidthPctOfMid,
       crossed,
     };
-    const legQuoteTimes = legs.map((leg: any) =>
-      quoteCapturedAtBySymbol[leg.symbol?.replace(/\s+/g, '')] ?? null
-    );
     // A combo quote is only as fresh as its oldest leg. If any leg lacks a
     // real broker timestamp, combo freshness is unknown/fail-closed.
-    const quoteCapturedAt = legQuoteTimes.every((value): value is string => value != null)
-      ? legQuoteTimes.reduce((oldest, value) => Date.parse(value) < Date.parse(oldest) ? value : oldest)
-      : null;
+    const quoteCapturedAt = derivePositionQuoteCapturedAt(legs, quoteCapturedAtBySymbol);
 
     const anyLegUnpriceable = legs.some(
       (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))

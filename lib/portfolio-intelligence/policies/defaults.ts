@@ -24,6 +24,11 @@ export const DEFAULT_POSITION_MANAGEMENT_POLICY: PositionManagementPolicy = {
   // DTE reasons around then also sees earnings context) while staying well
   // outside "not imminent" territory for a healthy position.
   earningsReviewWindowDays: 10,
+  // PI-0014C: recommendation-only freshness boundary. Two minutes permits
+  // ordinary polling/network delay while still requiring a recent broker
+  // observation before marketable pricing may promote a hard action.
+  marketableQuoteMaxAgeMs: 120_000,
+  marketableQuoteFutureSkewToleranceMs: 1_000,
 };
 
 // Matches AutopilotThresholds defaults (bpUtilizationMaxPct: 65,

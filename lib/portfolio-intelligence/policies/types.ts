@@ -38,6 +38,14 @@ export interface PositionManagementPolicy {
   // trading days -- centralized here specifically so it can be swapped to a
   // trading-day calculation later without touching rule implementations.
   earningsReviewWindowDays: number;
+  // Maximum age of the oldest option-leg quote before a marketable value
+  // becomes observational only. This affects recommendation authority,
+  // never order execution. Calendar time is used because the broker quote
+  // payload does not provide a market-session freshness abstraction.
+  marketableQuoteMaxAgeMs: number;
+  // Small tolerance for ordinary timestamp skew. Quotes farther in the
+  // future are unknown rather than treated as proof of freshness.
+  marketableQuoteFutureSkewToleranceMs: number;
 }
 
 // Portfolio Risk Policy: should ADDITIONAL portfolio risk be accepted right

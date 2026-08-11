@@ -4,6 +4,7 @@ export { evaluatePortfolioObjectives } from './evaluatePortfolioObjectives';
 export { prioritizePortfolioObjectives, synthesizeWaitObjective } from './prioritizePortfolioObjectives';
 export { RULE_ID_OBJECTIVE_TYPE, isRuleIdConsistentWithType } from './ruleIds';
 export type { PortfolioObjectiveRuleId } from './types';
+export { buildPricingVerificationGrounding } from './pricingVerification';
 
 // PI-0003: the combining adapter -- Position + Portfolio + Pending Order
 // objectives into one canonical ranked list. First real production wiring

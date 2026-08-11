@@ -21,6 +21,7 @@ const EVENT_BY_KIND: Record<PortfolioRecommendationKind, string> = {
   'let-expire': 'Continue monitoring through expiration.',
   'earnings-risk': 'Earnings review approaching.',
   'assignment-risk': 'Prepare for assignment.',
+  'verify-pricing': 'Obtain a fresh executable quote.',
 };
 
 export function deriveNextLifecycleEvent(

@@ -198,6 +198,7 @@ describe('PI-002/PI-003: stable rule IDs', () => {
       [baseInput({ pnlPct: 55, dte: 25 }), 'OBJ-CLOSE-FOR-PROFIT'],
       [baseInput({ dte: 18, pnlPct: 10 }), 'OBJ-MANAGE-21-DTE'],
       [baseInput({ dte: 25, pnlPct: 25, hasGtc: false }), 'OBJ-PLACE-GTC'],
+      [baseInput({ pnlPct: -25, marketablePnlPct: -125, marketableQuoteQuality: 'DEGRADED', marketableQuoteFreshness: 'UNKNOWN' }), 'OBJ-VERIFY-PRICING'],
     ];
     for (const [input, expectedRuleId] of expectations) {
       const { objective } = evaluatePositionObjective(input, NOW);

@@ -86,12 +86,16 @@ describe('PI-0014 fixture 1: real production failure (SMH-shaped BPS)', () => {
   });
 
   it('is classified LIQUIDITY_TRAP and routes an untrusted marketable-only breach to Verify Pricing', () => {
-    const { valuation, legacyRecommendation, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
+    const { valuation, legacyRecommendation, objective, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
     expect(valuation.liquidityTier).toBe('LIQUIDITY_TRAP');
     expect(executionRealityPromoted).toBe(false);
     expect(liquidityTrapTriggered).toBe(true);
-    expect(legacyRecommendation.kind).toBe('watch');
     expect(legacyRecommendation.label).toBe('Verify Pricing');
+    expect(legacyRecommendation.kind).toBe('verify-pricing');
+    expect(objective?.ruleId).toBe('OBJ-VERIFY-PRICING');
+    expect(objective?.reviewTriggers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'fresh-executable-quote' }),
+    ]));
     expect(legacyRecommendation.urgency).toBe('high');
   });
 
@@ -383,7 +387,7 @@ describe('PI-0014C: unknown liquidity/freshness cannot independently promote a h
       },
       NOW,
     );
-    expect(result.legacyRecommendation.kind).toBe('watch');
+    expect(result.legacyRecommendation.kind).toBe('verify-pricing');
     expect(result.legacyRecommendation.label).toBe('Verify Pricing');
     expect(result.executionRealityPromoted).toBe(false);
     // Correctly false: the gate that fired is materialLoss (from
@@ -426,7 +430,7 @@ describe('PI-0014C MU 800/790 five-lot pricing-conflict regression', () => {
 
   it('does not emit a hard exit from degraded/unknown-freshness marketable evidence', () => {
     const { result } = mu({ marketableQuoteQuality: 'DEGRADED', marketableQuoteFreshness: 'UNKNOWN' });
-    expect(result.legacyRecommendation.kind).toBe('watch');
+    expect(result.legacyRecommendation.kind).toBe('verify-pricing');
     expect(result.legacyRecommendation.label).toBe('Verify Pricing');
     expect(result.legacyRecommendation.urgency).toBe('high');
     expect(result.legacyRecommendation.suggestedAction).toMatch(/fresh, executable close quote/i);

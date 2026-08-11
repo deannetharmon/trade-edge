@@ -81,7 +81,8 @@ export type PortfolioRecommendationKind =
   | 'place-gtc'
   | 'let-expire'
   | 'earnings-risk'
-  | 'assignment-risk';
+  | 'assignment-risk'
+  | 'verify-pricing';
 
 export type PortfolioPricingBasis = 'MID' | 'MARKETABLE' | 'NONE';
 export type PortfolioPricingFreshness = 'FRESH' | 'STALE' | 'UNKNOWN';
@@ -350,6 +351,7 @@ const KIND_TO_TYPE: Record<Exclude<PortfolioRecommendationKind, 'hold'>, Portfol
   'place-gtc': 'MANAGE_POSITION',
   'let-expire': 'MANAGE_POSITION',
   watch: 'MANAGE_POSITION',
+  'verify-pricing': 'MANAGE_POSITION',
 };
 
 // PI-0003: each legacy kind now gets its own fine-grained rule ID, instead
@@ -365,6 +367,7 @@ const KIND_TO_RULE_ID: Record<Exclude<PortfolioRecommendationKind, 'hold'>, Port
   'place-gtc': 'OBJ-PLACE-GTC',
   'let-expire': 'OBJ-LET-EXPIRE',
   watch: 'OBJ-WATCH-POSITION',
+  'verify-pricing': 'OBJ-VERIFY-PRICING',
 };
 
 // PI-0004B: earnings-risk is the one branch with dedicated actionability
@@ -445,6 +448,11 @@ function buildReviewTriggers(
         threshold: DEFAULT_POSITION_MANAGEMENT_POLICY.watchHealthScoreThreshold,
         explanation: 'Re-evaluate if the health score moves back above the watch threshold, or deteriorates further.',
       }];
+    case 'verify-pricing':
+      return [{
+        id: 'fresh-executable-quote', label: 'Fresh executable quote received', triggerType: 'price',
+        explanation: 'Re-evaluate only after every leg has a fresh, reliable, two-sided quote and the pricing conflict can be resolved.',
+      }];
   }
 }
 
@@ -511,6 +519,11 @@ function buildPortfolioAndIncomeImpact(
       return {
         portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'No immediate action is required, but the flagged factors are worth monitoring before they compound.' },
         incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income change from monitoring alone.' },
+      };
+    case 'verify-pricing':
+      return {
+        portfolioImpact: { direction: 'neutral', magnitude: 'medium', explanation: 'The position remains under review because current executable pricing is not trustworthy enough to support a directional action.' },
+        incomeImpact: { direction: 'neutral', magnitude: 'low', explanation: 'No income decision is supported until a fresh executable quote resolves the pricing conflict.' },
       };
   }
 }
@@ -775,7 +788,7 @@ export function evaluatePositionObjective(
     );
   } else if (pricingConflictRequiresVerification) {
     legacy = makeLegacyRecommendation(
-      input, 'watch', 'high', 70,
+      input, 'verify-pricing', 'high', 70,
       `Pricing conflict: midpoint P/L is ${pnlPct?.toFixed(0) ?? 'unknown'}% of credit while marketable P/L is ${marketablePnlPct?.toFixed(0) ?? 'unknown'}%; the marketable quote is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness).`,
       'Verify a fresh, executable close quote before making a loss-management decision.',
       supportingReasons, now,

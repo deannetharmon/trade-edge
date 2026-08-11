@@ -88,3 +88,27 @@ Final integrated validation results:
 ## Existing worktree isolation
 
 The branch already contained uncommitted WA-0006 reconciliation changes in Screener, Autopilot, decision-engine, scans, paper-trading, fixtures, and two untracked canonical-recommendation files. PI-0014C did not edit those unrelated files. `tsconfig.tsbuildinfo` remains excluded from the intended commit.
+
+## Corrective approval pass
+
+The team returned the first implementation for a focused corrective pass. The original results above are retained as historical facts and are not represented as final approval validation.
+
+Corrections made:
+
+- `VERIFY_PRICING` is now a first-class `PortfolioRecommendationKind` (`verify-pricing`) with stable rule ID `OBJ-VERIFY-PRICING`, `MANAGE_POSITION` objective type, a fresh-executable-quote review trigger, pricing-specific impact text, management choices, and lifecycle text. It no longer masquerades downstream as the health-driven `OBJ-WATCH-POSITION` rule.
+- The AI trust boundary now uses deterministic copy that accepts no model-authored summary or reasoning. When pricing verification is required, a hostile `CLOSE`/`ROLL`/`CUT LOSSES` model response cannot leak directional prose or high confidence into the visible result.
+- Today's Priorities identifies this deterministic rule as `Rule Strength: Deterministic` and does not display the internal fixed value as a measured confidence percentage. Other recommendation types retain their existing confidence presentation.
+- Quote age and future-skew tolerances now live in `DEFAULT_POSITION_MANAGEMENT_POLICY`; acquisition imports the canonical policy rather than defining a private magic number. The 120-second boundary is recommendation-only and is documented as allowing ordinary polling/network delay while still requiring a recent broker observation. It does not authorize order execution.
+- Broker timestamp extraction and oldest-leg aggregation are exported acquisition helpers used by production. A realistic two-leg Tastytrade market-data fixture proves `updated-at`/`received-at` propagation, symbol normalization, oldest-leg selection, and fail-closed behavior when any leg lacks provenance.
+
+New focused coverage includes canonical rule/trigger identity, hostile AI output, deterministic confidence presentation, real-shaped broker timestamp propagation, and the existing MU pricing-conflict regression.
+
+Final clean-tree validation was performed by reproducing only the PI-0014C corrective diff in a detached worktree at base commit `6d3c328`; none of the unrelated WA-0006 working-tree changes were present:
+
+- Focused corrective suite: 8 files / 70 tests passing.
+- TypeScript: `npx tsc --noEmit --incremental false` clean.
+- Full suite: 148 files / 2,085 tests passing under `TZ=UTC`.
+- Production build: successful; compilation, type validation, page-data collection, and all 53 static pages completed.
+- `git diff --check`: clean.
+
+The first clean-tree full-suite run in the workstation's `America/Denver` timezone produced two unrelated CSP search failures whose fixtures expected 40 DTE but calculated 41. The exact CSP file passed 24/24 under UTC, and the entire suite was then rerun under UTC and passed 2,085/2,085. PI-0014C does not modify CSP search. This pre-existing timezone dependence is disclosed rather than attributed to PI-0014C. Build-time Redis connection-refused warnings were non-fatal in the isolated environment; the build completed successfully.

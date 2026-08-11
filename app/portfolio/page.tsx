@@ -85,7 +85,7 @@ import { computeEntryChangeTone } from '@/lib/portfolio/positionMetrics';
 import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
 import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
-import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
+import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct, buildPricingVerificationGrounding } from '@/lib/portfolio-intelligence';
 // TC-0001: canonicalPriorities/todaysPrioritiesDashboard/topPriority/
 // averagePositionHealth/portfolioHealth/portfolioReview/dailyBriefing are now
 // all composed by this single shared function (also used by the new
@@ -2595,6 +2595,7 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
   const raw = await callAI(prompt);
   const parsed = JSON.parse(raw);
   const pricingVerificationRequired = pos.pricingDecisionEvidence?.status === 'VERIFY_PRICING';
+  const pricingGrounding = pricingVerificationRequired ? buildPricingVerificationGrounding() : null;
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
@@ -2603,14 +2604,10 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
     // PI-0014C: prompt grounding is backed by a deterministic boundary. A
     // model response cannot turn an untrusted pricing conflict into a hard
     // directional action even if it ignores the written instruction.
-    recommendation: pricingVerificationRequired ? 'MANAGE' : parsed.recommendation,
-    confidence: parsed.confidence,
-    summary: pricingVerificationRequired
-      ? `Verify a fresh executable quote before choosing Hold, Close, Roll, or Cut Losses. ${parsed.summary}`
-      : parsed.summary,
-    reasoning: pricingVerificationRequired
-      ? `Marketable pricing is not decision-eligible; midpoint remains the controlling basis. ${parsed.reasoning}`
-      : parsed.reasoning,
+    recommendation: pricingGrounding?.recommendation ?? parsed.recommendation,
+    confidence: pricingGrounding?.confidence ?? parsed.confidence,
+    summary: pricingGrounding?.summary ?? parsed.summary,
+    reasoning: pricingGrounding?.reasoning ?? parsed.reasoning,
     risks: parsed.risks ?? [],
     catalysts: parsed.catalysts ?? [],
     deviatesFromRules: parsed.deviatesFromRules ?? false,

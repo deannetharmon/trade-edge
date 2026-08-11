@@ -6,7 +6,7 @@ import type { PortfolioRecommendation } from '@/lib/portfolio-intelligence';
 const recommendation: PortfolioRecommendation = {
   positionId: 'MU-800-790',
   symbol: 'MU',
-  kind: 'watch',
+  kind: 'verify-pricing',
   label: 'Verify Pricing',
   urgency: 'high',
   confidence: 70,

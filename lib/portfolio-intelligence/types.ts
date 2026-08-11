@@ -144,6 +144,7 @@ export type PortfolioObjectiveRuleId =
   | 'OBJ-PLACE-GTC'
   | 'OBJ-LET-EXPIRE'
   | 'OBJ-WATCH-POSITION'
+  | 'OBJ-VERIFY-PRICING'
   | 'OBJ-ROLL-POSITION'
   | 'OBJ-ASSIGNMENT-RISK'
   | 'OBJ-EARNINGS-RISK'

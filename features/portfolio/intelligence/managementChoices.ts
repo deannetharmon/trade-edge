@@ -26,6 +26,7 @@ const CHOICES_BY_KIND: Record<PortfolioRecommendationKind, ManagementChoices> = 
   'let-expire': { preferred: 'Hold', alternatives: ['Close', 'Monitor'] },
   'earnings-risk': { preferred: 'Monitor', alternatives: ['Close', 'Roll', 'Hold'] },
   'assignment-risk': { preferred: 'Accept Assignment', alternatives: ['Roll', 'Close'] },
+  'verify-pricing': { preferred: 'Verify Pricing', alternatives: ['Monitor'] },
 };
 
 export function deriveManagementChoices(kind: PortfolioRecommendationKind): ManagementChoices {
