@@ -113,4 +113,22 @@ describe('VerifyPricingRefreshButton', () => {
     fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
     await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringMatching(/still unverified/i) })));
   });
+
+  it('announces that the position is no longer open when a successful refresh omits it', async () => {
+    const onOutcome = vi.fn();
+    render(
+      <VerifyPricingRefreshButton
+        recommendation={verifyPricingRecommendation}
+        positionKey="MU-spread"
+        portfolioRefreshing={false}
+        onRefresh={vi.fn().mockResolvedValue({ status: 'success', positions: [] })}
+        onOutcome={onOutcome}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /refresh quotes/i }));
+    await waitFor(() => expect(onOutcome).toHaveBeenLastCalledWith({
+      tone: 'status',
+      message: 'Quotes refreshed; this position is no longer open.',
+    }));
+  });
 });

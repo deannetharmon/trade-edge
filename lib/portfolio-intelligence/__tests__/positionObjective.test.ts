@@ -261,3 +261,57 @@ describe('PI-002: safety', () => {
     expect({ ...a.objective, id: undefined }).toEqual({ ...b.objective, id: undefined });
   });
 });
+
+describe('PI-0014C: canonical pricing-verification continuity', () => {
+  it('rebuilds Verify Pricing from current incomplete evidence without stale conflict figures', () => {
+    const result = evaluatePositionObjective(baseInput({
+      pnlPct: 10,
+      marketablePnlPct: null,
+      marketableQuoteQuality: 'UNKNOWN',
+      marketableQuoteFreshness: 'UNKNOWN',
+      priorPricingVerificationRequired: true,
+    }), NOW);
+    expect(result.legacyRecommendation.kind).toBe('verify-pricing');
+    expect(result.legacyRecommendation.primaryReason).toContain('current broker leg quotes are incomplete');
+    expect(result.legacyRecommendation.primaryReason).not.toContain('-125');
+    expect(result.legacyRecommendation.computedAt).toBe(NOW.toISOString());
+    expect(result.objective?.ruleId).toBe('OBJ-VERIFY-PRICING');
+    expect(result.objective?.rationale).toContain('current broker leg quotes are incomplete');
+    expect(result.pricingDecisionEvidence.status).toBe('VERIFY_PRICING');
+  });
+
+  it('lets a current midpoint material-loss action supersede the latch', () => {
+    const result = evaluatePositionObjective(baseInput({
+      pnlPct: -110,
+      marketablePnlPct: null,
+      priorPricingVerificationRequired: true,
+    }), NOW);
+    expect(result.legacyRecommendation.kind).toBe('close-loser');
+    expect(result.pricingDecisionEvidence.controllingBasis).toBe('MID');
+  });
+
+  it.each([
+    ['assignment', { dte: 5, buffer: 1.5 }, 'assignment-risk'],
+    ['earnings', { dte: 25, earningsDate: '2026-07-15', expDate: '2026-08-05' }, 'earnings-risk'],
+    ['DTE management', { dte: 18 }, 'roll-soon'],
+  ])('does not mask an independent %s action', (_label, overrides, expectedKind) => {
+    const result = evaluatePositionObjective(baseInput({
+      ...overrides,
+      marketablePnlPct: null,
+      priorPricingVerificationRequired: true,
+    }), NOW);
+    expect(result.legacyRecommendation.kind).toBe(expectedKind);
+  });
+
+  it('releases the latch when current marketable evidence is decision-eligible', () => {
+    const result = evaluatePositionObjective(baseInput({
+      pnlPct: 10,
+      marketablePnlPct: 12,
+      marketableQuoteQuality: 'RELIABLE',
+      marketableQuoteFreshness: 'FRESH',
+      priorPricingVerificationRequired: true,
+    }), NOW);
+    expect(result.legacyRecommendation.kind).toBe('hold');
+    expect(result.pricingDecisionEvidence.marketableDecisionEligible).toBe(true);
+  });
+});

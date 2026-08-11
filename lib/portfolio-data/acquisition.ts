@@ -175,7 +175,7 @@ export function computeRawPositionValuation(pos: Position) {
 // evidence object -- and `liquidityTrapTriggered`, owned by
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
-export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date()): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
+export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationRequired = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
@@ -224,6 +224,7 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
     marketableQuoteQuality: derivePositionQuoteQuality(pos),
     marketableQuoteFreshness: deriveMarketableQuoteFreshness(pos.quoteCapturedAt, now),
     marketableQuoteCapturedAt: pos.quoteCapturedAt,
+    priorPricingVerificationRequired,
   }, now);
 
   return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
@@ -272,14 +273,17 @@ export async function fetchSnapshotStore(): Promise<Record<string, PositionSnaps
 export function attachSnapshotHistory(
   positions: Position[],
   store: Record<string, PositionSnapshot[]>,
+  previousPositions: Position[] = [],
 ): Position[] {
+  const previousByKey = new Map(previousPositions.map(position => [position.key, position]));
   return positions.map(p => {
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth);
+    const priorPricingVerificationRequired = previousByKey.get(p.key)?.recommendation?.kind === 'verify-pricing';
+    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationRequired);
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
 }

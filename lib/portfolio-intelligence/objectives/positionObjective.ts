@@ -153,6 +153,11 @@ export interface PositionObjectiveInput {
   marketableQuoteQuality?: QuoteQuality | null;
   marketableQuoteFreshness?: PortfolioPricingFreshness | null;
   marketableQuoteCapturedAt?: string | null;
+  // PI-0014C: in-session transition provenance supplied by the canonical
+  // acquisition pipeline. This preserves an unresolved pricing-verification
+  // disposition across an incomplete refresh without copying stale decision
+  // objects. Independent current rules still win below.
+  priorPricingVerificationRequired?: boolean;
   // PI-0014 follow-up: this position's liquidity classification (see
   // lib/positionValuation's PositionValuation.liquidityTier), supplied so
   // this function -- not the valuation module -- can decide whether
@@ -866,6 +871,38 @@ export function evaluatePositionObjective(
     };
   }
 
+  // PI-0014C final correction: an unresolved verification is sticky only
+  // across non-authoritative fallback/profit states. Current independent
+  // threat-management rules must remain authoritative; never let missing
+  // marketable evidence mask midpoint loss, assignment, earnings, or DTE
+  // management. Rebuild Verify Pricing from current evidence rather than
+  // transplanting an earlier recommendation/objective with stale figures.
+  const independentCurrentKinds = new Set<PortfolioRecommendationKind>([
+    'assignment-risk',
+    'close-loser',
+    'earnings-risk',
+    'roll-soon',
+    'let-expire',
+  ]);
+  const latchedPricingVerification =
+    input.priorPricingVerificationRequired === true &&
+    !marketableDecisionEligible &&
+    legacy.kind !== 'verify-pricing' &&
+    !independentCurrentKinds.has(legacy.kind);
+
+  if (latchedPricingVerification) {
+    const currentEvidence = marketablePnlPct == null
+      ? 'current broker leg quotes are incomplete, so no marketable estimate is available'
+      : `the current marketable estimate is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness)`;
+    legacy = makeLegacyRecommendation(
+      input, 'verify-pricing', 'high', 70,
+      `A prior pricing conflict remains unresolved because ${currentEvidence}.`,
+      'Refresh broker leg quotes and verify the derived marketable estimate before making a pricing-dependent decision; it is not a guaranteed fill price.',
+      supportingReasons, now,
+    );
+    legacy = { ...legacy, label: 'Verify Pricing' };
+  }
+
   const objective = legacy.kind === 'hold' ? null : buildObjective(input, legacy, now);
 
   // PI-0014 follow-up (Product Owner review): liquidityTrapTriggered is a
@@ -874,7 +911,7 @@ export function evaluatePositionObjective(
   // module's types.ts doc). Never fabricated true when liquidityTier is
   // absent.
   const liquidityTrapTriggered =
-    (executionRealityPromoted || pricingConflictRequiresVerification) &&
+    (executionRealityPromoted || pricingConflictRequiresVerification || latchedPricingVerification) &&
     input.liquidityTier === 'LIQUIDITY_TRAP';
 
   const pricingDecisionEvidence: PortfolioPricingDecisionEvidence = {
@@ -889,7 +926,7 @@ export function evaluatePositionObjective(
       : pnlPct != null
         ? 'MID'
         : 'NONE',
-    status: pricingConflictRequiresVerification
+    status: pricingConflictRequiresVerification || latchedPricingVerification
       ? 'VERIFY_PRICING'
       : executionRealityPromoted
         ? 'MARKETABLE_CONFIRMED'

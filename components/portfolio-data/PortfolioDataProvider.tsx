@@ -64,26 +64,6 @@ export type PortfolioRefreshResult =
   | { status: 'error'; message: string }
   | { status: 'superseded' };
 
-// A pricing conflict is sticky across refreshes. Missing/one-sided/stale
-// evidence cannot silently clear a previously established Verify Pricing
-// disposition; only fresh, reliable, decision-eligible evidence (or the
-// position disappearing because it closed) may clear it.
-export function preservePricingVerificationLatch(previous: Position[], refreshed: Position[]): Position[] {
-  const previousByKey = new Map(previous.map(position => [position.key, position]));
-  return refreshed.map(position => {
-    const prior = previousByKey.get(position.key);
-    const wasVerifying = prior?.recommendation?.kind === 'verify-pricing';
-    const nowDecisionEligible = position.pricingDecisionEvidence?.marketableDecisionEligible === true;
-    if (!wasVerifying || nowDecisionEligible) return position;
-    return {
-      ...position,
-      recommendation: prior.recommendation,
-      portfolioObjective: prior.portfolioObjective,
-      liquidityTrapTriggered: prior.liquidityTrapTriggered,
-    };
-  });
-}
-
 export interface PortfolioDataContextValue {
   positions: Position[];
   pendingOrders: PendingOrder[];
@@ -146,8 +126,10 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       } catch (snapshotError) {
         console.error('Snapshot history fetch failed; recomputing from fresh broker positions:', snapshotError);
       }
-      const recomputed = attachSnapshotHistory(data, snapshotStore);
-      const updated = preservePricingVerificationLatch(positionsRef.current, recomputed);
+      // Canonical recomputation owns the in-session Verify Pricing transition.
+      // The provider supplies prior provenance but never authors or overwrites
+      // recommendation policy after evaluation.
+      const updated = attachSnapshotHistory(data, snapshotStore, positionsRef.current);
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
 
       callbacks?.onRawPositionsLoaded?.(data);

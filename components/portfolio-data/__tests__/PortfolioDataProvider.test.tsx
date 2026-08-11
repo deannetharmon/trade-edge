@@ -82,7 +82,7 @@ describe('PortfolioDataProvider refresh contract', () => {
       await pending;
     });
 
-    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {});
+    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, []);
     expect(result).toEqual({ status: 'success', positions: [recomputed] });
     expect(screen.getByTestId('keys')).toHaveTextContent('MU');
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
@@ -158,12 +158,12 @@ describe('PortfolioDataProvider refresh contract', () => {
     let result!: PortfolioRefreshResult;
     await act(async () => { result = await context.refresh(); });
 
-    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {});
+    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, []);
     expect(result).toEqual({ status: 'success', positions: [recomputed] });
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
   });
 
-  it('latches Verify Pricing when refreshed evidence is incomplete and clears only when eligible', async () => {
+  it('delegates verification continuity to canonical recomputation and clears when eligible', async () => {
     const previous = position('MU', 'verify-pricing');
     const incomplete = {
       ...position('MU', 'watch'),
@@ -171,7 +171,14 @@ describe('PortfolioDataProvider refresh contract', () => {
     } as Position;
     act(() => { context.setPositions([previous]); });
     acquisition.loadPositions.mockResolvedValue({ positions: [incomplete], pendingOrders: [] });
-    acquisition.attachSnapshotHistory.mockReturnValue([incomplete]);
+    const canonicallyLatched = {
+      ...incomplete,
+      recommendation: {
+        kind: 'verify-pricing',
+        primaryReason: 'A prior pricing conflict remains unresolved because current broker leg quotes are incomplete.',
+      },
+    } as Position;
+    acquisition.attachSnapshotHistory.mockReturnValue([canonicallyLatched]);
 
     let result!: PortfolioRefreshResult;
     await act(async () => { result = await context.refresh(); });
@@ -179,7 +186,9 @@ describe('PortfolioDataProvider refresh contract', () => {
     if (result.status === 'success') {
       expect(result.positions[0].recommendation?.kind).toBe('verify-pricing');
       expect(result.positions[0].pricingDecisionEvidence?.marketableDecisionEligible).toBe(false);
+      expect(result.positions[0].recommendation?.primaryReason).toContain('current broker leg quotes are incomplete');
     }
+    expect(acquisition.attachSnapshotHistory).toHaveBeenLastCalledWith([incomplete], {}, [previous]);
 
     const eligible = position('MU', 'watch');
     acquisition.loadPositions.mockResolvedValue({ positions: [eligible], pendingOrders: [] });
