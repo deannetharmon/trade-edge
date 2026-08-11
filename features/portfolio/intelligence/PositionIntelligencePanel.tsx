@@ -191,8 +191,7 @@ function SuggestedActionCard({
             {recommendation.urgency}
           </span>
           <span className={`text-[11px] font-semibold ${th.text}`}>
-            {recommendation.confidence}% confidence
-            {confidenceTier ? <span className={`font-normal ${th.textFaint}`}> ({confidenceTier})</span> : null}
+            Rule strength: {confidenceTier ?? 'Deterministic'}
           </span>
         </div>
       </div>

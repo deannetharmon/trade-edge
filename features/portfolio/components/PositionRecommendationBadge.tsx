@@ -23,7 +23,7 @@ export function PositionRecommendationBadge({
       title={`${recommendation.primaryReason} Suggested action: ${recommendation.suggestedAction}`}
     >
       <span>{recommendation.label.toUpperCase()}</span>
-      <span>{recommendation.confidence}%</span>
+      <span>{recommendation.urgency.toUpperCase()} URGENCY</span>
     </div>
   );
 }

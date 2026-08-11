@@ -63,6 +63,7 @@ import { defaultActionabilityForPriority } from '../actionability';
 // LiquidityTier is a plain, dependency-free type, imported here as one more
 // piece of input evidence, the same way marketablePnlPct already is.
 import type { LiquidityTier } from '@/lib/positionValuation';
+import type { QuoteQuality } from '@/lib/portfolio/stopLossPolicy';
 import {
   selectManagementIntent,
   type ManagementIntentContext,
@@ -81,6 +82,26 @@ export type PortfolioRecommendationKind =
   | 'let-expire'
   | 'earnings-risk'
   | 'assignment-risk';
+
+export type PortfolioPricingBasis = 'MID' | 'MARKETABLE' | 'NONE';
+export type PortfolioPricingFreshness = 'FRESH' | 'STALE' | 'UNKNOWN';
+export type PortfolioPricingDecisionStatus =
+  | 'MID_ONLY'
+  | 'PRICING_AGREEMENT'
+  | 'MARKETABLE_OBSERVATIONAL'
+  | 'MARKETABLE_CONFIRMED'
+  | 'VERIFY_PRICING';
+
+export interface PortfolioPricingDecisionEvidence {
+  midPnlPct: number | null;
+  marketablePnlPct: number | null;
+  marketableQuoteQuality: QuoteQuality;
+  marketableQuoteFreshness: PortfolioPricingFreshness;
+  marketableQuoteCapturedAt: string | null;
+  marketableDecisionEligible: boolean;
+  controllingBasis: PortfolioPricingBasis;
+  status: PortfolioPricingDecisionStatus;
+}
 
 export type PortfolioRecommendationUrgency = 'low' | 'medium' | 'high' | 'critical';
 
@@ -125,6 +146,12 @@ export interface PositionObjectiveInput {
   // reads mid pricing only. See lib/positionValuation and
   // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
   marketablePnlPct?: number | null;
+  // PI-0014C: marketable pricing may influence a hard recommendation only
+  // when the caller proves both quote quality and freshness. Absence is
+  // UNKNOWN/fail-closed; callers must never substitute page-load time.
+  marketableQuoteQuality?: QuoteQuality | null;
+  marketableQuoteFreshness?: PortfolioPricingFreshness | null;
+  marketableQuoteCapturedAt?: string | null;
   // PI-0014 follow-up: this position's liquidity classification (see
   // lib/positionValuation's PositionValuation.liquidityTier), supplied so
   // this function -- not the valuation module -- can decide whether
@@ -559,13 +586,17 @@ export interface PositionObjectiveResult {
   // alone would have produced.
   executionRealityPromoted: boolean;
   // PI-0014 follow-up (Product Owner review): true only when
-  // executionRealityPromoted is true AND the caller-supplied liquidityTier
-  // is 'LIQUIDITY_TRAP'. This is a decision-engine property, not a
+  // a marketable-only promotion OR a pricing-verification conflict coincides
+  // with caller-supplied liquidityTier 'LIQUIDITY_TRAP'. This is a
   // valuation property -- a position can be LIQUIDITY_TRAP tier
   // (lib/positionValuation's own, purely observational classification) and
   // still have this false if the recommendation would have been the same
   // either way. False (never fabricated true) when liquidityTier is absent.
   liquidityTrapTriggered: boolean;
+  // PI-0014C: reconstructable, typed record of which valuation was allowed
+  // to control the recommendation. This is also the canonical AI/UI
+  // grounding contract; consumers must not infer a basis from prose.
+  pricingDecisionEvidence: PortfolioPricingDecisionEvidence;
 }
 
 // PI-0006A: builds 2-4 concise evidence bullets from data this function
@@ -602,6 +633,12 @@ export function evaluatePositionObjective(
   const pnlPct = normalizePositionObjectivePct(input.pnlPct);
   // PI-0014: see PositionObjectiveInput.marketablePnlPct doc comment above.
   const marketablePnlPct = normalizePositionObjectivePct(input.marketablePnlPct);
+  const marketableQuoteQuality = input.marketableQuoteQuality ?? 'UNKNOWN';
+  const marketableQuoteFreshness = input.marketableQuoteFreshness ?? 'UNKNOWN';
+  const marketableDecisionEligible =
+    marketablePnlPct != null &&
+    marketableQuoteQuality === 'RELIABLE' &&
+    marketableQuoteFreshness === 'FRESH';
   const buffer = normalizePositionObjectivePct(input.buffer);
   const healthScore = input.healthScore?.score ?? null;
   const strategy = String(input.strategy ?? '').toUpperCase();
@@ -641,23 +678,27 @@ export function evaluatePositionObjective(
   // "Take Profit -> Hold/Manage/Cut Losses" behavior once this input is
   // corrected. See docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
   const midMaterialLoss = pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
-  const marketableMaterialLoss =
+  const rawMarketableMaterialLoss =
     marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
+  const marketableMaterialLoss = marketableDecisionEligible && rawMarketableMaterialLoss;
   const materialLoss = midMaterialLoss || marketableMaterialLoss;
 
   const midWeakHealthLoss =
     pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
     healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
-  const marketableWeakHealthLoss =
+  const rawMarketableWeakHealthLoss =
     marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
     healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
+  const marketableWeakHealthLoss = marketableDecisionEligible && rawMarketableWeakHealthLoss;
   const weakHealthLoss = midWeakHealthLoss || marketableWeakHealthLoss;
 
   const midProfitTargetReached =
     Boolean(input.hitTarget) || hasHealthFactor(input, 'profit-target') ||
     (pnlPct != null && pnlPct >= DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct);
-  const marketableContradictsProfitTarget =
+  const rawMarketableContradictsProfitTarget =
     marketablePnlPct != null && marketablePnlPct < DEFAULT_POSITION_MANAGEMENT_POLICY.profitTargetPct;
+  const marketableContradictsProfitTarget =
+    marketableDecisionEligible && rawMarketableContradictsProfitTarget;
   const profitTargetReached = midProfitTargetReached && !marketableContradictsProfitTarget;
 
   // Did marketable evidence alone change any of the three outcomes above?
@@ -669,6 +710,12 @@ export function evaluatePositionObjective(
     (!midMaterialLoss && marketableMaterialLoss) ||
     (!midWeakHealthLoss && marketableWeakHealthLoss) ||
     (midProfitTargetReached && !profitTargetReached);
+  const pricingConflictRequiresVerification =
+    marketablePnlPct != null &&
+    !marketableDecisionEligible &&
+    ((!midMaterialLoss && rawMarketableMaterialLoss) ||
+      (!midWeakHealthLoss && rawMarketableWeakHealthLoss) ||
+      (midProfitTargetReached && rawMarketableContradictsProfitTarget));
   const meaningfulUnprotectedProfit =
     shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14;
   const earningsUpcoming = isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now);
@@ -718,12 +765,22 @@ export function evaluatePositionObjective(
       supportingReasons, now, intentResult,
     );
   } else if (materialLoss) {
+    const controllingLossPct = midMaterialLoss ? pnlPct : marketablePnlPct;
+    const controllingBasis = midMaterialLoss ? 'midpoint' : 'fresh, reliable marketable';
     legacy = makeLegacyRecommendation(
       input, 'close-loser', 'critical', 91,
-      `Loss is near or beyond 1x credit (${pnlPct!.toFixed(0)}%).`,
+      `The ${controllingBasis} valuation is near or beyond the 1x-credit loss threshold (${controllingLossPct!.toFixed(0)}% of credit; midpoint ${pnlPct?.toFixed(0) ?? 'unknown'}%, marketable ${marketablePnlPct?.toFixed(0) ?? 'unknown'}%).`,
       'Review closing or rolling defensively.',
       supportingReasons, now, intentResult,
     );
+  } else if (pricingConflictRequiresVerification) {
+    legacy = makeLegacyRecommendation(
+      input, 'watch', 'high', 70,
+      `Pricing conflict: midpoint P/L is ${pnlPct?.toFixed(0) ?? 'unknown'}% of credit while marketable P/L is ${marketablePnlPct?.toFixed(0) ?? 'unknown'}%; the marketable quote is not decision-eligible (${marketableQuoteQuality.toLowerCase()} quality, ${marketableQuoteFreshness.toLowerCase()} freshness).`,
+      'Verify a fresh, executable close quote before making a loss-management decision.',
+      supportingReasons, now,
+    );
+    legacy = { ...legacy, label: 'Verify Pricing' };
   } else if (weakHealthLoss) {
     legacy = makeLegacyRecommendation(
       input, 'close-loser', 'high', 84,
@@ -803,7 +860,32 @@ export function evaluatePositionObjective(
   // PositionValuation (which stays purely observational -- see that
   // module's types.ts doc). Never fabricated true when liquidityTier is
   // absent.
-  const liquidityTrapTriggered = executionRealityPromoted && input.liquidityTier === 'LIQUIDITY_TRAP';
+  const liquidityTrapTriggered =
+    (executionRealityPromoted || pricingConflictRequiresVerification) &&
+    input.liquidityTier === 'LIQUIDITY_TRAP';
 
-  return { objective, legacyRecommendation: legacy, executionRealityPromoted, liquidityTrapTriggered };
+  const pricingDecisionEvidence: PortfolioPricingDecisionEvidence = {
+    midPnlPct: pnlPct,
+    marketablePnlPct,
+    marketableQuoteQuality,
+    marketableQuoteFreshness,
+    marketableQuoteCapturedAt: input.marketableQuoteCapturedAt ?? null,
+    marketableDecisionEligible,
+    controllingBasis: executionRealityPromoted
+      ? 'MARKETABLE'
+      : pnlPct != null
+        ? 'MID'
+        : 'NONE',
+    status: pricingConflictRequiresVerification
+      ? 'VERIFY_PRICING'
+      : executionRealityPromoted
+        ? 'MARKETABLE_CONFIRMED'
+        : marketablePnlPct == null
+          ? 'MID_ONLY'
+          : !marketableDecisionEligible
+            ? 'MARKETABLE_OBSERVATIONAL'
+            : 'PRICING_AGREEMENT',
+  };
+
+  return { objective, legacyRecommendation: legacy, executionRealityPromoted, liquidityTrapTriggered, pricingDecisionEvidence };
 }

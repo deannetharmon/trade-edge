@@ -1952,7 +1952,19 @@ Flags: ${[
 ].filter(Boolean).join(', ') || 'None'}
 
 RULE ENGINE'S EXISTING CALL (the trader already sees this on screen -- do not restate it or reword its stated reason):
-${pos.recommendation ? `${pos.recommendation.label} — ${pos.recommendation.confidence}% confidence, ${pos.recommendation.urgency} urgency. Its stated reason: "${pos.recommendation.primaryReason}"` : 'No rule-engine recommendation is available for this position yet.'}
+${pos.recommendation ? `${pos.recommendation.label} — ${pos.recommendation.urgency} urgency; rule strength ${pos.recommendation.managementIntent?.confidenceTier ?? 'deterministic'}. Its stated reason: "${pos.recommendation.primaryReason}"` : 'No rule-engine recommendation is available for this position yet.'}
+
+PRICING DECISION EVIDENCE (authoritative; do not infer or substitute another basis):
+Midpoint P/L: ${pos.pricingDecisionEvidence?.midPnlPct != null ? `${pos.pricingDecisionEvidence.midPnlPct.toFixed(1)}% of credit` : 'unknown'}
+Marketable P/L: ${pos.pricingDecisionEvidence?.marketablePnlPct != null ? `${pos.pricingDecisionEvidence.marketablePnlPct.toFixed(1)}% of credit` : 'unknown'}
+Marketable quote quality: ${pos.pricingDecisionEvidence?.marketableQuoteQuality ?? 'UNKNOWN'}
+Marketable quote freshness: ${pos.pricingDecisionEvidence?.marketableQuoteFreshness ?? 'UNKNOWN'}
+Broker quote timestamp: ${pos.pricingDecisionEvidence?.marketableQuoteCapturedAt ?? 'unknown'}
+Marketable decision-eligible: ${pos.pricingDecisionEvidence?.marketableDecisionEligible === true ? 'yes' : 'no'}
+Controlling valuation basis: ${pos.pricingDecisionEvidence?.controllingBasis ?? 'NONE'}
+Pricing decision status: ${pos.pricingDecisionEvidence?.status ?? 'MID_ONLY'}
+- A marketable value that is not decision-eligible is observational only. It may justify VERIFY PRICING, but it may not independently justify CUT LOSSES, CLOSE, or a profit-target veto.
+- If status is VERIFY_PRICING, do not convert it into a directional HOLD/CLOSE/ROLL judgment. Ask for a fresh executable quote first.
 Your job here is different from the rule engine's: explain WHY this call is (or isn't) appropriate using the live market/greeks/trend/support data below -- the texture and judgment a fixed rule can't apply -- rather than summarizing the same reason in different words. If you agree with the call, say specifically what in the data below confirms it. If you'd go further, less far, or disagree, say so plainly and explain why using that data. Do not simply restate "${pos.recommendation ? pos.recommendation.primaryReason : 'the rule engine’s reason'}" in your own words.
 
 EXPERT DECISION CHECKLIST:
@@ -2241,6 +2253,13 @@ Credit (total): $${pos.creditReceived.toFixed(2)} | Per contract: $${creditPerCo
 Current buyback cost: $${pos.currentValue?.toFixed(2) ?? 'unknown'}
 P&L: $${pos.pnl?.toFixed(2) ?? 'unknown'} (${pnlPct}% of credit)
 Current profit target: ${Math.round(pos.profitTarget * 100)}%
+
+PRICING DECISION STATUS: ${pos.pricingDecisionEvidence?.status ?? 'MID_ONLY'}
+Midpoint P/L basis: ${pos.pricingDecisionEvidence?.midPnlPct != null ? `${pos.pricingDecisionEvidence.midPnlPct.toFixed(1)}% of credit` : 'unknown'}
+Marketable P/L basis: ${pos.pricingDecisionEvidence?.marketablePnlPct != null ? `${pos.pricingDecisionEvidence.marketablePnlPct.toFixed(1)}% of credit` : 'unknown'}
+Marketable decision-eligible: ${pos.pricingDecisionEvidence?.marketableDecisionEligible === true ? 'yes' : 'no'}
+Controlling basis: ${pos.pricingDecisionEvidence?.controllingBasis ?? 'NONE'}
+If status is VERIFY_PRICING, the marketable value is observational only and must not be represented as confirmation of a hard exit.
 
 Stock price: $${pos.stockPrice?.toFixed(2) ?? 'unknown'}
 Buffer to short strike: ${pos.buffer?.toFixed(1) ?? 'unknown'}%
@@ -2575,15 +2594,23 @@ async function analyzePosition(pos: Position, trend: TrendResult | null): Promis
   const prompt = buildPositionPrompt(pos, trend);
   const raw = await callAI(prompt);
   const parsed = JSON.parse(raw);
+  const pricingVerificationRequired = pos.pricingDecisionEvidence?.status === 'VERIFY_PRICING';
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
     loading: false,
     error: null,
-    recommendation: parsed.recommendation,
+    // PI-0014C: prompt grounding is backed by a deterministic boundary. A
+    // model response cannot turn an untrusted pricing conflict into a hard
+    // directional action even if it ignores the written instruction.
+    recommendation: pricingVerificationRequired ? 'MANAGE' : parsed.recommendation,
     confidence: parsed.confidence,
-    summary: parsed.summary,
-    reasoning: parsed.reasoning,
+    summary: pricingVerificationRequired
+      ? `Verify a fresh executable quote before choosing Hold, Close, Roll, or Cut Losses. ${parsed.summary}`
+      : parsed.summary,
+    reasoning: pricingVerificationRequired
+      ? `Marketable pricing is not decision-eligible; midpoint remains the controlling basis. ${parsed.reasoning}`
+      : parsed.reasoning,
     risks: parsed.risks ?? [],
     catalysts: parsed.catalysts ?? [],
     deviatesFromRules: parsed.deviatesFromRules ?? false,

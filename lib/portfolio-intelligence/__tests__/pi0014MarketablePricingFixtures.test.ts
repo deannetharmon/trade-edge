@@ -85,20 +85,22 @@ describe('PI-0014 fixture 1: real production failure (SMH-shaped BPS)', () => {
     expect(marketablePnlPct).toBeCloseTo(-124.8, 1);
   });
 
-  it('is classified LIQUIDITY_TRAP and promotes the recommendation to Cut Losses', () => {
+  it('is classified LIQUIDITY_TRAP and routes an untrusted marketable-only breach to Verify Pricing', () => {
     const { valuation, legacyRecommendation, executionRealityPromoted, liquidityTrapTriggered } = evaluate(fixture);
     expect(valuation.liquidityTier).toBe('LIQUIDITY_TRAP');
-    expect(executionRealityPromoted).toBe(true);
+    expect(executionRealityPromoted).toBe(false);
     expect(liquidityTrapTriggered).toBe(true);
-    expect(legacyRecommendation.kind).toBe('close-loser');
-    expect(legacyRecommendation.urgency).toBe('critical');
+    expect(legacyRecommendation.kind).toBe('watch');
+    expect(legacyRecommendation.label).toBe('Verify Pricing');
+    expect(legacyRecommendation.urgency).toBe('high');
   });
 
-  it('states the execution-reality divergence as explicit evidence', () => {
+  it('states both valuations and why marketable evidence cannot control', () => {
     const { legacyRecommendation } = evaluate(fixture);
-    expect(legacyRecommendation.supportingReasons[0]).toMatch(/Executable pricing is materially worse than mid/);
-    expect(legacyRecommendation.supportingReasons[0]).toMatch(/-125%/);
-    expect(legacyRecommendation.supportingReasons[0]).toMatch(/-26%/);
+    expect(legacyRecommendation.primaryReason).toMatch(/Pricing conflict/);
+    expect(legacyRecommendation.primaryReason).toMatch(/-26%/);
+    expect(legacyRecommendation.primaryReason).toMatch(/-125%/);
+    expect(legacyRecommendation.primaryReason).toMatch(/not decision-eligible/);
   });
 });
 
@@ -213,7 +215,11 @@ describe('PI-0014 supplementary: marketable pricing vetoes a false profit target
     midValue: 280,         // midPnL +$320, 53.3% -- mid alone says close-winner
     marketableValue: 340,  // marketablePnL +$260, 43.3% -- below the 50% target
     maxRisk: 2000,
-    input: { strategy: 'BCS', dte: 20, buffer: 10, hasGtc: true },
+    input: {
+      strategy: 'BCS', dte: 20, buffer: 10, hasGtc: true,
+      marketableQuoteQuality: 'RELIABLE', marketableQuoteFreshness: 'FRESH',
+      marketableQuoteCapturedAt: NOW.toISOString(),
+    },
   };
 
   it('demotes away from close-winner once marketable pricing disagrees', () => {
@@ -349,8 +355,8 @@ describe('PI-0014 corrective closeout: missing/invalid marketable data preserves
 // gates must keep working from marketablePnlPct alone; only
 // liquidityTrapTriggered (which requires liquidityTier === 'LIQUIDITY_TRAP'
 // specifically) should read false when the tier itself is unknown.
-describe('PI-0014 corrective closeout: marketable evidence still gates when liquidityTier is unknown', () => {
-  it('promotes Cut Losses from marketable evidence alone even when liquidityTier is null (unknown maxRisk)', () => {
+describe('PI-0014C: unknown liquidity/freshness cannot independently promote a hard exit', () => {
+  it('routes marketable-only loss evidence to Verify Pricing when decision eligibility is unproved', () => {
     // Mirrors fixture 1's real SMH-shaped numbers, but with maxRisk missing
     // -- computePositionValuation now classifies liquidityTier as null,
     // not LIQUIDITY_TRAP, per the corrected classifier.
@@ -377,10 +383,72 @@ describe('PI-0014 corrective closeout: marketable evidence still gates when liqu
       },
       NOW,
     );
-    expect(result.legacyRecommendation.kind).toBe('close-loser');
-    expect(result.executionRealityPromoted).toBe(true);
+    expect(result.legacyRecommendation.kind).toBe('watch');
+    expect(result.legacyRecommendation.label).toBe('Verify Pricing');
+    expect(result.executionRealityPromoted).toBe(false);
     // Correctly false: the gate that fired is materialLoss (from
     // marketablePnlPct), not the liquidity-trap tier, which is unknown here.
     expect(result.liquidityTrapTriggered).toBe(false);
+  });
+});
+
+describe('PI-0014C MU 800/790 five-lot pricing-conflict regression', () => {
+  const creditReceived = 1260;
+  const midValue = 1600;
+  const marketableValue = 3650;
+  const maxRisk = 3740;
+
+  function mu(overrides: Partial<PositionObjectiveInput> = {}) {
+    const valuation = computePositionValuation({ creditReceived, midValue, marketableValue, maxRisk });
+    return {
+      valuation,
+      result: evaluatePositionObjective({
+        positionId: 'MU-800-790', symbol: 'MU', strategy: 'BPS', dte: 29,
+        buffer: 7, hasGtc: true, creditReceived,
+        pnlPct: pctOf(creditReceived, midValue),
+        marketablePnlPct: pctOf(creditReceived, marketableValue),
+        liquidityTier: valuation.liquidityTier,
+        ...overrides,
+      }, NOW),
+    };
+  }
+
+  it('reconciles the exact production economics', () => {
+    const { valuation } = mu();
+    expect(valuation.midPnL).toBe(-340);
+    expect(pctOf(creditReceived, midValue)).toBeCloseTo(-26.98, 2);
+    expect(valuation.marketablePnL).toBe(-2390);
+    expect(pctOf(creditReceived, marketableValue)).toBeCloseTo(-189.68, 2);
+    expect(valuation.slippageCost).toBe(2050);
+    expect(valuation.slippagePercentOfMaxRisk).toBeCloseTo(2050 / 3740, 5);
+    expect(valuation.liquidityTier).toBe('LIQUIDITY_TRAP');
+  });
+
+  it('does not emit a hard exit from degraded/unknown-freshness marketable evidence', () => {
+    const { result } = mu({ marketableQuoteQuality: 'DEGRADED', marketableQuoteFreshness: 'UNKNOWN' });
+    expect(result.legacyRecommendation.kind).toBe('watch');
+    expect(result.legacyRecommendation.label).toBe('Verify Pricing');
+    expect(result.legacyRecommendation.urgency).toBe('high');
+    expect(result.legacyRecommendation.suggestedAction).toMatch(/fresh, executable close quote/i);
+    expect(result.executionRealityPromoted).toBe(false);
+    expect(result.liquidityTrapTriggered).toBe(true);
+    expect(result.pricingDecisionEvidence.status).toBe('VERIFY_PRICING');
+    expect(result.pricingDecisionEvidence.controllingBasis).toBe('MID');
+    expect(result.pricingDecisionEvidence.marketableDecisionEligible).toBe(false);
+    expect(result.objective?.metadata.executionAllowed).toBe(false);
+    expect(result.objective?.metadata.paperExecutionAllowed).toBe(false);
+  });
+
+  it('allows the same marketable breach only when quality and freshness are both proven', () => {
+    const { result } = mu({
+      marketableQuoteQuality: 'RELIABLE', marketableQuoteFreshness: 'FRESH',
+      marketableQuoteCapturedAt: NOW.toISOString(),
+    });
+    expect(result.legacyRecommendation.kind).toBe('close-loser');
+    expect(result.executionRealityPromoted).toBe(true);
+    expect(result.pricingDecisionEvidence.status).toBe('MARKETABLE_CONFIRMED');
+    expect(result.pricingDecisionEvidence.controllingBasis).toBe('MARKETABLE');
+    expect(result.legacyRecommendation.primaryReason).toMatch(/midpoint -27%/);
+    expect(result.legacyRecommendation.primaryReason).toMatch(/marketable -190%/);
   });
 });

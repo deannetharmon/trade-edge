@@ -48,6 +48,10 @@ export type {
   PortfolioRecommendation,
   PortfolioRecommendationKind,
   PortfolioRecommendationUrgency,
+  PortfolioPricingBasis,
+  PortfolioPricingDecisionEvidence,
+  PortfolioPricingDecisionStatus,
+  PortfolioPricingFreshness,
   PositionObjectiveInput,
   PositionObjectiveResult,
 } from './objectives/positionObjective';

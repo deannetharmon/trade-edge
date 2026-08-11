@@ -42,7 +42,7 @@ import {
   calculateRemainingOpportunity,
   normalizePositionObjectivePct,
 } from '@/lib/portfolio-intelligence';
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
 import {
@@ -116,6 +116,22 @@ export function computeMarketablePnlPct(pos: Position): number | null {
     : null;
 }
 
+export const MARKETABLE_QUOTE_MAX_AGE_MS = 120_000;
+
+export function deriveMarketableQuoteFreshness(
+  quoteCapturedAt: string | null | undefined,
+  now: Date = new Date(),
+): PortfolioPricingFreshness {
+  if (!quoteCapturedAt) return 'UNKNOWN';
+  const capturedMs = Date.parse(quoteCapturedAt);
+  if (!Number.isFinite(capturedMs)) return 'UNKNOWN';
+  const ageMs = now.getTime() - capturedMs;
+  // A future timestamp is not proof of freshness; tolerate only ordinary
+  // sub-second clock skew.
+  if (ageMs < -1_000) return 'UNKNOWN';
+  return ageMs <= MARKETABLE_QUOTE_MAX_AGE_MS ? 'FRESH' : 'STALE';
+}
+
 
 // PI-0014: purely observational mid/marketable valuation evidence -- see
 // lib/positionValuation's types.ts doc. Whether marketable evidence changed
@@ -141,7 +157,7 @@ export function computeRawPositionValuation(pos: Position) {
 // evidence object -- and `liquidityTrapTriggered`, owned by
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
-export function scorePortfolioPositionObjective(pos: Position): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean } {
+export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date()): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
   const healthScore = pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
@@ -178,7 +194,7 @@ export function scorePortfolioPositionObjective(pos: Position): { recommendation
   const marketablePnlPct = computeMarketablePnlPct(pos);
   const valuation = computeRawPositionValuation(pos);
 
-  const { objective, legacyRecommendation, liquidityTrapTriggered } = evaluatePositionObjective({
+  const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective({
     ...pos,
     positionId: pos.key,
     healthScore,
@@ -187,9 +203,12 @@ export function scorePortfolioPositionObjective(pos: Position): { recommendation
     remainingOpportunityPct,
     marketablePnlPct,
     liquidityTier: valuation?.liquidityTier ?? null,
-  });
+    marketableQuoteQuality: derivePositionQuoteQuality(pos),
+    marketableQuoteFreshness: deriveMarketableQuoteFreshness(pos.quoteCapturedAt, now),
+    marketableQuoteCapturedAt: pos.quoteCapturedAt,
+  }, now);
 
-  return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered };
+  return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
 }
 
 
@@ -242,8 +261,8 @@ export function attachSnapshotHistory(
     const withHistory = { ...p, snapshotHistory: sorted };
     const healthScore = scorePortfolioPositionHealth(withHistory);
     const withHealth = { ...withHistory, healthScore };
-    const { recommendation, objective, valuation, liquidityTrapTriggered } = scorePortfolioPositionObjective(withHealth);
-    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered };
+    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth);
+    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
 }
 
@@ -924,6 +943,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   const currentPrices: Record<string, number | null> = {};
   const currentBids: Record<string, number | null> = {};
   const currentAsks: Record<string, number | null> = {};
+  const quoteCapturedAtBySymbol: Record<string, string> = {};
   const unpriceableSymbols = new Set<string>();
   // Legs with no real two-sided market (missing bid or ask). currentBids/Asks
   // fall back to mark for these so the mid-based P&L (currentValue) still
@@ -955,6 +975,12 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           const bid = parseFloat(item.bid ?? '0');
           const ask = parseFloat(item.ask ?? '0');
           const mark = parseFloat(item.mark ?? item['mark-price'] ?? '0');
+          // PI-0014C: retain only a timestamp actually supplied by the
+          // broker payload. Never replace a missing value with Date.now().
+          const rawQuoteTime = item['updated-at'] ?? item['received-at'] ?? item.timestamp ?? null;
+          if (typeof rawQuoteTime === 'string' && Number.isFinite(Date.parse(rawQuoteTime))) {
+            quoteCapturedAtBySymbol[sym] = new Date(rawQuoteTime).toISOString();
+          }
           // PM-0001 corrective round: a crossed market (ask < bid) is treated
           // the same as one-sided everywhere -- it must never feed closeValue
           // ("Close now (marketable)"), quote-width evidence, or a real
@@ -1371,6 +1397,14 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       netWidthPctOfMid,
       crossed,
     };
+    const legQuoteTimes = legs.map((leg: any) =>
+      quoteCapturedAtBySymbol[leg.symbol?.replace(/\s+/g, '')] ?? null
+    );
+    // A combo quote is only as fresh as its oldest leg. If any leg lacks a
+    // real broker timestamp, combo freshness is unknown/fail-closed.
+    const quoteCapturedAt = legQuoteTimes.every((value): value is string => value != null)
+      ? legQuoteTimes.reduce((oldest, value) => Date.parse(value) < Date.parse(oldest) ? value : oldest)
+      : null;
 
     const anyLegUnpriceable = legs.some(
       (l: any) => unpriceableSymbols.has(l.symbol?.replace(/\s+/g, ''))
@@ -1501,6 +1535,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       stopLossClassification: stopLoss.classification,
       stopLossOrderStatus: stopLoss.orderStatus,
       quoteWidthEvidence,
+      quoteCapturedAt,
       stockPrice: stockPrices[symbol] ?? null,
       // PM-0001: side-specific buffer evidence. Short put/call strikes are
       // resolved via findShortLegStrikes() -- the SAME exported pure
@@ -1623,11 +1658,14 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
   // PI-0014: marketable/executable pnl% -- see computeMarketablePnlPct's
   // doc comment above. Null when closeValue is unavailable.
   const marketablePnlPct = computeMarketablePnlPct(pos);
-  // Emergency exit: fires on EITHER mid or marketable evidence -- marketable
-  // pricing can only make this fire more often, never less, so an
-  // already-conservative mid-based verdict is never weakened. See
-  // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
-  const veryLargeLoss = pnlPct <= -200 || (marketablePnlPct != null && marketablePnlPct <= -200);
+  // PI-0014C: marketable pricing may contribute to a hard action only after
+  // the canonical pricing evidence contract marks it decision-eligible.
+  // Midpoint evidence remains unchanged. Unknown/degraded/stale marketable
+  // values are observational and route to Verify Pricing instead.
+  const marketableHardActionEligible = pos.pricingDecisionEvidence?.marketableDecisionEligible === true;
+  const veryLargeLoss = pnlPct <= -200 ||
+    (marketableHardActionEligible && marketablePnlPct != null && marketablePnlPct <= -200);
+  const pricingNeedsVerification = pos.pricingDecisionEvidence?.status === 'VERIFY_PRICING';
   const shortQty = pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
   // TE-0002 corrective round: replaces the old `stopLossBreachedMid ||
   // stopLossBreachedMarketable` OR rule, which let EITHER a single noisy
@@ -1719,6 +1757,10 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
   // observation history, or only a wide-market/degraded-quote reading) --
   // never escalate a single noisy snapshot straight to CUT_LOSSES.
   if (stopLossNeedsVerification) return { action: 'MANAGE', detail: `Verify stop — ${stopVerifyExplanation}` };
+  if (pricingNeedsVerification) return {
+    action: 'MANAGE',
+    detail: `Verify pricing — midpoint and marketable valuations conflict, but the marketable quote is not fresh and reliable enough to control a hard action`,
+  };
   if (veryLargeLoss && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% and trend is adverse — exit or roll` };
 
   // Short-dated entry: maximize profit, but do not treat ordinary red P/L as a failure.

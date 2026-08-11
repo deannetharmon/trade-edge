@@ -60,14 +60,14 @@ describe('UX Polish: Suggested Action card', () => {
     expect(screen.getByText('Suggested Action')).toBeInTheDocument();
     expect(screen.getByText('Earnings Risk')).toBeInTheDocument();
     expect(screen.getByText('Decide whether to close, reduce risk, or intentionally hold through earnings.')).toBeInTheDocument();
-    expect(screen.getByText('86% confidence')).toBeInTheDocument();
+    expect(screen.getByText('Rule strength: Deterministic')).toBeInTheDocument();
     expect(screen.getByText('high')).toBeInTheDocument();
   });
 
   it('surfaces the confidence tier when managementIntent is present', () => {
     const recommendation = makeRecommendation({ managementIntent: makeManagementIntent() });
     render(<PositionIntelligencePanel recommendation={recommendation} objective={makeObjective()} lifecycleType="SPREAD" th={THEMES.dark} />);
-    expect(screen.getByText('(High)')).toBeInTheDocument();
+    expect(screen.getByText('Rule strength: High')).toBeInTheDocument();
   });
 
   it('surfaces top supporting evidence and remaining opportunity as compact metrics', () => {

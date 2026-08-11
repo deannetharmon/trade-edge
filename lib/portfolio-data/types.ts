@@ -7,7 +7,7 @@
 // PortfolioDataProvider (components/portfolio-data/PortfolioDataProvider.tsx)
 // use -- a single source of truth, not a duplicate of anything.
 
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation } from '@/lib/portfolio-intelligence';
+import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioPricingDecisionEvidence } from '@/lib/portfolio-intelligence';
 import type { PositionValuation } from '@/lib/positionValuation';
 import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
 import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence } from '@/lib/portfolio/stopLossPolicy';
@@ -183,6 +183,10 @@ export interface Position {
   // when width couldn't be computed at all (e.g. no market data fetch
   // occurred).
   quoteWidthEvidence: QuoteWidthEvidence | null;
+  // PI-0014C: genuine broker quote time only. Null when the market-data
+  // payload supplies no trustworthy timestamp; page-load time is never used
+  // as a substitute.
+  quoteCapturedAt?: string | null;
   // Not persisted/stored -- always recomputed fresh from current
   // currentValue/closeValue/snapshotHistory by getRecommendation() (and
   // available to callers directly via lib/portfolio/stopLossPolicy's
@@ -219,6 +223,7 @@ export interface Position {
   // function's PositionObjectiveResult doc, and lib/positionValuation's
   // types.ts doc for why this deliberately does NOT live on `valuation`).
   liquidityTrapTriggered?: boolean;
+  pricingDecisionEvidence?: PortfolioPricingDecisionEvidence;
   recommendation?: PortfolioRecommendation;
   // PI-0002: canonical objective, computed alongside `recommendation` from
   // the same evaluatePositionObjective() call. Not rendered anywhere yet
