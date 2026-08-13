@@ -40,6 +40,32 @@ export function getOtmWarningThreshold(dte: number, type: 'index' | 'etf' | 'sto
   return getBufferThresholds(dte, type).marg;
 }
 
+// PMCC-0009: canonical OTM-distance-to-short-strike calculation, covering
+// every strategy that has a near-term short leg (BPS, BCS, CSP, IC, PMCC).
+// Extracted after finding FOUR independently-duplicated copies of this same
+// formula scattered across app/screener/page.tsx (TradeModal's order-entry
+// gate, the result card display, calcFilteredOtmPct, calcRankedOtmPct) --
+// none of the four covered PMCC, and their strategy coverage had already
+// drifted apart from each other (e.g. only two of the four included CSP).
+// This is exactly the bug class buildOrderLegs/buildOrderPayload's
+// duplication caused before PMCC-0007 consolidated them -- same fix here.
+// All four call sites now use this single function instead of their own
+// copy, so a future strategy addition only needs to be taught here once.
+export function calcOtmPct(strategy: string, price: number | null | undefined, c: {
+  shortStrike: number; shortCallStrike?: number | null;
+}): number | null {
+  if (price == null || price <= 0) return null;
+  if (strategy === 'BPS' || strategy === 'CSP') return ((price - c.shortStrike) / price) * 100;
+  if (strategy === 'BCS' || strategy === 'PMCC') return ((c.shortStrike - price) / price) * 100;
+  if (strategy === 'IC' && c.shortCallStrike != null) {
+    return Math.min(
+      ((price - c.shortStrike) / price) * 100,
+      ((c.shortCallStrike - price) / price) * 100,
+    );
+  }
+  return null;
+}
+
 export function scoreBuffer(bufferPct: number | null | undefined, dte: number, type: 'index' | 'etf' | 'stock'): number {
   if (bufferPct == null) return 0.4; // unknown — neutral, don't penalize
   const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));

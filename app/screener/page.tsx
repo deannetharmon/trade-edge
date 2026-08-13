@@ -66,7 +66,7 @@ import {
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import { runChecklist } from '@/lib/scans/checklist';
-import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
+import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold, calcOtmPct } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
 import { buildOrderLegs, buildOrderPayload, hasOccSymbolsForOrder } from '@/lib/scans/orderBuilder';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
@@ -2792,19 +2792,7 @@ function TradeModal({ result, th, onClose }: {
   // meant to catch. Threshold mirrors the same buffer table the rank score
   // uses (index/etf/stock × DTE bucket), so if the score is already
   // flagging a weak buffer dimension, order entry blocks too.
-  const otmPct = (() => {
-    if (result.price == null) return null;
-    const price = result.price;
-    if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
-    if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
-    if (c.strategy === 'IC' && c.shortCallStrike != null) {
-      return Math.min(
-        ((price - c.shortStrike) / price) * 100,
-        ((c.shortCallStrike - price) / price) * 100
-      );
-    }
-    return null;
-  })();
+  const otmPct = calcOtmPct(c.strategy, result.price, c);
   const otmWarnThreshold = getOtmWarningThreshold(c.dte, result.underlyingType ?? 'stock');
   const otmTooTight = otmPct != null && otmPct < otmWarnThreshold;
   const [otmOverrideChecked, setOtmOverrideChecked] = useState(false);
@@ -3521,15 +3509,8 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   }, [research.open]);
 
   const otmPct = (() => {
-    if (!c || result.price == null || result.price <= 0) return null;
-    if (c.strategy === 'BPS' || c.strategy === 'CSP') return ((result.price - c.shortStrike) / result.price) * 100;
-    if (c.strategy === 'BCS') return ((c.shortStrike - result.price) / result.price) * 100;
-    if (c.strategy === 'IC' && c.shortCallStrike != null) {
-      const putOtm = ((result.price - c.shortStrike) / result.price) * 100;
-      const callOtm = ((c.shortCallStrike - result.price) / result.price) * 100;
-      return Math.min(putOtm, callOtm);
-    }
-    return null;
+    if (!c) return null;
+    return calcOtmPct(c.strategy, result.price, c);
   })();
   const deltaExposure = c
   ? Math.round(Math.abs(c.shortDelta) * 100)
@@ -7329,15 +7310,8 @@ export default function Home() {
   // something didn't qualify, not a ranked results list.
   const calcFilteredOtmPct = (r: ScreenResult): number | null => {
     const c = r.bestCandidate;
-    const price = r.price;
-    if (!c || price == null || price <= 0) return null;
-    if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
-    if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
-    if (c.strategy === 'IC' && c.shortCallStrike != null) {
-      return Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100);
-    }
-    if (c.strategy === 'CSP' && c.breakeven != null && price > 0) return ((price - c.shortStrike) / price) * 100;
-    return null;
+    if (!c) return null;
+    return calcOtmPct(c.strategy, r.price, c);
   };
   const filteredOiByResult = new Map<ScreenResult, OiEligibilityResult>();
   // Targeted CSP is fully defined by its immutable launch snapshot. It must
@@ -8119,14 +8093,8 @@ export default function Home() {
                 // credit ratio, then slice to the Show-top count.
                 const calcRankedOtmPct = (r: ScreenResult): number | null => {
                   const c = r.bestCandidate;
-                  const price = r.price;
-                  if (!c || price == null || price <= 0) return null;
-                  if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
-                  if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
-                  if (c.strategy === 'IC' && c.shortCallStrike != null) {
-                    return Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100);
-                  }
-                  return null;
+                  if (!c) return null;
+                  return calcOtmPct(c.strategy, r.price, c);
                 };
                 const getRankedOi = (r: ScreenResult): OiEligibilityResult | null => {
                   const strat = toOiStrategy(r.strategy);
