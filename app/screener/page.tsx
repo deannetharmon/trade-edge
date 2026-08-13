@@ -5147,6 +5147,7 @@ async function runTargetedScan(
       const symbol = loopSymbols[i];
       const primary: 'BPS' | 'BCS' | 'IC' = 'IC';
       pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
+      updateScreenerJob({ progressCurrent: i + 1 });
       const entriesBeforeThisSymbol = entries.length;
       let symbolThrew = false;
       try {
@@ -6680,6 +6681,7 @@ export default function Home() {
       for (let i = 0; i < loopSymbols.length; i++) {
         const symbol = loopSymbols[i];
         pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
+        updateScreenerJob({ progressCurrent: i + 1 });
         const classification = await classifyUnderlying(symbol, token);
         const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
@@ -6855,8 +6857,10 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (let i = 0; i < loopSymbols.length; i++) {
+        const symbol = loopSymbols[i];
         pushStatus(`Scanning PMCC ${symbol}...`);
+        updateScreenerJob({ progressCurrent: i + 1 });
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
@@ -6981,8 +6985,10 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (let i = 0; i < loopSymbols.length; i++) {
+        const symbol = loopSymbols[i];
         pushStatus(`Scanning CSP ${symbol}...`);
+        updateScreenerJob({ progressCurrent: i + 1 });
         try {
           const classification = await classifyUnderlying(symbol, token);
           const isEtf = classification === 'index' || classification === 'etf';
@@ -7200,13 +7206,24 @@ export default function Home() {
       });
       session = s;
       const loopSymbols = s.plannedScanSymbols;
+      // SCREENER-JOB-0001: CC's eligible list depends on account holdings
+      // fetched at runtime (capacity report), unlike PMCC/CSP where the
+      // universe is a fixed, pre-known selection -- so startScreenerJob's
+      // initial `total: 0` is correct at job-start time, but nothing ever
+      // corrected it once the real list was known. Without this, the
+      // progress bar doesn't just stay frozen -- ScreenerJobStatus hides
+      // the whole progress line whenever progressTotal <= 0, so it never
+      // appeared at all for CC scans specifically.
+      updateScreenerJob({ progressTotal: loopSymbols.length });
 
       pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (let i = 0; i < loopSymbols.length; i++) {
+        const symbol = loopSymbols[i];
         pushStatus(`Scanning CC ${symbol}...`);
+        updateScreenerJob({ progressCurrent: i + 1 });
         try {
           const classification = await classifyUnderlying(symbol, token);
           const isEtf = classification === 'index' || classification === 'etf';
