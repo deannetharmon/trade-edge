@@ -235,6 +235,35 @@ export interface Position {
   // consume it without another data-plumbing pass. Null when the position
   // needs no action (the old system's "hold" case).
   portfolioObjective?: PortfolioObjective | null;
+  // PMCC-0003: set only when this Position is linked as either leg of a
+  // PMCC (Poor Man's Covered Call). Attached post-hoc by attachPmccLinks(),
+  // same pattern as snapshotHistory -- never part of loadPositions()'s own
+  // per-position construction, so this Position's core fields (dte,
+  // expDate, etc.) remain single-expiration-correct regardless of PMCC
+  // linkage. See PMCC-0002 (Alan) for why two linked Position records were
+  // chosen over extending Position to carry two expirations directly.
+  pmccLink?: PmccLink | null;
+  pmccRole?: 'leap' | 'short' | null;
+}
+
+// PMCC-0003: persisted record joining a LEAP Position and a short-call
+// Position as one logical PMCC. Not derivable from broker data -- the
+// broker has no concept of "these two option positions are related" -- so
+// this is TradeEdge's own durable state, Redis-backed (see
+// lib/portfolio-data/pmccLinkStore.ts), same pattern as StopLossPolicy.
+// cumulativePremiumCollected is a running total incremented ONCE per
+// confirmed short-call roll (never derived by summing the audit log --
+// that log caps at 500 entries shared across every position and is
+// localStorage-only, not a sound source of truth for a durable, unbounded
+// cumulative figure -- see PMCC-0003 ticket, Quinn's finding).
+export interface PmccLink {
+  id: string;                          // stable id for this PMCC pairing
+  leapPositionKey: string;             // Position.key of the long LEAP leg
+  shortCallPositionKey: string;        // Position.key of the current short-call leg
+  openedDate: string;                  // YYYY-MM-DD, when this PMCC pairing was first linked
+  leapCost: number;                    // total debit paid for the LEAP at entry (per whole position, not per contract)
+  cumulativePremiumCollected: number;  // running total of net credit collected across every confirmed short-call roll
+  rollCount: number;                   // number of confirmed rolls so far (informational, drives "premium collected, N rolls")
 }
 
 

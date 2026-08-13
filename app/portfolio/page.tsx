@@ -173,8 +173,9 @@ import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvi
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import type {
-  Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent,
+  Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent, PmccLink,
 } from '@/lib/portfolio-data/types';
+import { fetchPmccLinks, postPmccLinks, deletePmccLink, pmccLinkKey } from '@/lib/portfolio-data/pmccLinkStore';
 import {
   LS_PROFIT_TARGETS,
   computeNetEdgeEvidence,
@@ -194,6 +195,9 @@ import {
   getRecommendation,
   evaluateExpirationGate,
   shouldShowExpirationGateNote,
+  calcLeapIntrinsicExtrinsic,
+  isLeapDecayDue,
+  LEAP_DECAY_DTE_THRESHOLD,
   normalizePercentValue,
   getCurrentPop,
   netEdgeFrom,
@@ -5964,6 +5968,295 @@ function saveLastStopMultiple(strategy: string, multiple: number) {
   } catch { /* non-blocking */ }
 }
 
+// ── PMCC Manager (PMCC-0003) ────────────────────────────────────────────────
+// Manual linking, expanded LEAP/short-call detail view, and roll recording
+// for Poor Man's Covered Call pairings. Deliberately a single top-level
+// modal rather than per-card plumbing -- avoids threading the full
+// positions array as a new prop through every PositionCard render just to
+// populate an "eligible position" picker used rarely (linking/rolling, not
+// every render).
+//
+// SCOPING NOTE (flagged for team review, not hidden): this records a
+// CONFIRMED roll -- the trader executes the actual close/open of the short
+// call themselves (via the existing per-position close/open flows or
+// directly on the broker), then uses this form to tell TradeEdge "the roll
+// happened, here's the new short position and the credit collected." This
+// does NOT build a new live chain-fetching, strike-picking, order-execution
+// engine for the short leg -- that would be comparable in scope to
+// SetStopLossButton itself and was judged disproportionate for this pass.
+// The ticket's AC3 said "execute it"; what's built here is the linking and
+// cost-basis bookkeeping the ticket actually introduces as new territory.
+// Automating the execution side is a reasonable, clearly-scoped follow-up.
+
+function isPmccEligibleLeap(p: Position): boolean {
+  return !p.pmccLink && p.legs.length === 1 && p.legs[0].optionType === 'C' && p.legs[0].direction === 'Long';
+}
+function isPmccEligibleShort(p: Position): boolean {
+  return !p.pmccLink && p.legs.length === 1 && p.legs[0].optionType === 'C' && p.legs[0].direction === 'Short';
+}
+
+function PmccLegBox({ pos, role, th }: { pos: Position; role: 'leap' | 'short'; th: typeof THEMES[Theme] }) {
+  const strike = pos.legs[0]?.strikePrice ?? null;
+  const decayDue = role === 'leap' && isLeapDecayDue(pos);
+  const rec = role === 'short' ? getRecommendation(pos, null) : null;
+  const { intrinsic, extrinsic } = role === 'leap'
+    ? calcLeapIntrinsicExtrinsic(pos.stockPrice, strike, pos.currentValue, pos.quantity)
+    : { intrinsic: null, extrinsic: null };
+
+  return (
+    <div className={`rounded-lg p-3 ${role === 'leap' ? 'bg-teal-500/5 border border-teal-700/30' : 'bg-slate-500/5 border border-slate-700/30'}`}>
+      <div className="flex items-center justify-between mb-1">
+        <p className={`text-[10px] font-bold uppercase tracking-widest ${role === 'leap' ? 'text-teal-400' : th.textFaint}`}>
+          {role === 'leap' ? 'LEAP · long call' : 'Short call'}
+        </p>
+        <p className={`text-[10px] ${th.textFaint}`}>{pos.symbol} · {pos.dte}d</p>
+      </div>
+      <p className={`text-xs ${th.text}`}>
+        strike {strike ?? '—'} {pos.netDelta != null && <>· {Math.abs(pos.netDelta).toFixed(2)} delta</>}
+      </p>
+      <p className="text-sm font-bold mt-0.5" style={{ fontFamily: "'DM Mono', monospace" }}>
+        {pos.currentValue != null ? `$${(pos.currentValue / (pos.quantity * 100)).toFixed(2)}` : '—'}
+      </p>
+      {role === 'leap' && intrinsic != null && extrinsic != null && (
+        <div className="flex gap-3 mt-1">
+          <span className={`text-[10px] ${th.textFaint}`}>intrinsic ${intrinsic.toFixed(2)}</span>
+          <span className={`text-[10px] ${th.textFaint}`}>extrinsic ${extrinsic.toFixed(2)}</span>
+        </div>
+      )}
+      {role === 'leap' && decayDue && (
+        <p className="text-[10px] text-amber-400 font-bold mt-1">
+          <span aria-hidden="true">⚠</span> LEAP decay clock — under {LEAP_DECAY_DTE_THRESHOLD}d remaining, consider rolling the LEAP itself
+        </p>
+      )}
+      {role === 'short' && rec && (
+        <p className={`text-[10px] font-bold mt-1 ${ACTION_META[rec.action].color}`}>
+          {ACTION_META[rec.action].label} — {rec.detail}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PmccGroup({
+  leap, short, link, allPositions, th, onRefresh,
+}: {
+  leap: Position; short: Position | null; link: PmccLink;
+  allPositions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void;
+}) {
+  const [recordingRoll, setRecordingRoll] = useState(false);
+  const [newShortKey, setNewShortKey] = useState('');
+  const [creditInput, setCreditInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const netCostBasis = link.leapCost - link.cumulativePremiumCollected;
+  const eligibleShorts = allPositions.filter(p => isPmccEligibleShort(p) && p.symbol === leap.symbol);
+
+  const recordRoll = async () => {
+    const credit = parseFloat(creditInput);
+    if (!newShortKey) { setError('Select the new short-call position'); return; }
+    if (!Number.isFinite(credit)) { setError('Enter a valid credit amount'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const updated: PmccLink = {
+        ...link,
+        shortCallPositionKey: newShortKey,
+        cumulativePremiumCollected: link.cumulativePremiumCollected + credit,
+        rollCount: link.rollCount + 1,
+      };
+      const result = await postPmccLinks([{ key: pmccLinkKey(link.leapPositionKey), link: updated }]);
+      if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
+      setRecordingRoll(false);
+      setNewShortKey('');
+      setCreditInput('');
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unlink = async () => {
+    await deletePmccLink(pmccLinkKey(link.leapPositionKey));
+    onRefresh();
+  };
+
+  return (
+    <div className={`rounded-xl p-3 border ${th.border} space-y-2`}>
+      <div className="grid grid-cols-2 gap-2">
+        <PmccLegBox pos={leap} role="leap" th={th} />
+        {short
+          ? <PmccLegBox pos={short} role="short" th={th} />
+          : <div className={`rounded-lg p-3 border border-dashed ${th.borderLight} flex items-center justify-center`}>
+              <p className={`text-[10px] ${th.textFaint}`}>No short call currently linked</p>
+            </div>}
+      </div>
+
+      <div className={`flex items-center justify-between border-t ${th.borderLight} pt-2`}>
+        <div>
+          <p className={`text-[9px] ${th.textFaint}`}>net effective cost basis</p>
+          <p className="text-sm font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>${netCostBasis.toFixed(2)}</p>
+        </div>
+        <div className="text-right">
+          <p className={`text-[9px] ${th.textFaint}`}>premium collected, {link.rollCount} roll{link.rollCount === 1 ? '' : 's'}</p>
+          <p className="text-sm font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>${link.cumulativePremiumCollected.toFixed(2)}</p>
+        </div>
+      </div>
+
+      {!recordingRoll ? (
+        <div className="flex gap-2">
+          <button onClick={() => setRecordingRoll(true)}
+            className="flex-1 text-[10px] py-1.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold">
+            Record confirmed roll
+          </button>
+          <button onClick={unlink}
+            className={`text-[10px] px-3 py-1.5 border ${th.border} ${th.textFaint} rounded hover:border-red-600 hover:text-red-400 transition-colors`}>
+            Unlink
+          </button>
+        </div>
+      ) : (
+        <div className={`space-y-2 border-t ${th.borderLight} pt-2`}>
+          <p className={`text-[9px] ${th.textFaint}`}>
+            Close the old short call and open the new one yourself (existing close/open flow or your broker), then record it here.
+          </p>
+          <select value={newShortKey} onChange={e => setNewShortKey(e.target.value)}
+            className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
+            <option value="">Select new short-call position…</option>
+            {eligibleShorts.map(p => (
+              <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d</option>
+            ))}
+          </select>
+          <input type="number" step="0.01" placeholder="Credit received"
+            value={creditInput} onChange={e => setCreditInput(e.target.value)}
+            className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`} />
+          {error && <p className="text-[10px] text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={recordRoll} disabled={saving}
+              className="flex-1 text-[10px] py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold disabled:opacity-50">
+              {saving ? 'Saving…' : 'Confirm roll'}
+            </button>
+            <button onClick={() => { setRecordingRoll(false); setError(''); }}
+              className={`text-[10px] px-3 py-1.5 border ${th.border} ${th.textFaint} rounded`}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
+  positions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void; onClose: () => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [leapKey, setLeapKey] = useState('');
+  const [shortKey, setShortKey] = useState('');
+  const [leapCostInput, setLeapCostInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const byKey = new Map(positions.map(p => [p.key, p]));
+  const links = new Map<string, PmccLink>();
+  for (const p of positions) if (p.pmccLink) links.set(p.pmccLink.id, p.pmccLink);
+
+  const eligibleLeaps = positions.filter(isPmccEligibleLeap);
+  const eligibleShorts = positions.filter(isPmccEligibleShort);
+
+  const createLink = async () => {
+    const leap = byKey.get(leapKey);
+    const cost = parseFloat(leapCostInput);
+    if (!leap) { setError('Select the LEAP position'); return; }
+    if (!Number.isFinite(cost)) { setError('Enter the LEAP cost paid'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const link: PmccLink = {
+        id: crypto.randomUUID(),
+        leapPositionKey: leapKey,
+        shortCallPositionKey: shortKey || '',
+        openedDate: new Date().toISOString().slice(0, 10),
+        leapCost: cost,
+        cumulativePremiumCollected: 0,
+        rollCount: 0,
+      };
+      const result = await postPmccLinks([{ key: pmccLinkKey(leapKey), link }]);
+      if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
+      setCreating(false);
+      setLeapKey(''); setShortKey(''); setLeapCostInput('');
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className={`${th.card} rounded-xl border ${th.border} p-4 max-w-2xl w-full max-h-[80vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <p className={`text-xs font-bold uppercase tracking-widest ${th.textFaint}`}>PMCC Manager</p>
+          <button onClick={onClose} className={`text-xl ${th.textFaint} hover:${th.text}`}>✕</button>
+        </div>
+
+        <div className="space-y-3 mb-3">
+          {Array.from(links.values()).map(link => {
+            const leap = byKey.get(link.leapPositionKey);
+            if (!leap) return null;
+            const short = link.shortCallPositionKey ? byKey.get(link.shortCallPositionKey) ?? null : null;
+            return <PmccGroup key={link.id} leap={leap} short={short} link={link} allPositions={positions} th={th} onRefresh={onRefresh} />;
+          })}
+          {links.size === 0 && !creating && (
+            <p className={`text-[11px] ${th.textFaint} text-center py-4`}>No PMCCs linked yet.</p>
+          )}
+        </div>
+
+        {!creating ? (
+          <button onClick={() => setCreating(true)}
+            className="w-full text-[10px] py-2 border border-teal-600 text-teal-400 rounded hover:bg-teal-600/20 transition-colors font-bold">
+            + Link a PMCC
+          </button>
+        ) : (
+          <div className={`space-y-2 border-t ${th.borderLight} pt-3`}>
+            <p className={`text-[9px] ${th.textFaint}`}>Pick the LEAP and (optionally) the current short call to link as one PMCC.</p>
+            <select value={leapKey} onChange={e => setLeapKey(e.target.value)}
+              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
+              <option value="">Select LEAP position…</option>
+              {eligibleLeaps.map(p => (
+                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d</option>
+              ))}
+            </select>
+            <select value={shortKey} onChange={e => setShortKey(e.target.value)}
+              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
+              <option value="">Select current short call (optional)…</option>
+              {eligibleShorts.map(p => (
+                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d</option>
+              ))}
+            </select>
+            <input type="number" step="0.01" placeholder="LEAP cost paid (net debit, total $)"
+              value={leapCostInput} onChange={e => setLeapCostInput(e.target.value)}
+              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`} />
+            {error && <p className="text-[10px] text-red-400">{error}</p>}
+            <div className="flex gap-2">
+              <button onClick={createLink} disabled={saving}
+                className="flex-1 text-[10px] py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded font-bold disabled:opacity-50">
+                {saving ? 'Saving…' : 'Link'}
+              </button>
+              <button onClick={() => { setCreating(false); setError(''); }}
+                className={`text-[10px] px-3 py-1.5 border ${th.border} ${th.textFaint} rounded`}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const portfolioMode = usePortfolioMode();
 
@@ -7949,6 +8242,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             <div className="border-t-2 border-slate-600/60 pt-1">
               <p className={`font-bold ${th.text} text-sm leading-tight`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol}</p>
               <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold ${stratColor(pos.strategy)}`}>{pos.strategy}</span>
+              {/* PMCC-0003: badge for a position linked as either leg of a
+                  PMCC. Deliberately just an indicator here -- the detail
+                  view (LEAP/short breakdown, intrinsic/extrinsic, cost
+                  basis) lives in the PMCC Manager panel, not inline on
+                  this already-dense card. */}
+              {pos.pmccRole && (
+                <span
+                  className="ml-1 text-[9px] px-1 py-0.5 rounded font-bold bg-teal-500/10 text-teal-400 border border-teal-700/40"
+                  title={pos.pmccRole === 'leap' ? 'LEAP leg of a linked PMCC — see PMCC Manager' : 'Short-call leg of a linked PMCC — see PMCC Manager'}>
+                  {pos.pmccRole === 'leap' ? 'PMCC ◆' : 'PMCC ○'}
+                </span>
+              )}
               {/* Chart button */}
               <div className="relative mt-1">
                 <button
@@ -9310,6 +9615,7 @@ export default function PortfolioPage() {
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showPmccManager, setShowPmccManager] = useState(false);
   const [dryRunMode, setDryRunMode] = useState<boolean>(isDryRun);
   // WA-0003 (CES section 13.2, level-2 deep link): read once on initial
   // mount, mirroring activeTab's own initial-URL-read pattern above. `focus`
@@ -9684,6 +9990,10 @@ export default function PortfolioPage() {
             className="text-[10px] px-3 py-1.5 border border-purple-800 text-purple-400 rounded hover:border-purple-600 hover:text-purple-300 transition-colors tracking-wider">
             ◆ Memory
           </button>
+          <button onClick={() => setShowPmccManager(true)}
+            className="text-[10px] px-3 py-1.5 border border-teal-800 text-teal-400 rounded hover:border-teal-600 hover:text-teal-300 transition-colors tracking-wider">
+            ◆ PMCC
+          </button>
           {positions.length > 0 && (
             <button onClick={handleAnalyzePortfolio} disabled={portfolioAnalysisLoading}
               className="text-[10px] px-3 py-1.5 border border-indigo-700 text-indigo-400 rounded hover:border-indigo-500 hover:text-indigo-300 transition-colors tracking-wider disabled:opacity-50 font-bold">
@@ -9965,6 +10275,14 @@ export default function PortfolioPage() {
       {showAuditLog && <AuditLogPanel onClose={() => setShowAuditLog(false)} th={th} />}
       {showPerformance && <PerformancePanel onClose={() => setShowPerformance(false)} th={th} />}
       {showMemory && <MemoryPanel onClose={() => setShowMemory(false)} th={th} />}
+      {showPmccManager && (
+        <PmccManagerPanel
+          positions={positions}
+          th={th}
+          onRefresh={refreshPortfolioData}
+          onClose={() => setShowPmccManager(false)}
+        />
+      )}
 
       {portfolioAnalysis && !portfolioAnalysis.error && (
         <PortfolioAnalysisPanel analysis={portfolioAnalysis} positions={positions} onClose={() => setPortfolioAnalysis(null)} th={th} />

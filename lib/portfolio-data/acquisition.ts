@@ -24,6 +24,7 @@ import type {
   ActionType, PositionIntent, StopStatus, StopLossInfo, Recommendation,
   PositionLeg, Position, PendingOrderLeg, PendingOrder, PositionSnapshot,
   GtcOrderLeg, GtcOrder, PriceSupportAnalysis, TrendResult, EntrySnapshot,
+  PmccLink,
 } from './types';
 import { BASE, CLIENT_ID, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import {
@@ -60,6 +61,7 @@ import {
   type QuoteWidthEvidence,
 } from '@/lib/portfolio/stopLossPolicy';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
+import { fetchPmccLinks, pmccLinkKey } from './pmccLinkStore';
 import {
   CONTRACT_MULTIPLIER,
   computeCreditPerContract,
@@ -291,6 +293,66 @@ export function attachSnapshotHistory(
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
 }
+
+// PMCC-0003: tags each Position with its PmccLink (if any) and which role
+// it plays in that pairing (leap vs short). Same "attach post-hoc, never
+// part of loadPositions()'s own per-position construction" pattern as
+// attachSnapshotHistory/attachEntrySnapshots -- see PMCC-0002 (Alan) for
+// why this must not touch pos.dte/pos.expDate or any other core field.
+export function attachPmccLinks(
+  positions: Position[],
+  links: Record<string, PmccLink>,
+): Position[] {
+  const byKey = new Map(positions.map(p => [p.key, p]));
+  const linkList = Object.values(links);
+  return positions.map(p => {
+    for (const link of linkList) {
+      if (link.leapPositionKey === p.key) {
+        return { ...p, pmccLink: link, pmccRole: 'leap' as const };
+      }
+      if (link.shortCallPositionKey === p.key) {
+        return { ...p, pmccLink: link, pmccRole: 'short' as const };
+      }
+    }
+    return { ...p, pmccLink: null, pmccRole: null };
+  });
+}
+
+// PMCC-0003: pure calculation, no I/O -- LEAP intrinsic value is
+// max(0, stockPrice - leapStrike) * 100 * qty; extrinsic is whatever's left
+// of the LEAP's market price. Extracted as its own function so it's
+// unit-testable in isolation from the rest of the PMCC UI wiring.
+export function calcLeapIntrinsicExtrinsic(
+  stockPrice: number | null,
+  leapStrike: number | null,
+  leapMarketValue: number | null, // total position value, already * qty * 100
+  quantity: number,
+): { intrinsic: number | null; extrinsic: number | null } {
+  if (stockPrice == null || leapStrike == null || leapMarketValue == null) {
+    return { intrinsic: null, extrinsic: null };
+  }
+  const intrinsic = Math.max(0, stockPrice - leapStrike) * 100 * quantity;
+  const extrinsic = leapMarketValue - intrinsic;
+  return { intrinsic, extrinsic };
+}
+
+// PMCC-0003: the LEAP's own decay clock, distinct from and slower than the
+// short call's existing near-term needsClose/expiration-gate cycle (which
+// already applies correctly to a PMCC's short-call Position without any
+// new code -- it's just a short call, buffer/POP/delta don't care what's
+// covering it). A LEAP decays slowly for most of its life but accelerates
+// as it crosses roughly 6 months remaining -- this flags that threshold so
+// it renders as a visually distinct alert from the short-call roll-due
+// signal, per PMCC-0003 ticket ("two independent decay clocks, do not
+// conflate"). 180 is a starting default, not yet validated against real
+// LEAP decay data -- same non-blocking-default pattern as PI-0007's
+// hysteresis bands (Quinn/Ian to sanity-check before relying on it).
+export const LEAP_DECAY_DTE_THRESHOLD = 180;
+
+export function isLeapDecayDue(pos: Position): boolean {
+  return pos.pmccRole === 'leap' && pos.dte <= LEAP_DECAY_DTE_THRESHOLD;
+}
+
 
 
 export async function fetchEntrySnapshots(): Promise<Record<string, EntrySnapshot>> {
@@ -1625,6 +1687,8 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   });
 
   positions = await attachEntrySnapshots(positions);
+  // PMCC-0003: tag positions with their PMCC pairing, if any, before sort.
+  positions = attachPmccLinks(positions, await fetchPmccLinks().catch(() => ({})));
 
   // PI-0007: three-tier sort, entirely priority-driven now. The old
   // `needsClose`-pinned-to-top rule is removed -- a position that's past 21
