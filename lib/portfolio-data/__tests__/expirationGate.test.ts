@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRecommendation } from '../acquisition';
+import { getRecommendation, shouldShowExpirationGateNote } from '../acquisition';
 import type { Position, PositionLeg, PositionSnapshot } from '../types';
 
 // ── Fixtures (mirrors the pattern in stopLossWiring.test.ts) ───────────────
@@ -193,5 +193,41 @@ describe('PI-0007 expiration gate (via getRecommendation)', () => {
       // With hasGtc true, low pnlPct, no trend, no hitTarget -> falls through to plain HOLD
       expect(rec.action).toBe('HOLD');
     });
+  });
+});
+
+describe('PI-0010 shouldShowExpirationGateNote', () => {
+  it('shows the note when a higher-priority signal (e.g. verify-stop MANAGE) is occupying the primary slot but the gate itself reads safe', () => {
+    // High POP/safe buffer -- gate would say HOLD_TO_EXPIRATION on its own --
+    // but the primary action is MANAGE because something else (stop
+    // verification, in the real card) took priority in getRecommendation.
+    const pos = makePosition({ pop: 82, netDelta: -0.18, buffer: 9.5, needsClose: true });
+    expect(shouldShowExpirationGateNote(pos, 'MANAGE')).toBe(true);
+  });
+
+  it('does not show the note when the primary action already IS HOLD_TO_EXPIRATION (would be redundant)', () => {
+    const pos = makePosition({ pop: 82, netDelta: -0.18, buffer: 9.5, needsClose: true });
+    expect(shouldShowExpirationGateNote(pos, 'HOLD_TO_EXPIRATION')).toBe(false);
+  });
+
+  it('does not show the note when the gate itself reads unsafe, regardless of primary action', () => {
+    const pos = makePosition({ pop: 40, netDelta: -0.18, buffer: 9.5, needsClose: true }); // low POP -> gate unsafe
+    expect(shouldShowExpirationGateNote(pos, 'MANAGE')).toBe(false);
+    expect(shouldShowExpirationGateNote(pos, 'CUT_LOSSES')).toBe(false);
+  });
+
+  it('does not show the note when needsClose is false, regardless of gate safety', () => {
+    const pos = makePosition({ pop: 90, netDelta: -0.1, buffer: 20, needsClose: false });
+    expect(shouldShowExpirationGateNote(pos, 'HOLD')).toBe(false);
+  });
+
+  it('agrees with getRecommendation on gate safety for the same position (no drift between the two code paths)', () => {
+    const safePos = makePosition({ pop: 90, netDelta: -0.1, buffer: 9.5, needsClose: true });
+    const rec = getRecommendation(safePos, null);
+    expect(rec.action).toBe('HOLD_TO_EXPIRATION');
+    // Since the primary action already IS HOLD_TO_EXPIRATION, the note
+    // should NOT show -- this is the one case where "gate says safe" and
+    // "show the note" correctly diverge, by design (no redundant display).
+    expect(shouldShowExpirationGateNote(safePos, rec.action)).toBe(false);
   });
 });

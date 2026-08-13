@@ -1702,7 +1702,7 @@ export function isShortDateEntry(pos: Position): boolean {
 // stop-loss breach, or any hard-exit path above this function's call site in
 // getRecommendation() -- those remain real risk events regardless of what
 // this gate decides. See PI-0007 ticket "Explicitly NOT in scope."
-interface ExpirationGateResult {
+export interface ExpirationGateResult {
   safe: boolean;
   reason: string;
 }
@@ -1714,7 +1714,12 @@ function wasBufferSafeLastSnapshot(pos: Position): boolean {
   return last.buffer != null && last.buffer > 6;
 }
 
-function evaluateExpirationGate(pos: Position): ExpirationGateResult {
+// PI-0010: exported so page.tsx can render the gate's read as a secondary,
+// visually subordinate line whenever a higher-priority signal (stop
+// verification, pricing verification, etc.) is occupying the primary
+// Suggested Action / banner slot. This does NOT change getRecommendation()'s
+// behavior or priority order -- it's read-only display support.
+export function evaluateExpirationGate(pos: Position): ExpirationGateResult {
   const pop = getCurrentPop(pos);
   const delta = pos.netDelta;
   const buffer = pos.buffer;
@@ -1740,6 +1745,19 @@ function evaluateExpirationGate(pos: Position): ExpirationGateResult {
         : `Buffer ${buffer != null ? buffer.toFixed(1) + '%' : 'unknown'} — below safety threshold`;
 
   return { safe, reason };
+}
+
+
+// PI-0010: single source of truth for "should the secondary expiration-gate
+// note render alongside the primary Suggested Action / banner." Used by
+// BOTH the Suggested cell and the top banner in page.tsx so they can never
+// disagree about when this note should appear -- extracted as a pure
+// function specifically so it's unit-testable without a component render
+// harness (PositionCard is not currently exported or tested as a component).
+export function shouldShowExpirationGateNote(pos: Position, primaryAction: ActionType): boolean {
+  if (!pos.needsClose) return false;
+  if (primaryAction === 'HOLD_TO_EXPIRATION') return false; // would just repeat the primary line
+  return evaluateExpirationGate(pos).safe;
 }
 
 

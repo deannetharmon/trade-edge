@@ -192,6 +192,8 @@ import {
   loadAccountBalances,
   isShortDateEntry,
   getRecommendation,
+  evaluateExpirationGate,
+  shouldShowExpirationGateNote,
   normalizePercentValue,
   getCurrentPop,
   netEdgeFrom,
@@ -7705,12 +7707,29 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
           <span className="text-[10px] text-teal-300/70 ml-1">{rec.detail}</span>
         </div>
       )}
-      {pos.needsClose && rec.action !== 'HOLD_TO_EXPIRATION' && (
-        <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
-          <span className="text-red-400 text-xs">⚠</span>
-          <span className="text-xs text-red-400 font-bold tracking-wider">{pos.dte} DTE — {rec.detail}</span>
-        </div>
-      )}
+      {pos.needsClose && rec.action !== 'HOLD_TO_EXPIRATION' && (() => {
+        // PI-0010: same problem as the Suggested cell -- when a higher-
+        // priority signal (stop verification, pricing verification, etc.)
+        // wins the primary banner slot, the gate's own read becomes
+        // invisible even when it's telling a different, calmer story.
+        // Rendered INSIDE this same banner (not a second banner) so it
+        // reads as a subordinate note, not a competing suggestion.
+        const showGateNote = shouldShowExpirationGateNote(pos, rec.action);
+        const gate = showGateNote ? evaluateExpirationGate(pos) : null;
+        return (
+          <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-red-400 text-xs">⚠</span>
+              <span className="text-xs text-red-400 font-bold tracking-wider">{pos.dte} DTE — {rec.detail}</span>
+            </div>
+            {gate && (
+              <p className="text-[10px] text-teal-400/70 mt-0.5 pl-5" title={gate.reason}>
+                <span aria-hidden="true">◆</span> gate: {gate.reason}
+              </p>
+            )}
+          </div>
+        );
+      })()}
       {!pos.needsClose && isShortDateEntry(pos) && (
         <div className="bg-purple-500/10 border-b border-purple-500/30 px-4 py-1.5 flex items-center gap-2">
           <span className="text-purple-400 text-xs">⚡</span>
@@ -7775,7 +7794,15 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
         {/* Data columns */}
         <div className="overflow-x-auto flex-1" style={{ minWidth: 0 }}>
-          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '50px 120px 70px 34px 110px 70px 70px 51px 70px 45px 70px 90px 70px 55px 60px 65px 60px 75px 70px 105px', gap: '0 12px', alignItems: 'start', minWidth: '1930px' }}>
+          {/* PI-0010: widened Trade Evolution (90->120, its Edge line was
+              wrapping), Stop Loss (70->105, policy description was wrapping
+              to 4-5 lines), and Suggested (105->150, now also carries a
+              second gate-note line -- see the ACTION section below).
+              minWidth increased by the same total (110px) added across the
+              three columns, preserving whatever slack margin the original
+              1930px already had over the raw column sum rather than
+              re-deriving it from scratch. No other column's width changed. */}
+          <div className="grid px-4 py-3" style={{ gridTemplateColumns: '50px 120px 70px 34px 110px 70px 70px 51px 70px 45px 70px 120px 70px 55px 60px 65px 60px 75px 105px 150px', gap: '0 12px', alignItems: 'start', minWidth: '2040px' }}>
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
@@ -8359,12 +8386,26 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             {/* ── ACTION ─────────────────────────────── */}
-            <div className="border-t-2 border-slate-500/40 pt-1 overflow-hidden">
+            <div className="border-t-2 border-slate-500/40 pt-1">
               <p className={`text-[9px] ${th.textFaint} whitespace-nowrap`}>Suggested</p>
-              <div className="flex items-baseline gap-1.5 whitespace-nowrap overflow-hidden" title={rec.detail}>
+              <div className="flex items-baseline gap-1.5 flex-wrap" title={rec.detail}>
                 <span className={`text-[10px] font-bold whitespace-nowrap shrink-0 ${ACTION_META[rec.action].color}`}>{ACTION_META[rec.action].label}</span>
-                <span className={`text-[9px] ${th.textFaint} truncate`}>{rec.detail}</span>
+                <span className={`text-[9px] ${th.textFaint}`}>{rec.detail}</span>
               </div>
+              {/* PI-0010: when a higher-priority signal (stop verification,
+                  pricing verification, etc.) is occupying the primary slot
+                  above, the expiration gate's own read is otherwise
+                  invisible. Show it as a quiet, clearly subordinate second
+                  line -- never rendered when the primary action already IS
+                  HOLD_TO_EXPIRATION, since that would just repeat itself. */}
+              {shouldShowExpirationGateNote(pos, rec.action) && (() => {
+                const gate = evaluateExpirationGate(pos);
+                return (
+                  <p className="text-[9px] text-teal-500/80 mt-1 pt-1 border-t border-teal-700/20 leading-tight" title={gate.reason}>
+                    <span aria-hidden="true">◆</span> {gate.reason}
+                  </p>
+                );
+              })()}
               {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight whitespace-nowrap truncate" title={sig}>{sig}</p> : null; })()}
             </div>
           </div>
