@@ -6148,19 +6148,31 @@ function PmccGroup({
   );
 }
 
-function PmccManagerPanel({ positions, th, onRefresh, onClose, dryRunMode }: {
-  positions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void; onClose: () => void;
+// PMCC-0008: PmccManagerPanel (the fixed-overlay modal version) has been
+// replaced by PmccManagerTab, rendered inline as its own sub-tab instead
+// of a modal triggered from the masthead. Same content, same logic --
+// createLink/dry-run-fixture handling unchanged verbatim -- just no
+// overlay chrome and no onClose (there's nothing to close; switching
+// sub-tabs is the equivalent action). Nothing else in the app triggers
+// the old modal, so it's removed rather than kept alongside this.
+function PmccManagerTab({ positions, th, onRefresh, dryRunMode, preselectLeapKey }: {
+  positions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void;
   dryRunMode: boolean;
+  // PMCC-0008: contextual "Link as PMCC" on an eligible position card sets
+  // this when it switches to this tab, so the linking form opens already
+  // pointed at the position the trader clicked from, instead of landing on
+  // an empty tab and making them find it again in the dropdown.
+  preselectLeapKey?: string | null;
 }) {
-  const [creating, setCreating] = useState(false);
-  const [leapKey, setLeapKey] = useState('');
+  const [creating, setCreating] = useState(Boolean(preselectLeapKey));
+  const [leapKey, setLeapKey] = useState(preselectLeapKey ?? '');
   const [shortKey, setShortKey] = useState('');
   const [leapCostInput, setLeapCostInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   // PMCC-0006: dry-run-only links live entirely in local state -- never
   // posted to the real PmccLink store, discarded automatically when this
-  // panel unmounts (closed) since useState resets. Only populated/relevant
+  // component unmounts since useState resets. Only populated/relevant
   // when dryRunMode is on.
   const [dryRunLinks, setDryRunLinks] = useState<Record<string, PmccLink>>({});
 
@@ -6226,77 +6238,70 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose, dryRunMode }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className={`${th.card} rounded-xl border ${th.border} p-4 max-w-2xl w-full max-h-[80vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <p className={`text-xs font-bold uppercase tracking-widest ${th.textFaint}`}>PMCC Manager</p>
-          <button onClick={onClose} className={`text-xl ${th.textFaint} hover:${th.text}`}>✕</button>
-        </div>
+    <div className="max-w-2xl">
+      {dryRunMode && (
+        <p className={`text-[9px] text-amber-400 mb-3`}>
+          <span aria-hidden="true">⚗</span> Dry Run is on — the pickers below include synthetic test positions (labeled "test fixture"). Links created from them are never saved, only kept while this tab stays mounted.
+        </p>
+      )}
 
-        {dryRunMode && (
-          <p className={`text-[9px] text-amber-400 mb-3`}>
-            <span aria-hidden="true">⚗</span> Dry Run is on — the pickers below include synthetic test positions (labeled "test fixture"). Links created from them are never saved, only kept while this panel is open.
-          </p>
-        )}
-
-        <div className="space-y-3 mb-3">
-          {Array.from(links.values()).map(link => {
-            const leap = byKey.get(link.leapPositionKey);
-            if (!leap) return null;
-            const short = link.shortCallPositionKey ? byKey.get(link.shortCallPositionKey) ?? null : null;
-            const isDryRunLink = isPmccDryRunFixture(link.leapPositionKey);
-            return (
-              <PmccGroup
-                key={link.id} leap={leap} short={short} link={link} allPositions={allPositions} th={th} onRefresh={onRefresh}
-                onDryRunSave={isDryRunLink ? (updated => setDryRunLinks(prev => ({ ...prev, [updated.id]: updated }))) : undefined}
-                onDryRunUnlink={isDryRunLink ? (() => setDryRunLinks(prev => { const next = { ...prev }; delete next[link.id]; return next; })) : undefined}
-              />
-            );
-          })}
-          {links.size === 0 && !creating && (
-            <p className={`text-[11px] ${th.textFaint} text-center py-4`}>No PMCCs linked yet.</p>
-          )}
-        </div>
-
-        {!creating ? (
-          <button onClick={() => setCreating(true)}
-            className="w-full text-[10px] py-2 border border-teal-600 text-teal-400 rounded hover:bg-teal-600/20 transition-colors font-bold">
-            + Link a PMCC
-          </button>
-        ) : (
-          <div className={`space-y-2 border-t ${th.borderLight} pt-3`}>
-            <p className={`text-[9px] ${th.textFaint}`}>Pick the LEAP and (optionally) the current short call to link as one PMCC.</p>
-            <select value={leapKey} onChange={e => setLeapKey(e.target.value)}
-              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
-              <option value="">Select LEAP position…</option>
-              {eligibleLeaps.map(p => (
-                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
-              ))}
-            </select>
-            <select value={shortKey} onChange={e => setShortKey(e.target.value)}
-              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
-              <option value="">Select current short call (optional)…</option>
-              {eligibleShorts.map(p => (
-                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d · qty {p.quantity}{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
-              ))}
-            </select>
-            <input type="number" step="0.01" placeholder="LEAP cost paid (net debit, total $)"
-              value={leapCostInput} onChange={e => setLeapCostInput(e.target.value)}
-              className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`} />
-            {error && <p className="text-[10px] text-red-400">{error}</p>}
-            <div className="flex gap-2">
-              <button onClick={createLink} disabled={saving}
-                className="flex-1 text-[10px] py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded font-bold disabled:opacity-50">
-                {saving ? 'Saving…' : 'Link'}
-              </button>
-              <button onClick={() => { setCreating(false); setError(''); }}
-                className={`text-[10px] px-3 py-1.5 border ${th.border} ${th.textFaint} rounded`}>
-                Cancel
-              </button>
-            </div>
-          </div>
+      <div className="space-y-3 mb-3">
+        {Array.from(links.values()).map(link => {
+          const leap = byKey.get(link.leapPositionKey);
+          if (!leap) return null;
+          const short = link.shortCallPositionKey ? byKey.get(link.shortCallPositionKey) ?? null : null;
+          const isDryRunLink = isPmccDryRunFixture(link.leapPositionKey);
+          return (
+            <PmccGroup
+              key={link.id} leap={leap} short={short} link={link} allPositions={allPositions} th={th} onRefresh={onRefresh}
+              onDryRunSave={isDryRunLink ? (updated => setDryRunLinks(prev => ({ ...prev, [updated.id]: updated }))) : undefined}
+              onDryRunUnlink={isDryRunLink ? (() => setDryRunLinks(prev => { const next = { ...prev }; delete next[link.id]; return next; })) : undefined}
+            />
+          );
+        })}
+        {links.size === 0 && !creating && (
+          <p className={`text-[11px] ${th.textFaint} text-center py-4`}>No PMCCs linked yet.</p>
         )}
       </div>
+
+      {!creating ? (
+        <button onClick={() => setCreating(true)}
+          className="w-full text-[10px] py-2 border border-teal-600 text-teal-400 rounded hover:bg-teal-600/20 transition-colors font-bold">
+          + Link a PMCC
+        </button>
+      ) : (
+        <div className={`space-y-2 border-t ${th.borderLight} pt-3`}>
+          <p className={`text-[9px] ${th.textFaint}`}>Pick the LEAP and (optionally) the current short call to link as one PMCC.</p>
+          <select value={leapKey} onChange={e => setLeapKey(e.target.value)}
+            className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
+            <option value="">Select LEAP position…</option>
+            {eligibleLeaps.map(p => (
+              <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
+            ))}
+          </select>
+          <select value={shortKey} onChange={e => setShortKey(e.target.value)}
+            className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
+            <option value="">Select current short call (optional)…</option>
+            {eligibleShorts.map(p => (
+              <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d · qty {p.quantity}{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
+            ))}
+          </select>
+          <input type="number" step="0.01" placeholder="LEAP cost paid (net debit, total $)"
+            value={leapCostInput} onChange={e => setLeapCostInput(e.target.value)}
+            className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`} />
+          {error && <p className="text-[10px] text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={createLink} disabled={saving}
+              className="flex-1 text-[10px] py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded font-bold disabled:opacity-50">
+              {saving ? 'Saving…' : 'Link'}
+            </button>
+            <button onClick={() => { setCreating(false); setError(''); }}
+              className={`text-[10px] px-3 py-1.5 border ${th.border} ${th.textFaint} rounded`}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -7984,7 +7989,7 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReview, onSaveDecisionReview, focusKey }: {
+function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReview, onSaveDecisionReview, focusKey, onLinkAsPmcc }: {
   pos: Position;
   th: typeof THEMES[Theme];
   checked: boolean;
@@ -8007,6 +8012,11 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   // Optional, defaults to undefined/null -- every existing caller's
   // rendering is unchanged (expanded still defaults to false).
   focusKey?: string | null;
+  // PMCC-0008: contextual "Link as PMCC" entry point. Optional, matching
+  // this component's existing convention for ticket-specific additions --
+  // any caller that predates this ticket keeps compiling unchanged, the
+  // affordance simply doesn't render without this.
+  onLinkAsPmcc?: (pos: Position) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [trend, setTrend] = useState<TrendResult | null>(null);
@@ -8297,6 +8307,28 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                   title={pos.pmccRole === 'leap' ? 'LEAP leg of a linked PMCC — see PMCC Manager' : 'Short-call leg of a linked PMCC — see PMCC Manager'}>
                   {pos.pmccRole === 'leap' ? 'PMCC ◆' : 'PMCC ○'}
                 </span>
+              )}
+              {/* PMCC-0008: contextual entry point, replacing the old
+                  masthead-button-only path. Shown on any eligible,
+                  not-yet-linked single-leg long/short call -- the trader's
+                  natural starting point is the position itself, not a
+                  global toolbar three clicks away. Only pre-fills the LEAP
+                  field when clicked from an eligible LEAP (pre-filling the
+                  short-call field from here would require a second
+                  preselect prop for comparatively little value -- landing
+                  on the tab with the position visible in the picker is an
+                  acceptable fallback for that case, per the ticket's own
+                  scope note). */}
+              {!pos.pmccRole && (isPmccEligibleLeap(pos) || isPmccEligibleShort(pos)) && onLinkAsPmcc && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    onLinkAsPmcc(pos);
+                  }}
+                  className="ml-1 text-[9px] px-1 py-0.5 rounded font-bold bg-teal-500/5 text-teal-500/80 border border-teal-800/40 hover:bg-teal-500/15 hover:text-teal-400 transition-colors"
+                  title="Link this position as a PMCC">
+                  Link as PMCC
+                </button>
               )}
               {/* Chart button */}
               <div className="relative mt-1">
@@ -9267,7 +9299,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReviews, onSaveDecisionReview, focusKey }: {
+function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReviews, onSaveDecisionReview, focusKey, onLinkAsPmcc }: {
   title: string; titleColor: string; positions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
@@ -9287,6 +9319,8 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
   // defaults to undefined -- every existing caller keeps compiling and
   // rendering unchanged.
   focusKey?: string | null;
+  // PMCC-0008: threaded through to PositionCard, same optional convention.
+  onLinkAsPmcc?: (pos: Position) => void;
 }) {
   const lifecycleRank: Record<string, number> = {
     CSP: 1,
@@ -9336,6 +9370,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
             decisionReview={decisionReviews ? latestReviewForPosition(decisionReviews, p.key) : null}
             onSaveDecisionReview={onSaveDecisionReview}
             focusKey={focusKey}
+            onLinkAsPmcc={onLinkAsPmcc}
           />
         ))}
       </div>
@@ -9610,10 +9645,10 @@ export default function PortfolioPage() {
   // 'history' via the `tab` query param -- read once, on initial state
   // construction, so a fresh load of a deep link opens directly into the
   // right tab without an extra render/flash.
-  const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>(() => {
+  const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances' | 'pmcc'>(() => {
     if (typeof window === 'undefined') return 'positions';
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab === 'todays-priorities' || tab === 'briefing' || tab === 'positions' || tab === 'history') return tab;
+    if (tab === 'todays-priorities' || tab === 'briefing' || tab === 'positions' || tab === 'history' || tab === 'pmcc') return tab;
     return 'positions';
   });
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
@@ -9659,7 +9694,12 @@ export default function PortfolioPage() {
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
-  const [showPmccManager, setShowPmccManager] = useState(false);
+  // PMCC-0008: showPmccManager modal state removed (PmccManagerPanel no
+  // longer exists as a modal) -- replaced by the 'pmcc' activeTab value.
+  // preselectPmccLeapKey carries a position key from an eligible card's
+  // "Link as PMCC" click into the PMCC tab's linking form, so it opens
+  // already pointed at that position instead of landing empty.
+  const [preselectPmccLeapKey, setPreselectPmccLeapKey] = useState<string | null>(null);
   const [dryRunMode, setDryRunMode] = useState<boolean>(isDryRun);
   // WA-0003 (CES section 13.2, level-2 deep link): read once on initial
   // mount, mirroring activeTab's own initial-URL-read pattern above. `focus`
@@ -10034,10 +10074,6 @@ export default function PortfolioPage() {
             className="text-[10px] px-3 py-1.5 border border-purple-800 text-purple-400 rounded hover:border-purple-600 hover:text-purple-300 transition-colors tracking-wider">
             ◆ Memory
           </button>
-          <button onClick={() => setShowPmccManager(true)}
-            className="text-[10px] px-3 py-1.5 border border-teal-800 text-teal-400 rounded hover:border-teal-600 hover:text-teal-300 transition-colors tracking-wider">
-            ◆ PMCC
-          </button>
           {positions.length > 0 && (
             <button onClick={handleAnalyzePortfolio} disabled={portfolioAnalysisLoading}
               className="text-[10px] px-3 py-1.5 border border-indigo-700 text-indigo-400 rounded hover:border-indigo-500 hover:text-indigo-300 transition-colors tracking-wider disabled:opacity-50 font-bold">
@@ -10086,7 +10122,14 @@ export default function PortfolioPage() {
             { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+            // PMCC-0008: relocated from the masthead toolbar -- PMCC
+            // management is position-specific, not a global/account-level
+            // action, so it belongs at this level (same as Balances,
+            // Decision History) not alongside Memory/Analyze
+            // Portfolio/Refresh/Sign Out. See docs/reviews/
+            // PMCC-0008-implementation-report.md for the full reasoning.
+            { key: 'pmcc', label: 'PMCC', icon: '◆' },
+          ] as { key: 'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances' | 'pmcc'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -10117,6 +10160,16 @@ export default function PortfolioPage() {
       )}
 
       {activeTab === 'balances' && <BalancesTab />}
+
+      {activeTab === 'pmcc' && (
+        <PmccManagerTab
+          positions={positions}
+          th={th}
+          onRefresh={refreshPortfolioData}
+          dryRunMode={dryRunMode}
+          preselectLeapKey={preselectPmccLeapKey}
+        />
+      )}
 
       {/* WA-0003: Today's Priorities -- the finite, completion-aware open
           queue (lib/todays-priorities-queue, additive over
@@ -10291,6 +10344,10 @@ export default function PortfolioPage() {
                         onPricingRefreshOutcome={setPricingRefreshOutcome}
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                         focusKey={focusPositionKey}
+                        onLinkAsPmcc={pos => {
+                          if (isPmccEligibleLeap(pos)) setPreselectPmccLeapKey(pos.key);
+                          setActiveTab('pmcc');
+                        }}
                       />
                     )}
                   </>
@@ -10319,15 +10376,6 @@ export default function PortfolioPage() {
       {showAuditLog && <AuditLogPanel onClose={() => setShowAuditLog(false)} th={th} />}
       {showPerformance && <PerformancePanel onClose={() => setShowPerformance(false)} th={th} />}
       {showMemory && <MemoryPanel onClose={() => setShowMemory(false)} th={th} />}
-      {showPmccManager && (
-        <PmccManagerPanel
-          positions={positions}
-          th={th}
-          onRefresh={refreshPortfolioData}
-          onClose={() => setShowPmccManager(false)}
-          dryRunMode={dryRunMode}
-        />
-      )}
 
       {portfolioAnalysis && !portfolioAnalysis.error && (
         <PortfolioAnalysisPanel analysis={portfolioAnalysis} positions={positions} onClose={() => setPortfolioAnalysis(null)} th={th} />
