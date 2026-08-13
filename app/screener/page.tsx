@@ -68,6 +68,7 @@ import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
+import { buildOrderLegs, buildOrderPayload, hasOccSymbolsForOrder } from '@/lib/scans/orderBuilder';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import {
@@ -2749,34 +2750,10 @@ async function getAccountNumber(): Promise<string> {
   return acct;
 }
 
-function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
-  const instrType = result.underlyingType === 'index' ? 'Index Option' : 'Equity Option';
-  const legs: any[] = [];
-  if (c.strategy === 'BPS') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'BCS') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'IC') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.shortCallOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longCallOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  }
-  return legs;
-}
-
-function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): any {
-  const credit = ((c.totalCredit ?? c.credit) * quantity).toFixed(2);
-  return {
-    'time-in-force': 'GTC',
-    'order-type': 'Limit',
-    price: credit,
-    'price-effect': 'Credit',
-    legs: legs.map(l => ({ ...l, quantity })),
-  };
-}
+// PMCC-0007/build-fix pattern: buildOrderLegs, buildOrderPayload, and
+// hasOccSymbolsForOrder moved to lib/scans/orderBuilder.ts -- see that
+// module's doc for why (testability + the same page.tsx-export
+// constraint that broke an earlier Vercel build). Imported below.
 
 function TradeModal({ result, th, onClose }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
@@ -2805,8 +2782,10 @@ function TradeModal({ result, th, onClose }: {
   const [stopLimitBufferPct, setStopLimitBufferPct] = useState(5);
   const stopLimitPrice = parseFloat((stopPrice * (1 + stopLimitBufferPct / 100)).toFixed(2));
 
-  // Entry limit price (default = credit, can tweak)
-  const [entryLimit, setEntryLimit] = useState(parseFloat(creditPerContract.toFixed(2)));
+  // Entry limit price (default = credit for BPS/BCS/IC, net debit for PMCC — can tweak)
+  const [entryLimit, setEntryLimit] = useState(
+    c.strategy === 'PMCC' ? parseFloat((c.netDebit ?? 0).toFixed(2)) : parseFloat(creditPerContract.toFixed(2))
+  );
 
   // ── OTM proximity hard gate ────────────────────────────────────────────
   // Chasing premium on a tight-to-ITM strike is the exact mistake this is
@@ -2831,8 +2810,7 @@ function TradeModal({ result, th, onClose }: {
   const [otmOverrideChecked, setOtmOverrideChecked] = useState(false);
   const otmGateBlocking = otmTooTight && !otmOverrideChecked;
 
-  const hasOccSymbols = c.shortOccSymbol && c.longOccSymbol &&
-    (c.strategy !== 'IC' || (c.shortCallOccSymbol && c.longCallOccSymbol));
+  const hasOccSymbols = hasOccSymbolsForOrder(c);
 
   const credit = entryLimit * quantity;
   const maxLoss = (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
@@ -2914,6 +2892,36 @@ function TradeModal({ result, th, onClose }: {
     try {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
+      // PMCC-0007: PMCC does NOT use the OTOCO bracket-the-whole-structure
+      // pattern every other strategy here uses. An OTOCO auto-attaches a
+      // GTC profit-target and stop-loss that closes ALL legs together --
+      // correct for a same-expiration credit spread, but wrong for a
+      // PMCC: it would auto-close the LEAP (the actual long-term profit
+      // engine) the moment the short call alone hits a target or stop,
+      // defeating the strategy's real mechanics (LEAP held long-term,
+      // short call rolled independently every 30-45 days). PMCC submits
+      // as a plain multi-leg entry order instead -- no auto-attached
+      // bracket. Optional protection on the short leg alone happens
+      // separately, after entry, via the existing single-leg GTC
+      // mechanism (SetStopLossButton, app/portfolio/page.tsx) once the
+      // resulting positions are linked in PMCC Manager (see PMCC-0003).
+      if (c.strategy === 'PMCC') {
+        const legs = buildOrderLegs(result, c);
+        const payload = buildOrderPayload(c, quantity, legs);
+        payload.price = entryLimit.toFixed(2);
+        const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        console.log('PLACE_ORDER_DEBUG (PMCC, plain order) payload sent:', JSON.stringify(payload, null, 2));
+        console.log('PLACE_ORDER_DEBUG (PMCC, plain order) full response:', data);
+        if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+        setOrderId(data?.data?.order?.id ?? 'submitted');
+        setPhase('done');
+        return;
+      }
       // Single OTOCO complex order: entry → OCO (GTC profit target + stop loss)
       const payload = buildOtocoPayload(quantity);
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
@@ -2996,10 +3004,10 @@ function TradeModal({ result, th, onClose }: {
             })()}
           </div>
           <div className="flex justify-between text-xs items-center">
-            <span className={th.textFaint}>Entry limit / contract</span>
+            <span className={th.textFaint}>{c.strategy === 'PMCC' ? 'Entry limit (net debit) / contract' : 'Entry limit / contract'}</span>
             <div className="flex items-center gap-1">
               <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>−</button>
-              <span className="text-emerald-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
+              <span className={`${c.strategy === 'PMCC' ? 'text-red-400' : 'text-emerald-400'} font-bold text-xs w-12 text-center`}>${entryLimit.toFixed(2)}</span>
               <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>+</button>
             </div>
           </div>
@@ -3018,57 +3026,85 @@ function TradeModal({ result, th, onClose }: {
             <button onClick={() => setQuantity(q => Math.min(20, q + 1))} className={`w-7 h-7 rounded border ${th.border} ${th.textMuted} ac-hover-border text-sm`}>+</button>
           </div>
           <div className="ml-auto text-right">
-            <p className="text-emerald-400 font-bold text-sm">${credit.toFixed(2)} credit</p>
-            <p className={`text-[10px] ${th.textFaint}`}>Max loss ~${maxLoss.toFixed(0)}</p>
+            {c.strategy === 'PMCC' ? (
+              <>
+                <p className="text-red-400 font-bold text-sm">${credit.toFixed(2)} debit</p>
+                <p className={`text-[10px] ${th.textFaint}`}>Capital at risk ~${(entryLimit * quantity * 100).toFixed(0)}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-emerald-400 font-bold text-sm">${credit.toFixed(2)} credit</p>
+                <p className={`text-[10px] ${th.textFaint}`}>Max loss ~${maxLoss.toFixed(0)}</p>
+              </>
+            )}
           </div>
         </div>
 
-        {/* GTC Profit Target */}
-        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold tracking-widest text-emerald-400">GTC PROFIT TARGET</p>
-            <span className={`text-[9px] ${th.textFaint}`}>closes at ${gtcBuyback.toFixed(2)} debit</span>
+        {/* PMCC-0007: no OTOCO bracket at entry -- see placeOrder's doc
+            comment for why (auto-closing the whole structure together
+            would close the LEAP alongside the short call, defeating the
+            strategy). The GTC/Stop config below is specific to a
+            same-expiration bracket order and doesn't apply here. */}
+        {c.strategy === 'PMCC' ? (
+          <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4`}>
+            <p className="text-[10px] font-bold tracking-widest text-teal-400 mb-2">NO AUTO-BRACKET FOR PMCC</p>
+            <p className={`text-[9px] ${th.textFaint} leading-relaxed`}>
+              This submits as a plain entry order — the LEAP and short call open together, with no automatic profit-target or stop-loss attached to the whole structure. Bracketing both legs together would auto-close your LEAP the moment the short call alone hits a target or stop, which defeats the strategy.
+            </p>
+            <p className={`text-[9px] ${th.textFaint} leading-relaxed mt-2`}>
+              After this fills, link the two resulting positions in Portfolio → PMCC Manager. You can optionally protect the short leg on its own from there, the same way any other short call gets a stop or GTC target.
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            {[25, 50, 65, 75].map(pct => (
-              <button key={pct} onClick={() => setGtcPct(pct)}
-                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${gtcPct === pct ? 'bg-emerald-600 border-emerald-500 text-white' : `${th.border} ${th.textFaint} hover:border-emerald-600`}`}>
-                {pct}%
-              </button>
-            ))}
-          </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} credit is captured</p>
-        </div>
+        ) : (
+          <>
+            {/* GTC Profit Target */}
+            <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-bold tracking-widest text-emerald-400">GTC PROFIT TARGET</p>
+                <span className={`text-[9px] ${th.textFaint}`}>closes at ${gtcBuyback.toFixed(2)} debit</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {[25, 50, 65, 75].map(pct => (
+                  <button key={pct} onClick={() => setGtcPct(pct)}
+                    className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${gtcPct === pct ? 'bg-emerald-600 border-emerald-500 text-white' : `${th.border} ${th.textFaint} hover:border-emerald-600`}`}>
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+              <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} credit is captured</p>
+            </div>
 
-        {/* Stop Loss */}
-        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4`}>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold tracking-widest text-red-400">STOP LOSS</p>
-            <span className={`text-[9px] ${th.textFaint}`}>triggers at ${stopPrice.toFixed(2)} debit</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {[150, 200, 250, 300].map(pct => (
-              <button key={pct} onClick={() => setStopPct(pct)}
-                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${stopPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
-                {pct}%
-              </button>
-            ))}
-          </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop triggers when spread costs ${stopPrice.toFixed(2)} to close ({stopPct}% of credit = {stopPct - 100}% loss on credit received)</p>
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-red-900/30">
-            <span className={`text-[9px] ${th.textFaint}`}>Stop-limit buffer</span>
-            <span className={`text-[9px] ${th.textFaint}`}>limit at ${stopLimitPrice.toFixed(2)} debit</span>
-          </div>
-          <div className="flex items-center gap-2 mt-1.5">
-            {[2, 5, 10, 15].map(pct => (
-              <button key={pct} onClick={() => setStopLimitBufferPct(pct)}
-                className={`flex-1 py-1 rounded text-[10px] font-bold border transition-colors ${stopLimitBufferPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
-                +{pct}%
-              </button>
-            ))}
-          </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop submits as Stop Limit — triggers at ${stopPrice.toFixed(2)}, fills up to ${stopLimitPrice.toFixed(2)} (required: TastyTrade does not allow stop-market orders on multi-leg spreads)</p>
-        </div>
+            {/* Stop Loss */}
+            <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4`}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-bold tracking-widest text-red-400">STOP LOSS</p>
+                <span className={`text-[9px] ${th.textFaint}`}>triggers at ${stopPrice.toFixed(2)} debit</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {[150, 200, 250, 300].map(pct => (
+                  <button key={pct} onClick={() => setStopPct(pct)}
+                    className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${stopPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+              <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop triggers when spread costs ${stopPrice.toFixed(2)} to close ({stopPct}% of credit = {stopPct - 100}% loss on credit received)</p>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-red-900/30">
+                <span className={`text-[9px] ${th.textFaint}`}>Stop-limit buffer</span>
+                <span className={`text-[9px] ${th.textFaint}`}>limit at ${stopLimitPrice.toFixed(2)} debit</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                {[2, 5, 10, 15].map(pct => (
+                  <button key={pct} onClick={() => setStopLimitBufferPct(pct)}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold border transition-colors ${stopLimitBufferPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
+                    +{pct}%
+                  </button>
+                ))}
+              </div>
+              <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop submits as Stop Limit — triggers at ${stopPrice.toFixed(2)}, fills up to ${stopLimitPrice.toFixed(2)} (required: TastyTrade does not allow stop-market orders on multi-leg spreads)</p>
+            </div>
+          </>
+        )}
 
         {/* Dry run result */}
         {dryRunResult && (
@@ -3081,9 +3117,19 @@ function TradeModal({ result, th, onClose }: {
 
         {phase === 'done' && (
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
-            <p className="text-xs text-emerald-400 font-bold">✓ OTOCO order submitted — ID {orderId}</p>
-            <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) + stop loss ({stopPct}%) submitted as a single bracket order. Once entry fills, the OCO activates automatically.</p>
-            <p className="text-[10px] text-emerald-400/70">Verify the complex order in TastyTrade.</p>
+            {c.strategy === 'PMCC' ? (
+              <>
+                <p className="text-xs text-emerald-400 font-bold">✓ PMCC entry order submitted — ID {orderId}</p>
+                <p className="text-[10px] text-emerald-400/70">Plain entry order — no auto-attached bracket. Once it fills, link the two positions in Portfolio → PMCC Manager.</p>
+                <p className="text-[10px] text-emerald-400/70">Verify the order in TastyTrade.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-emerald-400 font-bold">✓ OTOCO order submitted — ID {orderId}</p>
+                <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) + stop loss ({stopPct}%) submitted as a single bracket order. Once entry fills, the OCO activates automatically.</p>
+                <p className="text-[10px] text-emerald-400/70">Verify the complex order in TastyTrade.</p>
+              </>
+            )}
           </div>
         )}
 
@@ -3108,7 +3154,7 @@ function TradeModal({ result, th, onClose }: {
                 </button>
                 <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking}
                   className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
-                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC + STOP`}
+                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : c.strategy === 'PMCC' ? 'PLACE ENTRY ORDER' : 'PLACE + GTC + STOP'}
                 </button>
               </>
             )}

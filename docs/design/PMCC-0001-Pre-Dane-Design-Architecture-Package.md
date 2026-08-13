@@ -1,11 +1,26 @@
 # PMCC-0001 — Pre-Dane Design & Architecture Package
 
-**Status:** PRE-IMPLEMENTATION / REVIEW READY  
-**Date:** 2026-08-09  
-**Parent:** `docs/specifications/TradeEdge-PMCC-Capital-Cycle-Specification-v1.md`  
+**Status:** SUPERSEDED — see note below. Original content preserved unchanged for historical reference.
+**Date:** 2026-08-09
+**Parent:** `docs/specifications/TradeEdge-PMCC-Capital-Cycle-Specification-v1.md`
 **Implementation authorization:** NONE — this package defines the safe first engineering slice; it does not authorize production PMCC behavior.
 
 ---
+
+## Superseded — 2026-08-13
+
+This package planned PMCC entering through canonical `AutopilotStrategy`/`DecisionAction`/decision-engine contracts, with `PMCC-0002A` (canonical domain/decision-engine foundation) as the first real implementation step, and broker execution gated several phases further out behind execution-time revalidation and a Shadow Validation period.
+
+**`PMCC-0002A` was never built.** `AutopilotStrategy` still has no `'PMCC'` member — the only trace of this plan in real code is a deliberate exclusion guard in `lib/autopilot/decision/screenerCandidateAdapter.ts` that correctly stops Autopilot from evaluating PMCC results (`'PMCC has no AutopilotStrategy representation yet — product decision needed before Autopilot can evaluate it.'`). That guard is unaffected by everything below and should stay exactly as-is.
+
+Instead, PMCC entered production through a different, lighter path: `PMCC-0002` (Alan's data-model design, two linked `Position` records via `PmccLink`), then `PMCC-0003` through `PMCC-0006` (linking, intrinsic/extrinsic tracking, decay clocks, contract-ratio validation, a dry-run test fixture — all scoped to `app/portfolio/page.tsx`), then `PMCC-0007` (order execution, extending the existing `buildOrderLegs`/`buildOrderPayload`/`TradeModal` pattern already used for BPS/BCS/IC, not the canonical architecture below).
+
+This was a deliberate team decision (Paul/Ian/Quinn/Alan, 2026-08-13), not an oversight: the canonical path solves a currently-hypothetical problem (automated PMCC scanning/ranking through Autopilot), while the lighter path answered the actual concrete request (submit a PMCC order through TradeEdge) faster, and the existing dry-run-then-confirm order flow already satisfies this doc's execution-time-revalidation requirement without needing the larger rewrite.
+
+**If automated PMCC recommendations through Autopilot ever become a real, concrete need, this document's architecture (§3, §4, §7) is still the right starting point** — it wasn't wrong, just not what got built. See `PMCC-0007-order-execution-design.md` for the full reasoning.
+
+---
+
 
 ## 1. Executive Decision
 
