@@ -13,7 +13,11 @@ import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
 import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence } from '@/lib/portfolio/stopLossPolicy';
 
 // ── Types ──────────────────────────────────────────────────────────────────
-export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
+// PI-0007: HOLD_TO_EXPIRATION is a distinct outcome from HOLD -- it means the
+// gate in getRecommendation() actively evaluated a past-21-DTE position as
+// statistically safe (POP/delta/buffer) and is suppressing what would
+// otherwise be a MANAGE suggestion, not just "nothing else applies."
+export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC' | 'HOLD_TO_EXPIRATION';
 
 
 export interface PositionLeg {

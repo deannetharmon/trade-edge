@@ -1626,10 +1626,18 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
 
   positions = await attachEntrySnapshots(positions);
 
-  const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
+  // PI-0007: three-tier sort, entirely priority-driven now. The old
+  // `needsClose`-pinned-to-top rule is removed -- a position that's past 21
+  // DTE but confirmed safe by evaluateExpirationGate (HOLD_TO_EXPIRATION)
+  // should not fight for the same attention as an active CUT_LOSSES/MANAGE.
+  // HOLD_TO_EXPIRATION sits below every actionable tier but above plain HOLD,
+  // so it's still findable in one scroll without demanding daily attention.
+  const actionPriority: Record<string, number> = {
+    CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4,
+    HOLD_TO_EXPIRATION: 4.5,
+    HOLD: 5,
+  };
   positions.sort((a, b) => {
-    if (a.needsClose && !b.needsClose) return -1;
-    if (!a.needsClose && b.needsClose) return 1;
     const aRec = getRecommendation(a, null).action;
     const bRec = getRecommendation(b, null).action;
     const aPri = actionPriority[aRec] ?? 9;
@@ -1663,6 +1671,75 @@ export async function loadAccountBalances(): Promise<PortfolioFinancialContext> 
 // Returns true when this was intentionally entered as a short-dated trade
 export function isShortDateEntry(pos: Position): boolean {
   return pos.entryDte <= 21;
+}
+
+
+// PI-0007: Hold vs. Cut decision gate.
+//
+// Problem this replaces: the old getRecommendation() branch suggested
+// CLOSE_ROLL/MANAGE purely off `pos.needsClose` (past 21 DTE) crossed with
+// whether unrealized P/L happened to be red or green at that instant --
+// exactly the "temporary unrealized loss triggers a reaction" behavior
+// documented as the root cause of premature exits on trades that would have
+// expired OTM for max profit (see PI-0007 ticket, Context & Problem
+// Statement). pnlPct is noisy intraday; POP/buffer/delta are the actual risk
+// state of the trade.
+//
+// Signal hierarchy (per Paul/Ian review):
+//   - PRIMARY: pos.pop (breakeven-based probability of profit, already
+//     computed by calcPositionPop -- this function does NOT recompute POP).
+//   - SECONDARY/confirming only: pos.netDelta, checked against the
+//     strategy's own entry-target ceiling (BPS/BCS 0.30, IC 0.20) rather than
+//     a flat cutoff, since a position sitting at its normal entry delta
+//     should never itself read as "unsafe."
+//   - Buffer uses hysteresis (>6% to enter the safe state, must drop below
+//     4% to exit it) so the badge doesn't flicker on ordinary daily noise
+//     near a single threshold. "Was previously safe" is derived by
+//     re-evaluating the buffer-only condition against the most recent
+//     snapshot in pos.snapshotHistory, not a persisted flag.
+//
+// Explicitly does NOT touch: breached-strike CUT_LOSSES, confirmed
+// stop-loss breach, or any hard-exit path above this function's call site in
+// getRecommendation() -- those remain real risk events regardless of what
+// this gate decides. See PI-0007 ticket "Explicitly NOT in scope."
+interface ExpirationGateResult {
+  safe: boolean;
+  reason: string;
+}
+
+function wasBufferSafeLastSnapshot(pos: Position): boolean {
+  const hist = pos.snapshotHistory ?? [];
+  if (hist.length === 0) return false; // no history -> treat as "was not previously safe" (use the higher 6% bar)
+  const last = hist[hist.length - 1];
+  return last.buffer != null && last.buffer > 6;
+}
+
+function evaluateExpirationGate(pos: Position): ExpirationGateResult {
+  const pop = getCurrentPop(pos);
+  const delta = pos.netDelta;
+  const buffer = pos.buffer;
+
+  const deltaCeiling =
+    pos.strategy === 'BCS' ? 0.30 :
+    pos.strategy === 'IC'  ? 0.20 :
+    0.30; // BPS default
+
+  const popSafe = pop != null && pop > 75;
+  const deltaSafe = delta == null || Math.abs(delta) < deltaCeiling; // unknown delta never blocks safety on its own
+  const bufferFloor = wasBufferSafeLastSnapshot(pos) ? 4 : 6; // hysteresis: harder to enter "safe" than to stay in it
+  const bufferSafe = buffer != null && buffer > bufferFloor;
+
+  const safe = popSafe && deltaSafe && bufferSafe;
+
+  const reason = safe
+    ? `POP ${pop!.toFixed(0)}%, buffer ${buffer!.toFixed(1)}% — statistically safe, hold to expiration`
+    : !popSafe
+      ? `POP ${pop != null ? pop.toFixed(0) + '%' : 'unknown'} — below 75% safety threshold`
+      : !deltaSafe
+        ? `Delta ${Math.abs(delta!).toFixed(2)} drifted past ${deltaCeiling} entry ceiling`
+        : `Buffer ${buffer != null ? buffer.toFixed(1) + '%' : 'unknown'} — below safety threshold`;
+
+  return { safe, reason };
 }
 
 
@@ -1757,9 +1834,18 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
         ? `Working stop is ${pos.stopLossClassification === 'TOO_TIGHT' ? 'tighter than the documented policy' : 'of unknown provenance (not created by TradeEdge)'} — ${displayStopEvaluation.explanation}`
         : stopBreachEvaluation.explanation;
 
-  // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this
-  if (pos.needsClose && pnlPct >= 0) return { action: 'CLOSE_ROLL', detail: `${pos.dte} DTE — close or roll to next expiry` };
-  if (pos.needsClose && pnlPct < 0)  return { action: 'MANAGE', detail: `${pos.dte} DTE with loss — review close/roll, don't auto-cut` };
+  // needsClose only fires for standard entries (entryDte > 21) — short-dated entries skip this.
+  // PI-0007: this used to be a standalone check right here, before any
+  // hard-exit path below. That ordering had a latent correctness gap this
+  // ticket also fixes: a position that is BOTH past 21 DTE AND has a
+  // breached strike (or confirmed stop breach) would return off this branch
+  // and never reach the `breached`/`stopLossConfirmedBreach` checks below at
+  // all -- silently downgrading a real risk event to a DTE-driven MANAGE.
+  // The gate now runs AFTER every hard-exit check, so a breach always wins
+  // regardless of DTE (see PI-0007 ticket, "Explicitly NOT in scope" /
+  // Ian's review requirement that breach logic stays untouched -- moving
+  // this below is what actually satisfies that requirement, since leaving
+  // it in the original position would not have).
 
   // Acquisition-intent CSP: ITM / paper loss is the plan working, not a risk signal.
   // Skip all breach/stop/loss-based hard exits — hold to expiration for assignment.
@@ -1781,6 +1867,19 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
     detail: `Verify pricing — midpoint and marketable valuations conflict, but the marketable quote is not fresh and reliable enough to control a hard action`,
   };
   if (veryLargeLoss && trendAgainst) return { action: 'CUT_LOSSES', detail: `Down ${Math.abs(pnlPct).toFixed(0)}% and trend is adverse — exit or roll` };
+
+  // PI-0007: replaces the old pnlPct-driven needsClose branch. Whether a
+  // past-21-DTE position gets suggested for close/manage now depends on the
+  // POP/delta/buffer gate, NOT on whether unrealized P/L happens to be red
+  // or green at this exact moment -- see evaluateExpirationGate's doc
+  // comment above for the full rationale. Placed here, after every hard
+  // exit above, so breach/stop/pricing/very-large-loss conditions always
+  // win regardless of DTE.
+  if (pos.needsClose) {
+    const gate = evaluateExpirationGate(pos);
+    if (gate.safe) return { action: 'HOLD_TO_EXPIRATION', detail: gate.reason };
+    return { action: 'MANAGE', detail: `${pos.dte} DTE — ${gate.reason}` };
+  }
 
   // Short-dated entry: maximize profit, but do not treat ordinary red P/L as a failure.
   if (shortDate) {

@@ -2882,6 +2882,10 @@ const ACTION_META: Record<ActionType, { label: string; color: string; btnClass: 
   CUT_LOSSES:  { label: '✕ Cut Losses',   color: 'text-red-400',     btnClass: 'border-red-600 text-red-400 hover:bg-red-600/20' },
   CLOSE_ROLL:  { label: '↻ Close/Roll',   color: 'text-purple-400',  btnClass: 'border-purple-600 text-purple-400 hover:bg-purple-600/20' },
   PLACE_GTC:   { label: '⏱ Place GTC',   color: 'text-blue-400',    btnClass: 'ac-btn hover:ac-bg-20' },
+  // PI-0007: deliberately not red/amber/green — this isn't a danger or a
+  // target-hit state, it's a calm "nothing to do" signal for a past-21-DTE
+  // position the gate has confirmed is statistically safe.
+  HOLD_TO_EXPIRATION: { label: '◆ Hold to Expiration', color: 'text-teal-400', btnClass: 'border-teal-700 text-teal-400' },
 };
 
 function ThemeToggle({ theme, setTheme, accent, setAccent }: {
@@ -2947,6 +2951,8 @@ function BatchConfirmModal({
 
   // GTC override confirmation
   const [gtcConfirmed, setGtcConfirmed] = useState<Set<string>>(new Set());
+  // PI-0007: expiration-gate friction confirmation (statistically-safe close/roll)
+  const [expirationGateConfirmed, setExpirationGateConfirmed] = useState<Set<string>>(new Set());
   const [refreshingQuote, setRefreshingQuote] = useState<Set<string>>(new Set());
 
   // PT-0002B: guard call site for this component's real broker submissions
@@ -3292,9 +3298,25 @@ function BatchConfirmModal({
   );
   const allGtcConfirmed = needsGtcConfirmation.every(item => gtcConfirmed.has(item.pos.key));
 
+  // PI-0007: friction on manually closing/rolling a position the gate has
+  // marked HOLD_TO_EXPIRATION — reuses the same explicit-confirm pattern as
+  // needsGtcConfirmation/gtcConfirmed above rather than a separate modal, so
+  // this behaves identically to every other "are you sure" gate in this
+  // component. Reads pos.pop directly (getCurrentPop) — same number the
+  // badge on the card shows, never a second computed probability.
+  const needsExpirationGateConfirmation = activeItems.filter(item =>
+    (item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') &&
+    getRecommendation(item.pos, null).action === 'HOLD_TO_EXPIRATION'
+  );
+  const allExpirationGateConfirmed = needsExpirationGateConfirmation.every(item => expirationGateConfirmed.has(item.pos.key));
+
   const submitAll = async () => {
     if (needsGtcConfirmation.length > 0 && !allGtcConfirmed) {
       setErrorMsg('You must confirm replacing the existing GTC orders before submitting.');
+      return;
+    }
+    if (needsExpirationGateConfirmation.length > 0 && !allExpirationGateConfirmed) {
+      setErrorMsg('You must confirm closing a statistically safe position before submitting.');
       return;
     }
 
@@ -3717,6 +3739,44 @@ function BatchConfirmModal({
             </div>
           )}
 
+          {/* PI-0007: friction on manually closing/rolling a statistically-safe
+              position. Percentage reads directly from getCurrentPop(pos) —
+              the same value the card badge shows, never recomputed. */}
+          {needsExpirationGateConfirmation.length > 0 && (
+            <div className="bg-teal-500/10 border border-teal-500/40 rounded-xl p-4">
+              <p className="text-teal-400 font-bold text-sm mb-3">◆ Statistically Safe — Confirm Early Close</p>
+              {needsExpirationGateConfirmation.map(item => {
+                const pop = getCurrentPop(item.pos);
+                return (
+                  <div key={item.pos.key} className="flex items-center justify-between py-2 border-b border-teal-500/20 last:border-none">
+                    <div>
+                      <span className="text-xs font-medium">{item.pos.symbol}</span>
+                      <span className="text-xs text-teal-300 ml-2">
+                        — this position has a <span className="font-bold">{pop != null ? `${pop.toFixed(0)}%` : 'high'}</span> statistical probability of expiring worthless. Closing now realizes a premature loss.
+                      </span>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={expirationGateConfirmed.has(item.pos.key)}
+                        onChange={() => {
+                          setExpirationGateConfirmed(prev => {
+                            const n = new Set(prev);
+                            if (expirationGateConfirmed.has(item.pos.key)) n.delete(item.pos.key);
+                            else n.add(item.pos.key);
+                            return n;
+                          });
+                        }}
+                        className="accent-teal-400"
+                      />
+                      <span className="text-teal-400 font-medium">Close anyway</span>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Enriching spinner */}
           {status === 'enriching' && (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
@@ -4126,6 +4186,10 @@ function BatchConfirmModal({
                 {needsGtcConfirmation.length > 0 && !allGtcConfirmed ? (
                   <button disabled className="flex-1 py-3 bg-slate-700 text-slate-400 rounded-xl text-xs font-bold tracking-widest cursor-not-allowed">
                     CONFIRM REPLACING EXISTING GTC TO CONTINUE
+                  </button>
+                ) : needsExpirationGateConfirmation.length > 0 && !allExpirationGateConfirmed ? (
+                  <button disabled className="flex-1 py-3 bg-slate-700 text-slate-400 rounded-xl text-xs font-bold tracking-widest cursor-not-allowed">
+                    CONFIRM CLOSING STATISTICALLY SAFE POSITION TO CONTINUE
                   </button>
                 ) : (
                   <button onClick={submitAll} disabled={activeItems.length === 0}
@@ -7618,34 +7682,35 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
     onProfitTargetChange(pos.key, val);
   };
 
-  const _bannerNetEdge = netEdgeLive(pos);
-  const _reviewNotClose = pos.needsClose && _bannerNetEdge != null && _bannerNetEdge > 0;
+  // PI-0007: border color now agrees with the same gate that drives `rec`
+  // and the badge above — a HOLD_TO_EXPIRATION position gets the calm teal
+  // border, not the red border a stale net-edge check would otherwise leave it with.
   const borderClass = checked
     ? 'border-blue-500/60'
-    : pos.needsClose ? (_reviewNotClose ? 'border-amber-500/60' : 'border-red-500/60')
+    : pos.needsClose ? (rec.action === 'HOLD_TO_EXPIRATION' ? 'border-teal-500/60' : 'border-red-500/60')
     : pos.hitTarget ? 'border-emerald-500/60'
     : th.border;
 
   return (
     <div ref={cardRef} className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
-      {pos.needsClose && (() => {
-        // Net-edge-aware banner: past the 21-DTE rule, but if net edge is still
-        // healthy and positive, this is a REVIEW (amber), not a CLOSE NOW (red).
-        // Negative or unknown net edge keeps the red CLOSE NOW.
-        const ne = netEdgeLive(pos);
-        const healthy = ne != null && ne > 0;
-        return healthy ? (
-          <div className="bg-amber-500/10 border-b border-amber-500/40 px-4 py-1.5 flex items-center gap-2">
-            <span className="text-amber-400 text-xs">⚠</span>
-            <span className="text-xs text-amber-400 font-bold tracking-wider">REVIEW — {pos.dte} DTE · past 21-DTE rule, net edge still +${ne.toFixed(0)}/d</span>
-          </div>
-        ) : (
-          <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
-            <span className="text-red-400 text-xs">⚠</span>
-            <span className="text-xs text-red-400 font-bold tracking-wider">CLOSE NOW — {pos.dte} DTE{ne != null ? ` · net edge ${ne >= 0 ? '+' : ''}$${ne.toFixed(0)}/d` : ''}</span>
-          </div>
-        );
-      })()}
+      {/* PI-0007: replaces the old netEdgeLive-driven REVIEW/CLOSE NOW banner
+          split. The stabilizing badge below now comes from the same
+          POP/delta/buffer gate that drives `rec` above, so the badge and the
+          Suggested Action never disagree about whether this position is
+          safe. */}
+      {pos.needsClose && rec.action === 'HOLD_TO_EXPIRATION' && (
+        <div className="bg-teal-500/10 border-b border-teal-500/40 px-4 py-1.5 flex items-center gap-2">
+          <span className="text-teal-400 text-xs">◆</span>
+          <span className="text-xs text-teal-400 font-bold tracking-wider">HIGH OTM PROBABILITY — LOW GAMMA RISK</span>
+          <span className="text-[10px] text-teal-300/70 ml-1">{rec.detail}</span>
+        </div>
+      )}
+      {pos.needsClose && rec.action !== 'HOLD_TO_EXPIRATION' && (
+        <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-1.5 flex items-center gap-2">
+          <span className="text-red-400 text-xs">⚠</span>
+          <span className="text-xs text-red-400 font-bold tracking-wider">{pos.dte} DTE — {rec.detail}</span>
+        </div>
+      )}
       {!pos.needsClose && isShortDateEntry(pos) && (
         <div className="bg-purple-500/10 border-b border-purple-500/30 px-4 py-1.5 flex items-center gap-2">
           <span className="text-purple-400 text-xs">⚡</span>
