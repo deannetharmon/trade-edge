@@ -3,9 +3,27 @@
 
 export interface CheckResult { status: 'pass' | 'fail' | 'warn' | 'pending'; value: string; reason: string; }
 
+// STRATEGY-DEFS-0001: canonical, exhaustively-checkable strategy union.
+// Before this, SpreadCandidate.strategy was plain `string` -- no compiler
+// protection against a strategy silently missing from a branch anywhere
+// it's compared. That's the confirmed root cause behind four separate
+// incidents in one week (buildOrderLegs/buildOrderPayload missing a PMCC
+// branch entirely; the OTM-distance formula independently duplicated four
+// times, none of the four copies including PMCC; the Filtered-mode
+// single-strategy result-controls block built for CSP but not extended to
+// CC/PMCC; the Autopilot exclusion guard existing only because someone
+// happened to remember to add it in that one file). The working
+// counter-example already existed in this codebase in miniature --
+// lib/screener/screenerResultOrdering.ts's OiStrategy union, paired with
+// an exhaustive `_exhaustive: never` switch check -- this type applies
+// that same proven pattern to the actual root field everything else
+// branches on. Every literal strategy value ever assigned to a
+// SpreadCandidate was confirmed via grep before defining this list: BPS,
+// BCS, IC, CSP, CC, PMCC -- no seventh hidden value.
+export type SpreadStrategy = 'BPS' | 'BCS' | 'IC' | 'CSP' | 'CC' | 'PMCC';
 
 export interface SpreadCandidate {
-  strategy: string; expiration: string; dte: number;
+  strategy: SpreadStrategy; expiration: string; dte: number;
   shortStrike: number; longStrike: number; shortDelta: number;
   credit: number; spreadWidth: number; creditRatio: number;
   roc: number; pop: number | null; shortOI: number; longOI: number; shortIv?: number | null;
