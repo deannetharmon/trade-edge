@@ -5548,6 +5548,41 @@ function OiAndSortControls({
   );
 }
 
+// SCREENER-RESULTS-0002: shared single-strategy result-controls block for
+// Filtered mode's dedicated single-strategy sessions (CSP/CC/PMCC). The
+// generic multi-toggle strategy row (FilteredResultControls, used for the
+// 'spreads' -- BPS/BCS/IC -- session) is genuinely useful there since that
+// scan really does mix three strategies together. It's meaningless clutter
+// for a dedicated single-strategy session: every result is already known
+// to be one strategy, so there's nothing to toggle between (confirmed:
+// toggling any of the other five chips there would just empty the results
+// list, since none of that data was ever fetched). Originally CSP had its
+// own hand-written version of this block; extracted into one shared
+// component when CC and PMCC needed the identical treatment, rather than
+// writing two more near-duplicate copies -- same consolidation rationale
+// as PMCC-0009's calcOtmPct.
+function SingleStrategyResultControls({
+  th, strategy, label, minOi, setMinOi, sort, setSort, oiHelperNote, sortFields,
+}: {
+  th: typeof THEMES[Theme];
+  strategy: string;
+  label: string;
+  minOi: number;
+  setMinOi: (n: number) => void;
+  sort: SortSpec;
+  setSort: (s: SortSpec) => void;
+  oiHelperNote: string;
+  sortFields?: readonly SortField[];
+}) {
+  return (
+    <section aria-label={`${label} result controls`} className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid={`${strategy}-result-controls`}>
+      <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>{label} result controls</p>
+      <OiAndSortControls th={th} minOi={minOi} setMinOi={setMinOi} sort={sort} setSort={setSort} accent="amber" sortFields={sortFields} />
+      <p className={`mt-2 text-[9px] ${th.textFaint}`}>{oiHelperNote}</p>
+    </section>
+  );
+}
+
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
 // SCREENER-OI-0001 corrective pass: Targeted mode explicitly does NOT get
 // the new canonical minimum-OI floor or two-level sort UI -- product
@@ -7893,11 +7928,27 @@ export default function Home() {
                   documented Filtered-mode-first scope decision. */}
               {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
                 activeSession?.requestedStrategy === 'csp' ? (
-                  <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
-                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
-                  </section>
+                  <SingleStrategyResultControls
+                    th={th} strategy="csp" label="CSP"
+                    minOi={filteredMinOi} setMinOi={setFilteredMinOi}
+                    sort={filteredSort} setSort={setFilteredSort}
+                    sortFields={['score', 'rocPct', 'creditDollars', 'otmPct', 'pop', 'relevantLegOI', 'dte']}
+                    oiHelperNote="Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing."
+                  />
+                ) : activeSession?.requestedStrategy === 'cc' ? (
+                  <SingleStrategyResultControls
+                    th={th} strategy="cc" label="Covered Call"
+                    minOi={filteredMinOi} setMinOi={setFilteredMinOi}
+                    sort={filteredSort} setSort={setFilteredSort}
+                    oiHelperNote="Relevant-leg OI is the short call only. A positive OI floor fails closed when OI is missing."
+                  />
+                ) : activeSession?.requestedStrategy === 'pmcc' ? (
+                  <SingleStrategyResultControls
+                    th={th} strategy="pmcc" label="PMCC"
+                    minOi={filteredMinOi} setMinOi={setFilteredMinOi}
+                    sort={filteredSort} setSort={setFilteredSort}
+                    oiHelperNote="Relevant-leg OI is the lower of the LEAP's and the short call's OI. Unlike other strategies, the long LEAP is not a protective leg here -- it is the position itself, so both legs are required independently, not just the short one."
+                  />
                 ) : <FilteredResultControls
                   results={results}
                   qualifiedTotal={qualified.length}
