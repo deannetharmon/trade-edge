@@ -73,7 +73,7 @@ import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/st
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
-import { computeEntryChangeTone } from '@/lib/portfolio/positionMetrics';
+import { computeEntryChangeTone, findShortLegStrikes } from '@/lib/portfolio/positionMetrics';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -425,7 +425,7 @@ type EvaluatedAction = 'EXTEND_PROFIT' | 'CLOSE_ROLL' | 'TAKE_PROFIT' | 'CUT_LOS
 
 
 
-interface AuditEntry {
+export interface AuditEntry {
   id: string;
   timestamp: string;
   symbol: string;
@@ -440,6 +440,13 @@ interface AuditEntry {
   estPnl?: number;
   closeProfitPct?: number;  // % profit captured on TAKE_PROFIT closes (e.g. 65 for 65%)
   creditAtClose?: number;   // credit per contract at time of close — used to back-calc pct
+  // PI-0011: OCO/stop-loss placements carry two prices (GTC target AND stop
+  // trigger), which `limitPrice` alone can't represent. Both optional so
+  // every other existing entry shape/consumer is unaffected -- only
+  // SetStopLossButton's submit() populates these, and only for a CONFIRMED
+  // broker placement, never a draft edit (see writeAuditEntry call site).
+  gtcPrice?: number;
+  stopPrice?: number;
   // ES-0001: diagnostic/audit evidence for the canonical close-order safety
   // gate -- reuses this existing audit mechanism rather than adding a new
   // one. groupKey lets a later investigation trace exactly which canonical
@@ -748,6 +755,18 @@ function writeAuditEntry(entry: AuditEntry) {
     if (log.length > 500) log.length = 500; // cap at 500 entries
     localStorage.setItem(LS_AUDIT_LOG, JSON.stringify(log));
   } catch {}
+}
+
+// PI-0011: which audit entries count as stop/GTC change history for a given
+// position -- extracted as a pure, named, exported function specifically so
+// it's unit-testable without a full component render harness (SetStopLossButton
+// depends on live price fetch, AI suggestion fetch, and modal-open state, none
+// of which are worth mocking just to test a filter predicate). Only entries
+// carrying gtcPrice/stopPrice count -- ordinary trade-execution audit entries
+// (closes, rolls, take-profits) are deliberately excluded even if they share
+// the same groupKey, since this history is scoped to stop/GTC placements only.
+export function filterStopGtcHistory(log: AuditEntry[], positionKey: string): AuditEntry[] {
+  return log.filter(e => e.groupKey === positionKey && (e.gtcPrice != null || e.stopPrice != null));
 }
 
 function exportAuditCsv() {
@@ -5987,6 +6006,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const [phase, setPhase]     = useState('');
   const [result, setResult]   = useState<'success' | 'error' | null>(null);
   const [resultMsg, setResultMsg] = useState('');
+  const [showHistory, setShowHistory] = useState(false); // PI-0011: collapsed by default
   const [stopPrice, setStopPrice] = useState('');
   // TE-0002: tracks WHY the current stopPrice value is what it is, so
   // submit() can persist accurate provenance instead of re-deriving a basis
@@ -6479,6 +6499,18 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
           setResult('success');
           setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${displayOrderId})`);
           if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+          // PI-0011: change-history entry, written ONLY here at confirmed broker
+          // placement -- never on a draft edit while the trader is still typing.
+          // Reuses the existing audit-log mechanism (writeAuditEntry/AuditEntry)
+          // rather than a parallel log.
+          writeAuditEntry({
+            id: crypto.randomUUID(), timestamp: new Date().toISOString(),
+            symbol: pos.symbol, strategy: pos.strategy, action: 'PLACE_GTC',
+            orderType: 'OCO (GTC + Stop)', limitPrice: stopTrigger,
+            quantity: qty, orderId: displayOrderId, status: 'submitted',
+            gtcPrice: gtcLimit, stopPrice: stopTrigger,
+            groupKey: pos.key,
+          });
           // Never fabricate `orderId` as the parent id when the nested stop
           // leg couldn't be resolved -- complexOrderId (always available)
           // remains a real, non-fabricated fallback identity match on its
@@ -6556,6 +6588,15 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
         setResult('success');
         setResultMsg(`Stop Limit placed @ trigger $${stopTrigger.toFixed(2)} (ID #${orderId})`);
         if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+        // PI-0011: same change-history entry as the OCO path above, plain-stop variant.
+        writeAuditEntry({
+          id: crypto.randomUUID(), timestamp: new Date().toISOString(),
+          symbol: pos.symbol, strategy: pos.strategy, action: 'PLACE_GTC',
+          orderType: 'Stop Limit', limitPrice: stopTrigger,
+          quantity: qty, orderId, status: 'submitted',
+          stopPrice: stopTrigger,
+          groupKey: pos.key,
+        });
         // Plain (non-complex) order -- orderId IS the individual stop
         // order's own id, no complex-order envelope involved.
         await persistStopPolicy({ orderId, complexOrderId: null }, stopTrigger);
@@ -6593,6 +6634,12 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   const stopLossDollars   = clean$((stopParsed - creditPerContract) * qty * 100); // negative = net loss
   const suggGtcProfitDollars = suggestion ? clean$((creditPerContract - suggestion.gtcPrice) * qty * 100) : null;
   const suggStopLossDollars  = suggestion ? clean$((suggestion.stopPrice - creditPerContract) * qty * 100) : null;
+  // PI-0011: same "% of max risk" translation as stopPctOfMaxRisk below, but
+  // for the AI-suggested price rather than whatever the trader has typed --
+  // needed separately since the two can differ before "Use these values" is clicked.
+  const suggStopPctOfMaxRisk = (suggStopLossDollars != null && pos.maxRisk > 0)
+    ? (Math.abs(suggStopLossDollars) / pos.maxRisk) * 100
+    : null;
   // Breakeven context: how far the stop sits from true max risk, so "2.5x credit"
   // isn't read as the whole loss story on a defined-risk spread.
   const stopPctOfMaxRisk = pos.maxRisk > 0 ? (Math.abs(stopLossDollars) / pos.maxRisk) * 100 : null;
@@ -6636,6 +6683,23 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             </p>
             <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
           </div>
+
+          {/* PI-0011: reference line -- symbol/stock price/short strike/OTM% never
+              appeared anywhere in this modal before, forcing the trader to mentally
+              translate every spread-value number below against strike/buffer context
+              they had to hold in their head separately. All three values are already
+              on `pos` at zero additional fetch cost. Informational only, not editable. */}
+          {(() => {
+            const { shortPutStrike, shortCallStrike } = findShortLegStrikes(pos.legs);
+            const shortStrike = shortPutStrike ?? shortCallStrike;
+            if (pos.stockPrice == null || shortStrike == null) return null;
+            return (
+              <p className={`text-[10px] ${th.textFaint} mb-3`}>
+                {pos.symbol} ${pos.stockPrice.toFixed(2)} · short strike ${shortStrike}
+                {pos.buffer != null && <> · {pos.buffer.toFixed(1)}% OTM</>}
+              </p>
+            );
+          })()}
 
           {/* Live price bar */}
           <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
@@ -6706,22 +6770,58 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
                 <div className="grid grid-cols-2 gap-2">
                   <div className="p-2 rounded border border-emerald-700/40 bg-emerald-500/5">
                     <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mb-0.5">GTC Target</p>
-                    <p className="text-sm font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.gtcPrice.toFixed(2)}</p>
-                    <p className={`text-[9px] ${th.textFaint}`}>{suggestion.gtcPct}% profit</p>
-                    {suggGtcProfitDollars != null && (
-                      <p className="text-[11px] font-bold text-emerald-300 mt-0.5">+${suggGtcProfitDollars.toFixed(2)}</p>
+                    {/* PI-0011: lead with the profit-native number (dollars captured),
+                        spread-value price demoted to a supporting line -- same
+                        "risk/profit-native number first" principle applied to Stop
+                        Trigger below, approved via mockup. */}
+                    {suggGtcProfitDollars != null ? (
+                      <>
+                        <p className="text-sm font-bold text-emerald-300" style={{ fontFamily: "'DM Mono', monospace" }}>+${suggGtcProfitDollars.toFixed(2)}</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>{suggestion.gtcPct}% profit</p>
+                        <div className="border-t border-emerald-700/20 mt-1 pt-1">
+                          <p className={`text-[9px] ${th.textFaint}`}>${suggestion.gtcPrice.toFixed(2)}/contract</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.gtcPrice.toFixed(2)}</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>{suggestion.gtcPct}% profit</p>
+                      </>
                     )}
                   </div>
                   <div className="p-2 rounded border border-orange-700/40 bg-orange-500/5">
                     <p className="text-[9px] text-orange-400 font-bold uppercase tracking-widest mb-0.5">Stop Trigger</p>
-                    <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.stopPrice.toFixed(2)}</p>
-                    <p className={`text-[9px] ${th.textFaint}`}>
-                      {(effectiveLiveDisplay != null
-                        ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
-                        : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
-                    </p>
-                    {suggStopLossDollars != null && (
-                      <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
+                    {/* PI-0011: lead with % of max risk, the number the trader
+                        actually reasons in -- spread-value price and the
+                        x-current-value multiple demoted to a supporting line
+                        underneath, matching the reference-line goal above. */}
+                    {suggStopPctOfMaxRisk != null ? (
+                      <>
+                        <p className="text-sm font-bold text-orange-300" style={{ fontFamily: "'DM Mono', monospace" }}>{suggStopPctOfMaxRisk.toFixed(1)}%</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>of max risk (${pos.maxRisk.toFixed(2)})</p>
+                        <div className="border-t border-orange-700/20 mt-1 pt-1">
+                          <p className={`text-[9px] ${th.textFaint}`}>
+                            ${suggestion.stopPrice.toFixed(2)}/contract · {(effectiveLiveDisplay != null
+                              ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
+                              : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
+                          </p>
+                          {suggStopLossDollars != null && (
+                            <p className="text-[9px] text-orange-400/80 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)} if stop fills</p>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.stopPrice.toFixed(2)}</p>
+                        <p className={`text-[9px] ${th.textFaint}`}>
+                          {(effectiveLiveDisplay != null
+                            ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
+                            : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
+                        </p>
+                        {suggStopLossDollars != null && (
+                          <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -6772,7 +6872,18 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
             )}
             <div>
               <div className="flex items-center gap-2">
-                <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Stop trigger</span>
+                <span className={`text-[10px] ${th.textFaint} w-28 shrink-0 flex items-center gap-1`}>
+                  Stop trigger
+                  {/* PI-0011: static fallback tooltip, shown always -- covers the
+                      moment before an AI recommendation has loaded (or if the AI
+                      call fails), without duplicating suggestion.stopRationale's
+                      dynamic explanation once one exists. */}
+                  <span
+                    className={`inline-flex items-center justify-center w-3 h-3 rounded-full border ${th.borderLight} ${th.textFaint} text-[8px] cursor-help shrink-0`}
+                    title="Tighter stops protect more captured profit but risk triggering on normal price noise. Consider your overall strategy, not just this position.">
+                    ?
+                  </span>
+                </span>
                 <input
                   type="number" min="0.1" step="0.1"
                   value={stopMultipleDisplay === '—' ? '' : stopMultipleDisplay}
@@ -6889,6 +7000,36 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
           )}
 
           {result === 'error' && <p className="text-[9px] text-red-400 mt-2 leading-relaxed whitespace-pre-line">{resultMsg}</p>}
+
+          {/* PI-0011: change history, collapsed by default -- a reference view,
+              not competing for attention with the live inputs above it. Only
+              shows CONFIRMED placements (see the two writeAuditEntry call sites
+              above), never draft edits, per Dean's scope decision. */}
+          {(() => {
+            const history = filterStopGtcHistory(readAuditLog(), pos.key);
+            if (history.length === 0) return null;
+            return (
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowHistory(v => !v)}
+                  className={`w-full text-[9px] ${th.textFaint} hover:${th.text} text-left flex items-center gap-1`}>
+                  {showHistory ? '▾' : '▸'} History ({history.length})
+                </button>
+                {showHistory && (
+                  <div className={`mt-1 space-y-1 max-h-32 overflow-y-auto border-t ${th.borderLight} pt-1`}>
+                    {history.slice(0, 20).map(e => (
+                      <p key={e.id} className={`text-[9px] ${th.textFaint} leading-tight`}>
+                        {new Date(e.timestamp).toLocaleString()} — {e.orderType}
+                        {e.gtcPrice != null && ` · GTC $${e.gtcPrice.toFixed(2)}`}
+                        {e.stopPrice != null && ` · Stop $${e.stopPrice.toFixed(2)}`}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <button onClick={() => { setOpen(false); setConfirming(false); }} className={`w-full mt-2 text-[9px] ${th.textFaint} hover:${th.text} text-center`}>
             Cancel
           </button>
