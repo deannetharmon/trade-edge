@@ -9,7 +9,7 @@
 // isolation is fully captured by these pure functions.
 
 import { describe, expect, it } from 'vitest';
-import { attachPmccLinks, calcLeapIntrinsicExtrinsic, isLeapDecayDue, LEAP_DECAY_DTE_THRESHOLD } from '../acquisition';
+import { attachPmccLinks, calcLeapIntrinsicExtrinsic, isLeapDecayDue, LEAP_DECAY_DTE_THRESHOLD, checkPmccQuantityMatch } from '../acquisition';
 import { pmccLinkKey } from '../pmccLinkStore';
 import type { Position, PositionLeg, PmccLink } from '../types';
 
@@ -195,5 +195,24 @@ describe('PMCC-0004 pmccLinkKey account scoping', () => {
     const key1 = pmccLinkKey('ACCT-1', 'NVDA::2027-09-17');
     const key2 = pmccLinkKey('ACCT-1', 'NVDA::2027-09-17');
     expect(key1).toBe(key2);
+  });
+});
+
+describe('PMCC-0005 checkPmccQuantityMatch', () => {
+  it('returns null (no error) when LEAP and short-call quantities match', () => {
+    expect(checkPmccQuantityMatch(1, 1)).toBeNull();
+    expect(checkPmccQuantityMatch(3, 3)).toBeNull();
+  });
+
+  it('returns a descriptive error string when quantities mismatch', () => {
+    const result = checkPmccQuantityMatch(2, 1);
+    expect(result).not.toBeNull();
+    expect(result).toContain('LEAP is 2');
+    expect(result).toContain('short call is 1');
+  });
+
+  it('flags a mismatch in either direction (short > leap, not just leap > short)', () => {
+    expect(checkPmccQuantityMatch(1, 2)).not.toBeNull();
+    expect(checkPmccQuantityMatch(2, 1)).not.toBeNull();
   });
 });

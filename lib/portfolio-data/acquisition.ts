@@ -353,6 +353,17 @@ export function isLeapDecayDue(pos: Position): boolean {
   return pos.pmccRole === 'leap' && pos.dte <= LEAP_DECAY_DTE_THRESHOLD;
 }
 
+// PMCC-0005: a LEAP can only cover a short call at a strict 1:1 contract
+// ratio -- a mismatch silently breaks the "defined risk" premise of the
+// whole structure (excess short contracts would be effectively naked, and
+// TradeEdge's cost-basis math would be computed against a structure that
+// isn't actually sized consistently). Extracted as a pure function so it's
+// unit-testable without the linking-form component state.
+export function checkPmccQuantityMatch(leapQuantity: number, shortQuantity: number): string | null {
+  if (leapQuantity === shortQuantity) return null;
+  return `Contract mismatch — LEAP is ${leapQuantity}, short call is ${shortQuantity}. A PMCC requires a 1:1 ratio.`;
+}
+
 
 
 export async function fetchEntrySnapshots(): Promise<Record<string, EntrySnapshot>> {

@@ -198,6 +198,7 @@ import {
   calcLeapIntrinsicExtrinsic,
   isLeapDecayDue,
   LEAP_DECAY_DTE_THRESHOLD,
+  checkPmccQuantityMatch,
   normalizePercentValue,
   getCurrentPop,
   netEdgeFrom,
@@ -6056,6 +6057,15 @@ function PmccGroup({
     const credit = parseFloat(creditInput);
     if (!newShortKey) { setError('Select the new short-call position'); return; }
     if (!Number.isFinite(credit)) { setError('Enter a valid credit amount'); return; }
+    // PMCC-0005: a LEAP can only cover a short call at a strict 1:1 contract
+    // ratio -- a mismatch silently breaks the "defined risk" premise of the
+    // whole structure (the excess short contracts would be effectively
+    // naked). Block the roll rather than let it through uncounted.
+    const newShort = allPositions.find(p => p.key === newShortKey);
+    if (newShort) {
+      const mismatch = checkPmccQuantityMatch(leap.quantity, newShort.quantity);
+      if (mismatch) { setError(mismatch); return; }
+    }
     setSaving(true);
     setError('');
     try {
@@ -6170,6 +6180,16 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
     const cost = parseFloat(leapCostInput);
     if (!leap) { setError('Select the LEAP position'); return; }
     if (!Number.isFinite(cost)) { setError('Enter the LEAP cost paid'); return; }
+    // PMCC-0005: same 1:1 contract-ratio check as recordRoll -- only
+    // applies when a short call is actually selected (it's optional here,
+    // per PMCC-0003's manual-linking flow allowing a LEAP-only link).
+    if (shortKey) {
+      const shortPos = byKey.get(shortKey);
+      if (shortPos) {
+        const mismatch = checkPmccQuantityMatch(leap.quantity, shortPos.quantity);
+        if (mismatch) { setError(mismatch); return; }
+      }
+    }
     setSaving(true);
     setError('');
     try {
