@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { attachPmccLinks, calcLeapIntrinsicExtrinsic, isLeapDecayDue, LEAP_DECAY_DTE_THRESHOLD } from '../acquisition';
+import { pmccLinkKey } from '../pmccLinkStore';
 import type { Position, PositionLeg, PmccLink } from '../types';
 
 function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
@@ -180,5 +181,19 @@ describe('PMCC-0003 isLeapDecayDue', () => {
   it('is false for an unlinked (pmccRole null) position regardless of dte', () => {
     const pos = makePosition({ pmccRole: null, dte: 10 });
     expect(isLeapDecayDue(pos)).toBe(false);
+  });
+});
+
+describe('PMCC-0004 pmccLinkKey account scoping', () => {
+  it('scopes the key by account, not just the LEAP position key alone', () => {
+    const keyAcct1 = pmccLinkKey('ACCT-1', 'NVDA::2027-09-17');
+    const keyAcct2 = pmccLinkKey('ACCT-2', 'NVDA::2027-09-17');
+    expect(keyAcct1).not.toBe(keyAcct2);
+  });
+
+  it('produces the same key for the same account + LEAP position key (stable identity across rolls)', () => {
+    const key1 = pmccLinkKey('ACCT-1', 'NVDA::2027-09-17');
+    const key2 = pmccLinkKey('ACCT-1', 'NVDA::2027-09-17');
+    expect(key1).toBe(key2);
   });
 });

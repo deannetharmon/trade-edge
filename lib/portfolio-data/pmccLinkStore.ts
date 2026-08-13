@@ -9,12 +9,16 @@
 
 import type { PmccLink } from './types';
 
-// Stable identity for a PMCC pairing. Keyed by the LEAP's own position key
-// -- a LEAP can only ever be paired with one short call at a time (see
-// PMCC-0003 ticket, "one call per slot"), so the LEAP's key is a natural,
-// stable identity that doesn't change across short-call rolls.
-export function pmccLinkKey(leapPositionKey: string): string {
-  return leapPositionKey;
+// Stable identity for a PMCC pairing. Keyed by account + the LEAP's own
+// position key -- mirrors positionStopPolicyKey's exact shape and reasoning
+// (stopPolicyStore.ts) since the same collision risk applies here: a LEAP
+// can only ever be paired with one short call at a time (see PMCC-0003
+// ticket, "one call per slot"), so the LEAP's key is a natural, stable
+// identity that doesn't change across short-call rolls -- but without the
+// account scope, the same symbol+expiry LEAP open in two different
+// accounts would silently collide in the store (PMCC-0004, Alan's finding).
+export function pmccLinkKey(accountNumber: string, leapPositionKey: string): string {
+  return `${accountNumber}::${leapPositionKey}`;
 }
 
 export async function fetchPmccLinks(): Promise<Record<string, PmccLink>> {

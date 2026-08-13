@@ -6065,7 +6065,7 @@ function PmccGroup({
         cumulativePremiumCollected: link.cumulativePremiumCollected + credit,
         rollCount: link.rollCount + 1,
       };
-      const result = await postPmccLinks([{ key: pmccLinkKey(link.leapPositionKey), link: updated }]);
+      const result = await postPmccLinks([{ key: pmccLinkKey(leap.accountNumber, link.leapPositionKey), link: updated }]);
       if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
       setRecordingRoll(false);
       setNewShortKey('');
@@ -6079,7 +6079,7 @@ function PmccGroup({
   };
 
   const unlink = async () => {
-    await deletePmccLink(pmccLinkKey(link.leapPositionKey));
+    await deletePmccLink(pmccLinkKey(leap.accountNumber, link.leapPositionKey));
     onRefresh();
   };
 
@@ -6182,7 +6182,7 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
         cumulativePremiumCollected: 0,
         rollCount: 0,
       };
-      const result = await postPmccLinks([{ key: pmccLinkKey(leapKey), link }]);
+      const result = await postPmccLinks([{ key: pmccLinkKey(leap.accountNumber, leapKey), link }]);
       if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
       setCreating(false);
       setLeapKey(''); setShortKey(''); setLeapCostInput('');
