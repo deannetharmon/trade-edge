@@ -176,6 +176,7 @@ import type {
   Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent, PmccLink,
 } from '@/lib/portfolio-data/types';
 import { fetchPmccLinks, postPmccLinks, deletePmccLink, pmccLinkKey } from '@/lib/portfolio-data/pmccLinkStore';
+import { filterStopGtcHistory, type AuditEntry } from '@/lib/portfolio-data/auditLog';
 import {
   LS_PROFIT_TARGETS,
   computeNetEdgeEvidence,
@@ -430,36 +431,10 @@ type EvaluatedAction = 'EXTEND_PROFIT' | 'CLOSE_ROLL' | 'TAKE_PROFIT' | 'CUT_LOS
 
 
 
-export interface AuditEntry {
-  id: string;
-  timestamp: string;
-  symbol: string;
-  strategy: string;
-  action: ActionType;
-  orderType: string;
-  limitPrice: number;
-  quantity: number;
-  orderId: string;
-  status: 'submitted' | 'error' | 'dry-run';
-  error?: string;
-  estPnl?: number;
-  closeProfitPct?: number;  // % profit captured on TAKE_PROFIT closes (e.g. 65 for 65%)
-  creditAtClose?: number;   // credit per contract at time of close — used to back-calc pct
-  // PI-0011: OCO/stop-loss placements carry two prices (GTC target AND stop
-  // trigger), which `limitPrice` alone can't represent. Both optional so
-  // every other existing entry shape/consumer is unaffected -- only
-  // SetStopLossButton's submit() populates these, and only for a CONFIRMED
-  // broker placement, never a draft edit (see writeAuditEntry call site).
-  gtcPrice?: number;
-  stopPrice?: number;
-  // ES-0001: diagnostic/audit evidence for the canonical close-order safety
-  // gate -- reuses this existing audit mechanism rather than adding a new
-  // one. groupKey lets a later investigation trace exactly which canonical
-  // position group (post-split, if any) this order was built against.
-  groupKey?: string;
-  safetyGateOk?: boolean;
-  safetyGateIssues?: string[];  // rule IDs of any issues (block or warn)
-}
+// PI-0011/build-fix: AuditEntry + filterStopGtcHistory moved to
+// lib/portfolio-data/auditLog.ts -- Next.js forbids named exports other
+// than the page component from a page.tsx file, so they're imported here,
+// never exported from this file. See auditLog.ts's module doc.
 
 interface OrderLeg {
   symbol: string;
@@ -762,17 +737,8 @@ function writeAuditEntry(entry: AuditEntry) {
   } catch {}
 }
 
-// PI-0011: which audit entries count as stop/GTC change history for a given
-// position -- extracted as a pure, named, exported function specifically so
-// it's unit-testable without a full component render harness (SetStopLossButton
-// depends on live price fetch, AI suggestion fetch, and modal-open state, none
-// of which are worth mocking just to test a filter predicate). Only entries
-// carrying gtcPrice/stopPrice count -- ordinary trade-execution audit entries
-// (closes, rolls, take-profits) are deliberately excluded even if they share
-// the same groupKey, since this history is scoped to stop/GTC placements only.
-export function filterStopGtcHistory(log: AuditEntry[], positionKey: string): AuditEntry[] {
-  return log.filter(e => e.groupKey === positionKey && (e.gtcPrice != null || e.stopPrice != null));
-}
+// PI-0011/build-fix: filterStopGtcHistory moved to
+// lib/portfolio-data/auditLog.ts, imported below.
 
 function exportAuditCsv() {
   const log = readAuditLog();

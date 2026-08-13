@@ -9,7 +9,7 @@
 // proportionate-testing approach used in PI-0010.
 
 import { describe, expect, it } from 'vitest';
-import { filterStopGtcHistory, type AuditEntry } from '../page';
+import { filterStopGtcHistory, type AuditEntry } from '@/lib/portfolio-data/auditLog';
 
 function makeEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
   return {
