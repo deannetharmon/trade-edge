@@ -9,7 +9,7 @@
 // isolation is fully captured by these pure functions.
 
 import { describe, expect, it } from 'vitest';
-import { attachPmccLinks, calcLeapIntrinsicExtrinsic, isLeapDecayDue, LEAP_DECAY_DTE_THRESHOLD, checkPmccQuantityMatch } from '../acquisition';
+import { attachPmccLinks, calcLeapIntrinsicExtrinsic, isLeapDecayDue, LEAP_DECAY_DTE_THRESHOLD, checkPmccQuantityMatch, buildPmccDryRunFixtures, isPmccDryRunFixture } from '../acquisition';
 import { pmccLinkKey } from '../pmccLinkStore';
 import type { Position, PositionLeg, PmccLink } from '../types';
 
@@ -214,5 +214,52 @@ describe('PMCC-0005 checkPmccQuantityMatch', () => {
   it('flags a mismatch in either direction (short > leap, not just leap > short)', () => {
     expect(checkPmccQuantityMatch(1, 2)).not.toBeNull();
     expect(checkPmccQuantityMatch(2, 1)).not.toBeNull();
+  });
+});
+
+describe('PMCC-0006 isPmccDryRunFixture', () => {
+  it('identifies a dry-run fixture key by its DRYRUN:: prefix', () => {
+    expect(isPmccDryRunFixture('DRYRUN::LEAP')).toBe(true);
+    expect(isPmccDryRunFixture('DRYRUN::SHORT_MATCH')).toBe(true);
+  });
+
+  it('does not flag a real position key (symbol::expDate shape) as a fixture', () => {
+    expect(isPmccDryRunFixture('NVDA::2027-09-17')).toBe(false);
+    expect(isPmccDryRunFixture('MU::2026-09-04')).toBe(false);
+  });
+});
+
+describe('PMCC-0006 buildPmccDryRunFixtures', () => {
+  const fixtures = buildPmccDryRunFixtures();
+
+  it('returns exactly one LEAP fixture, identifiable as a dry-run key', () => {
+    const leaps = fixtures.filter(p => p.legs[0].direction === 'Long' && p.legs[0].optionType === 'C');
+    expect(leaps).toHaveLength(1);
+    expect(isPmccDryRunFixture(leaps[0].key)).toBe(true);
+  });
+
+  it('returns at least one short-call fixture whose quantity matches the LEAP (happy path)', () => {
+    const leap = fixtures.find(p => p.legs[0].direction === 'Long')!;
+    const matchingShorts = fixtures.filter(p => p.legs[0].direction === 'Short' && p.quantity === leap.quantity);
+    expect(matchingShorts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('returns at least one short-call fixture whose quantity does NOT match the LEAP (exercises the PMCC-0005 guard interactively)', () => {
+    const leap = fixtures.find(p => p.legs[0].direction === 'Long')!;
+    const mismatchedShorts = fixtures.filter(p => p.legs[0].direction === 'Short' && p.quantity !== leap.quantity);
+    expect(mismatchedShorts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('every fixture has a unique key and none collide with a plausible real Position.key shape', () => {
+    const keys = fixtures.map(p => p.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const key of keys) expect(isPmccDryRunFixture(key)).toBe(true);
+  });
+
+  it('produces a fresh array each call (no shared mutable state leaking between panel opens)', () => {
+    const a = buildPmccDryRunFixtures();
+    const b = buildPmccDryRunFixtures();
+    expect(a).not.toBe(b);
+    expect(a[0]).not.toBe(b[0]);
   });
 });

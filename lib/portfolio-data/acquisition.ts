@@ -364,6 +364,60 @@ export function checkPmccQuantityMatch(leapQuantity: number, shortQuantity: numb
   return `Contract mismatch — LEAP is ${leapQuantity}, short call is ${shortQuantity}. A PMCC requires a 1:1 ratio.`;
 }
 
+// PMCC-0006: dry-run-only synthetic positions so the linking/rolling/
+// quantity-guard flow in PmccManagerPanel can be exercised end-to-end with
+// zero real broker positions, zero market exposure, and zero cost -- real
+// options can't be opened after-hours and can't be "deleted" once filled
+// (only closed, at a real cost), so a dry-run fixture is the only way to
+// test this safely outside market hours. Keys are prefixed 'DRYRUN::' so
+// they can never collide with a real Position.key (always
+// '${symbol}::${expDate}') and so callers can trivially detect a fixture
+// (see isPmccDryRunFixture below) and route its state through local
+// component state instead of the real Redis-backed PmccLink store.
+const PMCC_DRYRUN_KEY_PREFIX = 'DRYRUN::';
+
+export function isPmccDryRunFixture(positionKey: string): boolean {
+  return positionKey.startsWith(PMCC_DRYRUN_KEY_PREFIX);
+}
+
+export function buildPmccDryRunFixtures(): Position[] {
+  const base = {
+    symbol: 'TEST', strategy: 'PMCC', identity: null, structureAmbiguous: false,
+    structureBlockMessage: null, entryPriceEffect: 'Debit' as const, creditReceived: 0,
+    currentValue: 5000, closeValue: 5000, closeNowPnl: 0, pnl: 0, pnlPct: 0, pnlReliable: true,
+    intent: 'income' as const, plOpen: null, targetPrice: 0, profitTarget: 0.5, maxRisk: 5000,
+    hitTarget: false, needsClose: false, entryDate: '2026-08-01', accountNumber: 'DRYRUN-FIXTURE',
+    ivr: 40, iv: 35, hv30: 30, beta: 1.5, netVega: 0.5, pop: null, hasGtc: false,
+    gtcOrderId: null, gtcOrderPrice: null, stopLossStatus: 'unknown' as const, stopLossPrice: null,
+    stopLossPolicy: null, stopLossDisplayPolicy: null, stopLossClassification: 'NO_STOP' as const,
+    stopLossOrderStatus: null, quoteWidthEvidence: null, buffer: null, putBufferPct: null,
+    callBufferPct: null, theta: 0.02, gamma: 0.001, earningsDate: null,
+  };
+  return [
+    {
+      ...base,
+      key: `${PMCC_DRYRUN_KEY_PREFIX}LEAP`,
+      expDate: '2027-09-17', dte: 401, quantity: 1, entryDte: 401,
+      legs: [{ symbol: 'TEST  270917C00100000', optionType: 'C', strikePrice: 100, direction: 'Long', quantity: 1, avgOpenPrice: 50, currentPrice: null }],
+      netDelta: 0.80, stockPrice: 150,
+    },
+    {
+      ...base,
+      key: `${PMCC_DRYRUN_KEY_PREFIX}SHORT_MATCH`,
+      expDate: '2026-09-25', dte: 43, quantity: 1, entryDte: 43,
+      legs: [{ symbol: 'TEST  260925C00160000', optionType: 'C', strikePrice: 160, direction: 'Short', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+      netDelta: -0.28, stockPrice: 150,
+    },
+    {
+      ...base,
+      key: `${PMCC_DRYRUN_KEY_PREFIX}SHORT_MISMATCH`,
+      expDate: '2026-09-25', dte: 43, quantity: 2, entryDte: 43,
+      legs: [{ symbol: 'TEST  260925C00165000', optionType: 'C', strikePrice: 165, direction: 'Short', quantity: 2, avgOpenPrice: 2.5, currentPrice: null }],
+      netDelta: -0.24, stockPrice: 150,
+    },
+  ] as Position[];
+}
+
 
 
 export async function fetchEntrySnapshots(): Promise<Record<string, EntrySnapshot>> {

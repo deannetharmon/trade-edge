@@ -200,6 +200,8 @@ import {
   isLeapDecayDue,
   LEAP_DECAY_DTE_THRESHOLD,
   checkPmccQuantityMatch,
+  buildPmccDryRunFixtures,
+  isPmccDryRunFixture,
   normalizePercentValue,
   getCurrentPop,
   netEdgeFrom,
@@ -6005,10 +6007,18 @@ function PmccLegBox({ pos, role, th }: { pos: Position; role: 'leap' | 'short'; 
 }
 
 function PmccGroup({
-  leap, short, link, allPositions, th, onRefresh,
+  leap, short, link, allPositions, th, onRefresh, onDryRunSave, onDryRunUnlink,
 }: {
   leap: Position; short: Position | null; link: PmccLink;
   allPositions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void;
+  // PMCC-0006: when this group's link is a dry-run fixture (detected via
+  // isPmccDryRunFixture on the LEAP's key), saves/unlinks route through
+  // these local-state callbacks instead of the real Redis-backed store --
+  // never persisted, discarded when the panel closes. Undefined for real,
+  // non-fixture links, which fall through to the existing postPmccLinks/
+  // deletePmccLink + onRefresh path unchanged.
+  onDryRunSave?: (updated: PmccLink) => void;
+  onDryRunUnlink?: () => void;
 }) {
   const [recordingRoll, setRecordingRoll] = useState(false);
   const [newShortKey, setNewShortKey] = useState('');
@@ -6016,6 +6026,7 @@ function PmccGroup({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const isDryRun = isPmccDryRunFixture(link.leapPositionKey);
   const netCostBasis = link.leapCost - link.cumulativePremiumCollected;
   const eligibleShorts = allPositions.filter(p => isPmccEligibleShort(p) && p.symbol === leap.symbol);
 
@@ -6032,15 +6043,22 @@ function PmccGroup({
       const mismatch = checkPmccQuantityMatch(leap.quantity, newShort.quantity);
       if (mismatch) { setError(mismatch); return; }
     }
+    const updated: PmccLink = {
+      ...link,
+      shortCallPositionKey: newShortKey,
+      cumulativePremiumCollected: link.cumulativePremiumCollected + credit,
+      rollCount: link.rollCount + 1,
+    };
+    if (isDryRun && onDryRunSave) {
+      onDryRunSave(updated);
+      setRecordingRoll(false);
+      setNewShortKey('');
+      setCreditInput('');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const updated: PmccLink = {
-        ...link,
-        shortCallPositionKey: newShortKey,
-        cumulativePremiumCollected: link.cumulativePremiumCollected + credit,
-        rollCount: link.rollCount + 1,
-      };
       const result = await postPmccLinks([{ key: pmccLinkKey(leap.accountNumber, link.leapPositionKey), link: updated }]);
       if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
       setRecordingRoll(false);
@@ -6055,12 +6073,18 @@ function PmccGroup({
   };
 
   const unlink = async () => {
+    if (isDryRun && onDryRunUnlink) { onDryRunUnlink(); return; }
     await deletePmccLink(pmccLinkKey(leap.accountNumber, link.leapPositionKey));
     onRefresh();
   };
 
   return (
-    <div className={`rounded-xl p-3 border ${th.border} space-y-2`}>
+    <div className={`rounded-xl p-3 border ${isDryRun ? 'border-amber-600/50' : th.border} space-y-2`}>
+      {isDryRun && (
+        <p className="text-[9px] text-amber-400 font-bold uppercase tracking-widest">
+          <span aria-hidden="true">⚗</span> Dry run test fixture — not saved, discarded on close
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <PmccLegBox pos={leap} role="leap" th={th} />
         {short
@@ -6124,8 +6148,9 @@ function PmccGroup({
   );
 }
 
-function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
+function PmccManagerPanel({ positions, th, onRefresh, onClose, dryRunMode }: {
   positions: Position[]; th: typeof THEMES[Theme]; onRefresh: () => void; onClose: () => void;
+  dryRunMode: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const [leapKey, setLeapKey] = useState('');
@@ -6133,13 +6158,25 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
   const [leapCostInput, setLeapCostInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // PMCC-0006: dry-run-only links live entirely in local state -- never
+  // posted to the real PmccLink store, discarded automatically when this
+  // panel unmounts (closed) since useState resets. Only populated/relevant
+  // when dryRunMode is on.
+  const [dryRunLinks, setDryRunLinks] = useState<Record<string, PmccLink>>({});
 
-  const byKey = new Map(positions.map(p => [p.key, p]));
+  // PMCC-0006: fixture positions are additive-only and ONLY present when
+  // Dry Run is on -- with it off, eligibility/linking behaves exactly as
+  // before this ticket, real positions only.
+  const fixtures = dryRunMode ? buildPmccDryRunFixtures() : [];
+  const allPositions = dryRunMode ? [...positions, ...fixtures] : positions;
+
+  const byKey = new Map(allPositions.map(p => [p.key, p]));
   const links = new Map<string, PmccLink>();
   for (const p of positions) if (p.pmccLink) links.set(p.pmccLink.id, p.pmccLink);
+  for (const link of Object.values(dryRunLinks)) links.set(link.id, link);
 
-  const eligibleLeaps = positions.filter(isPmccEligibleLeap);
-  const eligibleShorts = positions.filter(isPmccEligibleShort);
+  const eligibleLeaps = allPositions.filter(isPmccEligibleLeap);
+  const eligibleShorts = allPositions.filter(isPmccEligibleShort);
 
   const createLink = async () => {
     const leap = byKey.get(leapKey);
@@ -6156,18 +6193,26 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
         if (mismatch) { setError(mismatch); return; }
       }
     }
+    const link: PmccLink = {
+      id: crypto.randomUUID(),
+      leapPositionKey: leapKey,
+      shortCallPositionKey: shortKey || '',
+      openedDate: new Date().toISOString().slice(0, 10),
+      leapCost: cost,
+      cumulativePremiumCollected: 0,
+      rollCount: 0,
+    };
+    // PMCC-0006: fixture LEAPs never touch the real store -- save to local
+    // dry-run state only.
+    if (isPmccDryRunFixture(leapKey)) {
+      setDryRunLinks(prev => ({ ...prev, [link.id]: link }));
+      setCreating(false);
+      setLeapKey(''); setShortKey(''); setLeapCostInput('');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const link: PmccLink = {
-        id: crypto.randomUUID(),
-        leapPositionKey: leapKey,
-        shortCallPositionKey: shortKey || '',
-        openedDate: new Date().toISOString().slice(0, 10),
-        leapCost: cost,
-        cumulativePremiumCollected: 0,
-        rollCount: 0,
-      };
       const result = await postPmccLinks([{ key: pmccLinkKey(leap.accountNumber, leapKey), link }]);
       if (!result) { setError('Failed to save — try again'); setSaving(false); return; }
       setCreating(false);
@@ -6188,12 +6233,25 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
           <button onClick={onClose} className={`text-xl ${th.textFaint} hover:${th.text}`}>✕</button>
         </div>
 
+        {dryRunMode && (
+          <p className={`text-[9px] text-amber-400 mb-3`}>
+            <span aria-hidden="true">⚗</span> Dry Run is on — the pickers below include synthetic test positions (labeled "test fixture"). Links created from them are never saved, only kept while this panel is open.
+          </p>
+        )}
+
         <div className="space-y-3 mb-3">
           {Array.from(links.values()).map(link => {
             const leap = byKey.get(link.leapPositionKey);
             if (!leap) return null;
             const short = link.shortCallPositionKey ? byKey.get(link.shortCallPositionKey) ?? null : null;
-            return <PmccGroup key={link.id} leap={leap} short={short} link={link} allPositions={positions} th={th} onRefresh={onRefresh} />;
+            const isDryRunLink = isPmccDryRunFixture(link.leapPositionKey);
+            return (
+              <PmccGroup
+                key={link.id} leap={leap} short={short} link={link} allPositions={allPositions} th={th} onRefresh={onRefresh}
+                onDryRunSave={isDryRunLink ? (updated => setDryRunLinks(prev => ({ ...prev, [updated.id]: updated }))) : undefined}
+                onDryRunUnlink={isDryRunLink ? (() => setDryRunLinks(prev => { const next = { ...prev }; delete next[link.id]; return next; })) : undefined}
+              />
+            );
           })}
           {links.size === 0 && !creating && (
             <p className={`text-[11px] ${th.textFaint} text-center py-4`}>No PMCCs linked yet.</p>
@@ -6212,14 +6270,14 @@ function PmccManagerPanel({ positions, th, onRefresh, onClose }: {
               className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
               <option value="">Select LEAP position…</option>
               {eligibleLeaps.map(p => (
-                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d</option>
+                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
               ))}
             </select>
             <select value={shortKey} onChange={e => setShortKey(e.target.value)}
               className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text}`}>
               <option value="">Select current short call (optional)…</option>
               {eligibleShorts.map(p => (
-                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d</option>
+                <option key={p.key} value={p.key}>{p.symbol} {p.legs[0].strikePrice}C · {p.dte}d · qty {p.quantity}{isPmccDryRunFixture(p.key) ? ' (test fixture)' : ''}</option>
               ))}
             </select>
             <input type="number" step="0.01" placeholder="LEAP cost paid (net debit, total $)"
@@ -10267,6 +10325,7 @@ export default function PortfolioPage() {
           th={th}
           onRefresh={refreshPortfolioData}
           onClose={() => setShowPmccManager(false)}
+          dryRunMode={dryRunMode}
         />
       )}
 
