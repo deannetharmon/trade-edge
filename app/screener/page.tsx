@@ -5100,6 +5100,7 @@ async function runTargetedScan(
       const symbol = loopSymbols[i];
       const primary: 'BPS' | 'BCS' | 'IC' = 'IC';
       pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
+      updateScreenerJob({ progressCurrent: i + 1 });
       const entriesBeforeThisSymbol = entries.length;
       let symbolThrew = false;
       try {
@@ -6598,6 +6599,7 @@ export default function Home() {
       for (let i = 0; i < loopSymbols.length; i++) {
         const symbol = loopSymbols[i];
         pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
+        updateScreenerJob({ progressCurrent: i + 1 });
         const classification = await classifyUnderlying(symbol, token);
         const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
@@ -6773,8 +6775,9 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (const [pmccLoopIdx, symbol] of loopSymbols.entries()) {
         pushStatus(`Scanning PMCC ${symbol}...`);
+        updateScreenerJob({ progressCurrent: pmccLoopIdx + 1 });
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
@@ -6899,8 +6902,9 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (const [cspLoopIdx, symbol] of loopSymbols.entries()) {
         pushStatus(`Scanning CSP ${symbol}...`);
+        updateScreenerJob({ progressCurrent: cspLoopIdx + 1 });
         try {
           const classification = await classifyUnderlying(symbol, token);
           const isEtf = classification === 'index' || classification === 'etf';
@@ -7123,8 +7127,9 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const symbol of loopSymbols) {
+      for (const [ccLoopIdx, symbol] of loopSymbols.entries()) {
         pushStatus(`Scanning CC ${symbol}...`);
+        updateScreenerJob({ progressCurrent: ccLoopIdx + 1 });
         try {
           const classification = await classifyUnderlying(symbol, token);
           const isEtf = classification === 'index' || classification === 'etf';
