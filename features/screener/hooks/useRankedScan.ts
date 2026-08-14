@@ -51,13 +51,33 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
   // below reads it.
   const rankedSessionRef = useRef<ScreenerScanSession | null>(null);
 
+  // PO corrective round 4 (WA-0005 Defect 2): previously this effect only
+  // ever picked a ranked-scan task ONCE per mount (`if (rankedScanTaskId)
+  // return;`), then stuck to that same id for the mount's lifetime unless
+  // startRankedScan() explicitly reset it back to null before dispatching a
+  // new scan. That made this the only way to observe a second, genuinely
+  // distinct ranked-scan task -- which round 3's test suite worked around by
+  // reusing the SAME task id for a simulated "second run" (a disclosed
+  // simplification the round 4 Product Owner review required be fixed, not
+  // merely disclosed again).
+  //
+  // Corrected: this effect now always tracks the LATEST ranked-scan task by
+  // creation order (allTasks preserves TaskManager's own insertion order,
+  // confirmed by direct read of lib/tasks/task-store.ts's
+  // `Array.from(this.tasks.values())`), regardless of whether
+  // `rankedScanTaskId` is already set. It only calls setRankedScanTaskId
+  // when the latest id actually differs from what's already tracked, so
+  // this is a no-op on every render where nothing changed. This is strictly
+  // more correct than the old one-shot pick (a genuinely newer ranked-scan
+  // task is always followed, exactly as if startRankedScan() had reset
+  // tracking first) and does not change behavior for the common
+  // single-task-per-mount case.
   useEffect(() => {
     if (screenMode !== 'rank') return;
-    if (rankedScanTaskId) return;
     const rankedTasks = allTasks.filter(t => t.kind === 'ranked-scan');
     if (rankedTasks.length === 0) return;
-    const latest = rankedTasks.reduce((a, b) => (new Date(b.createdAt) > new Date(a.createdAt) ? b : a));
-    setRankedScanTaskId(latest.id);
+    const latest = rankedTasks.reduce((a, b) => (new Date(b.createdAt) >= new Date(a.createdAt) ? b : a));
+    if (latest.id !== rankedScanTaskId) setRankedScanTaskId(latest.id);
   }, [screenMode, allTasks, rankedScanTaskId]);
 
   const rankedScanTask = useTask(rankedScanTaskId);

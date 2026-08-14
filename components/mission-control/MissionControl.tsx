@@ -65,15 +65,51 @@ export function MissionControl({ viewModel, th }: MissionControlProps) {
         </div>
       )}
 
-      {state === 'loaded' && narrative && (
+      {/* PO corrective round 3, Finding 1: New Opportunities/Ranked
+          Opportunities was previously only rendered inside the
+          `state === 'loaded'` branch below, which meant Mission Control's
+          Loading/Unavailable/Error page-level states -- real, already-
+          computed signals -- never appeared as a compact state *within*
+          this section itself; the section was simply absent. Rendered here,
+          outside the `state === 'loaded'` gate, for every page state, with
+          `reviewState` threading the exact same real `state` value so the
+          section can show its own honestly-worded Loading/Unavailable
+          compact state instead of disappearing entirely. Positioned after
+          the takeover placeholders above (loading/error/unavailable) so it
+          never duplicates their messaging -- narrative order for the
+          `loaded` case is unchanged (Portfolio Status, Since Last Review,
+          Attention Required, Ranked Opportunities, Review Complete). */}
+      {state === 'loaded' && narrative ? (
         <>
           <SummaryStrip narrative={narrative} sinceLastReview={sinceLastReview} th={th} />
           <PortfolioStatusSection review={narrative.portfolioStatus.review} th={th} />
           <SinceLastReviewSection sinceLastReview={sinceLastReview} th={th} />
           <AttentionRequiredSection todaysPriorities={todaysPriorities} th={th} />
-          <NewOpportunitiesSection items={narrative.newOpportunities.items} generatedAt={narrative.generatedAt} th={th} />
+          <NewOpportunitiesSection
+            items={narrative.newOpportunities.items}
+            generatedAt={viewModel.opportunitiesGeneratedAt}
+            th={th}
+            reviewState="loaded"
+            // PO corrective round 4 (WA-0005 Defect 1): the Recommendation
+            // Service's own real evaluation-lifecycle signal -- distinct
+            // from `reviewState` above (which describes the surrounding
+            // portfolio-composition load, not the opportunities evaluation
+            // pipeline). Lets this section genuinely represent "a newer
+            // evaluation is running/failed since the currently-published
+            // set" underneath the current items, which it previously had
+            // no way to observe.
+            opportunityEvaluationStatus={viewModel.opportunitiesEvaluationStatus}
+            opportunityEvaluationError={viewModel.opportunitiesEvaluationError}
+          />
           <ReviewCompleteBand narrative={narrative} th={th} />
         </>
+      ) : (
+        <NewOpportunitiesSection
+          items={[]}
+          generatedAt={viewModel.opportunitiesGeneratedAt}
+          th={th}
+          reviewState={state === 'loading' ? 'loading' : state === 'error' ? 'error' : 'unavailable'}
+        />
       )}
     </main>
   );

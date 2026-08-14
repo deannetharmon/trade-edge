@@ -76,6 +76,15 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
   const now = input.now ?? new Date();
   const generatedAt = now.toISOString();
   const lastRefreshedAt = input.lastRefreshedAt ?? null;
+  const opportunitiesGeneratedAt = input.opportunityRecommendationsGeneratedAt ?? null;
+  // PO corrective round 4 (WA-0005 Defect 1): the Recommendation Service's
+  // own real evaluation-lifecycle signal, threaded through unconditionally
+  // (every branch below) -- distinct from `state`/`compositionError` above,
+  // which describe the surrounding portfolio-composition load, not the
+  // opportunities evaluation pipeline itself. Defaults to 'idle'/undefined
+  // exactly as RecommendationService's own EMPTY_STATE does.
+  const opportunitiesEvaluationStatus = input.opportunityRecommendationsStatus ?? 'idle';
+  const opportunitiesEvaluationError = input.opportunityError ?? null;
 
   if (input.compositionError) {
     return {
@@ -86,6 +95,9 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
       lastRefreshedAt,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
       sinceLastReview: EMPTY_SINCE_LAST_REVIEW_SUMMARY,
+      opportunitiesGeneratedAt,
+      opportunitiesEvaluationStatus,
+      opportunitiesEvaluationError,
     };
   }
 
@@ -106,6 +118,9 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
       lastRefreshedAt,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES_SUMMARY,
       sinceLastReview: EMPTY_SINCE_LAST_REVIEW_SUMMARY,
+      opportunitiesGeneratedAt,
+      opportunitiesEvaluationStatus,
+      opportunitiesEvaluationError,
     };
   }
 
@@ -157,5 +172,15 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
   // recomputes or independently decides the tracking-active state.
   const sinceLastReview = buildSinceLastReviewSummary(narrative);
 
-  return { state: 'loaded', narrative, generatedAt, lastRefreshedAt, todaysPriorities, sinceLastReview };
+  return {
+    state: 'loaded',
+    narrative,
+    generatedAt,
+    lastRefreshedAt,
+    todaysPriorities,
+    sinceLastReview,
+    opportunitiesGeneratedAt,
+    opportunitiesEvaluationStatus,
+    opportunitiesEvaluationError,
+  };
 }

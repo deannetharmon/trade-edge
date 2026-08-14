@@ -228,6 +228,72 @@ describe('buildMissionControlViewModel: WA-0003 todaysPriorities summary', () =>
   });
 });
 
+// PO corrective round 4 (WA-0005 Defect 1): buildMissionControlViewModel.ts
+// previously declared `opportunityError` on its input type but never
+// consumed it, and had no way to thread the Recommendation Service's own
+// evaluation-lifecycle status through at all -- Mission Control had no
+// path to receive "an evaluation is running/failed" independent of
+// portfolio-composition loading/error. These tests prove the corrected
+// threading: both new fields pass through, unconditionally, defaulting
+// honestly when omitted, in every state branch (error/loading-unavailable/
+// loaded).
+describe('buildMissionControlViewModel: WA-0005 Defect 1 evaluation-lifecycle fields', () => {
+  it('defaults opportunitiesEvaluationStatus to "idle" and opportunitiesEvaluationError to null when omitted, in every state branch', () => {
+    expect(buildMissionControlViewModel(baseInput({ compositionLoading: true })).opportunitiesEvaluationStatus).toBe('idle');
+    expect(buildMissionControlViewModel(baseInput({ compositionLoading: true })).opportunitiesEvaluationError).toBeNull();
+
+    expect(
+      buildMissionControlViewModel(baseInput({ composition: loadedComposition(), compositionError: 'boom' })).opportunitiesEvaluationStatus,
+    ).toBe('idle');
+
+    expect(buildMissionControlViewModel(baseInput({ composition: loadedComposition() })).opportunitiesEvaluationStatus).toBe('idle');
+  });
+
+  it('threads a real "loading" status through in the loaded state, without altering opportunitiesGeneratedAt/narrative', () => {
+    const result = buildMissionControlViewModel(
+      baseInput({
+        composition: loadedComposition(),
+        opportunityRecommendationsStatus: 'loading',
+        opportunityRecommendationsGeneratedAt: '2026-07-25T08:00:00.000Z',
+      }),
+    );
+
+    expect(result.state).toBe('loaded');
+    expect(result.opportunitiesEvaluationStatus).toBe('loading');
+    expect(result.opportunitiesGeneratedAt).toBe('2026-07-25T08:00:00.000Z');
+  });
+
+  it('threads a real "error" status and message through in the loaded state, without clearing opportunitiesGeneratedAt', () => {
+    const result = buildMissionControlViewModel(
+      baseInput({
+        composition: loadedComposition(),
+        opportunityRecommendationsStatus: 'error',
+        opportunityError: 'Recommendation engine unavailable.',
+        opportunityRecommendationsGeneratedAt: '2026-07-25T08:00:00.000Z',
+      }),
+    );
+
+    expect(result.opportunitiesEvaluationStatus).toBe('error');
+    expect(result.opportunitiesEvaluationError).toBe('Recommendation engine unavailable.');
+    // The last successfully published generatedAt is untouched by the
+    // failure -- a failed refresh must never blank out a prior valid result.
+    expect(result.opportunitiesGeneratedAt).toBe('2026-07-25T08:00:00.000Z');
+  });
+
+  it('threads the evaluation-lifecycle fields through even in the error/loading/unavailable page-level states -- the same real signal, regardless of surrounding composition state', () => {
+    const errored = buildMissionControlViewModel(
+      baseInput({ composition: loadedComposition(), compositionError: 'boom', opportunityRecommendationsStatus: 'error', opportunityError: 'eval failed' }),
+    );
+    expect(errored.opportunitiesEvaluationStatus).toBe('error');
+    expect(errored.opportunitiesEvaluationError).toBe('eval failed');
+
+    const loading = buildMissionControlViewModel(
+      baseInput({ compositionLoading: true, opportunityRecommendationsStatus: 'loading' }),
+    );
+    expect(loading.opportunitiesEvaluationStatus).toBe('loading');
+  });
+});
+
 describe('buildMissionControlViewModel: determinism', () => {
   it('produces deeply equal results across repeated calls with identical input', () => {
     const input = baseInput({ composition: loadedComposition() });
