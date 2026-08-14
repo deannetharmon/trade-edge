@@ -6775,7 +6775,8 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const [pmccLoopIdx, symbol] of loopSymbols.entries()) {
+      for (let pmccLoopIdx = 0; pmccLoopIdx < loopSymbols.length; pmccLoopIdx++) {
+        const symbol = loopSymbols[pmccLoopIdx];
         pushStatus(`Scanning PMCC ${symbol}...`);
         updateScreenerJob({ progressCurrent: pmccLoopIdx + 1 });
         try {
@@ -6902,7 +6903,8 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const [cspLoopIdx, symbol] of loopSymbols.entries()) {
+      for (let cspLoopIdx = 0; cspLoopIdx < loopSymbols.length; cspLoopIdx++) {
+        const symbol = loopSymbols[cspLoopIdx];
         pushStatus(`Scanning CSP ${symbol}...`);
         updateScreenerJob({ progressCurrent: cspLoopIdx + 1 });
         try {
@@ -7127,7 +7129,8 @@ export default function Home() {
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
-      for (const [ccLoopIdx, symbol] of loopSymbols.entries()) {
+      for (let ccLoopIdx = 0; ccLoopIdx < loopSymbols.length; ccLoopIdx++) {
+        const symbol = loopSymbols[ccLoopIdx];
         pushStatus(`Scanning CC ${symbol}...`);
         updateScreenerJob({ progressCurrent: ccLoopIdx + 1 });
         try {
