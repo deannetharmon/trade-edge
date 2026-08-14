@@ -56,11 +56,52 @@ const candidate: AutopilotCandidate = {
   theoreticalMaxLoss: 365,
 };
 
+const pmccCandidate: AutopilotCandidate = {
+  id: 'screen_AAPL_PMCC_2026-09-18_205_2027-01-15_150',
+  strategy: 'PMCC',
+  symbol: 'AAPL',
+  underlyingPrice: 190,
+  legs: [
+    {
+      symbol: 'AAPL270115C00150000',
+      optionSymbol: 'AAPL270115C00150000',
+      underlyingSymbol: 'AAPL',
+      assetType: 'option',
+      direction: 'long',
+      optionType: 'call',
+      strike: 150,
+      expiration: '2027-01-15',
+      quantity: 1,
+      contractMultiplier: 100,
+      openInterest: 1_200,
+    },
+    {
+      symbol: 'AAPL260918C00205000',
+      optionSymbol: 'AAPL260918C00205000',
+      underlyingSymbol: 'AAPL',
+      assetType: 'option',
+      direction: 'short',
+      optionType: 'call',
+      strike: 205,
+      expiration: '2026-09-18',
+      quantity: 1,
+      contractMultiplier: 100,
+      openInterest: 900,
+    },
+  ],
+  estimatedCredit: 135,
+  theoreticalMaxLoss: 3_000,
+  netDebit: 30,
+  netDebitUnit: 'per_share',
+  sourceResultId: 'AAPL::PMCC::2026-09-18::205::2027-01-15::150',
+};
+
 function completeCandidate(index: number): AutopilotCandidate {
   const symbol = `SYM${index}`;
   return {
     ...candidate,
     id: `screen_${symbol}_BPS_2026-09-18_${180 + index / 100}`,
+    sourceResultId: `source-${symbol}-${index}`,
     symbol,
     underlyingPrice: 190 + index / 100,
     legs: [
@@ -199,6 +240,7 @@ const completeConfig: AutopilotConfig = {
     IC: 'income',
     CSP: 'acquire',
     CC: 'income',
+    PMCC: 'income',
   },
   portfolioRiskPosture: 'steady',
   thresholds: {
@@ -282,7 +324,7 @@ function completeRunResult(candidates: AutopilotCandidate[]): RecommendationRunR
       openRiskPct: 8.55,
       drawdownPct: 1.44,
       tickerExposure: Object.fromEntries(candidates.slice(0, 100).map((item) => [item.symbol, 365])),
-      strategyExposure: { BPS: 8_760, BCS: 0, IC: 0, CSP: 0, CC: 0 },
+      strategyExposure: { BPS: 8_760, BCS: 0, IC: 0, CSP: 0, CC: 0, PMCC: 0 },
       generatedAt: '2026-07-25T14:31:00.000Z',
     },
     account,
@@ -317,6 +359,36 @@ describe('POST /api/autopilot/recommendations compact transport', () => {
       source: 'screener',
       candidates: [candidate],
     });
+  });
+
+  it('accepts a canonical two-expiration PMCC and retains both leg contracts', async () => {
+    const response = await POST(request({ candidates: [pmccCandidate] }));
+
+    expect(response.status).toBe(200);
+    expect(runRecommendationEngine).toHaveBeenCalledWith('user-1', {
+      source: 'screener',
+      candidates: [pmccCandidate],
+    });
+  });
+
+  it.each([
+    ['same expiration', {
+      legs: [
+        pmccCandidate.legs[0],
+        { ...pmccCandidate.legs[1], expiration: pmccCandidate.legs[0].expiration },
+      ],
+    }],
+    ['mismatched quantity', {
+      legs: [
+        pmccCandidate.legs[0],
+        { ...pmccCandidate.legs[1], quantity: 2 },
+      ],
+    }],
+    ['missing debit', { netDebit: undefined }],
+  ])('rejects invalid PMCC structure: %s', async (_label, override) => {
+    const response = await POST(request({ candidates: [{ ...pmccCandidate, ...override }] }));
+    expect(response.status).toBe(400);
+    expect(runRecommendationEngine).not.toHaveBeenCalled();
   });
 
   it('serializes the actual route envelope with a complete realistic run result below the response limit', async () => {

@@ -1,8 +1,8 @@
 # TradeEdge Project Governance
 
-**Version:** 1.1  
+**Version:** 1.2
 **Status:** Active  
-**Last Updated:** 2026-07-24 (DOC-0001 documentation reconciliation — updated Roles and Responsibilities to reflect the TradeEdge Engineering Operating Model Update adopted by the repository owner, and updated Branch Strategy to reflect the current long-lived branch name. No other section materially changed.)
+**Last Updated:** 2026-08-14 (Reconciled Roles and Responsibilities with the canonical TradeEdge team personas.)
 
 ## Purpose
 
@@ -33,9 +33,13 @@ TradeEdge shall:
 
 ## Roles and Responsibilities
 
-### Repository Owner
+### Project Sponsor — Dean
 
-The repository owner retains final authority over product direction, sprint approval, production deployment, and any live-trading capability.
+The Project Sponsor provides executive sponsorship and project direction. Dean retains final authority over product direction, sprint approval, production deployment, and any live-trading capability.
+
+### Professional Options Trader — Ian
+
+The Professional Options Trader provides expert guidance grounded in years of Wall Street experience and practical use of leading systems for trading stocks, options, and related instruments. Ian helps ensure TradeEdge reflects real professional workflows and sound trading practice.
 
 ### Product Owner — Paul
 
@@ -50,7 +54,25 @@ The Product Owner is responsible for:
 
 Repository disorder, unclear sprint state, conflicting instructions, or untracked scope changes are treated as Product Owner process failures.
 
-### Chief Architect — Quinn
+### Scrum Master and Chief Facilitator — Frank
+
+The Scrum Master is responsible for:
+
+- facilitating effective team collaboration and delivery ceremonies;
+- helping remove impediments;
+- promoting transparency, focus, and continuous improvement;
+- ensuring the agreed delivery process is followed.
+
+### User Experience Expert — Diane
+
+The User Experience Expert is responsible for:
+
+- designing and reviewing application flows;
+- ensuring the product is usable, coherent, and accessible;
+- guiding the application's look and feel;
+- identifying UX risks and inconsistencies before acceptance.
+
+### Chief Architect — Alan
 
 The Chief Architect is responsible for:
 
@@ -59,9 +81,9 @@ The Chief Architect is responsible for:
 - approving or rejecting architecture, layering, separation of concerns, determinism, and test strategy;
 - identifying when a discovered issue requires an "ARCHITECTURE REVIEW REQUIRED" escalation rather than a unilateral implementation decision.
 
-### Lead Engineer / Implementation Lead — Dean
+### Principal Developer — Dane
 
-The Lead Engineer is responsible for:
+The Principal Developer is responsible for:
 
 - implementing the approved sprint specification;
 - working only within the approved scope;
@@ -70,12 +92,21 @@ The Lead Engineer is responsible for:
 - writing or updating targeted tests;
 - running the required validation sequence;
 - documenting implementation results, limitations, and deviations;
+- ensuring every implementation has an associated implementation report for team review and acceptance;
 - committing and pushing completed work when instructed;
 - managing day-to-day repository and branch mechanics (creation, verification, cleanup) under Product Owner/Chief Architect direction.
 
-The Lead Engineer must not independently expand sprint scope, redesign unrelated architecture, introduce future-sprint features, modify acceptance criteria, or rewrite design documents unilaterally. When an architecture, safety, scope, governance, or repository-state assumption proves wrong mid-session, the Lead Engineer must stop and return an "ARCHITECTURE REVIEW REQUIRED" report rather than self-resolving.
+The Principal Developer must not independently expand sprint scope, redesign unrelated architecture, introduce future-sprint features, modify acceptance criteria, or rewrite design documents unilaterally. When an architecture, safety, scope, governance, or repository-state assumption proves wrong mid-session, the Principal Developer must stop and return an "ARCHITECTURE REVIEW REQUIRED" report rather than self-resolving.
 
-*(Historical note: earlier revisions of this document, and some superseded implementation reports predating 2026-07-24, refer to "Product Owner — ChatGPT" and "Implementation Engineer — Claude." Those labels describe the same functional roles under different working names and are superseded by the names above; no responsibilities changed as part of this rename.)*
+### Software Test Engineer — Quinn
+
+The Software Test Engineer is responsible for:
+
+- verifying implemented behavior and acceptance criteria;
+- reviewing test architecture, coverage, and quality;
+- evaluating requirements for correctness, clarity, and testability;
+- identifying defects, gaps, and risks before product acceptance;
+- providing feedback that improves both implementation quality and the team's testing approach.
 
 ## Source-of-Truth Hierarchy
 
@@ -171,7 +202,7 @@ Multiple commands may be grouped only when they form one atomic, low-risk operat
 
 ## Implementation Efficiency Standards
 
-Lead Engineer implementation prompts shall require efficient use of the active environment.
+Principal Developer implementation prompts shall require efficient use of the active environment.
 
 Unless a sprint explicitly requires otherwise:
 

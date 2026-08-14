@@ -131,7 +131,12 @@ function candidateDedupeAffinityKey(candidate: AutopilotCandidate): string {
     candidate.symbol.trim().toUpperCase(),
     candidate.strategy,
     candidate.legs
-      .map((leg) => `${leg.direction}:${leg.optionType ?? 'stock'}:${leg.strike ?? 'na'}`)
+      .map((leg) => [
+        leg.direction,
+        leg.optionType ?? 'stock',
+        leg.strike ?? 'na',
+        candidate.strategy === 'PMCC' ? leg.expiration ?? 'na' : null,
+      ].filter((value) => value !== null).join(':'))
       .join('|'),
   ].join('::');
 }

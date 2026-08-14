@@ -210,6 +210,75 @@ describe('duplicate handling', () => {
     expect(result.totalDuplicates).toBe(0);
   });
 
+  it('validates PMCC and keeps distinct long expirations out of one duplicate identity', () => {
+    const base = makeCandidate({
+      strategy: 'PMCC',
+      theoreticalMaxLoss: 3_000,
+      netDebit: 30,
+      netDebitUnit: 'per_share',
+      sourceResultId: 'AMD::PMCC',
+      legs: [
+        {
+          symbol: 'AMD270115C00130000', optionSymbol: 'AMD270115C00130000',
+          underlyingSymbol: 'AMD', assetType: 'option', direction: 'long', optionType: 'call',
+          strike: 130, expiration: '2027-01-15', quantity: 1, contractMultiplier: 100, openInterest: 1_200,
+        },
+        {
+          symbol: 'AMD260821C00170000', optionSymbol: 'AMD260821C00170000',
+          underlyingSymbol: 'AMD', assetType: 'option', direction: 'short', optionType: 'call',
+          strike: 170, expiration: '2026-08-21', quantity: 1, contractMultiplier: 100, openInterest: 900,
+        },
+      ],
+    });
+    const later = {
+      ...base,
+      id: 'pmcc-later',
+      sourceResultId: 'AMD::PMCC::later',
+      legs: [
+        { ...base.legs[0], symbol: 'AMD270319C00130000', optionSymbol: 'AMD270319C00130000', expiration: '2027-03-19' },
+        base.legs[1],
+      ],
+    };
+    const result = runCandidatePipeline({
+      candidates: [base, later],
+      portfolio: makePortfolioState(),
+      source: 'screener',
+    });
+    expect(result.totalAccepted).toBe(2);
+    expect(result.totalDuplicates).toBe(0);
+  });
+
+  it('rejects an invalid PMCC rather than reinterpreting it', () => {
+    const invalid = makeCandidate({
+      strategy: 'PMCC',
+      theoreticalMaxLoss: 3_000,
+      netDebit: 30,
+      netDebitUnit: 'per_share',
+      sourceResultId: 'AMD::PMCC::invalid',
+      legs: [
+        {
+          symbol: 'AMD260821C00130000', optionSymbol: 'AMD260821C00130000',
+          underlyingSymbol: 'AMD', assetType: 'option', direction: 'long', optionType: 'call',
+          strike: 130, expiration: '2026-08-21', quantity: 1, contractMultiplier: 100, openInterest: 1_200,
+        },
+        {
+          symbol: 'AMD260821C00170000', optionSymbol: 'AMD260821C00170000',
+          underlyingSymbol: 'AMD', assetType: 'option', direction: 'short', optionType: 'call',
+          strike: 170, expiration: '2026-08-21', quantity: 1, contractMultiplier: 100, openInterest: 900,
+        },
+      ],
+    });
+    const result = runCandidatePipeline({
+      candidates: [invalid],
+      portfolio: makePortfolioState(),
+      source: 'screener',
+    });
+    expect(result.totalRejected).toBe(1);
+    expect(result.rejected[0].validationIssues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'PMCC' })]),
+    );
+  });
+
   it('assigns each surviving candidate a unique pipelineId', () => {
     const result = runCandidatePipeline({
       candidates: [makeCandidate({ id: 'a', symbol: 'AMD' }), makeCandidate({ id: 'b', symbol: 'NVDA' })],

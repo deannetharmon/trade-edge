@@ -491,6 +491,239 @@ WA-0005 remains unaccepted, unmerged, and awaiting Paul’s review plus a repeat
 Vercel broad-scan/refresh validation with the diagnostic summary captured. No
 files were staged, committed, pushed, merged, or stashed.
 
+## 13. Ranked Opportunities UX corrective round
+
+### 13.1 Rejected production UX and frozen ruling
+
+Production proved the evaluation pipeline at 9,425 raw results, 9,425
+canonical candidates, eight HTTP batches, 2,437 returned analyses, and 2,437
+published opportunities. The prior zero-analysis hypothesis is therefore
+resolved. The remaining production result was rejected because
+`BestOpportunitiesPanel` rendered 2,437 prose-heavy `RecommendationCard`
+instances as a browsing surface.
+
+The frozen corrective ruling makes `/screener`'s existing `ResultCard` the
+canonical compact result presentation. Ranked mode preserves the Opportunity
+Engine's order and adds context; it does not own a second financial-card
+design.
+
+### 13.2 Shared components and source mapping
+
+- `ResultCard` remains the compact card mounted by Filter, Targeted, and the
+  existing Ranked “All Scan Results” paths. Ranked Opportunities now mounts
+  that same component.
+- The ranked presentation maps
+  `OpportunityRecommendation.decisionAnalysisId → DecisionAnalysis.candidate`
+  option-leg identity → the retained canonical `ScreenResult`. No price,
+  strike, return, OI, or risk value is reconstructed.
+- `CandidateDetailTier` is exported from `BestOpportunitiesPanel.tsx` and
+  lazily reused inside an expanded compact card. Complete recommendation
+  reason/support/tradeoff/conflict/rejection/missing-data/improvement content
+  remains available there.
+- Ranked cards add original canonical rank, disposition, whole-number
+  opportunity score, whole-number confidence percentage, and one concise
+  concern. UI filters never rescore, redisposition, or renumber.
+- Ranked compact cards suppress `ResultCard`'s trade/finder actions because
+  this surface remains analysis-only.
+
+### 13.3 Filters, OI, performance, and refresh
+
+The Ranked publication owns a memoized filter state independent of scan input
+state. It covers 10/20/50/All, DTE, POP, OTM, credit ratio, canonical strategy,
+ticker, weakest-required-option-leg OI, canonical disposition, and the approved
+SR-0001 Rank/OI/CR/Cap Required/OTM sorting controls. Filtering precedes
+sorting, which precedes limiting, and preserves `OpportunityRecommendation.rank`. Counts
+distinguish total published, matching, and currently rendered results.
+
+OI numeric thresholds use strict `>` semantics:
+
+- choices are Any, >100, >250, >500, and >1,000, with >500 selected by default;
+- BPS/BCS/PMCC: short and long option legs;
+- IC: short put, long put, short call, and long call;
+- CSP/covered strategy: required option leg only; shares are ignored;
+- missing OI fails a numeric threshold;
+- Any imposes no restriction.
+
+The same OI choices were added to regular Filter and Targeted result controls.
+The visible >500 selection is the actual active default; Any restores the
+complete publication. Changing OI, sort, direction, or limit is client-side
+only and does not invoke either scan or recommendation APIs.
+“All” incrementally mounts 100 compact cards at a time, avoiding eager
+expanded-detail/card mounting for the 2,437-result production population.
+
+The last successful source-result array is retained by reference alongside the
+published recommendations. Starting or failing a refresh does not clear it,
+and Ranked filter state is not reset. Successful publication atomically
+replaces recommendations, analyses, and source-result references. Existing
+abort, pause, supersession, late-response, and partial-publication safeguards
+are unchanged.
+
+### 13.4 Warning and diagnostics changes
+
+The capital-limitation notice now appears once at section level. It is absent
+from individual ranked cards and `availableCapital: 0` is unchanged. Candidate
+warnings remain card-specific. The temporary unconditional
+`[WA-0005] ranked-opportunities evaluation summary` console logging was removed
+after production validation; workflow error reporting remains.
+
+### 13.5 Tests and remaining gate
+
+New pure tests cover canonical result-reference mapping, explicit mapping
+failure, recommendation-order and rank preservation, Filter order without
+fabricated ranks, Targeted score-published rank, filter-before-limit, strict OI
+boundaries, weakest-leg behavior, missing OI, vertical/IC/CSP/PMCC/covered
+option-leg rules, the >500 default, neutral Any behavior, and authoritative
+BPS/BCS/IC/CSP/PMCC capital fields. Adapter, pipeline, API, transport, Decision
+Engine, detail-model, and mounted Screener tests cover PMCC's complete
+two-expiration lifecycle, invalid contract rejection, CC exclusion, batch
+aggregation, `OPEN_PMCC`, canonical compact metrics, both option legs, OI,
+per-share debit, and total capital. Existing mounted coverage continues to
+assert ranked context, shared controls, one capital notice, lazy full
+reasoning, analysis-only cards, filter changes without evaluation requests,
+and filter preservation during refresh.
+
+Validation commands and any environment blockers are recorded in the review
+handoff:
+
+| Check | Command | Result |
+|---|---|---|
+| Targeted affected suites (single pre-final attempt) | `npm test -- …` (8 affected test files) | Blocked before collection, exit 127: `vitest: command not found`; not repeated. |
+| Complete suite (single attempt) | `npm test` | Blocked before collection, exit 127: `vitest: command not found`. |
+| TypeScript (single attempt) | `tsc --noEmit -p tsconfig.json` | Blocked immediately, exit 127: `command not found: tsc`. |
+| Production build (single attempt) | `npm run build` | Blocked before compilation, exit 127: `next: command not found`. |
+
+Dependencies were not inspected, installed, or repaired. These are environment
+blockers, not passing results or product-code failures. Unit tests cannot
+establish visual or high-volume interaction parity.
+WA-0005 remains unaccepted and unmerged pending Paul’s diff review and
+production validation of layout, precision, filters/OI, expanded details,
+warning placement, refresh preservation, and 2,437-opportunity performance.
+
+### 13.6 PMCC contract expansion, capital authority, and rank provenance
+
+The earlier PMCC blocker was resolved by a binding product/architecture ruling:
+PMCC is now a first-class `AutopilotStrategy` with Decision Engine action
+`OPEN_PMCC`. The canonical Screener adapter retains the long LEAPS call and
+short call as distinct option legs, including independent expirations, strikes,
+directions, quantities, contract multipliers, OI, and contract identities.
+Transport and candidate-pipeline validation require matched coverage, a later
+long expiration, a lower long strike, positive finite per-share net debit, and
+complete leg identity.
+
+`findBestPMCC()` produces `netDebit` as `bestLong.cost - bestShort.credit`.
+Both inputs are option quote points per share; existing UI consumers likewise
+display the raw value as a per-share debit. The canonical Screener financial
+producer therefore records total capital once as per-share net debit times the
+100-share contract multiplier. The canonical adapter scales that value by
+covered quantity and writes it to `candidate.theoreticalMaxLoss`; the Decision
+Engine carries the same value to `expectedOutcome.capitalRequired`.
+Presentation and sorting only read those fields.
+
+Capital authority by shared result strategy is:
+
+- BPS/BCS: producer-retained defined-risk maximum loss;
+- IC: the existing `spread-finder` maximum-loss result, retained without a
+  presentation-layer side calculation;
+- CSP: producer-retained required cash less collected premium;
+- PMCC: canonical total net debit;
+- Ranked Opportunities: Decision Engine
+  `expectedOutcome.capitalRequired` / `candidate.theoreticalMaxLoss`.
+
+Missing producer-level capital remains unavailable and sorts last. Covered
+Call is intentionally outside the Screener recommendation transport: the
+adapter excludes it before submission, the API continues rejecting it and
+stock legs, and existing non-Screener `WRITE_CC` behavior is unchanged.
+
+Rank/order provenance is explicit:
+
+- Ranked Opportunities: `OpportunityRecommendation.rank`;
+- Ranked raw results: score-sorted publication rank retained when the completed
+  ranked scan is published;
+- Targeted: score-descending publication rank assigned before persistence;
+- Filter and strategy-specific results: their established qualified/IVR
+  publication order, retained as presentation order without displaying an
+  invented canonical rank.
+
+The Targeted DTE buckets were removed because grouping after a global sort
+overrode the requested canonical result order. Targeted cards now render as
+one compact list while retaining their authoritative score-derived published
+rank; neither insertion order nor React array position supplies that rank.
+Mapping now supports PMCC's two-expiration leg identity. Any published
+recommendation that cannot map produces an explicit controlled error rather
+than silently disappearing.
+
+### 13.7 Paul corrective round: canonical financials and source identity
+
+The §13.6 statement that PMCC capital was already authoritative is superseded
+by this correction. `findBestPMCC()` produces raw debit from the difference
+between the long-call and short-call quote midpoints. Those quote points are
+per share, as demonstrated by the existing per-share option-price displays and
+now encoded as `netDebitUnit: 'per_share'`. The actual contract multiplier is
+retained when PMCC market data is ingested; absent multiplier metadata resolves
+only through the financial-domain standard equity-option contract default, not
+through React. Covered contract quantity originates in canonical scan/adaptation
+input.
+
+`lib/scans/financials.ts` is now the single owner of PMCC quote-to-capital
+conversion. `buildPmccFinancialsFromQuotes()` derives the per-share debit and
+calls `calculatePmccCapital()` exactly once:
+
+`net debit per share × contract multiplier × covered quantity`.
+
+It supplies identical `capitalRequired` and `theoreticalMaxLoss`. The Screener
+adapter reuses the same calculation from canonical raw inputs, and the Decision
+Engine copies `theoreticalMaxLoss` to
+`expectedOutcome.capitalRequired`. React, compact cards, filters, sorting,
+formatting, and presentation models contain no PMCC capital formula and cannot
+fabricate missing capital.
+
+The same module now owns Iron Condor maximum loss. For a standard non-overlapping
+position it calculates:
+
+`(max(put wing width, call wing width) - total position credit per share)
+× contract multiplier × quantity`.
+
+Both wing credits are combined before offsetting the threatened wider wing.
+Invalid widths, credits, multipliers, quantities, or non-positive maximum loss
+fail canonical validation. Producer and adapter reuse this implementation;
+presentation and sorting only read retained canonical values.
+
+`ScreenResult.sourceResultId` is assigned when results enter a complete
+publication, retained through cache/refresh, candidate adaptation, compact
+transport, route validation, the canonical candidate pipeline, Decision
+Analysis response serialization, batch aggregation, recommendation publication,
+and compact-card mapping. Mapping uses only that ID—never symbol, strategy,
+strikes, expirations, display text, or array position. Duplicate IDs are
+explicit data-integrity failures. Mapping now returns valid entries and
+structured per-recommendation failures; one failure renders a visible
+rank/disposition-aware alert while all valid compact cards remain visible.
+Network batch aggregation/publication remains atomic and unchanged.
+
+Tests added or extended cover PMCC quote units, one/multiple contracts,
+nonstandard multiplier through production/adaptation, invalid debit/multiplier,
+authoritative candidate and Decision Engine capital, the corrected two-credit
+Iron Condor regression ($300 for two $1 credits against five-point wings),
+unequal widths, quantity/multiplier, invalid structures, exact identity
+retention, structurally identical results with distinct IDs, duplicate IDs,
+and mixed valid/failed mapping. Final validation results for this corrective
+round are recorded in the handoff after the mandated commands actually run.
+
+Corrective-round validation:
+
+| Check | Exact command | Result |
+|---|---|---|
+| Focused affected suites | `npm test -- lib/scans/__tests__/financials.test.ts lib/autopilot/decision/__tests__/screenerCandidateAdapter.test.ts lib/autopilot/decision/__tests__/candidatePipeline.test.ts app/api/autopilot/recommendations/__tests__/route.test.ts lib/recommendations/__tests__/screenerRecommendationTransport.test.ts lib/command-center/__tests__/rankedOpportunityPresentation.test.ts app/screener/__tests__/ScreenerPage.test.tsx` | Blocked before collection, exit 127: `vitest: command not found`. |
+| Complete suite (one final run) | `npm test` | Blocked before collection, exit 127: `vitest: command not found`. |
+| TypeScript (one final run) | `tsc --noEmit -p tsconfig.json` | Blocked immediately, exit 127: `command not found: tsc`. |
+| Production build (one final run) | `npm run build` | Blocked before compilation, exit 127: `next: command not found`. |
+| Patch hygiene | `git diff --check` | Passed. |
+
+Dependencies were not inspected, installed, updated, or repaired. The missing
+executables prevent commit approval; these outcomes are not test/build passes.
+Automated tests do not constitute visual approval. WA-0005 remains unaccepted
+and unmerged, with production preview layout and high-volume validation still
+required.
+
 ---
 
 ## 11. Preview HTTP 413 Corrective Round

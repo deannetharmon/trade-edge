@@ -350,7 +350,8 @@ export function exploreAllCandidatesForRank(
               bestCandidate = {
                 strategy: strat, expiration: exp, dte, shortStrike: shortLeg.strikePrice, longStrike,
                 shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
-                credit, spreadWidth: width, creditRatio, roc, pop: modelPop, optimized: false,
+                credit, spreadWidth: width, capitalRequired: maxLoss * 100, contractMultiplier: 100,
+                creditRatio, roc, pop: modelPop, optimized: false,
                 shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
                 shortIv: normalizeIv(shortLeg.iv),
                 expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
@@ -408,5 +409,4 @@ export function exploreAllCandidatesForRank(
   }
   return results;
 }
-
 

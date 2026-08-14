@@ -188,6 +188,8 @@ function buildSpreadCandidate(
     cspMid: c.mid,
     optimized: true,
     requiredCash,
+    capitalRequired: Math.max(0, requiredCash - totalPremium),
+    contractMultiplier: 100,
     annualizedRoc,
     breakeven,
     assignmentPrice: c.strikePrice,

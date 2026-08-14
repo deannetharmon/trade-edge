@@ -5,14 +5,9 @@
 // evaluates real market data instead of the empty candidates: [] it gets
 // today.
 //
-// SCOPE: BPS, BCS, IC, CSP only. PMCC has no representation in
-// AutopilotStrategy ('BPS' | 'BCS' | 'IC' | 'CSP' | 'CC') -- extending that
-// type cascades into opportunity.ts's riskPenalty(), the decision-engine's
-// actionForStrategy() switch, and portfolioState.ts's STRATEGIES list. That's
-// a real product decision (does Autopilot recommend PMCC at all?), not
-// something to decide silently inside an adapter. PMCC results from
-// ScreenResult are skipped here and surfaced in the conversion summary
-// instead of being dropped silently.
+// SCOPE: BPS, BCS, IC, CSP, and PMCC. PMCC is a canonical first-class
+// recommendation strategy. Its two call expirations remain distinct and its
+// authoritative maximum loss is the total net debit paid.
 //
 // Also out of scope: CC (covered call) candidates aren't produced by the
 // standard screener scan at all (lib/scans/* has no CC path) -- they come
@@ -21,13 +16,18 @@
 
 import type { AutopilotCandidate, AutopilotLeg, AutopilotStrategy } from '../types';
 import type { ScreenResult, SpreadCandidate } from '@/lib/scans/types';
+import {
+  calculateIronCondorCapital,
+  calculatePmccCapital,
+  resolveOptionContractMultiplier,
+} from '@/lib/scans/financials';
 
 export interface ScreenerAdapterResult {
   candidates: AutopilotCandidate[];
   skipped: Array<{ symbol: string; strategy: string; reason: string }>;
 }
 
-const SUPPORTED_STRATEGIES: ReadonlySet<string> = new Set(['BPS', 'BCS', 'IC', 'CSP']);
+const SUPPORTED_STRATEGIES: ReadonlySet<string> = new Set(['BPS', 'BCS', 'IC', 'CSP', 'PMCC']);
 
 function toAutopilotStrategy(strategy: string): AutopilotStrategy | null {
   return SUPPORTED_STRATEGIES.has(strategy) ? (strategy as AutopilotStrategy) : null;
@@ -44,6 +44,27 @@ function isoFromQuoteFetchedAt(quoteFetchedAt?: number): string | undefined {
 // CSP has no spread width -- max loss (pre-assignment) is capital at risk,
 // i.e. requiredCash minus premium collected.
 function theoreticalMaxLoss(strategy: AutopilotStrategy, candidate: SpreadCandidate, quantity: number): number {
+  if (strategy === 'PMCC') {
+    return calculatePmccCapital({
+      netDebit: Number(candidate.netDebit),
+      netDebitUnit: candidate.netDebitUnit as 'per_share',
+      contractMultiplier: Number(candidate.contractMultiplier),
+      quantity,
+    }).theoreticalMaxLoss;
+  }
+  if (strategy === 'IC') {
+    return calculateIronCondorCapital({
+      putWidth: candidate.spreadWidth,
+      callWidth: Number(candidate.callWidth),
+      totalCredit: Number(candidate.totalCredit),
+      creditUnit: 'per_share',
+      contractMultiplier: Number(candidate.contractMultiplier),
+      quantity,
+    }).theoreticalMaxLoss;
+  }
+  if (Number.isFinite(candidate.capitalRequired ?? NaN)) {
+    return Number(candidate.capitalRequired) * quantity;
+  }
   if (strategy === 'CSP') {
     const requiredCash = candidate.requiredCash ?? 0;
     const credit = candidate.credit ?? 0;
@@ -64,7 +85,17 @@ function buildLegs(
   const quoteTimestamp = isoFromQuoteFetchedAt(candidate.quoteFetchedAt);
   const legs: AutopilotLeg[] = [];
 
-  const shortLeg = (strike: number | undefined, optionType: 'call' | 'put', occSymbol?: string, delta?: number, bid?: number, ask?: number): AutopilotLeg | null => {
+  const multiplier = resolveOptionContractMultiplier(candidate.contractMultiplier);
+  const shortLeg = (
+    strike: number | undefined,
+    optionType: 'call' | 'put',
+    occSymbol?: string,
+    delta?: number,
+    bid?: number,
+    ask?: number,
+    expiration = candidate.expiration,
+    openInterest?: number,
+  ): AutopilotLeg | null => {
     if (!Number.isFinite(strike ?? NaN)) return null;
     return {
       symbol: occSymbol ?? symbol,
@@ -74,8 +105,10 @@ function buildLegs(
       direction: 'short',
       optionType,
       strike,
-      expiration: candidate.expiration,
+      expiration,
       quantity,
+      contractMultiplier: multiplier,
+      openInterest,
       delta,
       bid,
       ask,
@@ -84,7 +117,15 @@ function buildLegs(
     };
   };
 
-  const longLeg = (strike: number | undefined, optionType: 'call' | 'put', occSymbol?: string, bid?: number, ask?: number): AutopilotLeg | null => {
+  const longLeg = (
+    strike: number | undefined,
+    optionType: 'call' | 'put',
+    occSymbol?: string,
+    bid?: number,
+    ask?: number,
+    expiration = candidate.expiration,
+    openInterest?: number,
+  ): AutopilotLeg | null => {
     if (!Number.isFinite(strike ?? NaN)) return null;
     return {
       symbol: occSymbol ?? symbol,
@@ -94,8 +135,10 @@ function buildLegs(
       direction: 'long',
       optionType,
       strike,
-      expiration: candidate.expiration,
+      expiration,
       quantity,
+      contractMultiplier: multiplier,
+      openInterest,
       bid,
       ask,
       mid: bid !== undefined && ask !== undefined ? (bid + ask) / 2 : undefined,
@@ -104,27 +147,49 @@ function buildLegs(
   };
 
   if (strategy === 'BPS') {
-    const s = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk);
-    const l = longLeg(candidate.longStrike, 'put', candidate.longOccSymbol, candidate.longBid, candidate.longAsk);
+    const s = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
+    const l = longLeg(candidate.longStrike, 'put', candidate.longOccSymbol, candidate.longBid, candidate.longAsk, candidate.expiration, candidate.longOI);
     if (s) legs.push(s);
     if (l) legs.push(l);
   } else if (strategy === 'BCS') {
-    const s = shortLeg(candidate.shortStrike, 'call', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk);
-    const l = longLeg(candidate.longStrike, 'call', candidate.longOccSymbol, candidate.longBid, candidate.longAsk);
+    const s = shortLeg(candidate.shortStrike, 'call', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
+    const l = longLeg(candidate.longStrike, 'call', candidate.longOccSymbol, candidate.longBid, candidate.longAsk, candidate.expiration, candidate.longOI);
     if (s) legs.push(s);
     if (l) legs.push(l);
   } else if (strategy === 'IC') {
-    const shortPut = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk);
-    const longPut = longLeg(candidate.longStrike, 'put', candidate.longOccSymbol, candidate.longBid, candidate.longAsk);
-    const shortCall = shortLeg(candidate.shortCallStrike, 'call', candidate.shortCallOccSymbol, undefined, undefined, undefined);
-    const longCall = longLeg(candidate.longCallStrike, 'call', candidate.longCallOccSymbol, undefined, undefined);
+    const shortPut = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
+    const longPut = longLeg(candidate.longStrike, 'put', candidate.longOccSymbol, candidate.longBid, candidate.longAsk, candidate.expiration, candidate.longOI);
+    const shortCall = shortLeg(candidate.shortCallStrike, 'call', candidate.shortCallOccSymbol, undefined, undefined, undefined, candidate.expiration, candidate.shortCallOI);
+    const longCall = longLeg(candidate.longCallStrike, 'call', candidate.longCallOccSymbol, undefined, undefined, candidate.expiration, candidate.longCallOI);
     if (shortPut) legs.push(shortPut);
     if (longPut) legs.push(longPut);
     if (shortCall) legs.push(shortCall);
     if (longCall) legs.push(longCall);
   } else if (strategy === 'CSP') {
-    const s = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk);
+    const s = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
     if (s) legs.push(s);
+  } else if (strategy === 'PMCC') {
+    const longCall = longLeg(
+      candidate.longStrike,
+      'call',
+      candidate.longOccSymbolPMCC,
+      undefined,
+      undefined,
+      candidate.longExpiration,
+      candidate.longOI,
+    );
+    const shortCall = shortLeg(
+      candidate.shortStrike,
+      'call',
+      candidate.shortOccSymbolPMCC,
+      candidate.shortDelta,
+      candidate.shortBid,
+      candidate.shortAsk,
+      candidate.expiration,
+      candidate.shortOI,
+    );
+    if (longCall) legs.push(longCall);
+    if (shortCall) legs.push(shortCall);
   }
 
   return legs;
@@ -136,6 +201,18 @@ export function screenResultsToAutopilotCandidates(
 ): ScreenerAdapterResult {
   const candidates: AutopilotCandidate[] = [];
   const skipped: ScreenerAdapterResult['skipped'] = [];
+  const sourceIdentity = new Map<string, ScreenResult>();
+
+  for (const result of results) {
+    if (!result.sourceResultId) continue;
+    const prior = sourceIdentity.get(result.sourceResultId);
+    if (prior) {
+      throw new Error(
+        `Duplicate sourceResultId "${result.sourceResultId}" for ${prior.symbol} ${prior.strategy} and ${result.symbol} ${result.strategy}.`,
+      );
+    }
+    sourceIdentity.set(result.sourceResultId, result);
+  }
 
   for (const result of results) {
     if (!result.qualified || !result.bestCandidate) {
@@ -148,39 +225,77 @@ export function screenResultsToAutopilotCandidates(
       skipped.push({
         symbol: result.symbol,
         strategy: result.strategy,
-        reason:
-          result.strategy === 'PMCC'
-            ? 'PMCC has no AutopilotStrategy representation yet -- product decision needed before Autopilot can evaluate it.'
-            : `Unsupported strategy "${result.strategy}".`,
+        reason: `Unsupported strategy "${result.strategy}".`,
       });
       continue;
     }
 
     const candidate = result.bestCandidate;
+    if (!result.sourceResultId) {
+      skipped.push({
+        symbol: result.symbol,
+        strategy: result.strategy,
+        reason: 'Missing canonical sourceResultId.',
+      });
+      continue;
+    }
+    if (strategy === 'PMCC') {
+      const multiplier = candidate.contractMultiplier;
+      const valid = (
+        Number.isFinite(candidate.netDebit ?? NaN)
+        && Number(candidate.netDebit) > 0
+        && candidate.netDebitUnit === 'per_share'
+        && Number.isFinite(multiplier)
+        && Number(multiplier) > 0
+        && Number.isFinite(quantity)
+        && quantity > 0
+        && candidate.longStrike < candidate.shortStrike
+        && Boolean(candidate.longExpiration)
+        && new Date(candidate.longExpiration as string).getTime() > new Date(candidate.expiration).getTime()
+        && Boolean(candidate.longOccSymbolPMCC)
+        && Boolean(candidate.shortOccSymbolPMCC)
+      );
+      if (!valid) {
+        skipped.push({
+          symbol: result.symbol,
+          strategy: result.strategy,
+          reason: 'Invalid PMCC: requires identified long/short call legs, later long expiration, lower long strike, matched positive quantity/multiplier, and positive finite per-share net debit.',
+        });
+        continue;
+      }
+    }
     const legs = buildLegs(strategy, result.symbol, candidate, quantity);
     if (!legs.length) {
       skipped.push({ symbol: result.symbol, strategy: result.strategy, reason: 'Could not build any valid legs from bestCandidate.' });
       continue;
     }
 
-    const estimatedCredit = (candidate.totalCredit ?? candidate.credit ?? 0) * quantity;
+    const estimatedCredit = strategy === 'PMCC'
+      ? candidate.credit * quantity
+      : (candidate.totalCredit ?? candidate.credit ?? 0) * quantity;
+    let maxLoss: number;
+    try {
+      maxLoss = theoreticalMaxLoss(strategy, candidate, quantity);
+    } catch {
+      skipped.push({ symbol: result.symbol, strategy: result.strategy, reason: 'Invalid canonical capital inputs.' });
+      continue;
+    }
+    const sourceResultId = result.sourceResultId;
 
     candidates.push({
-      id: `screen_${result.symbol}_${strategy}_${candidate.expiration}_${candidate.shortStrike}`,
-      // CSP-WORKFLOW-0001 core-correction (BLOCKER-04) — carry the
-      // canonical ScreenResult.candidateId through unchanged, so
-      // downstream joins never need to reparse `id` above (which is not a
-      // stable, canonical identity -- it's an ad hoc string local to this
-      // adapter) or fall back to symbol+strategy, which collides across
-      // multiple contracts on the same symbol (e.g. CSP's six-strike AMD
-      // fixture).
+      id: `screen_${sourceResultId}`,
+      // Preserve the modern Screener's canonical per-contract identity for
+      // downstream joins (especially multi-contract CSP result sets).
       screenerCandidateId: result.candidateId,
       strategy,
       symbol: result.symbol,
       underlyingPrice: result.price ?? 0,
       legs,
       estimatedCredit,
-      theoreticalMaxLoss: theoreticalMaxLoss(strategy, candidate, quantity),
+      theoreticalMaxLoss: maxLoss,
+      netDebit: strategy === 'PMCC' ? candidate.netDebit : undefined,
+      netDebitUnit: strategy === 'PMCC' ? 'per_share' : undefined,
+      sourceResultId,
       pop: candidate.pop ?? undefined,
       roc: candidate.roc ?? undefined,
       ivr: result.ivr ?? undefined,

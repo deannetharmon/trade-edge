@@ -122,7 +122,7 @@ function DetailRow({ label, value, th }: { label: string; value: string; th: (ty
   );
 }
 
-function CandidateDetailTier({
+export function CandidateDetailTier({
   detail,
   th,
 }: {
@@ -137,6 +137,13 @@ function CandidateDetailTier({
       <DetailRow label="DTE" th={th} value={formatValue(detail?.dte)} />
       <DetailRow label="Underlying Price" th={th} value={detail?.underlyingPrice != null ? `$${detail.underlyingPrice.toFixed(2)}` : 'Not available'} />
       <DetailRow label="Credit / Debit" th={th} value={detail?.credit != null ? `$${detail.credit.toFixed(2)}` : 'Not available'} />
+      {detail?.netDebit != null && (
+        <DetailRow
+          label="Net Debit"
+          th={th}
+          value={`$${detail.netDebit.toFixed(2)}${detail.netDebitUnit === 'per_share' ? ' per share' : ''}`}
+        />
+      )}
       <DetailRow label="Capital Requirement" th={th} value={detail?.capitalRequirement != null ? `$${detail.capitalRequirement.toFixed(2)}` : 'Not available'} />
       <DetailRow label="ROC" th={th} value={detail?.roc != null ? `${detail.roc}%` : 'Not available'} />
       <DetailRow label="Annualized Yield" th={th} value={detail?.annualizedYield != null ? `${detail.annualizedYield}%` : 'Not available'} />
@@ -153,6 +160,8 @@ function CandidateDetailTier({
             {detail.legs.map((leg, i) => (
               <li key={i} className={`text-[10px] ${th.textMuted}`}>
                 {leg.direction} {leg.optionType ?? ''} {leg.strike ?? 'Not available'} exp {leg.expiration ?? 'Not available'}
+                {' · '}OI {leg.openInterest ?? 'Not available'}
+                {' · '}×{leg.contractMultiplier ?? 'Not available'}
               </li>
             ))}
           </ul>

@@ -3,7 +3,7 @@
 import type { AutopilotConfig, AutopilotGoal, AutopilotStrategy, PortfolioRiskPosture } from '../types';
 import { DEFAULT_AUTOPILOT_CONFIG } from './defaults';
 
-const STRATEGIES: AutopilotStrategy[] = ['BPS', 'BCS', 'IC', 'CSP', 'CC'];
+const STRATEGIES: AutopilotStrategy[] = ['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC'];
 const GOALS: AutopilotGoal[] = ['conserve', 'income', 'acquire', 'maximize'];
 const POSTURES: PortfolioRiskPosture[] = ['conserve', 'steady', 'maximize'];
 

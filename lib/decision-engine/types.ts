@@ -31,6 +31,7 @@ export type DecisionAction =
   | 'OPEN_BPS'
   | 'OPEN_BCS'
   | 'OPEN_IC'
+  | 'OPEN_PMCC'
   | 'ROLL'
   | 'CLOSE'
   | 'MANAGE'

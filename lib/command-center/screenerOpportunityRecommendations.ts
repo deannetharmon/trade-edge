@@ -29,7 +29,7 @@ import type { DecisionAnalysis } from '@/lib/decision-engine';
 // canonical field on this route's response (app/api/autopilot/
 // recommendations/route.ts's own `skipped` output, sourced from
 // lib/autopilot/decision/screenerCandidateAdapter.ts's real adapter-skip
-// list -- e.g. PMCC candidates the adapter cannot convert). It was
+// list -- e.g. intentionally excluded CC or structurally invalid candidates). It was
 // previously returned by the route but never read by this module or by
 // app/screener/page.tsx. Adding it here is a narrow, additive,
 // presentation-layer typed seam only: it does not touch

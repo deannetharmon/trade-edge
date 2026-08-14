@@ -3,7 +3,7 @@
 import type { AutopilotStrategy, PaperAccount, PaperPosition } from '../types';
 import type { PortfolioStateSummary } from './types';
 
-const STRATEGIES: AutopilotStrategy[] = ['BPS', 'BCS', 'IC', 'CSP', 'CC'];
+const STRATEGIES: AutopilotStrategy[] = ['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC'];
 
 function safeNumber(value: number | undefined | null): number {
   return Number.isFinite(value) ? Number(value) : 0;

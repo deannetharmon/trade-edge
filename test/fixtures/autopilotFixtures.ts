@@ -109,7 +109,7 @@ export function makePortfolioState(
     openRiskPct: 0,
     drawdownPct: 0,
     tickerExposure: {},
-    strategyExposure: { BPS: 0, BCS: 0, IC: 0, CSP: 0, CC: 0 },
+    strategyExposure: { BPS: 0, BCS: 0, IC: 0, CSP: 0, CC: 0, PMCC: 0 },
     generatedAt: '2026-07-11T13:00:00.000Z',
     ...overrides,
   };

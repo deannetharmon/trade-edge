@@ -32,6 +32,8 @@ function actionForStrategy(strategy: AutopilotStrategy): DecisionAction {
       return 'OPEN_BCS';
     case 'IC':
       return 'OPEN_IC';
+    case 'PMCC':
+      return 'OPEN_PMCC';
   }
 }
 

@@ -127,6 +127,44 @@ describe('buildOpportunityCandidateDetail', () => {
     expect(detail.capitalRequirement).toBe(500);
   });
 
+  it('preserves both PMCC expirations and consumes canonical capital without recalculation', () => {
+    const analysis = makeAnalysis({
+      subject: { type: 'candidate', id: 'pmcc', symbol: 'AAPL', strategy: 'PMCC', label: 'AAPL PMCC' },
+      recommendation: { action: 'OPEN_PMCC', strategy: 'PMCC', summary: 'Review PMCC.', status: 'conditional' },
+      expectedOutcome: { intent: 'income', capitalRequired: 3_000 },
+      candidate: {
+        id: 'pmcc',
+        strategy: 'PMCC',
+        symbol: 'AAPL',
+        underlyingPrice: 190,
+        legs: [
+          {
+            symbol: 'AAPL270115C00150000', optionSymbol: 'AAPL270115C00150000',
+            underlyingSymbol: 'AAPL', assetType: 'option', direction: 'long', optionType: 'call',
+            strike: 150, expiration: '2027-01-15', quantity: 1, contractMultiplier: 100, openInterest: 1_200,
+          },
+          {
+            symbol: 'AAPL260918C00205000', optionSymbol: 'AAPL260918C00205000',
+            underlyingSymbol: 'AAPL', assetType: 'option', direction: 'short', optionType: 'call',
+            strike: 205, expiration: '2026-09-18', quantity: 1, contractMultiplier: 100, openInterest: 900,
+          },
+        ],
+        estimatedCredit: 135,
+        theoreticalMaxLoss: 3_000,
+        netDebit: 30,
+        netDebitUnit: 'per_share',
+        sourceResultId: 'AAPL::PMCC',
+      },
+    });
+    const detail = buildOpportunityCandidateDetail(analysis, FIXED_NOW);
+    expect(detail.capitalRequirement).toBe(3_000);
+    expect(detail.netDebit).toBe(30);
+    expect(detail.netDebitUnit).toBe('per_share');
+    expect(detail.expiration).toBe('2027-01-15');
+    expect(detail.legs?.map((leg) => leg.expiration)).toEqual(['2027-01-15', '2026-09-18']);
+    expect(detail.legs?.map((leg) => leg.openInterest)).toEqual([1_200, 900]);
+  });
+
   it('does not mutate the input DecisionAnalysis', () => {
     const analysis = makeAnalysis({
       candidate: {

@@ -874,6 +874,7 @@ function saveEtfRulesToStorage(rules: RulesType) {
 // defined (rather than deleted) purely so the migration's exact legacy
 // inputs stay traceable from this file.
 const LS_PMCC = 'hunter-tickers-pmcc';
+const LS_PMCC_DTE = 'hunter-pmcc-dte-ranges';
 const LS_CSP = 'hunter-tickers-csp';
 const LS_CSP_CASH = 'hunter-csp-available-cash';
 const LS_CAL = 'hunter-cal-scheduled'; // legacy — superseded by LS_FOLLOWUPS, kept only so old presence flags don't error on read
@@ -1171,7 +1172,11 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 
 
 // PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
-async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
+async function getPMCCChain(
+  symbol: string,
+  token: string,
+  dteRanges: { shortMin: number; shortMax: number; longMin: number; longMax: number },
+): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
   const classification = await classifyUnderlying(symbol, token);
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
@@ -1180,8 +1185,8 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
     const dte = daysUntil(expDate);
-    const isShortWindow = dte >= PMCC_SHORT_DTE_MIN && dte <= PMCC_SHORT_DTE_MAX;
-    const isLongWindow = dte >= PMCC_LONG_DTE_MIN && dte <= PMCC_LONG_DTE_MAX;
+    const isShortWindow = dte >= dteRanges.shortMin && dte <= dteRanges.shortMax;
+    const isLongWindow = dte >= dteRanges.longMin && dte <= dteRanges.longMax;
     if (!isShortWindow && !isLongWindow) continue;
     for (const strike of expGroup.strikes ?? []) {
       const strikePrice = parseFloat(strike['strike-price'] ?? '0');
@@ -5881,6 +5886,24 @@ export default function Home() {
     [tickers]
   );
   const [cspCashOverride, setCspCashOverride] = useState('');
+  const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
+  const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
+  const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
+  const [pmccLongDteMax, setPmccLongDteMax] = useState(PMCC_LONG_DTE_MAX);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_PMCC_DTE);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
+      if (Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
+      if (Number.isFinite(parsed.longMin)) setPmccLongDteMin(parsed.longMin);
+      if (Number.isFinite(parsed.longMax)) setPmccLongDteMax(parsed.longMax);
+    } catch {}
+  }, []);
+  const persistPmccDteRanges = (ranges: { shortMin: number; shortMax: number; longMin: number; longMax: number }) => {
+    try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify(ranges)); } catch {}
+  };
   // TE-0007C — CC's scan universe comes from verified account holdings, not
   // a free-form ticker list (unlike CSP/PMCC), so its state shape differs:
   // no `ccTickers` string, just the holdings the API reports plus a
@@ -6743,6 +6766,10 @@ export default function Home() {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
+    if (pmccShortDteMin < 0 || pmccLongDteMin < 0 || pmccShortDteMin > pmccShortDteMax || pmccLongDteMin > pmccLongDteMax) {
+      setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
+      return;
+    }
     setError('');
     // Switch to Filter mode immediately -- the same thing the main
     // "SCAN SELECTED" button already does via RunModeModal's onRun handler
@@ -6781,7 +6808,15 @@ export default function Home() {
         updateScreenerJob({ progressCurrent: pmccLoopIdx + 1 });
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
+          const [pmccChain, price] = await Promise.all([
+            getPMCCChain(symbol, token, {
+              shortMin: pmccShortDteMin,
+              shortMax: pmccShortDteMax,
+              longMin: pmccLongDteMin,
+              longMax: pmccLongDteMax,
+            }),
+            getQuote(symbol, token),
+          ]);
           let trendResult: TrendResult | undefined;
           const pmccIsEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
           try { trendResult = await getTrend(symbol, pmccIsEtfOrIndex); } catch {}
@@ -7482,6 +7517,36 @@ export default function Home() {
                 FIND LEAPS — COMING SOON
               </button>
             </div>
+
+            <details className="text-[9px]">
+              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>PMCC DTE SETTINGS</summary>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <fieldset className={`rounded-lg border ${th.border} p-2`}>
+                  <legend className={`px-1 ${th.textFaint}`}>Short call</legend>
+                  <div className="flex items-center gap-1">
+                    <input aria-label="Short call DTE minimum" type="number" min={0} value={pmccShortDteMin} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMin(value); persistPmccDteRanges({ shortMin: value, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                    <span className={th.textFaint}>to</span>
+                    <input aria-label="Short call DTE maximum" type="number" min={0} value={pmccShortDteMax} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: value, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                  </div>
+                </fieldset>
+                <fieldset className={`rounded-lg border ${th.border} p-2`}>
+                  <legend className={`px-1 ${th.textFaint}`}>Long call</legend>
+                  <div className="flex items-center gap-1">
+                    <input aria-label="Long call DTE minimum" type="number" min={0} value={pmccLongDteMin} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMin(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: value, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                    <span className={th.textFaint}>to</span>
+                    <input aria-label="Long call DTE maximum" type="number" min={0} value={pmccLongDteMax} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: value }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                  </div>
+                </fieldset>
+              </div>
+            </details>
 
             {/* Strategy-specific settings — kept out of the launcher-button
                 row itself (TE-0007's "smallest change" guidance) but still

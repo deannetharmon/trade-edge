@@ -38,10 +38,13 @@ import type { AutopilotLeg } from '@/lib/autopilot/types';
 
 export interface OpportunityCandidateDetailLeg {
   symbol: string;
+  optionSymbol?: string;
   direction: AutopilotLeg['direction'];
   optionType?: AutopilotLeg['optionType'];
   strike?: number;
   expiration?: string;
+  contractMultiplier?: number;
+  openInterest?: number;
 }
 
 export interface OpportunityCandidateDetail {
@@ -53,6 +56,8 @@ export interface OpportunityCandidateDetail {
   expiration?: string;
   dte?: number;
   credit?: number;
+  netDebit?: number;
+  netDebitUnit?: 'per_share';
   capitalRequirement?: number;
   roc?: number;
   annualizedYield?: number;
@@ -110,14 +115,19 @@ export function buildOpportunityCandidateDetail(
     underlyingPrice: candidate?.underlyingPrice,
     legs: candidate?.legs?.map((leg) => ({
       symbol: leg.symbol,
+      optionSymbol: leg.optionSymbol,
       direction: leg.direction,
       optionType: leg.optionType,
       strike: leg.strike,
       expiration: leg.expiration,
+      contractMultiplier: leg.contractMultiplier,
+      openInterest: leg.openInterest,
     })),
     expiration,
     dte: calculateDte(expiration, now),
     credit: candidate?.estimatedCredit ?? analysis.expectedOutcome.expectedCredit,
+    netDebit: candidate?.netDebit,
+    netDebitUnit: candidate?.netDebitUnit,
     capitalRequirement: analysis.expectedOutcome.capitalRequired ?? candidate?.theoreticalMaxLoss,
     roc: candidate?.roc,
     annualizedYield: candidate?.annualizedYield,

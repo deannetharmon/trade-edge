@@ -10,6 +10,7 @@ import type {
   DuplicateCandidateRecord,
   PipelineCandidate,
 } from './candidatePipelineTypes';
+import { calculatePmccCapital } from '@/lib/scans/financials';
 
 function createPipelineId(): string {
   return `pipe_${Date.now().toString(36)}_${Math.random()
@@ -34,6 +35,7 @@ function normalizeCandidate(candidate: AutopilotCandidate): AutopilotCandidate {
     underlyingPrice: safeNumber(candidate.underlyingPrice),
     estimatedCredit: safeNumber(candidate.estimatedCredit),
     theoreticalMaxLoss: Math.max(0, safeNumber(candidate.theoreticalMaxLoss)),
+    netDebit: candidate.netDebit === undefined ? undefined : safeNumber(candidate.netDebit),
     pop: candidate.pop === undefined ? undefined : safeNumber(candidate.pop),
     roc: candidate.roc === undefined ? undefined : safeNumber(candidate.roc),
     ivr: candidate.ivr === undefined ? undefined : safeNumber(candidate.ivr),
@@ -66,6 +68,8 @@ function normalizeCandidate(candidate: AutopilotCandidate): AutopilotCandidate {
       symbol: normalizeSymbol(leg.symbol),
       underlyingSymbol: normalizeSymbol(leg.underlyingSymbol),
       quantity: Math.max(0, safeNumber(leg.quantity)),
+      contractMultiplier: leg.contractMultiplier === undefined ? undefined : safeNumber(leg.contractMultiplier),
+      openInterest: leg.openInterest === undefined ? undefined : safeNumber(leg.openInterest),
       strike: leg.strike === undefined ? undefined : safeNumber(leg.strike),
       delta: leg.delta === undefined ? undefined : safeNumber(leg.delta),
       gamma: leg.gamma === undefined ? undefined : safeNumber(leg.gamma),
@@ -129,6 +133,60 @@ function validateCandidate(
       severity: 'block',
       message: 'Candidate must include at least one leg.',
     });
+  }
+
+  if (candidate.strategy === 'PMCC') {
+    const longCall = candidate.legs.find((leg) => leg.direction === 'long');
+    const shortCall = candidate.legs.find((leg) => leg.direction === 'short');
+    const validPmcc = (
+      candidate.netDebitUnit === 'per_share'
+      && Number.isFinite(candidate.netDebit)
+      && Number(candidate.netDebit) > 0
+      && Boolean(candidate.sourceResultId)
+      && candidate.legs.length === 2
+      && longCall?.assetType === 'option'
+      && shortCall?.assetType === 'option'
+      && longCall.optionType === 'call'
+      && shortCall.optionType === 'call'
+      && longCall.underlyingSymbol === candidate.symbol
+      && shortCall.underlyingSymbol === candidate.symbol
+      && longCall.quantity === shortCall.quantity
+      && Number.isFinite(longCall.contractMultiplier)
+      && Number(longCall.contractMultiplier) > 0
+      && longCall.contractMultiplier === shortCall.contractMultiplier
+      && Number.isFinite(longCall.openInterest)
+      && Number.isFinite(shortCall.openInterest)
+      && Number(longCall.openInterest) >= 0
+      && Number(shortCall.openInterest) >= 0
+      && Number(longCall.strike) < Number(shortCall.strike)
+      && Boolean(longCall.expiration)
+      && Boolean(shortCall.expiration)
+      && new Date(longCall.expiration as string).getTime() > new Date(shortCall.expiration as string).getTime()
+      && Boolean(longCall.optionSymbol)
+      && Boolean(shortCall.optionSymbol)
+      && (() => {
+        try {
+          return Math.abs(
+            candidate.theoreticalMaxLoss
+            - calculatePmccCapital({
+              netDebit: Number(candidate.netDebit),
+              netDebitUnit: candidate.netDebitUnit as 'per_share',
+              contractMultiplier: Number(longCall.contractMultiplier),
+              quantity: longCall.quantity,
+            }).theoreticalMaxLoss,
+          ) < 1e-8;
+        } catch {
+          return false;
+        }
+      })()
+    );
+    if (!validPmcc) {
+      issues.push({
+        field: 'PMCC',
+        severity: 'block',
+        message: 'PMCC requires two identified call legs with matched coverage, later long expiration, lower long strike, positive per-share net debit, and canonical total-net-debit maximum loss.',
+      });
+    }
   }
 
   for (let index = 0; index < candidate.legs.length; index++) {
@@ -228,7 +286,12 @@ function dedupeCandidates(candidates: PipelineCandidate[]): {
       candidate.normalized.symbol,
       candidate.normalized.strategy,
       candidate.normalized.legs
-        .map((leg) => `${leg.direction}:${leg.optionType ?? 'stock'}:${leg.strike ?? 'na'}`)
+        .map((leg) => [
+          leg.direction,
+          leg.optionType ?? 'stock',
+          leg.strike ?? 'na',
+          candidate.normalized.strategy === 'PMCC' ? leg.expiration ?? 'na' : null,
+        ].filter((value) => value !== null).join(':'))
         .join('|'),
     ].join('::');
 

@@ -27,10 +27,11 @@ import { resolveAutopilotUserId } from '@/lib/autopilot/server/auth';
 import type { AutopilotCandidate } from '@/lib/autopilot/types';
 import type { ScreenResult } from '@/lib/scans/types';
 import { RECOMMENDATION_ENGINE_BUSY_CODE } from '@/lib/recommendations/screenerRecommendationTransport';
+import { calculatePmccCapital } from '@/lib/scans/financials';
 
 export const dynamic = 'force-dynamic';
 
-const SCREENER_TRANSPORT_STRATEGIES = new Set(['BPS', 'BCS', 'IC', 'CSP']);
+const SCREENER_TRANSPORT_STRATEGIES = new Set(['BPS', 'BCS', 'IC', 'CSP', 'PMCC']);
 const MARKET_TRENDS = new Set(['uptrend', 'downtrend', 'sideways', 'unknown']);
 const ENGINE_BUSY_MESSAGE = 'Autopilot recommendation engine is already running.';
 const CANDIDATE_OPTIONAL_NUMBER_FIELDS = [
@@ -79,17 +80,76 @@ function isOptionalTimestamp(value: unknown): boolean {
   );
 }
 
+function isValidPmccCandidate(candidate: Partial<AutopilotCandidate>): boolean {
+  if (
+    candidate.netDebitUnit !== 'per_share'
+    || !isFiniteNumber(candidate.netDebit)
+    || candidate.netDebit <= 0
+    || typeof candidate.sourceResultId !== 'string'
+    || candidate.sourceResultId.trim().length === 0
+    || !Array.isArray(candidate.legs)
+    || candidate.legs.length !== 2
+  ) return false;
+
+  const longCall = candidate.legs.find((leg) => leg.direction === 'long');
+  const shortCall = candidate.legs.find((leg) => leg.direction === 'short');
+  if (!longCall || !shortCall) return false;
+  let canonicalCapital: number;
+  try {
+    canonicalCapital = calculatePmccCapital({
+      netDebit: candidate.netDebit,
+      netDebitUnit: candidate.netDebitUnit,
+      contractMultiplier: Number(longCall.contractMultiplier),
+      quantity: longCall.quantity,
+    }).theoreticalMaxLoss;
+  } catch {
+    return false;
+  }
+  return (
+    longCall.assetType === 'option'
+    && shortCall.assetType === 'option'
+    && longCall.optionType === 'call'
+    && shortCall.optionType === 'call'
+    && longCall.underlyingSymbol === candidate.symbol
+    && shortCall.underlyingSymbol === candidate.symbol
+    && longCall.quantity === shortCall.quantity
+    && isFiniteNumber(longCall.contractMultiplier)
+    && longCall.contractMultiplier > 0
+    && longCall.contractMultiplier === shortCall.contractMultiplier
+    && isFiniteNumber(longCall.openInterest)
+    && longCall.openInterest >= 0
+    && isFiniteNumber(shortCall.openInterest)
+    && shortCall.openInterest >= 0
+    && isFiniteNumber(longCall.strike)
+    && isFiniteNumber(shortCall.strike)
+    && longCall.strike < shortCall.strike
+    && typeof longCall.expiration === 'string'
+    && typeof shortCall.expiration === 'string'
+    && new Date(longCall.expiration).getTime() > new Date(shortCall.expiration).getTime()
+    && typeof longCall.optionSymbol === 'string'
+    && longCall.optionSymbol.length > 0
+    && typeof shortCall.optionSymbol === 'string'
+    && shortCall.optionSymbol.length > 0
+    && Math.abs(Number(candidate.theoreticalMaxLoss) - canonicalCapital) < 1e-8
+  );
+}
+
 function isCandidateTransportArray(value: unknown): value is AutopilotCandidate[] {
-  return Array.isArray(value) && value.every((candidate) => {
+  if (!Array.isArray(value)) return false;
+  const sourceIds = new Set<string>();
+  return value.every((candidate) => {
     if (!candidate || typeof candidate !== 'object') return false;
     const item = candidate as Partial<AutopilotCandidate>;
-    return (
+    const valid = (
       typeof item.id === 'string' && item.id.trim().length > 0
       && typeof item.symbol === 'string' && item.symbol.trim().length > 0
       && typeof item.strategy === 'string' && SCREENER_TRANSPORT_STRATEGIES.has(item.strategy)
       && isFiniteNumber(item.underlyingPrice) && item.underlyingPrice > 0
       && isFiniteNumber(item.estimatedCredit)
       && isFiniteNumber(item.theoreticalMaxLoss) && item.theoreticalMaxLoss >= 0
+      && (item.netDebit === undefined || isFiniteNumber(item.netDebit))
+      && (item.netDebitUnit === undefined || item.netDebitUnit === 'per_share')
+      && typeof item.sourceResultId === 'string' && item.sourceResultId.trim().length > 0
       && CANDIDATE_OPTIONAL_NUMBER_FIELDS.every((field) => isOptionalFiniteNumber(item[field]))
       && (
         item.marketTrend === undefined
@@ -118,13 +178,19 @@ function isCandidateTransportArray(value: unknown): value is AutopilotCandidate[
           && (leg.direction === 'long' || leg.direction === 'short')
           && (leg.optionType === 'call' || leg.optionType === 'put')
           && isFiniteNumber(leg.quantity) && leg.quantity > 0
+          && (leg.contractMultiplier === undefined || (isFiniteNumber(leg.contractMultiplier) && leg.contractMultiplier > 0))
+          && (leg.openInterest === undefined || (isFiniteNumber(leg.openInterest) && leg.openInterest >= 0))
           && isFiniteNumber(leg.strike) && leg.strike > 0
           && isIsoCalendarDate(leg.expiration)
           && LEG_OPTIONAL_NUMBER_FIELDS.every((field) => isOptionalFiniteNumber(leg[field]))
           && isOptionalTimestamp(leg.quoteTimestamp)
         ),
       )
+      && (item.strategy !== 'PMCC' || isValidPmccCandidate(item))
     );
+    if (!valid || !item.sourceResultId || sourceIds.has(item.sourceResultId)) return false;
+    sourceIds.add(item.sourceResultId);
+    return true;
   });
 }
 
@@ -166,7 +232,7 @@ export async function POST(request: Request) {
       mode: 'paper',
       liveTradingEnabled: false,
       result,
-      skipped, // candidates the adapter couldn't/wouldn't convert (e.g. PMCC), with reasons
+      skipped, // candidates the adapter intentionally excludes or cannot validate, with reasons
     });
   } catch (e: any) {
     if (e?.message === ENGINE_BUSY_MESSAGE) {

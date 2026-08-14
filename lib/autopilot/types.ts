@@ -1,6 +1,6 @@
 // lib/autopilot/types.ts
 
-export type AutopilotStrategy = 'BPS' | 'BCS' | 'IC' | 'CSP' | 'CC';
+export type AutopilotStrategy = 'BPS' | 'BCS' | 'IC' | 'CSP' | 'CC' | 'PMCC';
 export type AutopilotGoal = 'conserve' | 'income' | 'acquire' | 'maximize';
 export type PortfolioRiskPosture = 'conserve' | 'steady' | 'maximize';
 export type PaperPositionStatus = 'open' | 'closed' | 'rolled' | 'blocked' | 'review_required';
@@ -49,6 +49,8 @@ export interface AutopilotLeg {
   strike?: number;
   expiration?: string;
   quantity: number;
+  contractMultiplier?: number;
+  openInterest?: number;
   delta?: number;
   gamma?: number;
   theta?: number;
@@ -139,6 +141,9 @@ export interface AutopilotCandidate {
   legs: AutopilotLeg[];
   estimatedCredit: number;
   theoreticalMaxLoss: number;
+  netDebit?: number;
+  netDebitUnit?: 'per_share';
+  sourceResultId?: string;
   pop?: number;
   roc?: number;
   ivr?: number;

@@ -208,11 +208,77 @@ function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): Decisi
     expectedOutcome: { intent: 'income' },
     candidate: {
       id: 'cand_1', strategy: 'BPS', symbol: 'AAPL', underlyingPrice: 190,
-      legs: [], estimatedCredit: 1.2, theoreticalMaxLoss: 380,
+      legs: [
+        { symbol: 'AAPL', underlyingSymbol: 'AAPL', assetType: 'option', direction: 'short', optionType: 'put', strike: 180, expiration: '2026-09-18', quantity: 1 },
+        { symbol: 'AAPL', underlyingSymbol: 'AAPL', assetType: 'option', direction: 'long', optionType: 'put', strike: 175, expiration: '2026-09-18', quantity: 1 },
+      ],
+      estimatedCredit: 1.2, theoreticalMaxLoss: 380,
     },
     metadata: { source: 'screener', executionAllowed: false, paperExecutionAllowed: false, rulesEvaluated: [], rulesBlocked: [] },
     ...overrides,
   };
+}
+
+function makePmccScreenResult(): ScreenResult {
+  return makeScreenResult({
+    strategy: 'PMCC',
+    bestCandidate: {
+      strategy: 'PMCC',
+      expiration: '2026-09-18',
+      dte: 55,
+      shortStrike: 205,
+      longStrike: 150,
+      shortDelta: 0.25,
+      longDelta: 0.8,
+      credit: 1.35,
+      longCost: 31.35,
+      netDebit: 30,
+      spreadWidth: 55,
+      capitalRequired: 3_000,
+      contractMultiplier: 100,
+      creditRatio: 1.35 / 31.35,
+      roc: 4.5,
+      pop: 75,
+      shortOI: 900,
+      longOI: 1_200,
+      longExpiration: '2027-01-15',
+      longDte: 174,
+      longOccSymbolPMCC: 'AAPL270115C00150000',
+      shortOccSymbolPMCC: 'AAPL260918C00205000',
+    },
+  });
+}
+
+function makePmccDecisionAnalysis(): DecisionAnalysis {
+  return makeDecisionAnalysis({
+    id: 'decision_pmcc',
+    subject: { type: 'candidate', id: 'cand_pmcc', symbol: 'AAPL', strategy: 'PMCC', label: 'AAPL PMCC' },
+    recommendation: { action: 'OPEN_PMCC', strategy: 'PMCC', summary: 'Review PMCC.', status: 'conditional' },
+    expectedOutcome: { intent: 'income', capitalRequired: 3_000, theoreticalMaxLoss: 3_000 },
+    candidate: {
+      id: 'cand_pmcc',
+      strategy: 'PMCC',
+      symbol: 'AAPL',
+      underlyingPrice: 190,
+      legs: [
+        {
+          symbol: 'AAPL270115C00150000', optionSymbol: 'AAPL270115C00150000',
+          underlyingSymbol: 'AAPL', assetType: 'option', direction: 'long', optionType: 'call',
+          strike: 150, expiration: '2027-01-15', quantity: 1, contractMultiplier: 100, openInterest: 1_200,
+        },
+        {
+          symbol: 'AAPL260918C00205000', optionSymbol: 'AAPL260918C00205000',
+          underlyingSymbol: 'AAPL', assetType: 'option', direction: 'short', optionType: 'call',
+          strike: 205, expiration: '2026-09-18', quantity: 1, contractMultiplier: 100, openInterest: 900,
+        },
+      ],
+      estimatedCredit: 1.35,
+      theoreticalMaxLoss: 3_000,
+      netDebit: 30,
+      netDebitUnit: 'per_share',
+      sourceResultId: 'AAPL::PMCC::2026-09-18::205::2027-01-15::150',
+    },
+  });
 }
 
 function makeAnalysisForCandidate(
@@ -417,8 +483,8 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
   });
 });
 
-describe('WA-0005 /screener: successful evaluation renders the canonical panel', () => {
-  it('renders real ranked recommendations via BestOpportunitiesPanel, including the capital-limitation notice', async () => {
+describe('WA-0005 /screener: successful evaluation renders canonical compact cards', () => {
+  it('uses the shared ResultCard metrics, ranked context, filters, one capital notice, and lazy full reasoning', async () => {
     kv.set('results', [makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -433,7 +499,64 @@ describe('WA-0005 /screener: successful evaluation renders the canonical panel',
     renderScreenerPage();
 
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
-    expect(screen.getByText(/Available capital is not connected for this scan/)).toBeInTheDocument();
+    const ranked = within(document.getElementById('ranked-opportunities')!);
+    expect(ranked.getByText('#1')).toBeInTheDocument();
+    expect(ranked.getByText(/Score \d+/)).toBeInTheDocument();
+    expect(ranked.getByText(/Confidence \d+%/)).toBeInTheDocument();
+    expect(ranked.getByText('IVR', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByText('Exp', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByLabelText('Results shown')).toBeInTheDocument();
+    expect(ranked.getByLabelText('Ranked opportunities sort by')).toHaveValue('rank');
+    expect(ranked.getByLabelText('Ranked opportunities sort direction')).toHaveTextContent('↑');
+    const rankedOpenInterest = ranked.getByLabelText('Open interest filter') as HTMLSelectElement;
+    expect(rankedOpenInterest).toHaveValue('500');
+    expect(within(rankedOpenInterest).getByRole('option', { name: '>1000' })).toBeInTheDocument();
+    expect(ranked.getByLabelText('Disposition filter')).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter scan open interest')).toHaveValue('500');
+    expect(screen.getByLabelText('Filter results sort by')).toHaveValue('rank');
+    expect(screen.getAllByText(/Available capital is not connected for this scan/)).toHaveLength(1);
+    expect(ranked.queryByText('Good setup.')).not.toBeInTheDocument();
+    const recommendationCallsBeforeFilter = (globalThis.fetch as any).mock.calls.filter(
+      ([url]: [string]) => url === '/api/autopilot/recommendations',
+    ).length;
+    fireEvent.change(ranked.getByLabelText('Results shown'), { target: { value: '10' } });
+    fireEvent.change(ranked.getByLabelText('Ranked opportunities sort by'), { target: { value: 'oi' } });
+    fireEvent.click(ranked.getByLabelText('Ranked opportunities sort direction'));
+    expect((globalThis.fetch as any).mock.calls.filter(
+      ([url]: [string]) => url === '/api/autopilot/recommendations',
+    )).toHaveLength(recommendationCallsBeforeFilter);
+
+    fireEvent.click(ranked.getByRole('button', { name: 'Expand AAPL BPS details' }));
+    expect(ranked.getByText('Good setup.')).toBeInTheDocument();
+    expect(ranked.getByText('Recommendation analysis')).toBeInTheDocument();
+    expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
+  });
+
+  it('maps PMCC through the compact card and exposes both canonical expirations, OI values, and capital on expansion', async () => {
+    kv.set('results', [makePmccScreenResult()]);
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (url === '/api/autopilot/recommendations') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, result: { recommendations: [makePmccDecisionAnalysis()] } }),
+        });
+      }
+      return Promise.reject(new Error('network disabled in test'));
+    });
+
+    renderScreenerPage();
+
+    await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
+    const ranked = within(document.getElementById('ranked-opportunities')!);
+    await waitFor(() => expect(ranked.getByText('PMCC', { exact: false })).toBeInTheDocument());
+    fireEvent.click(ranked.getByRole('button', { name: 'Expand AAPL PMCC details' }));
+
+    expect(ranked.getByText('2027-01-15', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByText('2026-09-18', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByText('OI 1200', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByText('OI 900', { exact: false })).toBeInTheDocument();
+    expect(ranked.getByText('$3000.00')).toBeInTheDocument();
+    expect(ranked.getByText('$30.00 per share')).toBeInTheDocument();
   });
 });
 
@@ -743,6 +866,10 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A' }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    fireEvent.change(
+      within(document.getElementById('ranked-opportunities')!).getByLabelText('Results shown'),
+      { target: { value: '10' } },
+    );
 
     // The refresh itself: only runRankedScan() (the actual TastyTrade-bound
     // scan work) is mocked, via a controllable deferred promise -- every
@@ -769,6 +896,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() => expect(runRankedScan).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
     expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(document.getElementById('ranked-opportunities')!).getByLabelText('Results shown')).toHaveValue('10');
     await waitFor(() => expect(screen.getByText(/Refreshing ranked opportunities/)).toBeInTheDocument());
     expect(screen.queryByText('Ranking opportunities from these scan results…')).not.toBeInTheDocument();
 
@@ -803,7 +931,14 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
               recommendations: [
                 makeDecisionAnalysis({
                   subject: { type: 'candidate', id: 'cand_2', symbol: 'MSFT', strategy: 'BPS', label: 'MSFT BPS' },
-                  candidate: { id: 'cand_2', strategy: 'BPS', symbol: 'MSFT', underlyingPrice: 400, legs: [], estimatedCredit: 1.5, theoreticalMaxLoss: 400 },
+                  candidate: {
+                    id: 'cand_2', strategy: 'BPS', symbol: 'MSFT', underlyingPrice: 400,
+                    legs: [
+                      { symbol: 'MSFT', underlyingSymbol: 'MSFT', assetType: 'option', direction: 'short', optionType: 'put', strike: 180, expiration: '2026-09-18', quantity: 1 },
+                      { symbol: 'MSFT', underlyingSymbol: 'MSFT', assetType: 'option', direction: 'long', optionType: 'put', strike: 175, expiration: '2026-09-18', quantity: 1 },
+                    ],
+                    estimatedCredit: 1.5, theoreticalMaxLoss: 400,
+                  },
                 }),
               ],
             },
@@ -921,7 +1056,14 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
           recommendations: [
             makeDecisionAnalysis({
               subject: { type: 'candidate', id: 'cand_msft', symbol: 'MSFT', strategy: 'BPS', label: 'MSFT BPS' },
-              candidate: { id: 'cand_msft', strategy: 'BPS', symbol: 'MSFT', underlyingPrice: 400, legs: [], estimatedCredit: 1.5, theoreticalMaxLoss: 400 },
+              candidate: {
+                id: 'cand_msft', strategy: 'BPS', symbol: 'MSFT', underlyingPrice: 400,
+                legs: [
+                  { symbol: 'MSFT', underlyingSymbol: 'MSFT', assetType: 'option', direction: 'short', optionType: 'put', strike: 180, expiration: '2026-09-18', quantity: 1 },
+                  { symbol: 'MSFT', underlyingSymbol: 'MSFT', assetType: 'option', direction: 'long', optionType: 'put', strike: 175, expiration: '2026-09-18', quantity: 1 },
+                ],
+                estimatedCredit: 1.5, theoreticalMaxLoss: 400,
+              },
             }),
           ],
         },
@@ -1054,23 +1196,9 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
     expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
     expect(screen.queryByText('Scan results existed, but the evaluation service produced no candidate analyses.')).not.toBeInTheDocument();
-    expect(consoleInfo).toHaveBeenCalledWith(
+    expect(consoleInfo).not.toHaveBeenCalledWith(
       '[WA-0005] ranked-opportunities evaluation summary',
-      expect.objectContaining({
-        rawResultCount: 2,
-        resultsWithBestCandidate: 2,
-        qualifiedTrueCount: 0,
-        qualifiedFalseCount: 2,
-        canonicalCandidateCount: 2,
-        duplicateAffinityGroupCount: 2,
-        httpBatchCount: 1,
-        submittedCandidateCount: 2,
-        returnedAnalysisCount: 2,
-        batchCandidateCounts: [2],
-        batchAnalysisCounts: [2],
-        globallyRankedAnalysisCount: 2,
-        publishedOpportunityCount: 2,
-      }),
+      expect.anything(),
     );
     consoleInfo.mockRestore();
   });
@@ -1148,21 +1276,9 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     expect((globalThis.fetch as any).mock.calls.filter(
       ([url]: [string]) => url === '/api/autopilot/recommendations',
     )).toHaveLength(0);
-    expect(consoleInfo).toHaveBeenCalledWith(
+    expect(consoleInfo).not.toHaveBeenCalledWith(
       '[WA-0005] ranked-opportunities evaluation summary',
-      expect.objectContaining({
-        rawResultCount: 1,
-        resultsWithBestCandidate: 0,
-        qualifiedTrueCount: 0,
-        qualifiedFalseCount: 1,
-        canonicalCandidateCount: 0,
-        duplicateAffinityGroupCount: 0,
-        httpBatchCount: 0,
-        submittedCandidateCount: 0,
-        returnedAnalysisCount: 0,
-        globallyRankedAnalysisCount: 0,
-        publishedOpportunityCount: 0,
-      }),
+      expect.anything(),
     );
     consoleInfo.mockRestore();
   });

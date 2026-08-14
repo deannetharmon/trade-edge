@@ -20,6 +20,7 @@ const check: CheckResult = {
 
 function makeCandidate(index: number, overrides: Partial<SpreadCandidate> = {}): SpreadCandidate {
   return {
+    sourceResultId: `source-${index}`,
     strategy: 'BPS',
     expiration: '2026-09-18',
     dte: 55,
@@ -115,6 +116,30 @@ function makeResult(index: number, overrides: Partial<ScreenResult> = {}): Scree
     },
     ...overrides,
   };
+}
+
+function makePmccResult(index: number, longExpiration = '2027-01-15'): ScreenResult {
+  return makeResult(index, {
+    strategy: 'PMCC',
+    bestCandidate: makeCandidate(index, {
+      strategy: 'PMCC',
+      expiration: '2026-09-18',
+      shortStrike: 205,
+      longStrike: 150,
+      shortOI: 900,
+      longOI: 1_200,
+      credit: 1.35,
+      longCost: 31.35,
+      netDebit: 30,
+      netDebitUnit: 'per_share',
+      capitalRequired: 3_000,
+      contractMultiplier: 100,
+      quantity: 1,
+      longExpiration,
+      longOccSymbolPMCC: `SYM${index}270115C00150000`,
+      shortOccSymbolPMCC: `SYM${index}260918C00205000`,
+    }),
+  });
 }
 
 function makeAnalysis(candidate: AutopilotCandidate, score: number): DecisionAnalysis {
@@ -234,6 +259,57 @@ describe('screener recommendation transport', () => {
 
     expect(matchingBatchIndexes).toHaveLength(2);
     expect(new Set(matchingBatchIndexes).size).toBe(1);
+  });
+
+  it('retains PMCC two-expiration identity through planning and does not collapse distinct LEAPS expirations', () => {
+    const first = makePmccResult(1, '2027-01-15');
+    const second = makePmccResult(1, '2027-03-19');
+    second.bestCandidate = {
+      ...second.bestCandidate!,
+      longOccSymbolPMCC: 'SYM1270319C00150000',
+    };
+    const plan = buildBatchedRecommendationTransportPlan([first, second], 10_000);
+
+    expect(plan.candidateCount).toBe(2);
+    expect(plan.batches.flatMap((batch) => batch.candidates).map((candidate) =>
+      candidate.legs.find((leg) => leg.direction === 'long')?.expiration,
+    )).toEqual(['2027-01-15', '2027-03-19']);
+  });
+
+  it('excludes Covered Call before recommendation submission', () => {
+    const cc = makeResult(7, {
+      strategy: 'CC',
+      bestCandidate: makeCandidate(7, { strategy: 'CC' }),
+    });
+    expect(() => buildBatchedRecommendationTransportPlan([cc])).toThrow(
+      /produced no canonical candidates/,
+    );
+  });
+
+  it('aggregates a PMCC analysis without overwriting earlier batches', async () => {
+    const results = [makeResult(1), makePmccResult(2)];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const candidates = JSON.parse(String(init?.body)).candidates as AutopilotCandidate[];
+      return response({
+        result: {
+          recommendations: candidates.map((candidate, index) => makeAnalysis(candidate, index + 1)),
+          duplicates: [],
+          candidatesScanned: candidates.length,
+          killSwitchActive: false,
+        },
+      });
+    });
+    const body = await evaluateScreenResultsInBatches(results, { fetch: fetchMock, maxRequestBytes: 2_500 });
+
+    expect(body.result.recommendations.map((analysis) => analysis.candidate?.strategy)).toEqual(['BPS', 'PMCC']);
+    expect(body.result.recommendations[1].candidate?.legs.map((leg) => leg.expiration)).toEqual([
+      '2027-01-15',
+      '2026-09-18',
+    ]);
+    expect(body.result.recommendations.map((analysis) => analysis.candidate?.sourceResultId)).toEqual([
+      'source-1',
+      'source-2',
+    ]);
   });
 
   it('uses one request for a normal small scan and aggregates every batch before returning success', async () => {
