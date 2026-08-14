@@ -32,6 +32,7 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
+import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -796,11 +797,11 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
 // CHANGE 1: Added EARNINGS_BUFFER_DAYS and CREDIT_MIN_ABS
 
 
-const PMCC_SHORT_DTE_MIN = 21;
-const PMCC_SHORT_DTE_MAX = 45;
+const PMCC_SHORT_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.shortMin;
+const PMCC_SHORT_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.shortMax;
 
-const PMCC_LONG_DTE_MIN = 180;
-const PMCC_LONG_DTE_MAX = 730;
+const PMCC_LONG_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.longMin;
+const PMCC_LONG_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.longMax;
 
 const PMCC_LONG_DTE_SWEET_MIN = 300;
 const PMCC_LONG_DTE_SWEET_MAX = 540;
@@ -1171,7 +1172,8 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 
 
 
-// PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
+// PMCC fetches only the two user-selected DTE windows. An expiration in an
+// intentionally overlapping range remains eligible for either leg.
 async function getPMCCChain(
   symbol: string,
   token: string,
@@ -1185,8 +1187,7 @@ async function getPMCCChain(
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
     const dte = daysUntil(expDate);
-    const isShortWindow = dte >= dteRanges.shortMin && dte <= dteRanges.shortMax;
-    const isLongWindow = dte >= dteRanges.longMin && dte <= dteRanges.longMax;
+    const { isShortWindow, isLongWindow } = classifyPmccDte(dte, dteRanges);
     if (!isShortWindow && !isLongWindow) continue;
     for (const strike of expGroup.strikes ?? []) {
       const strikePrice = parseFloat(strike['strike-price'] ?? '0');
@@ -1194,7 +1195,7 @@ async function getPMCCChain(
       if (callSym) { allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' }; }
     }
     if (isShortWindow) shortExpirations.push(expDate);
-    else longExpirations.push(expDate);
+    if (isLongWindow) longExpirations.push(expDate);
   }
   if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
   for (let i = 0; i < allOCCSymbols.length; i += 100) {
@@ -1225,8 +1226,8 @@ async function getPMCCChain(
 
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
-// Long a deep ITM call (LEAPS, 70-180 DTE, delta 0.70-0.85)
-// Short a near-term OTM call (21-50 DTE, delta 0.20-0.35)
+// Long a deep ITM call and short a near-term OTM call using the DTE windows
+// selected in PMCC Settings (defaults: 180-730 long and 21-45 short).
 // Net debit trade: maximize extrinsic value capture on the short leg relative to long cost.
 // Key rule: short strike must be ABOVE the long strike.
 // Ideal conditions: bullish/neutral trend, low-moderate IVR (30-50), high-priced underlying.
@@ -6765,7 +6766,7 @@ export default function Home() {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
-    if (pmccShortDteMin < 0 || pmccLongDteMin < 0 || pmccShortDteMin > pmccShortDteMax || pmccLongDteMin > pmccLongDteMax) {
+    if (!isValidPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax })) {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
       return;
     }

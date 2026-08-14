@@ -37,6 +37,7 @@ import type { DecisionAnalysis } from '@/lib/decision-engine';
 import type { AutopilotCandidate } from '@/lib/autopilot/types';
 import { startScreenerJob, completeScreenerJob, clearScreenerJob } from '@/lib/screener/screenerJobStore';
 import { runRankedScan } from '@/lib/scans/ranked-scan-runner';
+import { getAccessToken } from '@/lib/scans/tastytrade-client';
 import type { RankedScanResult } from '@/lib/scans/ranked-scan-runner';
 import {
   clearRecommendations,
@@ -382,6 +383,62 @@ afterEach(() => {
 });
 
 describe('WA-0005 /screener: Initial/not-yet-run state', () => {
+  it('shows configurable PMCC DTE defaults and persists edits', async () => {
+    renderScreenerPage();
+
+    const shortMin = screen.getByLabelText('Short call DTE minimum') as HTMLInputElement;
+    const shortMax = screen.getByLabelText('Short call DTE maximum') as HTMLInputElement;
+    const longMin = screen.getByLabelText('Long call DTE minimum') as HTMLInputElement;
+    const longMax = screen.getByLabelText('Long call DTE maximum') as HTMLInputElement;
+
+    expect(shortMin.value).toBe('21');
+    expect(shortMax.value).toBe('45');
+    expect(longMin.value).toBe('180');
+    expect(longMax.value).toBe('730');
+
+    fireEvent.change(shortMin, { target: { value: '14' } });
+    fireEvent.change(shortMax, { target: { value: '35' } });
+    fireEvent.change(longMin, { target: { value: '120' } });
+    fireEvent.change(longMax, { target: { value: '540' } });
+
+    expect(JSON.parse(window.localStorage.getItem('hunter-pmcc-dte-ranges')!)).toEqual({
+      shortMin: 14,
+      shortMax: 35,
+      longMin: 120,
+      longMax: 540,
+    });
+  });
+
+  it('restores saved PMCC DTE ranges', async () => {
+    window.localStorage.setItem('hunter-pmcc-dte-ranges', JSON.stringify({
+      shortMin: 10,
+      shortMax: 30,
+      longMin: 90,
+      longMax: 365,
+    }));
+
+    renderScreenerPage();
+
+    await waitFor(() => expect(screen.getByLabelText('Short call DTE minimum')).toHaveValue(10));
+    expect(screen.getByLabelText('Short call DTE maximum')).toHaveValue(30);
+    expect(screen.getByLabelText('Long call DTE minimum')).toHaveValue(90);
+    expect(screen.getByLabelText('Long call DTE maximum')).toHaveValue(365);
+  });
+
+  it('blocks a PMCC scan when a selected DTE range is invalid', async () => {
+    seedWatchlist();
+    renderScreenerPage();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
+    vi.mocked(getAccessToken).mockClear();
+    fireEvent.change(screen.getByLabelText('Short call DTE minimum'), { target: { value: '46' } });
+    fireEvent.change(screen.getByLabelText('Short call DTE maximum'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
+
+    expect(await screen.findByText(/PMCC DTE ranges are invalid/)).toBeInTheDocument();
+    expect(vi.mocked(getAccessToken)).not.toHaveBeenCalled();
+  });
+
   it('AC-14: shows an explicit "run a scan" prompt, not an empty-results message, and Ranked Opportunities does not render', async () => {
     renderScreenerPage();
 
