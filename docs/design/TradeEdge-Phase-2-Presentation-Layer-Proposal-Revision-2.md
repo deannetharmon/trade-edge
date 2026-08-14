@@ -1,8 +1,8 @@
 # TradeEdge Phase 2 Presentation-Layer Proposal — Revision 2
 
-**Status:** Proposed; unapproved  
-**Decision authority:** Dean  
-**Phase:** 2 — conceptual presentation layer  
+**Status:** Proposed; unapproved
+**Decision authority:** Dean
+**Phase:** 2 — conceptual presentation layer
 **Revision date:** 2026-07-26
 
 ## 1. Purpose and decision requested

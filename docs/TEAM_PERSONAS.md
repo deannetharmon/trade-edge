@@ -1,7 +1,7 @@
 # TradeEdge Team Personas
 
-**Status:** Canonical  
-**Established:** 2026-08-14  
+**Status:** Canonical
+**Established:** 2026-08-14
 **Owner:** Dean, Project Sponsor
 
 ## Purpose
