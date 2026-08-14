@@ -129,7 +129,7 @@ import { ExpirationDisclosure } from '@/features/screener/components/ExpirationD
 import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
-import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
+import { publishRecommendations, clearRecommendations, evaluateScreenResultsInBatches } from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -6374,19 +6374,18 @@ export default function Home() {
 
     setOpportunityState('loading');
     setOpportunityError('');
+    const abortController = new AbortController();
 
     (async () => {
       try {
-        const response = await fetch('/api/autopilot/recommendations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ screenResults: qualifiedResults }),
+        // WA-0005: adapt once, then send compact byte-bounded batches so an
+        // exhaustive scan cannot exceed the deployment request-body limit.
+        // The modern scan-session gate above remains authoritative: only the
+        // qualified/account-eligible results from this completed session are
+        // submitted.
+        const body = await evaluateScreenResultsInBatches(qualifiedResults, {
+          signal: abortController.signal,
         });
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(body?.error ?? `Recommendation engine request failed (${response.status}).`);
-        }
 
         const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
         const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
@@ -6401,7 +6400,7 @@ export default function Home() {
           publishRecommendations(rawAnalyses, generatedAt);
         }
       } catch (e: any) {
-        if (!cancelled) {
+        if (!cancelled && e?.name !== 'AbortError') {
           setOpportunityRecommendations([]);
           setOpportunityGeneratedAt(undefined);
           setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
@@ -6410,7 +6409,7 @@ export default function Home() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; abortController.abort(); };
   }, [activeSession]);
 
   const clearResultsCache = () => {
