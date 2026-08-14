@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDashboardComposition,
+  buildDashboardSupportedRiskInputs,
   type DashboardCompositionInput,
   type DashboardCompositionPosition,
 } from '../dashboardComposition';
@@ -131,14 +132,7 @@ describe('TC-0001: buildDashboardComposition', () => {
   });
 
   it('fails dashboard concentration and review risk closed for debit, incomplete, and legacy provenance', () => {
-    const result = buildDashboardComposition(baseInput({
-      balances: {
-        netLiquidity: 10_000,
-        cashBalance: 10_000,
-        optionBuyingPower: 10_000,
-        buyingPowerUsedPct: 0,
-      } as any,
-      positions: [
+    const positions = [
         makePosition({ key: 'SUPPORTED', symbol: 'AAPL', maxRisk: 1_000 }),
         makePosition({
           key: 'DEBIT',
@@ -160,7 +154,42 @@ describe('TC-0001: buildDashboardComposition', () => {
           maxRisk: 9_000,
           maxRiskReliable: undefined,
         }),
-      ],
+      ];
+    const riskInputs = buildDashboardSupportedRiskInputs(positions);
+
+    expect([...riskInputs.canonicalPositionMaxRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', 0],
+      ['INCOMPLETE', 0],
+      ['LEGACY', 0],
+    ]);
+    expect(riskInputs.canonicalPortfolioExposures).toEqual([{
+      symbol: 'AAPL',
+      maxRisk: 1_000,
+      assignmentPreference: 'AVOID',
+    }]);
+    expect([...riskInputs.todaysPrioritiesCapitalAtRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', null],
+      ['INCOMPLETE', null],
+      ['LEGACY', null],
+    ]);
+    expect(riskInputs.portfolioHealthExposures).toEqual(riskInputs.canonicalPortfolioExposures);
+    expect([...riskInputs.portfolioReviewMaxRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', null],
+      ['INCOMPLETE', null],
+      ['LEGACY', null],
+    ]);
+
+    const result = buildDashboardComposition(baseInput({
+      balances: {
+        netLiquidity: 10_000,
+        cashBalance: 10_000,
+        optionBuyingPower: 10_000,
+        buyingPowerUsedPct: 0,
+      } as any,
+      positions,
     }));
 
     expect(result.portfolioReview?.composition.symbolConcentrationPct).toEqual({
