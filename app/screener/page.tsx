@@ -2704,9 +2704,17 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
   if (c.strategy === 'PMCC') {
     return (
       <div className="text-xs shrink-0">
-        <span className={th.label}>Long </span><span className={th.text}>{c.longStrike}C</span>
+        <span className={th.label}>Long </span>
+        <span className={th.text}>{c.longStrike}C</span>
+        <span className="text-[10px] text-emerald-400 font-mono ml-0.5">
+          (Δ{c.longDelta != null ? c.longDelta.toFixed(2) : '—'})
+        </span>
         <span className={`${th.textFaint} mx-1`}>→</span>
-        <span className={th.label}>Short </span><span className={th.text}>{c.shortStrike}C</span>
+        <span className={th.label}>Short </span>
+        <span className={th.text}>{c.shortStrike}C</span>
+        <span className="text-[10px] text-amber-400 font-mono ml-0.5">
+          (Δ{c.shortDelta != null ? c.shortDelta.toFixed(2) : '—'})
+        </span>
       </div>
     );
   }
