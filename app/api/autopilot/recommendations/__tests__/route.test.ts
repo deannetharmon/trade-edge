@@ -39,6 +39,7 @@ function request(body: unknown): Request {
 
 const candidate: AutopilotCandidate = {
   id: 'screen_AAPL_BPS_2026-09-18_180',
+  sourceResultId: 'source-AAPL-BPS-2026-09-18-180',
   strategy: 'BPS',
   symbol: 'AAPL',
   underlyingPrice: 190,

@@ -202,16 +202,18 @@ export function screenResultsToAutopilotCandidates(
   const candidates: AutopilotCandidate[] = [];
   const skipped: ScreenerAdapterResult['skipped'] = [];
   const sourceIdentity = new Map<string, ScreenResult>();
+  const resolvedSourceIds = new Map<ScreenResult, string>();
 
   for (const result of results) {
-    if (!result.sourceResultId) continue;
-    const prior = sourceIdentity.get(result.sourceResultId);
+    const sourceResultId = result.sourceResultId ?? result.bestCandidate?.sourceResultId ?? crypto.randomUUID();
+    resolvedSourceIds.set(result, sourceResultId);
+    const prior = sourceIdentity.get(sourceResultId);
     if (prior) {
       throw new Error(
-        `Duplicate sourceResultId "${result.sourceResultId}" for ${prior.symbol} ${prior.strategy} and ${result.symbol} ${result.strategy}.`,
+        `Duplicate sourceResultId "${sourceResultId}" for ${prior.symbol} ${prior.strategy} and ${result.symbol} ${result.strategy}.`,
       );
     }
-    sourceIdentity.set(result.sourceResultId, result);
+    sourceIdentity.set(sourceResultId, result);
   }
 
   for (const result of results) {
@@ -231,14 +233,7 @@ export function screenResultsToAutopilotCandidates(
     }
 
     const candidate = result.bestCandidate;
-    if (!result.sourceResultId) {
-      skipped.push({
-        symbol: result.symbol,
-        strategy: result.strategy,
-        reason: 'Missing canonical sourceResultId.',
-      });
-      continue;
-    }
+    const sourceResultId = resolvedSourceIds.get(result)!;
     if (strategy === 'PMCC') {
       const multiplier = candidate.contractMultiplier;
       const valid = (
@@ -280,8 +275,6 @@ export function screenResultsToAutopilotCandidates(
       skipped.push({ symbol: result.symbol, strategy: result.strategy, reason: 'Invalid canonical capital inputs.' });
       continue;
     }
-    const sourceResultId = result.sourceResultId;
-
     candidates.push({
       id: `screen_${sourceResultId}`,
       // Preserve the modern Screener's canonical per-contract identity for

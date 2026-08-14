@@ -59,7 +59,7 @@ function analysis(id: string, source: ScreenResult): DecisionAnalysis {
     id,
     createdAt: '2026-07-25T00:00:00.000Z',
     version: 'decision-analysis-v1',
-    subject: { type: 'candidate', id: `candidate_${id}`, symbol: source.symbol, strategy: source.strategy, label: source.symbol },
+    subject: { type: 'candidate', id: `candidate_${id}`, symbol: source.symbol, strategy: source.strategy as any, label: source.symbol },
     objective: 'generate_income',
     recommendation: { action: 'WAIT', strategy: source.strategy as any, summary: 'Wait.', status: 'conditional' },
     confidence: { overall: 80, market: 80, portfolio: 80, execution: 80, income: 80, risk: 80 },
@@ -78,7 +78,7 @@ function analysis(id: string, source: ScreenResult): DecisionAnalysis {
       estimatedCredit: candidate.credit,
       theoreticalMaxLoss: 365,
       sourceResultId: source.sourceResultId,
-      pop: candidate.pop,
+      pop: candidate.pop ?? undefined,
       roc: candidate.roc,
       ivr: source.ivr ?? undefined,
       legs: [

@@ -50,6 +50,7 @@ function makeCandidate(index: number, overrides: Partial<SpreadCandidate> = {}):
 
 function makeResult(index: number, overrides: Partial<ScreenResult> = {}): ScreenResult {
   return {
+    sourceResultId: `source-${index}`,
     symbol: `SYM${index}`,
     strategy: 'BPS',
     price: 190.25,
@@ -244,6 +245,7 @@ describe('screener recommendation transport', () => {
   it('keeps candidates with the canonical duplicate identity in one batch', () => {
     const first = makeResult(1, { symbol: 'AAPL' });
     const second = makeResult(2, {
+      sourceResultId: 'source-2-duplicate-affinity',
       symbol: 'AAPL',
       bestCandidate: makeCandidate(1, { expiration: '2026-10-16' }),
     });
@@ -264,6 +266,7 @@ describe('screener recommendation transport', () => {
   it('retains PMCC two-expiration identity through planning and does not collapse distinct LEAPS expirations', () => {
     const first = makePmccResult(1, '2027-01-15');
     const second = makePmccResult(1, '2027-03-19');
+    second.sourceResultId = 'source-1-second-leaps-expiration';
     second.bestCandidate = {
       ...second.bestCandidate!,
       longOccSymbolPMCC: 'SYM1270319C00150000',
