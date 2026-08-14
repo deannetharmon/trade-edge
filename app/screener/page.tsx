@@ -32,6 +32,7 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
+import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -129,7 +130,7 @@ import { ExpirationDisclosure } from '@/features/screener/components/ExpirationD
 import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
-import { publishRecommendations, clearRecommendations } from '@/lib/recommendations';
+import { publishRecommendations, clearRecommendations, evaluateScreenResultsInBatches } from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -796,11 +797,11 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
 // CHANGE 1: Added EARNINGS_BUFFER_DAYS and CREDIT_MIN_ABS
 
 
-const PMCC_SHORT_DTE_MIN = 21;
-const PMCC_SHORT_DTE_MAX = 45;
+const PMCC_SHORT_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.shortMin;
+const PMCC_SHORT_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.shortMax;
 
-const PMCC_LONG_DTE_MIN = 180;
-const PMCC_LONG_DTE_MAX = 730;
+const PMCC_LONG_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.longMin;
+const PMCC_LONG_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.longMax;
 
 const PMCC_LONG_DTE_SWEET_MIN = 300;
 const PMCC_LONG_DTE_SWEET_MAX = 540;
@@ -874,6 +875,7 @@ function saveEtfRulesToStorage(rules: RulesType) {
 // defined (rather than deleted) purely so the migration's exact legacy
 // inputs stay traceable from this file.
 const LS_PMCC = 'hunter-tickers-pmcc';
+const LS_PMCC_DTE = 'hunter-pmcc-dte-ranges';
 const LS_CSP = 'hunter-tickers-csp';
 const LS_CSP_CASH = 'hunter-csp-available-cash';
 const LS_CAL = 'hunter-cal-scheduled'; // legacy — superseded by LS_FOLLOWUPS, kept only so old presence flags don't error on read
@@ -1170,8 +1172,13 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 
 
 
-// PMCC needs two DTE windows: long LEAPS (70-180 DTE) and short near-term (21-50 DTE)
-async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
+// PMCC fetches only the two user-selected DTE windows. An expiration in an
+// intentionally overlapping range remains eligible for either leg.
+async function getPMCCChain(
+  symbol: string,
+  token: string,
+  dteRanges: { shortMin: number; shortMax: number; longMin: number; longMax: number },
+): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
   const classification = await classifyUnderlying(symbol, token);
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
@@ -1180,8 +1187,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
     const dte = daysUntil(expDate);
-    const isShortWindow = dte >= PMCC_SHORT_DTE_MIN && dte <= PMCC_SHORT_DTE_MAX;
-    const isLongWindow = dte >= PMCC_LONG_DTE_MIN && dte <= PMCC_LONG_DTE_MAX;
+    const { isShortWindow, isLongWindow } = classifyPmccDte(dte, dteRanges);
     if (!isShortWindow && !isLongWindow) continue;
     for (const strike of expGroup.strikes ?? []) {
       const strikePrice = parseFloat(strike['strike-price'] ?? '0');
@@ -1189,7 +1195,7 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
       if (callSym) { allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' }; }
     }
     if (isShortWindow) shortExpirations.push(expDate);
-    else longExpirations.push(expDate);
+    if (isLongWindow) longExpirations.push(expDate);
   }
   if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
   for (let i = 0; i < allOCCSymbols.length; i += 100) {
@@ -1220,8 +1226,8 @@ async function getPMCCChain(symbol: string, token: string): Promise<{ shortExpir
 
 
 // ── PMCC — Poor Man's Covered Call ────────────────────────────────────────
-// Long a deep ITM call (LEAPS, 70-180 DTE, delta 0.70-0.85)
-// Short a near-term OTM call (21-50 DTE, delta 0.20-0.35)
+// Long a deep ITM call and short a near-term OTM call using the DTE windows
+// selected in PMCC Settings (defaults: 180-730 long and 21-45 short).
 // Net debit trade: maximize extrinsic value capture on the short leg relative to long cost.
 // Key rule: short strike must be ABOVE the long strike.
 // Ideal conditions: bullish/neutral trend, low-moderate IVR (30-50), high-priced underlying.
@@ -5881,6 +5887,24 @@ export default function Home() {
     [tickers]
   );
   const [cspCashOverride, setCspCashOverride] = useState('');
+  const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
+  const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
+  const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
+  const [pmccLongDteMax, setPmccLongDteMax] = useState(PMCC_LONG_DTE_MAX);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_PMCC_DTE);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
+      if (Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
+      if (Number.isFinite(parsed.longMin)) setPmccLongDteMin(parsed.longMin);
+      if (Number.isFinite(parsed.longMax)) setPmccLongDteMax(parsed.longMax);
+    } catch {}
+  }, []);
+  const persistPmccDteRanges = (ranges: { shortMin: number; shortMax: number; longMin: number; longMax: number }) => {
+    try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify(ranges)); } catch {}
+  };
   // TE-0007C — CC's scan universe comes from verified account holdings, not
   // a free-form ticker list (unlike CSP/PMCC), so its state shape differs:
   // no `ccTickers` string, just the holdings the API reports plus a
@@ -6351,19 +6375,18 @@ export default function Home() {
 
     setOpportunityState('loading');
     setOpportunityError('');
+    const abortController = new AbortController();
 
     (async () => {
       try {
-        const response = await fetch('/api/autopilot/recommendations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ screenResults: qualifiedResults }),
+        // WA-0005: adapt once, then send compact byte-bounded batches so an
+        // exhaustive scan cannot exceed the deployment request-body limit.
+        // The modern scan-session gate above remains authoritative: only the
+        // qualified/account-eligible results from this completed session are
+        // submitted.
+        const body = await evaluateScreenResultsInBatches(qualifiedResults, {
+          signal: abortController.signal,
         });
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(body?.error ?? `Recommendation engine request failed (${response.status}).`);
-        }
 
         const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
         const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
@@ -6378,7 +6401,7 @@ export default function Home() {
           publishRecommendations(rawAnalyses, generatedAt);
         }
       } catch (e: any) {
-        if (!cancelled) {
+        if (!cancelled && e?.name !== 'AbortError') {
           setOpportunityRecommendations([]);
           setOpportunityGeneratedAt(undefined);
           setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
@@ -6387,7 +6410,7 @@ export default function Home() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; abortController.abort(); };
   }, [activeSession]);
 
   const clearResultsCache = () => {
@@ -6743,6 +6766,10 @@ export default function Home() {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
+    if (!isValidPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax })) {
+      setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
+      return;
+    }
     setError('');
     // Switch to Filter mode immediately -- the same thing the main
     // "SCAN SELECTED" button already does via RunModeModal's onRun handler
@@ -6781,7 +6808,15 @@ export default function Home() {
         updateScreenerJob({ progressCurrent: pmccLoopIdx + 1 });
         try {
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const [pmccChain, price] = await Promise.all([getPMCCChain(symbol, token), getQuote(symbol, token)]);
+          const [pmccChain, price] = await Promise.all([
+            getPMCCChain(symbol, token, {
+              shortMin: pmccShortDteMin,
+              shortMax: pmccShortDteMax,
+              longMin: pmccLongDteMin,
+              longMax: pmccLongDteMax,
+            }),
+            getQuote(symbol, token),
+          ]);
           let trendResult: TrendResult | undefined;
           const pmccIsEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
           try { trendResult = await getTrend(symbol, pmccIsEtfOrIndex); } catch {}
@@ -7482,6 +7517,36 @@ export default function Home() {
                 FIND LEAPS — COMING SOON
               </button>
             </div>
+
+            <details className="text-[9px]">
+              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>PMCC DTE SETTINGS</summary>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <fieldset className={`rounded-lg border ${th.border} p-2`}>
+                  <legend className={`px-1 ${th.textFaint}`}>Short call</legend>
+                  <div className="flex items-center gap-1">
+                    <input aria-label="Short call DTE minimum" type="number" min={0} value={pmccShortDteMin} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMin(value); persistPmccDteRanges({ shortMin: value, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                    <span className={th.textFaint}>to</span>
+                    <input aria-label="Short call DTE maximum" type="number" min={0} value={pmccShortDteMax} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: value, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                  </div>
+                </fieldset>
+                <fieldset className={`rounded-lg border ${th.border} p-2`}>
+                  <legend className={`px-1 ${th.textFaint}`}>Long call</legend>
+                  <div className="flex items-center gap-1">
+                    <input aria-label="Long call DTE minimum" type="number" min={0} value={pmccLongDteMin} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMin(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: value, longMax: pmccLongDteMax }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                    <span className={th.textFaint}>to</span>
+                    <input aria-label="Long call DTE maximum" type="number" min={0} value={pmccLongDteMax} disabled={loading}
+                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: value }); }}
+                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
+                  </div>
+                </fieldset>
+              </div>
+            </details>
 
             {/* Strategy-specific settings — kept out of the launcher-button
                 row itself (TE-0007's "smallest change" guidance) but still

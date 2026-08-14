@@ -5,6 +5,7 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 
 if (typeof document !== 'undefined') {
   if (!document.getElementById('hunter-font')) {
@@ -60,6 +61,8 @@ interface SpreadCandidate {
   roc: number; pop: number | null; shortOI: number; longOI: number;
   shortCallStrike?: number; longCallStrike?: number;
   callCredit?: number; callWidth?: number; totalCredit?: number;
+  capitalRequired?: number; theoreticalMaxLoss?: number;
+  contractMultiplier?: number; quantity?: number;
   shortOccSymbol?: string; longOccSymbol?: string;
   shortCallOccSymbol?: string; longCallOccSymbol?: string;
 }
@@ -544,9 +547,12 @@ function findBestIC(chain: any[], expDate: string, price: number | null, RULES: 
   for (const w of widthSteps) { const c = tryICSideAtWidth(calls, 'call', w, price, RULES, bestPut.shortStrike); if (c && (!bestCall || c.roc > bestCall.roc)) bestCall = { ...c, width: w }; }
   if (!bestCall) return null;
   const totalCredit = parseFloat((bestPut.credit + bestCall.credit).toFixed(2));
-  const maxLoss = Math.max(bestPut.width - bestPut.credit, bestCall.width - bestCall.credit);
-  const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_IC) return null;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
+  let capital;
+  try {
+    capital = calculateIronCondorCapital({ putWidth: bestPut.width, callWidth: bestCall.width, totalCredit, creditUnit: 'per_share', contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1 });
+  } catch { return null; }
+  const roc = totalCredit / (capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER) * 100; if (roc < RULES.ROC_MIN_IC) return null;
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
 }
 
 // ── RR Score ──────────────────────────────────────────────────────────────

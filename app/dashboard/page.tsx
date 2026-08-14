@@ -99,10 +99,29 @@ export default function DashboardPage() {
         compositionLoading: loading,
         compositionError: error || undefined,
         opportunityRecommendations,
+        opportunityRecommendationsGeneratedAt: currentRecommendations.generatedAt,
+        // PO corrective round 4 (WA-0005 Defect 1): the Recommendation
+        // Service's own real evaluation-lifecycle signal -- previously read
+        // nowhere on this page, so Mission Control had no way to know
+        // whether a newer opportunities evaluation was running or had
+        // failed since the currently-published set. Threaded through
+        // exactly as-is; this page still computes nothing about it.
+        opportunityRecommendationsStatus: currentRecommendations.status,
+        opportunityError: currentRecommendations.error ?? undefined,
         lastRefreshedAt: lastRefresh ? lastRefresh.toISOString() : null,
         workflowState,
       }),
-    [composition, loading, error, opportunityRecommendations, lastRefresh, workflowState],
+    [
+      composition,
+      loading,
+      error,
+      opportunityRecommendations,
+      currentRecommendations.generatedAt,
+      currentRecommendations.status,
+      currentRecommendations.error,
+      lastRefresh,
+      workflowState,
+    ],
   );
 
   const backgroundTasks = useMemo(

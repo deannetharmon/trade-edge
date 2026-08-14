@@ -25,17 +25,40 @@ import { buildOpportunityRecommendations } from './buildOpportunityRecommendatio
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 
+// PO corrective round, Finding 3: `skipped` is an already-existing,
+// canonical field on this route's response (app/api/autopilot/
+// recommendations/route.ts's own `skipped` output, sourced from
+// lib/autopilot/decision/screenerCandidateAdapter.ts's real adapter-skip
+// list -- e.g. intentionally excluded CC or structurally invalid candidates). It was
+// previously returned by the route but never read by this module or by
+// app/screener/page.tsx. Adding it here is a narrow, additive,
+// presentation-layer typed seam only: it does not touch
+// lib/decision-engine or lib/opportunity-engine, does not change what the
+// adapter itself does, and is not a new producer -- it is a new *reader* of
+// data the route already emits. This is the canonical evidence for a
+// genuine partial-evaluation disclosure (some of this scan's candidates
+// were evaluated successfully while others were skipped) -- never a
+// fabricated or heuristic signal.
+export interface RecommendationsApiResponseSkippedEntry {
+  symbol: string;
+  strategy?: string;
+  reason: string;
+}
+
 export interface RecommendationsApiResponseBody {
   success?: boolean;
   error?: string;
   result?: {
     recommendations?: DecisionAnalysis[];
   };
+  skipped?: RecommendationsApiResponseSkippedEntry[];
 }
 
 export interface ScreenerOpportunityRecommendationsResult {
   recommendations: OpportunityRecommendation[];
   generatedAt: string;
+  /** Finding 3: the canonical adapter-skip list, verbatim, never fabricated. Empty array when the route omits it or it is genuinely empty. */
+  skipped: RecommendationsApiResponseSkippedEntry[];
 }
 
 export function opportunityRecommendationsFromApiResponse(
@@ -50,5 +73,5 @@ export function opportunityRecommendationsFromApiResponse(
     generatedAt,
   });
 
-  return { recommendations, generatedAt };
+  return { recommendations, generatedAt, skipped: body.skipped ?? [] };
 }

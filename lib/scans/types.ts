@@ -5,9 +5,14 @@ export interface CheckResult { status: 'pass' | 'fail' | 'warn' | 'pending'; val
 
 
 export interface SpreadCandidate {
+  sourceResultId?: string;
   strategy: string; expiration: string; dte: number;
   shortStrike: number; longStrike: number; shortDelta: number;
   credit: number; spreadWidth: number; creditRatio: number;
+  capitalRequired?: number;
+  theoreticalMaxLoss?: number;
+  contractMultiplier?: number;
+  quantity?: number;
   roc: number; pop: number | null; shortOI: number; longOI: number; shortIv?: number | null;
   expirationIvx?: number | null; expectedMove?: number | null;
   shortCallStrike?: number; longCallStrike?: number;
@@ -24,7 +29,7 @@ export interface SpreadCandidate {
   
   // PMCC-specific
   longExpiration?: string; longDte?: number; longDelta?: number;
-  longCost?: number; netDebit?: number; maxProfit?: number; extrinsicCapture?: number;
+  longCost?: number; netDebit?: number; netDebitUnit?: 'per_share'; maxProfit?: number; extrinsicCapture?: number;
   longOccSymbolPMCC?: string; shortOccSymbolPMCC?: string;
 
   // CSP-specific (TE-0007A) — single-leg cash-secured put, no long leg.
@@ -170,6 +175,7 @@ export interface TrendResult {
 
 
 export interface ScreenResult {
+  sourceResultId?: string;
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;
@@ -177,6 +183,8 @@ export interface ScreenResult {
   isEtf?: boolean;
   underlyingType?: 'index' | 'etf' | 'stock';
   ruleSetApplied?: string;
+  publishedOrder?: number;
+  publishedRank?: number;
   checks: { ivr: CheckResult; earnings: CheckResult; oi: CheckResult; delta: CheckResult; credit: CheckResult; roc: CheckResult; pop: CheckResult; iv: CheckResult; emClearance: CheckResult; };
   // CSP-WORKFLOW-0001 — one ScreenResult now represents exactly ONE
   // contract for multi-candidate strategies (CSP today). `candidateId`
@@ -219,4 +227,3 @@ export interface RawScanEntry {
   price: number | null;
   trendResult?: TrendResult;
 }
-

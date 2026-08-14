@@ -201,6 +201,52 @@ describe('strategy recommendation scenarios', () => {
     expect(analysis.recommendation.strategy).toBe('IC');
   });
 
+  it('uses OPEN_PMCC and carries canonical total-net-debit capital unchanged', () => {
+    const context = makeContext({
+      candidate: makeCandidate({
+        strategy: 'PMCC',
+        theoreticalMaxLoss: 3_000,
+        netDebit: 30,
+        netDebitUnit: 'per_share',
+        sourceResultId: 'AMD::PMCC::2026-08-21::170::2027-01-15::130',
+        legs: [
+          {
+            symbol: 'AMD270115C00130000',
+            optionSymbol: 'AMD270115C00130000',
+            underlyingSymbol: 'AMD',
+            assetType: 'option',
+            direction: 'long',
+            optionType: 'call',
+            strike: 130,
+            expiration: '2027-01-15',
+            quantity: 1,
+            contractMultiplier: 100,
+            openInterest: 1_200,
+          },
+          {
+            symbol: 'AMD260821C00170000',
+            optionSymbol: 'AMD260821C00170000',
+            underlyingSymbol: 'AMD',
+            assetType: 'option',
+            direction: 'short',
+            optionType: 'call',
+            strike: 170,
+            expiration: '2026-08-21',
+            quantity: 1,
+            contractMultiplier: 100,
+            openInterest: 900,
+          },
+        ],
+      }),
+    });
+    const analysis = evaluateSingleCandidate(context);
+
+    expect(analysis.recommendation.action).toBe('OPEN_PMCC');
+    expect(analysis.recommendation.strategy).toBe('PMCC');
+    expect(analysis.expectedOutcome.capitalRequired).toBe(3_000);
+    expect(analysis.candidate?.theoreticalMaxLoss).toBe(3_000);
+  });
+
   it('recommends WAIT when opportunity score is low and market bias is uncertain', () => {
     const context = makeContext({
       market: { bias: 'uncertain', earningsWithinExpiration: false, macroRiskElevated: false, volatilityStable: true },

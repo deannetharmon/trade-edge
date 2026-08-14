@@ -3,6 +3,7 @@
 import type { SpreadCandidate } from './types';
 import type { RulesType } from './constants';
 import { getWidthSteps, getBidAskMax, normalizeIv, calcSpreadPop, daysUntil } from './scan-utils';
+import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from './financials';
 
 export function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string, width: number, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
   const bidAskMax = getBidAskMax(price);
@@ -33,6 +34,8 @@ export function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: 
           longOI: longLeg.openInterest,
           credit,
           spreadWidth: width,
+          capitalRequired: maxLoss * 100,
+          contractMultiplier: 100,
           creditRatio,
           roc,
           pop,
@@ -116,9 +119,13 @@ export function findBestIC(chain: any[], expDate: string, price: number | null, 
   for (const width of widthSteps) { const c = tryICSideAtWidth(calls, 'call', width, price, RULES, bestPut.shortStrike); if (c && (bestCall === null || c.roc > bestCall.roc)) bestCall = { ...c, width }; }
   if (!bestCall) return null;
   const totalCredit = parseFloat((bestPut.credit + bestCall.credit).toFixed(2));
-  const maxLoss = Math.max(bestPut.width - bestPut.credit, bestCall.width - bestCall.credit);
-  const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_IC) return null;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, shortCallOI: bestCall.shortOI, longCallOI: bestCall.longOI, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, optimized: true, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
+  let capital;
+  try {
+    capital = calculateIronCondorCapital({ putWidth: bestPut.width, callWidth: bestCall.width, totalCredit, creditUnit: 'per_share', contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1 });
+  } catch { return null; }
+  const maxLossPerShare = capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER;
+  const roc = (totalCredit / maxLossPerShare) * 100; if (roc < RULES.ROC_MIN_IC) return null;
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: bestPut.shortStrike, longStrike: bestPut.longStrike, shortDelta: bestPut.shortDelta, shortOI: bestPut.shortOI, longOI: bestPut.longOI, credit: bestPut.credit, spreadWidth: bestPut.width, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1, creditRatio: bestPut.creditRatio, roc, pop: (1 - bestPut.shortDelta - bestCall.shortDelta) * 100, shortCallStrike: bestCall.shortStrike, longCallStrike: bestCall.longStrike, shortCallOI: bestCall.shortOI, longCallOI: bestCall.longOI, callCredit: bestCall.credit, callWidth: bestCall.width, totalCredit, optimized: true, shortOccSymbol: bestPut.shortOccSymbol, longOccSymbol: bestPut.longOccSymbol, shortCallOccSymbol: bestCall.shortOccSymbol, longCallOccSymbol: bestCall.longOccSymbol };
 }
 
 
@@ -178,6 +185,8 @@ export function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', 
         longOI: longLeg.openInterest ?? 0,
         credit,
         spreadWidth: width,
+        capitalRequired: maxLoss * 100,
+        contractMultiplier: 100,
         creditRatio,
         roc,
         pop,
@@ -205,9 +214,10 @@ export function findBestICUnfiltered(chain: any[], expDate: string, price: numbe
   const callSpread = findBestSpreadUnfiltered([...calls.map((o: any) => ({ ...o, optionType: 'C' })), ...calls.map((o: any) => ({ ...o, optionType: 'C' }))], 'BCS', expDate, price);
   if (!putSpread || !callSpread) return null;
   const totalCredit = parseFloat((putSpread.credit + callSpread.credit).toFixed(2));
-  const maxLoss = Math.max(putSpread.spreadWidth - putSpread.credit, callSpread.spreadWidth - callSpread.credit);
-  const roc = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
-  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false, shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol, shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
+  let capital;
+  try {
+    capital = calculateIronCondorCapital({ putWidth: putSpread.spreadWidth, callWidth: callSpread.spreadWidth, totalCredit, creditUnit: 'per_share', contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1 });
+  } catch { return null; }
+  const roc = totalCredit / (capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER) * 100;
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false, shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol, shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
 }
-
-

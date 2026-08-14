@@ -2,6 +2,8 @@
 
 A Next.js web app that runs your full BPS/BCS/IC screening checklist automatically using the TastyTrade API.
 
+Project roles and working personas are defined in [`docs/TEAM_PERSONAS.md`](docs/TEAM_PERSONAS.md).
+
 ## What it checks
 - ✅ IVR ≥ 30% (no upper cap for spreads)
 - ✅ IVx ≥ 35% (real premium check)
@@ -87,4 +89,3 @@ export const RULES = {
 - Tailwind CSS
 - TastyTrade API (your existing account)
 - Vercel hosting
-

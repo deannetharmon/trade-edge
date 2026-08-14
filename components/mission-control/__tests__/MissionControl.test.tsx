@@ -124,8 +124,26 @@ function viewModelFor(
   narrative: ReviewNarrative,
   todaysPriorities: MissionControlTodaysPrioritiesSummary = EMPTY_TODAYS_PRIORITIES,
   sinceLastReview: MissionControlSinceLastReviewSummary = TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+  opportunitiesGeneratedAt: string | null = null,
+  // PO corrective round 4 (WA-0005 Defect 1): the Recommendation Service's
+  // own real evaluation-lifecycle signal -- optional, defaulting to 'idle'/
+  // null exactly as buildMissionControlViewModel.ts's own default does, so
+  // every pre-existing call site in this file that doesn't pass these
+  // continues to exercise the common "nothing newer in flight" case.
+  opportunitiesEvaluationStatus: 'idle' | 'loading' | 'error' = 'idle',
+  opportunitiesEvaluationError: string | null = null,
 ): MissionControlViewModel {
-  return { state: 'loaded', narrative, generatedAt: FIXED_NOW, lastRefreshedAt: null, todaysPriorities, sinceLastReview };
+  return {
+    state: 'loaded',
+    narrative,
+    generatedAt: FIXED_NOW,
+    lastRefreshedAt: null,
+    todaysPriorities,
+    sinceLastReview,
+    opportunitiesGeneratedAt,
+    opportunitiesEvaluationStatus,
+    opportunitiesEvaluationError,
+  };
 }
 
 describe('MissionControl: non-loaded states', () => {
@@ -133,15 +151,43 @@ describe('MissionControl: non-loaded states', () => {
     const vm: MissionControlViewModel = {
       state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      opportunitiesGeneratedAt: null,
     };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
-    expect(screen.getByRole('status')).toBeInTheDocument();
+    // PO corrective round 3, Finding 1: the top-level "Preparing your
+    // Review..." takeover AND the Ranked Opportunities section's own
+    // Loading compact state (a real, threaded signal, not fabricated) both
+    // use role="status" -- there are genuinely two now, so this asserts at
+    // least one exists rather than exactly one.
+    expect(screen.getAllByRole('status').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Preparing your Review…')).toBeInTheDocument();
+  });
+
+  it('WA-0005 Finding 1: the Ranked Opportunities section renders its own Loading compact state during the page-level loading state', () => {
+    const vm: MissionControlViewModel = {
+      state: 'loading', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      opportunitiesGeneratedAt: null,
+    };
+    render(<MissionControl viewModel={vm} th={THEMES.dark} />);
+    expect(screen.getByText(/ranked opportunities will appear here once ready/)).toBeInTheDocument();
+  });
+
+  it('WA-0005 Finding 1: the Ranked Opportunities section renders its own Unavailable compact state during the page-level error state', () => {
+    const vm: MissionControlViewModel = {
+      state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
+      todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      opportunitiesGeneratedAt: null,
+    };
+    render(<MissionControl viewModel={vm} th={THEMES.dark} />);
+    expect(screen.getByText(/Ranked opportunities can't be confirmed right now/)).toBeInTheDocument();
   });
 
   it('renders an error state with role=alert and the given message', () => {
     const vm: MissionControlViewModel = {
       state: 'error', message: 'boom', narrative: null, generatedAt: FIXED_NOW, lastRefreshedAt: null,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES, sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      opportunitiesGeneratedAt: null,
     };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByRole('alert')).toHaveTextContent('boom');
@@ -156,6 +202,7 @@ describe('MissionControl: non-loaded states', () => {
       lastRefreshedAt: null,
       todaysPriorities: EMPTY_TODAYS_PRIORITIES,
       sinceLastReview: TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      opportunitiesGeneratedAt: null,
     };
     render(<MissionControl viewModel={vm} th={THEMES.dark} />);
     expect(screen.getByText(/not available yet/)).toBeInTheDocument();
@@ -175,7 +222,7 @@ describe('MissionControl: narrative section order', () => {
       'Portfolio Status',
       'Since Your Last Review',
       'Attention Required',
-      'New Opportunities',
+      'Ranked Opportunities',
       'Review Complete',
     ]);
   });
@@ -313,7 +360,9 @@ describe('MissionControl: empty-state copy for each section', () => {
     render(<MissionControl viewModel={viewModelFor(narrativeFor())} th={THEMES.dark} />);
 
     expect(screen.getByText('Nothing needs your attention right now.')).toBeInTheDocument();
-    expect(screen.getByText('No ranked opportunities to display.')).toBeInTheDocument();
+    // WA-0005: NewOpportunitiesSection no longer embeds BestOpportunitiesPanel
+    // -- its own honest "nothing published this session" copy renders instead.
+    expect(screen.getByText(/No current ranked opportunities/)).toBeInTheDocument();
   });
 });
 
@@ -381,5 +430,66 @@ describe('MissionControl: read-only surface', () => {
     for (const el of screen.queryAllByRole('link')) {
       expect(el.textContent ?? '').not.toMatch(forbidden);
     }
+  });
+});
+
+// PO corrective round 4 (WA-0005 Defect 1): Mission Control previously had
+// no way to receive the Ranked Opportunities lifecycle state at all --
+// `reviewState` (threaded into NewOpportunitiesSection) came only from
+// portfolio-composition loading/failure, never from the opportunities
+// evaluation pipeline's own loading/refresh/failure state. These tests
+// prove the corrected wiring end to end: MissionControlViewModel's new
+// `opportunitiesEvaluationStatus`/`opportunitiesEvaluationError` fields
+// reach NewOpportunitiesSection intact, for a REAL refresh-in-progress and
+// a REAL evaluation-failure-with-stale-prior-results-preserved scenario --
+// not just a prop-level simulation of a state that has no real code path.
+describe('MissionControl: Ranked Opportunities lifecycle state now reaches Mission Control (WA-0005 Defect 1)', () => {
+  it('genuine refresh-in-progress: opportunitiesEvaluationStatus="loading" on the view model surfaces a distinct banner while the last published Ranked Opportunities count remains visible', () => {
+    const narrative = narrativeFor({
+      newOpportunities: { items: [{ candidateId: 'c1', disposition: 'WATCH' } as any] },
+    });
+    const vm = viewModelFor(
+      narrative,
+      EMPTY_TODAYS_PRIORITIES,
+      TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      '2026-07-25T09:00:00.000Z',
+      'loading',
+    );
+    render(<MissionControl viewModel={vm} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Ranked Opportunities');
+    expect(section).toHaveTextContent('1 ranked opportunity to review');
+    expect(section).toHaveTextContent('A newer ranked-opportunities evaluation is running');
+  });
+
+  it('genuine evaluation-failure-with-stale-prior-results-preserved: opportunitiesEvaluationStatus="error" surfaces the real error message while the last published Ranked Opportunities count remains visible, never blanked out', () => {
+    const narrative = narrativeFor({
+      newOpportunities: { items: [{ candidateId: 'c1', disposition: 'WATCH' } as any] },
+    });
+    const vm = viewModelFor(
+      narrative,
+      EMPTY_TODAYS_PRIORITIES,
+      TRACKING_INACTIVE_SINCE_LAST_REVIEW,
+      '2026-07-25T09:00:00.000Z',
+      'error',
+      'Recommendation engine unavailable.',
+    );
+    render(<MissionControl viewModel={vm} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Ranked Opportunities');
+    expect(section).toHaveTextContent('1 ranked opportunity to review');
+    expect(section).toHaveTextContent('The most recent ranked-opportunities evaluation attempt failed');
+    expect(section).toHaveTextContent('Recommendation engine unavailable.');
+  });
+
+  it('the common case (opportunitiesEvaluationStatus omitted/"idle") renders neither banner -- no false positive', () => {
+    const narrative = narrativeFor({
+      newOpportunities: { items: [{ candidateId: 'c1', disposition: 'WATCH' } as any] },
+    });
+    render(<MissionControl viewModel={viewModelFor(narrative, EMPTY_TODAYS_PRIORITIES, TRACKING_INACTIVE_SINCE_LAST_REVIEW, '2026-07-25T09:00:00.000Z')} th={THEMES.dark} />);
+
+    const section = screen.getByLabelText('Ranked Opportunities');
+    expect(section).not.toHaveTextContent('A newer ranked-opportunities evaluation is running');
+    expect(section).not.toHaveTextContent('The most recent ranked-opportunities evaluation attempt failed');
   });
 });

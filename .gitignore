@@ -2,3 +2,5 @@ node_modules
 .next/
 *.py
 .DS_Store
+.codex/
+.pnpm-store/

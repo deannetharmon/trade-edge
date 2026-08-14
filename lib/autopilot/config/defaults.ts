@@ -9,6 +9,7 @@ export const DEFAULT_AUTOPILOT_CONFIG: AutopilotConfig = {
     IC: 'income',
     CSP: 'acquire',
     CC: 'income',
+    PMCC: 'income',
   },
   portfolioRiskPosture: 'steady',
   thresholds: {
