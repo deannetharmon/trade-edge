@@ -59,10 +59,11 @@ afterEach(() => {
 
 describe('PI-0004C: TodaysPrioritiesWorkflow -- Open/Completed sections', () => {
   it('offers the canonical quote refresh directly on a Verify Pricing priority', async () => {
+    const quoteCapturedAt = '2026-08-10T20:00:00.000Z';
     const user = userEvent.setup();
     const onRefreshQuotes = vi.fn().mockResolvedValue({
       status: 'success',
-      positions: [{ key: 'pos_amd', recommendation: { kind: 'watch' }, pricingDecisionEvidence: { marketableDecisionEligible: true } }],
+      positions: [{ key: 'pos_amd', recommendation: { kind: 'verify-pricing' }, pricingDecisionEvidence: { marketableDecisionEligible: false, marketableQuoteCapturedAt: quoteCapturedAt } }],
     });
     const onPricingRefreshOutcome = vi.fn();
     const objective = makeObjective({
@@ -78,12 +79,13 @@ describe('PI-0004C: TodaysPrioritiesWorkflow -- Open/Completed sections', () => 
         onRefreshQuotes={onRefreshQuotes}
         portfolioRefreshing={false}
         onPricingRefreshOutcome={onPricingRefreshOutcome}
+        quoteCapturedAtByPositionKey={{ pos_amd: quoteCapturedAt }}
       />,
     );
 
     await user.click(screen.getByRole('button', { name: /refresh quotes/i }));
     expect(onRefreshQuotes).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'Pricing verified; recommendation updated.' })));
+    await waitFor(() => expect(onPricingRefreshOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining('broker quote timestamp did not advance') })));
     expect(screen.queryByRole('button', { name: 'Mark Complete' })).not.toBeInTheDocument();
   });
 

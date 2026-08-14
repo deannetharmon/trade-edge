@@ -38,9 +38,10 @@ export interface TodaysPrioritiesWorkflowProps {
   onRefreshQuotes?: () => Promise<PortfolioRefreshResult>;
   portfolioRefreshing?: boolean;
   onPricingRefreshOutcome?: (outcome: PricingRefreshOutcome | null) => void;
+  quoteCapturedAtByPositionKey?: Readonly<Record<string, string | null>>;
 }
 
-export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome }: TodaysPrioritiesWorkflowProps) {
+export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuotes, portfolioRefreshing = false, onPricingRefreshOutcome, quoteCapturedAtByPositionKey = {} }: TodaysPrioritiesWorkflowProps) {
   const [workflowState, setWorkflowState] = useState<PriorityWorkflowState>({});
   // Guards against writing an empty {} back over real stored state before
   // the initial localStorage read completes (both run in the same tick on
@@ -108,6 +109,7 @@ export function TodaysPrioritiesWorkflow({ objectives, loading, th, onRefreshQuo
                 portfolioRefreshing={portfolioRefreshing}
                 onRefresh={onRefreshQuotes}
                 onOutcome={onPricingRefreshOutcome}
+                beforeQuoteCapturedAt={quoteCapturedAtByPositionKey[objective.subject.id ?? ''] ?? null}
               />
             );
           }

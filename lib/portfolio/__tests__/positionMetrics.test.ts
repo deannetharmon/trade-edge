@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateBrokerPositionGreeks,
   CONTRACT_MULTIPLIER,
   computeCreditPerContract,
   computeSignedNetPremium,
@@ -15,8 +16,160 @@ import {
   resolveUnderlyingPrice,
   computeEntryChangeTone,
   clampPct,
+  parseBrokerEntryPremium,
+  toWholePositionThetaDollars,
+  toWholePositionGammaShareEquivalent,
+  toWholePositionVegaDollars,
+  computeCspEffectiveBuyPrice,
+  hasCompleteEntryEconomics,
+  hasSupportedCreditEntryEconomics,
+  canonicalEntryCredit,
+  entryPnlPct,
+  reliableSupportedMaxRisk,
+  summarizeReliableSupportedMaxRisk,
+  formatReliableSupportedMaxRisk,
+  formatPortfolioMaxRiskContext,
+  MAX_RISK_UNAVAILABLE_COPY,
   type PopLeg,
 } from '../positionMetrics';
+
+describe('PM-0002 entry-premium provenance', () => {
+  it('requires explicit complete provenance and never falls back to compatibility credit', () => {
+    expect(hasCompleteEntryEconomics({ creditReceived: 1260 })).toBe(false);
+    expect(hasCompleteEntryEconomics({ entryEconomicsComplete: true, entryCredit: null, creditReceived: 1260 })).toBe(false);
+    expect(canonicalEntryCredit({ entryEconomicsComplete: true, entryCredit: null, creditReceived: 1260 })).toBeNull();
+    expect(hasCompleteEntryEconomics({ entryEconomicsComplete: true, entryCredit: 1260, creditReceived: 0 })).toBe(true);
+  });
+
+  it('keeps complete debit provenance but rejects it for credit-based math and actions', () => {
+    const debit = { entryEconomicsComplete: true, entryCredit: 500, entryPriceEffect: 'Debit' as const, creditReceived: 0, pnl: 100 };
+    expect(hasCompleteEntryEconomics(debit)).toBe(true);
+    expect(canonicalEntryCredit(debit)).toBe(500);
+    expect(hasSupportedCreditEntryEconomics(debit)).toBe(false);
+    expect(entryPnlPct(debit)).toBeNull();
+  });
+
+  it('accepts credit-based math only for explicit supported net-credit entries', () => {
+    const credit = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 1000, pnl: 250 };
+    expect(hasSupportedCreditEntryEconomics(credit)).toBe(true);
+    expect(entryPnlPct(credit)).toBe(25);
+  });
+
+  it('exposes max risk only for explicit supported credit provenance and reliability', () => {
+    const supported = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 0, maxRisk: 4000, maxRiskReliable: true };
+    expect(reliableSupportedMaxRisk(supported)).toBe(4000);
+    expect(reliableSupportedMaxRisk({ ...supported, entryPriceEffect: 'Debit' })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, entryEconomicsComplete: false })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, maxRiskReliable: undefined })).toBeNull();
+    expect(reliableSupportedMaxRisk({ ...supported, entryCredit: null })).toBeNull();
+  });
+
+  it('fails aggregate At Risk and generated contexts closed for debit, incomplete, and legacy reliability', () => {
+    const supported = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 0, maxRisk: 4000, maxRiskReliable: true };
+    const debit = { ...supported, entryPriceEffect: 'Debit' as const };
+    const incomplete = { ...supported, entryEconomicsComplete: false };
+    const legacy = { entryEconomicsComplete: true, entryCredit: 1000, entryPriceEffect: 'Credit' as const, creditReceived: 1000, maxRisk: 4000 };
+
+    expect(summarizeReliableSupportedMaxRisk([supported, debit, incomplete, legacy])).toEqual({
+      total: 4000,
+      includedCount: 1,
+      excludedCount: 3,
+    });
+    expect(formatPortfolioMaxRiskContext([supported, debit, incomplete, legacy]))
+      .toBe('Total at risk: $4000.00 (3 positions excluded: unreliable entry/max-risk basis)');
+    expect(formatReliableSupportedMaxRisk(supported)).toBe('$4000.00');
+    expect(formatReliableSupportedMaxRisk(debit)).toBe(MAX_RISK_UNAVAILABLE_COPY);
+    expect(formatReliableSupportedMaxRisk(incomplete)).toBe(MAX_RISK_UNAVAILABLE_COPY);
+    expect(formatReliableSupportedMaxRisk(legacy)).toBe(MAX_RISK_UNAVAILABLE_COPY);
+  });
+
+  it.each([undefined, null, '', '   ', 'not-a-price', NaN, Infinity, -1])('keeps unavailable broker value %p unavailable', value => {
+    expect(parseBrokerEntryPremium(value)).toBeNull();
+  });
+
+  it('preserves a genuine broker-reported zero', () => {
+    expect(parseBrokerEntryPremium(0)).toBe(0);
+    expect(parseBrokerEntryPremium('0')).toBe(0);
+  });
+
+  it('fails the whole signed entry calculation closed when any leg is unavailable', () => {
+    expect(computeSignedNetPremium([
+      { direction: 'Short', quantity: 5, avgOpenPrice: 40.01 },
+      { direction: 'Long', quantity: 5, avgOpenPrice: null },
+    ])).toBeNull();
+  });
+});
+
+describe('PM-0002 whole-position Greek units', () => {
+  it('reconciles broker-shaped five-lot spread legs before applying the display multiplier once', () => {
+    const short = 'MU260904P00800000';
+    const long = 'MU260904P00790000';
+    const raw = aggregateBrokerPositionGreeks([
+      { symbol: short, quantity: '5', 'quantity-direction': 'Short' },
+      { symbol: long, quantity: '5', 'quantity-direction': 'Long' },
+    ], {
+      theta: { [short]: -0.05, [long]: -0.03 },
+      gamma: { [short]: 0.002, [long]: 0.001 },
+      delta: { [short]: -0.20, [long]: -0.10 },
+      vega: { [short]: 0.08, [long]: 0.05 },
+    });
+    expect(raw).toEqual({ theta: 0.1, gamma: -0.005, delta: 0.5, vega: -0.15 });
+    expect(toWholePositionThetaDollars(raw.theta)).toBe(10);
+    expect(toWholePositionGammaShareEquivalent(raw.gamma)).toBe(-0.5);
+    expect(toWholePositionVegaDollars(raw.vega)).toBe(-15);
+  });
+
+  it('applies the standard option multiplier exactly once', () => {
+    expect(toWholePositionThetaDollars(0.23)).toBeCloseTo(23);
+    expect(toWholePositionGammaShareEquivalent(-0.000405)).toBeCloseTo(-0.0405);
+    expect(toWholePositionVegaDollars(-0.15)).toBeCloseTo(-15);
+  });
+
+  it('fails closed for missing and non-finite values', () => {
+    expect(toWholePositionThetaDollars(null)).toBeNull();
+    expect(toWholePositionGammaShareEquivalent(NaN)).toBeNull();
+    expect(toWholePositionVegaDollars(Infinity)).toBeNull();
+  });
+
+  it('never defaults missing quantity or unknown direction while aggregating broker legs', () => {
+    const maps = { theta: { MU: -0.05 }, gamma: { MU: 0.002 }, delta: { MU: -0.2 }, vega: { MU: 0.08 } };
+    expect(aggregateBrokerPositionGreeks([{ symbol: 'MU', 'quantity-direction': 'Short' }], maps))
+      .toEqual({ theta: null, gamma: null, delta: null, vega: null });
+    expect(aggregateBrokerPositionGreeks([{ symbol: 'MU', quantity: '5', 'quantity-direction': 'Sell' }], maps))
+      .toEqual({ theta: null, gamma: null, delta: null, vega: null });
+  });
+
+  it('fails each Greek closed instead of forming a partial-position aggregate', () => {
+    const raw = aggregateBrokerPositionGreeks([
+      { symbol: 'SHORT', quantity: '5', 'quantity-direction': 'Short' },
+      { symbol: 'LONG', quantity: '5', 'quantity-direction': 'Long' },
+    ], {
+      theta: { SHORT: -0.05 },
+      gamma: { SHORT: 0.002, LONG: 0.001 },
+      delta: { SHORT: -0.2, LONG: -0.1 },
+      vega: { SHORT: 0.08, LONG: 0.05 },
+    });
+    expect(raw.theta).toBeNull();
+    expect(raw.gamma).toBe(-0.005);
+    expect(raw.delta).toBe(0.5);
+    expect(raw.vega).toBe(-0.15);
+  });
+});
+
+describe('PM-0002 CSP Effective Buy units', () => {
+  it('uses the per-share short-put premium and is quantity invariant', () => {
+    expect(computeCspEffectiveBuyPrice(440, 16.55)).toBeCloseTo(423.45);
+    // Contract count is deliberately absent: the per-share basis is the same
+    // for one contract or five contracts.
+    expect(computeCspEffectiveBuyPrice(440, 16.55)).not.toBeCloseTo(440 - 8275);
+  });
+
+  it('fails closed for missing/malformed economics and preserves genuine zero', () => {
+    expect(computeCspEffectiveBuyPrice(440, null)).toBeNull();
+    expect(computeCspEffectiveBuyPrice(NaN, 16.55)).toBeNull();
+    expect(computeCspEffectiveBuyPrice(440, 0)).toBe(440);
+  });
+});
 
 describe('CONTRACT_MULTIPLIER', () => {
   it('is the standard 100 shares/contract multiplier', () => {

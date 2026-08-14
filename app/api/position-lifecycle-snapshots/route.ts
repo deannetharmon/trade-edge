@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import Redis from 'ioredis';
-import type { PositionLifecycleSnapshot, PositionSnapshotStore } from '@/lib/position-snapshot';
+import { normalizePositionSnapshotStore, type PositionLifecycleSnapshot, type PositionSnapshotStore } from '@/lib/position-snapshot';
 
 const redis = new Redis(process.env.REDIS_URL!);
 
@@ -33,7 +33,7 @@ export async function GET(_req: NextRequest) {
   const userId = (session.user as any).id;
   try {
     const raw = await redis.get(redisKey(userId));
-    const snapshots: PositionSnapshotStore = raw ? JSON.parse(raw) : {};
+    const snapshots: PositionSnapshotStore = normalizePositionSnapshotStore(raw ? JSON.parse(raw) : {});
     return NextResponse.json({ snapshots });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     const raw = await redis.get(redisKey(userId));
-    const store: PositionSnapshotStore = raw ? JSON.parse(raw) : {};
+    const store: PositionSnapshotStore = normalizePositionSnapshotStore(raw ? JSON.parse(raw) : {});
 
     let added = 0;
     let skipped = 0;

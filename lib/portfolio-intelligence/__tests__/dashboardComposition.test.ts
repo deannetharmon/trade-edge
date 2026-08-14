@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDashboardComposition,
+  buildDashboardSupportedRiskInputs,
   type DashboardCompositionInput,
   type DashboardCompositionPosition,
 } from '../dashboardComposition';
@@ -21,6 +22,11 @@ function makePosition(overrides: Partial<DashboardCompositionPosition> = {}): Da
       { symbol: 'AAPL  260821P00180000', optionType: 'P', strikePrice: 180, direction: 'Long', quantity: 1 },
     ],
     maxRisk: 440,
+    entryEconomicsComplete: true,
+    entryCredit: 60,
+    entryPriceEffect: 'Credit',
+    creditReceived: 60,
+    maxRiskReliable: true,
     intent: 'income',
     dte: 30,
     strategy: 'BPS',
@@ -123,5 +129,75 @@ describe('TC-0001: buildDashboardComposition', () => {
     const result = buildDashboardComposition(input);
 
     expect(result.canonicalPriorities).not.toBeNull();
+  });
+
+  it('fails dashboard concentration and review risk closed for debit, incomplete, and legacy provenance', () => {
+    const positions = [
+        makePosition({ key: 'SUPPORTED', symbol: 'AAPL', maxRisk: 1_000 }),
+        makePosition({
+          key: 'DEBIT',
+          symbol: 'AMD',
+          maxRisk: 9_000,
+          entryCredit: 100,
+          entryPriceEffect: 'Debit',
+        }),
+        makePosition({
+          key: 'INCOMPLETE',
+          symbol: 'META',
+          maxRisk: 9_000,
+          entryEconomicsComplete: false,
+          entryCredit: null,
+        }),
+        makePosition({
+          key: 'LEGACY',
+          symbol: 'NVDA',
+          maxRisk: 9_000,
+          maxRiskReliable: undefined,
+        }),
+      ];
+    const riskInputs = buildDashboardSupportedRiskInputs(positions);
+
+    expect([...riskInputs.canonicalPositionMaxRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', 0],
+      ['INCOMPLETE', 0],
+      ['LEGACY', 0],
+    ]);
+    expect(riskInputs.canonicalPortfolioExposures).toEqual([{
+      symbol: 'AAPL',
+      maxRisk: 1_000,
+      assignmentPreference: 'AVOID',
+    }]);
+    expect([...riskInputs.todaysPrioritiesCapitalAtRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', null],
+      ['INCOMPLETE', null],
+      ['LEGACY', null],
+    ]);
+    expect(riskInputs.portfolioHealthExposures).toEqual(riskInputs.canonicalPortfolioExposures);
+    expect([...riskInputs.portfolioReviewMaxRiskByKey.entries()]).toEqual([
+      ['SUPPORTED', 1_000],
+      ['DEBIT', null],
+      ['INCOMPLETE', null],
+      ['LEGACY', null],
+    ]);
+
+    const result = buildDashboardComposition(baseInput({
+      balances: {
+        netLiquidity: 10_000,
+        cashBalance: 10_000,
+        optionBuyingPower: 10_000,
+        buyingPowerUsedPct: 0,
+      } as any,
+      positions,
+    }));
+
+    expect(result.portfolioReview?.composition.symbolConcentrationPct).toEqual({
+      AAPL: 10,
+      AMD: 0,
+      META: 0,
+      NVDA: 0,
+    });
+    expect(result.portfolioReview?.composition.maxSymbolConcentrationPct).toBe(10);
   });
 });

@@ -54,6 +54,7 @@ import {
 import type { DecisionReviewStore } from '@/lib/decision-review';
 import { latestReviewForPosition } from '@/lib/decision-review';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
+import { reliableSupportedMaxRisk } from '@/lib/portfolio/positionMetrics';
 import { buildTodaysPrioritiesDashboard, selectTopPriority } from '@/lib/todaysPriorities';
 import { calculatePortfolioHealthScore } from '@/lib/portfolioHealth';
 import type { PortfolioHealthInput } from '@/lib/portfolioHealth';
@@ -86,6 +87,15 @@ export interface DashboardCompositionPosition {
   symbol: string;
   legs: DashboardCompositionLeg[];
   maxRisk: number;
+  // PM-0002: maxRisk is usable by Portfolio composition only when these
+  // canonical entry-provenance fields establish a supported net-credit
+  // basis and maxRiskReliable is explicitly true. Legacy/compatibility
+  // objects that omit provenance fail closed.
+  entryEconomicsComplete?: boolean;
+  entryCredit?: number | null;
+  entryPriceEffect?: 'Credit' | 'Debit' | 'Unknown' | null;
+  creditReceived: number;
+  maxRiskReliable?: boolean;
   intent: string;
   dte: number;
   strategy: string;
@@ -135,8 +145,54 @@ export interface DashboardComposition {
   dailyBriefing: ReturnType<typeof buildDailyBriefing> | null;
 }
 
+/**
+ * PM-0002: the single observable provenance boundary between raw loaded
+ * positions and every portfolio-level Max Risk consumer. The deliberately
+ * separate named outputs make it impossible for a future composition edit
+ * to bypass sanitization unnoticed, while reliableSupportedMaxRisk remains
+ * the sole owner of the underlying financial policy.
+ */
+export interface DashboardSupportedRiskInputs {
+  canonicalPositionMaxRiskByKey: ReadonlyMap<string, number>;
+  canonicalPortfolioExposures: PositionExposureInput[];
+  todaysPrioritiesCapitalAtRiskByKey: ReadonlyMap<string, number | null>;
+  portfolioHealthExposures: PositionExposureInput[];
+  portfolioReviewMaxRiskByKey: ReadonlyMap<string, number | null>;
+}
+
+export function buildDashboardSupportedRiskInputs(
+  positions: DashboardCompositionPosition[],
+): DashboardSupportedRiskInputs {
+  const supportedMaxRiskByKey = new Map(
+    positions.map(p => [p.key, reliableSupportedMaxRisk(p)] as const),
+  );
+  const exposures = positions.flatMap((p): PositionExposureInput[] => {
+    const maxRisk = supportedMaxRiskByKey.get(p.key);
+    return maxRisk == null ? [] : [{
+      symbol: p.symbol,
+      maxRisk,
+      assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
+    }];
+  });
+
+  return {
+    canonicalPositionMaxRiskByKey: new Map(
+      positions.map(p => [p.key, supportedMaxRiskByKey.get(p.key) ?? 0] as const),
+    ),
+    canonicalPortfolioExposures: exposures,
+    todaysPrioritiesCapitalAtRiskByKey: new Map(
+      positions.map(p => [p.key, supportedMaxRiskByKey.get(p.key) ?? null] as const),
+    ),
+    portfolioHealthExposures: exposures,
+    portfolioReviewMaxRiskByKey: new Map(
+      positions.map(p => [p.key, supportedMaxRiskByKey.get(p.key) ?? null] as const),
+    ),
+  };
+}
+
 export function buildDashboardComposition(input: DashboardCompositionInput): DashboardComposition {
   const { positions, pendingOrders, balances, decisionReviews } = input;
+  const supportedRiskInputs = buildDashboardSupportedRiskInputs(positions);
 
   // --- canonicalPriorities (PI-0003/PI-0004B) --------------------------------
   const canonicalPriorities: CanonicalPortfolioPriorities | null =
@@ -145,16 +201,17 @@ export function buildDashboardComposition(input: DashboardCompositionInput): Das
       : computeCanonicalPortfolioPriorities(
           positions.map(p => ({
             ...p,
+            // computeCanonicalPortfolioPriorities' position-objective input
+            // still requires a number. Zero is the fail-closed compatibility
+            // representation here; portfolio-level exposure receives only
+            // the filtered, provenance-supported list below.
+            maxRisk: supportedRiskInputs.canonicalPositionMaxRiskByKey.get(p.key) ?? 0,
             positionId: p.key,
             healthScore: p.healthScore ?? null,
             assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
           })),
           balances ?? ({} as PortfolioFinancialContext),
-          positions.map((p): PositionExposureInput => ({
-            symbol: p.symbol,
-            maxRisk: p.maxRisk,
-            assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
-          })),
+          supportedRiskInputs.canonicalPortfolioExposures,
           pendingOrders.map(o => ({ id: o.id, symbol: o.symbol, strategy: o.strategy, createdAt: o.createdAt, status: o.status })),
         );
 
@@ -177,7 +234,7 @@ export function buildDashboardComposition(input: DashboardCompositionInput): Das
       netEdgeDeclinePct: p.netEdgeDeclinePct,
       netEdgeNegative: p.netEdgeNegative ?? false,
       remainingOpportunityPct: p.remainingOpportunityPct,
-      capitalAtRisk: p.maxRisk ?? null,
+      capitalAtRisk: supportedRiskInputs.todaysPrioritiesCapitalAtRiskByKey.get(p.key) ?? null,
       hasPendingDecisionReview: latestReview?.outcomeStatus === 'PENDING',
     };
   });
@@ -223,11 +280,7 @@ export function buildDashboardComposition(input: DashboardCompositionInput): Das
   const averageDecisionConfidence =
     confidences.length > 0 ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length : null;
 
-  const positionsForConcentration: PositionExposureInput[] = positions.map(p => ({
-    symbol: p.symbol,
-    maxRisk: p.maxRisk,
-    assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
-  }));
+  const positionsForConcentration = supportedRiskInputs.portfolioHealthExposures;
   const concentrationBySymbol = derivePositionConcentration(positionsForConcentration, balances?.netLiquidity);
   const concentrationValues = Object.values(concentrationBySymbol);
   const maxSymbolConcentrationPct = concentrationValues.length > 0 ? Math.max(...concentrationValues) : null;
@@ -251,7 +304,7 @@ export function buildDashboardComposition(input: DashboardCompositionInput): Das
   const reviewPositions: PortfolioReviewPositionInput[] = positions.map(p => ({
     symbol: p.symbol,
     strategy: p.strategy,
-    maxRisk: p.maxRisk ?? null,
+    maxRisk: supportedRiskInputs.portfolioReviewMaxRiskByKey.get(p.key) ?? null,
     positionStrategy: null,
     assignmentPreference: deriveAssignmentPreferenceFromIntent(p.intent),
   }));

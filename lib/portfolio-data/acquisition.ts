@@ -46,6 +46,7 @@ import {
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
+import { canonicalRecommendationPriority } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import {
   classifyStopLossPolicy,
   evaluateStopBreach,
@@ -72,6 +73,11 @@ import {
   resolveOptionLegPrice,
   resolveUnderlyingPrice,
   computePositionPnl,
+  parseBrokerEntryPremium,
+  aggregateBrokerPositionGreeks,
+  hasCompleteEntryEconomics,
+  hasSupportedCreditEntryEconomics,
+  reliableSupportedMaxRisk,
 } from '@/lib/portfolio/positionMetrics';
 
 export const LS_PROFIT_TARGETS = 'hunter-profit-targets';
@@ -112,8 +118,8 @@ export function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: numb
 // mid. See lib/positionValuation and
 // docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
 export function computeMarketablePnlPct(pos: Position): number | null {
-  return pos.closeNowPnl != null && pos.creditReceived !== 0
-    ? (pos.closeNowPnl / pos.creditReceived) * 100
+  return hasSupportedCreditEntryEconomics(pos) && pos.closeNowPnl != null && pos.entryCredit != null
+    ? (pos.closeNowPnl / pos.entryCredit) * 100
     : null;
 }
 
@@ -158,12 +164,14 @@ export function derivePositionQuoteCapturedAt(
 // Null when currentValue or closeValue is unavailable, same convention
 // those two fields already follow.
 export function computeRawPositionValuation(pos: Position) {
+  const maxRisk = reliableSupportedMaxRisk(pos);
+  if (maxRisk == null || pos.entryCredit == null) return null;
   if (pos.currentValue == null || pos.closeValue == null) return null;
   return computePositionValuation({
-    creditReceived: pos.creditReceived,
+    creditReceived: pos.entryCredit,
     midValue: pos.currentValue,
     marketableValue: pos.closeValue,
-    maxRisk: pos.maxRisk,
+    maxRisk,
   });
 }
 
@@ -176,11 +184,23 @@ export function computeRawPositionValuation(pos: Position) {
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
 export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
-  const healthScore = pos.healthScore ?? (
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
+  const decisionPosition: Position = supportedCreditEntry ? pos : {
+    ...pos,
+    entryCredit: null,
+    pnl: null,
+    pnlPct: null,
+    closeNowPnl: null,
+    pop: null,
+    hitTarget: false,
+    targetPrice: 0,
+    maxRiskReliable: false,
+  };
+  const healthScore = supportedCreditEntry ? (pos.healthScore ?? (
     typeof scorePortfolioPositionHealth === 'function'
       ? scorePortfolioPositionHealth(pos)
       : undefined
-  );
+  )) : undefined;
 
   // technicalAlignment is deliberately NOT wired in this slice: trend
   // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
@@ -193,8 +213,8 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // so intent selection sees the same number Position Intelligence displays,
   // computed fresh at render time -- nothing new persisted onto Position.
   const { remainingOpportunityPct } = calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
+    pnlPct: supportedCreditEntry ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: healthScore?.score ?? null,
@@ -209,11 +229,12 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
   // this file already owns pos.closeNowPnl/pos.currentValue/pos.closeValue --
   // the Decision Engine only ever sees the already-normalized percentage,
   // never raw prices, matching how pnlPct itself is passed through today.
-  const marketablePnlPct = computeMarketablePnlPct(pos);
-  const valuation = computeRawPositionValuation(pos);
+  const marketablePnlPct = supportedCreditEntry ? computeMarketablePnlPct(pos) : null;
+  const valuation = computeRawPositionValuation(decisionPosition);
 
   const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective({
-    ...pos,
+    ...decisionPosition,
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
     positionId: pos.key,
     healthScore,
     netEdgeDeclinePct,
@@ -239,13 +260,14 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
 // Intelligence call site -- nothing is persisted onto Position.
 export function scorePortfolioRemainingOpportunity(pos: Position) {
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
   return calculateRemainingOpportunity({
-    creditReceived: pos.creditReceived,
+    creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
     // Same fraction-vs-percent normalization evaluatePositionObjective()
     // already applies to these two fields before using them -- keeps this
     // metric's captured/remaining percentages consistent with the
     // recommendation engine's own reading of the same position.
-    pnlPct: normalizePositionObjectivePct(pos.pnlPct),
+    pnlPct: supportedCreditEntry ? normalizePositionObjectivePct(pos.pnlPct) : null,
     dte: pos.dte,
     buffer: normalizePositionObjectivePct(pos.buffer),
     healthScore: pos.healthScore?.score ?? null,
@@ -276,7 +298,7 @@ export function attachSnapshotHistory(
   previousPositions: Position[] = [],
 ): Position[] {
   const previousByKey = new Map(previousPositions.map(position => [position.key, position]));
-  return positions.map(p => {
+  const enriched = positions.map(p => {
     const hist = store[p.key] ?? [];
     const sorted = [...hist].sort((a, b) => a.date.localeCompare(b.date));
     const withHistory = { ...p, snapshotHistory: sorted };
@@ -289,6 +311,11 @@ export function attachSnapshotHistory(
       previous?.recommendation?.kind === 'verify-pricing';
     const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved);
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
+  });
+  return enriched.sort((a, b) => {
+    const aPriority = canonicalRecommendationPriority(a.recommendation);
+    const bPriority = canonicalRecommendationPriority(b.recommendation);
+    return aPriority - bPriority || a.dte - b.dte;
   });
 }
 
@@ -434,7 +461,7 @@ export function parseOptionSymbol(sym: string): { optionType: 'P' | 'C'; strikeP
 }
 
 
-export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number {
+export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'quantity' | 'avgOpenPrice'>[]): number | null {
   // Returns the actual net opening credit for the whole position in dollars.
   // TT leg prices are per-share option prices; multiply by contracts * 100.
   // PM-0001: this floors a net debit to $0.00 for backward-compatible
@@ -442,7 +469,8 @@ export function calculateSpreadCredit(legs: Pick<PositionLeg, 'direction' | 'qua
   // (rather than just display a magnitude) must use computeSignedNetPremium
   // + isNetDebitStructure on the SAME legs, not infer it from this floored
   // value (see loadPositions' isNetDebit guard).
-  return Math.max(0, computeSignedNetPremium(legs));
+  const signed = computeSignedNetPremium(legs);
+  return signed == null ? null : Math.max(0, signed);
 }
 
 
@@ -733,16 +761,19 @@ export function resolveOcoStopOrderId(complexOrderSubmissionResult: any): { comp
 //   UNKNOWN_PROVENANCE     -> 'unknown'
 //   INVALID                -> 'unknown'
 export function classifyPositionStopLoss(
-  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity'>,
+  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity' | 'entryCredit' | 'entryEconomicsComplete' | 'entryPriceEffect'>,
   gtcOrders: GtcOrder[],
   recordedPolicy: StopLossPolicy | null = null,
 ): StopLossInfo {
+  if (!hasSupportedCreditEntryEconomics(position)) {
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+  }
   const shortLeg = position.legs.find(l => l.direction === 'Short');
   if (!shortLeg?.symbol) {
     return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
   }
   // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
-  const creditPerContract = position.quantity > 0 ? position.creditReceived / (position.quantity * 100) : position.creditReceived / 100;
+  const creditPerContract = position.quantity > 0 ? position.entryCredit! / (position.quantity * 100) : position.entryCredit! / 100;
   const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
   const match = gtcOrders.find(order =>
     isStopOrder(order) && order.legs.some(leg => normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action))
@@ -933,7 +964,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         strikePrice: parsed.strikePrice,
         direction: l['quantity-direction'] as 'Short' | 'Long',
         quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
+        avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         createdAt: l['created-at'] ?? null,
       };
     });
@@ -1312,12 +1343,16 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         symbol: l.symbol, optionType: parsed.optionType, strikePrice: parsed.strikePrice,
         direction: l['quantity-direction'] as 'Short' | 'Long',
         quantity: parseInt(l['quantity'] ?? '1', 10),
-        avgOpenPrice: parseFloat(l['average-open-price'] ?? '0'),
+        avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
       };
     });
 
-    const creditReceived = calculateSpreadCredit(positionLegs);
+    const entryCredit = calculateSpreadCredit(positionLegs);
+    const entryEconomicsComplete = entryCredit != null;
+    // Compatibility-only numeric field. All calculations below are gated by
+    // entryEconomicsComplete; no unavailable value is presented as $0.
+    const creditReceived = entryCredit ?? 0;
 
     // PM-0001 (debit-trade guard): calculateSpreadCredit floors a net debit
     // to $0.00 for backward-compatible display -- computed here from the
@@ -1436,7 +1471,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     const anyLegCrossed = legs.some(
       (l: any) => crossedSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
-    const pnlReliable = hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
+    const pnlReliable = entryEconomicsComplete && hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
     const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
     const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
     // PM-0001 corrective round 2: computePositionPnl (lib/portfolio/
@@ -1449,7 +1484,9 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // pop/targetPrice/hitTarget but missed it here; extracting the formula
     // into a named, directly-tested function (rather than leaving it
     // inline) is what let that gap be caught and regression-tested.
-    const pnl = computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue });
+    const pnl = entryEconomicsComplete
+      ? computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue })
+      : null;
     const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
     // PM-0001 debit guard: a net-debit structure's `creditReceived` above is
@@ -1459,15 +1496,23 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
     // (the Position type's existing contract) but is 0 and inert; hitTarget
     // is forced false so no take-profit recommendation can fire off it.
     // Same forcing applies to a crossed leg -- see anyLegCrossed above.
-    const targetPrice = isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
-    const hitTarget = !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    const targetPrice = !entryEconomicsComplete || isNetDebit ? 0 : Math.abs(creditReceived) * profitTarget;
+    const hitTarget = entryEconomicsComplete && !isNetDebit && !anyLegCrossed && hasCurrentPrices && pnl != null && pnl >= Math.abs(creditReceived) * profitTarget;
+    const entryPriceEffect: Position['entryPriceEffect'] = !entryEconomicsComplete ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit');
 
     const shortLegForPolicyKey = positionLegs.find(l => l.direction === 'Short');
     const recordedStopPolicy = shortLegForPolicyKey
       ? stopPolicies[positionStopPolicyKey(accountNumber, shortLegForPolicyKey.symbol)] ?? null
       : null;
     const stopLoss = classifyPositionStopLoss(
-      { legs: positionLegs, creditReceived: Math.abs(creditReceived), quantity: canonicalQuantity },
+      {
+        legs: positionLegs,
+        creditReceived: Math.abs(creditReceived),
+        entryCredit,
+        entryEconomicsComplete,
+        entryPriceEffect,
+        quantity: canonicalQuantity,
+      },
       gtcOrders,
       recordedStopPolicy,
     );
@@ -1485,6 +1530,16 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
         ? rawEarningsDate
         : null;
 
+    const brokerGreeks = aggregateBrokerPositionGreeks(legs, {
+      theta: thetaMap, gamma: gammaMap, delta: deltaMap, vega: vegaMap,
+    });
+    const resolvedEntryCredit = entryEconomicsComplete ? Math.abs(creditReceived) : null;
+    const supportedCreditEntry =
+      entryEconomicsComplete &&
+      entryPriceEffect === 'Credit' &&
+      resolvedEntryCredit != null &&
+      resolvedEntryCredit > 0;
+
     return {
       key, symbol, expDate, dte, strategy, legs: positionLegs,
       quantity: canonicalQuantity,
@@ -1495,14 +1550,17 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // genuine net-credit structure from a detected net-debit one --
       // `creditReceived` below is floored to $0.00 for the debit case and
       // must never be read as though it were a real zero-credit entry.
-      entryPriceEffect: positionLegs.length === 0 ? 'Unknown' : (isNetDebit ? 'Debit' : 'Credit'),
+      entryPriceEffect,
+      entryCredit: resolvedEntryCredit,
+      entryEconomicsComplete,
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: hasCloseValue ? Math.abs(creditReceived) - Math.abs(closeValue) : null,
+      closeNowPnl: supportedCreditEntry && hasCloseValue ? resolvedEntryCredit - Math.abs(closeValue) : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),
+      maxRiskReliable: supportedCreditEntry,
       entryDte, entryDate: openedAt,
       // needsClose (the hard 21-DTE close-or-roll rule) applies ONLY to
       // defined-risk spreads. A CSP is never "close now" — assignment is a valid
@@ -1523,7 +1581,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
       // an arbitrary leg's own quantity -- see calcPositionPop's doc
       // comment), and POP is never computed off a net-debit structure's
       // floored $0.00 "credit" (isNetDebit guard).
-      pop: isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
+      pop: !entryEconomicsComplete || isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       hasGtc: (() => {
         // Check both the position symbol and its weekly option variant
@@ -1577,64 +1635,18 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
           buffer: computeCanonicalBuffer(strategy, putBufferPct, callBufferPct),
         };
       })(),
-      theta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = thetaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? Math.abs(val) * qty : -Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      gamma: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = gammaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netDelta: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = deltaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -val * qty : val * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
-      netVega: (() => {
-        let net = 0; let any = false;
-        for (const l of legs) {
-          const val = vegaMap[l.symbol?.replace(/\s+/g, '')];
-          if (val == null) continue;
-          const qty = parseInt(l['quantity'] ?? '1', 10);
-          net += l['quantity-direction'] === 'Short' ? -Math.abs(val) * qty : Math.abs(val) * qty;
-          any = true;
-        }
-        return any ? parseFloat(net.toFixed(4)) : null;
-      })(),
+      theta: brokerGreeks.theta,
+      gamma: brokerGreeks.gamma,
+      netDelta: brokerGreeks.delta,
+      netVega: brokerGreeks.vega,
     };
   });
 
   positions = await attachEntrySnapshots(positions);
 
-  const actionPriority: Record<string, number> = { CLOSE_ROLL: 0, CUT_LOSSES: 1, TAKE_PROFIT: 2, MANAGE: 3, WATCH: 4, HOLD: 5 };
   positions.sort((a, b) => {
     if (a.needsClose && !b.needsClose) return -1;
     if (!a.needsClose && b.needsClose) return 1;
-    const aRec = getRecommendation(a, null).action;
-    const bRec = getRecommendation(b, null).action;
-    const aPri = actionPriority[aRec] ?? 9;
-    const bPri = actionPriority[bRec] ?? 9;
-    if (aPri !== bPri) return aPri - bPri;
     return a.dte - b.dte;
   });
   return { positions, pendingOrders };
@@ -1667,7 +1679,12 @@ export function isShortDateEntry(pos: Position): boolean {
 
 
 export function getRecommendation(pos: Position, trend: TrendResult | null): Recommendation {
-  const pnlPct = pos.pnl != null && pos.creditReceived !== 0 ? (pos.pnl / pos.creditReceived) * 100 : 0;
+  const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
+  if (!supportedCreditEntry) {
+    return { action: 'MANAGE', detail: 'Credit-derived recommendation unavailable — supported net-credit entry economics are not established' };
+  }
+  const entryCredit = pos.entryCredit!;
+  const pnlPct = pos.pnl != null && entryCredit != null ? (pos.pnl / entryCredit) * 100 : 0;
   const targetPct = pos.profitTarget * 100;
   const trendAgainst = trend && ((pos.strategy === 'BPS' && trend.trend === 'downtrend') || (pos.strategy === 'BCS' && trend.trend === 'uptrend'));
   const trendAligns = trend && ((pos.strategy === 'BPS' && trend.trend === 'uptrend') || (pos.strategy === 'BCS' && trend.trend === 'downtrend') || (pos.strategy === 'IC' && trend.trend === 'sideways'));

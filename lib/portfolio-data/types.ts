@@ -22,7 +22,10 @@ export interface PositionLeg {
   strikePrice: number;
   direction: 'Short' | 'Long';
   quantity: number;
-  avgOpenPrice: number;
+  // Null means the broker did not provide a finite entry premium. A genuine
+  // broker-reported zero remains 0 and is therefore distinguishable from
+  // unavailable entry economics.
+  avgOpenPrice: number | null;
   currentPrice: number | null;
 }
 
@@ -76,6 +79,12 @@ export interface Position {
   // economics) is unaffected by this field -- it remains the sole source
   // for close/roll actions.
   entryPriceEffect: 'Credit' | 'Debit' | 'Unknown';
+  // PM-0002 canonical entry economics. `creditReceived` remains the legacy
+  // numeric compatibility field; new calculations and presentation must use
+  // entryCredit/entryEconomicsComplete so missing broker premiums never look
+  // like a real $0 entry.
+  entryCredit?: number | null;
+  entryEconomicsComplete?: boolean;
   creditReceived: number;
   currentValue: number | null;
   closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
@@ -88,6 +97,7 @@ export interface Position {
   targetPrice: number;
   profitTarget: number;
   maxRisk: number;
+  maxRiskReliable?: boolean;
   hitTarget: boolean;
   needsClose: boolean;
   entryDte: number;

@@ -66,7 +66,7 @@ export interface RawEconomicLeg {
   quantity: number;
   /** Per-share option price at entry, in broker option-price POINTS (e.g.
    *  0.60), TastyTrade convention -- NOT dollars. */
-  avgOpenPrice: number;
+  avgOpenPrice: number | null;
   createdAt?: string | null;
 }
 
@@ -262,7 +262,7 @@ export function buildCanonicalCloseIdentity(
   // 0.60) -- NOT dollars. A short leg's premium is collected (+), a long
   // leg's premium is paid (-).
   const netPointsPerShare = structure.legs.reduce(
-    (sum, l) => sum + (l.direction === 'Short' ? l.avgOpenPrice : -l.avgOpenPrice),
+    (sum, l) => sum + (l.direction === 'Short' ? l.avgOpenPrice! : -l.avgOpenPrice!),
     0
   );
   if (netPointsPerShare === 0 || !Number.isFinite(netPointsPerShare)) {

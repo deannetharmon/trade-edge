@@ -12,6 +12,7 @@ import {
   shouldCaptureRecommendationChange,
   detectClosedPositionKeys,
   createPositionSnapshot,
+  normalizePositionSnapshotStore,
 } from '../snapshotEngine';
 import type { PositionSnapshotInput, PositionSnapshotStore } from '../types';
 
@@ -22,6 +23,7 @@ function makeInput(overrides: Partial<PositionSnapshotInput> = {}): PositionSnap
     strategy: 'BPS',
     dte: 21,
     creditReceived: 200,
+    entryEconomicsComplete: true,
     closeValue: 50,
     delta: -0.15,
     pop: 78,
@@ -39,6 +41,20 @@ function makeInput(overrides: Partial<PositionSnapshotInput> = {}): PositionSnap
 }
 
 describe('planLifecycleSnapshots: initial detection', () => {
+  it('preserves explicitly incomplete nullable entry economics', () => {
+    const snapshot = createPositionSnapshot(makeInput({ creditReceived: null, entryEconomicsComplete: false }), 'POSITION_DETECTED');
+    expect(snapshot.creditReceived).toBeNull();
+    expect(snapshot.entryEconomicsComplete).toBe(false);
+  });
+
+  it('fails legacy snapshots without provenance closed instead of inferring from numeric credit', () => {
+    const legacy = createPositionSnapshot(makeInput(), 'POSITION_DETECTED') as any;
+    delete legacy.entryEconomicsComplete;
+    legacy.creditReceived = 1260;
+    const normalized = normalizePositionSnapshotStore({ pos_1: [legacy] });
+    expect(normalized.pos_1[0].entryEconomicsComplete).toBe(false);
+    expect(normalized.pos_1[0].creditReceived).toBeNull();
+  });
   it('captures POSITION_DETECTED for a position with no snapshot history', () => {
     const store: PositionSnapshotStore = {};
     const { toAppend } = planLifecycleSnapshots([makeInput()], store, '2026-07-01T00:00:00.000Z');

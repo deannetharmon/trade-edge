@@ -9,7 +9,7 @@ export interface LifecycleLeg {
   strikePrice: number;
   direction: LegDirection;
   quantity: number;
-  avgOpenPrice?: number;
+  avgOpenPrice?: number | null;
   currentPrice?: number | null;
 }
 

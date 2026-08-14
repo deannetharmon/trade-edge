@@ -10,6 +10,7 @@ export {
   shouldCaptureRecommendationChange,
   detectClosedPositionKeys,
   planLifecycleSnapshots,
+  normalizePositionSnapshotStore,
 } from './snapshotEngine';
 export type { LifecycleSnapshotPlan } from './snapshotEngine';
 

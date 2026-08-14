@@ -50,6 +50,7 @@ function makeCloseSnapshot(overrides: Partial<PositionLifecycleSnapshot> = {}): 
     strategy: 'BPS',
     dte: 5,
     creditReceived: 200,
+    entryEconomicsComplete: true,
     closeValue: 20,
     delta: -0.2,
     pop: 65,

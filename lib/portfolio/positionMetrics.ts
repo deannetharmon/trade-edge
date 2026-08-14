@@ -24,6 +24,158 @@
 // explicitly instead of this default.
 export const CONTRACT_MULTIPLIER = 100;
 
+export interface EntryEconomicsLike {
+  entryEconomicsComplete?: boolean;
+  entryCredit?: number | null;
+  entryPriceEffect?: 'Credit' | 'Debit' | 'Unknown' | null;
+  creditReceived: number;
+}
+
+export function hasCompleteEntryEconomics(position: EntryEconomicsLike): boolean {
+  return position.entryEconomicsComplete === true
+    && position.entryCredit != null
+    && Number.isFinite(position.entryCredit)
+    && position.entryCredit >= 0;
+}
+
+export function canonicalEntryCredit(position: EntryEconomicsLike): number | null {
+  if (!hasCompleteEntryEconomics(position)) return null;
+  return position.entryCredit!;
+}
+
+/** True only for a supported, positive net-credit entry. */
+export function hasSupportedCreditEntryEconomics(position: EntryEconomicsLike): boolean {
+  const credit = canonicalEntryCredit(position);
+  return credit != null && credit > 0 && position.entryPriceEffect === 'Credit';
+}
+
+export function entryPnlPct(position: EntryEconomicsLike & { pnl?: number | null }): number | null {
+  const credit = hasSupportedCreditEntryEconomics(position) ? canonicalEntryCredit(position) : null;
+  return credit != null && position.pnl != null && Number.isFinite(position.pnl)
+    ? (position.pnl / credit) * 100
+    : null;
+}
+
+/**
+ * Returns a max-risk value only when it is explicitly reliable and grounded
+ * in supported net-credit entry economics. Compatibility/legacy fields,
+ * debit structures, and omitted reliability provenance all fail closed.
+ */
+export function reliableSupportedMaxRisk(
+  position: EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean },
+): number | null {
+  return hasSupportedCreditEntryEconomics(position)
+    && position.maxRiskReliable === true
+    && position.maxRisk != null
+    && Number.isFinite(position.maxRisk)
+    && position.maxRisk >= 0
+    ? position.maxRisk
+    : null;
+}
+
+export function summarizeReliableSupportedMaxRisk(
+  positions: Array<EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean }>,
+) {
+  const values = positions
+    .map(reliableSupportedMaxRisk)
+    .filter((value): value is number => value != null);
+  return {
+    total: values.reduce((sum, value) => sum + value, 0),
+    includedCount: values.length,
+    excludedCount: positions.length - values.length,
+  };
+}
+
+export const MAX_RISK_UNAVAILABLE_COPY = 'unavailable — supported credit entry and reliable max-risk basis not established';
+
+export function formatReliableSupportedMaxRisk(
+  position: EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean },
+): string {
+  const value = reliableSupportedMaxRisk(position);
+  return value == null ? MAX_RISK_UNAVAILABLE_COPY : `$${value.toFixed(2)}`;
+}
+
+export function formatPortfolioMaxRiskContext(
+  positions: Array<EntryEconomicsLike & { maxRisk?: number | null; maxRiskReliable?: boolean }>,
+): string {
+  const summary = summarizeReliableSupportedMaxRisk(positions);
+  const value = summary.includedCount > 0 ? `$${summary.total.toFixed(2)}` : 'unavailable';
+  const excluded = summary.excludedCount > 0
+    ? ` (${summary.excludedCount} position${summary.excludedCount === 1 ? '' : 's'} excluded: unreliable entry/max-risk basis)`
+    : '';
+  return `Total at risk: ${value}${excluded}`;
+}
+
+export function parseBrokerEntryPremium(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = typeof value === 'string' ? value.trim() : value;
+  if (normalized === '') return null;
+  const parsed = typeof normalized === 'number' ? normalized : Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+export function toWholePositionThetaDollars(rawTheta: number | null): number | null {
+  return rawTheta == null || !Number.isFinite(rawTheta) ? null : rawTheta * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionDeltaShares(rawDelta: number | null): number | null {
+  return rawDelta == null || !Number.isFinite(rawDelta) ? null : rawDelta * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionGammaShareEquivalent(rawGamma: number | null): number | null {
+  return rawGamma == null || !Number.isFinite(rawGamma) ? null : rawGamma * CONTRACT_MULTIPLIER;
+}
+
+export function toWholePositionVegaDollars(rawVega: number | null): number | null {
+  return rawVega == null || !Number.isFinite(rawVega) ? null : rawVega * CONTRACT_MULTIPLIER;
+}
+
+export interface BrokerGreekLeg {
+  symbol?: string | null;
+  quantity?: string | number | null;
+  'quantity-direction'?: string | null;
+}
+
+export function aggregateBrokerPositionGreeks(
+  legs: BrokerGreekLeg[],
+  maps: { theta: Readonly<Record<string, number>>; gamma: Readonly<Record<string, number>>; delta: Readonly<Record<string, number>>; vega: Readonly<Record<string, number>> },
+) {
+  const normalizedLegs = legs.map((leg) => ({
+    symbol: leg.symbol?.replace(/\s+/g, '') ?? '',
+    quantity: Number(leg.quantity),
+    direction: leg['quantity-direction'],
+  }));
+  if (normalizedLegs.length === 0 || normalizedLegs.some(leg =>
+    !leg.symbol || !Number.isInteger(leg.quantity) || leg.quantity <= 0
+    || (leg.direction !== 'Short' && leg.direction !== 'Long')
+  )) return { theta: null, gamma: null, delta: null, vega: null };
+
+  const sum = (map: Readonly<Record<string, number>>, shortSign: number, longSign: number, absolute: boolean): number | null => {
+    let total = 0;
+    for (const leg of normalizedLegs) {
+      const value = map[leg.symbol];
+      if (!Number.isFinite(value)) return null;
+      total += (leg.direction === 'Short' ? shortSign : longSign) * (absolute ? Math.abs(value) : value) * leg.quantity;
+    }
+    return Number(total.toFixed(4));
+  };
+  return {
+    theta: sum(maps.theta, 1, -1, true),
+    gamma: sum(maps.gamma, -1, 1, true),
+    delta: sum(maps.delta, -1, 1, false),
+    vega: sum(maps.vega, -1, 1, true),
+  };
+}
+
+export function computeCspEffectiveBuyPrice(strike: number | null, perShareEntryPremium: number | null): number | null {
+  if (
+    strike == null || perShareEntryPremium == null ||
+    !Number.isFinite(strike) || !Number.isFinite(perShareEntryPremium) ||
+    strike <= 0 || perShareEntryPremium < 0
+  ) return null;
+  return strike - perShareEntryPremium;
+}
+
 // Per-contract (or per-spread, for verticals/condors) credit in option
 // "points" -- e.g. $0.45 for a CSP sold at $0.45/share, or $2.52 for a
 // 5-lot BPS with $1,260 total credit. `totalCreditReceived` is the whole-
@@ -57,10 +209,17 @@ export function computeCreditPerContract(
 // $0.00 display credit would otherwise silently mask.
 export function computeSignedNetPremium(
   legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number }[]
-): number {
+): number;
+export function computeSignedNetPremium(
+  legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number | null }[]
+): number | null;
+export function computeSignedNetPremium(
+  legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number | null }[]
+): number | null {
+  if (legs.length === 0 || legs.some(leg => leg.avgOpenPrice == null || !Number.isFinite(leg.avgOpenPrice))) return null;
   const net = legs.reduce((sum, leg) => {
     const qty = Math.abs(Number(leg.quantity) || 0);
-    const price = Number(leg.avgOpenPrice) || 0;
+    const price = leg.avgOpenPrice as number;
     return sum + (leg.direction === 'Short' ? price * qty : -price * qty);
   }, 0);
   return Math.round(net * 100 * 100) / 100;
@@ -69,8 +228,8 @@ export function computeSignedNetPremium(
 // True when the raw (unfloored) net premium is actually a debit -- i.e. the
 // structure was opened for a net cost, not a net credit. Small epsilon
 // avoids float noise flagging a genuine ~$0.00 credit trade as a debit.
-export function isNetDebitStructure(signedNetPremium: number): boolean {
-  return signedNetPremium < -0.005;
+export function isNetDebitStructure(signedNetPremium: number | null): boolean {
+  return signedNetPremium != null && signedNetPremium < -0.005;
 }
 
 export interface ComputePositionPnlInput {

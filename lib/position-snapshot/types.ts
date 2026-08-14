@@ -37,7 +37,8 @@ export interface PositionLifecycleSnapshot {
   // Credit/debit: what was collected at entry vs. what it would currently
   // cost to close (or did cost, for a POSITION_CLOSE snapshot built from the
   // last known live values).
-  creditReceived: number;
+  creditReceived: number | null;
+  entryEconomicsComplete: boolean;
   closeValue: number | null;
 
   delta: number | null;
@@ -69,7 +70,8 @@ export interface PositionSnapshotInput {
   symbol: string;
   strategy: string;
   dte: number;
-  creditReceived: number;
+  creditReceived: number | null;
+  entryEconomicsComplete: boolean;
   closeValue: number | null;
   delta: number | null;
   pop: number | null;
