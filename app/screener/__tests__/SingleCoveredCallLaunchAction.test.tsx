@@ -112,6 +112,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['NKE']); // MU not eligible, AAPL not in universe
   });
@@ -140,6 +141,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /Scan all eligible holdings/i })).not.toBeInTheDocument();
   });
@@ -149,6 +151,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(await screen.findByRole('button', { name: /Scan all eligible holdings/i })).toBeInTheDocument();
   });
@@ -158,6 +161,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['MU']);
 
@@ -176,6 +180,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     getMarketMetricsMock.mockClear();
@@ -198,6 +203,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     renderScreener();
     await addToUniverse('MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     // Hide NKE via its chip (only visible once eligible holdings are loaded).
@@ -240,6 +246,7 @@ describe('TE-0007 final corrective pass: single ordinary Covered Call launch act
     // universe to reach a completed scan).
     await addToUniverse('NKE,MU');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
 
     // Conservative-exposure disclosure.

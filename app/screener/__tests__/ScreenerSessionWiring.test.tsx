@@ -80,6 +80,7 @@ async function addToUniverse(symbols: string) {
 
 async function clickCcScan() {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
 }
 async function clickCspScan() {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
