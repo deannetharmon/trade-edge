@@ -89,6 +89,16 @@ import {
   formatReliableSupportedMaxRisk,
   formatPortfolioMaxRiskContext,
 } from '@/lib/portfolio/positionMetrics';
+import {
+  canonicalShortLegEntryCredit,
+  canonicalShortLegCreditPerContract,
+  type PmccShortLegLike,
+} from '@/lib/portfolio/pmccLegEconomics';
+import {
+  buildStopGtcFlags,
+  buildPmccShortLegStopGtcPrompt,
+  type PmccShortLegPromptContext,
+} from '@/lib/portfolio/pmccStopGtcPrompt';
 import { canonicalRecommendationForCard, canonicalRecommendationToAction, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
@@ -5841,20 +5851,50 @@ CURRENT ORDERS:
 GTC profit-target: ${pos.hasGtc ? 'Yes — at $' + (pos.gtcOrderPrice?.toFixed(2) ?? '?') + '/contract (' + currentGtcPct + '% profit)' : 'None set'}
 Stop loss: ${pos.stopLossStatus}${pos.stopLossPrice ? ' @ $' + pos.stopLossPrice.toFixed(2) + '/contract' : ''}
 
-FLAGS: ${[
-  pos.needsClose ? 'AT 21 DTE — closing soon anyway (standard entry)' : '',
-  pos.entryDte <= 21 ? `SHORT-DATED ENTRY (entered at ${pos.entryDte} DTE, now ${pos.dte} DTE — set tight stop, lower GTC target to 30-40%)` : '',
-  pos.buffer != null && pos.buffer < 2 ? 'CRITICAL buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE — near breach' : pos.buffer != null && pos.buffer < 3 && pos.dte > 14 ? 'TIGHT buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE' : pos.buffer != null && pos.buffer < 5 && pos.dte > 30 ? 'WATCH buffer ' + pos.buffer.toFixed(1) + '% at ' + pos.dte + ' DTE' : '',
-  isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) ? 'EARNINGS ' + pos.earningsDate : '',
-  (pos.ivr ?? 0) < 30 ? 'IVR BELOW 30 — edge thin' : '',
-  (pos.ivr ?? 0) > 70 ? 'IVR ABOVE 70 — elevated volatility' : '',
-  profitCaptured != null && profitCaptured > 70 ? profitCaptured + '% PROFIT CAPTURED — stop must protect gains, anchor to current value' : '',
-].filter(Boolean).join(' | ') || 'None'}
+FLAGS: ${buildStopGtcFlags({
+  needsClose: pos.needsClose,
+  entryDte: pos.entryDte,
+  dte: pos.dte,
+  buffer: pos.buffer,
+  earningsDate: pos.earningsDate,
+  expDate: pos.expDate,
+  ivr: pos.ivr,
+  profitCaptured,
+})}
 
 IMPORTANT: stopMultiple in your response should be relative to the CURRENT spread value (${currentValuePerContract?.toFixed(2) ?? '?'}), not original credit. Respond as JSON only.`;
 }
 async function fetchStopGtcSuggestion(pos: Position): Promise<StopGtcSuggestion> {
   const prompt = buildStopGtcPrompt(pos);
+  const res = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      profile: 'analysis',
+      max_tokens: 500,
+      system: STOP_GTC_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`AI request failed: ${res.status}`);
+  const data = await res.json();
+  const text = (data?.content?.find((b: any) => b.type === 'text')?.text ?? '')
+    .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  return JSON.parse(text) as StopGtcSuggestion;
+}
+
+// PMCC short-leg profit-target/stop-loss ticket. buildPmccShortLegStopGtcPrompt
+// itself lives in lib/portfolio/pmccStopGtcPrompt.ts (a real fork of
+// buildStopGtcPrompt, not a PMCC branch threaded through it -- same
+// reasoning as PmccTradeModal's fork of TradeModal) so it's unit-testable
+// in isolation, matching this codebase's own PM-0001 precedent for pulling
+// pure calculation/prompt logic out of page.tsx closures. This is just the
+// thin fetch wrapper.
+async function fetchPmccShortLegSuggestion(
+  shortLeg: PmccShortLegLike,
+  context: PmccShortLegPromptContext,
+): Promise<StopGtcSuggestion> {
+  const prompt = buildPmccShortLegStopGtcPrompt(shortLeg, context);
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
