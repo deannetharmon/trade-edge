@@ -1,5 +1,7 @@
 // lib/portfolio/positionLifecycle.ts
 
+import { parseOccSymbol } from '@/lib/optionSymbol';
+
 export type OptionType = 'P' | 'C';
 export type LegDirection = 'Short' | 'Long';
 
@@ -84,6 +86,56 @@ export function isSpreadPosition(legs: LifecycleLeg[] = []): boolean {
   return putSpread || callSpread;
 }
 
+// TE-0007D corrective — a PMCC (long-dated deep-ITM call + short-dated OTM
+// call) is structurally a call spread by isSpreadPosition's definition
+// above (one long call, one short call), so without this check every held
+// PMCC was silently misclassified as a generic SPREAD. LifecycleLeg has no
+// expiration field of its own; parseOccSymbol decodes it from the OCC
+// symbol already present on `symbol` -- the same canonical parser the
+// merged PMCC pairing engine uses, so this stays consistent with how a
+// PMCC is defined everywhere else in the app.
+//
+// Threshold (short DTE < 60, long DTE > 120) mirrors the real PMCC shape
+// already established for the screener/pairing engine (short call window
+// 21-45 DTE default, long call window 180-730 DTE default) rather than an
+// arbitrary day-gap -- a 45/120 DTE pair should classify as PMCC, a 21/45
+// pair should not.
+//
+// Known limitation, not solved here: this checks expiration gap only, not
+// moneyness. A same-underlying call spread where the "long" leg happens to
+// sit 130+ DTE out but isn't actually deep ITM will still classify as
+// PMCC even though it's really just a wide speculative call spread, not a
+// LEAPS-anchored diagonal. LifecycleLeg carries strikePrice but no delta,
+// so a moneyness-aware refinement isn't possible with today's data shape.
+const PMCC_SHORT_DTE_MAX = 60;
+const PMCC_LONG_DTE_MIN = 120;
+
+function daysUntil(dateStr: string): number {
+  const target = new Date(`${dateStr}T00:00:00Z`);
+  const now = new Date();
+  const utcNow = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((target.getTime() - utcNow) / 86400000);
+}
+
+export function isPmccPosition(legs: LifecycleLeg[] = []): boolean {
+  const { shortCalls, longCalls } = splitOptionLegs(legs);
+  if (shortCalls.length === 0 || longCalls.length === 0) return false;
+
+  return shortCalls.some(shortLeg => {
+    const shortExpiry = parseOccSymbol(shortLeg.symbol).expiry;
+    if (!shortExpiry) return false;
+    const shortDte = daysUntil(shortExpiry);
+    if (shortDte >= PMCC_SHORT_DTE_MAX) return false;
+
+    return longCalls.some(longLeg => {
+      const longExpiry = parseOccSymbol(longLeg.symbol).expiry;
+      if (!longExpiry) return false;
+      return daysUntil(longExpiry) > PMCC_LONG_DTE_MIN;
+    });
+  });
+}
+
+
 export function isCashSecuredPut(legs: LifecycleLeg[] = []): boolean {
   const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
 
@@ -167,6 +219,20 @@ export function classifyPositionLifecycle(
       shortCalls,
       longCalls,
       reason: 'Single short put with no long hedge.',
+    };
+  }
+
+  if (isPmccPosition(legs)) {
+    return {
+      type: 'PMCC',
+      symbol: input.symbol,
+      contracts,
+      shares,
+      shortPuts,
+      longPuts,
+      shortCalls,
+      longCalls,
+      reason: 'Long-dated deep-ITM-window call paired with a short-dated call (short DTE < 60, long DTE > 120).',
     };
   }
 
