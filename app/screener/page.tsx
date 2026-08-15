@@ -4869,15 +4869,33 @@ function BestOpportunityFinder({
   const [levelResults, setLevelResults] = useState<LevelResult[]>([]);
   const [error, setError] = useState('');
 
-  const COURSE_RULES = { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 };
-  const levels = [
-    { presetKey: 'strict',    presetLabel: 'Strict',     presetColor: 'border-red-500 text-red-400',         rules: { IVR_MIN: 40, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.35, ROC_MIN_SPREAD: 25, ROC_MIN_IC: 35 } },
-    { presetKey: 'course',    presetLabel: 'Course',     presetColor: 'ac-btn',       rules: COURSE_RULES },
-    { presetKey: 'relaxed',   presetLabel: 'Relaxed',    presetColor: 'border-emerald-500 text-emerald-400', rules: { IVR_MIN: 25, OI_MIN: 300, BID_ASK_MAX: 0.15, CREDIT_RATIO_MIN: 0.28, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 25 } },
-    { presetKey: 'lowvol',    presetLabel: 'Low Vol',    presetColor: 'border-yellow-500 text-yellow-400',   rules: { IVR_MIN: 20, OI_MIN: 200, BID_ASK_MAX: 0.20, CREDIT_RATIO_MIN: 0.22, ROC_MIN_SPREAD: 12, ROC_MIN_IC: 20 } },
-    { presetKey: 'shortterm',    presetLabel: 'Short Term',   presetColor: 'border-orange-500 text-orange-400',  rules: { IVR_MIN: 35, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.30, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 22, DTE_MIN: 7,  DTE_MAX: 14 } },
-    { presetKey: 'intermediate', presetLabel: 'Intermediate', presetColor: 'border-amber-500 text-amber-400',   rules: { IVR_MIN: 35, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.30, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 22, DTE_MIN: 15, DTE_MAX: 29 } },
-  ];
+  // TE-0007D corrective — this used to be a second, hand-maintained preset
+  // array (presetKey/presetLabel/presetColor/rules) with values duplicated
+  // from the canonical RULE_PRESETS above by hand. Confirmed via the
+  // fetch/scan/view filter audit: both arrays held identical numeric rule
+  // values today, but nothing enforced that -- editing RULE_PRESETS wouldn't
+  // have touched this copy. Rule values are now derived from RULE_PRESETS,
+  // so there is exactly one source of truth for the numbers. Color classes
+  // are intentionally kept local and NOT consolidated: RULE_PRESETS uses
+  // -600 shades with background fills (for its own settings-modal usage),
+  // while this component's buttons have always used lighter -500 borders
+  // with no background. Silently adopting RULE_PRESETS' colors here would
+  // be an undiscussed visual change outside this cleanup's scope.
+  const PRESET_COLORS_LOCAL: Record<string, string> = {
+    strict: 'border-red-500 text-red-400',
+    course: 'ac-btn',
+    relaxed: 'border-emerald-500 text-emerald-400',
+    lowvol: 'border-yellow-500 text-yellow-400',
+    shortterm: 'border-orange-500 text-orange-400',
+    intermediate: 'border-amber-500 text-amber-400',
+  };
+  const COURSE_RULES = RULE_PRESETS.find(p => p.key === 'course')!.rules;
+  const levels = RULE_PRESETS.map(p => ({
+    presetKey: p.key,
+    presetLabel: p.label,
+    presetColor: PRESET_COLORS_LOCAL[p.key] ?? p.color,
+    rules: p.rules,
+  }));
 
   const scoreCandidateLocal = (result: ScreenResult, strat: string): BestSetup | null => {
     if (!result.qualified || !result.bestCandidate) return null;
