@@ -143,14 +143,14 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
             </div>
           </fieldset>
 
-          <label className="text-[10px] text-neutral-400">
+          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
             Long OI min
             <input aria-label="Long call open interest minimum" type="number" min={0}
               value={draft.longOiMin}
               onChange={e => setDraft(prev => ({ ...prev, longOiMin: Number(e.target.value) }))}
               className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
           </label>
-          <label className="text-[10px] text-neutral-400">
+          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
             Short OI min
             <input aria-label="Short call open interest minimum" type="number" min={0}
               value={draft.shortOiMin}

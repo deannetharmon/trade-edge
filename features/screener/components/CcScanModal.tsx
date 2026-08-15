@@ -84,7 +84,7 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {CC_FIELDS.map(([key, label, step]) => (
-            <label key={key} className="text-[10px] text-neutral-400">
+            <label key={key} className="flex flex-col gap-1 text-[10px] text-neutral-400">
               {label}
               <input
                 aria-label={label}
