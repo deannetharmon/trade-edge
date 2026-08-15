@@ -122,4 +122,31 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     await userEvent.keyboard('{ArrowLeft}');
     expect(screen.getByRole('radio', { name: /More opportunities/i })).toHaveFocus();
   });
+
+  it('IVR and bid/ask width render as real editable inputs, not preset-locked', async () => {
+    // Closes the gap flagged in the fetch/scan/view filter audit: IVR_MIN,
+    // IVR_MAX, and BID_ASK_MAX previously had no input control at all and
+    // stayed silently locked to whatever preset was last selected, even
+    // under "Custom." Fixed separately; this is the regression test that
+    // was missing at the time, proving the fields stay wired rather than
+    // relying on reading the source and trusting it.
+    render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
+
+    const ivrMin = screen.getByLabelText('Min IVR %') as HTMLInputElement;
+    const ivrMax = screen.getByLabelText('Max IVR %') as HTMLInputElement;
+    const bidAsk = screen.getByLabelText('Max bid/ask width') as HTMLInputElement;
+
+    expect(ivrMin.value).toBe(String(DEFAULT_CSP_RULES.IVR_MIN));
+    expect(ivrMax.value).toBe(String(DEFAULT_CSP_RULES.IVR_MAX));
+    expect(bidAsk.value).toBe(String(DEFAULT_CSP_RULES.BID_ASK_MAX));
+
+    await userEvent.clear(ivrMin);
+    await userEvent.type(ivrMin, '42');
+    expect(ivrMin.value).toBe('42');
+
+    // Editing IVR, same as any other rule field, flips the preset to
+    // Custom -- confirming these three fields actually participate in the
+    // shared draft rather than being decorative and disconnected.
+    expect(screen.getByRole('radio', { name: /Custom/i })).toHaveAttribute('aria-checked', 'true');
+  });
 });

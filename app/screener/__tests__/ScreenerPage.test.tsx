@@ -413,6 +413,31 @@ afterEach(() => {
 });
 
 describe('WA-0005 /screener: Initial/not-yet-run state', () => {
+  it('Spreads Filter mode preview box shows the selected preset\'s real values', async () => {
+    // Closes the gap Quinn flagged: nothing previously confirmed the
+    // Filter-mode preview box shows the *correct* numbers for a given
+    // preset, only that it renders something.
+    seedWatchlist();
+    renderScreenerPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'FIND SPREADS' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'FIND SPREADS' }));
+    const dialog = await screen.findByRole('dialog', { name: /SCAN SELECTED/ });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Strict/ }));
+
+    const preview = screen.getByTestId('filter-preset-preview');
+    expect(preview).toHaveTextContent('IVR ≥ 40%');
+    expect(preview).toHaveTextContent('OI ≥ 500');
+    expect(preview).toHaveTextContent('$0.10');
+    expect(preview).toHaveTextContent('35%');
+
+    // Switching preset must change the displayed numbers, not just the
+    // selected-button highlight -- proves the preview is wired to the
+    // real selection, not a static string.
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Relaxed/ }));
+    expect(screen.getByTestId('filter-preset-preview')).toHaveTextContent('IVR ≥ 25%');
+    expect(screen.queryByTestId('filter-preset-preview')).not.toHaveTextContent('IVR ≥ 40%');
+  });
+
   it('shows configurable PMCC DTE defaults and persists edits on submit', async () => {
     seedWatchlist();
     renderScreenerPage();
