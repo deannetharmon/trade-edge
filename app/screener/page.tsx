@@ -33,6 +33,16 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { buildPmccFailureAuditResult, derivePmccMarketSession, runPmccSymbolProduction } from '@/lib/scans/pmccProduction';
+import {
+  DEFAULT_PMCC_LONG_DELTA_RANGE,
+  DEFAULT_PMCC_SHORT_DELTA_RANGE,
+  DEFAULT_PMCC_LONG_OI_MIN,
+  DEFAULT_PMCC_SHORT_OI_MIN,
+  DEFAULT_PMCC_PAIRING_LIMITS,
+  DEFAULT_PMCC_QUOTE_POLICY,
+} from '@/lib/scans/pmccConfig';
+import type { PmccScanSnapshot } from '@/lib/scans/pmccTypes';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -1209,7 +1219,20 @@ async function getPMCCChain(
       const delta = item.delta != null ? parseFloat(item.delta) : null;
       const oi = parseInt(item['open-interest'] ?? '0', 10);
       if (!chains[meta.expDate]) chains[meta.expDate] = [];
-      chains[meta.expDate].push({ strikePrice: meta.strike, expirationDate: meta.expDate, optionType: 'C', delta, openInterest: oi, bid, ask, mid: (bid + ask) / 2, occSymbol: item.symbol });
+      chains[meta.expDate].push({
+        underlyingSymbol: symbol,
+        strikePrice: meta.strike,
+        expirationDate: meta.expDate,
+        optionType: 'C',
+        delta,
+        openInterest: oi,
+        bid,
+        ask,
+        mid: (bid + ask) / 2,
+        occSymbol: item.symbol,
+        quoteTimestamp: item['quote-time'] ?? item['updated-at'] ?? item.timestamp ?? null,
+        delayed: item.delayed ?? item['is-delayed'] ?? null,
+      });
     }
   }
   shortExpirations.sort(); longExpirations.sort();
@@ -3418,7 +3441,7 @@ function StockResearchPanel({ symbol, th, research }: {
   );
 }
 
-function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cachedEntry, existingPositions }: {
+type ResultCardProps = {
   result: ScreenResult;
   th: typeof THEMES[Theme];
   rules: RulesType;
@@ -3427,7 +3450,76 @@ function ResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cached
   onTrade?: (result: ScreenResult) => void;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
-}) {
+};
+
+function PmccResultCard({ result, th }: ResultCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const pair = result.pmccPair;
+  const metrics = pair?.metrics;
+  const ready = Boolean(pair?.qualified && pair.longLeg.quote.readyInput && pair.shortLeg.quote.readyInput);
+  const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
+  const quoteLine = (leg: NonNullable<typeof pair>['longLeg']) =>
+    `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
+  const age = (leg: NonNullable<typeof pair>['longLeg']) => leg.quote.ageSeconds == null ? 'unknown age' : `${Math.round(leg.quote.ageSeconds)}s old`;
+  const counts = result.pmccPairingCounts;
+  if (!pair) {
+    return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
+      <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span><span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span><span className="text-amber-400 text-xs">Audit result · Not Ready</span></div>
+      <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>
+      <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
+      {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
+      {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
+      {(result.pmccLegRejections?.length ?? 0) > 0 && <details className="mt-2 text-xs"><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
+      <p className="mt-2 rounded border border-amber-700 px-3 py-2 text-xs text-amber-300">Not Ready — Open/Trade is blocked.</p>
+    </article>;
+  }
+  return <article className={`rounded-xl border ${ready ? 'border-cyan-700/70' : 'border-amber-700/70'} overflow-hidden`} data-testid="pmcc-result-card">
+    <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
+        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">PMCC</span>
+        <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
+        <span className={`ml-auto text-[10px] ${ready ? 'text-emerald-400' : 'text-amber-400'}`}>{ready ? 'Ready' : 'Not Ready'} · {pair.longLeg.quote.status}/{pair.shortLeg.quote.status} {expanded ? '▴' : '▾'}</span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span></div>
+        <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) {money(pair.shortLeg.executablePrice)} · OI {pair.shortLeg.openInterest}</span></div>
+      </div>
+      {metrics && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
+        <span>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span>
+        <span>Strike width {money(metrics.strikeWidth)}</span>
+        <span>Width minus debit {money(metrics.widthMinusDebitPerShare)} · {metrics.widthMinusDebitPctOfDebit.toFixed(1)}% of debit</span>
+        <span>Net delta {metrics.netDelta.toFixed(2)}</span>
+        <span>Short-call OTM estimate {(100 - pair.shortLeg.delta * 100).toFixed(0)}%</span>
+      </div>}
+      {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
+    </button>
+    {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
+      <div><b>Long OCC:</b> {pair.longLeg.occSymbol}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
+      <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
+      {metrics && <div className="space-y-1">
+        <p>Natural price: long ask {money(pair.longLeg.quote.ask)} minus short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}</p>
+        <p>Long intrinsic {money(metrics.longIntrinsicPerShare)} · long extrinsic {money(metrics.longExtrinsicPerShare)}</p>
+        <p>Short credit / net debit {metrics.shortCreditToNetDebitPct.toFixed(1)}% · short credit / long extrinsic {metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</p>
+        <p>Width minus debit: {money(metrics.strikeWidth)} − {money(metrics.netDebitPerShare)} = {money(metrics.widthMinusDebitPerShare)}. This is structure economics, not maximum profit.</p>
+      </div>}
+      {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>Qualification and near-miss reasons:</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
+      {counts && <div><b>Pairing/accounting:</b> {counts.eligibleLongLegs} eligible long · {counts.eligibleShortLegs} eligible short · {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations evaluated · {counts.qualifiedPairsRetained} qualified retained · {counts.nearMissPairsRetained} near-miss retained · {counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention} omitted</div>}
+      {result.pmccIncompleteAnalysis && <p className="font-bold text-amber-400">Incomplete analysis: the safety limit prevented some combinations from being evaluated.</p>}
+      {(result.pmccLegRejections?.length ?? 0) > 0 && <details><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
+      <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
+      <p className={`rounded border ${ready ? 'border-cyan-700 text-cyan-300' : 'border-amber-700 text-amber-300'} px-3 py-2`}>
+        {ready ? 'Analysis ready — PMCC execution is not enabled.' : 'Not Ready — Open/Trade is blocked.'}
+      </p>
+    </div>}
+  </article>;
+}
+
+function ResultCard(props: ResultCardProps) {
+  return props.result.strategy === 'PMCC' ? <PmccResultCard {...props} /> : <GenericResultCard {...props} />;
+}
+
+function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cachedEntry, existingPositions }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
   const [showChart, setShowChart] = useState(false);
@@ -6006,6 +6098,7 @@ export default function Home() {
     // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — the immutable rule
     // snapshot for this session, forwarded unchanged to createScanSession().
     ruleSnapshot?: ReturnType<typeof buildCspRuleSnapshot>;
+    pmccSnapshot?: PmccScanSnapshot;
   }): ScreenerScanSession => {
     setActiveSession(prev => {
       if (prev && prev.status === 'running') {
@@ -6342,7 +6435,7 @@ export default function Home() {
     let cancelled = false;
     const eligible = shouldGenerateRecommendationsForSession(activeSession, activeSessionIdRef.current);
 
-    if (!eligible || !activeSession) {
+    if (!eligible || !activeSession || activeSession.requestedStrategy === 'pmcc') {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
       setOpportunityState('idle');
@@ -6763,11 +6856,10 @@ export default function Home() {
   };
 
   // Scan PMCC using the canonical Opportunity Universe — entirely separate
-  // action from runScreen/Run Hunter. PMCC results are appended to the
-  // existing results list (not replaced), so running PMCC after a
-  // watchlist scan adds to what's already shown. TE-0007: no longer reads
-  // a separate PMCC-only ticker list; uses the same normalized array every
-  // other strategy button reads.
+  // action from runScreen/Run Hunter. A PMCC scan replaces and isolates
+  // prior strategy results. TE-0007: no longer reads a separate PMCC-only
+  // ticker list; uses the same normalized array every other strategy
+  // button reads.
   const runPMCCScan = async () => {
     const pmcc = opportunityUniverse;
     if (!pmcc.length) {
@@ -6795,10 +6887,26 @@ export default function Home() {
 
     // SCREENER-RESULTS-0001 — 'pmcc' session, filter mode only. Replaces,
     // never merges into, whatever session was previously active.
+    const pmccAsOf = new Date();
+    const pmccMarketSession = derivePmccMarketSession(pmccAsOf);
+    const pmccCriteria = {
+      dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
+      longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
+      shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
+      longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+      shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
+      requireDebitBelowWidth: true,
+      quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY },
+      limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
+    };
+    const pmccSnapshot: PmccScanSnapshot = {
+      asOf: pmccAsOf.toISOString(), marketSession: pmccMarketSession, criteria: pmccCriteria,
+    };
     let session = beginScanSession({
       mode: 'filter',
       requestedStrategy: 'pmcc',
       scope: { universeSymbols: pmcc, eligibleSymbols: pmcc },
+      pmccSnapshot,
     });
     const loopSymbols = session.plannedScanSymbols;
 
@@ -6814,25 +6922,37 @@ export default function Home() {
         const symbol = loopSymbols[pmccLoopIdx];
         pushStatus(`Scanning PMCC ${symbol}...`);
         updateScreenerJob({ progressCurrent: pmccLoopIdx + 1 });
-        try {
-          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const [pmccChain, price] = await Promise.all([
-            getPMCCChain(symbol, token, {
-              shortMin: pmccShortDteMin,
-              shortMax: pmccShortDteMax,
-              longMin: pmccLongDteMin,
-              longMax: pmccLongDteMax,
-            }),
-            getQuote(symbol, token),
-          ]);
-          let trendResult: TrendResult | undefined;
-          const pmccIsEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
-          try { trendResult = await getTrend(symbol, pmccIsEtfOrIndex); } catch {}
-          const result = runPMCCChecklist(symbol, pmccChain, price, metrics, trendResult);
-          session = recordSymbolEvaluated(session, symbol, [result]);
-        } catch (e: any) {
-          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
-        }
+        const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
+        const outcome = await runPmccSymbolProduction({
+          snapshot: pmccSnapshot,
+          fallbackContext: {
+            symbol, price: null, ivr: metrics.ivRank ?? null,
+            earningsDate: metrics.earningsExpectedDate ?? null, underlyingType: 'stock',
+          },
+          acquire: async () => {
+            const [pmccChain, price] = await Promise.all([
+              getPMCCChain(symbol, token, {
+                shortMin: pmccShortDteMin, shortMax: pmccShortDteMax,
+                longMin: pmccLongDteMin, longMax: pmccLongDteMax,
+              }),
+              getQuote(symbol, token),
+            ]);
+            let trendResult: TrendResult | undefined;
+            const isEtfOrIndex = pmccChain.classification === 'index' || pmccChain.classification === 'etf';
+            try { trendResult = await getTrend(symbol, isEtfOrIndex); } catch {}
+            return {
+              chain: pmccChain,
+              context: {
+                symbol, price: price as number, ivr: metrics.ivRank ?? null,
+                earningsDate: metrics.earningsExpectedDate ?? null,
+                trendResult, underlyingType: pmccChain.classification,
+              },
+            };
+          },
+        });
+        session = outcome.status === 'evaluated'
+          ? recordSymbolEvaluated(session, symbol, outcome.results)
+          : recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED', outcome.audit);
       }
 
       session = completeSession(session);
@@ -6861,8 +6981,21 @@ export default function Home() {
       }
       const reasonCode: ScreenerReasonCode = /token/i.test(e?.message ?? '') ? 'ACCESS_TOKEN_UNAVAILABLE' : 'MARKET_DATA_REQUEST_FAILED';
       try {
-        session = errorSession(session, reasonCode);
-        commitScanSession(session);
+        const completedSymbols = new Set(session.symbolOutcomes.map(outcome => outcome.symbol));
+        for (const symbol of session.plannedScanSymbols) {
+          if (completedSymbols.has(symbol)) continue;
+          const audit = buildPmccFailureAuditResult({
+            symbol, price: null, ivr: null, earningsDate: null, underlyingType: 'stock',
+          }, pmccSnapshot.asOf, 'MARKET_DATA_FAILURE', e?.message ?? 'PMCC scan-wide acquisition failed');
+          session = recordSymbolFailed(session, symbol, reasonCode, audit);
+        }
+        session = completeSession(session);
+        commitScanSession(session, () => {
+          setResults(session.results);
+          const cacheTs = Date.now();
+          setResultsCachedAt(cacheTs);
+          persistScanSession(session);
+        });
       } catch { /* session already terminal */ }
     } finally {
       if (isScanCurrent(session)) {
@@ -7272,6 +7405,7 @@ export default function Home() {
 
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
+    if (activeSession?.requestedStrategy === 'pmcc') return true;
     if (!filterStrategies.includes(r.strategy)) return false;
     const c = r.bestCandidate;
     if (c) {
@@ -7302,8 +7436,9 @@ export default function Home() {
     activeSession && activeSession.mode === screenMode && activeSession.status !== 'running'
   );
   const cspNonFilterSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode !== 'filter';
-  const filteredQualifiedChips = cspNonFilterSession ? qualified : applyFilterModeChips(qualified);
-  const filteredDisqualified = cspNonFilterSession ? disqualified : applyFilterModeChips(disqualified);
+  const activePmccSession = activeSession?.requestedStrategy === 'pmcc';
+  const filteredQualifiedChips = cspNonFilterSession || activePmccSession ? qualified : applyFilterModeChips(qualified);
+  const filteredDisqualified = cspNonFilterSession || activePmccSession ? disqualified : applyFilterModeChips(disqualified);
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
   // sort, applied to the QUALIFIED section only. Eligibility filters
@@ -7333,14 +7468,14 @@ export default function Home() {
   const effectiveFilteredSort = cspTargetedSession
     ? ({ primary: 'score', secondary: 'none' } as SortSpec)
     : filteredSort;
-  let filteredQualified = filteredQualifiedChips.filter(r => {
+  let filteredQualified = activePmccSession ? filteredQualifiedChips : filteredQualifiedChips.filter(r => {
     const strat = toOiStrategy(r.strategy);
     if (!strat || !r.bestCandidate) return true; // strategies with no OI mapping are unaffected
     const oi = evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), effectiveFilteredMinOi);
     filteredOiByResult.set(r, oi);
     return oi.eligible;
   });
-  filteredQualified = sortItems(filteredQualified, effectiveFilteredSort, (r): SortableMetrics => {
+  filteredQualified = activePmccSession ? filteredQualified : sortItems(filteredQualified, effectiveFilteredSort, (r): SortableMetrics => {
     const c = r.bestCandidate;
     const strat = toOiStrategy(r.strategy);
     return {
@@ -7706,7 +7841,7 @@ export default function Home() {
           )}
 
           {/* Last Rules Used — hidden in rank mode */}
-          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
+          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
             <div className={`${th.card} border ${th.border} rounded-xl p-3 text-[9px] space-y-1`}>
               <p className={`${th.textMuted} mb-2 tracking-widest font-medium`}>ACTIVE RULES</p>
               <div className="space-y-3">
@@ -7743,7 +7878,7 @@ export default function Home() {
         <div className="flex-1 overflow-auto p-5">
 
           {/* Real-time Interactive Preset Filter Bar */}
-          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
+          {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
             <div className={`mb-4 p-3 ${th.card} border ${th.border} rounded-xl flex items-center justify-between gap-4 flex-wrap`}>
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-bold uppercase tracking-wider ${th.textFaint}`}>Quick Rule Presets:</span>
@@ -7891,9 +8026,15 @@ export default function Home() {
                     </button>
                   )}
                   <button onClick={downloadCSV} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>↓ CSV</button>
-                  <button onClick={() => activeSession?.requestedStrategy === 'csp' ? setShowCspRunModal(true) : setShowRunModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-purple-500 hover:text-purple-400 transition-colors tracking-wider`}>
-                    {screenMode === 'filter' ? '⊘ Filter' : screenMode === 'rank' ? '⬡ Rank' : '⊕ Targeted'} ↺
-                  </button>
+                  {activeSession?.requestedStrategy === 'pmcc' ? (
+                    <button onClick={runPMCCScan} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
+                      RESCAN PMCC ↺
+                    </button>
+                  ) : (
+                    <button onClick={() => activeSession?.requestedStrategy === 'csp' ? setShowCspRunModal(true) : setShowRunModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-purple-500 hover:text-purple-400 transition-colors tracking-wider`}>
+                      {screenMode === 'filter' ? '⊘ Filter' : screenMode === 'rank' ? '⬡ Rank' : '⊕ Targeted'} ↺
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -7915,7 +8056,7 @@ export default function Home() {
                 />
               )}
 
-              {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && (
+              {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
                 <SmartSuggestionsPanel results={results} rules={runtimeStockRules} th={th} onApplyAndRerun={(r) => {
                   setRuntimeStockRules(r);
                   if (rawScanCache.length > 0) {
@@ -7932,7 +8073,7 @@ export default function Home() {
                   and Targeted modes are unchanged (their own filter rows
                   already precede their result lists) — see the ticket's
                   documented Filtered-mode-first scope decision. */}
-              {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
+              {!activePmccSession && (screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
                 activeSession?.requestedStrategy === 'csp' ? (
                   <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
@@ -7987,7 +8128,7 @@ export default function Home() {
                   meaningless/misleading empty state if wired to either
                   Best-Opportunities component -- it is deliberately
                   excluded, not merely deferred. */}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
+              {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
                   borderClassName={th.border}
@@ -8068,7 +8209,7 @@ export default function Home() {
                 <>
                   {filteredQualified.length > 0 && (
                     <div>
-                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
+                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">{activePmccSession ? 'QUALIFIED PMCC STRUCTURES' : 'QUALIFIED'}</p>
                       <div className="space-y-2">
                         {activeSession?.requestedStrategy === 'csp' ? cspExpirationGroups.map(([expiration, group]) => (
                           <ExpirationDisclosure key={expiration} expiration={expiration}
@@ -8110,14 +8251,39 @@ export default function Home() {
                       </div>
                     </div>
                   )}
-                  <DisqualifiedSection
-                    results={filteredDisqualified}
-                    hasQualifiedCandidates={filteredQualified.length > 0}
-                    groupByExpiration={activeSession?.requestedStrategy === 'csp'}
-                    borderClassName={th.border}
-                    textFaintClassName={th.textFaint}
-                    textMutedClassName={th.textMuted}
-                  />
+                  {activePmccSession ? (
+                    <>
+                      {filteredDisqualified.filter(result => result.pmccPair != null).length > 0 && (
+                        <div>
+                          <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC NEAR-MISS STRUCTURES</p>
+                          <div className="space-y-2">
+                            {filteredDisqualified.filter(result => result.pmccPair != null).map(result => (
+                              <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {filteredDisqualified.filter(result => result.pmccPair == null).length > 0 && (
+                        <div>
+                          <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC AUDIT RESULTS</p>
+                          <div className="space-y-2">
+                            {filteredDisqualified.filter(result => result.pmccPair == null).map(result => (
+                              <PmccResultCard key={result.candidateId ?? `pmcc-audit-${result.symbol}`} result={result} th={th} rules={runtimeStockRules} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <DisqualifiedSection
+                      results={filteredDisqualified}
+                      hasQualifiedCandidates={filteredQualified.length > 0}
+                      groupByExpiration={activeSession?.requestedStrategy === 'csp'}
+                      borderClassName={th.border}
+                      textFaintClassName={th.textFaint}
+                      textMutedClassName={th.textMuted}
+                    />
+                  )}
                   {activeSession && (activeSession.requestedStrategy === 'csp' || activeSession.mode === 'filter') ? (
                     <SymbolOutcomesDisclosure
                       session={activeSession!}

@@ -327,6 +327,7 @@ describe('shouldGenerateRecommendationsForSession', () => {
     s = recordSymbolEvaluated(s, 'A', [makeResult('A', 'CSP', true)]);
     const done = completeSession(s);
     expect(shouldGenerateRecommendationsForSession(done, done.sessionId)).toBe(true);
+    expect(shouldGenerateRecommendationsForSession({ ...done, requestedStrategy: 'pmcc' }, done.sessionId)).toBe(false);
     expect(shouldGenerateRecommendationsForSession(done, 'newer-session-id')).toBe(false);
   });
 });

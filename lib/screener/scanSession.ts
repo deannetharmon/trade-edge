@@ -90,6 +90,8 @@
 import type { ScreenResult } from '@/lib/scans/types';
 import { type CspRuleSnapshot, isValidCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { isOverallCspQualified } from '@/lib/scans/cspQualification';
+import type { PmccScanSnapshot } from '@/lib/scans/pmccTypes';
+import { isValidPmccScanSnapshot } from '@/lib/scans/pmccConfig';
 
 export type ScreenerScanMode = 'filter' | 'rank' | 'targeted';
 
@@ -219,7 +221,7 @@ const ALLOWED_SCOPE_EXCLUSION_REASON_CODES: ReadonlySet<ScreenerReasonCode> = ne
 // UNKNOWN_SCHEMA_VERSION and is discarded outright (see
 // lib/screener/scanSessionCache.ts's restoreScanSession()) before any code
 // path would need to backfill a `ruleSnapshot` for it.
-const SCHEMA_VERSION = 7 as const;
+const SCHEMA_VERSION = 8 as const;
 
 // ── Symbol normalization ────────────────────────────────────────────────
 export function normalizeSymbols(symbols: string[]): string[] {
@@ -309,6 +311,7 @@ export interface ScreenerScanSession {
   // fabricated for a session restored from an older schema (which fails
   // closed on schemaVersion mismatch before this field is ever read).
   ruleSnapshot: CspRuleSnapshot | null;
+  pmccSnapshot: PmccScanSnapshot | null;
 }
 
 // ── Construction ─────────────────────────────────────────────────────────
@@ -338,6 +341,7 @@ export function createScanSession(args: {
   // becomes `null` on the resulting session, which is the correct value for
   // every non-CSP strategy today.
   ruleSnapshot?: CspRuleSnapshot;
+  pmccSnapshot?: PmccScanSnapshot;
 }): ScreenerScanSession {
   if (!STRATEGY_ALLOWED_MODES[args.requestedStrategy].has(args.mode)) {
     throw new ScanSessionConstructionError(
@@ -390,6 +394,7 @@ export function createScanSession(args: {
     cachedAt: null,
     schemaVersion: SCHEMA_VERSION,
     ruleSnapshot: args.ruleSnapshot ?? null,
+    pmccSnapshot: args.pmccSnapshot ?? null,
   };
 
   for (const { symbol, reasonCode } of exclusions) {
@@ -537,12 +542,19 @@ export function recordSymbolFailed(
   session: ScreenerScanSession,
   symbol: string,
   reasonCode: ScreenerReasonCode,
+  auditResult?: ScreenResult,
 ): ScreenerScanSession {
   assertRunning(session, 'recordSymbolFailed');
   assertPlannedMember(session, symbol, 'recordSymbolFailed');
   assertNoExistingOutcome(session, symbol, 'recordSymbolFailed');
+  if (auditResult) {
+    const check = checkResultShapeForSession(auditResult, session.requestedStrategy, symbol);
+    if (!check.symbolOk || !check.strategyOk || !check.qualifiedOk || !check.failReasonsOk || auditResult.qualified || !auditResult.pmccAuditKind) {
+      throw new ScanSessionTransitionError(`recordSymbolFailed('${symbol}'): invalid failure audit result.`);
+    }
+  }
   const outcome: ScreenerSymbolOutcome = { symbol, status: 'failed', reasonCode, candidateCount: 0 };
-  return { ...session, symbolOutcomes: [...session.symbolOutcomes, outcome] };
+  return { ...session, symbolOutcomes: [...session.symbolOutcomes, outcome], results: auditResult ? [...session.results, auditResult] : session.results };
 }
 
 export function recordSymbolSkipped(
@@ -573,7 +585,7 @@ export function sessionResultsReconcile(session: ScreenerScanSession): boolean {
   const expected = session.symbolOutcomes
     .filter(o => o.status === 'evaluated')
     .reduce((sum, o) => sum + o.candidateCount, 0);
-  return expected === session.results.length;
+  return expected === session.results.filter(result => !result.pmccAuditKind).length;
 }
 
 // ── Terminal transitions ─────────────────────────────────────────────────
@@ -651,6 +663,15 @@ export interface ScreenerSessionAccounting {
    * `bestCandidate.cspAccountEligibility` value to disagree with market
    * qualification. */
   accountActionableCount: number;
+  /** PMCC engine accounting is symbol-level. Repeated pair results from the
+   * same symbol carry the same snapshot, so aggregation deduplicates by symbol. */
+  pmccPairing?: {
+    combinationsEvaluated: number;
+    combinationsOmitted: number;
+    qualifiedPairsRetained: number;
+    nearMissPairsRetained: number;
+    incompleteSymbolCount: number;
+  };
 }
 
 function isAccountActionableResult(r: ScreenResult): boolean {
@@ -667,6 +688,19 @@ export function computeSessionAccounting(session: ScreenerScanSession): Screener
   const qualifiedCandidateCount = session.results.filter(r => r.qualified).length;
   const disqualifiedCandidateCount = session.results.filter(r => !r.qualified).length;
   const accountActionableCount = session.results.filter(isAccountActionableResult).length;
+  const pmccSnapshots = new Map<string, ScreenResult>();
+  for (const result of session.results) {
+    if (result.strategy === 'PMCC' && result.pmccPairingCounts && !pmccSnapshots.has(result.symbol)) pmccSnapshots.set(result.symbol, result);
+  }
+  const pmccPairing = pmccSnapshots.size === 0 ? undefined : Array.from(pmccSnapshots.values()).reduce((total, result) => {
+    const counts = result.pmccPairingCounts!;
+    total.combinationsEvaluated += counts.combinationsEvaluated;
+    total.combinationsOmitted += counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention;
+    total.qualifiedPairsRetained += counts.qualifiedPairsRetained;
+    total.nearMissPairsRetained += counts.nearMissPairsRetained;
+    total.incompleteSymbolCount += result.pmccIncompleteAnalysis ? 1 : 0;
+    return total;
+  }, { combinationsEvaluated: 0, combinationsOmitted: 0, qualifiedPairsRetained: 0, nearMissPairsRetained: 0, incompleteSymbolCount: 0 });
 
   return {
     selectedCount: session.selectedSymbols.length,
@@ -678,7 +712,7 @@ export function computeSessionAccounting(session: ScreenerScanSession): Screener
     candidateCount,
     qualifiedCandidateCount,
     disqualifiedCandidateCount,
-    accountActionableCount,
+    accountActionableCount, pmccPairing,
   };
 }
 
@@ -700,6 +734,11 @@ export function formatSessionAccountingSummary(session: ScreenerScanSession): st
   if (a.accountActionableCount !== a.qualifiedCandidateCount) {
     parts.push(`${a.accountActionableCount} account-actionable`);
   }
+  if (a.pmccPairing) {
+    parts.push(`${a.pmccPairing.combinationsEvaluated} PMCC pairs evaluated`);
+    parts.push(`${a.pmccPairing.combinationsOmitted} PMCC pairs omitted`);
+    if (a.pmccPairing.incompleteSymbolCount > 0) parts.push(`${a.pmccPairing.incompleteSymbolCount} PMCC symbols incomplete`);
+  }
   return parts.join(' · ');
 }
 
@@ -710,7 +749,135 @@ export function shouldGenerateRecommendationsForSession(
 ): boolean {
   if (session == null) return false;
   if (isSessionStale(session.sessionId, activeSessionId)) return false;
+  if (session.requestedStrategy === 'pmcc') return false;
   return session.status === 'complete' && session.results.length > 0;
+}
+
+const PMCC_AUDIT_KINDS = new Set(['MARKET_DATA_FAILURE', 'CHAIN_ADAPTATION_FAILURE', 'PAIRING_ENGINE_FAILURE']);
+const PMCC_QUOTE_STATES = new Set(['acceptable', 'wide_warning', 'too_wide', 'stale', 'delayed', 'market_closed', 'timestamp_missing', 'insufficient']);
+const PMCC_FAILURE_CODES = new Set([
+  'INVALID_OPTION_TYPE', 'UNDERLYING_MISMATCH', 'INVALID_OCC_IDENTITY', 'DUPLICATE_CONTRACT',
+  'DELTA_OUT_OF_RANGE', 'DTE_OUT_OF_RANGE', 'OPEN_INTEREST_BELOW_MINIMUM', 'INVALID_QUOTE',
+  'BID_ASK_TOO_WIDE', 'LONG_NOT_ITM', 'SHORT_NOT_OTM', 'LONG_EXPIRATION_NOT_LATER',
+  'LONG_STRIKE_NOT_BELOW_SHORT', 'NET_DEBIT_NOT_POSITIVE', 'NET_DEBIT_NOT_BELOW_WIDTH',
+  'INVALID_EXTRINSIC', 'INSUFFICIENT_DATA',
+]);
+const finiteOrNull = (value: unknown): boolean => value === null || (typeof value === 'number' && Number.isFinite(value));
+
+function isValidPmccReason(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const reason = value as Record<string, unknown>;
+  return typeof reason.code === 'string' && PMCC_FAILURE_CODES.has(reason.code)
+    && typeof reason.message === 'string' && reason.message.length > 0;
+}
+
+function isValidPmccLegRejections(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.every(item => {
+    if (item == null || typeof item !== 'object') return false;
+    const rejection = item as Record<string, unknown>;
+    return (rejection.role === 'long' || rejection.role === 'short')
+      && (rejection.occSymbol === null || typeof rejection.occSymbol === 'string')
+      && typeof rejection.strike === 'number' && Number.isFinite(rejection.strike)
+      && typeof rejection.expiration === 'string' && Number.isFinite(Date.parse(rejection.expiration))
+      && Array.isArray(rejection.reasons) && rejection.reasons.length > 0
+      && rejection.reasons.every(isValidPmccReason);
+  });
+}
+
+function isValidPmccCounts(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const counts = value as Record<string, unknown>;
+  if (Number(counts.combinationsEvaluated) + Number(counts.combinationsOmittedBySafetyLimit) !== Number(counts.potentialCombinations)) return false;
+  if (Number(counts.qualifiedPairsRetained) + Number(counts.qualifiedPairsOmittedByRetention) !== Number(counts.qualifiedPairsBeforeRetention)) return false;
+  if (Number(counts.nearMissPairsRetained) + Number(counts.nearMissPairsOmittedByRetention) !== Number(counts.nearMissPairsBeforeRetention)) return false;
+  if (Number(counts.potentialCombinations) !== Number(counts.eligibleLongLegs) * Number(counts.eligibleShortLegs)) return false;
+  if (Number(counts.qualifiedPairsBeforeRetention) + Number(counts.nearMissPairsBeforeRetention) !== Number(counts.combinationsEvaluated)) return false;
+  if (Number(counts.structurallyValidPairs) > Number(counts.combinationsEvaluated)
+    || Number(counts.qualifiedPairsBeforeRetention) > Number(counts.combinationsEvaluated)
+    || Number(counts.nearMissPairsBeforeRetention) > Number(counts.combinationsEvaluated)) return false;
+  return [
+    'eligibleLongLegs', 'eligibleShortLegs', 'potentialCombinations', 'combinationsEvaluated',
+    'combinationsOmittedBySafetyLimit', 'structurallyValidPairs', 'qualifiedPairsBeforeRetention',
+    'nearMissPairsBeforeRetention', 'qualifiedPairsRetained', 'nearMissPairsRetained',
+    'qualifiedPairsOmittedByRetention', 'nearMissPairsOmittedByRetention',
+  ].every(key => Number.isInteger((value as Record<string, unknown>)[key]) && Number((value as Record<string, unknown>)[key]) >= 0);
+}
+
+function isValidPmccQuote(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const quote = value as Record<string, unknown>;
+  return ['bid', 'ask', 'midpoint', 'width', 'spreadPct', 'ageSeconds'].every(key => finiteOrNull(quote[key]))
+    && (quote.quoteTimestamp === null || (typeof quote.quoteTimestamp === 'string' && Number.isFinite(Date.parse(quote.quoteTimestamp))))
+    && (quote.delayed === null || typeof quote.delayed === 'boolean')
+    && typeof quote.structurallyUsable === 'boolean'
+    && typeof quote.withinQualifyingWidth === 'boolean'
+    && typeof quote.readyInput === 'boolean'
+    && typeof quote.status === 'string' && PMCC_QUOTE_STATES.has(quote.status)
+    && typeof quote.reason === 'string';
+}
+
+function isValidPmccLeg(value: unknown, role: 'long' | 'short', symbol: string): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const leg = value as Record<string, unknown>;
+  const occ = typeof leg.occSymbol === 'string' ? leg.occSymbol.replace(/\s+/g, '').toUpperCase() : '';
+  return leg.role === role
+    && leg.underlyingSymbol === symbol
+    && typeof leg.candidateId === 'string' && leg.candidateId === `occ:${occ}`
+    && occ.length > 0
+    && typeof leg.expiration === 'string' && Number.isFinite(Date.parse(leg.expiration))
+    && Number.isInteger(leg.dte) && Number(leg.dte) >= 0
+    && ['strike', 'delta', 'openInterest', 'executablePrice'].every(key => typeof leg[key] === 'number' && Number.isFinite(leg[key]))
+    && isValidPmccQuote(leg.quote)
+    && finiteOrNull(leg.intrinsic) && finiteOrNull(leg.extrinsic);
+}
+
+function isValidPmccMetrics(value: unknown): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const metrics = value as Record<string, unknown>;
+  return [
+    'netDebitPerShare', 'strikeWidth', 'widthMinusDebitPerShare', 'widthMinusDebitPctOfDebit',
+    'longIntrinsicPerShare', 'longExtrinsicPerShare', 'shortCreditToNetDebitPct', 'netDelta',
+  ].every(key => typeof metrics[key] === 'number' && Number.isFinite(metrics[key]))
+    && finiteOrNull(metrics.shortCreditToLongExtrinsicPct);
+}
+
+function isValidPmccResult(value: Record<string, unknown>, snapshot: PmccScanSnapshot): boolean {
+  if (value.strategy !== 'PMCC' || typeof value.symbol !== 'string' || value.pmccAsOf !== snapshot.asOf) return false;
+  if (typeof value.candidateId !== 'string' || value.qualified === true && value.pmccPair == null) return false;
+  if (value.pmccPair == null) {
+    const productionAudit = value.pmccAuditKind != null;
+    return value.qualified === false
+      && value.candidateId === (productionAudit
+        ? `pmcc-audit:${value.symbol}:${snapshot.asOf}:${value.pmccAuditKind}`
+        : `pmcc-audit:${value.symbol}:${snapshot.asOf}`)
+      && (!productionAudit || (typeof value.pmccAuditKind === 'string' && PMCC_AUDIT_KINDS.has(value.pmccAuditKind)))
+      && (productionAudit
+        ? value.pmccPairingCounts == null && value.pmccLegRejections == null && value.pmccIncompleteAnalysis == null
+        : isValidPmccCounts(value.pmccPairingCounts)
+          && typeof value.pmccIncompleteAnalysis === 'boolean'
+          && isValidPmccLegRejections(value.pmccLegRejections));
+  }
+  if (value.pmccAuditKind != null || !isValidPmccCounts(value.pmccPairingCounts)
+    || typeof value.pmccIncompleteAnalysis !== 'boolean'
+    || !isValidPmccLegRejections(value.pmccLegRejections)) return false;
+  const pair = value.pmccPair as Record<string, unknown>;
+  if (pair.pairId !== value.candidateId || pair.symbol !== value.symbol || pair.orderingLabel !== 'Contract order') return false;
+  if (pair.qualified !== value.qualified || !Array.isArray(pair.failureReasons)
+    || !pair.failureReasons.every(isValidPmccReason) || typeof pair.insufficientData !== 'boolean') return false;
+  if (!(pair.primaryFailureReason === null || isValidPmccReason(pair.primaryFailureReason))) return false;
+  if ((pair.failureReasons.length === 0) !== (pair.primaryFailureReason === null)) return false;
+  if (pair.qualified !== (pair.failureReasons.length === 0)) return false;
+  if (pair.primaryFailureReason !== null) {
+    const first = pair.failureReasons[0] as Record<string, unknown>;
+    const primary = pair.primaryFailureReason as Record<string, unknown>;
+    if (primary.code !== first.code || primary.message !== first.message) return false;
+  }
+  if (!isValidPmccLeg(pair.longLeg, 'long', value.symbol) || !isValidPmccLeg(pair.shortLeg, 'short', value.symbol)) return false;
+  const longLeg = pair.longLeg as Record<string, unknown>;
+  const shortLeg = pair.shortLeg as Record<string, unknown>;
+  if (pair.pairId !== `${longLeg.candidateId}::${shortLeg.candidateId}`) return false;
+  return pair.metrics === null ? pair.insufficientData === true : isValidPmccMetrics(pair.metrics);
 }
 
 // ── Cache validation ─────────────────────────────────────────────────────
@@ -747,7 +914,9 @@ export type SessionValidationError =
   | 'RESULT_STRATEGY_MISMATCH'
   | 'INVALID_RESULT_SHAPE'
   | 'INVALID_CSP_QUALIFICATION'
-  | 'INVALID_RULE_SNAPSHOT';
+  | 'INVALID_RULE_SNAPSHOT'
+  | 'INVALID_PMCC_SNAPSHOT'
+  | 'INVALID_PMCC_RESULT';
 
 export type SessionValidationResult =
   | { valid: true; session: ScreenerScanSession }
@@ -784,6 +953,11 @@ export function validateSessionData(data: unknown): SessionValidationResult {
     }
   } else if (d.ruleSnapshot !== null) {
     errors.push('INVALID_RULE_SNAPSHOT');
+  }
+  if (strategyValid && d.requestedStrategy === 'pmcc') {
+    if (!isValidPmccScanSnapshot(d.pmccSnapshot)) errors.push('INVALID_PMCC_SNAPSHOT');
+  } else if (d.pmccSnapshot !== null) {
+    errors.push('INVALID_PMCC_SNAPSHOT');
   }
 
   if (strategyValid && modeValid) {
@@ -951,6 +1125,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
     const selectedSet = selectedValid ? new Set(selected as string[]) : null;
 
     let resultSymbolsValid = true;
+    const pmccOrdersBySymbol = new Map<string, Set<number>>();
     for (const r of rawResults) {
       const sym = r?.symbol;
       if (typeof sym !== 'string' || (selectedSet && !selectedSet.has(sym))) resultSymbolsValid = false;
@@ -965,6 +1140,19 @@ export function validateSessionData(data: unknown): SessionValidationResult {
         if (!check.strategyOk) errors.push('RESULT_STRATEGY_MISMATCH');
         if (!check.qualifiedOk) errors.push('INVALID_RESULT_SHAPE');
         if (!check.failReasonsOk) errors.push('INVALID_RESULT_SHAPE');
+        if (d.requestedStrategy === 'pmcc' && isValidPmccScanSnapshot(d.pmccSnapshot)) {
+          if (!isValidPmccResult(r, d.pmccSnapshot)) errors.push('INVALID_PMCC_RESULT');
+          if (r.pmccPair != null) {
+            const order = r.publishedOrder;
+            const orders = pmccOrdersBySymbol.get(sym) ?? new Set<number>();
+            if (!Number.isInteger(order) || Number(order) <= 0 || orders.has(Number(order))) {
+              errors.push('INVALID_PMCC_RESULT');
+            } else {
+              orders.add(Number(order));
+              pmccOrdersBySymbol.set(sym, orders);
+            }
+          }
+        }
         if (d.requestedStrategy === 'csp' && r.bestCandidate == null) {
           // A CSP result without a concrete contract can only represent a
           // failed/disqualified evaluation. It must never restore as a
@@ -999,10 +1187,40 @@ export function validateSessionData(data: unknown): SessionValidationResult {
         }
       }
     }
+    for (const orders of Array.from(pmccOrdersBySymbol.values())) {
+      const ordered = Array.from(orders).sort((a, b) => a - b);
+      if (ordered.some((order, index) => order !== index + 1)) {
+        errors.push('INVALID_PMCC_RESULT');
+        break;
+      }
+    }
+    const pmccResultsBySymbol = new Map<string, Array<Record<string, any>>>();
+    for (const result of rawResults) {
+      if (result?.pmccPair == null || typeof result.symbol !== 'string') continue;
+      const group = pmccResultsBySymbol.get(result.symbol) ?? [];
+      group.push(result);
+      pmccResultsBySymbol.set(result.symbol, group);
+    }
+    for (const group of Array.from(pmccResultsBySymbol.values())) {
+      const canonicalCounts = JSON.stringify(group[0].pmccPairingCounts);
+      const qualifiedRetained = group.filter(result => result.qualified === true).length;
+      const nearMissRetained = group.filter(result => result.qualified === false).length;
+      if (group.some(result => JSON.stringify(result.pmccPairingCounts) !== canonicalCounts)
+        || group[0].pmccPairingCounts.qualifiedPairsRetained !== qualifiedRetained
+        || group[0].pmccPairingCounts.nearMissPairsRetained !== nearMissRetained) errors.push('INVALID_PMCC_RESULT');
+    }
+    for (const result of rawResults) {
+      const counts = result.pmccPairingCounts as Record<string, unknown> | null | undefined;
+      if (result?.strategy === 'PMCC' && result.pmccPair == null && result.pmccAuditKind == null
+        && (counts?.qualifiedPairsRetained !== 0
+          || counts?.nearMissPairsRetained !== 0)) errors.push('INVALID_PMCC_RESULT');
+    }
+
     if (!resultSymbolsValid) errors.push('RESULT_SYMBOL_NOT_IN_SESSION');
 
     const resultCountsBySymbol = new Map<string, number>();
     for (const r of rawResults) {
+      if (r?.pmccAuditKind != null) continue;
       const sym = r?.symbol;
       if (typeof sym === 'string') resultCountsBySymbol.set(sym, (resultCountsBySymbol.get(sym) ?? 0) + 1);
     }
@@ -1015,8 +1233,16 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       }
     }
     const evaluatedSymbols = new Set(validatedOutcomes.filter(o => o.status === 'evaluated').map(o => o.symbol));
+    const failedSymbols = new Set(validatedOutcomes.filter(o => o.status === 'failed').map(o => o.symbol));
     for (const sym of Array.from(resultCountsBySymbol.keys())) {
       if (!evaluatedSymbols.has(sym)) {
+        errors.push('CANDIDATE_RECONCILIATION_FAILED');
+        break;
+      }
+    }
+    for (const r of rawResults) {
+      if (r?.pmccAuditKind == null) continue;
+      if (d.requestedStrategy !== 'pmcc' || r.qualified !== false || typeof r.symbol !== 'string' || !failedSymbols.has(r.symbol)) {
         errors.push('CANDIDATE_RECONCILIATION_FAILED');
         break;
       }
@@ -1048,6 +1274,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       cachedAt: (d.cachedAt ?? null) as number | null,
       schemaVersion: SCHEMA_VERSION,
       ruleSnapshot: (d.ruleSnapshot ?? null) as CspRuleSnapshot | null,
+      pmccSnapshot: (d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
     },
   };
 }

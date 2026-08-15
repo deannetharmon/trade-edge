@@ -32,6 +32,9 @@ import '@testing-library/jest-dom/vitest';
 import { TaskProvider, useTaskManagerContext } from '@/components/tasks/TaskProvider';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import type { TaskManager } from '@/lib/tasks/task-manager';
+import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbolFailed } from '@/lib/screener/scanSession';
+import { SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
+import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
 import type { ScreenResult, CheckResult } from '@/lib/scans/types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import type { AutopilotCandidate } from '@/lib/autopilot/types';
@@ -221,7 +224,7 @@ function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): Decisi
 }
 
 function makePmccScreenResult(): ScreenResult {
-  return makeScreenResult({
+  const base = makeScreenResult({
     strategy: 'PMCC',
     bestCandidate: {
       strategy: 'PMCC',
@@ -248,6 +251,33 @@ function makePmccScreenResult(): ScreenResult {
       shortOccSymbolPMCC: 'AAPL260918C00205000',
     },
   });
+  const quote = (bid: number, ask: number) => ({
+    bid, ask, midpoint: (bid + ask) / 2, width: ask - bid, spreadPct: ((ask - bid) / ((ask + bid) / 2)) * 100,
+    quoteTimestamp: '2026-08-14T19:59:30.000Z', ageSeconds: 30, delayed: false,
+    structurallyUsable: true, withinQualifyingWidth: true, readyInput: true,
+    status: 'acceptable' as const, reason: 'Quote is current and within the acceptable spread',
+  });
+  return {
+    ...base,
+    candidateId: 'occ:AAPL270115C00150000::occ:AAPL260918C00205000',
+    publishedOrder: 1,
+    pmccAsOf: '2026-08-14T20:00:00.000Z',
+    pmccIncompleteAnalysis: false,
+    pmccLegRejections: [],
+    pmccPairingCounts: {
+      eligibleLongLegs: 1, eligibleShortLegs: 1, potentialCombinations: 1, combinationsEvaluated: 1,
+      combinationsOmittedBySafetyLimit: 0, structurallyValidPairs: 1, qualifiedPairsBeforeRetention: 1,
+      nearMissPairsBeforeRetention: 0, qualifiedPairsRetained: 1, nearMissPairsRetained: 0,
+      qualifiedPairsOmittedByRetention: 0, nearMissPairsOmittedByRetention: 0,
+    },
+    pmccPair: {
+      pairId: 'occ:AAPL270115C00150000::occ:AAPL260918C00205000', symbol: 'AAPL', qualified: true,
+      insufficientData: false, failureReasons: [], primaryFailureReason: null, orderingLabel: 'Contract order',
+      longLeg: { candidateId: 'occ:AAPL270115C00150000', role: 'long', underlyingSymbol: 'AAPL', expiration: '2027-01-15', dte: 174, strike: 150, delta: 0.8, openInterest: 1200, occSymbol: 'AAPL270115C00150000', quote: quote(31, 31.35), executablePrice: 31.35, intrinsic: 40, extrinsic: 0.35 },
+      shortLeg: { candidateId: 'occ:AAPL260918C00205000', role: 'short', underlyingSymbol: 'AAPL', expiration: '2026-09-18', dte: 35, strike: 205, delta: 0.25, openInterest: 900, occSymbol: 'AAPL260918C00205000', quote: quote(1.35, 1.45), executablePrice: 1.35, intrinsic: null, extrinsic: null },
+      metrics: { netDebitPerShare: 30, strikeWidth: 55, widthMinusDebitPerShare: 25, widthMinusDebitPctOfDebit: 83.333, longIntrinsicPerShare: 40, longExtrinsicPerShare: 0.35, shortCreditToNetDebitPct: 4.5, shortCreditToLongExtrinsicPct: 385.714, netDelta: 0.55 },
+    },
+  };
 }
 
 function makePmccDecisionAnalysis(): DecisionAnalysis {
@@ -439,6 +469,37 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(vi.mocked(getAccessToken)).not.toHaveBeenCalled();
   });
 
+  it('replaces a mounted prior spread session and clears recommendations through the real PMCC scan path', async () => {
+    const priorResult = makeScreenResult();
+    seedWatchlist();
+    window.history.pushState({}, '', '/screener?mode=filter');
+    let prior = createScanSession({
+      mode: 'filter', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] },
+    });
+    prior = completeSession(recordSymbolEvaluated(prior, 'AAPL', [priorResult]));
+    kv.set(SCAN_SESSION_CACHE_KEY, { ...prior, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (url === '/api/autopilot/recommendations') return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }),
+      });
+      return Promise.reject(new Error('network disabled in test'));
+    });
+
+    renderScreenerPage();
+    await waitFor(() => expect(screen.getByText('$190.00')).toBeInTheDocument());
+    await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
+
+    await waitFor(() => expect(screen.getByText('PMCC AUDIT RESULTS')).toBeInTheDocument());
+    expect(screen.getByTestId('pmcc-audit-card')).toHaveTextContent('Market-data acquisition failure');
+    expect(screen.queryByText('$190.00')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Best Opportunities/i)).not.toBeInTheDocument();
+    expect(getCurrentRecommendations().analyses).toHaveLength(0);
+    expect(vi.mocked(getAccessToken)).toHaveBeenCalled();
+  });
   it('AC-14: shows an explicit "run a scan" prompt, not an empty-results message, and Ranked Opportunities does not render', async () => {
     renderScreenerPage();
 
@@ -589,32 +650,143 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
     expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
   });
 
-  it('maps PMCC through the compact card and exposes both canonical expirations, OI values, and capital on expansion', async () => {
-    kv.set('results', [makePmccScreenResult()]);
-    (globalThis.fetch as any).mockImplementation((url: string) => {
-      if (url === '/api/autopilot/recommendations') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, result: { recommendations: [makePmccDecisionAnalysis()] } }),
-        });
-      }
-      return Promise.reject(new Error('network disabled in test'));
+  it('restores an active canonical PMCC session and renders every retained pair without generic controls or scoring', async () => {
+    const first = makePmccScreenResult();
+    const secondBase = makePmccScreenResult();
+    const secondShortId = 'AAPL260918C00210000';
+    const secondPairId = `occ:AAPL270115C00150000::occ:${secondShortId}`;
+    const second = {
+      ...secondBase, candidateId: secondPairId, publishedOrder: 2,
+      pmccPair: {
+        ...secondBase.pmccPair!, pairId: secondPairId,
+        shortLeg: {
+          ...secondBase.pmccPair!.shortLeg, candidateId: `occ:${secondShortId}`,
+          occSymbol: secondShortId, strike: 210,
+        },
+      },
+    };
+    const pairCounts = {
+      ...first.pmccPairingCounts!, eligibleShortLegs: 2, potentialCombinations: 2,
+      combinationsEvaluated: 2, structurallyValidPairs: 2,
+      qualifiedPairsBeforeRetention: 2, qualifiedPairsRetained: 2,
+    };
+    first.pmccPairingCounts = pairCounts;
+    second.pmccPairingCounts = pairCounts;
+    const pmccSnapshot = {
+      asOf: '2026-08-14T20:00:00.000Z', marketSession: 'open' as const,
+      criteria: {
+        dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
+        longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
+        longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+        quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
+      },
+    };
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['AAPL'], eligibleSymbols: ['AAPL'] }, pmccSnapshot,
     });
+    session = completeSession(recordSymbolEvaluated(session, 'AAPL', [first, second]));
+    kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+    (globalThis.fetch as any).mockRejectedValue(new Error('network disabled in test'));
 
     renderScreenerPage();
 
-    await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
-    const ranked = within(document.getElementById('ranked-opportunities')!);
-    await waitFor(() => expect(ranked.getByText('PMCC', { exact: false })).toBeInTheDocument());
-    fireEvent.click(ranked.getByRole('button', { name: 'Expand AAPL PMCC details' }));
-
-    expect(ranked.getByText('2027-01-15', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByText('2026-09-18', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByText('OI 1200', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByText('OI 900', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByText('$3000.00')).toBeInTheDocument();
-    expect(ranked.getByText('$30.00 per share')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('QUALIFIED PMCC STRUCTURES')).toBeInTheDocument());
+    expect(screen.getByText('Contract order 1')).toBeInTheDocument();
+    expect(screen.getByText('Contract order 2')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Expand AAPL PMCC details/ })).toHaveLength(2);
+    expect(screen.queryByText(/Best Opportunities/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Filter \/ Rank \/ Targeted/i)).not.toBeInTheDocument();
+    expect((globalThis.fetch as any).mock.calls.some(([url]: [string]) => url === '/api/autopilot/recommendations')).toBe(false);
+    expect(screen.queryByText(/Max Profit/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\b(Best|Rank|Score|Quality)\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open|Trade/i })).not.toBeInTheDocument();
   });
+
+  it('renders PMCC near-miss and failed-symbol audit cards through the PMCC-only path and blocks Not Ready execution', async () => {
+    const base = makePmccScreenResult();
+    const reason = { code: 'INSUFFICIENT_DATA' as const, message: 'Short quote is delayed' };
+    const nearMiss: ScreenResult = {
+      ...base, qualified: false, failReasons: [reason.message],
+      pmccPairingCounts: {
+        ...base.pmccPairingCounts!, qualifiedPairsBeforeRetention: 0, qualifiedPairsRetained: 0,
+        nearMissPairsBeforeRetention: 1, nearMissPairsRetained: 1,
+      },
+      pmccPair: {
+        ...base.pmccPair!, qualified: false, failureReasons: [reason], primaryFailureReason: reason,
+        shortLeg: {
+          ...base.pmccPair!.shortLeg,
+          quote: {
+            ...base.pmccPair!.shortLeg.quote, delayed: true, readyInput: false,
+            status: 'delayed', reason: 'Delayed quote is not a readiness input',
+          },
+        },
+      },
+    };
+    const readinessCases = [
+      { status: 'delayed', reason: 'Delayed quote is not a readiness input', delayed: true, quoteTimestamp: '2026-08-14T19:59:30.000Z' },
+      { status: 'stale', reason: 'Quote is stale', delayed: false, quoteTimestamp: '2026-08-14T19:00:00.000Z' },
+      { status: 'timestamp_missing', reason: 'Quote timestamp is missing', delayed: false, quoteTimestamp: null },
+      { status: 'market_closed', reason: 'Market is closed', delayed: false, quoteTimestamp: '2026-08-14T19:59:30.000Z' },
+      { status: 'too_wide', reason: 'Bid/ask spread exceeds the qualifying limit', delayed: false, quoteTimestamp: '2026-08-14T19:59:30.000Z' },
+    ] as const;
+    const nearMisses: ScreenResult[] = readinessCases.map((readiness, index) => {
+      const shortOcc = `AAPL260918C${String(20500000 + index * 50000).padStart(8, '0')}`;
+      const shortCandidateId = `occ:${shortOcc}`;
+      const pairId = `${nearMiss.pmccPair!.longLeg.candidateId}::${shortCandidateId}`;
+      return {
+        ...nearMiss, candidateId: pairId, publishedOrder: index + 1,
+        pmccPairingCounts: {
+          ...nearMiss.pmccPairingCounts!, eligibleShortLegs: readinessCases.length, potentialCombinations: readinessCases.length,
+          combinationsEvaluated: readinessCases.length, structurallyValidPairs: readinessCases.length,
+          nearMissPairsBeforeRetention: readinessCases.length, nearMissPairsRetained: readinessCases.length,
+        },
+        pmccPair: {
+          ...nearMiss.pmccPair!, pairId,
+          shortLeg: {
+            ...nearMiss.pmccPair!.shortLeg, candidateId: shortCandidateId, occSymbol: shortOcc,
+            quote: { ...nearMiss.pmccPair!.shortLeg.quote, ...readiness, readyInput: false },
+          },
+        },
+      };
+    });
+    const audit: ScreenResult = {
+      ...base, symbol: 'MSFT', price: null, qualified: false, bestCandidate: null,
+      candidateId: 'pmcc-audit:MSFT:2026-08-14T20:00:00.000Z:MARKET_DATA_FAILURE',
+      failReasons: ['Market-data acquisition failure', 'quote unavailable'],
+      pmccPair: undefined, pmccPairingCounts: undefined, pmccLegRejections: undefined, pmccIncompleteAnalysis: undefined,
+      pmccAuditKind: 'MARKET_DATA_FAILURE', publishedOrder: undefined,
+    };
+    const pmccSnapshot = {
+      asOf: '2026-08-14T20:00:00.000Z', marketSession: 'open' as const,
+      criteria: {
+        dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
+        longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
+        longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+        quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
+      },
+    };
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['AAPL', 'MSFT'], eligibleSymbols: ['AAPL', 'MSFT'] }, pmccSnapshot,
+    });
+    session = recordSymbolEvaluated(session, 'AAPL', nearMisses);
+    session = recordSymbolFailed(session, 'MSFT', 'MARKET_DATA_REQUEST_FAILED', audit);
+    session = completeSession(session);
+    kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+
+    renderScreenerPage();
+
+    await waitFor(() => expect(screen.getByText('PMCC NEAR-MISS STRUCTURES')).toBeInTheDocument());
+    expect(screen.getByText('PMCC AUDIT RESULTS')).toBeInTheDocument();
+    expect(screen.getByTestId('pmcc-audit-card')).toHaveTextContent('Market-data acquisition failure');
+    expect(screen.queryByText(/Disqualified put/i)).not.toBeInTheDocument();
+    for (const readiness of readinessCases) expect(screen.getByText(new RegExp(readiness.status))).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Expand AAPL PMCC details' })[0]);
+    expect(screen.getAllByText(/Not Ready — Open\/Trade is blocked/)).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /Open|Trade/i })).not.toBeInTheDocument();
+  });
+
 });
 
 describe('WA-0005 /screener: first-scan failure (AC-19)', () => {
