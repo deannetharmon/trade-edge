@@ -258,6 +258,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     getMarketMetricsMock.mockClear();
     await addToUniverse('AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     const { pmcc } = launcherButtons();
     await waitFor(() => expect(pmcc).toHaveAttribute('aria-pressed', 'true'));

@@ -206,6 +206,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('pmcc'));
   });
