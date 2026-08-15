@@ -360,7 +360,7 @@ export const OI_PRESETS: OiPreset[] = [
 export const MIN_OI_LABEL = 'Minimum relevant-leg OI';
 
 export const MIN_OI_HELPER_TEXT =
-  'The "relevant leg" depends on the strategy -- e.g. the short put for a Cash-Secured Put, the short call for a Covered Call, or the lower of both short legs for an Iron Condor. Protective long legs are never required to clear this floor.';
+  'The "relevant leg" depends on the strategy -- e.g. the short put for a Cash-Secured Put, the short call for a Covered Call, or the lower of both short legs for an Iron Condor. Protective long legs are never required to clear this floor -- except for PMCC, where the long LEAPS call is a required core position rather than a protective leg.';
 
 // ── Adapter: real SpreadCandidate-shaped data -> OiCandidateLegs ──────────
 //
