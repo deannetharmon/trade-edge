@@ -98,6 +98,23 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
           ))}
         </div>
 
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] text-neutral-500">DTE</span>
+          {[
+            { label: '14\u201321', min: 14, max: 21 },
+            { label: '21\u201345', min: 21, max: 45 },
+            { label: '30\u201345', min: 30, max: 45 },
+            { label: '45\u201360', min: 45, max: 60 },
+          ].map(r => (
+            <button key={r.label} type="button" onClick={() => setDraft(prev => ({ ...prev, rules: { ...prev.rules, DTE_MIN: r.min, DTE_MAX: r.max } }))}
+              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                draft.rules.DTE_MIN === r.min && draft.rules.DTE_MAX === r.max
+                  ? 'border-amber-500 text-amber-300 bg-amber-500/15'
+                  : 'border-neutral-700 text-neutral-400 hover:border-amber-500/50'
+              }`}>{r.label}</button>
+          ))}
+        </div>
+
         <div
           className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"
           data-testid="cc-rule-preview"

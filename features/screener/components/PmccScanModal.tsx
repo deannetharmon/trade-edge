@@ -94,6 +94,21 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
                 onChange={e => setDte('shortMax', Number(e.target.value))}
                 className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
             </div>
+            <div className="flex gap-1 mt-1.5 flex-wrap">
+              {[
+                { label: '14\u201321', min: 14, max: 21 },
+                { label: '21\u201345', min: 21, max: 45 },
+                { label: '30\u201345', min: 30, max: 45 },
+                { label: '45\u201360', min: 45, max: 60 },
+              ].map(r => (
+                <button key={r.label} type="button" onClick={() => setDraft(prev => ({ ...prev, dte: { ...prev.dte, shortMin: r.min, shortMax: r.max } }))}
+                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                    draft.dte.shortMin === r.min && draft.dte.shortMax === r.max
+                      ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                      : 'border-neutral-700 text-neutral-400 hover:border-teal-500/50'
+                  }`}>{r.label}</button>
+              ))}
+            </div>
           </fieldset>
           <fieldset className="rounded-lg border border-neutral-700 p-2">
             <legend className="px-1 text-[10px] text-neutral-400">Long call DTE</legend>
@@ -107,6 +122,21 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
                 value={draft.dte.longMax}
                 onChange={e => setDte('longMax', Number(e.target.value))}
                 className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+            </div>
+            <div className="flex gap-1 mt-1.5 flex-wrap">
+              {[
+                { label: '90\u2013180', min: 90, max: 180 },
+                { label: '180\u2013365', min: 180, max: 365 },
+                { label: '365\u2013730', min: 365, max: 730 },
+                { label: '180\u2013730', min: 180, max: 730 },
+              ].map(r => (
+                <button key={r.label} type="button" onClick={() => setDraft(prev => ({ ...prev, dte: { ...prev.dte, longMin: r.min, longMax: r.max } }))}
+                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                    draft.dte.longMin === r.min && draft.dte.longMax === r.max
+                      ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                      : 'border-neutral-700 text-neutral-400 hover:border-teal-500/50'
+                  }`}>{r.label}</button>
+              ))}
             </div>
           </fieldset>
 
