@@ -3914,7 +3914,7 @@ const strategyScores = useMemo(() => {
                   </span>
                 </div>
                 <div>
-                  <span className={th.label}>{(c.strategy === 'CSP' || c.strategy === 'CC') ? 'Ann. Yield ' : 'Cr Ratio '}</span>
+                  <span className={th.label}>{(c.strategy === 'CSP' || c.strategy === 'CC') ? 'Ann. Yield ' : c.strategy === 'PMCC' ? 'Cr/LEAP ' : 'Cr Ratio '}</span>
                   {(c.strategy === 'CSP' || c.strategy === 'CC') ? (
                     <span className={`${(c.annualizedRoc ?? 0) >= 20 ? 'text-emerald-400' : (c.annualizedRoc ?? 0) >= 10 ? 'text-yellow-400' : 'text-red-400'} font-medium`}>
                       {c.annualizedRoc != null ? `${c.annualizedRoc.toFixed(0)}%` : '—'}
@@ -8150,6 +8150,18 @@ export default function Home() {
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
                     <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
+                  </section>
+                ) : activeSession?.requestedStrategy === 'cc' ? (
+                  <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
+                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short call only. A positive OI floor fails closed when OI is missing.</p>
+                  </section>
+                ) : activeSession?.requestedStrategy === 'pmcc' ? (
+                  <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
+                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short call only. The long LEAPS call is a required core position, not a protective leg, and is not subject to this floor. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : <FilteredResultControls
                   results={results}
