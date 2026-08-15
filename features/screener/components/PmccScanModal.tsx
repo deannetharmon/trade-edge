@@ -87,12 +87,12 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
               <input aria-label="Short call DTE minimum" type="number" min={0}
                 value={draft.dte.shortMin}
                 onChange={e => setDte('shortMin', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
               <span className="text-neutral-500 text-xs">to</span>
               <input aria-label="Short call DTE maximum" type="number" min={0}
                 value={draft.dte.shortMax}
                 onChange={e => setDte('shortMax', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
             </div>
           </fieldset>
           <fieldset className="rounded-lg border border-neutral-700 p-2">
@@ -101,12 +101,12 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
               <input aria-label="Long call DTE minimum" type="number" min={0}
                 value={draft.dte.longMin}
                 onChange={e => setDte('longMin', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
               <span className="text-neutral-500 text-xs">to</span>
               <input aria-label="Long call DTE maximum" type="number" min={0}
                 value={draft.dte.longMax}
                 onChange={e => setDte('longMax', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
             </div>
           </fieldset>
 
@@ -117,13 +117,13 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
                 min={PMCC_LONG_DELTA_BOUNDS.min} max={PMCC_LONG_DELTA_BOUNDS.max}
                 value={draft.longDelta.min}
                 onChange={e => setLongDelta('min', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
               <span className="text-neutral-500 text-xs">to</span>
               <input aria-label="Long call delta maximum" type="number" step="0.01"
                 min={PMCC_LONG_DELTA_BOUNDS.min} max={PMCC_LONG_DELTA_BOUNDS.max}
                 value={draft.longDelta.max}
                 onChange={e => setLongDelta('max', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
             </div>
           </fieldset>
           <fieldset className="rounded-lg border border-neutral-700 p-2">
@@ -133,13 +133,13 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
                 min={PMCC_SHORT_DELTA_BOUNDS.min} max={PMCC_SHORT_DELTA_BOUNDS.max}
                 value={draft.shortDelta.min}
                 onChange={e => setShortDelta('min', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
               <span className="text-neutral-500 text-xs">to</span>
               <input aria-label="Short call delta maximum" type="number" step="0.01"
                 min={PMCC_SHORT_DELTA_BOUNDS.min} max={PMCC_SHORT_DELTA_BOUNDS.max}
                 value={draft.shortDelta.max}
                 onChange={e => setShortDelta('max', Number(e.target.value))}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
+                className="w-16 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs text-white" />
             </div>
           </fieldset>
 
@@ -148,14 +148,14 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
             <input aria-label="Long call open interest minimum" type="number" min={0}
               value={draft.longOiMin}
               onChange={e => setDraft(prev => ({ ...prev, longOiMin: Number(e.target.value) }))}
-              className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+              className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
           </label>
           <label className="text-[10px] text-neutral-400">
             Short OI min
             <input aria-label="Short call open interest minimum" type="number" min={0}
               value={draft.shortOiMin}
               onChange={e => setDraft(prev => ({ ...prev, shortOiMin: Number(e.target.value) }))}
-              className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+              className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
           </label>
         </div>
 

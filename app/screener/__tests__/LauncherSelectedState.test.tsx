@@ -301,6 +301,29 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     expectOnlyPressed('cc');
   });
 
+  it('13. a completed PMCC session survives opening and cancelling an unrelated CC modal', async () => {
+    // Closes the one gap not already covered by test 8 (which checks
+    // *selection state* survives an unrelated modal open/cancel) -- this
+    // checks the actual *result content* survives too, not just which
+    // launcher button is highlighted.
+    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
+    renderScreener();
+    await addToUniverse('NVDA');
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
+    await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
+    await waitFor(() => expectOnlyPressed('pmcc'));
+    const resultCountBefore = screen.getAllByText(/NVDA/i).length;
+
+    await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
+    const ccModal = await screen.findByRole('dialog', { name: /COVERED CALL SCAN/i });
+    await userEvent.click(within(ccModal).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /COVERED CALL SCAN/i })).not.toBeInTheDocument());
+
+    expectOnlyPressed('pmcc');
+    expect(screen.getAllByText(/NVDA/i).length).toBe(resultCountBefore);
+  });
+
   it('9. exactly one enabled launcher can be selected at a time', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol, 'P')));
     renderScreener();
