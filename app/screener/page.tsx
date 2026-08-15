@@ -42,7 +42,7 @@ import {
   DEFAULT_PMCC_PAIRING_LIMITS,
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '@/lib/scans/pmccConfig';
-import type { PmccScanSnapshot } from '@/lib/scans/pmccTypes';
+import type { PmccScanSnapshot, PmccPairResult } from '@/lib/scans/pmccTypes';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -2965,6 +2965,215 @@ function TradeModal({ result, th, onClose }: {
 }
 
 
+function buildPmccOrderLegs(pair: PmccPairResult): any[] {
+  return [
+    { 'instrument-type': 'Equity Option', symbol: pair.longLeg.occSymbol, quantity: 1, action: 'Buy to Open' },
+    { 'instrument-type': 'Equity Option', symbol: pair.shortLeg.occSymbol, quantity: 1, action: 'Sell to Open' },
+  ];
+}
+
+// PmccTradeModal — a real fork of TradeModal, not a shared component with
+// PMCC-branch conditionals threaded through it. TradeModal's `c =
+// result.bestCandidate!` assumption, its OTM gate (built for a short
+// spread's strike relative to price -- doesn't apply to a diagonal's two
+// strikes), and its 'price-effect': 'Credit' default are all wrong for a
+// PMCC entry and would need to be disabled/bypassed at every point rather
+// than reused. Two independently-correct components are safer than one
+// component with logic guarding against the wrong pricing model firing on
+// the wrong strategy -- exactly the kind of mistake that's cheap to
+// prevent here and expensive to discover after a live order goes out
+// wrong (per Paul's requirement on this ticket).
+//
+// v1 is deliberately entry-only, no OTOCO wrapper, no profit-target, no
+// stop-loss -- per Ian's guidance: the short call gets managed like any
+// covered call (its own GTC profit-target, a fast-follow ticket), the long
+// LEAPS is thesis-driven and never gets a mechanical stop, and there is no
+// single "close the whole diagonal" automation since that's a manual,
+// two-leg decision when the trader decides it's time.
+function PmccTradeModal({ result, th, onClose }: {
+  result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+}) {
+  const pair = result.pmccPair!;
+  const [quantity, setQuantity] = useState(1);
+  const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
+  const [dryRunResult, setDryRunResult] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [orderId, setOrderId] = useState<string>('');
+
+  const netDebit = pair.metrics?.netDebitPerShare ?? 0;
+  const [entryLimit, setEntryLimit] = useState(parseFloat(netDebit.toFixed(2)));
+
+  const hasOccSymbols = Boolean(pair.longLeg.occSymbol && pair.shortLeg.occSymbol);
+  const debit = entryLimit * quantity;
+
+  const buildPayload = (qty: number) => {
+    const legs = buildPmccOrderLegs(pair);
+    return {
+      'time-in-force': 'GTC',
+      'order-type': 'Limit',
+      price: entryLimit.toFixed(2),
+      'price-effect': 'Debit',
+      legs: legs.map(l => ({ ...l, quantity: qty })),
+    };
+  };
+
+  const runDryRun = async () => {
+    setPhase('dryrun'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = buildPayload(quantity);
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.data);
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const placeOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = buildPayload(quantity);
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      setOrderId(data?.data?.order?.id ?? 'submitted');
+      setPhase('done');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const bpEffect = dryRunResult?.['buying-power-effect'];
+  const bpChange = bpEffect?.['change-in-buying-power'];
+  const bpEffect2 = bpEffect?.['change-in-buying-power-effect'];
+  const marginReq = bpEffect?.['change-in-margin-requirement'];
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE PMCC ENTRY — {result.symbol}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        {!hasOccSymbols && (
+          <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
+            <p className="text-xs text-yellow-400">OCC symbols not available for this pair — rescan to populate them.</p>
+          </div>
+        )}
+
+        <div className="p-3 bg-cyan-500/10 border border-cyan-600 rounded-lg mb-4">
+          <p className="text-[10px] text-cyan-300">Entry only. No profit-target or stop-loss is submitted with this order -- the short call is managed separately (its own GTC target), and the long LEAPS leg has no mechanical exit.</p>
+        </div>
+
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Strategy</span>
+            <span className="font-bold text-cyan-400">PMCC</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Buy (long)</span>
+            <span className={th.text}>{pair.longLeg.strike}C · {pair.longLeg.expiration} ({pair.longLeg.dte}d) · Δ{pair.longLeg.delta.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Sell (short)</span>
+            <span className={th.text}>{pair.shortLeg.strike}C · {pair.shortLeg.expiration} ({pair.shortLeg.dte}d) · Δ{pair.shortLeg.delta.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-xs items-center">
+            <span className={th.textFaint}>Entry limit / contract (net debit)</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>−</button>
+              <span className="text-cyan-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
+              <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>+</button>
+            </div>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Order type</span>
+            <span className={th.text}>Limit · GTC · Debit</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-4">
+          <span className={`text-xs ${th.textFaint}`}>Contracts</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className={`w-7 h-7 rounded border ${th.border} ${th.textMuted} ac-hover-border text-sm`}>−</button>
+            <span className={`text-sm font-bold ${th.text} w-6 text-center`}>{quantity}</span>
+            <button onClick={() => setQuantity(q => Math.min(20, q + 1))} className={`w-7 h-7 rounded border ${th.border} ${th.textMuted} ac-hover-border text-sm`}>+</button>
+          </div>
+          <div className="ml-auto text-right">
+            <p className="text-cyan-400 font-bold text-sm">${debit.toFixed(2)} debit</p>
+          </div>
+        </div>
+
+        {dryRunResult && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
+            <p className="text-[10px] text-emerald-400 font-bold tracking-wider">DRY RUN PASSED</p>
+            {bpChange && <p className="text-xs text-emerald-300">Buying power: {bpEffect2 === 'Debit' ? '−' : '+'}${parseFloat(bpChange).toFixed(2)}</p>}
+            {marginReq && <p className="text-xs text-emerald-300">Margin required: ${parseFloat(marginReq).toFixed(2)}</p>}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
+            <p className="text-xs text-emerald-400 font-bold">✓ PMCC entry submitted — ID {orderId}</p>
+            <p className="text-[10px] text-emerald-400/70">No profit-target or stop-loss was attached. Manage the short call and long LEAPS separately.</p>
+            <p className="text-[10px] text-emerald-400/70">Verify the order in TastyTrade.</p>
+          </div>
+        )}
+
+        {phase === 'error' && error && (
+          <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4">
+            <p className="text-xs text-red-400">{error}</p>
+          </div>
+        )}
+
+        {phase !== 'done' && (
+          <div className="flex gap-2">
+            {!dryRunResult ? (
+              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun'}
+                className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
+                {phase === 'dryrun' ? 'VALIDATING...' : 'VALIDATE ORDER'}
+              </button>
+            ) : (
+              <>
+                <button onClick={runDryRun} disabled={phase === 'dryrun'}
+                  className={`py-2.5 px-3 border ${th.border} ${th.textFaint} rounded-xl text-xs ac-hover-border transition-colors disabled:opacity-40`}>
+                  ↺
+                </button>
+                <button onClick={placeOrder} disabled={phase === 'placing'}
+                  className="flex-1 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
+                  {phase === 'placing' ? 'PLACING...' : 'PLACE PMCC ENTRY'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <button onClick={onClose} className={`w-full py-2.5 border ${th.border} ${th.textMuted} rounded-xl text-xs font-bold tracking-widest`}>
+            CLOSE
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 // ── Stock Research Component ──────────────────────────────────────────────
 interface ChatContentPart {
   type: 'text' | 'image';
@@ -3274,7 +3483,7 @@ type ResultCardProps = {
   existingPositions?: ExistingPosition[];
 };
 
-function PmccResultCard({ result, th }: ResultCardProps) {
+function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const pair = result.pmccPair;
   const metrics = pair?.metrics;
@@ -3331,8 +3540,16 @@ function PmccResultCard({ result, th }: ResultCardProps) {
       {(result.pmccLegRejections?.length ?? 0) > 0 && <details><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
       <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
       <p className={`rounded border ${ready ? 'border-cyan-700 text-cyan-300' : 'border-amber-700 text-amber-300'} px-3 py-2`}>
-        {ready ? 'Analysis ready — PMCC execution is not enabled.' : 'Not Ready — Open/Trade is blocked.'}
+        {ready ? 'Analysis ready.' : 'Not Ready — Open/Trade is blocked.'}
       </p>
+      {ready && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
+          className="w-full py-2 rounded-lg border border-cyan-500 text-cyan-300 text-xs font-bold tracking-widest hover:bg-cyan-500/10 transition-colors"
+        >
+          ⚡ TRADE THIS
+        </button>
+      )}
     </div>}
   </article>;
 }
@@ -8452,6 +8669,7 @@ export default function Home() {
       </div>
 
       {tradeResult && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {tradeResult && !tradeResult.bestCandidate && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
         <RunModeModal
