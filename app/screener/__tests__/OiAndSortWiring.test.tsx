@@ -189,14 +189,17 @@ afterEach(() => {
 });
 
 describe('SCREENER-OI-0001: single canonical implementation, Ranked + Filtered only', () => {
-  it('OiAndSortControls is defined once and reused for spread Filtered, CSP Filtered, and Ranked (not Targeted)', () => {
+  it('OiAndSortControls is defined once and reused for spread Filtered, CSP Filtered, CC, PMCC, and Ranked (not Targeted)', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../page.tsx'), 'utf8');
     const definitions = src.match(/function OiAndSortControls\(/g) ?? [];
     expect(definitions).toHaveLength(1);
     const usages = src.match(/<OiAndSortControls\b/g) ?? [];
-    // Spread Filtered + CSP Filtered + Ranked -- one shared implementation,
-    // three deliberate call sites. Targeted still never renders it.
-    expect(usages.length).toBe(3);
+    // Spread Filtered + CSP Filtered + CC + PMCC + Ranked -- one shared
+    // implementation, five deliberate call sites. CC and PMCC gained their
+    // own accurate-tooltip result-control sections (fix: PMCC/CC
+    // result-label and OI tooltip accuracy) rather than falling through to
+    // generic copy. Targeted still never renders it.
+    expect(usages.length).toBe(5);
 
     // Precisely confirm neither call site is inside TargetedScanResultsPanel:
     // slice the function's own body out and check it directly.
