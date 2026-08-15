@@ -65,6 +65,7 @@ async function addToUniverse(symbols: string) {
 async function clickCcScan() {
   const button = await screen.findByRole('button', { name: 'FIND CCs' });
   await userEvent.click(button);
+  await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
 }
 
 describe('TE-0007C final corrective pass: CC capacity gate wiring', () => {

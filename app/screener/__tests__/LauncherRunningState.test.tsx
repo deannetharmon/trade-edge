@@ -245,6 +245,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     const { cc } = launcherButtons();
     await waitFor(() => expect(cc).toHaveAttribute('aria-pressed', 'true'));
@@ -299,6 +300,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     expect(screen.getByRole('button', { name: 'FIND CCs' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalled());
   });
 });

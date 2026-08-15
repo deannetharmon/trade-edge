@@ -134,6 +134,7 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 // activeSession?.requestedStrategy -- never tracked as separate state.
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
+import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -6046,6 +6047,14 @@ export default function Home() {
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showCspRunModal, setShowCspRunModal] = useState(false);
+  const [showCcScanModal, setShowCcScanModal] = useState(false);
+  // Submitted CC rules, applied by runCcScan below. Defaults to
+  // DEFAULT_CC_RULES until a modal run overrides it -- matches the "opening
+  // the modal copies saved defaults into a draft, only a submitted run
+  // changes what the scan actually uses" pattern from CspScanModal, minus
+  // the persisted-defaults/preset layer CC intentionally doesn't have yet.
+  const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
+  const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
@@ -7176,7 +7185,48 @@ export default function Home() {
   // override -- it bypasses ONLY the Opportunity Universe narrowing, never
   // the underlying capacity verification (availableCoveredContracts > 0)
   // or the hide-only ccHiddenSymbols filter, which still apply either way.
-  const runCcScan = async (bypassUniverse = false) => {
+  // Extracted from runCcScan (Option 1, per Alan/Quinn/Ian/Paul agreement on
+  // the CC-modal ticket): capacity/holdings loading is independent of the
+  // submitted rule fields, so it no longer waits for modal submission.
+  // Fired the moment the modal opens, matching the ticket's "eligible
+  // universe summary" requirement and CSP's selectedTickerCount-on-open
+  // precedent. runCcScan below still calls this itself before scanning --
+  // fetching twice (once for display, once at execution) is the simplest
+  // correct way to guarantee the scan never acts on holdings data that's
+  // gone stale while the modal sat open, without introducing shared-state
+  // staleness tracking for a single cheap API call.
+  const loadCcCapacity = async (): Promise<{ ok: boolean; eligibleHoldings: typeof ccEligibleHoldings; bySymbol?: Record<string, CoveredCallCapacity>; reason?: string }> => {
+    setCcHoldingsLoading(true);
+    try {
+      const token = await getAccessToken();
+      const capacityReport = await getCoveredCallCapacityReport(token);
+      setCcHoldingsLoading(false);
+      if (capacityReport.status !== 'ok') {
+        const reason = capacityReport.unavailableReason
+          ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
+        setCcUnavailableReason(reason);
+        setCcEligibleHoldings([]);
+        setCcBlockedHoldings([]);
+        return { ok: false, eligibleHoldings: [], reason };
+      }
+      setCcUnavailableReason(null);
+      const eligibleEntries = Object.entries(capacityReport.bySymbol).filter(([, c]) => c.grossCoveredContracts > 0);
+      const eligibleHoldings = eligibleEntries.map(([symbol, c]) => ({ symbol, ...c }));
+      const blockedHoldings = eligibleEntries.filter(([, c]) => c.availableCoveredContracts === 0).map(([symbol]) => symbol);
+      setCcEligibleHoldings(eligibleHoldings);
+      setCcBlockedHoldings(blockedHoldings);
+      return { ok: true, eligibleHoldings, bySymbol: capacityReport.bySymbol };
+    } catch (e: any) {
+      setCcHoldingsLoading(false);
+      const reason = e?.message ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
+      setCcUnavailableReason(reason);
+      setCcEligibleHoldings([]);
+      setCcBlockedHoldings([]);
+      return { ok: false, eligibleHoldings: [], reason };
+    }
+  };
+
+  const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules) => {
     setError('');
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
@@ -7206,32 +7256,14 @@ export default function Home() {
       const token = await getAccessToken();
 
       pushStatus('Loading eligible holdings...');
-      const capacityReport = await getCoveredCallCapacityReport(token);
-      setCcHoldingsLoading(false);
-      if (capacityReport.status !== 'ok') {
-        // TE-0007C final corrective pass: an account-level unattributable-
-        // exposure failure is a data-integrity condition, not an ordinary
-        // "nothing to scan" result -- surface capacityReport.unavailableReason
-        // verbatim (set by buildCoveredCallCapacityReport) via ccUnavailableReason
-        // so the UI renders the explicit blocking message instead of the
-        // generic "No eligible holdings" empty state, and skip the scan
-        // entirely (no holding is scanned while this is unresolved).
-        const reason = capacityReport.unavailableReason
+      const { ok, eligibleHoldings, bySymbol: capacityBySymbolMap, reason: capacityFailReason } = await loadCcCapacity();
+      if (!ok || !capacityBySymbolMap) {
+        const reason = capacityFailReason
           ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
-        setCcUnavailableReason(reason);
-        setCcEligibleHoldings([]);
-        setCcBlockedHoldings([]);
         setError(reason);
         failScreenerJob(reason);
         return;
       }
-      setCcUnavailableReason(null);
-
-      const eligibleEntries = Object.entries(capacityReport.bySymbol).filter(([, c]) => c.grossCoveredContracts > 0);
-      const eligibleHoldings = eligibleEntries.map(([symbol, c]) => ({ symbol, ...c }));
-      const blockedHoldings = eligibleEntries.filter(([, c]) => c.availableCoveredContracts === 0).map(([symbol]) => symbol);
-      setCcEligibleHoldings(eligibleHoldings);
-      setCcBlockedHoldings(blockedHoldings);
 
       // TE-0007: the Opportunity Universe may narrow this set (intersect
       // with verified eligible holdings) but can NEVER create eligibility
@@ -7278,7 +7310,7 @@ export default function Home() {
       // now expressed through the canonical model instead of an ad-hoc
       // "no eligible holdings" message that couldn't distinguish WHY a
       // given selected symbol didn't make it into the plan).
-      const capacityBySymbol = capacityReport.bySymbol;
+      const capacityBySymbol = capacityBySymbolMap;
       const scopeExclusionReasonCode = (symbol: string): ScreenerReasonCode => {
         if (ccHiddenSymbols.includes(symbol)) return 'CC_HIDDEN_BY_TRADER';
         const capacity = capacityBySymbol[symbol];
@@ -7314,7 +7346,7 @@ export default function Home() {
           const isEtf = classification === 'index' || classification === 'etf';
           const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
           const [chainData, price] = await Promise.all([
-            getChain(symbol, token, DEFAULT_RULES, { min: DEFAULT_CC_RULES.DTE_MIN, max: DEFAULT_CC_RULES.DTE_MAX }),
+            getChain(symbol, token, DEFAULT_RULES, { min: rules.DTE_MIN, max: rules.DTE_MAX }),
             getQuote(symbol, token),
           ]);
           let trendResult: TrendResult | undefined;
@@ -7323,8 +7355,8 @@ export default function Home() {
           // no need to reconstruct it field-by-field from the flattened
           // eligibleHoldings array (that reconstruction was dead weight left
           // over from the old server-route response shape).
-          const capacity: CoveredCallCapacity = capacityReport.bySymbol[symbol];
-          const result = runCcChecklist(symbol, chainData, price, metrics, DEFAULT_CC_RULES, capacity, trendResult);
+          const capacity: CoveredCallCapacity = capacityBySymbolMap[symbol];
+          const result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
           s = recordSymbolEvaluated(s, symbol, [result]);
         } catch (e: any) {
           s = recordSymbolFailed(s, symbol, 'MARKET_DATA_REQUEST_FAILED');
@@ -7637,7 +7669,7 @@ export default function Home() {
                 label="FIND CCs"
                 isSelected={activeSession?.requestedStrategy === 'cc'}
                 isRunning={runningLauncher === 'cc'}
-                onClick={() => runCcScan(false)}
+                onClick={() => { setCcBypassUniverse(false); setShowCcScanModal(true); void loadCcCapacity(); }}
                 disabled={loading}
                 title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
               >
@@ -8603,6 +8635,22 @@ export default function Home() {
           onRun={(request) => {
             setShowCspRunModal(false);
             void runCspScan(request);
+          }}
+        />
+      )}
+      {showCcScanModal && (
+        <CcScanModal
+          th={th}
+          selectedTickerCount={ccEligibleHoldings.length}
+          initial={{ rules: ccRules }}
+          onClose={() => {
+            setShowCcScanModal(false);
+            requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND CCs"]')?.focus());
+          }}
+          onRun={(request) => {
+            setShowCcScanModal(false);
+            setCcRules(request.rules);
+            void runCcScan(ccBypassUniverse, request.rules);
           }}
         />
       )}

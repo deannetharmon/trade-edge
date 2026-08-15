@@ -171,6 +171,7 @@ describe('TE-0007: Covered Call universe intersection', () => {
 
   async function clickFindCoveredCalls() {
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
   }
 
   it('1. universe [NKE, MU], eligible [NKE, AAPL] → scans only NKE', async () => {

@@ -196,6 +196,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('cc'));
   });
@@ -265,6 +266,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
 
     getMarketMetricsMock.mockClear();
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     // Selection now belongs entirely to the new (CC) canonical session --
     // never both, never left on the prior CSP session.
@@ -278,6 +280,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     await addToUniverse('NKE');
 
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     await waitFor(() => expectOnlyPressed('cc'));
 
@@ -332,6 +335,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     expect(screen.getByRole('button', { name: 'FIND CCs' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalled());
   });
 
