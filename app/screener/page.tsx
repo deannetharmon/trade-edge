@@ -4450,10 +4450,11 @@ const FILTER_PRESETS = [
   { key: 'intermediate',label: 'Intermediate', color: 'border-amber-500 text-amber-400',    desc: '15–29 DTE — active management' },
 ];
 
-function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedPreset, onRun, onClose }: {
+function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedPreset, onRun, onClose }: {
   th: typeof THEMES[Theme];
   lastMode: 'filter' | 'rank' | 'targeted';
   lastPreset: string;
+  activeRankRules: RulesType;
   lastTargetedDteMin: number;
   lastTargetedDteMax: number;
   lastTargetedPopMin: number;
@@ -4505,6 +4506,41 @@ function RunModeModal({ th, lastMode, lastPreset, lastTargetedDteMin, lastTarget
                 <span className="text-[9px] opacity-70">{p.desc}</span>
               </button>
             ))}
+            {/* TE-0007D corrective — Filter mode previously showed only the
+                preset name/description, never the numbers it was about to
+                apply. RulesModal remains the place to edit values; this is
+                read-only visibility so a trader isn't running a scan blind
+                to what it actually gates on. */}
+            {(() => {
+              const selected = RULE_PRESETS.find(rp => rp.key === preset);
+              if (!selected) return null;
+              const r = selected.rules as Record<string, number | undefined>;
+              return (
+                <div className={`rounded-lg border ${th.border} bg-black/20 p-2.5 text-[9px] ${th.textFaint} leading-relaxed`} data-testid="filter-preset-preview">
+                  IVR ≥ {r.IVR_MIN}% · OI ≥ {r.OI_MIN} · bid/ask ≤ ${r.BID_ASK_MAX?.toFixed(2)} · credit ≥ {((r.CREDIT_RATIO_MIN ?? 0) * 100).toFixed(0)}% of width
+                  {r.DTE_MIN != null && r.DTE_MAX != null ? ` · DTE ${r.DTE_MIN}–${r.DTE_MAX}` : ''}
+                  {' '}· ROC ≥ {r.ROC_MIN_SPREAD}% (spread) / {r.ROC_MIN_IC}% (IC)
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Rank mode previously showed nothing at all -- no preset selector
+            (Rank has none, by design; it scores and sorts the full universe
+            using the active saved ruleset rather than gating pass/fail) and
+            no indication of what that active ruleset actually was. Same
+            read-only visibility fix as Filter mode above. */}
+        {mode === 'rank' && (
+          <div className="flex flex-col gap-2">
+            <p className={`text-[9px] tracking-widest font-medium ${th.textFaint}`}>ACTIVE RULESET</p>
+            <p className={`text-[9px] ${th.textFaint}`}>
+              Rank scores and sorts every ticker using your currently active saved rules — set via RULES, not selected here.
+            </p>
+            <div className={`rounded-lg border ${th.border} bg-black/20 p-2.5 text-[9px] ${th.textFaint} leading-relaxed`} data-testid="rank-active-rules-preview">
+              IVR ≥ {activeRankRules.IVR_MIN}% · OI ≥ {activeRankRules.OI_MIN} · bid/ask ≤ ${activeRankRules.BID_ASK_MAX?.toFixed(2)} · credit ≥ {(activeRankRules.CREDIT_RATIO_MIN * 100).toFixed(0)}% of width
+              {' '}· ROC ≥ {activeRankRules.ROC_MIN_SPREAD}% (spread) / {activeRankRules.ROC_MIN_IC}% (IC)
+            </div>
           </div>
         )}
 
@@ -8605,6 +8641,7 @@ export default function Home() {
           th={th}
           lastMode={screenMode}
           lastPreset={stockPresetLabel}
+          activeRankRules={runtimeStockRules}
           lastTargetedDteMin={targetedDteMin}
           lastTargetedDteMax={targetedDteMax}
           lastTargetedPopMin={targetedPopMin}
