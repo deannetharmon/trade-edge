@@ -191,9 +191,18 @@ export interface ScreenResult {
   // mirrors `bestCandidate.candidateId` at the top level so React keys,
   // Best Opportunities joins, CSV rows, and cache lookups never need to
   // drill into bestCandidate (which is nullable) to find a stable identity.
-  // Undefined for strategies not yet migrated to per-contract results
-  // (BPS/BCS/IC/CC/PMCC still produce at most one ScreenResult per symbol).
+  // Undefined for strategies not yet migrated to per-contract results.
+  // PMCC and CSP use it to preserve every retained contract/pair identity.
   candidateId?: string;
+  /** Canonical PMCC pair. When present, PMCC presentation and audit logic
+   * must use this structure rather than re-deriving diagonal semantics from
+   * the legacy spread-shaped bestCandidate compatibility adapter. */
+  pmccPair?: import('./pmccTypes').PmccPairResult;
+  pmccPairingCounts?: import('./pmccTypes').PmccPairingCounts;
+  pmccIncompleteAnalysis?: boolean;
+  pmccLegRejections?: import('./pmccTypes').PmccLegRejection[];
+  pmccAsOf?: string;
+  pmccAuditKind?: 'MARKET_DATA_FAILURE' | 'CHAIN_ADAPTATION_FAILURE' | 'PAIRING_ENGINE_FAILURE';
 }
 
 
