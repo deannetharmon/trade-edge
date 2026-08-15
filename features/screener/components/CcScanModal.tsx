@@ -92,7 +92,7 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
                 step={step}
                 value={draft.rules[key]}
                 onChange={e => setRule(key, Number(e.target.value))}
-                className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"
+                className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"
               />
             </label>
           ))}

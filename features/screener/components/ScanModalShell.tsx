@@ -92,7 +92,15 @@ export function ScanModalShell({
     // Solid, fully opaque backdrop -- not a translucent scrim over the page
     // behind it. Uses the app's own theme background color so the modal
     // reads as its own screen rather than a see-through overlay.
-    <div className={`fixed inset-0 z-[80] flex items-center justify-center ${th.bg} p-3`}>
+    // [color-scheme:dark] fixes a real bug found in the PMCC modal (and
+    // present identically in CC/CSP, since all three inputs use the same
+    // bg-neutral-900/text-white classes): without an explicit color-scheme
+    // hint, some browsers auto-invert native form control chrome to match
+    // the OS/page's inferred light-mode default, which can override the
+    // Tailwind text/background classes on inputs regardless of what the
+    // class list says. This tells the browser the modal is intentionally
+    // dark, so it stops fighting the explicit classes underneath.
+    <div className={`fixed inset-0 z-[80] flex items-center justify-center [color-scheme:dark] ${th.bg} p-3`}>
       <div
         ref={dialogRef}
         role="dialog"
