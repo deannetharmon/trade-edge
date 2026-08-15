@@ -98,6 +98,7 @@ describe('TE-0007: launcher routing', () => {
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NVDA', 'AAPL']));
   });

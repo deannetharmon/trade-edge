@@ -135,6 +135,7 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
+import { PmccScanModal, type PmccScanCriteria } from '@/features/screener/components/PmccScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -6102,13 +6103,13 @@ export default function Home() {
   const [showRunModal, setShowRunModal] = useState(false);
   const [showCspRunModal, setShowCspRunModal] = useState(false);
   const [showCcScanModal, setShowCcScanModal] = useState(false);
-  // Submitted CC rules, applied by runCcScan below. Defaults to
   // DEFAULT_CC_RULES until a modal run overrides it -- matches the "opening
   // the modal copies saved defaults into a draft, only a submitted run
   // changes what the scan actually uses" pattern from CspScanModal, minus
   // the persisted-defaults/preset layer CC intentionally doesn't have yet.
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
+  const [showPmccScanModal, setShowPmccScanModal] = useState(false);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
@@ -6923,17 +6924,25 @@ export default function Home() {
   // prior strategy results. TE-0007: no longer reads a separate PMCC-only
   // ticker list; uses the same normalized array every other strategy
   // button reads.
-  const runPMCCScan = async () => {
+  const runPMCCScan = async (submitted?: PmccScanCriteria) => {
     const pmcc = opportunityUniverse;
     if (!pmcc.length) {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
       return;
     }
-    if (!isValidPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax })) {
+    const dte = submitted?.dte ?? { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax };
+    if (!isValidPmccDteRanges(dte)) {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
       return;
     }
     setError('');
+    if (submitted) {
+      setPmccShortDteMin(submitted.dte.shortMin);
+      setPmccShortDteMax(submitted.dte.shortMax);
+      setPmccLongDteMin(submitted.dte.longMin);
+      setPmccLongDteMax(submitted.dte.longMax);
+      persistPmccDteRanges(submitted.dte);
+    }
     // Switch to Filter mode immediately -- the same thing the main
     // "SCAN SELECTED" button already does via RunModeModal's onRun handler
     // before it calls runScreen(). Without this, PMCC/CSP/CC scans only set
@@ -6952,13 +6961,18 @@ export default function Home() {
     // never merges into, whatever session was previously active.
     const pmccAsOf = new Date();
     const pmccMarketSession = derivePmccMarketSession(pmccAsOf);
+    // TE-0007D corrective — every field below now comes from the submitted
+    // modal criteria when present, falling back to the prior hardcoded
+    // DEFAULT_* constants only if this is ever invoked without going
+    // through the modal (defensive, not the normal path -- FIND PMCCs
+    // always opens the modal now).
     const pmccCriteria = {
-      dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
-      longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
-      shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
-      longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
-      shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
-      requireDebitBelowWidth: true,
+      dte,
+      longDelta: submitted?.longDelta ?? { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
+      shortDelta: submitted?.shortDelta ?? { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
+      longOiMin: submitted?.longOiMin ?? DEFAULT_PMCC_LONG_OI_MIN,
+      shortOiMin: submitted?.shortOiMin ?? DEFAULT_PMCC_SHORT_OI_MIN,
+      requireDebitBelowWidth: submitted?.requireDebitBelowWidth ?? true,
       quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY },
       limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
     };
@@ -7734,7 +7748,7 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={runPMCCScan}
+                onClick={() => setShowPmccScanModal(true)}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
               >
@@ -7747,39 +7761,10 @@ export default function Home() {
               </button>
             </div>
 
-            <details className="text-[9px]">
-              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>PMCC DTE SETTINGS</summary>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <fieldset className={`rounded-lg border ${th.border} p-2`}>
-                  <legend className={`px-1 ${th.textFaint}`}>Short call</legend>
-                  <div className="flex items-center gap-1">
-                    <input aria-label="Short call DTE minimum" type="number" min={0} value={pmccShortDteMin} disabled={loading}
-                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMin(value); persistPmccDteRanges({ shortMin: value, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
-                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
-                    <span className={th.textFaint}>to</span>
-                    <input aria-label="Short call DTE maximum" type="number" min={0} value={pmccShortDteMax} disabled={loading}
-                      onChange={(event) => { const value = Number(event.target.value); setPmccShortDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: value, longMin: pmccLongDteMin, longMax: pmccLongDteMax }); }}
-                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
-                  </div>
-                </fieldset>
-                <fieldset className={`rounded-lg border ${th.border} p-2`}>
-                  <legend className={`px-1 ${th.textFaint}`}>Long call</legend>
-                  <div className="flex items-center gap-1">
-                    <input aria-label="Long call DTE minimum" type="number" min={0} value={pmccLongDteMin} disabled={loading}
-                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMin(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: value, longMax: pmccLongDteMax }); }}
-                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
-                    <span className={th.textFaint}>to</span>
-                    <input aria-label="Long call DTE maximum" type="number" min={0} value={pmccLongDteMax} disabled={loading}
-                      onChange={(event) => { const value = Number(event.target.value); setPmccLongDteMax(value); persistPmccDteRanges({ shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: value }); }}
-                      className={`w-full rounded border ${th.border} ${th.card} ${th.text} px-1.5 py-1`} />
-                  </div>
-                </fieldset>
-              </div>
-            </details>
-
-            {/* Strategy-specific settings — kept out of the launcher-button
-                row itself (TE-0007's "smallest change" guidance) but still
-                reachable without recreating a separate CSP ticker list. */}
+            {/* PMCC DTE SETTINGS disclosure removed -- superseded by
+                PmccScanModal, which now owns these same fields (same
+                aria-labels preserved) inside the pre-scan modal FIND
+                PMCCs opens, matching CSP/CC/Spreads' pattern. */}
             <details className="text-[9px]">
               <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>CSP SETTINGS</summary>
               <div className="mt-2">
@@ -8113,7 +8098,7 @@ export default function Home() {
                   )}
                   <button onClick={downloadCSV} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>↓ CSV</button>
                   {activeSession?.requestedStrategy === 'pmcc' ? (
-                    <button onClick={runPMCCScan} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
+                    <button onClick={() => setShowPmccScanModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
                       RESCAN PMCC ↺
                     </button>
                   ) : (
@@ -8706,6 +8691,28 @@ export default function Home() {
             setShowCcScanModal(false);
             setCcRules(request.rules);
             void runCcScan(ccBypassUniverse, request.rules);
+          }}
+        />
+      )}
+      {showPmccScanModal && (
+        <PmccScanModal
+          th={th}
+          selectedTickerCount={opportunityUniverse.length}
+          initial={{
+            dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
+            longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
+            shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
+            longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+            shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
+            requireDebitBelowWidth: true,
+          }}
+          onClose={() => {
+            setShowPmccScanModal(false);
+            requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND PMCCs"]')?.focus());
+          }}
+          onRun={(criteria) => {
+            setShowPmccScanModal(false);
+            void runPMCCScan(criteria);
           }}
         />
       )}
