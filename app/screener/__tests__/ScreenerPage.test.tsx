@@ -35,7 +35,7 @@ import type { TaskManager } from '@/lib/tasks/task-manager';
 import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbolFailed } from '@/lib/screener/scanSession';
 import { SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
-import type { ScreenResult, CheckResult } from '@/lib/scans/types';
+import type { ScreenResult, CheckResult, RawScanEntry } from '@/lib/scans/types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import type { AutopilotCandidate } from '@/lib/autopilot/types';
 import { startScreenerJob, completeScreenerJob, clearScreenerJob } from '@/lib/screener/screenerJobStore';
@@ -156,6 +156,27 @@ function installFakeIndexedDB(): Map<string, unknown> {
 }
 
 const c: CheckResult = { status: 'pass', value: '', reason: '' };
+
+// TE-0007D corrective (second, real root cause found alongside the missing
+// createTask input above): lib/screener/hooks/useRankedScan.ts's completion
+// handler treats absence from rawScanCache as a genuine
+// MARKET_DATA_REQUEST_FAILED for that symbol -- deliberate, documented
+// safety behavior (a symbol only ever lands in rawScanCache after its own
+// real chain/quote fetch succeeds; absence means that fetch genuinely
+// threw). Every test below that completes a ranked-scan task with real,
+// qualified results for a symbol must also include that symbol in
+// rawScanCache, or the real session-reconciliation logic correctly (and
+// silently, from the test's perspective) recodes it as failed and drops
+// it -- exactly the symptom that made every one of these tests fail.
+function makeRawScanEntry(symbol: string): RawScanEntry {
+  return {
+    symbol,
+    strategy: 'BPS',
+    metrics: { symbol, ivRank: 55, earningsExpectedDate: null },
+    chainData: { expirations: [], chains: {}, isEtfOrIndex: false },
+    price: 190,
+  };
+}
 
 function makeScreenResult(overrides: Partial<ScreenResult> = {}): ScreenResult {
   return {
@@ -1100,14 +1121,14 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan', input: { activeSymbols: ['AAPL'] } }); });
 
     await waitFor(() => expect(screen.getAllByText(/SCANNING/i).length).toBeGreaterThan(0));
     expect(document.getElementById('ranked-opportunities')).toBeNull();
 
     // Complete it so the rest of the suite's assumption (a real scan can
     // reach completion through this harness) is also demonstrated here.
-    act(() => { manager.completeTask(task.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
+    act(() => { manager.completeTask(task.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
   });
 
@@ -1136,8 +1157,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // presentation; job A's own trigger mechanism is not what Defect 1 is
     // about, only the REFRESH is.
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A' }); });
-    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
+    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
     fireEvent.change(
       within(document.getElementById('ranked-opportunities')!).getByLabelText('Results shown'),
@@ -1190,8 +1211,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A' }); });
-    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
+    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
@@ -1249,8 +1270,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A' }); });
-    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
+    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
@@ -1299,8 +1320,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     // Job A completes -> triggers recommendations fetch call #0 (left pending).
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A' }); });
-    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: [] }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
+    act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(deferredByCall[0]).toBeDefined());
 
     // PO corrective round 4 (Defect 2): job B is a GENUINELY SEPARATE
@@ -1315,9 +1336,9 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // lastResultsAffectingJobId (set atomically inside completeScreenerJob()
     // as part of job B's own completion), not job A's.
     let taskB: any;
-    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan B' }); });
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan B', input: { activeSymbols: ['MSFT'] } }); });
     expect(taskB.id).not.toBe(taskA.id);
-    act(() => { manager.completeTask(taskB.id, { results: [makeScreenResult({ symbol: 'MSFT' })], rawScanCache: [] }); });
+    act(() => { manager.completeTask(taskB.id, { results: [makeScreenResult({ symbol: 'MSFT' })], rawScanCache: ['MSFT'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(deferredByCall[1]).toBeDefined());
 
     // B's fetch resolves first (as it would in the real race this test
@@ -1398,11 +1419,11 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Small ranked scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Small ranked scan', input: { activeSymbols: ['AAPL', 'MSFT'] } }); });
     act(() => {
       manager.completeTask(task.id, {
         results: [makeScreenResult({ symbol: 'AAPL' }), makeScreenResult({ symbol: 'MSFT' })],
-        rawScanCache: [],
+        rawScanCache: ['AAPL', 'MSFT'].map(makeRawScanEntry),
       });
     });
 
@@ -1442,7 +1463,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Exhaustive ranked scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Exhaustive ranked scan', input: { activeSymbols: ['AAPL', 'MSFT'] } }); });
     act(() => {
       manager.completeTask(task.id, {
         results: [
@@ -1459,7 +1480,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
             failReasons: ['Risk threshold'],
           }),
         ],
-        rawScanCache: [],
+        rawScanCache: ['AAPL', 'MSFT'].map(makeRawScanEntry),
       });
     });
 
@@ -1500,22 +1521,22 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let first: any;
-    act(() => { first = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan' }); });
+    act(() => { first = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan', input: { activeSymbols: ['AAPL'] } }); });
     act(() => {
       manager.completeTask(first.id, {
         results: [makeScreenResult({ symbol: 'AAPL', ruleSetApplied: 'ranked-broad' })],
-        rawScanCache: [],
+        rawScanCache: ['AAPL'].map(makeRawScanEntry),
       });
     });
     await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
 
     returnEmpty = true;
     let refresh: any;
-    act(() => { refresh = manager.createTask({ kind: 'ranked-scan', title: 'Empty evaluation refresh' }); });
+    act(() => { refresh = manager.createTask({ kind: 'ranked-scan', title: 'Empty evaluation refresh', input: { activeSymbols: ['MSFT'] } }); });
     act(() => {
       manager.completeTask(refresh.id, {
         results: [makeScreenResult({ symbol: 'MSFT', ruleSetApplied: 'ranked-broad' })],
-        rawScanCache: [],
+        rawScanCache: ['MSFT'].map(makeRawScanEntry),
       });
     });
 
@@ -1530,7 +1551,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     const manager = renderRankedScanScreenerPage();
     const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'No candidate ranked scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'No candidate ranked scan', input: { activeSymbols: ['AAPL'] } }); });
     act(() => {
       manager.completeTask(task.id, {
         results: [makeScreenResult({
@@ -1538,7 +1559,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
           bestCandidate: null,
           ruleSetApplied: 'ranked-broad',
         })],
-        rawScanCache: [],
+        rawScanCache: ['AAPL'].map(makeRawScanEntry),
       });
     });
 
@@ -1579,14 +1600,14 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     const large = 'x'.repeat(300_000);
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Broad ranked scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Broad ranked scan', input: { activeSymbols: ['AAPL', 'MSFT'] } }); });
     act(() => {
       manager.completeTask(task.id, {
         results: [
           makeLargeTransportResult('AAPL', large),
           makeLargeTransportResult('MSFT', large),
         ],
-        rawScanCache: [],
+        rawScanCache: ['AAPL', 'MSFT'].map(makeRawScanEntry),
       });
     });
 
@@ -1677,11 +1698,11 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan' }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior ranked scan', input: { activeSymbols: ['AAPL'] } }); });
     act(() => {
       manager.completeTask(taskA.id, {
         results: [makeScreenResult({ symbol: 'AAPL' })],
-        rawScanCache: [],
+        rawScanCache: ['AAPL'].map(makeRawScanEntry),
       });
     });
     await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
@@ -1689,14 +1710,14 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     phase = 'refresh';
     const large = 'y'.repeat(300_000);
     let taskB: any;
-    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Refresh ranked scan' }); });
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Refresh ranked scan', input: { activeSymbols: ['MSFT', 'NVDA'] } }); });
     act(() => {
       manager.completeTask(taskB.id, {
         results: [
           makeLargeTransportResult('MSFT', large),
           makeLargeTransportResult('NVDA', large),
         ],
-        rawScanCache: [],
+        rawScanCache: ['MSFT', 'NVDA'].map(makeRawScanEntry),
       });
     });
 
@@ -1731,7 +1752,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     const large = 'k'.repeat(300_000);
     let task: any;
-    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Paused broad scan' }); });
+    act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Paused broad scan', input: { activeSymbols: ['AAPL', 'MSFT', 'NVDA'] } }); });
     act(() => {
       manager.completeTask(task.id, {
         results: [
@@ -1739,7 +1760,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
           makeLargeTransportResult('MSFT', large),
           makeLargeTransportResult('NVDA', large),
         ],
-        rawScanCache: [],
+        rawScanCache: ['AAPL', 'MSFT', 'NVDA'].map(makeRawScanEntry),
       });
     });
 
@@ -1800,11 +1821,11 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior successful scan' }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Prior successful scan', input: { activeSymbols: ['AAPL'] } }); });
     act(() => {
       manager.completeTask(taskA.id, {
         results: [makeScreenResult({ symbol: 'AAPL' })],
-        rawScanCache: [],
+        rawScanCache: ['AAPL'].map(makeRawScanEntry),
       });
     });
     await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
@@ -1812,7 +1833,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     phase = 'paused-refresh';
     const large = 'p'.repeat(300_000);
     let taskB: any;
-    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Paused refresh scan' }); });
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Paused refresh scan', input: { activeSymbols: ['MSFT', 'NVDA', 'TSLA'] } }); });
     act(() => {
       manager.completeTask(taskB.id, {
         results: [
@@ -1820,7 +1841,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
           makeLargeTransportResult('NVDA', large),
           makeLargeTransportResult('TSLA', large),
         ],
-        rawScanCache: [],
+        rawScanCache: ['MSFT', 'NVDA', 'TSLA'].map(makeRawScanEntry),
       });
     });
 
@@ -1879,7 +1900,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     let taskA: any;
-    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Old ranked scan' }); });
+    act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Old ranked scan', input: { activeSymbols: ['AAPL'] } }); });
     const oldLarge = 'z'.repeat(300_000);
     act(() => {
       manager.completeTask(taskA.id, {
@@ -1887,7 +1908,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
           makeLargeTransportResult('AAPL', oldLarge),
           makeLargeTransportResult('NVDA', oldLarge),
         ],
-        rawScanCache: [],
+        rawScanCache: ['AAPL', 'NVDA'].map(makeRawScanEntry),
       });
     });
     await waitFor(() => expect((globalThis.fetch as any).mock.calls.some(
@@ -1898,11 +1919,11 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     )).toBe(true));
 
     let taskB: any;
-    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'New ranked scan' }); });
+    act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'New ranked scan', input: { activeSymbols: ['MSFT'] } }); });
     act(() => {
       manager.completeTask(taskB.id, {
         results: [makeScreenResult({ symbol: 'MSFT' })],
-        rawScanCache: [],
+        rawScanCache: ['MSFT'].map(makeRawScanEntry),
       });
     });
 
