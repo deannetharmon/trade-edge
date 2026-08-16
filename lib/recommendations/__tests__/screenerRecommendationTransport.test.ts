@@ -279,14 +279,24 @@ describe('screener recommendation transport', () => {
     )).toEqual(['2027-01-15', '2027-03-19']);
   });
 
-  it('excludes Covered Call before recommendation submission', () => {
+  it('includes Covered Call in the recommendation transport plan -- real capability, not out of scope', () => {
+    // TE-0007D corrective — same real gap fixed in
+    // lib/autopilot/decision/screenerCandidateAdapter.ts: CC was excluded
+    // there on a stale premise ("not-yet-built feature"). makeCandidate's
+    // default fields (shortOccSymbol/shortBid/shortAsk/shortStrike/
+    // shortDelta/shortOI) are already real, usable CC short-leg data --
+    // no fixture change needed here, only the assertion.
     const cc = makeResult(7, {
       strategy: 'CC',
       bestCandidate: makeCandidate(7, { strategy: 'CC' }),
     });
-    expect(() => buildBatchedRecommendationTransportPlan([cc])).toThrow(
-      /produced no canonical candidates/,
-    );
+    const plan = buildBatchedRecommendationTransportPlan([cc]);
+    expect(plan.candidateCount).toBe(1);
+    const candidate = plan.batches[0].candidates[0];
+    expect(candidate.strategy).toBe('CC');
+    expect(candidate.legs).toHaveLength(1);
+    expect(candidate.legs[0].direction).toBe('short');
+    expect(candidate.legs[0].optionType).toBe('call');
   });
 
   it('aggregates a PMCC analysis without overwriting earlier batches', async () => {

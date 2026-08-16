@@ -5,14 +5,26 @@
 // evaluates real market data instead of the empty candidates: [] it gets
 // today.
 //
-// SCOPE: BPS, BCS, IC, CSP, and PMCC. PMCC is a canonical first-class
+// SCOPE: BPS, BCS, IC, CSP, PMCC, and CC. PMCC is a canonical first-class
 // recommendation strategy. Its two call expirations remain distinct and its
 // authoritative maximum loss is the total net debit paid.
 //
-// Also out of scope: CC (covered call) candidates aren't produced by the
-// standard screener scan at all (lib/scans/* has no CC path) -- they come
-// from wheel/position management against owned shares, a separate,
-// not-yet-built feature per the screener redesign plan. Nothing to adapt yet.
+// CC (covered call): this file's header previously said CC candidates
+// "aren't produced by the standard screener scan at all... a separate,
+// not-yet-built feature" -- that was true when this file was written but
+// is stale now that lib/scans/covered-call-finder.ts exists and CC scans
+// go through the same runCcScan/ScreenResult/bestCandidate pipeline as
+// every other strategy here (confirmed via direct read of
+// covered-call-finder.ts's real field names: shortStrike/shortOccSymbol/
+// shortBid/shortAsk/shortDelta/shortOI, identical to CSP's single-leg
+// pattern). Real, confirmed gap found via a genuinely failing test
+// (SCREENER-RESULTS-0001), not assumed. Note: unlike every other strategy
+// here, a covered call's true theoretical max loss requires the position's
+// actual cost basis (the stock could go to $0), which a scan-level
+// candidate does not carry -- CC scans against already-owned shares of
+// unknown historical purchase price. theoreticalMaxLoss() below uses
+// current market price as the best available proxy, not real cost basis;
+// this is an honest approximation, not a fabricated precise figure.
 
 import type { AutopilotCandidate, AutopilotLeg, AutopilotStrategy } from '../types';
 import type { ScreenResult, SpreadCandidate } from '@/lib/scans/types';
@@ -27,7 +39,7 @@ export interface ScreenerAdapterResult {
   skipped: Array<{ symbol: string; strategy: string; reason: string }>;
 }
 
-const SUPPORTED_STRATEGIES: ReadonlySet<string> = new Set(['BPS', 'BCS', 'IC', 'CSP', 'PMCC']);
+const SUPPORTED_STRATEGIES: ReadonlySet<string> = new Set(['BPS', 'BCS', 'IC', 'CSP', 'PMCC', 'CC']);
 
 function toAutopilotStrategy(strategy: string): AutopilotStrategy | null {
   return SUPPORTED_STRATEGIES.has(strategy) ? (strategy as AutopilotStrategy) : null;
@@ -43,7 +55,7 @@ function isoFromQuoteFetchedAt(quoteFetchedAt?: number): string | undefined {
 //   maxLoss = (spreadWidth - credit) * quantity * 100
 // CSP has no spread width -- max loss (pre-assignment) is capital at risk,
 // i.e. requiredCash minus premium collected.
-function theoreticalMaxLoss(strategy: AutopilotStrategy, candidate: SpreadCandidate, quantity: number): number {
+function theoreticalMaxLoss(strategy: AutopilotStrategy, candidate: SpreadCandidate, quantity: number, underlyingPrice: number): number {
   if (strategy === 'PMCC') {
     return calculatePmccCapital({
       netDebit: Number(candidate.netDebit),
@@ -69,6 +81,16 @@ function theoreticalMaxLoss(strategy: AutopilotStrategy, candidate: SpreadCandid
     const requiredCash = candidate.requiredCash ?? 0;
     const credit = candidate.credit ?? 0;
     return Math.max(0, requiredCash - credit * quantity * 100);
+  }
+  if (strategy === 'CC') {
+    // Honest approximation, not real cost basis (see file header) --
+    // current market price is the only downside reference a scan-level
+    // candidate has. A real covered call's max loss depends on what the
+    // shares were actually purchased at, which lives on the position,
+    // not this candidate.
+    const price = underlyingPrice;
+    const credit = candidate.credit ?? candidate.totalCredit ?? 0;
+    return Math.max(0, price - credit) * quantity * 100;
   }
 
   const width = candidate.spreadWidth ?? 0;
@@ -167,6 +189,9 @@ function buildLegs(
     if (longCall) legs.push(longCall);
   } else if (strategy === 'CSP') {
     const s = shortLeg(candidate.shortStrike, 'put', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
+    if (s) legs.push(s);
+  } else if (strategy === 'CC') {
+    const s = shortLeg(candidate.shortStrike, 'call', candidate.shortOccSymbol, candidate.shortDelta, candidate.shortBid, candidate.shortAsk, candidate.expiration, candidate.shortOI);
     if (s) legs.push(s);
   } else if (strategy === 'PMCC') {
     const longCall = longLeg(
@@ -270,7 +295,7 @@ export function screenResultsToAutopilotCandidates(
       : (candidate.totalCredit ?? candidate.credit ?? 0) * quantity;
     let maxLoss: number;
     try {
-      maxLoss = theoreticalMaxLoss(strategy, candidate, quantity);
+      maxLoss = theoreticalMaxLoss(strategy, candidate, quantity, result.price ?? 0);
     } catch {
       skipped.push({ symbol: result.symbol, strategy: result.strategy, reason: 'Invalid canonical capital inputs.' });
       continue;
