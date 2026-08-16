@@ -42,7 +42,10 @@ import {
   DEFAULT_PMCC_PAIRING_LIMITS,
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '@/lib/scans/pmccConfig';
-import type { PmccScanSnapshot, PmccPairResult } from '@/lib/scans/pmccTypes';
+import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib/scans/pmccTypes';
+import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
+import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
+import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -3485,6 +3488,7 @@ type ResultCardProps = {
 
 function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showPairLookup, setShowPairLookup] = useState(false);
   const pair = result.pmccPair;
   const metrics = pair?.metrics;
   const ready = Boolean(pair?.qualified && pair.longLeg.quote.readyInput && pair.shortLeg.quote.readyInput);
@@ -3549,6 +3553,49 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         >
           ⚡ TRADE THIS
         </button>
+      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
+        className="w-full py-1.5 rounded-lg border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:border-neutral-500 transition-colors"
+      >
+        CHECK A SPECIFIC PAIR
+      </button>
+      {showPairLookup && (
+        <PmccPairLookupModal
+          th={th}
+          symbol={result.symbol}
+          onClose={() => setShowPairLookup(false)}
+          onCheck={async ({ longStrike, longExpiration, shortStrike, shortExpiration }) => {
+            const token = await getAccessToken();
+            const longDte = daysUntil(longExpiration);
+            const shortDte = daysUntil(shortExpiration);
+            const rawChain = await getPMCCChain(result.symbol, token, {
+              shortMin: 0, shortMax: shortDte + 5,
+              longMin: 0, longMax: longDte + 5,
+            });
+            const adapted = adaptPmccChain(result.symbol, rawChain);
+            const longChainLeg = adapted.longLegs.find(l => l.expiration === longExpiration && l.strike === longStrike) ?? null;
+            const shortChainLeg = adapted.shortLegs.find(l => l.expiration === shortExpiration && l.strike === shortStrike) ?? null;
+            const price = await getQuote(result.symbol, token);
+            return evaluatePmccPairOnDemand({
+              symbol: result.symbol,
+              underlyingPrice: price ?? 0,
+              longChainLeg, shortChainLeg,
+              criteria: {
+                dte: { shortMin: 0, shortMax: shortDte + 5, longMin: 0, longMax: longDte + 5 },
+                longDelta: DEFAULT_PMCC_LONG_DELTA_RANGE,
+                shortDelta: DEFAULT_PMCC_SHORT_DELTA_RANGE,
+                longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+                shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
+                requireDebitBelowWidth: true,
+                quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
+                limits: DEFAULT_PMCC_PAIRING_LIMITS,
+              },
+              asOf: new Date(),
+              marketSession: derivePmccMarketSession(new Date()),
+            });
+          }}
+        />
       )}
     </div>}
   </article>;
@@ -6147,6 +6194,7 @@ export default function Home() {
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const [showPmccScanModal, setShowPmccScanModal] = useState(false);
+  const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
