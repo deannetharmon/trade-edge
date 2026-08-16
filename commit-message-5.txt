@@ -1,0 +1,26 @@
+feat: PMCC on-demand pair lookup UI
+
+Connects the on-demand engine function (evaluatePmccPairOnDemand,
+merged separately) to an actual button and modal. Answers the real
+question that motivated this arc: does a specific strike/expiration
+pair exist in the current chain, and if so what happened to it --
+genuinely disqualified, or just truncated by the 10-result retention
+limit that governs the visible scan results.
+
+- PmccPairLookupModal.tsx: enter a specific long/short strike plus
+  expiration, get one of five outcomes with plain-language
+  explanation (not found in chain / leg rejected / pair rejected /
+  qualified / near miss).
+- "CHECK A SPECIFIC PAIR" button added to every PmccResultCard,
+  available regardless of Ready state -- this is diagnostic, not
+  execution.
+- Fresh chain fetch on every check, evaluated against the CURRENT
+  live DEFAULT_PMCC_* criteria, never a stale/cached scan's settings.
+
+Rebuilt clean against current main (the original branch pre-dated
+this session's ScreenerPage.test.tsx fix and would have conflicted
+with/reverted it) -- this diff touches only the two real PMCC files.
+
+Full suite verified against established baseline, zero new
+regressions. Not yet verified against a real rendered screen -- that
+manual check is the last step before this is fully trusted.
