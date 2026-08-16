@@ -86,7 +86,15 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
     if (!rankedScanTask || screenMode !== 'rank') return;
     if (rankedScanTask.status === 'queued' || rankedScanTask.status === 'running') {
       setLoading(true);
-      setStatus(rankedScanTask.progressLabel ?? 'Running...');
+      // TE-0007D corrective — this used to unconditionally overwrite
+      // startRankedScan()'s own "Refreshing ranked opportunities..."
+      // status text with the generic 'Running...' fallback the instant
+      // the real dispatched task transitioned to queued/running --
+      // losing the distinct refreshing framing a moment after it was
+      // correctly set, a real overwrite race confirmed via debug
+      // instrumentation. Now respects the same hasPriorResults
+      // distinction startRankedScan already uses.
+      setStatus(rankedScanTask.progressLabel ?? (hasPriorResults ? 'Refreshing ranked opportunities...' : 'Running...'));
       setError('');
       updateScreenerJob({
         id: rankedScanTask.id,
