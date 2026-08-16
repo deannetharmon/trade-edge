@@ -23,6 +23,12 @@ export interface UseRankedScanParams {
   screenMode: 'filter' | 'rank' | 'targeted';
   tickers: RankedScanTickerInput[];
   rankConfig: RankConfig;
+  // TE-0007D corrective — lets startRankedScan distinguish a refresh
+  // (prior valid results are visible and must stay visible for the whole
+  // refresh window, per the real Ranked Scan orchestration test) from a
+  // genuine first scan, without needing the whole results array passed
+  // in -- only whether one is currently non-empty.
+  hasPriorResults: boolean;
   setResults: (results: ScreenResult[]) => void;
   setRawScanCache: (cache: RawScanEntry[]) => void;
   setResultsCachedAt: (timestamp: number | null) => void;
