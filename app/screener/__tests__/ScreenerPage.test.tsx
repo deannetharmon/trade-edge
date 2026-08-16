@@ -215,6 +215,28 @@ function makeScreenResult(overrides: Partial<ScreenResult> = {}): ScreenResult {
   } as ScreenResult;
 }
 
+// TE-0007D corrective — SCREENER-UX-0001's real, added session gate
+// (hasCompletedScanForCurrentMode) requires a real, completed
+// ScreenerScanSession restored via SCAN_SESSION_CACHE_KEY -- bare
+// kv.set('results', [...]) alone (sufficient before this gate existed)
+// no longer renders the results panel at all. Wraps the exact real,
+// working pattern already used elsewhere in this file (createScanSession
+// -> completeSession(recordSymbolEvaluated(...)) -> kv.set(
+// SCAN_SESSION_CACHE_KEY, ...)), generalized to any symbol/result set
+// instead of one hardcoded case.
+function seedCompletedSession(results: ScreenResult[]): void {
+  let session = createScanSession({
+    mode: 'filter', // matches renderScreenerPage()'s default screenMode ('filter')
+    requestedStrategy: 'spreads',
+    scope: { universeSymbols: results.map(r => r.symbol), eligibleSymbols: results.map(r => r.symbol) },
+  });
+  for (const r of results) {
+    session = recordSymbolEvaluated(session, r.symbol, [r]);
+  }
+  session = completeSession(session);
+  kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+}
+
 function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): DecisionAnalysis {
   return {
     id: 'decision_1',
@@ -570,13 +592,14 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
 
     await waitFor(() => expect(screen.getByText(/ADD TICKERS AND RUN HUNTER/)).toBeInTheDocument());
     expect(screen.queryByText(/EMPTY UNIVERSE/)).not.toBeInTheDocument();
-    expect(document.getElementById('ranked-opportunities')).toBeNull();
+    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
   });
 });
 
 describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC-4/AC-6/AC-9/AC-10)', () => {
   it('renders Ranked Opportunities above "All Scan Results" once a scan has produced results, with the id="ranked-opportunities" anchor present exactly once', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -590,9 +613,9 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
     renderScreenerPage();
 
     await waitFor(() => expect(screen.getByText('All Scan Results')).toBeInTheDocument());
-    await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
 
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     const allScanResultsHeading = screen.getByText('All Scan Results');
 
     // Document order: Ranked Opportunities' DOM node must precede "All Scan
@@ -602,18 +625,19 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // AC-10: exactly one id="ranked-opportunities" and no duplicate ids on this page.
-    expect(document.querySelectorAll('#ranked-opportunities')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-testid="best-opportunities-shortlist"]')).toHaveLength(1);
     expect(document.querySelectorAll('#best-opportunity')).toHaveLength(0);
   });
 
   it('AC-6: does not render Ranked Opportunities before a scan has produced evaluable results (results.length === 0)', async () => {
     renderScreenerPage();
     await waitFor(() => expect(screen.getByText(/ADD TICKERS AND RUN HUNTER/)).toBeInTheDocument());
-    expect(document.getElementById('ranked-opportunities')).toBeNull();
+    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
   });
 
   it('AC-5: "All Scan Results" retains the existing CSV export control', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     renderScreenerPage();
 
     await waitFor(() => expect(screen.getByText('All Scan Results')).toBeInTheDocument());
@@ -624,6 +648,7 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
 describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
   it('AC-18a (state 2): rawAnalyses present, zero adapted/ranked recommendations -- distinct message, never state 1/5 wording', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     // A DecisionAnalysis with no `candidate` fails the Opportunity Engine's
     // adapter (never fabricated) -- rawAnalyses.length > 0 but the adapted
     // recommendations array ends up empty.
@@ -648,6 +673,7 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
 
   it('AC-18 (state 5): first evaluation with zero analyses fails truthfully without claiming prior results exist', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) });
@@ -668,7 +694,24 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
 
 describe('WA-0005 /screener: successful evaluation renders canonical compact cards', () => {
   it('uses the shared ResultCard metrics, ranked context, filters, one capital notice, and lazy full reasoning', async () => {
+    // TE-0007D corrective — SCREENER-UX-0001 rebuilt this entire area.
+    // BestOpportunitiesShortlist (features/screener/components/
+    // BestOpportunitiesShortlist.tsx) is a simple, collapsed-by-default
+    // top-3 list with NO sort/filter/results-count controls of its own
+    // (confirmed via direct read: rows come only from the `rows` prop,
+    // no local filtering state at all). Every specific control this test
+    // used to check ("Results shown," "Ranked opportunities sort by/
+    // direction," "Open interest filter," "Disposition filter," "Filter
+    // scan open interest," "Filter results sort by," "Available capital
+    // is not connected," "Expand AAPL BPS details," "Good setup.",
+    // "Recommendation analysis") is confirmed absent from the real app --
+    // grepped, zero matches for any of them. Rewritten against the real
+    // component's actual render output (rank/symbol/POP/OTM/ROC/OI/Score/
+    // Confidence, a real "View details"/"Hide details" toggle, and
+    // row.primaryReason as the expanded content) instead.
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -681,37 +724,20 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
-    const ranked = within(document.getElementById('ranked-opportunities')!);
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    const ranked = within(screen.getByTestId('best-opportunities-shortlist'));
     expect(ranked.getByText('#1')).toBeInTheDocument();
-    expect(ranked.getByText(/Score \d+/)).toBeInTheDocument();
-    expect(ranked.getByText(/Confidence \d+%/)).toBeInTheDocument();
-    expect(ranked.getByText('IVR', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByText('Exp', { exact: false })).toBeInTheDocument();
-    expect(ranked.getByLabelText('Results shown')).toBeInTheDocument();
-    expect(ranked.getByLabelText('Ranked opportunities sort by')).toHaveValue('rank');
-    expect(ranked.getByLabelText('Ranked opportunities sort direction')).toHaveTextContent('↑');
-    const rankedOpenInterest = ranked.getByLabelText('Open interest filter') as HTMLSelectElement;
-    expect(rankedOpenInterest).toHaveValue('500');
-    expect(within(rankedOpenInterest).getByRole('option', { name: '>1000' })).toBeInTheDocument();
-    expect(ranked.getByLabelText('Disposition filter')).toBeInTheDocument();
-    expect(screen.getByLabelText('Filter scan open interest')).toHaveValue('500');
-    expect(screen.getByLabelText('Filter results sort by')).toHaveValue('rank');
-    expect(screen.getAllByText(/Available capital is not connected for this scan/)).toHaveLength(1);
-    expect(ranked.queryByText('Good setup.')).not.toBeInTheDocument();
-    const recommendationCallsBeforeFilter = (globalThis.fetch as any).mock.calls.filter(
-      ([url]: [string]) => url === '/api/autopilot/recommendations',
-    ).length;
-    fireEvent.change(ranked.getByLabelText('Results shown'), { target: { value: '10' } });
-    fireEvent.change(ranked.getByLabelText('Ranked opportunities sort by'), { target: { value: 'oi' } });
-    fireEvent.click(ranked.getByLabelText('Ranked opportunities sort direction'));
-    expect((globalThis.fetch as any).mock.calls.filter(
-      ([url]: [string]) => url === '/api/autopilot/recommendations',
-    )).toHaveLength(recommendationCallsBeforeFilter);
+    expect(ranked.getByText(/Score/)).toBeInTheDocument();
+    expect(ranked.getByText(/Confidence \d+/)).toBeInTheDocument();
+    expect(ranked.getByText(/POP/)).toBeInTheDocument();
+    expect(ranked.getByText(/OTM/)).toBeInTheDocument();
+    expect(ranked.getByText(/ROC/)).toBeInTheDocument();
+    expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
 
-    fireEvent.click(ranked.getByRole('button', { name: 'Expand AAPL BPS details' }));
-    expect(ranked.getByText('Good setup.')).toBeInTheDocument();
-    expect(ranked.getByText('Recommendation analysis')).toBeInTheDocument();
+    const toggle = ranked.getByRole('button', { name: 'View details' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(ranked.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true');
     expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
   });
 
@@ -857,6 +883,7 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
 describe('WA-0005 /screener: first-scan failure (AC-19)', () => {
   it('renders the existing blockerNotice/opportunityError failure state, never a silent empty list', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'Recommendation engine unavailable.' }) });
@@ -868,7 +895,7 @@ describe('WA-0005 /screener: first-scan failure (AC-19)', () => {
 
     await waitFor(() => expect(screen.getByText('Recommendation engine unavailable.')).toBeInTheDocument());
     // AC-30: no execution/order affordance anywhere.
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     expect(within(rankedSection).queryByText(/execute|submit order|place order/i)).not.toBeInTheDocument();
   });
 });
@@ -876,6 +903,7 @@ describe('WA-0005 /screener: first-scan failure (AC-19)', () => {
 describe('WA-0005 /screener: no execution affordance anywhere on the page (AC-30)', () => {
   it('contains no order-submission/execution control text', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -887,9 +915,9 @@ describe('WA-0005 /screener: no execution affordance anywhere on the page (AC-30
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
 
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     for (const forbidden of ['Execute Trade', 'Submit Order', 'Place Order', 'Auto-Trade']) {
       expect(within(rankedSection).queryByText(forbidden)).not.toBeInTheDocument();
     }
@@ -905,6 +933,7 @@ describe('WA-0005 /screener: no execution affordance anywhere on the page (AC-30
 describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5 (Finding 4)', () => {
   it('state 2 (rawAnalyses present, zero adapted recommendations): the capital-limitation notice still renders', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -923,6 +952,7 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
 
   it('a first zero-analysis failure still renders the frozen capital-limitation notice', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) });
@@ -953,6 +983,7 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
 describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
   it('discloses a genuine partial-evaluation result and preserves the successfully-evaluated candidate', async () => {
     kv.set('results', [makeScreenResult({ symbol: 'AAPL' }), makeScreenResult({ symbol: 'IBM' })]);
+    seedCompletedSession([makeScreenResult({ symbol: 'AAPL' }), makeScreenResult({ symbol: 'IBM' })]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -969,12 +1000,13 @@ describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
     expect(screen.getByText(/Partial evaluation: 1 of 2 scan results could not be evaluated/)).toBeInTheDocument();
   });
 
   it('does not disclose a partial-evaluation banner when nothing was skipped', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }) });
@@ -984,7 +1016,7 @@ describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
     expect(screen.queryByText(/Partial evaluation/)).not.toBeInTheDocument();
   });
 });
@@ -1000,6 +1032,7 @@ describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
 describe('WA-0005 /screener: session-supersession staleness via the canonical job-store identity (Finding 5)', () => {
   it('a newer, results-affecting scan job completing marks the current presentation stale while keeping it visible', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }) });
@@ -1008,7 +1041,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
 
     startScreenerJob({ kind: 'filter', label: 'Filter Scan' });
@@ -1018,7 +1051,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     // Superseded output remains inspectable, never hidden -- and genuinely
     // interactive, not just textually present: the Detailed-tier toggle for
     // the stale candidate is still a real, enabled control.
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
     const toggle = within(rankedSection).getByRole('button', { name: /show details/i });
     expect(toggle).toBeEnabled();
@@ -1026,6 +1059,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
 
   it('a completed Targeted Scan job never marks Ranked Opportunities stale (Targeted Scan cannot affect the recommendations pipeline)', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }) });
@@ -1034,7 +1068,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     startScreenerJob({ kind: 'targeted', label: 'Targeted Scan' });
     completeScreenerJob({ resultCount: 5 });
@@ -1105,7 +1139,16 @@ function seedWatchlist(): void {
 // unmocked `startRankedScan()` -- the exact function Paul's review requires
 // these tests exercise, not a direct TaskManager.createTask() bypass.
 async function clickRunRankedScanButton(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: /SCAN SELECTED.*EQUITIES/i }));
+  // TE-0007D corrective — two real, distinct triggers open the same
+  // RunModeModal: "FIND SPREADS" (the initial launcher, used when no
+  // session is active yet) and the results-toolbar refresh button
+  // (dynamic text -- "⬡ Rank ↺" in Rank mode, confirmed via direct read
+  // of app/screener/page.tsx's screenMode-based label). A refresh of an
+  // already-active session uses the second; a first scan only has the
+  // first. Prefer whichever is actually present, matching real user
+  // behavior instead of assuming one button always exists.
+  const refreshButton = screen.queryByRole('button', { name: /Rank ↺|Filter ↺|Targeted ↺/ });
+  fireEvent.click(refreshButton ?? screen.getByRole('button', { name: 'FIND SPREADS' }));
   await waitFor(() => expect(screen.getByRole('button', { name: /RUN SCREENER/i })).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: /RUN SCREENER/i }));
 }
@@ -1123,13 +1166,19 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let task: any;
     act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan', input: { activeSymbols: ['AAPL'] } }); });
 
-    await waitFor(() => expect(screen.getAllByText(/SCANNING/i).length).toBeGreaterThan(0));
-    expect(document.getElementById('ranked-opportunities')).toBeNull();
+    // TE-0007D corrective — Rank mode's real loading status ({status ||
+    // 'SCANNING...'} in page.tsx) is set to "Running..."/"Running ranked
+    // scan..." by useRankedScan.ts's queued/running branch -- the
+    // 'SCANNING...' fallback only shows when status is unset, which never
+    // happens for a real ranked-scan task. Confirmed via direct read of
+    // both files, not assumed.
+    await waitFor(() => expect(screen.getAllByText(/Running/i).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
 
     // Complete it so the rest of the suite's assumption (a real scan can
     // reach completion through this harness) is also demonstrated here.
     act(() => { manager.completeTask(task.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
   });
 
   // PO corrective round 5 (WA-0005 Defect 1): round 4's version of the next
@@ -1159,11 +1208,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
-    fireEvent.change(
-      within(document.getElementById('ranked-opportunities')!).getByLabelText('Results shown'),
-      { target: { value: '10' } },
-    );
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     // The refresh itself: only runRankedScan() (the actual TastyTrade-bound
     // scan work) is mocked, via a controllable deferred promise -- every
@@ -1188,20 +1233,37 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // (section-gate fix reverted), or "AAPL" would be gone (effect fix
     // reverted).
     await waitFor(() => expect(runRankedScan).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(document.getElementById('ranked-opportunities')).not.toBeNull());
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
-    expect(within(document.getElementById('ranked-opportunities')!).getByLabelText('Results shown')).toHaveValue('10');
+    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    // TE-0007D corrective — "Results shown" (a user-configurable result
+    // count) was removed by the real redesign; BestOpportunitiesShortlist
+    // is a fixed top-3 shortlist by design (confirmed via its own file
+    // header comment), not something to check persists across a refresh.
+    // The real, still-valid assertion this test needs is that AAPL's
+    // result content persists, which the line above already covers.
     await waitFor(() => expect(screen.getByText(/Refreshing ranked opportunities/)).toBeInTheDocument());
     expect(screen.queryByText('Ranking opportunities from these scan results…')).not.toBeInTheDocument();
 
     // Let the refresh's own scan complete so this test also demonstrates
     // the refreshing window closing correctly, not left hanging.
-    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'AAPL', price: 191 })], rawScanCache: [] }); });
+    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'AAPL', price: 191 })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
     await waitFor(() => expect(screen.queryByText(/Refreshing ranked opportunities/)).not.toBeInTheDocument());
   });
 
   it('successful refresh and supersession: clicking the REAL "Run Ranked Scan" button to completion replaces the old presentation and clears stale/refreshing indicators', async () => {
-    seedWatchlist();
+    // TE-0007D corrective — seedWatchlist() alone only seeds AAPL, but
+    // beginSession()'s universeSymbols come from the real watchlist, never
+    // from whatever a mock happens to return. Since this test's whole
+    // point is genuine supersession (the same scan universe producing
+    // different results because market conditions changed between scans,
+    // not a different universe), both symbols need to be real, active
+    // watchlist entries from the start -- otherwise the reconciliation
+    // loop only ever looks for AAPL and MSFT can never appear in results
+    // no matter what the mock resolves with.
+    window.localStorage.setItem('hunter-watchlist', JSON.stringify([
+      { symbol: 'AAPL', active: true },
+      { symbol: 'MSFT', active: true },
+    ]));
     const manager = renderRankedScanScreenerPage();
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -1213,7 +1275,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -1249,12 +1311,12 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() => expect(runRankedScan).toHaveBeenCalledTimes(1));
 
     // Refresh in progress: prior AAPL results remain visible underneath.
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
-    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'MSFT' })], rawScanCache: [] }); });
+    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'MSFT' })], rawScanCache: ['MSFT'].map(makeRawScanEntry) }); });
 
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument());
-    expect(within(document.getElementById('ranked-opportunities')!).queryByText('AAPL')).not.toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument());
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('AAPL')).not.toBeInTheDocument();
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Refreshing ranked opportunities/)).not.toBeInTheDocument();
   });
@@ -1272,7 +1334,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -1289,15 +1351,15 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     // Refresh in progress: prior AAPL results remain visible underneath,
     // never deleted by the refresh's own dispatch (Defect 1).
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     // The refresh's own raw scan succeeds; its recommendations fetch (the
     // real /api/autopilot/recommendations call) is what fails.
-    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'AAPL', price: 191 })], rawScanCache: [] }); });
+    act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'AAPL', price: 191 })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
 
     await waitFor(() => expect(screen.getByText('Recommendation engine unavailable.')).toBeInTheDocument());
     // Prior valid results remain visible -- never blanked by the failure.
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
     // The failure is disclosed via role="alert" (Finding 6's convention),
     // genuinely distinguishable from the stale banner's role="status".
     expect(screen.getByText('Recommendation engine unavailable.').closest('[role="alert"]')).not.toBeNull();
@@ -1363,7 +1425,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
         },
       });
     });
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument());
     // Job B's own recommendations are now correctly paired with job B's own
     // id (recommendationsJobId === latestResultsAffectingJobId, both job
     // B's), so the presentation is NOT marked stale -- proving the pairing
@@ -1378,7 +1440,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // land, then assert it did not.
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
     expect(within(rankedSection).queryByText('AAPL')).not.toBeInTheDocument();
     // Critically, job A's late-arriving response must not have corrupted
@@ -1486,7 +1548,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
     expect(submittedSymbols).toEqual(['AAPL', 'MSFT']);
-    const rankedSection = document.getElementById('ranked-opportunities')!;
+    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
     expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
     expect(screen.queryByText('Scan results existed, but the evaluation service produced no candidate analyses.')).not.toBeInTheDocument();
@@ -1542,7 +1604,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(screen.getByText(/completed without candidate analyses/)).toBeInTheDocument());
     expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL');
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByText(/completed without candidate analyses/).closest('[role="alert"]')).not.toBeNull();
     expect(screen.getByText(/last successfully published ranked opportunities remain visible/i)).toBeInTheDocument();
   });
@@ -1658,8 +1720,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
     expect(publishedAnalysisCounts).toEqual([2]);
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument();
     unsubscribe();
   });
 
@@ -1725,7 +1787,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     expect(refreshCall).toBe(2);
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByText('Second recommendation batch failed.').closest('[role="alert"]')).not.toBeNull();
   });
 
@@ -1855,8 +1917,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
-    expect(within(document.getElementById('ranked-opportunities')!).queryByText('MSFT')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('MSFT')).not.toBeInTheDocument();
   });
 
   it('a newer evaluation retries an old server lock, publishes the newer result, and ignores the older late response', async () => {
@@ -1949,8 +2011,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('MSFT');
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('MSFT')).toBeInTheDocument();
-    expect(within(document.getElementById('ranked-opportunities')!).queryByText('AAPL')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('AAPL')).not.toBeInTheDocument();
     expect((globalThis.fetch as any).mock.calls.some(
       ([url, init]: [string, RequestInit]) => (
         url === '/api/autopilot/recommendations'
@@ -1961,6 +2023,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
   it('Targeted Scan exclusion, via a real (non-Ranked) job kind: a completed Targeted Scan never affects Ranked Opportunities staleness or identity even when triggered through the same job-store mechanism real scans use', async () => {
     kv.set('results', [makeScreenResult()]);
+    seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }) });
@@ -1969,7 +2032,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
 
     // A real Targeted Scan job (kind: 'targeted') completing through the
     // exact same exported screenerJobStore functions runScreen/
@@ -1983,7 +2046,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Refreshing ranked opportunities/)).not.toBeInTheDocument();
-    expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument();
+    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
   });
 
   it('hard reload / IndexedDB cache-restore (no live job has run this session): renders the honest, non-stale, non-failure state -- no job identity exists yet to compare against', async () => {
@@ -1992,6 +2055,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // starts at its idle DEFAULT_STATE, so useLatestResultsAffectingJobId()
     // returns null and stays null until a real job completes.
     kv.set('results', [makeScreenResult({ symbol: 'AAPL' })]);
+    seedCompletedSession([makeScreenResult({ symbol: 'AAPL' })]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis()] } }) });
@@ -2001,7 +2065,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(document.getElementById('ranked-opportunities')!).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
     // Honest: not stale, not a failure, not a refresh -- just the
     // evaluation this session's cache-restore itself triggered.
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();

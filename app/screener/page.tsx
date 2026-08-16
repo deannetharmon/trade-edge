@@ -6312,7 +6312,7 @@ export default function Home() {
   // useRankedScan(). Filter/Targeted are untouched: they still call
   // runScreen()/runTargetedScan() directly in this file, as before.
   const { startRankedScan } = useRankedScan({
-    screenMode, tickers, rankConfig,
+    screenMode, tickers, rankConfig, hasPriorResults: results.length > 0,
     setResults, setRawScanCache, setResultsCachedAt,
     setLoading, setStatus, setError,
     beginSession: (scope) => beginScanSession({ mode: 'rank', requestedStrategy: 'spreads', scope }),
@@ -6584,12 +6584,32 @@ export default function Home() {
     let cancelled = false;
     const eligible = shouldGenerateRecommendationsForSession(activeSession, activeSessionIdRef.current);
 
-    if (!eligible || !activeSession || activeSession.requestedStrategy === 'pmcc') {
+    // TE-0007D corrective — this used to unconditionally clear
+    // opportunityRecommendations the instant eligible became false for
+    // ANY reason, including "activeSession.status === 'running'" (a
+    // refresh of the same session in flight). That's the exact same
+    // user-facing defect this file's own comments already document as
+    // "now fixed" for an older version of this UI (stale/prior valid
+    // results should stay visible during a refresh), reintroduced here.
+    // This does NOT weaken the real safety rule
+    // shouldGenerateRecommendationsForSession enforces (never GENERATE
+    // new recommendations for a running session's own in-flight data) --
+    // it only avoids WIPING already-valid prior recommendations while
+    // that new session is still running. Explicitly excludes PMCC (which
+    // shouldGenerateRecommendationsForSession always excludes regardless
+    // of status) from the bypass -- switching directly into a PMCC scan
+    // must still clear immediately, not leave stale non-PMCC
+    // recommendations visible for the scan's duration.
+    const isJustRefreshing = activeSession?.status === 'running' && activeSession.requestedStrategy !== 'pmcc';
+    if (!eligible && !isJustRefreshing) {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
       setOpportunityState('idle');
       setOpportunityError('');
       clearRecommendations();
+      return;
+    }
+    if (!eligible || !activeSession || activeSession.requestedStrategy === 'pmcc') {
       return;
     }
 
@@ -6652,8 +6672,19 @@ export default function Home() {
         }
       } catch (e: any) {
         if (!cancelled && e?.name !== 'AbortError') {
-          setOpportunityRecommendations([]);
-          setOpportunityGeneratedAt(undefined);
+          // TE-0007D corrective — this used to unconditionally clear
+          // opportunityRecommendations on ANY fetch failure, including a
+          // refresh's recommendation fetch failing while its own raw scan
+          // succeeded. That wiped prior valid recommendations the real
+          // Ranked Scan orchestration test explicitly requires stay
+          // visible alongside a genuine failure notice (same "preserve
+          // what's already valid" principle already applied to results
+          // and the refresh-start clearing). Only clear when there's
+          // nothing valid to preserve in the first place.
+          if (opportunityRecommendations.length === 0) {
+            setOpportunityRecommendations([]);
+            setOpportunityGeneratedAt(undefined);
+          }
           setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
           setOpportunityState('error');
         }
@@ -8090,10 +8121,44 @@ export default function Home() {
               <p className={`text-[9px] mt-2 ${th.textFaint}`}>Save sessions · Load scan lists · Upload Finviz screenshots</p>
             </div>
           )}
-          {loading && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
+          {/* TE-0007D corrective — this used to show the full-screen
+              spinner unconditionally whenever loading was true, which
+              also hid the entire results panel below (its own gate
+              required !loading) -- during a refresh of an already-
+              displayed session, that synchronously hid prior valid
+              results the instant the refresh started, the same
+              user-facing defect this file's own comments already
+              documented as "now fixed" for an older version of this UI,
+              reintroduced here through a different mechanism. Now only
+              shown for a genuine first scan (nothing to show yet); a
+              refresh gets its own smaller indicator inside the still-
+              visible panel below instead. */}
+          {loading && results.length === 0 && targetedResults.length === 0 && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
 
-          {(results.length > 0 || targetedResults.length > 0 || hasCompletedScanForCurrentMode) && !loading && (
+          {(results.length > 0 || targetedResults.length > 0 || hasCompletedScanForCurrentMode) && (!loading || results.length > 0 || targetedResults.length > 0) && (
             <div className="space-y-4">
+              {loading && (results.length > 0 || targetedResults.length > 0) && (
+                <div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium px-1`}>
+                  {status || 'Refreshing...'}
+                </div>
+              )}
+              {/* TE-0007D corrective — opportunityError/opportunityState
+                  were correctly SET by the recommendations effect's catch
+                  block (confirmed via debug instrumentation: the real
+                  error message reaches this state precisely), but nothing
+                  in the render tree ever displayed them -- a genuinely
+                  missing UI element, not a gating bug. role="alert" per
+                  the real Ranked Scan orchestration test's explicit
+                  requirement, distinguishable from the "Refreshing..."
+                  banner above (role via the browser's implicit ARIA,
+                  not role="status") -- a refresh failure must be
+                  genuinely, accessibly distinct from a normal in-progress
+                  refresh, not just styled differently. */}
+              {!loading && opportunityState === 'error' && opportunityError && (results.length > 0 || targetedResults.length > 0) && (
+                <div role="alert" className="text-[10px] text-red-400 px-1">
+                  {opportunityError}
+                </div>
+              )}
               {/* SCREENER-UX-0001 — item 1 of the required hierarchy: scan
                   identity always leads. Falls back to the prior static
                   "⬢ FILTERED SCAN" label when no activeSession is available

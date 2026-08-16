@@ -36,7 +36,7 @@ import { persistScanSession } from '@/lib/screener/scanSessionCache';
 
 export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult {
   const {
-    screenMode, tickers, rankConfig,
+    screenMode, tickers, rankConfig, hasPriorResults,
     setResults, setRawScanCache, setResultsCachedAt,
     setLoading, setStatus, setError,
     beginSession, commitSession,
@@ -221,10 +221,21 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
       return;
     }
     setError('');
-    setResults([]);
+    // TE-0007D corrective — this used to call setResults([]) here,
+    // synchronously wiping the prior scan's results the instant a refresh
+    // was dispatched, well before the new scan's own results ever
+    // resolved. Confirmed via a genuinely failing test (real Ranked Scan
+    // orchestration) that this is exactly the documented "now fixed"
+    // defect this file's own comments describe, reintroduced by the
+    // SCREENER-UX-0001 redesign through a different mechanism than
+    // before (the section stayed mounted, but BestOpportunitiesShortlist's
+    // rows -- built from results.filter(qualified) -- still went empty).
+    // Removed: results now naturally retains its prior value until the
+    // new scan's completion handler below actually replaces it, so prior
+    // valid results stay visible for the whole refresh window.
     setResultsCachedAt(null);
     setLoading(true);
-    setStatus('Starting ranked scan...');
+    setStatus(hasPriorResults ? 'Refreshing ranked opportunities...' : 'Ranking opportunities from these scan results…');
     // SCREENER-RESULTS-0001 — 'spreads' session, rank mode. No capacity-
     // style eligibility gate, so eligibleSymbols === the active watchlist.
     rankedSessionRef.current = beginSession({ universeSymbols: activeSymbols, eligibleSymbols: activeSymbols });
