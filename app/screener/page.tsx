@@ -8345,10 +8345,28 @@ export default function Home() {
                           // ScreenResult per symbol.
                           const resultKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
                           const isTopOpportunity = topOpportunityResultKeys.has(resultKey);
+                          // TE-0007D — reuses the exact aligned/against
+                          // comparison already live in Targeted mode's
+                          // panel (line ~5978), against data that's
+                          // already on every ScreenResult regardless of
+                          // which scan mode produced it (runChecklist
+                          // includes trendResult in its return; confirmed
+                          // via direct read, not assumed). Only meaningful
+                          // for BPS/BCS/IC -- trend's strategy field only
+                          // ever resolves to one of those three, so CSP/
+                          // CC/PMCC results never show a badge either way.
+                          const trendAligned = r.trendResult?.strategy === r.strategy;
+                          const trendAgainst = r.trendResult != null && r.trendResult.strategy !== 'NO_TRADE' && !trendAligned && r.strategy !== 'IC' && (r.strategy === 'BPS' || r.strategy === 'BCS');
                           return (
                           <div key={resultKey}>
                             {isTopOpportunity && (
                               <p className="text-[9px] font-bold text-emerald-400 mb-1" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>
+                            )}
+                            {trendAligned && (
+                              <p className="text-[9px] text-emerald-400 mb-1" title="Trend aligned" data-testid="trend-aligned-marker">↑✓ Trend aligned</p>
+                            )}
+                            {trendAgainst && (
+                              <p className="text-[9px] text-amber-400 mb-1" title="Against trend" data-testid="trend-against-marker">⚠ Against trend</p>
                             )}
                             <ResultCard
                               result={r}
@@ -8619,13 +8637,25 @@ export default function Home() {
                   })()}
 
                   <div className="space-y-2">
-                    {display.map((r, i) => (
+                    {display.map((r, i) => {
+                      // TE-0007D — same aligned/against comparison as
+                      // Filter mode above, against trendResult already
+                      // present on every ScreenResult regardless of scan
+                      // mode (exploreAllCandidatesForRank/errResult both
+                      // include it; confirmed via direct read of
+                      // lib/scans/rank-scoring.ts and
+                      // lib/scans/ranked-scan-runner.ts, not assumed).
+                      const trendAligned = r.trendResult?.strategy === r.strategy;
+                      const trendAgainst = r.trendResult != null && r.trendResult.strategy !== 'NO_TRADE' && !trendAligned && r.strategy !== 'IC' && (r.strategy === 'BPS' || r.strategy === 'BCS');
+                      return (
                         <div key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}-${r.bestCandidate?.shortStrike}`} className="flex items-start gap-2">
                           <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
                             <span className={`text-[9px] ${th.textFaint} w-5 text-right`}>{i + 1}</span>
                             <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${dteBadgeColor(r.bestCandidate?.dte ?? 0)}`}>
                               {r.bestCandidate?.dte ?? '—'}d
                             </span>
+                            {trendAligned && <span className="text-[8px] text-emerald-400" title="Trend aligned">↑✓</span>}
+                            {trendAgainst && <span className="text-[8px] text-amber-400" title="Against trend">⚠</span>}
                           </div>
                           <div className="flex-1">
                             <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
@@ -8636,7 +8666,8 @@ export default function Home() {
                             ))}
                           </div>
                         </div>
-                      ))}
+                      );
+                    })}
                   </div>
                   {/* SCREENER-UX-0001 corrective pass: items 6-7 of the
                       required hierarchy, wired into Ranked mode.
