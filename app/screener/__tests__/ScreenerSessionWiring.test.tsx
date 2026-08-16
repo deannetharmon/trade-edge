@@ -339,9 +339,16 @@ describe('SCREENER-RESULTS-0001: Best Opportunities trust boundary (10, 11, 12, 
     const call = fetchMock.mock.calls.find(c => c[0] === '/api/autopilot/recommendations');
     expect(call).toBeTruthy();
     const body = JSON.parse((call![1] as RequestInit).body as string);
-    expect(body.screenResults).toHaveLength(1);
-    expect(body.screenResults[0].symbol).toBe('NKE');
-    expect(body.screenResults[0].qualified).toBe(true);
+    // TE-0007D corrective — same CSP-WORKFLOW-0001/SCREENER-RESULTS-0001
+    // body restructuring already fixed in CspCandidateDiscovery.test.tsx:
+    // screenResults -> candidates. No .qualified field exists on
+    // AutopilotCandidate -- but this test's own premise ("only qualified
+    // results reach the recommendation request") already guarantees the
+    // single entry present is qualified by construction, so that specific
+    // check is redundant once using the real shape, not silently dropped
+    // coverage.
+    expect(body.candidates).toHaveLength(1);
+    expect(body.candidates[0].symbol).toBe('NKE');
   });
 
   it('no qualified results produces the required exact empty state and never calls the recommendation endpoint', async () => {
@@ -377,7 +384,7 @@ describe('SCREENER-RESULTS-0001: Best Opportunities trust boundary (10, 11, 12, 
     const staleFetch = deferred<any>();
     const fetchMock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string);
-      const symbol = body.screenResults[0]?.symbol;
+      const symbol = body.candidates[0]?.symbol;
       if (symbol === 'NKE') return staleFetch.promise;
       return Promise.resolve({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) });
     });

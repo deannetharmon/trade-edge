@@ -1,0 +1,42 @@
+feat: real Covered Call support in the Autopilot recommendation adapter
+
+Started as an investigation into 2 failing ScreenerSessionWiring
+tests. Traced through real debug instrumentation (5 layers: the
+recommendation effect's eligibility gate, qualifiedResults filtering,
+evaluateScreenResultsInBatches, the adapter's skip reasons) to a
+genuine, significant gap, not a test bug: CC was never added to
+SUPPORTED_STRATEGIES in screenerCandidateAdapter.ts.
+
+The file's own header comment explained why: "CC candidates aren't
+produced by the standard screener scan at all... a separate,
+not-yet-built feature." That was true when written, stale now --
+lib/scans/covered-call-finder.ts exists and CC scans go through the
+same runCcScan/ScreenResult/bestCandidate pipeline as every other
+strategy here (confirmed via direct read: shortStrike/shortOccSymbol/
+shortBid/shortAsk/shortDelta/shortOI, identical to CSP's single-leg
+pattern).
+
+- SUPPORTED_STRATEGIES now includes 'CC' (AutopilotStrategy's type
+  already had it -- only the runtime Set and leg-building logic were
+  missing).
+- New buildLegs branch: single short call leg, same pattern as CSP.
+- New theoreticalMaxLoss branch: explicitly documented as an honest
+  approximation (current price minus credit), never fabricated as
+  precise -- a covered call's true max loss needs the position's
+  real cost basis, which a scan-level candidate does not have (CC
+  scans against already-owned shares of unknown purchase price).
+- Two existing test files had tests explicitly verifying the OLD
+  "CC excluded" behavior (screenerCandidateAdapter.test.ts,
+  screenerRecommendationTransport.test.ts) -- rewrote both as real,
+  positive tests of the new capability, using accurate CC fixture
+  data rather than reusing PMCC-shaped fixtures with the wrong field
+  names (shortOccSymbolPMCC instead of shortOccSymbol).
+- ScreenerSessionWiring.test.tsx's screenResults -> candidates body
+  shape fix (same class of bug already fixed in
+  CspCandidateDiscovery.test.tsx) was necessary but not sufficient
+  alone -- this CC-adapter gap was the real blocker underneath it.
+
+Full suite: baseline down to 1 failing file (ScreenerPage.test.tsx
+only, the already-documented, intentionally-parked SCREENER-UX-0001
+test rewrite -- unrelated, separate, larger scope). All fixes
+verified stable across repeated runs, not just lucky timing.
