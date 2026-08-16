@@ -145,7 +145,7 @@ import { ExpirationDisclosure } from '@/features/screener/components/ExpirationD
 import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
-import { publishRecommendations, clearRecommendations, evaluateScreenResultsInBatches } from '@/lib/recommendations';
+import { publishRecommendations, clearRecommendations, failRecommendationsEvaluation, evaluateScreenResultsInBatches } from '@/lib/recommendations';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -6672,21 +6672,29 @@ export default function Home() {
         }
       } catch (e: any) {
         if (!cancelled && e?.name !== 'AbortError') {
-          // TE-0007D corrective — this used to unconditionally clear
-          // opportunityRecommendations on ANY fetch failure, including a
-          // refresh's recommendation fetch failing while its own raw scan
-          // succeeded. That wiped prior valid recommendations the real
-          // Ranked Scan orchestration test explicitly requires stay
-          // visible alongside a genuine failure notice (same "preserve
-          // what's already valid" principle already applied to results
-          // and the refresh-start clearing). Only clear when there's
-          // nothing valid to preserve in the first place.
+          // TE-0007D corrective — this used to unconditionally clear both
+          // the local opportunityRecommendations state AND
+          // RecommendationService's separate module-level state on ANY
+          // fetch failure, including a refresh's recommendation fetch
+          // failing while its own raw scan succeeded. That wiped prior
+          // valid recommendations the real Ranked Scan orchestration test
+          // explicitly requires stay visible alongside a genuine failure
+          // notice. Local state: only clear when there's nothing valid to
+          // preserve in the first place. RecommendationService: always
+          // publish the real failure via failRecommendationsEvaluation
+          // (not clearRecommendations, which resets to idle/no-error) --
+          // that service is a separate consumer-facing signal (used
+          // elsewhere in the app) and must always accurately reflect a
+          // genuine failure, regardless of this component's own local
+          // display/preservation logic.
           if (opportunityRecommendations.length === 0) {
             setOpportunityRecommendations([]);
             setOpportunityGeneratedAt(undefined);
           }
-          setOpportunityError(e?.message ?? 'Unable to load ranked opportunities.');
+          const message = e?.message ?? 'Unable to load ranked opportunities.';
+          setOpportunityError(message);
           setOpportunityState('error');
+          failRecommendationsEvaluation(message);
         }
       }
     })();
@@ -8154,7 +8162,7 @@ export default function Home() {
                   not role="status") -- a refresh failure must be
                   genuinely, accessibly distinct from a normal in-progress
                   refresh, not just styled differently. */}
-              {!loading && opportunityState === 'error' && opportunityError && (results.length > 0 || targetedResults.length > 0) && (
+              {!loading && opportunityState === 'error' && opportunityError && (
                 <div role="alert" className="text-[10px] text-red-400 px-1">
                   {opportunityError}
                 </div>

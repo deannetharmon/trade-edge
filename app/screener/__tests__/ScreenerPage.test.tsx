@@ -597,9 +597,23 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
 });
 
 describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC-4/AC-6/AC-9/AC-10)', () => {
-  it('renders Ranked Opportunities above "All Scan Results" once a scan has produced results, with the id="ranked-opportunities" anchor present exactly once', async () => {
-    kv.set('results', [makeScreenResult()]);
-    seedCompletedSession([makeScreenResult()]);
+  it('renders Ranked Opportunities above the disqualified/full-results section once a scan has produced results, with the best-opportunities-shortlist testid present exactly once', async () => {
+    // TE-0007D corrective — "All Scan Results" as a distinct heading was
+    // replaced by SCREENER-UX-0001's real 6-section hierarchy (Scan
+    // Identity -> Accounting -> Filter Controls -> Best Opportunities ->
+    // Disqualified -> Symbol Outcomes). The DOM-order relationship this
+    // test actually cares about (ranked/best-opportunities content leads,
+    // the full disqualified/rejected list follows) still holds -- just
+    // against real current testids instead of retired heading text.
+    // features/screener/components/__tests__/ScreenerUXHierarchy.test.tsx
+    // already covers the full 6-section order in more depth; this keeps
+    // the narrower, original AC-10 duplicate-id check alive too.
+    const combined = [
+      makeScreenResult(),
+      makeScreenResult({ symbol: 'MSFT', qualified: false, bestCandidate: null, failReasons: ['No qualifying strikes'] }),
+    ];
+    kv.set('results', combined);
+    seedCompletedSession(combined);
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
         return Promise.resolve({
@@ -612,19 +626,20 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
 
     renderScreenerPage();
 
-    await waitFor(() => expect(screen.getByText('All Scan Results')).toBeInTheDocument());
     await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('disqualified-section')).not.toBeNull());
 
     const rankedSection = screen.getByTestId('best-opportunities-shortlist');
-    const allScanResultsHeading = screen.getByText('All Scan Results');
+    const disqualifiedSection = screen.getByTestId('disqualified-section');
 
-    // Document order: Ranked Opportunities' DOM node must precede "All Scan
-    // Results" -- Node.compareDocumentPosition bit 4 (DOCUMENT_POSITION_FOLLOWING)
-    // set on allScanResultsHeading relative to rankedSection confirms this.
-    const position = rankedSection.compareDocumentPosition(allScanResultsHeading);
+    // Document order: Best Opportunities' DOM node must precede the
+    // disqualified/full-results section -- Node.compareDocumentPosition
+    // bit 4 (DOCUMENT_POSITION_FOLLOWING) set on disqualifiedSection
+    // relative to rankedSection confirms this.
+    const position = rankedSection.compareDocumentPosition(disqualifiedSection);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // AC-10: exactly one id="ranked-opportunities" and no duplicate ids on this page.
+    // AC-10: exactly one best-opportunities-shortlist and no duplicate ids on this page.
     expect(document.querySelectorAll('[data-testid="best-opportunities-shortlist"]')).toHaveLength(1);
     expect(document.querySelectorAll('#best-opportunity')).toHaveLength(0);
   });
@@ -635,12 +650,16 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
     expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
   });
 
-  it('AC-5: "All Scan Results" retains the existing CSV export control', async () => {
+  it('AC-5: the results view retains the existing CSV export control', async () => {
+    // TE-0007D corrective — "All Scan Results" heading text is retired
+    // (see the hierarchy test above); the CSV control's own real
+    // requirement -- it must still exist once a scan has results -- is
+    // unaffected by that rename.
     kv.set('results', [makeScreenResult()]);
     seedCompletedSession([makeScreenResult()]);
     renderScreenerPage();
 
-    await waitFor(() => expect(screen.getByText('All Scan Results')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
     expect(screen.getByRole('button', { name: /CSV/i })).toBeInTheDocument();
   });
 });
@@ -1616,9 +1635,22 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'No candidate ranked scan', input: { activeSymbols: ['AAPL'] } }); });
     act(() => {
       manager.completeTask(task.id, {
+        // TE-0007D corrective — this used to be qualified: false,
+        // bestCandidate: null, which page.tsx's own qualifiedResults.
+        // length === 0 gate short-circuits before ever calling
+        // evaluateScreenResultsInBatches at all (confirmed via direct
+        // read; that gate sets opportunityState: 'idle', never 'error',
+        // and never throws this message). The real
+        // "no canonical candidates" error (screenerRecommendationTransport.
+        // ts) requires results.length > 0 AND candidates.length === 0 --
+        // a genuinely qualified result whose bestCandidate the adapter
+        // still can't build a leg from (here: no finite shortStrike).
+        // Pre-existing test/premise mismatch, confirmed by checking this
+        // test against unmodified main before touching it -- fails
+        // identically there, unrelated to anything else in this session.
         results: [makeScreenResult({
-          qualified: false,
-          bestCandidate: null,
+          qualified: true,
+          bestCandidate: { ...makeScreenResult().bestCandidate!, shortStrike: NaN, longStrike: NaN },
           ruleSetApplied: 'ranked-broad',
         })],
         rawScanCache: ['AAPL'].map(makeRawScanEntry),
@@ -1660,7 +1692,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
       return deferred.promise;
     });
 
-    const large = 'x'.repeat(300_000);
+    const large = 'x'.repeat(120_000);
     let task: any;
     act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Broad ranked scan', input: { activeSymbols: ['AAPL', 'MSFT'] } }); });
     act(() => {
@@ -1770,7 +1802,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
 
     phase = 'refresh';
-    const large = 'y'.repeat(300_000);
+    const large = 'y'.repeat(120_000);
     let taskB: any;
     act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Refresh ranked scan', input: { activeSymbols: ['MSFT', 'NVDA'] } }); });
     act(() => {
@@ -1812,7 +1844,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
       });
     });
 
-    const large = 'k'.repeat(300_000);
+    const large = 'k'.repeat(120_000);
     let task: any;
     act(() => { task = manager.createTask({ kind: 'ranked-scan', title: 'Paused broad scan', input: { activeSymbols: ['AAPL', 'MSFT', 'NVDA'] } }); });
     act(() => {
@@ -1893,7 +1925,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() => expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL'));
 
     phase = 'paused-refresh';
-    const large = 'p'.repeat(300_000);
+    const large = 'p'.repeat(120_000);
     let taskB: any;
     act(() => { taskB = manager.createTask({ kind: 'ranked-scan', title: 'Paused refresh scan', input: { activeSymbols: ['MSFT', 'NVDA', 'TSLA'] } }); });
     act(() => {
@@ -1963,7 +1995,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Old ranked scan', input: { activeSymbols: ['AAPL'] } }); });
-    const oldLarge = 'z'.repeat(300_000);
+    const oldLarge = 'z'.repeat(120_000);
     act(() => {
       manager.completeTask(taskA.id, {
         results: [

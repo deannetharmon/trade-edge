@@ -1,0 +1,47 @@
+fix: round 2 of real ScreenerPage refresh bugs, 16 -> 7 failures
+
+Continuing the SCREENER-UX-0001 investigation. Two more real
+application bugs found via debug instrumentation, plus test fixes:
+
+1. RecommendationService desync: my earlier catch-block fix (preserve
+   prior valid recommendations on a refresh failure) accidentally
+   dropped the call to failRecommendationsEvaluation() -- a separate
+   function that publishes error state to RecommendationService, a
+   module-level service other parts of the app consume. That service
+   was left showing stale 'idle' status after a genuine failure.
+   Fixed to always publish the real failure there, independent of
+   local-state preservation logic.
+
+2. Status-text overwrite race: startRankedScan() correctly sets a
+   distinct "Refreshing ranked opportunities..." status, but a
+   separate task-tracking reconnect effect in the same hook
+   unconditionally overwrote it with the generic "Running..."
+   fallback the moment the real dispatched task transitioned to
+   queued/running -- losing the distinct refreshing framing a moment
+   after it was set. Fixed to respect the same hasPriorResults
+   distinction in both places.
+
+Test/fixture fixes in the same pass:
+- Two "All Scan Results" tests rewritten against the real 6-section
+  hierarchy (best-opportunities-shortlist / disqualified-section
+  testids) instead of retired heading text.
+- 5 tests used 300,000-character fill data that, embedded twice per
+  candidate, exceeded the app's real 900,000-byte request-safety
+  limit before any of the tests' intended scenarios (kill-switch,
+  batching) could be reached -- reduced to a size that actually
+  exercises the intended behavior.
+- One pre-existing test/fixture mismatch (confirmed failing
+  identically on unmodified main, unrelated to this session): a test
+  expected the adapter's specific "no canonical candidates" error,
+  but its qualified:false fixture could never reach that code path --
+  it hit page.tsx's own earlier qualifiedResults.length===0 gate
+  instead. Fixed the fixture to genuinely produce a qualified result
+  the adapter still can't build a leg from, matching the test's real
+  intent.
+
+Both real application fixes verified via targeted debug
+instrumentation (added, confirmed actual runtime state, removed --
+zero debug code remains in the diff).
+
+Net: 16 failures -> 7 in this file. Full-suite regression check
+clean: 174/175 other files, 2514/2521 other tests unaffected.
