@@ -13,10 +13,23 @@ import { searchCspCandidates, describeCspSearchOutcome, type CspSearchRules } fr
 
 const RULES: CspSearchRules = { deltaMin: 0.15, deltaMax: 0.25, dteMin: 30, dteMax: 45, oiMin: 500, bidAskMax: 0.10 };
 
+// TE-0007D corrective — the real daysUntil() in cspSearch.ts is fully
+// local-time-consistent (parses a date string as local midnight, compares
+// against local midnight). This fixture used to compute the target date
+// locally but then format it via toISOString(), which forces a UTC
+// conversion -- a mismatch that can shift the calendar date by exactly
+// one day depending on timezone offset and time of day, producing the
+// exact "expected 40, got 41" flakiness this was corrective for. Fixed
+// to stay local-time-consistent throughout, matching the function under
+// test rather than introducing a UTC/local seam that doesn't exist there.
 function expDate(daysFromNow: number): string {
   const d = new Date();
+  d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + daysFromNow);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 interface LegSpec {

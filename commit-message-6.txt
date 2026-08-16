@@ -1,0 +1,21 @@
+fix: two small, real baseline test issues
+
+1. dashboardComposition.test.ts: [...map.entries()] spread requires
+   downlevelIteration/newer target. Switched to Array.from(...) --
+   same runtime behavior, no tsconfig change needed. Zero TS2802
+   errors now, not just fewer.
+
+2. cspSearch.test.ts: expDate() computed a date in local time but
+   formatted it via toISOString(), which forces a UTC conversion --
+   a mismatch that can shift the calendar date by exactly one day
+   depending on timezone offset and time of day. The real function
+   under test (daysUntil() in cspSearch.ts) is fully local-time-
+   consistent throughout; the fixture now matches it exactly instead
+   of introducing a UTC/local seam that doesn't exist in the real
+   code. Verified by simulation that the fix removes the seam
+   entirely rather than happening to pass in this sandbox's UTC-only
+   environment (where the original bug can't reproduce at all).
+
+Full suite verified: 3 failed files (down from 4), 172 passed (175
+total). Both TS2802 and cspSearch flakiness confirmed gone, not just
+not triggering this run.
