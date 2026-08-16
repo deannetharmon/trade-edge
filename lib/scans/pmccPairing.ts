@@ -21,6 +21,7 @@ import type {
   PmccPairingCounts,
   PmccPairingCriteria,
   PmccSessionResult,
+  PmccOnDemandResult,
 } from './pmccTypes';
 
 const FAILURE_MESSAGES: Record<PmccFailureCode, string> = {
@@ -286,3 +287,58 @@ export function pairPmccCandidates(input: {
     orderingLabel: 'Contract order',
   };
 }
+
+/**
+ * Checks one specific long/short pair on demand, reusing the exact same
+ * filterLegs/evaluatePair gates as the full scan -- per Alan's requirement,
+ * this always evaluates against the CURRENT criteria passed in, never a
+ * cached/stale session's criteria. Answers "was this specific structure
+ * ever evaluated, and if so what happened to it" independent of the
+ * retention limit that governs what a full scan's PmccSessionResult keeps.
+ *
+ * longChainLeg/shortChainLeg are null when the requested strike/expiration
+ * doesn't exist in the fetched chain at all -- distinct from existing in
+ * the chain but failing eligibility.
+ */
+export function evaluatePmccPairOnDemand(input: {
+  symbol: string;
+  underlyingPrice: number;
+  longChainLeg: PmccChainLeg | null;
+  shortChainLeg: PmccChainLeg | null;
+  criteria: PmccPairingCriteria;
+  asOf: Date;
+  marketSession: PmccMarketSession;
+}): PmccOnDemandResult {
+  const { symbol, underlyingPrice, longChainLeg, shortChainLeg, criteria, asOf, marketSession } = input;
+  validateCriteria(criteria);
+
+  const chainMissing = { long: longChainLeg == null, short: shortChainLeg == null };
+  if (chainMissing.long || chainMissing.short) {
+    return { outcome: 'not_found_in_chain', pair: null, longLegRejection: null, shortLegRejection: null, chainMissing };
+  }
+
+  const { eligible: eligibleLong, rejected: rejectedLong } =
+    filterLegs('long', [longChainLeg!], symbol, underlyingPrice, criteria, asOf, marketSession);
+  const { eligible: eligibleShort, rejected: rejectedShort } =
+    filterLegs('short', [shortChainLeg!], symbol, underlyingPrice, criteria, asOf, marketSession);
+
+  if (eligibleLong.length === 0 || eligibleShort.length === 0) {
+    return {
+      outcome: 'leg_rejected',
+      pair: null,
+      longLegRejection: rejectedLong[0] ?? null,
+      shortLegRejection: rejectedShort[0] ?? null,
+      chainMissing,
+    };
+  }
+
+  const { pair, structurallyValid } = evaluatePair(eligibleLong[0], eligibleShort[0], criteria);
+  if (pair.qualified) {
+    return { outcome: 'qualified', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
+  }
+  if (structurallyValid) {
+    return { outcome: 'near_miss', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
+  }
+  return { outcome: 'pair_rejected', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
+}
+
