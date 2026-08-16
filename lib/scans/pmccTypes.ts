@@ -177,3 +177,38 @@ export interface PmccSessionResult {
   incompleteAnalysis: boolean;
   orderingLabel: 'Contract order';
 }
+
+// PMCC on-demand pair lookup ticket. Confirmed via direct read: a
+// PmccSessionResult only retains its top maxQualifiedPairsRetained /
+// maxNearMissPairsRetained pairs after sorting by the interim neutral
+// "Contract order" (ticker -> long expiration -> short expiration -> long
+// strike -> short strike). Everything evaluated beyond that retention
+// limit is discarded -- only aggregate counts (qualifiedPairsOmittedByRetention
+// etc.) survive, not the individual pairs. That means a real, valid,
+// qualified structure a person is comparing against their own manually-
+// built broker trade can be entirely invisible in the retained set, with
+// no way to tell "was this genuinely disqualified" from "was this just
+// truncated by the retention limit" -- exactly what caused today's
+// frustration comparing against a real TastyTrade example.
+//
+// Three distinct outcomes a caller needs to be able to tell apart:
+export type PmccOnDemandOutcome =
+  | 'not_found_in_chain'   // the requested strike/expiration doesn't exist
+                            // in the fetched chain at all -- never evaluated
+  | 'leg_rejected'          // the specific long or short leg failed its own
+                            // eligibility gate (delta/DTE/OI/quote/etc.)
+  | 'pair_rejected'         // both legs individually eligible, but the pair
+                            // itself failed structural validation
+  | 'qualified'             // fully valid -- would be in qualifiedPairs if
+                            // there had been room within the retention limit
+  | 'near_miss';            // structurally valid but not qualified -- would
+                            // be in nearMissPairs if there had been room
+
+export interface PmccOnDemandResult {
+  outcome: PmccOnDemandOutcome;
+  pair: PmccPairResult | null;
+  longLegRejection: PmccLegRejection | null;
+  shortLegRejection: PmccLegRejection | null;
+  chainMissing: { long: boolean; short: boolean };
+}
+

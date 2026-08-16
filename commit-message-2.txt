@@ -1,0 +1,23 @@
+feat: PMCC on-demand pair lookup
+
+Confirmed root cause via direct read: PmccSessionResult only retains
+its top maxQualifiedPairsRetained/maxNearMissPairsRetained pairs
+after sorting by the interim neutral Contract order. Everything
+evaluated beyond that limit is discarded -- only aggregate counts
+survive, not the individual pairs. A real, valid, qualified structure
+someone is comparing against their own manually-built broker trade
+can be entirely invisible in the retained set, with no way to tell
+"genuinely disqualified" from "truncated by the retention limit."
+
+- evaluatePmccPairOnDemand(): reuses the exact filterLegs/evaluatePair
+  gates the full scan uses, applied to one specific pair. Five
+  outcomes: not_found_in_chain, leg_rejected, pair_rejected,
+  qualified, near_miss.
+- Always evaluates against the criteria passed in, never a cached
+  value -- verified by test.
+- The motivating test builds 12 genuinely qualified pairs, confirms
+  the full scan's retention limit truncates one out of view, then
+  proves the on-demand check correctly identifies that truncated
+  pair as real and qualified.
+
+Engine-level only. No UI wired up yet -- that is the next piece.
