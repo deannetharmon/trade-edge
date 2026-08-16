@@ -157,7 +157,7 @@ describe('TC-0001: buildDashboardComposition', () => {
       ];
     const riskInputs = buildDashboardSupportedRiskInputs(positions);
 
-    expect([...riskInputs.canonicalPositionMaxRiskByKey.entries()]).toEqual([
+    expect(Array.from(riskInputs.canonicalPositionMaxRiskByKey.entries())).toEqual([
       ['SUPPORTED', 1_000],
       ['DEBIT', 0],
       ['INCOMPLETE', 0],
@@ -168,14 +168,14 @@ describe('TC-0001: buildDashboardComposition', () => {
       maxRisk: 1_000,
       assignmentPreference: 'AVOID',
     }]);
-    expect([...riskInputs.todaysPrioritiesCapitalAtRiskByKey.entries()]).toEqual([
+    expect(Array.from(riskInputs.todaysPrioritiesCapitalAtRiskByKey.entries())).toEqual([
       ['SUPPORTED', 1_000],
       ['DEBIT', null],
       ['INCOMPLETE', null],
       ['LEGACY', null],
     ]);
     expect(riskInputs.portfolioHealthExposures).toEqual(riskInputs.canonicalPortfolioExposures);
-    expect([...riskInputs.portfolioReviewMaxRiskByKey.entries()]).toEqual([
+    expect(Array.from(riskInputs.portfolioReviewMaxRiskByKey.entries())).toEqual([
       ['SUPPORTED', 1_000],
       ['DEBIT', null],
       ['INCOMPLETE', null],
