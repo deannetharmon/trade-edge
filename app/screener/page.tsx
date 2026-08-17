@@ -7183,6 +7183,18 @@ export default function Home() {
       scope: { universeSymbols: pmcc, eligibleSymbols: pmcc },
       pmccSnapshot,
     });
+    // TE-0007F — Ian/Paul: score/pop/creditPct are structurally always
+    // null for PMCC (a debit structure, not a credit spread; PMCC's own
+    // roc field literally carries a pending('Generic spread scoring is
+    // not used for PMCC') placeholder, confirmed in pmccProduction.ts).
+    // Leaving the sort on one of those fields silently reproduces the
+    // "Contract order" bug this whole ticket exists to fix -- every
+    // candidate ties on null, order falls back to arrival order. Only
+    // resets when the CURRENT primary is one of those dead fields;
+    // never overrides a PMCC-relevant field the person already chose.
+    if (filteredSort.primary === 'score' || filteredSort.primary === 'pop' || filteredSort.primary === 'creditPct') {
+      setFilteredSort({ primary: 'widthMinusDebitPct', secondary: 'none' });
+    }
     const loopSymbols = session.plannedScanSymbols;
 
     try {
@@ -7766,16 +7778,38 @@ export default function Home() {
   const effectiveFilteredSort = cspTargetedSession
     ? ({ primary: 'score', secondary: 'none' } as SortSpec)
     : filteredSort;
-  let filteredQualified = activePmccSession ? filteredQualifiedChips : filteredQualifiedChips.filter(r => {
+  // TE-0007F — a THIRD real, pre-existing bug found in this same
+  // investigation, same class as the other two: the OI eligibility
+  // filter itself (not just the controls rendering, not just the
+  // sort) was also unconditionally bypassed for PMCC sessions. The
+  // floor control rendered, the sort worked, but the floor never
+  // actually excluded anything -- confirmed via a genuine test
+  // failure (floor set to 300, both results still rendered) before
+  // finding this.
+  let filteredQualified = filteredQualifiedChips.filter(r => {
     const strat = toOiStrategy(r.strategy);
     if (!strat || !r.bestCandidate) return true; // strategies with no OI mapping are unaffected
     const oi = evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), effectiveFilteredMinOi);
     filteredOiByResult.set(r, oi);
     return oi.eligible;
   });
-  filteredQualified = activePmccSession ? filteredQualified : sortItems(filteredQualified, effectiveFilteredSort, (r): SortableMetrics => {
+  // TE-0007F — a second real, pre-existing bug found while wiring PMCC
+  // sort/filter: this whole sortItems call was unconditionally skipped
+  // for PMCC sessions (activePmccSession ? filteredQualified : ...),
+  // meaning PMCC results were never actually sorted by anything at all,
+  // matching exactly the "Contract order" complaint that started this
+  // thread. Removed the bypass so PMCC gets real sorting like every
+  // other strategy.
+  filteredQualified = sortItems(filteredQualified, effectiveFilteredSort, (r): SortableMetrics => {
     const c = r.bestCandidate;
     const strat = toOiStrategy(r.strategy);
+    // TE-0007F — PMCC's three new sort fields read pmccPair.metrics
+    // directly (not the flattened bestCandidate shape, which doesn't
+    // carry width-minus-debit% or the raw leg data breakeven needs).
+    // Same formulas as PmccResultCard, deliberately kept identical so
+    // the sort order and the displayed numbers never silently diverge.
+    const pmccMetrics = r.pmccPair?.metrics;
+    const pmccBreakeven = pmccMetrics && r.pmccPair ? r.pmccPair.longLeg.strike + pmccMetrics.netDebitPerShare : null;
     return {
       score: c?.strategy === 'CSP'
         ? (c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore.total : null)
@@ -7787,6 +7821,11 @@ export default function Home() {
       otmPct: calcFilteredOtmPct(r),
       relevantLegOI: strat && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(strat, c)) : null,
       dte: c?.dte ?? null,
+      widthMinusDebitPct: pmccMetrics?.widthMinusDebitPctOfDebit ?? null,
+      breakevenPct: pmccBreakeven != null && r.price ? ((r.price - pmccBreakeven) / r.price) * 100 : null,
+      annualizedRoiPct: pmccMetrics && r.pmccPair && r.pmccPair.shortLeg.dte > 0
+        ? pmccMetrics.shortCreditToNetDebitPct * (365 / r.pmccPair.shortLeg.dte)
+        : null,
     };
   });
 
@@ -8410,7 +8449,21 @@ export default function Home() {
                   and Targeted modes are unchanged (their own filter rows
                   already precede their result lists) — see the ticket's
                   documented Filtered-mode-first scope decision. */}
-              {!activePmccSession && (screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
+              {/* TE-0007F — a real, pre-existing bug found while scoping
+                  PMCC sort/filter work (Ian/Paul, this session): the
+                  pmcc-result-controls branch below was added inside this
+                  ternary on 2026-08-15 (c6dda04, "PMCC/CC result-label and
+                  OI tooltip accuracy"), correctly wired to real state
+                  (filteredMinOi/filteredSort) with correct copy -- but the
+                  outer !activePmccSession guard predates that commit and
+                  was never updated, structurally preventing a PMCC
+                  session from ever reaching its own branch. Confirmed via
+                  git log -S and direct definition read
+                  (activePmccSession = requestedStrategy === 'pmcc') that
+                  this made the PMCC branch dead code since the day it was
+                  added. This is exactly what produced the screenshot with
+                  zero visible controls that started this whole thread. */}
+              {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
                 activeSession?.requestedStrategy === 'csp' ? (
                   <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
@@ -8426,8 +8479,8 @@ export default function Home() {
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short call only. The long LEAPS call is a required core position, not a protective leg, and is not subject to this floor. A positive OI floor fails closed when OI is missing.</p>
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the lower of the long LEAPS call's and short call's OI — both legs are required positions, not a protective/core distinction (matching IC's identical two-required-legs rule; confirmed via lib/screener/screenerResultOrdering.ts's own computeRelevantLegOI). A positive OI floor fails closed when either leg's OI is missing.</p>
                   </section>
                 ) : <FilteredResultControls
                   results={results}
@@ -8693,6 +8746,15 @@ export default function Home() {
                     otmPct: calcRankedOtmPct(r),
                     relevantLegOI: strat && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(strat, c)) : null,
                     dte: c?.dte ?? null,
+                    // TE-0007F — PMCC only ever runs in Filter mode
+                    // (confirmed: SCREENER-RESULTS-0001's 'pmcc' session
+                    // is filter-mode-only), so Rank mode structurally
+                    // never receives a PMCC result here. null, not
+                    // duplicated PMCC-specific logic this path can't
+                    // reach.
+                    widthMinusDebitPct: null,
+                    breakevenPct: null,
+                    annualizedRoiPct: null,
                   };
                 };
 

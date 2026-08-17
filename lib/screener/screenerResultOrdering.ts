@@ -198,6 +198,21 @@ export const SORT_FIELDS = [
   'otmPct',
   'relevantLegOI',
   'dte',
+  // TE-0007F — PMCC-specific sort keys (Ian/Paul/Diane, scoping session).
+  // null for every other strategy (CSP/CC/BPS/BCS/IC), matching the
+  // existing convention (e.g. relevantLegOI's own strategy-conditional
+  // population) rather than a new, separate mechanism.
+  'widthMinusDebitPct',
+  'breakevenPct',
+  // TE-0007F — deliberately NOT a reuse of the existing rocPct field.
+  // bestCandidate.roc is load-bearing elsewhere (lib/scans/checklist.ts,
+  // rank-scoring.ts, page.tsx's own checklist row all gate pass/fail on
+  // roc >= ROC_MIN_SPREAD). Confirmed via direct search before touching
+  // anything: repurposing that shared field to carry PMCC's much larger
+  // annualized figure would silently change a real qualification gate
+  // calibrated for non-annualized values, for a reason that has nothing
+  // to do with this ticket. This is its own, separate field instead.
+  'annualizedRoiPct',
 ] as const;
 
 export type SortField = (typeof SORT_FIELDS)[number];
@@ -213,6 +228,9 @@ export const SORT_FIELD_LABELS: Record<SortField, string> = {
   otmPct: 'OTM %',
   relevantLegOI: 'Relevant-leg OI',
   dte: 'DTE',
+  widthMinusDebitPct: 'Width minus debit %',
+  breakevenPct: 'Breakeven distance %',
+  annualizedRoiPct: 'Annualized ROI %',
 };
 
 export interface SortSpec {
@@ -235,6 +253,9 @@ export interface SortableMetrics {
   otmPct: number | null;
   relevantLegOI: number | null;
   dte: number | null;
+  widthMinusDebitPct: number | null;
+  breakevenPct: number | null;
+  annualizedRoiPct: number | null;
 }
 
 // "Selecting a primary field already used as secondary should clear or
