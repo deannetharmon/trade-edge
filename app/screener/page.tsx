@@ -8105,8 +8105,29 @@ export default function Home() {
     // the sort order and the displayed numbers never silently diverge.
     const pmccMetrics = r.pmccPair?.metrics;
     const pmccBreakeven = pmccMetrics && r.pmccPair ? r.pmccPair.longLeg.strike + pmccMetrics.netDebitPerShare : null;
+    // PMCC-RANK-0001 — score was previously falling through to
+    // scoreCandidate(), which has no PMCC-specific logic and returns
+    // null for it, so the "Score" sort silently did nothing for PMCC
+    // results even though the score badge is real and visible on every
+    // card. Uses the exact same computePmccScore already powering
+    // PmccResultCard's badge/breakdown, so the sort order and the
+    // displayed number can never disagree. earningsDeductionEnabled
+    // defaults true here (the card's own default), matching the score
+    // shown before any manual per-card override.
+    const pmccScore = r.pmccPair && pmccMetrics ? computePmccScore({
+      annualizedRoiPct: pmccAnnualizedRoi(r),
+      longLegSpreadPct: r.pmccPair.longLeg.quote.spreadPct,
+      longLegOpenInterest: r.pmccPair.longLeg.openInterest,
+      shortLegSpreadPct: r.pmccPair.shortLeg.quote.spreadPct,
+      shortLegOpenInterest: r.pmccPair.shortLeg.openInterest,
+      earningsDate: r.earningsDate ?? null,
+      shortLegExpiration: r.pmccPair.shortLeg.expiration,
+      earningsDeductionEnabled: true,
+    }).total : null;
     return {
-      score: c?.strategy === 'CSP'
+      score: r.pmccPair
+        ? pmccScore
+        : c?.strategy === 'CSP'
         ? (c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore.total : null)
         : (strat ? scoreCandidate(r, rankConfig)?.score ?? null : null),
       pop: c?.pop ?? null,
@@ -8774,7 +8795,7 @@ export default function Home() {
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the lower of the long LEAPS call's and short call's OI — both legs are required positions, not a protective/core distinction (matching IC's identical two-required-legs rule; confirmed via lib/screener/screenerResultOrdering.ts's own computeRelevantLegOI). A positive OI floor fails closed when either leg's OI is missing.</p>
                     {/* TE-0007H — reuses the exact filterHiddenSymbols/
                         toggleFilterSymbol state and interaction pattern
@@ -9457,5 +9478,6 @@ export default function Home() {
     </div>
   );
 }
+
 
 
