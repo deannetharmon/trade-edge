@@ -13,19 +13,25 @@ import { useId, type ReactNode } from 'react';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export function PmccTickerDisclosure({
-  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, defaultOpen, borderClassName, children,
+  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, itemLabel = 'qualified structure', defaultOpen, borderClassName, children,
 }: {
   symbol: string;
   price: number | null;
   candidateCount: number;
   bestWidthMinusDebitPct: number | null;
   bestAnnualizedRoiPct: number | null;
+  // SCREENER-PMCC-DISQUALIFIED-GROUPING-0001 -- this component now also
+  // groups the near-miss and audit sections (Dean's explicit ask: "It
+  // should behave just like the qualified list"), which are not
+  // "qualified structures." Defaults to the original wording so the
+  // existing qualified-section call site needs no change.
+  itemLabel?: string;
   defaultOpen: boolean;
   borderClassName: string;
   children: ReactNode;
 }) {
   const panelId = useId();
-  const countLabel = `${candidateCount} qualified structure${candidateCount === 1 ? '' : 's'}`;
+  const countLabel = `${candidateCount} ${itemLabel}${candidateCount === 1 ? '' : 's'}`;
   const bestLine = [
     bestWidthMinusDebitPct != null ? `best width-minus-debit ${bestWidthMinusDebitPct.toFixed(1)}%` : null,
     bestAnnualizedRoiPct != null ? `best annualized ROI ${bestAnnualizedRoiPct.toFixed(1)}%` : null,
@@ -52,3 +58,4 @@ export function PmccTickerDisclosure({
     </section>
   );
 }
+
