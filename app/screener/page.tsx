@@ -6578,6 +6578,16 @@ export default function Home() {
   // audit trail of *why* something didn't qualify, not a ranked results list.
   const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
   const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
+  // PMCC-VIEW-MODE-0001 -- Diane's original score mockup was a flat,
+  // globally-ranked list (no ticker grouping); PmccTickerDisclosure was a
+  // separate, later feature (Ian's per-ticker triage ask). The two got
+  // conflated into "grouping is the only way to view results," which
+  // meant a ticker's 10th-best structure could render above another
+  // ticker's 2nd-best simply because grouping came first -- not a true
+  // cross-ticker rank. Both views are real and wanted; this makes the
+  // choice explicit instead of picking one at the expense of the other.
+  // Defaults to 'flat' per Dean/Ian/Diane's explicit sign-off.
+  const [pmccViewMode, setPmccViewMode] = useState<'flat' | 'grouped'>('flat');
 
   // ── SCREENER-RESULTS-0001 — canonical scan-session wiring ────────────────
   // `activeSession` is the single authoritative record for the currently
@@ -8896,6 +8906,22 @@ export default function Home() {
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
                     <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
+                        rank (Diane's original score mockup); grouped is
+                        Ian's per-ticker triage view (PmccTickerDisclosure).
+                        Both real, both wanted -- this is an explicit either/
+                        or, not a replacement of one by the other. */}
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>View</span>
+                      {(['flat', 'grouped'] as const).map(mode => (
+                        <button key={mode} onClick={() => setPmccViewMode(mode)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            pmccViewMode === mode ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                          }`}>
+                          {mode === 'flat' ? 'Flat ranked list' : 'Grouped by ticker'}
+                        </button>
+                      ))}
+                    </div>
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the lower of the long LEAPS call's and short call's OI — both legs are required positions, not a protective/core distinction (matching IC's identical two-required-legs rule; confirmed via lib/screener/screenerResultOrdering.ts's own computeRelevantLegOI). A positive OI floor fails closed when either leg's OI is missing.</p>
                     {/* TE-0007H — reuses the exact filterHiddenSymbols/
                         toggleFilterSymbol state and interaction pattern
@@ -9150,14 +9176,26 @@ export default function Home() {
                             kind="qualified" defaultOpen borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </ExpirationDisclosure>
-                        )) : activePmccSession ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
+                        )) : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                           <PmccTickerDisclosure key={symbol} symbol={symbol}
                             price={group[0]?.price ?? null} candidateCount={group.length}
                             bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore}
                             defaultOpen={pmccTickerGroups.length === 1} borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </PmccTickerDisclosure>
-                        )) : filteredQualified.map(r => {
+                        )) : activePmccSession ? (
+                          // PMCC-VIEW-MODE-0001 -- flat mode: filteredQualified
+                          // is already correctly sorted by filteredSort (the
+                          // Sort control), rendered directly with no ticker
+                          // grouping at all -- this is the true cross-ticker
+                          // rank, matching Diane's original score mockup. A
+                          // structure on AMD with a higher score than a
+                          // structure on TSLA will render above it here,
+                          // which grouped mode can never show regardless of
+                          // sort field, since grouping itself clusters every
+                          // ticker's structures together first.
+                          filteredQualified.map(renderQualifiedCandidate)
+                        ) : filteredQualified.map(r => {
                           // CSP-WORKFLOW-0001 — candidateId (when present,
                           // i.e. CSP results) is the stable identity; other
                           // strategies fall back to symbol+strategy exactly
@@ -9681,6 +9719,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
