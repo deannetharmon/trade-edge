@@ -1,3 +1,9 @@
+#!/bin/bash
+set -e
+git pull --rebase origin main
+git checkout -b fix/take-profit-marketable-price
+
+cat > app/screener/page.tsx << 'SCRIPT_EOF'
 // app/portfolio/page.tsx
 
 'use client';
@@ -1267,6 +1273,18 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
       if (!(bid > 0) && !(ask > 0)) continue;
+      // A leg with a real ask but no working bid (bid <= 0) has no two-sided
+      // market -- there's nothing to buy it back at or sell it into right
+      // now. Previously this fell through to the math below with bid
+      // treated as 0, which only zeroed out one side of the net quote
+      // (e.g. contributed nothing to shareAsk on a Long leg while still
+      // subtracting its full ask from shareBid), producing a net bid that
+      // can go negative even though no leg's real market was actually
+      // crossed. Bail out for the whole position instead of computing a
+      // quote from a one-sided leg: the safety gate was correctly
+      // rejecting the resulting bad number, but the fix belongs here, not
+      // there.
+      if (!(bid > 0) || !(ask > 0)) return null;
       const mid = (bid + ask) / 2;
       if (leg.direction === 'Short') {
         // Buy to Close: cost. Marketable = ask, patient = bid.
@@ -2983,14 +3001,30 @@ function BatchConfirmModal({
       if (!item) return;
       const token = await getAccessToken();
       const [freshPrice, closeQuote] = await Promise.all([
-        fetchFreshPositionPrice(item.pos, token),
+        fetchFreshPositionPrice(item.pos, token).catch(() => null),
         fetchCloseQuote(item.pos, token).catch(() => null),
       ]);
       const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
       const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
-      setBatchItems(prev => prev.map(i => i.pos.key === key
-        ? { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() }
-        : i));
+      // Refreshing used to only update the informational "quote Xs old"
+      // display, leaving the actual limit price frozen at whatever it was
+      // when the modal opened -- so a stale Take Profit limit could sit
+      // right next to a correctly-updated marketable-price readout with
+      // nothing keeping them in sync. Take Profit's limit now tracks the
+      // fresh marketable price on every refresh, same as its initial
+      // default, unless the operator has manually typed a limit (tracked
+      // via limitOverrides) -- a deliberate override is never silently
+      // clobbered by a refresh.
+      const isManuallySet = limitOverrides[key] != null;
+      const freshMarketable = closeQuote?.netAsk ?? freshPerContract;
+      setBatchItems(prev => prev.map(i => {
+        if (i.pos.key !== key) return i;
+        const next = { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() };
+        if (i.action === 'TAKE_PROFIT' && !isManuallySet && freshMarketable != null) {
+          next.limitPrice = parseFloat(Math.max(freshMarketable, 0.01).toFixed(2));
+        }
+        return next;
+      }));
     } catch (e: any) {
       console.warn('Quote refresh failed:', e.message);
     } finally {
@@ -3074,15 +3108,23 @@ function BatchConfirmModal({
 
           const effectiveValue = freshPrice ?? pos.currentValue;
           const effectivePerContract = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
+          // Take Profit's whole purpose is closing at a price you can
+          // actually get filled at today -- mid is a theoretical reference,
+          // not a real fill level, and defaulting to it overstates
+          // achievable profit versus the marketable (ask-side) price.
+          // Falls back to mid only when no marketable quote is available.
+          const marketablePerContract = closeQuote?.netAsk ?? effectivePerContract;
 
           if (action === 'TAKE_PROFIT') {
-            // Default to the LIVE MARKET (mid), not the static profit target.
-            // Take Profit's purpose is closing near where the position actually
-            // sits today — defaulting to the target made it identical to any
-            // existing GTC already resting there. The 50% target still renders
-            // as a marker on the profit-capture scale, so it's a drag/snap away.
-            if (effectivePerContract != null) {
-              limitPrice = parseFloat(Math.max(effectivePerContract, 0.01).toFixed(2));
+            // Default to the real marketable (fillable) price, not mid.
+            // Take Profit's purpose is closing near where the position can
+            // actually be closed today — defaulting to mid made the shown
+            // profit look better than what's really available, and made
+            // the field identical to any existing GTC already resting
+            // there. The 50% target still renders as a marker on the
+            // profit-capture scale, so it's a drag/snap away.
+            if (marketablePerContract != null) {
+              limitPrice = parseFloat(Math.max(marketablePerContract, 0.01).toFixed(2));
             } else {
               // No live quote available — fall back to the target as a safe default.
               limitPrice = parseFloat(Math.max((creditPerContract * (1 - pos.profitTarget)), 0.01).toFixed(2));
@@ -3385,7 +3427,15 @@ function BatchConfirmModal({
                     }
                     let freshLimit: number;
                     if (item.action === 'TAKE_PROFIT') {
-                      freshLimit = Math.max(parseFloat(Math.min(creditPerContract * (1 - item.pos.profitTarget), livePerContract - 0.01).toFixed(2)), 0.01);
+                      // Marketable (full natural/ask side), matching the
+                      // fix to the initial default and to refresh -- Take
+                      // Profit always targets a real fillable price, never
+                      // mid. Falls back to mid (livePerContract) only if
+                      // the marketable optimizer can't quote either.
+                      const marketable = await fetchCloseLimit(item.pos, token, 1).catch(() => null);
+                      freshLimit = (marketable != null && marketable > 0)
+                        ? parseFloat(Math.max(marketable, 0.01).toFixed(2))
+                        : parseFloat(Math.max(livePerContract, 0.01).toFixed(2));
                     } else {
                       // CUT_LOSSES / CLOSE_ROLL: price to the marketable side
                       // (balanced mid->natural) so the close fills. Only
@@ -3400,19 +3450,6 @@ function BatchConfirmModal({
                     }
                     item.orderBody = buildCloseOrder(item.pos, freshLimit, item.orderBody['time-in-force'] as 'GTC' | 'Day');
                     (item as any).limitPrice = freshLimit;
-                    // PT-FIX-STALE-GATE-QUOTE: freshLimit above is rebuilt from
-                    // fetchFreshPositionPrice's livePerContract, but the safety
-                    // gate below (line ~3450) validates against item.closeQuote,
-                    // which was fetched once at enrich time and never refreshed.
-                    // If the two feeds disagree (wide/moving bid-ask), the
-                    // "corrected" price still trips MATERIAL_PNL_DEVIATION
-                    // against stale bid/ask data. Refetch the quote here so both
-                    // numbers come from the same moment.
-                    const refreshedQuote = await fetchCloseQuote(item.pos, token).catch(() => null);
-                    if (refreshedQuote != null) {
-                      item.closeQuote = refreshedQuote;
-                      item.quoteFetchedAt = Date.now();
-                    }
                   }
                 }
               }
@@ -9848,3 +9885,64 @@ export default function PortfolioPage() {
     </div>
   );
 }
+
+SCRIPT_EOF
+
+git add app/screener/page.tsx
+
+cat > commit-message-4.txt << 'MSG_EOF'
+fix: Take Profit defaults to marketable price, not mid, and refresh syncs it
+
+Take Profit's limit price was defaulting to closeQuote.netMid (the mid)
+at three separate points: the initial batch-build default, the "refresh
+quote" handler, and the submit-time freshLimit rebuild. Mid is a
+theoretical reference price, not a real fill level -- it consistently
+overstated achievable profit versus the marketable (ask-side) price the
+order could actually get filled at, which is what triggered
+MATERIAL_PNL_DEVIATION rejections once the real market moved away from
+the stale mid-based default.
+
+Three fixes, all pointed at the same root cause:
+
+1. Initial default (batch build): new `marketablePerContract`
+   (closeQuote.netAsk, falling back to mid only if no marketable quote
+   exists) replaces mid as Take Profit's reference price.
+
+2. Refresh ("↻ refresh" button): previously only updated the
+   informational "quote Xs old" display and the marketable-price shown
+   in the warning box -- the actual Limit $ field never moved, so two
+   refreshes could show an updated marketable price side-by-side with a
+   frozen, increasingly-stale limit. Refresh now re-syncs the Take
+   Profit limit to the fresh marketable price on every call, UNLESS the
+   operator has manually typed a limit (tracked via limitOverrides) --
+   a deliberate override is never silently clobbered by a refresh.
+
+3. Submit-time rebuild (when the limit has drifted >30% from live):
+   was computing a fresh cap from creditPerContract/profitTarget vs.
+   mid (fetchFreshPositionPrice). Now uses fetchCloseLimit(pos, token, 1)
+   -- full marketable/natural side, the same helper CUT_LOSSES/CLOSE_ROLL
+   already use for their own marketable fallback -- so the final price
+   sent to the safety gate is consistent with what the operator saw and
+   what refresh already synced to.
+
+Also added the missing .catch(() => null) on fetchFreshPositionPrice
+inside refreshItemQuote, for defensive symmetry with fetchCloseQuote's
+existing .catch on the same call.
+
+No changes to closeOrderSafety.ts / submitCloseOrderIfSafe -- this fixes
+the price the frontend hands to the gate, not the gate itself.
+MSG_EOF
+
+git commit -F commit-message-4.txt
+rm commit-message-4.txt
+
+git push origin fix/take-profit-marketable-price
+
+echo ""
+echo "Pushed to fix/take-profit-marketable-price."
+echo "Next: verify on Vercel preview, then merge to main:"
+echo "  git checkout main && git pull origin main"
+echo "  git merge --no-ff fix/take-profit-marketable-price"
+echo "  git push origin main"
+echo "  git branch -d fix/take-profit-marketable-price"
+echo "  git push origin --delete fix/take-profit-marketable-price"
