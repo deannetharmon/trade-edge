@@ -143,6 +143,7 @@ import { PmccScanModal, type PmccScanCriteria } from '@/features/screener/compon
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
+import { PmccTickerDisclosure } from '@/features/screener/components/PmccTickerDisclosure';
 import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
@@ -3514,9 +3515,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const rollRunway = pair && pair.shortLeg.dte > 0
     ? Math.floor((pair.longLeg.dte - pair.shortLeg.dte) / pair.shortLeg.dte)
     : null;
-  const annualizedRoi = metrics && pair && pair.shortLeg.dte > 0
-    ? metrics.shortCreditToNetDebitPct * (365 / pair.shortLeg.dte)
-    : null;
+  const annualizedRoi = pmccAnnualizedRoi(result);
   // TE-0007G — Ian/Paul-reviewed. Real, traced math, not invented:
   // rollRunway (above) counts ADDITIONAL rolls after the current one,
   // so total times a credit gets collected is rollRunway + 1.
@@ -5723,6 +5722,21 @@ function calcTargetedEntryOtmPct(entry: TargetedScanEntry): number | null {
   return null;
 }
 
+// TE-0007H — extracted from PmccResultCard's own inline computation so
+// the per-ticker summary group (below) and each individual card are
+// mathematically guaranteed to agree, never a separately-maintained
+// copy that could quietly drift. Same real reasoning as when this
+// formula was first built: uses THIS pair's own shortLeg.dte as the
+// cycle length (self-consistent with what's shown on the card), never
+// a separate assumed constant.
+function pmccAnnualizedRoi(result: ScreenResult): number | null {
+  const pair = result.pmccPair;
+  const metrics = pair?.metrics;
+  return metrics && pair && pair.shortLeg.dte > 0
+    ? metrics.shortCreditToNetDebitPct * (365 / pair.shortLeg.dte)
+    : null;
+}
+
 // SCREENER-OI-0001 — maps a real SpreadCandidate/ScreenResult strategy
 // string onto the canonical OiStrategy union. Every strategy the Screener
 // actually produces candidates for today (CSP/CC/BPS/BCS/IC/PMCC) maps
@@ -7793,8 +7807,16 @@ export default function Home() {
   );
   const cspNonFilterSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode !== 'filter';
   const activePmccSession = activeSession?.requestedStrategy === 'pmcc';
-  const filteredQualifiedChips = cspNonFilterSession || activePmccSession ? qualified : applyFilterModeChips(qualified);
-  const filteredDisqualified = cspNonFilterSession || activePmccSession ? disqualified : applyFilterModeChips(disqualified);
+  // TE-0007H — a fourth real, pre-existing bug found in this same
+  // investigation pattern: filteredQualifiedChips/filteredDisqualified
+  // bypassed applyFilterModeChips entirely for PMCC, even though that
+  // function already has its own correct, internal PMCC early-return
+  // (skips the credit-spread-specific POP/creditRatio/OTM checks, but
+  // still applies the symbol-hide filter first). The outer bypass meant
+  // filterHiddenSymbols/toggleFilterSymbol -- real, working, already
+  // used by every other strategy -- silently did nothing for PMCC.
+  const filteredQualifiedChips = cspNonFilterSession ? qualified : applyFilterModeChips(qualified);
+  const filteredDisqualified = cspNonFilterSession ? disqualified : applyFilterModeChips(disqualified);
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
   // sort, applied to the QUALIFIED section only. Eligibility filters
@@ -8527,6 +8549,38 @@ export default function Home() {
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
                     <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the lower of the long LEAPS call's and short call's OI — both legs are required positions, not a protective/core distinction (matching IC's identical two-required-legs rule; confirmed via lib/screener/screenerResultOrdering.ts's own computeRelevantLegOI). A positive OI floor fails closed when either leg's OI is missing.</p>
+                    {/* TE-0007H — reuses the exact filterHiddenSymbols/
+                        toggleFilterSymbol state and interaction pattern
+                        already real and working in FilteredResultControls's
+                        own Tickers row -- not a new mechanism. That
+                        component wasn't reused wholesale here since it
+                        also renders credit-spread-specific sliders (POP/
+                        OTM/credit ratio minimums) that don't apply to a
+                        debit structure. Genuine, related bug found and
+                        fixed alongside this: filteredQualifiedChips's own
+                        activePmccSession bypass meant hiding a symbol via
+                        this state never actually took effect for PMCC,
+                        the same dead-guard class fixed three times
+                        earlier this session -- see the fix below. */}
+                    {(() => {
+                      const pmccAllSymbols = Array.from(new Set(qualified.map(r => r.symbol))).sort();
+                      return pmccAllSymbols.length > 1 && (
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[9px] ${th.textFaint} shrink-0`}>Tickers</span>
+                          {pmccAllSymbols.map(sym => {
+                            const hidden = filterHiddenSymbols.includes(sym);
+                            return (
+                              <button key={sym} onClick={() => toggleFilterSymbol(sym)}
+                                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                                  hidden ? `${th.border} ${th.textFaint} line-through opacity-40` : 'border-amber-600 text-amber-300 bg-amber-500/10'
+                                }`}>
+                                {sym} <span className="opacity-60">({qualified.filter(r => r.symbol === sym).length})</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </section>
                 ) : <FilteredResultControls
                   results={results}
@@ -8653,6 +8707,37 @@ export default function Home() {
                       group.push(result); groups.set(expiration, group); return groups;
                     }, new Map<string, ScreenResult[]>()).entries()).sort(([a], [b]) => a.localeCompare(b))
                   : [];
+                // TE-0007H — Ian's real, priority addition: "I'd want a
+                // collapsed view: ticker, best width-minus-debit%, best
+                // annualized ROI, count of qualified structures... more
+                // valuable to me day-to-day than the AI box, since it's
+                // the thing that actually helps me triage 171 results
+                // down to the 5 I'll seriously look at." Same real
+                // grouping pattern as cspExpirationGroups above, grouped
+                // by symbol instead of expiration. bestWidthMinusDebitPct
+                // reads the real, already-computed metrics field
+                // directly; bestAnnualizedRoiPct reuses pmccAnnualizedRoi
+                // (the shared helper extracted above PmccResultCard's own
+                // use of it), so the "best" figures shown here are
+                // guaranteed to match what each individual card
+                // underneath actually displays, never a separately
+                // computed, potentially-drifting copy.
+                const pmccTickerGroups = activePmccSession
+                  ? Array.from(filteredQualified.reduce((groups, result) => {
+                      const group = groups.get(result.symbol) ?? [];
+                      group.push(result); groups.set(result.symbol, group); return groups;
+                    }, new Map<string, ScreenResult[]>()).entries())
+                    .map(([symbol, group]): [string, ScreenResult[], number | null, number | null] => {
+                      const widthPcts = group.map(r => r.pmccPair?.metrics?.widthMinusDebitPctOfDebit).filter((v): v is number => v != null);
+                      const roiPcts = group.map(r => pmccAnnualizedRoi(r)).filter((v): v is number => v != null);
+                      return [
+                        symbol, group,
+                        widthPcts.length > 0 ? Math.max(...widthPcts) : null,
+                        roiPcts.length > 0 ? Math.max(...roiPcts) : null,
+                      ];
+                    })
+                    .sort(([, , aWidth], [, , bWidth]) => (bWidth ?? -Infinity) - (aWidth ?? -Infinity))
+                  : [];
                 return (
                 <>
                   {filteredQualified.length > 0 && (
@@ -8665,6 +8750,13 @@ export default function Home() {
                             kind="qualified" defaultOpen borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </ExpirationDisclosure>
+                        )) : activePmccSession ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi]) => (
+                          <PmccTickerDisclosure key={symbol} symbol={symbol}
+                            price={group[0]?.price ?? null} candidateCount={group.length}
+                            bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
+                            defaultOpen={pmccTickerGroups.length === 1} borderClassName={th.border}>
+                            {group.map(renderQualifiedCandidate)}
+                          </PmccTickerDisclosure>
                         )) : filteredQualified.map(r => {
                           // CSP-WORKFLOW-0001 — candidateId (when present,
                           // i.e. CSP results) is the stable identity; other

@@ -146,6 +146,31 @@ function buildPmccResult(): ScreenResult {
   return results[0];
 }
 
+// TE-0007H — genuinely new fixture need: every prior test in this file
+// uses one symbol ('ACME'). Ticker grouping/filtering needs real,
+// distinct symbols. makeLeg/pairPmccCandidates are hardcoded to 'ACME'
+// throughout this file, so this builds a second symbol's fixture from
+// scratch using the same real, proven pairPmccCandidates/
+// buildPmccScreenResults chain, not a different mechanism.
+function buildPmccResultForSymbol(symbol: string, underlyingPrice: number, longAsk: number, shortBid: number): ScreenResult {
+  const expiration = { long: '2027-06-10', short: '2026-09-13' };
+  const strike = { long: 100, short: 120 };
+  const leg = (role: 'long' | 'short'): PmccChainLeg => ({
+    underlyingSymbol: symbol, optionType: 'C', expiration: expiration[role], strike: strike[role],
+    delta: role === 'long' ? 0.80 : 0.25, openInterest: 500,
+    bid: role === 'long' ? longAsk - 0.20 : shortBid, ask: role === 'long' ? longAsk : Number((shortBid * 1.05).toFixed(2)),
+    occSymbol: `${symbol}${expiration[role].slice(2).replace(/-/g, '')}C${String(strike[role] * 1000).padStart(8, '0')}`,
+    quoteTimestamp: '2026-08-14T14:59:30.000Z', delayed: false,
+  });
+  const pairing = pairPmccCandidates({
+    symbol, underlyingPrice, longLegs: [leg('long')], shortLegs: [leg('short')],
+    criteria, asOf, marketSession: 'open',
+  });
+  const results = buildPmccScreenResults(pairing, { symbol, price: underlyingPrice, ivr: 35, underlyingType: 'stock' });
+  expect(results).toHaveLength(1);
+  return results[0];
+}
+
 function seedPmccSession(results: ScreenResult[]) {
   let session = createScanSession({
     mode: 'filter', requestedStrategy: 'pmcc',
@@ -156,6 +181,32 @@ function seedPmccSession(results: ScreenResult[]) {
     pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria },
   });
   session = recordSymbolEvaluated(session, 'ACME', results);
+  session = completeSession(session);
+  kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+  kv.set('results', results);
+}
+
+// TE-0007H — multi-symbol variant of seedPmccSession above: groups the
+// given results by their own real symbol, sets scope to every distinct
+// symbol present, and calls recordSymbolEvaluated once per symbol
+// (required -- it validates every supplied result's symbol matches the
+// symbol being recorded, confirmed via direct read of scanSession.ts).
+function seedPmccSessionMultiSymbol(results: ScreenResult[]) {
+  const bySymbol = new Map<string, ScreenResult[]>();
+  for (const r of results) {
+    const group = bySymbol.get(r.symbol) ?? [];
+    group.push(r);
+    bySymbol.set(r.symbol, group);
+  }
+  const symbols = Array.from(bySymbol.keys());
+  let session = createScanSession({
+    mode: 'filter', requestedStrategy: 'pmcc',
+    scope: { universeSymbols: symbols, eligibleSymbols: symbols },
+    pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria },
+  });
+  for (const [symbol, group] of Array.from(bySymbol.entries())) {
+    session = recordSymbolEvaluated(session, symbol, group);
+  }
   session = completeSession(session);
   kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
   kv.set('results', results);
@@ -348,5 +399,85 @@ describe('PMCC results — real sort and OI filter (previously dead code paths)'
     // not just present on screen.
     await waitFor(() => expect(screen.getAllByTestId('pmcc-result-card')).toHaveLength(1));
     expect(within(screen.getByTestId('pmcc-result-card')).getByText(/120C/)).toBeInTheDocument();
+  });
+});
+
+// TE-0007H — Dean/Ian/Paul-reviewed: real per-ticker grouping (Ian's own
+// priority addition -- "the thing that actually helps me triage 171
+// results down to the 5 I'll seriously look at") and a real ticker
+// filter, reusing filterHiddenSymbols/toggleFilterSymbol -- already real,
+// already working for every other strategy, previously bypassed for
+// PMCC by the same dead-guard class fixed three times earlier this
+// session (filteredQualifiedChips's own activePmccSession bypass).
+//
+// Real, hand-verified numbers for two distinct symbols (long strike 100,
+// short strike 120, short DTE 30 throughout, matching every other
+// fixture in this file):
+//   AAPL: long ask 20.00, short bid 5.00 -> net debit 15.00,
+//     width-minus-debit (20-15)/15*100 = 33.33%,
+//     annualized ROI (5/15*100)*(365/30) = 405.6%
+//   MSFT: long ask 23.00, short bid 4.00 -> net debit 19.00,
+//     width-minus-debit (20-19)/19*100 = 5.26%,
+//     annualized ROI (4/19*100)*(365/30) = 256.1%
+// AAPL wins on both metrics -- ticker groups sort descending by best
+// width-minus-debit%, so AAPL's group must render before MSFT's.
+describe('PMCC results — per-ticker grouping and ticker filter (Ian/Paul-reviewed)', () => {
+  it('groups qualified results by symbol, shows the real best width-minus-debit%/annualized ROI per group, sorted best-first, collapsed by default', async () => {
+    const aapl = buildPmccResultForSymbol('AAPL', 110, 20.00, 5.00);
+    const msft = buildPmccResultForSymbol('MSFT', 110, 23.00, 4.00);
+    expect(aapl.pmccPair?.metrics?.widthMinusDebitPctOfDebit).toBeCloseTo(33.33, 1);
+    expect(msft.pmccPair?.metrics?.widthMinusDebitPctOfDebit).toBeCloseTo(5.26, 1);
+
+    seedPmccSessionMultiSymbol([msft, aapl]); // deliberately seeded worst-first
+    renderScreener();
+
+    const groups = await screen.findAllByTestId('pmcc-ticker-group');
+    expect(groups).toHaveLength(2);
+    // Best-first: AAPL's group (33.3%) must lead, even though MSFT was
+    // seeded first -- proving this is real sorting, not seed/arrival
+    // order (the exact "Contract order" bug class this whole PMCC
+    // effort exists to fix).
+    expect(within(groups[0]).getByText('AAPL')).toBeInTheDocument();
+    expect(within(groups[0]).getByText(/best width-minus-debit 33\.3%/)).toBeInTheDocument();
+    expect(within(groups[0]).getByText(/best annualized ROI 405\.6%/)).toBeInTheDocument();
+    expect(within(groups[1]).getByText('MSFT')).toBeInTheDocument();
+    expect(within(groups[1]).getByText(/best width-minus-debit 5\.3%/)).toBeInTheDocument();
+
+    // Collapsed by default with more than one ticker (Ian's stated
+    // triage need: decide which tickers deserve a closer look before
+    // opening any card) -- no result cards visible yet.
+    expect(screen.queryAllByTestId('pmcc-result-card')).toHaveLength(0);
+
+    // Expanding one group reveals only that symbol's card, not both.
+    fireEvent.click(within(groups[0]).getByRole('button', { name: /AAPL/ }));
+    await waitFor(() => expect(screen.getAllByTestId('pmcc-result-card')).toHaveLength(1));
+    expect(within(screen.getByTestId('pmcc-result-card')).getByText(/100C/)).toBeInTheDocument();
+  });
+
+  it('the real ticker filter (reused filterHiddenSymbols) actually hides a symbol\'s results, not just a decorative toggle', async () => {
+    const aapl = buildPmccResultForSymbol('AAPL', 110, 20.00, 5.00);
+    const msft = buildPmccResultForSymbol('MSFT', 110, 23.00, 4.00);
+    seedPmccSessionMultiSymbol([aapl, msft]);
+    renderScreener();
+
+    // Both ticker groups visible with no filter applied.
+    expect(await screen.findAllByTestId('pmcc-ticker-group')).toHaveLength(2);
+
+    // The Tickers row lives inside PMCC's own result-controls section,
+    // alongside the OI floor and sort buttons already tested above.
+    const controls = screen.getByTestId('pmcc-result-controls');
+    fireEvent.click(within(controls).getByRole('button', { name: /MSFT/ }));
+
+    // MSFT's group is gone entirely -- proving the toggle actually
+    // filters what renders, not just its own visual state. (The toggle
+    // chip itself still legitimately shows "MSFT" as its own label even
+    // while hidden -- checking for the group's absence, not the text's,
+    // since the text genuinely still exists on the page.)
+    const remainingGroups = await waitFor(() => {
+      const found = screen.getAllByTestId('pmcc-ticker-group');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(within(remainingGroups[0]).getByText('AAPL')).toBeInTheDocument();
   });
 });

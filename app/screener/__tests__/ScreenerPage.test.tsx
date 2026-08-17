@@ -793,7 +793,21 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
     expect(screen.queryByText(/Filter \/ Rank \/ Targeted/i)).not.toBeInTheDocument();
     expect((globalThis.fetch as any).mock.calls.some(([url]: [string]) => url === '/api/autopilot/recommendations')).toBe(false);
     expect(screen.queryByText(/Max Profit/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/\b(Best|Rank|Score|Quality)\b/i)).not.toBeInTheDocument();
+    // TE-0007H corrective — this used to be a blanket
+    // /\b(Best|Rank|Score|Quality)\b/i ban, which correctly caught
+    // generic, composite cross-strategy scoring UI bleeding into
+    // PMCC's deliberately portfolio-neutral results view when it was
+    // written, but is now too broad: it also matches this session's
+    // real, team-reviewed, PMCC-specific per-ticker summary ("best
+    // width-minus-debit%, best annualized ROI" -- real metrics on
+    // real data, not a composite score). Narrowed to what this test
+    // is actually protecting against: a numeric rank badge (e.g. "#1")
+    // or an explicit "Score:" label, the actual shape a generic
+    // scoring system would take. The genuinely generic panels (Best
+    // Opportunities, Filter/Rank/Targeted mode-switcher) are already
+    // checked precisely above and remain unaffected by this change.
+    expect(screen.queryByText(/^#\d+$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\bScore:\s*\d/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Open|Trade/i })).not.toBeInTheDocument();
   });
 
