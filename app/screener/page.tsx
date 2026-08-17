@@ -45,6 +45,7 @@ import {
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib/scans/pmccTypes';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
+import { computePmccScore } from '@/lib/scans/pmccScore';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -3611,6 +3612,12 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [showPairLookup, setShowPairLookup] = useState(false);
   const [showQuoteDetail, setShowQuoteDetail] = useState(false);
   const [showAuditDetail, setShowAuditDetail] = useState(false);
+  const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
+  // PMCC-RANK-0001 — opt-in-disableable earnings deduction, per Ian's
+  // explicit requirement that it never be a silent penalty. Defaults on
+  // (the deduction reflects a real risk), operator can turn it off
+  // per-card if they've already accounted for it another way.
+  const [earningsDeductionEnabled, setEarningsDeductionEnabled] = useState(true);
   const [showChart, setShowChart] = useState(false);
   const [sparkData, setSparkData] = useState<number[] | null>(null);
   const [sparkLoading, setSparkLoading] = useState(false);
@@ -3712,6 +3719,20 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   // total premium, and profit-at-current-price move into the "quote and
   // pricing detail" disclosure below -- they're supporting math, not
   // primary decision inputs.
+  // PMCC-RANK-0001 — composite score computed from data already on this
+  // pair/result, no new fetches. Trend is intentionally excluded (stays
+  // a gate/warning elsewhere, never a score input).
+  const score = pair && metrics ? computePmccScore({
+    annualizedRoiPct: annualizedRoi,
+    longLegSpreadPct: pair.longLeg.quote.spreadPct,
+    longLegOpenInterest: pair.longLeg.openInterest,
+    shortLegSpreadPct: pair.shortLeg.quote.spreadPct,
+    shortLegOpenInterest: pair.shortLeg.openInterest,
+    earningsDate: result.earningsDate ?? null,
+    shortLegExpiration: pair.shortLeg.expiration,
+    earningsDeductionEnabled,
+  }) : null;
+
   const decisionStrip = metrics ? [
     { label: 'Width minus debit', value: `${money(metrics.widthMinusDebitPerShare)} · ${metrics.widthMinusDebitPctOfDebit.toFixed(1)}%` },
     { label: 'Annualized ROI', value: annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%` },
@@ -3722,6 +3743,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
     <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
       <div className="flex flex-wrap items-center gap-2">
+        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">Score {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">PMCC</span>
@@ -3768,6 +3790,41 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
           <p>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls. Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price.</p>
         </div>}
       </div>}
+
+      {score && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowScoreBreakdown(value => !value); }}
+            className="w-full flex items-center justify-between py-1.5 text-left"
+          >
+            <span>Show score breakdown</span><span>{showScoreBreakdown ? '▴' : '▾'}</span>
+          </button>
+          {showScoreBreakdown && <div className={`border-t ${th.border} pt-3 space-y-2.5`}>
+            <div className="flex items-center gap-2">
+              <span className={`${th.textFaint} w-24 shrink-0`}>ROI</span>
+              <div className="flex-1 h-1.5 rounded bg-neutral-800 overflow-hidden"><div className="h-full bg-cyan-500" style={{ width: `${(score.roiScore / 60) * 100}%` }} /></div>
+              <span className="w-16 shrink-0 text-right font-bold">{score.roiScore} / 60</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`${th.textFaint} w-24 shrink-0`}>Liquidity</span>
+              <div className="flex-1 h-1.5 rounded bg-neutral-800 overflow-hidden"><div className="h-full bg-cyan-500" style={{ width: `${(score.liquidityScore / 30) * 100}%` }} /></div>
+              <span className="w-16 shrink-0 text-right font-bold">{score.liquidityScore} / 30</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-24 shrink-0 ${score.earningsDeduction < 0 ? 'text-red-400' : th.textFaint}`}>Earnings</span>
+              <div className="flex-1 h-1.5 rounded bg-neutral-800 overflow-hidden"><div className={`h-full ${score.earningsDeduction < 0 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: '100%' }} /></div>
+              <span className={`w-16 shrink-0 text-right font-bold ${score.earningsDeduction < 0 ? 'text-red-400' : ''}`}>{score.earningsDeduction}</span>
+            </div>
+            {score.earningsFlagged && (
+              <label className="flex items-center gap-2 text-[10px] pt-1">
+                <input type="checkbox" checked={earningsDeductionEnabled} onChange={(e) => { e.stopPropagation(); setEarningsDeductionEnabled(v => !v); }} onClick={(e) => e.stopPropagation()} />
+                Apply earnings deduction
+              </label>
+            )}
+            <p className={`text-[10px] ${th.textFaint} pt-1`}>ROI benchmark: 60% annualized = full marks. Liquidity: worse of the two legs. Earnings: deduction applies when an earnings date falls before the short leg's expiration.</p>
+          </div>}
+        </>
+      )}
 
       <button
         onClick={(e) => { e.stopPropagation(); setShowAuditDetail(value => !value); }}
@@ -9400,4 +9457,5 @@ export default function Home() {
     </div>
   );
 }
+
 

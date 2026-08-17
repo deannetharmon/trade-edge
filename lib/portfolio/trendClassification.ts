@@ -31,38 +31,50 @@ function avgNumbers(arr: number[]): number {
 
 /**
  * Pure trend classification from a series of closing prices (oldest
- * first, most recent last). Requires at least 50 closes -- returns
- * 'unknown'/'NO_TRADE' at confidence 0 otherwise, the same threshold
- * getTrend has always used.
+ * first, most recent last). Requires at least 90 closes -- returns
+ * 'unknown'/'NO_TRADE' at confidence 0 otherwise.
+ *
+ * PMCC-RANK-TREND-WINDOW-0001 -- Ian's explicit decision: 60/90-day
+ * moving averages, not the prior MA20/MA50. Now that this function
+ * feeds technicalAlignment into real portfolio recommendations
+ * (PI-0006B-FOLLOWUP), not just new-entry screening, a position
+ * already being held shouldn't flip aligned/against on a few noisy
+ * days -- stability over responsiveness. /api/chart already pulls 6
+ * months of daily bars (~126 trading days), comfortably covering a
+ * 90-day window with no new data sourcing.
  */
 export function classifyTrendFromCloses(closes: number[]): TrendClassification {
-  if (closes.length < 50) {
+  if (closes.length < 90) {
     return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data' };
   }
 
   const price = closes[closes.length - 1];
-  const ma20 = avgNumbers(closes.slice(-20));
-  const ma50 = avgNumbers(closes.slice(-50));
-  const mom20 = (price - closes[closes.length - 21]) / closes[closes.length - 21];
+  const ma60 = avgNumbers(closes.slice(-60));
+  const ma90 = avgNumbers(closes.slice(-90));
+  const mom60 = (price - closes[closes.length - 61]) / closes[closes.length - 61];
+  // Higher-lows/lower-highs confirmation keeps its original 20-day
+  // granularity -- a minor confirmatory factor, not the primary trend
+  // read Ian's stability concern was about, and 6mo of daily data
+  // doesn't comfortably support widening this sub-signal too.
   const low20 = Math.min(...closes.slice(-20));
   const high20 = Math.max(...closes.slice(-20));
   const higherLows = low20 > Math.min(...closes.slice(-40, -20)) * 0.985;
   const lowerHighs = high20 < Math.max(...closes.slice(-40, -20)) * 1.015;
 
   let score = 0;
-  if (price > ma20) score += 2; else score -= 2;
-  if (price > ma50) score += 2; else score -= 2;
-  if (ma20 > ma50) score += 2; else score -= 2;
-  if (mom20 > 0.03) score += 2; else if (mom20 < -0.03) score -= 2;
+  if (price > ma60) score += 2; else score -= 2;
+  if (price > ma90) score += 2; else score -= 2;
+  if (ma60 > ma90) score += 2; else score -= 2;
+  if (mom60 > 0.03) score += 2; else if (mom60 < -0.03) score -= 2;
   if (higherLows) score += 2; else if (lowerHighs) score -= 2;
 
   const confidence = Math.min(100, Math.abs(score) * 10);
 
   if (score >= 4) {
-    return { trend: 'uptrend', strategy: 'BPS', confidence, reason: 'Price above MA20/MA50, positive momentum' };
+    return { trend: 'uptrend', strategy: 'BPS', confidence, reason: 'Price above MA60/MA90, positive momentum' };
   }
   if (score <= -4) {
-    return { trend: 'downtrend', strategy: 'BCS', confidence, reason: 'Price below MA20/MA50, negative momentum' };
+    return { trend: 'downtrend', strategy: 'BCS', confidence, reason: 'Price below MA60/MA90, negative momentum' };
   }
   return { trend: 'sideways', strategy: 'IC', confidence, reason: 'Mixed signals, range-bound' };
 }
@@ -104,4 +116,5 @@ export function technicalAlignmentForStrategy(
   if (trend === 'uptrend') return bullish ? 'aligned' : 'against';
   return bullish ? 'against' : 'aligned'; // downtrend
 }
+
 
