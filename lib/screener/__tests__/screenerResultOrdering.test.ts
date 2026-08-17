@@ -208,6 +208,9 @@ function metrics(overrides: Partial<SortableMetrics>): SortableMetrics {
     otmPct: null,
     relevantLegOI: null,
     dte: null,
+    widthMinusDebitPct: null,
+    breakevenPct: null,
+    annualizedRoiPct: null,
     ...overrides,
   };
 }
