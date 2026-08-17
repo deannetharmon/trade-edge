@@ -2,10 +2,33 @@ import type { CheckResult, ScreenResult, SpreadCandidate, TrendResult } from './
 import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
 import type { PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
+// PMCC-TREND-GATE-0001 -- cross-domain import (lib/scans -> lib/portfolio)
+// is intentional: technicalAlignmentForStrategy's own doc comment already
+// declares itself "the single source of truth for both the screener's
+// group-header trend badge... and the portfolio recommendation engine's
+// technicalAlignment input" -- this is that function's second, previously
+// unbuilt consumer, not a new mechanism.
+import { technicalAlignmentForStrategy } from '@/lib/portfolio/trendClassification';
 
 export interface PmccProductionContext {
   symbol: string; price: number; ivr: number | null; earningsDate?: string | null;
   trendResult?: TrendResult; underlyingType: 'index' | 'etf' | 'stock';
+  // PMCC-TREND-GATE-0001 -- default true, same "trust the qualified realm,
+  // adjust the criterion" pattern as requireDebitBelowWidth. Session
+  // scoping note (Paul/Ian's resolved call): reads context.trendResult --
+  // the SAME TrendResult already attached to every ScreenResult and
+  // already read by the group-header trend badge -- not a separate trend
+  // fetch/computation. This means the gate uses the screener's existing
+  // ma20/ma50 trend engine (lib/scans/trend.ts), NOT the 60/90-day window
+  // built for the portfolio recommendation engine (lib/portfolio/
+  // trendClassification.ts's classifyTrendFromCloses) -- a known, disclosed
+  // limitation, not an oversight. Badge/gate agreement was judged more
+  // important than window length by Ian's own explicit resolution; the
+  // window mismatch is tracked separately as
+  // SCREENER-TREND-WINDOW-MIGRATION-0001, which will make this correct
+  // automatically once it lands, with no further PMCC-specific change
+  // needed here.
+  requireTrendAlignmentForPmcc?: boolean;
 }
 
 const pending = (reason: string): CheckResult => ({ status: 'pending', value: '—', reason });
@@ -113,9 +136,31 @@ function checksFor(pair: PmccPairResult | null): ScreenResult['checks'] {
 }
 
 function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context: PmccProductionContext, order: number): ScreenResult {
-  const readinessReasons = [...pair.failureReasons.map(item => item.message), ...(!pair.longLeg.quote.readyInput ? [`Long quote not ready: ${pair.longLeg.quote.reason}`] : []), ...(!pair.shortLeg.quote.readyInput ? [`Short quote not ready: ${pair.shortLeg.quote.reason}`] : [])];
+  // PMCC-TREND-GATE-0001 -- reads context.trendResult, the same object
+  // already attached below as `trendResult` (and already read by the
+  // screener's group-header trend badge) -- one shared trend read, not a
+  // second computation, per Quinn/Diane's explicit requirement.
+  // technicalAlignmentForStrategy already returns 'unknown' for a missing
+  // trend, which correctly never gates (matches every other "missing data
+  // never fails closed the wrong direction" convention in this file).
+  const requireTrendAlignment = context.requireTrendAlignmentForPmcc ?? true;
+  const trendAgainst = requireTrendAlignment
+    && technicalAlignmentForStrategy(context.trendResult?.trend ?? 'unknown', 'PMCC') === 'against';
+  const readinessReasons = [
+    ...pair.failureReasons.map(item => item.message),
+    ...(!pair.longLeg.quote.readyInput ? [`Long quote not ready: ${pair.longLeg.quote.reason}`] : []),
+    ...(!pair.shortLeg.quote.readyInput ? [`Short quote not ready: ${pair.shortLeg.quote.reason}`] : []),
+    ...(trendAgainst ? [`Trend against PMCC's bullish thesis`] : []),
+  ];
   return {
-    symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr, qualified: pair.qualified,
+    symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr,
+    // Trend gate demotes qualified -> false here, at the ScreenResult
+    // layer, WITHOUT touching pair.qualified itself -- the pairing
+    // engine's own qualified/failureReasons remain pure structural/
+    // economic truth (same layering already used for the quote-readiness
+    // reasons above, which also never touch pair.qualified/
+    // pair.failureReasons).
+    qualified: pair.qualified && !trendAgainst,
     bestCandidate: compatibilityCandidate(pair), candidateId: pair.pairId, failReasons: readinessReasons,
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock',
     underlyingType: context.underlyingType, ruleSetApplied: 'PMCC pairing engine v2', publishedOrder: order, checks: checksFor(pair),
@@ -241,4 +286,5 @@ export async function runPmccSymbolProduction(args: {
     };
   }
 }
+
 
