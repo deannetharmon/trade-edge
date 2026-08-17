@@ -3498,6 +3498,25 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
   const age = (leg: NonNullable<typeof pair>['longLeg']) => leg.quote.ageSeconds == null ? 'unknown age' : `${Math.round(leg.quote.ageSeconds)}s old`;
   const counts = result.pmccPairingCounts;
+  // TE-0007E — Diane/Ian/Paul/Alan-reviewed PMCC card fields (breakeven,
+  // promoted extrinsic, roll runway, annualized ROI). All four derive
+  // from real, already-computed PmccPairMetrics/PmccEligibleLeg fields --
+  // no new data sourcing. Roll runway and the ROI annualization both use
+  // THIS pair's own shortLeg.dte as the cycle length (confirmed with the
+  // team: self-consistent with what's already shown on the card, not a
+  // separate assumed constant like the criteria's 21-45 DTE target
+  // range, which would quietly diverge from the number on screen).
+  const breakeven = metrics ? pair!.longLeg.strike + metrics.netDebitPerShare : null;
+  // Ian's sanity check: a qualified pair should never have its breakeven
+  // above the short strike -- that would mean max profit is already
+  // structurally unreachable. Real validation, not just a display value.
+  const breakevenAboveShortStrike = breakeven != null && pair && breakeven > pair.shortLeg.strike;
+  const rollRunway = pair && pair.shortLeg.dte > 0
+    ? Math.floor((pair.longLeg.dte - pair.shortLeg.dte) / pair.shortLeg.dte)
+    : null;
+  const annualizedRoi = metrics && pair && pair.shortLeg.dte > 0
+    ? metrics.shortCreditToNetDebitPct * (365 / pair.shortLeg.dte)
+    : null;
   if (!pair) {
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span><span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span><span className="text-amber-400 text-xs">Audit result · Not Ready</span></div>
@@ -3518,15 +3537,17 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <span className={`ml-auto text-[10px] ${ready ? 'text-emerald-400' : 'text-amber-400'}`}>{ready ? 'Ready' : 'Not Ready'} · {pair.longLeg.quote.status}/{pair.shortLeg.quote.status} {expanded ? '▴' : '▾'}</span>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span></div>
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) {money(pair.shortLeg.executablePrice)} · OI {pair.shortLeg.openInterest}</span></div>
       </div>
-      {metrics && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
+      {metrics && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
         <span>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span>
         <span>Strike width {money(metrics.strikeWidth)}</span>
         <span>Width minus debit {money(metrics.widthMinusDebitPerShare)} · {metrics.widthMinusDebitPctOfDebit.toFixed(1)}% of debit</span>
         <span>Net delta {metrics.netDelta.toFixed(2)}</span>
-        <span>Short-call OTM estimate {(100 - pair.shortLeg.delta * 100).toFixed(0)}%</span>
+        <span className={breakevenAboveShortStrike ? 'text-amber-400' : ''}>Breakeven {money(breakeven)}{breakevenAboveShortStrike ? ' ⚠ above short strike' : ''}</span>
+        <span>Roll runway {rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}`}</span>
+        <span>Annualized ROI {annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%`}, assumes level rolls</span>
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
     </button>
