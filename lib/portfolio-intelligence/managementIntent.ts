@@ -306,6 +306,8 @@ function remainingOpportunityDampeningFactor(
 function dampenedPoints(basePoints: number, pct: number | null | undefined, direction: 'toward_close' | 'toward_hold'): number {
   return Math.round(basePoints * remainingOpportunityDampeningFactor(pct, direction));
 }
+
+function bump(
   scores: Partial<Record<ManagementIntent, ScoreEntry>>,
   intent: ManagementIntent,
   points: number,
