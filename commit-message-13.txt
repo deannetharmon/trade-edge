@@ -1,0 +1,52 @@
+feat: PMCC card fields -- breakeven, extrinsic, roll runway, annualized ROI
+
+Team-reviewed scope (Ian's priority list, Diane's mockup, Paul/Alan
+alignment): four new/promoted fields on PmccResultCard, all derived
+from real, already-computed PmccPairMetrics/PmccEligibleLeg data --
+no new data sourcing, no scoring model (that stays a deliberately
+separate, later ticket per Ian's own sequencing).
+
+1. Breakeven: longLeg.strike + metrics.netDebitPerShare. Pure
+   arithmetic off existing fields.
+2. Promoted extrinsic: metrics.longExtrinsicPerShare was already
+   computed and rendered, just buried in the expanded detail view
+   behind a click on every card. Moved next to the long leg itself.
+3. Roll runway: floor((longDte - shortDte) / shortDte). Uses THIS
+   pair's own short leg DTE as the cycle length rather than the
+   criteria's 21-45 DTE target range constant -- confirmed with the
+   team (Ian/Alan) this is self-consistent with what's already shown
+   on the card, not a second, separately-sourced assumption that
+   could quietly diverge from the displayed short DTE.
+4. Annualized ROI: metrics.shortCreditToNetDebitPct (already real,
+   already computed) * (365 / shortLeg.dte). Labeled "assumes level
+   rolls" per Ian's explicit concern about fabricating precision --
+   the annualization assumes every future roll captures the same
+   credit, which is optimistic, not guaranteed, and the UI now says
+   so rather than implying a promise.
+
+Also: Ian's breakeven/short-strike sanity check -- a qualified pair
+should never have breakeven above the short strike (max profit
+already structurally unreachable); now visibly flagged, not left for
+someone to reconcile two numbers by hand. Short-call OTM estimate
+dropped from the front stat row per Ian's density feedback (redundant
+with the short leg's own delta, already shown one line up).
+
+New test coverage from scratch: this codebase had zero existing PMCC
+test coverage. Added app/screener/__tests__/PmccResultCardFields.test.tsx,
+reusing pmccProduction.test.ts's real, already-tested leg()/
+pairPmccCandidates()/buildPmccScreenResults() fixture chain rather
+than hand-rolling a fake pair. Every expected value is hand-computed
+independently in the file's own header comment, not copied from the
+implementation. Two tests: the primary case (also exercising the
+above-short-strike warning) and the boundary case where breakeven
+lands exactly at the short strike, not just clearly above or below.
+
+One real gap in this feature's own first test-writing pass, caught
+immediately: createScanSession requires a pmccSnapshot for a PMCC
+session (restoreScanSession's own INVALID_PMCC_SNAPSHOT validation
+correctly rejected it when omitted) -- confirms that validation works
+as designed, not a bug in the new code.
+
+Verified: ScreenerPage.test.tsx all 36 tests still pass (zero
+regressions from the page.tsx change). Full suite: 176/176 files,
+2520/2520 tests, genuinely clean.
