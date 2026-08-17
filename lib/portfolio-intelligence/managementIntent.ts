@@ -257,6 +257,56 @@ interface ScoreEntry {
 // small number of "linked" bumps below that piggyback on evidence another
 // bump already put into `reasons` (e.g. a tight buffer's secondary nudge to
 // Cut Losses), preserving PI-0006B's exact `reasons` output byte-for-byte.
+// PI-0008C: Remaining Opportunity dampening. Doesn't touch the base weight
+// matrix (decisionQualityMatrix.ts already has its own tuning history --
+// see the "was 30"/"was 20" comments from PI-0008B) -- instead multiplies
+// specific bumps at the point they're scored, so a secondary signal
+// (net edge, technical trend) only carries full weight when profit-captured
+// status makes it a genuine tie-breaker.
+//
+// Per Ian's explicit review of a real MU position: a signal that AGREES
+// with what remaining opportunity already implies is never dampened -- a
+// negative net edge on an 85%-captured position is reinforcing the closing
+// signal, not fighting it, and should keep its full weight. Only a signal
+// that would ARGUE AGAINST what remaining opportunity implies gets
+// weakened:
+//   - 'toward_close' signals (net edge negative, technical against) are
+//     dampened when remaining opportunity is HIGH (early in the trade,
+//     most reward still ahead) -- a single bad-day reading shouldn't force
+//     an early exit before the thesis has had time to develop.
+//   - 'toward_hold' signals (technical aligned) are dampened when
+//     remaining opportunity is LOW (deep in profit already) -- "trend
+//     still looks fine" isn't a strong enough reason on its own to keep
+//     holding a position that's already captured most of its reward.
+//   - In the ambiguous middle (between the existing low/high thresholds),
+//     both directions apply at full, undampened weight -- this is exactly
+//     where these signals are supposed to act as tie-breakers.
+// Floor of 0.5, not 0 -- these signals should never be fully silenced,
+// only weakened; a 0.5 floor is consistent with this file's existing
+// preference for continuous, non-absolute scaling (see gammaDteFraction/
+// scaleWeight) rather than a hard on/off cutoff.
+const REMAINING_OPPORTUNITY_DAMPEN_FLOOR = 0.5;
+
+function remainingOpportunityDampeningFactor(
+  pct: number | null | undefined,
+  direction: 'toward_close' | 'toward_hold',
+): number {
+  if (pct == null) return 1;
+  if (direction === 'toward_close' && pct >= W.remainingOpportunityHighThresholdPct) {
+    const fraction = Math.min(1, (pct - W.remainingOpportunityHighThresholdPct) / (100 - W.remainingOpportunityHighThresholdPct));
+    return 1 - fraction * (1 - REMAINING_OPPORTUNITY_DAMPEN_FLOOR);
+  }
+  if (direction === 'toward_hold' && pct <= W.remainingOpportunityLowThresholdPct) {
+    const fraction = Math.min(1, (W.remainingOpportunityLowThresholdPct - pct) / W.remainingOpportunityLowThresholdPct);
+    return 1 - fraction * (1 - REMAINING_OPPORTUNITY_DAMPEN_FLOOR);
+  }
+  return 1;
+}
+
+function dampenedPoints(basePoints: number, pct: number | null | undefined, direction: 'toward_close' | 'toward_hold'): number {
+  return Math.round(basePoints * remainingOpportunityDampeningFactor(pct, direction));
+}
+
 function bump(
   scores: Partial<Record<ManagementIntent, ScoreEntry>>,
   intent: ManagementIntent,
@@ -363,45 +413,60 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
   if (evidence.netEdgeNegative) {
-    bump(scores, 'REDUCE_RISK', W.netEdgeNegativeReduceRisk, {
-      id: 'net-edge-negative-reduce-risk',
-      label: 'Net edge negative',
-      explanation: 'Net edge is negative -- remaining premium no longer compensates for gamma risk.',
-      evidenceField: 'netEdgeNegative',
-    });
-    bump(scores, 'CUT_LOSSES', W.netEdgeNegativeCutLossesNudge, {
-      id: 'net-edge-negative-cut-losses',
-      label: 'Net edge negative',
-      explanation: 'Net edge is negative, which also elevates loss risk.',
-      evidenceField: 'netEdgeNegative',
-      includeInReasons: false,
-    });
+    const reduceRiskPoints = dampenedPoints(W.netEdgeNegativeReduceRisk, evidence.remainingOpportunityPct, 'toward_close');
+    if (reduceRiskPoints > 0) {
+      bump(scores, 'REDUCE_RISK', reduceRiskPoints, {
+        id: 'net-edge-negative-reduce-risk',
+        label: 'Net edge negative',
+        explanation: 'Net edge is negative -- remaining premium no longer compensates for gamma risk.',
+        evidenceField: 'netEdgeNegative',
+      });
+    }
+    const cutLossesPoints = dampenedPoints(W.netEdgeNegativeCutLossesNudge, evidence.remainingOpportunityPct, 'toward_close');
+    if (cutLossesPoints > 0) {
+      bump(scores, 'CUT_LOSSES', cutLossesPoints, {
+        id: 'net-edge-negative-cut-losses',
+        label: 'Net edge negative',
+        explanation: 'Net edge is negative, which also elevates loss risk.',
+        evidenceField: 'netEdgeNegative',
+        includeInReasons: false,
+      });
+    }
   }
 
   // PI-0008B: technical trend -- increased influence in the risk-detection
   // (against) direction only; the confirming (aligned) direction is
   // unchanged (see decisionQualityMatrix.ts for why).
   if (evidence.technicalAlignment === 'against') {
-    bump(scores, 'CUT_LOSSES', W.technicalAgainstCutLosses, {
-      id: 'technical-against-cut-losses',
-      label: 'Technical trend against',
-      explanation: 'Recent technical trend is running against the position.',
-      evidenceField: 'technicalAlignment',
-    });
-    bump(scores, 'REDUCE_RISK', W.technicalAgainstReduceRisk, {
-      id: 'technical-against-reduce-risk',
-      label: 'Technical trend against',
-      explanation: 'Recent technical trend is running against the position, which also supports reducing exposure.',
-      evidenceField: 'technicalAlignment',
-      includeInReasons: false,
-    });
+    const cutLossesPoints = dampenedPoints(W.technicalAgainstCutLosses, evidence.remainingOpportunityPct, 'toward_close');
+    if (cutLossesPoints > 0) {
+      bump(scores, 'CUT_LOSSES', cutLossesPoints, {
+        id: 'technical-against-cut-losses',
+        label: 'Technical trend against',
+        explanation: 'Recent technical trend is running against the position.',
+        evidenceField: 'technicalAlignment',
+      });
+    }
+    const reduceRiskPoints = dampenedPoints(W.technicalAgainstReduceRisk, evidence.remainingOpportunityPct, 'toward_close');
+    if (reduceRiskPoints > 0) {
+      bump(scores, 'REDUCE_RISK', reduceRiskPoints, {
+        id: 'technical-against-reduce-risk',
+        label: 'Technical trend against',
+        explanation: 'Recent technical trend is running against the position, which also supports reducing exposure.',
+        evidenceField: 'technicalAlignment',
+        includeInReasons: false,
+      });
+    }
   } else if (evidence.technicalAlignment === 'aligned') {
-    bump(scores, 'HOLD_POSITION', W.technicalAlignedHold, {
-      id: 'technical-aligned-hold',
-      label: 'Technical trend confirms position',
-      explanation: 'Recent technical trend confirms the position.',
-      evidenceField: 'technicalAlignment',
-    });
+    const holdPoints = dampenedPoints(W.technicalAlignedHold, evidence.remainingOpportunityPct, 'toward_hold');
+    if (holdPoints > 0) {
+      bump(scores, 'HOLD_POSITION', holdPoints, {
+        id: 'technical-aligned-hold',
+        label: 'Technical trend confirms position',
+        explanation: 'Recent technical trend confirms the position.',
+        evidenceField: 'technicalAlignment',
+      });
+    }
   }
 
   // PI-0008B: gamma/DTE risk -- new. Reuses the existing `dte` field, scaled
@@ -612,3 +677,4 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
     confidenceTier: confidenceTierForMargin(margin),
   };
 }
+
