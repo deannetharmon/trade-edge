@@ -41,6 +41,11 @@ export interface PmccScanCriteria {
   longOiMin: number;
   shortOiMin: number;
   requireDebitBelowWidth: boolean;
+  // PMCC-TREND-GATE-0001 -- default true, same "trust the qualified realm,
+  // adjust the criterion" pattern as requireDebitBelowWidth above.
+  // Explicitly PMCC-scoped, not a generic trend toggle, per Ian's
+  // explicit naming requirement.
+  requireTrendAlignmentForPmcc: boolean;
 }
 
 interface Props {
@@ -197,6 +202,18 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
           Require net debit below strike width (qualified pairs only — failing pairs are retained in the audit set either way)
         </label>
 
+        {/* PMCC-TREND-GATE-0001 -- same pattern as the toggle above.
+            Explicitly PMCC-scoped label per Ian's requirement -- not a
+            generic "trend" toggle that could be confused for applying to
+            other strategies later. */}
+        <label className="mt-2 flex items-center gap-2 text-[10px] text-neutral-400">
+          <input aria-label="Require trend alignment for PMCC" type="checkbox"
+            checked={draft.requireTrendAlignmentForPmcc}
+            onChange={e => setDraft(prev => ({ ...prev, requireTrendAlignmentForPmcc: e.target.checked }))}
+            className="rounded border-neutral-700" />
+          Require trend alignment for PMCC (qualified pairs only — a structure on a confirmed downtrending underlying is retained in the near-miss set either way)
+        </label>
+
         <div
           className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"
           data-testid="pmcc-rule-preview"
@@ -235,4 +252,5 @@ export function PmccScanModal({ th, selectedTickerCount, initial, onClose, onRun
     </ScanModalShell>
   );
 }
+
 

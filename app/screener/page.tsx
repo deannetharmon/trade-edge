@@ -7583,6 +7583,7 @@ export default function Home() {
                 symbol, price: price as number, ivr: metrics.ivRank ?? null,
                 earningsDate: metrics.earningsExpectedDate ?? null,
                 trendResult, underlyingType: pmccChain.classification,
+                requireTrendAlignmentForPmcc: submitted?.requireTrendAlignmentForPmcc ?? true,
               },
             };
           },
@@ -9704,6 +9705,7 @@ export default function Home() {
             longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
             shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
             requireDebitBelowWidth: true,
+            requireTrendAlignmentForPmcc: true,
           }}
           onClose={() => {
             setShowPmccScanModal(false);
@@ -9719,6 +9721,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
