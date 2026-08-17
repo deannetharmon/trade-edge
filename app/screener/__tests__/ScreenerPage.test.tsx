@@ -1046,7 +1046,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     // the stale candidate is still a real, enabled control.
     const rankedSection = screen.getByTestId('best-opportunities-shortlist');
     expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
-    const toggle = within(rankedSection).getByRole('button', { name: /show details/i });
+    const toggle = within(rankedSection).getByRole('button', { name: 'View details' });
     expect(toggle).toBeEnabled();
   });
 
@@ -1522,15 +1522,24 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     act(() => {
       manager.completeTask(task.id, {
         results: [
+          // TE-0007D corrective — same fixture mismatch already fixed once
+          // this session (the "no-canonical-candidate" test): qualified:
+          // false hits page.tsx's own qualifiedResults.length===0 early
+          // return before the recommendation pipeline is ever reached at
+          // all (confirmed via direct read). Changed to qualified: true
+          // so this test can reach the real code path it's actually
+          // trying to exercise; ruleSetApplied/failReasons kept as-is
+          // since they're real, valid fields regardless of the qualified
+          // flag.
           makeScreenResult({
             symbol: 'AAPL',
-            qualified: false,
+            qualified: true,
             ruleSetApplied: 'ranked-broad',
             failReasons: ['Below fit threshold'],
           }),
           makeScreenResult({
             symbol: 'MSFT',
-            qualified: false,
+            qualified: true,
             ruleSetApplied: 'ranked-broad',
             failReasons: ['Risk threshold'],
           }),

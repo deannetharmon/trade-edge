@@ -66,6 +66,7 @@ import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
+  getScreenerJobState, useScreenerJobState,
 } from '@/lib/screener/screenerJobStore';
 // SCREENER-OI-0001 — canonical minimum-relevant-leg-OI filter + two-level
 // sort, shared by Ranked, Filtered, and Targeted result panels. See
@@ -112,7 +113,7 @@ import { persistScanSession, restoreScanSession, clearScanSessionCache } from '@
 // unmount/navigation -- the same lifecycle `results` itself already has.
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
-import { opportunityRecommendationsFromApiResponse } from '@/lib/command-center/screenerOpportunityRecommendations';
+import { opportunityRecommendationsFromApiResponse, type RecommendationsApiResponseSkippedEntry } from '@/lib/command-center/screenerOpportunityRecommendations';
 // SCREENER-UX-0001: results-presentation redesign. Filtered/Ranked
 // hierarchy fix (filters/OI/sort relocated above Best Opportunities) plus
 // the new scan-identity, accounting, best-opportunities-shortlist,
@@ -6277,6 +6278,18 @@ export default function Home() {
     if (isSessionStale(session.sessionId, activeSessionIdRef.current)) return false;
     setActiveSession(session);
     onCommit?.();
+    // TE-0007D corrective — this capture originally ran BEFORE onCommit(),
+    // but useRankedScan.ts's own commitSession callback calls
+    // completeScreenerJob(...) -- the exact call that updates
+    // lastResultsAffectingJobId to THIS session's own job -- from inside
+    // that same callback. Capturing before onCommit() ran read the OLD,
+    // pre-this-refresh value, one step behind the job that actually
+    // produced the results just committed, causing a false "Superseded"
+    // flash on every normal, self-initiated refresh (confirmed via a
+    // genuine test regression, not assumed). Moved after onCommit() so
+    // this always sees whatever the commit's own job-completion call
+    // just set.
+    setCommittedResultsJobId(getScreenerJobState().lastResultsAffectingJobId);
     return true;
   };
 
@@ -6305,6 +6318,35 @@ export default function Home() {
   const [opportunityGeneratedAt, setOpportunityGeneratedAt] = useState<string | undefined>(undefined);
   const [opportunityState, setOpportunityState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [opportunityError, setOpportunityError] = useState('');
+  // TE-0007D corrective — Finding 3 added `skipped` as a real, typed
+  // pass-through field (opportunityRecommendationsFromApiResponse's
+  // return value) but nothing ever read it at this call site; the
+  // plumbing was complete, the disclosure UI was the missing step.
+  const [opportunitySkipped, setOpportunitySkipped] = useState<RecommendationsApiResponseSkippedEntry[]>([]);
+  // TE-0007D corrective — the real total submitted for evaluation
+  // (qualifiedResults.length), captured because that variable is scoped
+  // inside the recommendations effect and not reachable from the render
+  // body; needed so the partial-evaluation disclosure's denominator is
+  // the true total, not reconstructed from output counts (which would be
+  // wrong if the adapter also silently drops a candidate for a reason
+  // other than the server's own `skipped` list).
+  const [opportunityEvaluatedCount, setOpportunityEvaluatedCount] = useState(0);
+  // TE-0007D corrective — the job identity captured at commit time (see
+  // commitScanSession), compared reactively below against the live store
+  // to detect a newer, results-affecting scan (from another tab/session)
+  // completing while this presentation is still showing.
+  const [committedResultsJobId, setCommittedResultsJobId] = useState<string | null>(null);
+  const liveJobState = useScreenerJobState();
+  // TE-0007D corrective — the `!== null` guard on committedResultsJobId
+  // was a real bug in this fix's own first pass: a cache-restored session
+  // (page reload) legitimately captures null as its baseline (no job has
+  // completed yet in this browser session). Requiring the baseline to be
+  // non-null meant the FIRST job completing afterward could never be
+  // detected as newer, since the guard stayed false forever. The correct
+  // check is simply whether the live value differs from what was
+  // captured -- true even when the baseline was null.
+  const isPresentationStale = activeSession != null
+    && liveJobState.lastResultsAffectingJobId !== committedResultsJobId;
 
   // ── RF-0001: Ranked Scan orchestration extracted to features/screener/
   // (see docs/reviews/RF-0001-Implementation-Report.md). Mechanical move —
@@ -6506,6 +6548,12 @@ export default function Home() {
       if (activeSessionIdRef.current != null) return;
       activeSessionIdRef.current = session.sessionId;
       setActiveSession(session);
+      // TE-0007D corrective — same capture as commitScanSession's own
+      // fix; a cache-restored session (page reload, tab reopen) bypasses
+      // commitScanSession entirely via this direct setActiveSession call,
+      // so without this, a restored session's staleness could never be
+      // detected at all -- committedResultsJobId would stay null forever.
+      setCommittedResultsJobId(getScreenerJobState().lastResultsAffectingJobId);
       if (session.requestedStrategy === 'csp' && session.mode === 'rank' && session.ruleSnapshot) {
         setFilteredSort({ primary: 'score', secondary: session.ruleSnapshot.rankSecondary });
       }
@@ -6604,6 +6652,7 @@ export default function Home() {
     if (!eligible && !isJustRefreshing) {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
+      setOpportunitySkipped([]);
       setOpportunityState('idle');
       setOpportunityError('');
       clearRecommendations();
@@ -6637,6 +6686,7 @@ export default function Home() {
     if (qualifiedResults.length === 0) {
       setOpportunityRecommendations([]);
       setOpportunityGeneratedAt(undefined);
+      setOpportunitySkipped([]);
       setOpportunityState('idle');
       setOpportunityError('');
       clearRecommendations();
@@ -6658,7 +6708,7 @@ export default function Home() {
           signal: abortController.signal,
         });
 
-        const { recommendations, generatedAt } = opportunityRecommendationsFromApiResponse(body);
+        const { recommendations, generatedAt, skipped } = opportunityRecommendationsFromApiResponse(body);
         const rawAnalyses: DecisionAnalysis[] = body?.result?.recommendations ?? [];
 
         // The session may have been superseded while this request was in
@@ -6667,6 +6717,8 @@ export default function Home() {
         if (!cancelled && shouldGenerateRecommendationsForSession(activeSession, activeSessionIdRef.current)) {
           setOpportunityRecommendations(recommendations);
           setOpportunityGeneratedAt(generatedAt);
+          setOpportunitySkipped(skipped);
+          setOpportunityEvaluatedCount(qualifiedResults.length);
           setOpportunityState('loaded');
           publishRecommendations(rawAnalyses, generatedAt);
         }
@@ -6690,6 +6742,7 @@ export default function Home() {
           if (opportunityRecommendations.length === 0) {
             setOpportunityRecommendations([]);
             setOpportunityGeneratedAt(undefined);
+            setOpportunitySkipped([]);
           }
           const message = e?.message ?? 'Unable to load ranked opportunities.';
           setOpportunityError(message);
@@ -8165,6 +8218,40 @@ export default function Home() {
               {!loading && opportunityState === 'error' && opportunityError && (
                 <div role="alert" className="text-[10px] text-red-400 px-1">
                   {opportunityError}
+                  {/* TE-0007D corrective — a second, real, missing piece:
+                      when a refresh failure preserves prior valid
+                      recommendations (per the earlier fix above), the
+                      person looking at this needs to be told explicitly
+                      that what they're seeing is the last GOOD data, not
+                      something new or corrupted. Only shown when there's
+                      genuinely something preserved to reassure about. */}
+                  {opportunityRecommendations.length > 0 && (
+                    <span className="block opacity-80">The last successfully published ranked opportunities remain visible.</span>
+                  )}
+                </div>
+              )}
+              {/* TE-0007D corrective — Finding 5's own store field
+                  (lastResultsAffectingJobId) and capture logic already
+                  exist and are already correct; page.tsx never read them.
+                  Never hides the presentation -- results stay fully
+                  visible/inspectable underneath, matching the real Ranked
+                  Scan orchestration test's explicit requirement. */}
+              {isPresentationStale && (
+                <div role="status" className={`text-[10px] ${th.textMuted} px-1`}>
+                  Superseded by a newer scan — this presentation may be out of date.
+                </div>
+              )}
+              {/* TE-0007D corrective — Finding 3 added `skipped` as a real,
+                  typed field (opportunityRecommendationsFromApiResponse's
+                  return value), documented in that file's own header as
+                  "the canonical evidence for a genuine partial-evaluation
+                  disclosure," but page.tsx never actually read it -- the
+                  plumbing was complete, only this rendering step was
+                  missing. Never fabricated: skipped.length comes straight
+                  from the route's own response, verbatim. */}
+              {!loading && opportunitySkipped.length > 0 && (
+                <div className={`text-[10px] ${th.textMuted} px-1`}>
+                  Partial evaluation: {opportunitySkipped.length} of {opportunityEvaluatedCount} scan results could not be evaluated.
                 </div>
               )}
               {/* SCREENER-UX-0001 — item 1 of the required hierarchy: scan

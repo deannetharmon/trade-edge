@@ -281,6 +281,15 @@ export async function evaluateScreenResultsInBatches(
   const fetchImpl = options.fetch ?? fetch;
   const recommendations: DecisionAnalysis[] = [];
   const duplicates: DuplicateCandidateRecord[] = [];
+  // TE-0007D corrective — Finding 3's `skipped` field is genuinely
+  // real, server-returned data (each batch response can include its own
+  // `skipped` entries, distinct from plan.skipped's client-side adapter
+  // skip reasons computed before the request was ever sent), but this
+  // function previously only ever returned plan.skipped, silently
+  // discarding whatever the server itself reported skipping. Accumulated
+  // the same way recommendations/duplicates already are, across all
+  // batches.
+  const serverSkipped: RecommendationsApiResponseSkippedEntry[] = [];
   const batchAnalysisCounts: number[] = [];
   let candidatesScanned = 0;
   const maxBusyRetries = options.maxBusyRetries ?? DEFAULT_BUSY_RETRY_LIMIT;
@@ -383,6 +392,9 @@ export async function evaluateScreenResultsInBatches(
     recommendations.push(...batchRecommendations);
     batchAnalysisCounts.push(batchRecommendations.length);
     duplicates.push(...batchDuplicates);
+    if (Array.isArray(body?.skipped)) {
+      serverSkipped.push(...body.skipped);
+    }
     candidatesScanned += Number(body?.result?.candidatesScanned ?? batch.candidates.length);
   }
 
@@ -411,7 +423,7 @@ export async function evaluateScreenResultsInBatches(
       candidatesScanned,
       killSwitchActive: false,
     },
-    skipped: plan.skipped,
+    skipped: [...plan.skipped, ...serverSkipped],
     transport: {
       batchCount: plan.batches.length,
       candidateCount: plan.candidateCount,
