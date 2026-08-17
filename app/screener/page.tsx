@@ -5995,6 +5995,28 @@ function pmccAnnualizedRoi(result: ScreenResult): number | null {
     : null;
 }
 
+// PMCC-CARD-SCORE-HEADER-0001 -- same extraction reasoning as
+// pmccAnnualizedRoi above: the sort metric, every group header's score
+// badge, and the best-in-scan callout must all read the exact same
+// number, never three separately-maintained computations that could
+// quietly drift. earningsDeductionEnabled defaults true, matching
+// PmccResultCard's own default before any per-card manual override.
+function pmccResultScore(result: ScreenResult): number | null {
+  const pair = result.pmccPair;
+  const metrics = pair?.metrics;
+  if (!pair || !metrics) return null;
+  return computePmccScore({
+    annualizedRoiPct: pmccAnnualizedRoi(result),
+    longLegSpreadPct: pair.longLeg.quote.spreadPct,
+    longLegOpenInterest: pair.longLeg.openInterest,
+    shortLegSpreadPct: pair.shortLeg.quote.spreadPct,
+    shortLegOpenInterest: pair.shortLeg.openInterest,
+    earningsDate: result.earningsDate ?? null,
+    shortLegExpiration: pair.shortLeg.expiration,
+    earningsDeductionEnabled: true,
+  }).total;
+}
+
 // SCREENER-OI-0001 — maps a real SpreadCandidate/ScreenResult strategy
 // string onto the canonical OiStrategy union. Every strategy the Screener
 // actually produces candidates for today (CSP/CC/BPS/BCS/IC/PMCC) maps
@@ -8140,21 +8162,10 @@ export default function Home() {
     // scoreCandidate(), which has no PMCC-specific logic and returns
     // null for it, so the "Score" sort silently did nothing for PMCC
     // results even though the score badge is real and visible on every
-    // card. Uses the exact same computePmccScore already powering
-    // PmccResultCard's badge/breakdown, so the sort order and the
-    // displayed number can never disagree. earningsDeductionEnabled
-    // defaults true here (the card's own default), matching the score
-    // shown before any manual per-card override.
-    const pmccScore = r.pmccPair && pmccMetrics ? computePmccScore({
-      annualizedRoiPct: pmccAnnualizedRoi(r),
-      longLegSpreadPct: r.pmccPair.longLeg.quote.spreadPct,
-      longLegOpenInterest: r.pmccPair.longLeg.openInterest,
-      shortLegSpreadPct: r.pmccPair.shortLeg.quote.spreadPct,
-      shortLegOpenInterest: r.pmccPair.shortLeg.openInterest,
-      earningsDate: r.earningsDate ?? null,
-      shortLegExpiration: r.pmccPair.shortLeg.expiration,
-      earningsDeductionEnabled: true,
-    }).total : null;
+    // card. Now reads pmccResultScore(), the same shared helper the
+    // group headers and best-in-scan callout also use, so the sort
+    // order and every displayed number can never disagree.
+    const pmccScore = pmccResultScore(r);
     return {
       score: r.pmccPair
         ? pmccScore
@@ -9064,35 +9075,60 @@ export default function Home() {
                       const group = groups.get(result.symbol) ?? [];
                       group.push(result); groups.set(result.symbol, group); return groups;
                     }, new Map<string, ScreenResult[]>()).entries())
-                    .map(([symbol, group]): [string, ScreenResult[], number | null, number | null] => {
+                    .map(([symbol, group]): [string, ScreenResult[], number | null, number | null, number | null] => {
                       const widthPcts = group.map(r => r.pmccPair?.metrics?.widthMinusDebitPctOfDebit).filter((v): v is number => v != null);
                       const roiPcts = group.map(r => pmccAnnualizedRoi(r)).filter((v): v is number => v != null);
+                      // PMCC-CARD-SCORE-HEADER-0001 -- Diane's approved
+                      // mockup: group headers lead with score, not width/
+                      // ROI. Uses the same shared pmccResultScore() the
+                      // sort and best-in-scan callout use.
+                      const scores = group.map(r => pmccResultScore(r)).filter((v): v is number => v != null);
                       return [
                         symbol, group,
                         widthPcts.length > 0 ? Math.max(...widthPcts) : null,
                         roiPcts.length > 0 ? Math.max(...roiPcts) : null,
+                        scores.length > 0 ? Math.max(...scores) : null,
                       ];
                     })
-                    // fix/pmcc-ticker-group-sort — this used to end with
-                    // .sort(([,,aWidth],[,,bWidth]) => (bWidth ?? -Infinity) -
-                    // (aWidth ?? -Infinity)), which hard-locked the VISIBLE
-                    // group order to width-minus-debit% no matter which sort
-                    // button was selected -- the actual reason none of the
-                    // PMCC sort buttons appeared to do anything (they were
-                    // correctly reordering filteredQualified underneath, but
-                    // this explicit re-sort then threw that order away).
-                    // Removed entirely: the Map above already preserves each
-                    // ticker's group in the order its first (i.e. best-under-
-                    // the-current-sort) result appears in the already-sorted
-                    // filteredQualified array, so no re-sort is needed here
-                    // at all -- the natural insertion order IS the correct
-                    // order for whatever field the user picked.
+                    // PMCC-CARD-SCORE-HEADER-0001 -- groups now explicitly
+                    // sorted by best score descending (missing score
+                    // sorts last, same "missing loses" convention used
+                    // throughout screenerResultOrdering.ts). Previously
+                    // relied on the Map's natural insertion order tracking
+                    // whatever sort field was selected (see
+                    // fix/pmcc-ticker-group-sort below) -- correct when
+                    // sort=Score, but the group HEADER itself needs to
+                    // consistently lead with score regardless of which
+                    // sort field the operator has selected for the cards
+                    // inside each group, per the mockup Ian/Paul signed
+                    // off on.
+                    .sort(([, , , , aScore], [, , , , bScore]) => (bScore ?? -Infinity) - (aScore ?? -Infinity))
                   : [];
+                const pmccBestInScan = pmccTickerGroups.length > 1 ? pmccTickerGroups[0] : null;
                 return (
                 <>
                   {filteredQualified.length > 0 && (
                     <div>
                       <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">{activePmccSession ? 'QUALIFIED PMCC STRUCTURES' : 'QUALIFIED'}</p>
+                      {/* PMCC-CARD-SCORE-HEADER-0001 -- one-line best-in-scan
+                          callout, per Diane's approved mockup. Only shown
+                          when there's more than one ticker group to pick
+                          from -- with a single ticker, the callout would
+                          just repeat that group's own header, adding
+                          nothing. Deliberately scoped to PMCC's own
+                          qualified results only -- not Best Opportunities,
+                          which stays BPS/BCS/IC/CSP-only per standing
+                          project scope (see memory: "Best Opportunities
+                          never shows PMCC or CC candidates -- intentional,
+                          documented scope"). */}
+                      {pmccBestInScan && pmccBestInScan[4] != null && (
+                        <div className="mb-2 flex items-center gap-2 rounded-lg border border-cyan-600/60 bg-cyan-500/5 px-3 py-2 text-xs">
+                          <span className={th.textFaint}>Best in this scan</span>
+                          <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] font-bold text-cyan-300">Score {pmccBestInScan[4]}</span>
+                          <span className="font-bold">{pmccBestInScan[0]}</span>
+                          {pmccBestInScan[1][0]?.price != null && <span className={th.textFaint}>${pmccBestInScan[1][0].price.toFixed(2)}</span>}
+                        </div>
+                      )}
                       <div className="space-y-2">
                         {activeSession?.requestedStrategy === 'csp' ? cspExpirationGroups.map(([expiration, group]) => (
                           <ExpirationDisclosure key={expiration} expiration={expiration}
@@ -9100,10 +9136,10 @@ export default function Home() {
                             kind="qualified" defaultOpen borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </ExpirationDisclosure>
-                        )) : activePmccSession ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi]) => (
+                        )) : activePmccSession ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                           <PmccTickerDisclosure key={symbol} symbol={symbol}
                             price={group[0]?.price ?? null} candidateCount={group.length}
-                            bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
+                            bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore}
                             defaultOpen={pmccTickerGroups.length === 1} borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </PmccTickerDisclosure>
@@ -9631,6 +9667,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
