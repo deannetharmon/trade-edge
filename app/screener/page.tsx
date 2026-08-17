@@ -8783,13 +8783,71 @@ export default function Home() {
                 activeSession?.requestedStrategy === 'csp' ? (
                   <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                    {/* SCREENER-CSP-CC-FILTER-PARITY-0001 -- CSP previously
+                        rendered only OiAndSortControls, missing the ticker
+                        filter row and the POP/OTM/credit-ratio minimum
+                        filters FilteredResultControls already has working
+                        for the generic spreads path. The underlying state
+                        (filterPopMin/filterOtmMin/filterCreditRatioMin/
+                        filterHiddenSymbols) already applied to CSP results
+                        via applyFilterModeChips -- confirmed by reading
+                        that function before touching anything -- so this
+                        was a missing UI, not missing logic. Strategy
+                        toggle hidden: a CSP-only scan page has no other
+                        strategy's results to toggle. */}
+                    <FilteredResultControls
+                      results={results}
+                      qualifiedTotal={qualified.length}
+                      filteredQualifiedCount={filteredQualified.length}
+                      popMin={filterPopMin}
+                      setPopMin={setFilterPopMin}
+                      otmMin={filterOtmMin}
+                      setOtmMin={setFilterOtmMin}
+                      creditRatioMin={filterCreditRatioMin}
+                      setCreditRatioMin={setFilterCreditRatioMin}
+                      strategies={filterStrategies as FilterStrategy[]}
+                      toggleStrategy={toggleFilterStrategy}
+                      hiddenSymbols={filterHiddenSymbols}
+                      toggleSymbol={toggleFilterSymbol}
+                      setHiddenSymbols={setFilterHiddenSymbols}
+                      th={th}
+                      showStrategyToggle={false}
+                      oiAndSortControls={
+                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                      }
+                    />
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                    {/* SCREENER-CSP-CC-FILTER-PARITY-0001 -- same gap and
+                        same fix as CSP above. Credit-ratio also hidden
+                        here per Ian's explicit call: covered-call yield
+                        math doesn't translate cleanly to the same
+                        credit-ratio threshold CSP/BPS/BCS use. */}
+                    <FilteredResultControls
+                      results={results}
+                      qualifiedTotal={qualified.length}
+                      filteredQualifiedCount={filteredQualified.length}
+                      popMin={filterPopMin}
+                      setPopMin={setFilterPopMin}
+                      otmMin={filterOtmMin}
+                      setOtmMin={setFilterOtmMin}
+                      creditRatioMin={filterCreditRatioMin}
+                      setCreditRatioMin={setFilterCreditRatioMin}
+                      strategies={filterStrategies as FilterStrategy[]}
+                      toggleStrategy={toggleFilterStrategy}
+                      hiddenSymbols={filterHiddenSymbols}
+                      toggleSymbol={toggleFilterSymbol}
+                      setHiddenSymbols={setFilterHiddenSymbols}
+                      th={th}
+                      showStrategyToggle={false}
+                      showCreditRatio={false}
+                      oiAndSortControls={
+                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                      }
+                    />
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short call only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
@@ -9491,6 +9549,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 

@@ -57,6 +57,19 @@ export interface FilteredResultControlsProps {
   oiAndSortControls: ReactNode;
 
   th: { border: string; textFaint: string };
+
+  // SCREENER-CSP-CC-FILTER-PARITY-0001 — CSP and CC each have their own
+  // dedicated result-controls branch in page.tsx rather than rendering this
+  // component, specifically because the Strategy toggle (BPS/BCS/IC/CSP/
+  // CC/PMCC) is meaningless clutter on a page whose scan only ever produces
+  // one strategy's results — that's a real, deliberate reason, not an
+  // oversight, so it's an opt-out flag here rather than removed outright.
+  // Both default true (unchanged behavior for the existing generic-spreads
+  // caller). CC also opts out of the credit-ratio slider per Ian's
+  // explicit call: covered-call yield math doesn't translate cleanly to
+  // the same credit-ratio threshold CSP/BPS/BCS use.
+  showStrategyToggle?: boolean;
+  showCreditRatio?: boolean;
 }
 
 const POP_PRESETS = [0, 50, 60, 70, 80];
@@ -86,15 +99,19 @@ export function FilteredResultControls({
   setHiddenSymbols,
   oiAndSortControls,
   th,
+  showStrategyToggle = true,
+  showCreditRatio = true,
 }: FilteredResultControlsProps) {
   const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
 
   const activeChips: ActiveChip[] = [];
   if (popMin > 0) activeChips.push({ key: 'pop', label: `POP ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
   if (otmMin > 0) activeChips.push({ key: 'otm', label: `OTM ≥ ${otmMin}%`, onRemove: () => setOtmMin(0) });
-  if (creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
-  for (const s of strategies) {
-    activeChips.push({ key: `strat-${s}`, label: s, onRemove: () => toggleStrategy(s) });
+  if (showCreditRatio && creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
+  if (showStrategyToggle) {
+    for (const s of strategies) {
+      activeChips.push({ key: `strat-${s}`, label: s, onRemove: () => toggleStrategy(s) });
+    }
   }
   for (const sym of hiddenSymbols) {
     activeChips.push({ key: `hide-${sym}`, label: `Hiding ${sym}`, onRemove: () => toggleSymbol(sym) });
@@ -105,8 +122,8 @@ export function FilteredResultControls({
   function resetAll() {
     setPopMin(0);
     setOtmMin(0);
-    setCreditRatioMin(0);
-    for (const s of [...strategies]) toggleStrategy(s);
+    if (showCreditRatio) setCreditRatioMin(0);
+    if (showStrategyToggle) for (const s of [...strategies]) toggleStrategy(s);
     setHiddenSymbols([]);
   }
 
@@ -136,33 +153,41 @@ export function FilteredResultControls({
             </button>
           ))}
         </div>
-        <div className={`w-px h-4 ${th.border} border-l`} />
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
-          {CREDIT_RATIO_PRESETS.map(v => (
-            <button key={v} onClick={() => setCreditRatioMin(v)}
-              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                creditRatioMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-              }`}>
-              {v === 0 ? 'Any' : `${v}%`}
-            </button>
-          ))}
-        </div>
-        <div className={`w-px h-4 ${th.border} border-l`} />
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
-          {STRATEGY_OPTIONS.map(s => {
-            const on = strategies.includes(s);
-            return (
-              <button key={s} onClick={() => toggleStrategy(s)}
-                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                  on ? STRATEGY_COLOR[s] : `${th.border} ${th.textFaint} opacity-40`
-                }`}>
-                {s}
-              </button>
-            );
-          })}
-        </div>
+        {showCreditRatio && (
+          <>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
+              {CREDIT_RATIO_PRESETS.map(v => (
+                <button key={v} onClick={() => setCreditRatioMin(v)}
+                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                    creditRatioMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                  }`}>
+                  {v === 0 ? 'Any' : `${v}%`}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {showStrategyToggle && (
+          <>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
+              {STRATEGY_OPTIONS.map(s => {
+                const on = strategies.includes(s);
+                return (
+                  <button key={s} onClick={() => toggleStrategy(s)}
+                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                      on ? STRATEGY_COLOR[s] : `${th.border} ${th.textFaint} opacity-40`
+                    }`}>
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       <div>{oiAndSortControls}</div>
@@ -222,3 +247,4 @@ export function FilteredResultControls({
     </section>
   );
 }
+
