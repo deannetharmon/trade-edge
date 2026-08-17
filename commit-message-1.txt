@@ -1,0 +1,17 @@
+PMCC: ticker filter + per-ticker summary disclosure
+
+- Wire PMCC into FilteredResultControls filterHiddenSymbols/toggleFilterSymbol
+  (4th instance of dead-guard bug: filteredQualifiedChips/filteredDisqualified
+  were bypassing applyFilterModeChips's existing correct PMCC branch)
+- Add PmccTickerDisclosure component: groups qualified results by symbol,
+  shows best width-minus-debit% and best annualized ROI per group,
+  sorted best-first, collapsed by default when multiple tickers
+- Extract shared pmccAnnualizedRoi helper so group summary and card numbers
+  can't drift apart
+- Narrow overly-broad scoring-language regex guard test
+  (/\b(Best|Rank|Score|Quality)\b/i) to target generic composite scoring
+  specifically, not PMCC's real per-metric text
+- 7 new tests in PmccResultCardFields.test.tsx: real sort order,
+  real filtering, collapsed-by-default
+
+Full suite: 176 files / 2525 tests passing.
