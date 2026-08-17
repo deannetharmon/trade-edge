@@ -8984,7 +8984,20 @@ export default function Home() {
                         roiPcts.length > 0 ? Math.max(...roiPcts) : null,
                       ];
                     })
-                    .sort(([, , aWidth], [, , bWidth]) => (bWidth ?? -Infinity) - (aWidth ?? -Infinity))
+                    // fix/pmcc-ticker-group-sort — this used to end with
+                    // .sort(([,,aWidth],[,,bWidth]) => (bWidth ?? -Infinity) -
+                    // (aWidth ?? -Infinity)), which hard-locked the VISIBLE
+                    // group order to width-minus-debit% no matter which sort
+                    // button was selected -- the actual reason none of the
+                    // PMCC sort buttons appeared to do anything (they were
+                    // correctly reordering filteredQualified underneath, but
+                    // this explicit re-sort then threw that order away).
+                    // Removed entirely: the Map above already preserves each
+                    // ticker's group in the order its first (i.e. best-under-
+                    // the-current-sort) result appears in the already-sorted
+                    // filteredQualified array, so no re-sort is needed here
+                    // at all -- the natural insertion order IS the correct
+                    // order for whatever field the user picked.
                   : [];
                 return (
                 <>
@@ -9478,6 +9491,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
