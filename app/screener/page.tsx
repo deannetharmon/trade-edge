@@ -9130,26 +9130,77 @@ export default function Home() {
                   )}
                   {activePmccSession ? (
                     <>
-                      {filteredDisqualified.filter(result => result.pmccPair != null).length > 0 && (
-                        <div>
-                          <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC NEAR-MISS STRUCTURES</p>
-                          <div className="space-y-2">
-                            {filteredDisqualified.filter(result => result.pmccPair != null).map(result => (
-                              <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules} />
-                            ))}
+                      {/* SCREENER-PMCC-DISQUALIFIED-GROUPING-0001 -- Dean's
+                          explicit direction: "It should behave just like
+                          the qualified list." Near-miss and audit results
+                          are now grouped by ticker via PmccTickerDisclosure
+                          (the same component the qualified section uses),
+                          each collapsed by default -- not a flat,
+                          always-expanded list of every disqualified card.
+                          Near-miss groups still show best width-minus-debit/
+                          ROI (a near-miss pair has real metrics, same as a
+                          qualified one); audit groups show only ticker and
+                          count, since an audit-only result (pmccPair ==
+                          null) never has metrics to summarize. */}
+                      {(() => {
+                        const nearMissResults = filteredDisqualified.filter(result => result.pmccPair != null);
+                        const nearMissTickerGroups = Array.from(nearMissResults.reduce((groups, result) => {
+                          const group = groups.get(result.symbol) ?? [];
+                          group.push(result); groups.set(result.symbol, group); return groups;
+                        }, new Map<string, ScreenResult[]>()).entries())
+                          .map(([symbol, group]): [string, ScreenResult[], number | null, number | null] => {
+                            const widthPcts = group.map(r => r.pmccPair?.metrics?.widthMinusDebitPctOfDebit).filter((v): v is number => v != null);
+                            const roiPcts = group.map(r => pmccAnnualizedRoi(r)).filter((v): v is number => v != null);
+                            return [
+                              symbol, group,
+                              widthPcts.length > 0 ? Math.max(...widthPcts) : null,
+                              roiPcts.length > 0 ? Math.max(...roiPcts) : null,
+                            ];
+                          });
+                        return nearMissResults.length > 0 && (
+                          <div>
+                            <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC NEAR-MISS STRUCTURES</p>
+                            <div className="space-y-2">
+                              {nearMissTickerGroups.map(([symbol, group, bestWidth, bestRoi]) => (
+                                <PmccTickerDisclosure key={symbol} symbol={symbol}
+                                  price={group[0]?.price ?? null} candidateCount={group.length}
+                                  bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
+                                  itemLabel="near-miss structure"
+                                  defaultOpen={false} borderClassName={th.border}>
+                                  {group.map(result => (
+                                    <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules} />
+                                  ))}
+                                </PmccTickerDisclosure>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {filteredDisqualified.filter(result => result.pmccPair == null).length > 0 && (
-                        <div>
-                          <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC AUDIT RESULTS</p>
-                          <div className="space-y-2">
-                            {filteredDisqualified.filter(result => result.pmccPair == null).map(result => (
-                              <PmccResultCard key={result.candidateId ?? `pmcc-audit-${result.symbol}`} result={result} th={th} rules={runtimeStockRules} />
-                            ))}
+                        );
+                      })()}
+                      {(() => {
+                        const auditResults = filteredDisqualified.filter(result => result.pmccPair == null);
+                        const auditTickerGroups = Array.from(auditResults.reduce((groups, result) => {
+                          const group = groups.get(result.symbol) ?? [];
+                          group.push(result); groups.set(result.symbol, group); return groups;
+                        }, new Map<string, ScreenResult[]>()).entries());
+                        return auditResults.length > 0 && (
+                          <div>
+                            <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC AUDIT RESULTS</p>
+                            <div className="space-y-2">
+                              {auditTickerGroups.map(([symbol, group]) => (
+                                <PmccTickerDisclosure key={symbol} symbol={symbol}
+                                  price={group[0]?.price ?? null} candidateCount={group.length}
+                                  bestWidthMinusDebitPct={null} bestAnnualizedRoiPct={null}
+                                  itemLabel="audit result"
+                                  defaultOpen={false} borderClassName={th.border}>
+                                  {group.map(result => (
+                                    <PmccResultCard key={result.candidateId ?? `pmcc-audit-${result.symbol}`} result={result} th={th} rules={runtimeStockRules} />
+                                  ))}
+                                </PmccTickerDisclosure>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </>
                   ) : (
                     <DisqualifiedSection
@@ -9549,6 +9600,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
