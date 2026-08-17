@@ -2983,14 +2983,30 @@ function BatchConfirmModal({
       if (!item) return;
       const token = await getAccessToken();
       const [freshPrice, closeQuote] = await Promise.all([
-        fetchFreshPositionPrice(item.pos, token),
+        fetchFreshPositionPrice(item.pos, token).catch(() => null),
         fetchCloseQuote(item.pos, token).catch(() => null),
       ]);
       const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
       const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
-      setBatchItems(prev => prev.map(i => i.pos.key === key
-        ? { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() }
-        : i));
+      // Refreshing used to only update the informational "quote Xs old"
+      // display, leaving the actual limit price frozen at whatever it was
+      // when the modal opened -- so a stale Take Profit limit could sit
+      // right next to a correctly-updated marketable-price readout with
+      // nothing keeping them in sync. Take Profit's limit now tracks the
+      // fresh marketable price on every refresh, same as its initial
+      // default, unless the operator has manually typed a limit (tracked
+      // via limitOverrides) -- a deliberate override is never silently
+      // clobbered by a refresh.
+      const isManuallySet = limitOverrides[key] != null;
+      const freshMarketable = closeQuote?.netAsk ?? freshPerContract;
+      setBatchItems(prev => prev.map(i => {
+        if (i.pos.key !== key) return i;
+        const next = { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() };
+        if (i.action === 'TAKE_PROFIT' && !isManuallySet && freshMarketable != null) {
+          next.limitPrice = parseFloat(Math.max(freshMarketable, 0.01).toFixed(2));
+        }
+        return next;
+      }));
     } catch (e: any) {
       console.warn('Quote refresh failed:', e.message);
     } finally {
@@ -3074,15 +3090,23 @@ function BatchConfirmModal({
 
           const effectiveValue = freshPrice ?? pos.currentValue;
           const effectivePerContract = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
+          // Take Profit's whole purpose is closing at a price you can
+          // actually get filled at today -- mid is a theoretical reference,
+          // not a real fill level, and defaulting to it overstates
+          // achievable profit versus the marketable (ask-side) price.
+          // Falls back to mid only when no marketable quote is available.
+          const marketablePerContract = closeQuote?.netAsk ?? effectivePerContract;
 
           if (action === 'TAKE_PROFIT') {
-            // Default to the LIVE MARKET (mid), not the static profit target.
-            // Take Profit's purpose is closing near where the position actually
-            // sits today — defaulting to the target made it identical to any
-            // existing GTC already resting there. The 50% target still renders
-            // as a marker on the profit-capture scale, so it's a drag/snap away.
-            if (effectivePerContract != null) {
-              limitPrice = parseFloat(Math.max(effectivePerContract, 0.01).toFixed(2));
+            // Default to the real marketable (fillable) price, not mid.
+            // Take Profit's purpose is closing near where the position can
+            // actually be closed today — defaulting to mid made the shown
+            // profit look better than what's really available, and made
+            // the field identical to any existing GTC already resting
+            // there. The 50% target still renders as a marker on the
+            // profit-capture scale, so it's a drag/snap away.
+            if (marketablePerContract != null) {
+              limitPrice = parseFloat(Math.max(marketablePerContract, 0.01).toFixed(2));
             } else {
               // No live quote available — fall back to the target as a safe default.
               limitPrice = parseFloat(Math.max((creditPerContract * (1 - pos.profitTarget)), 0.01).toFixed(2));
@@ -3383,9 +3407,33 @@ function BatchConfirmModal({
                         `Blocked: your price $${item.limitPrice.toFixed(2)} (P&L $${yourPnl.toFixed(2)}) is ${(pctFromLive * 100).toFixed(0)}% from live $${livePerContract.toFixed(2)} (P&L $${livePnl.toFixed(2)}). Refresh the quote and resubmit to confirm.`
                       );
                     }
+                    // PT-FIX-STALE-GATE-QUOTE: the safety gate below (line
+                    // ~3450) validates against item.closeQuote, which was
+                    // fetched once at enrich time and never refreshed. If
+                    // that feed disagrees with a freshly-computed limit
+                    // (wide/moving bid-ask), the "corrected" price still
+                    // trips MATERIAL_PNL_DEVIATION against stale bid/ask
+                    // data. Refetch here, before computing freshLimit, so
+                    // both the limit and the gate check come from the same
+                    // moment.
+                    const refreshedQuote = await fetchCloseQuote(item.pos, token).catch(() => null);
+                    if (refreshedQuote != null) {
+                      item.closeQuote = refreshedQuote;
+                      item.quoteFetchedAt = Date.now();
+                    }
                     let freshLimit: number;
                     if (item.action === 'TAKE_PROFIT') {
-                      freshLimit = Math.max(parseFloat(Math.min(creditPerContract * (1 - item.pos.profitTarget), livePerContract - 0.01).toFixed(2)), 0.01);
+                      // Marketable (netAsk), not mid/profit-target -- Take
+                      // Profit always targets a real fillable price, matching
+                      // the fix to its initial default and to refresh. Uses
+                      // the quote just refetched above so this and the gate
+                      // check are reading the identical data point. Falls
+                      // back to mid (livePerContract) only if no marketable
+                      // quote is available at all.
+                      const marketable = refreshedQuote?.netAsk;
+                      freshLimit = marketable != null
+                        ? parseFloat(Math.max(marketable, 0.01).toFixed(2))
+                        : parseFloat(Math.max(livePerContract, 0.01).toFixed(2));
                     } else {
                       // CUT_LOSSES / CLOSE_ROLL: price to the marketable side
                       // (balanced mid->natural) so the close fills. Only
@@ -3400,19 +3448,6 @@ function BatchConfirmModal({
                     }
                     item.orderBody = buildCloseOrder(item.pos, freshLimit, item.orderBody['time-in-force'] as 'GTC' | 'Day');
                     (item as any).limitPrice = freshLimit;
-                    // PT-FIX-STALE-GATE-QUOTE: freshLimit above is rebuilt from
-                    // fetchFreshPositionPrice's livePerContract, but the safety
-                    // gate below (line ~3450) validates against item.closeQuote,
-                    // which was fetched once at enrich time and never refreshed.
-                    // If the two feeds disagree (wide/moving bid-ask), the
-                    // "corrected" price still trips MATERIAL_PNL_DEVIATION
-                    // against stale bid/ask data. Refetch the quote here so both
-                    // numbers come from the same moment.
-                    const refreshedQuote = await fetchCloseQuote(item.pos, token).catch(() => null);
-                    if (refreshedQuote != null) {
-                      item.closeQuote = refreshedQuote;
-                      item.quoteFetchedAt = Date.now();
-                    }
                   }
                 }
               }
@@ -9848,3 +9883,4 @@ export default function PortfolioPage() {
     </div>
   );
 }
+
