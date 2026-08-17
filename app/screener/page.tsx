@@ -3488,12 +3488,157 @@ type ResultCardProps = {
   existingPositions?: ExistingPosition[];
 };
 
+// PMCC-CARD-0001 item 4 — reuses the exact chart/sparkline/TradingView
+// pattern already shipped in GenericResultCard below, so PMCC tickers get
+// the same chart link "the same way we do it on other pages" (Dean's
+// framing). No new data source: same /api/chart endpoint, same sparkline
+// rendering, same TradingView deep link.
+function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSparkData, sparkLoading, setSparkLoading }: {
+  symbol: string;
+  th: typeof THEMES[Theme];
+  showChart: boolean;
+  setShowChart: (value: boolean) => void;
+  sparkData: number[] | null;
+  setSparkData: (value: number[] | null) => void;
+  sparkLoading: boolean;
+  setSparkLoading: (value: boolean) => void;
+}) {
+  return (
+    <div className="relative">
+      <button
+        onClick={e => {
+          e.stopPropagation();
+          if (!showChart) {
+            setShowChart(true);
+            if (!sparkData) {
+              setSparkLoading(true);
+              fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}`)
+                .then(r => r.json())
+                .then(d => {
+                  const allBars = (d?.bars ?? []).map((b: any) => b?.c).filter((v: any) => v != null);
+                  setSparkData(allBars.slice(-90));
+                })
+                .catch(() => setSparkData([]))
+                .finally(() => setSparkLoading(false));
+            }
+          } else {
+            setShowChart(false);
+          }
+        }}
+        className={`inline-flex items-center gap-0.5 text-[9px] transition-colors ${showChart ? 'text-blue-400' : 'text-slate-500 ac-hover-text'}`}
+        title="Quick chart"
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span className="tracking-wide">chart</span>
+      </button>
+
+      {showChart && (
+        <div
+          className={`absolute top-full left-0 mt-1 z-40 ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
+          style={{ width: '280px' }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="mb-2">
+            {sparkLoading && (
+              <div className="flex items-center justify-center h-16">
+                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+            {!sparkLoading && sparkData && sparkData.length > 1 && (() => {
+              const min = Math.min(...sparkData);
+              const max = Math.max(...sparkData);
+              const range = max - min || 1;
+              const w = 256, h = 56;
+              const pts = sparkData.map((v, i) => {
+                const x = (i / (sparkData.length - 1)) * w;
+                const y = h - ((v - min) / range) * h;
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+              }).join(' ');
+              const isUp = sparkData[sparkData.length - 1] >= sparkData[0];
+              const color = isUp ? '#10b981' : '#ef4444';
+              const lastPrice = sparkData[sparkData.length - 1];
+              const firstPrice = sparkData[0];
+              const changePct = ((lastPrice - firstPrice) / firstPrice * 100).toFixed(1);
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{symbol}</span>
+                    <span className={`text-[10px] font-bold`} style={{ color }}>
+                      ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
+                    </span>
+                  </div>
+                  <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '56px' }}>
+                    <defs>
+                      <linearGradient id={`grad-pmcc-${symbol}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+                        <stop offset="100%" stopColor={color} stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+                    <polygon points={`0,${h} ${pts} ${w},${h}`} fill={`url(#grad-pmcc-${symbol})`} />
+                  </svg>
+                </div>
+              );
+            })()}
+            {!sparkLoading && sparkData && sparkData.length === 0 && (
+              <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
+            )}
+          </div>
+
+          <a
+            href={`https://www.tradingview.com/chart/?symbol=${symbol}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="flex items-center justify-center gap-2 w-full py-2 ac-bg-20 ac-hover-bg/30 border ac-border/40 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            Open in TradingView
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showPairLookup, setShowPairLookup] = useState(false);
+  const [showQuoteDetail, setShowQuoteDetail] = useState(false);
+  const [showAuditDetail, setShowAuditDetail] = useState(false);
+  const [showChart, setShowChart] = useState(false);
+  const [sparkData, setSparkData] = useState<number[] | null>(null);
+  const [sparkLoading, setSparkLoading] = useState(false);
   const pair = result.pmccPair;
   const metrics = pair?.metrics;
-  const ready = Boolean(pair?.qualified && pair.longLeg.quote.readyInput && pair.shortLeg.quote.readyInput);
+  // PMCC-CARD-0001 — Ian/Paul-signed-off three-state readiness, replacing the
+  // old binary ready/not-ready text. Disqualified (failed real criteria) is
+  // visually distinct from not-ready (market/data gate): the former won't
+  // clear without different strikes, the latter clears on its own once the
+  // regular market session opens. No new logic -- disqualified derives from
+  // pair.qualified/failureReasons, which already exist; not-ready derives
+  // from the same readyInput fields the old `ready` boolean already used.
+  const disqualified = Boolean(pair && (!pair.qualified || pair.failureReasons.length > 0));
+  const dataNotReady = Boolean(pair && (!pair.longLeg.quote.readyInput || !pair.shortLeg.quote.readyInput));
+  const readinessState: 'ready' | 'not_ready' | 'disqualified' = !pair
+    ? 'disqualified'
+    : disqualified
+      ? 'disqualified'
+      : dataNotReady
+        ? 'not_ready'
+        : 'ready';
+  const ready = readinessState === 'ready';
+  const READINESS_META: Record<typeof readinessState, { label: string; dot: string; text: string; border: string; bg: string }> = {
+    ready:        { label: 'Ready',        dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
+    not_ready:    { label: 'Not ready',    dot: 'bg-amber-400',   text: 'text-amber-400',   border: 'border-amber-700/70',   bg: 'bg-amber-500/5' },
+    disqualified: { label: 'Disqualified', dot: 'bg-red-500',     text: 'text-red-400',     border: 'border-red-700/70',     bg: 'bg-red-500/5' },
+  };
+  const readiness = READINESS_META[readinessState];
   const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
   const quoteLine = (leg: NonNullable<typeof pair>['longLeg']) =>
     `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
@@ -3545,74 +3690,99 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     : null;
   if (!pair) {
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
-      <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span><span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span><span className="text-amber-400 text-xs">Audit result · Not Ready</span></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold">{result.symbol}</span>
+        <span className={th.textMuted}>{money(result.price)}</span>
+        <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span>
+        <span className="text-red-400 text-xs">Audit result · Disqualified</span>
+      </div>
       <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
       {(result.pmccLegRejections?.length ?? 0) > 0 && <details className="mt-2 text-xs"><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
-      <p className="mt-2 rounded border border-amber-700 px-3 py-2 text-xs text-amber-300">Not Ready — Open/Trade is blocked.</p>
+      <p className="mt-2 rounded border border-red-700 px-3 py-2 text-xs text-red-300">Disqualified — Open/Trade is blocked. No executable pair met criteria.</p>
     </article>;
   }
-  return <article className={`rounded-xl border ${ready ? 'border-cyan-700/70' : 'border-amber-700/70'} overflow-hidden`} data-testid="pmcc-result-card">
+  // PMCC-CARD-0001 — decision-tier fields Ian/Paul signed off on: width
+  // minus debit, annualized ROI, breakeven, roll runway, net delta. All
+  // five already existed as computed values above; this is a JSX
+  // reorganization only, no new calculations. Net debit, strike width,
+  // total premium, and profit-at-current-price move into the "quote and
+  // pricing detail" disclosure below -- they're supporting math, not
+  // primary decision inputs.
+  const decisionStrip = metrics ? [
+    { label: 'Width minus debit', value: `${money(metrics.widthMinusDebitPerShare)} · ${metrics.widthMinusDebitPctOfDebit.toFixed(1)}%` },
+    { label: 'Annualized ROI', value: annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%` },
+    { label: 'Breakeven', value: `${money(breakeven)}${breakevenAboveShortStrike ? ' ⚠' : ''}`, warn: breakevenAboveShortStrike },
+    { label: 'Roll runway', value: rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}` },
+    { label: 'Net delta', value: metrics.netDelta.toFixed(2), warn: disqualified },
+  ] : [];
+  return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
     <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
+        <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">PMCC</span>
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
-        <span className={`ml-auto text-[10px] ${ready ? 'text-emerald-400' : 'text-amber-400'}`}>{ready ? 'Ready' : 'Not Ready'} · {pair.longLeg.quote.status}/{pair.shortLeg.quote.status} {expanded ? '▴' : '▾'}</span>
+        <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold ${readiness.text}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${readiness.dot}`} />
+          {readiness.label} {expanded ? '▴' : '▾'}
+        </span>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) {money(pair.shortLeg.executablePrice)} · OI {pair.shortLeg.openInterest}</span></div>
       </div>
-      {metrics && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-        <span>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span>
-        <span>Strike width {money(metrics.strikeWidth)}</span>
-        <span>Width minus debit {money(metrics.widthMinusDebitPerShare)} · {metrics.widthMinusDebitPctOfDebit.toFixed(1)}% of debit</span>
-        {/* TE-0007G — Ian's ideal-range explanation, not just a bare
-            number: shows the real, already-computed default criteria
-            range (0.70-0.85 long minus 0.20-0.30 short = 0.40-0.65),
-            not an invented figure. Labeled "default scan criteria"
-            rather than claiming it's always exactly what this specific
-            scan used -- ScreenResult doesn't carry the actual
-            per-scan criteria if it was customized via the modal
-            (confirmed via direct read), so overclaiming precision here
-            would be dishonest. */}
-        <span>Net delta {metrics.netDelta.toFixed(2)} <span className={th.textFaint}>(ideal {(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}, default scan criteria)</span></span>
-        <span className={breakevenAboveShortStrike ? 'text-amber-400' : ''}>Breakeven {money(breakeven)}{breakevenAboveShortStrike ? ' ⚠ above short strike' : ''}</span>
-        <span>Roll runway {rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}`}</span>
-        <span>Annualized ROI {annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%`}, assumes level rolls</span>
-        {/* TE-0007G — Ian/Paul-reviewed. Two distinct, honestly-labeled
-            projections, not one number shown twice: total premium is
-            the "assumes level rolls" figure (same caveat already on
-            annualizedRoi); profit-at-current-price is real, live
-            market data, genuinely different information, not
-            profit-at-breakeven (which was traced to be mathematically
-            identical to total premium by construction and deliberately
-            not built as a separate stat -- see the computation above). */}
-        <span>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls</span>
-        <span>Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price</span>
+      {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
+        {decisionStrip.map(field => (
+          <span key={field.label} className={field.warn ? 'text-amber-400' : ''}>
+            <span className={th.textFaint}>{field.label}</span><br/>{field.value}
+          </span>
+        ))}
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
     </button>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
-      <div><b>Long OCC:</b> {pair.longLeg.occSymbol}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
-      <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
-      {metrics && <div className="space-y-1">
-        <p>Natural price: long ask {money(pair.longLeg.quote.ask)} minus short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}</p>
-        <p>Long intrinsic {money(metrics.longIntrinsicPerShare)} · long extrinsic {money(metrics.longExtrinsicPerShare)}</p>
-        <p>Short credit / net debit {metrics.shortCreditToNetDebitPct.toFixed(1)}% · short credit / long extrinsic {metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</p>
-        <p>Width minus debit: {money(metrics.strikeWidth)} − {money(metrics.netDebitPerShare)} = {money(metrics.widthMinusDebitPerShare)}. This is structure economics, not maximum profit.</p>
-      </div>}
-      {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>Qualification and near-miss reasons:</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
-      {counts && <div><b>Pairing/accounting:</b> {counts.eligibleLongLegs} eligible long · {counts.eligibleShortLegs} eligible short · {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations evaluated · {counts.qualifiedPairsRetained} qualified retained · {counts.nearMissPairsRetained} near-miss retained · {counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention} omitted</div>}
-      {result.pmccIncompleteAnalysis && <p className="font-bold text-amber-400">Incomplete analysis: the safety limit prevented some combinations from being evaluated.</p>}
-      {(result.pmccLegRejections?.length ?? 0) > 0 && <details><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
-      <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
-      <p className={`rounded border ${ready ? 'border-cyan-700 text-cyan-300' : 'border-amber-700 text-amber-300'} px-3 py-2`}>
-        {ready ? 'Analysis ready.' : 'Not Ready — Open/Trade is blocked.'}
+      <p className={`rounded border ${readiness.border} ${readiness.text} px-3 py-2`}>
+        {readinessState === 'ready' ? 'Analysis ready.' : readinessState === 'disqualified' ? 'Disqualified — Open/Trade is blocked.' : 'Not Ready — Open/Trade is blocked.'}
       </p>
+
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowQuoteDetail(value => !value); }}
+        className="w-full flex items-center justify-between py-1.5 text-left"
+      >
+        <span>Show quote and pricing detail</span><span>{showQuoteDetail ? '▴' : '▾'}</span>
+      </button>
+      {showQuoteDetail && <div className={`border-t ${th.border} pt-3 space-y-3`}>
+        <div><b>Long OCC:</b> {pair.longLeg.occSymbol}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
+        <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
+        {metrics && <div className="space-y-1">
+          <p>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract · Strike width {money(metrics.strikeWidth)}</p>
+          <p>Natural price: long ask {money(pair.longLeg.quote.ask)} minus short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}</p>
+          <p>Long intrinsic {money(metrics.longIntrinsicPerShare)} · long extrinsic {money(metrics.longExtrinsicPerShare)}</p>
+          <p>Short credit / net debit {metrics.shortCreditToNetDebitPct.toFixed(1)}% · short credit / long extrinsic {metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</p>
+          <p>Width minus debit: {money(metrics.strikeWidth)} − {money(metrics.netDebitPerShare)} = {money(metrics.widthMinusDebitPerShare)}. This is structure economics, not maximum profit.</p>
+          <p>Net delta ideal range: {(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}, default scan criteria.</p>
+          <p>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls. Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price.</p>
+        </div>}
+      </div>}
+
+      <button
+        onClick={(e) => { e.stopPropagation(); setShowAuditDetail(value => !value); }}
+        className="w-full flex items-center justify-between py-1.5 text-left"
+      >
+        <span>Show qualification and audit detail</span><span>{showAuditDetail ? '▴' : '▾'}</span>
+      </button>
+      {showAuditDetail && <div className={`border-t ${th.border} pt-3 space-y-3`}>
+        {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>Qualification and near-miss reasons:</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
+        {counts && <div><b>Pairing/accounting:</b> {counts.eligibleLongLegs} eligible long · {counts.eligibleShortLegs} eligible short · {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations evaluated · {counts.qualifiedPairsRetained} qualified retained · {counts.nearMissPairsRetained} near-miss retained · {counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention} omitted</div>}
+        {result.pmccIncompleteAnalysis && <p className="font-bold text-amber-400">Incomplete analysis: the safety limit prevented some combinations from being evaluated.</p>}
+        {(result.pmccLegRejections?.length ?? 0) > 0 && <details><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
+        <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
+      </div>}
+
       {ready && (
         <button
           onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
@@ -9230,3 +9400,4 @@ export default function Home() {
     </div>
   );
 }
+
