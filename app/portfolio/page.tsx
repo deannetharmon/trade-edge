@@ -1268,6 +1268,20 @@ async function fetchCloseQuote(pos: Position, token: string): Promise<CloseQuote
       const bid = parseFloat(item.bid ?? '0');
       const ask = parseFloat(item.ask ?? '0');
       if (!(bid > 0) && !(ask > 0)) continue;
+      // A leg with a real ask but no working bid (bid <= 0) has no two-sided
+      // market -- there's nothing to buy it back at or sell it into right
+      // now. Previously this fell through to the math below with bid
+      // treated as 0, which only zeroed out one side of the net quote
+      // (e.g. contributed nothing to shareAsk on a Long leg while still
+      // subtracting its full ask from shareBid), producing a net bid that
+      // can go negative even though no leg's real market was actually
+      // crossed -- confirmed live on an MU BPS close (-0.20 bid / 1.05
+      // ask). closeOrderSafety.ts's QUOTE_INVALID check validates the
+      // whole quote object (netBid < 0 alone rejects it) regardless of
+      // which side the order actually prices from, so this bails out for
+      // the whole position instead of computing a quote from a one-sided
+      // leg -- same fail-closed convention as the `!item` case above.
+      if (!(bid > 0) || !(ask > 0)) return null;
       const mid = (bid + ask) / 2;
       if (leg.direction === 'Short') {
         // Buy to Close: cost. Marketable = ask, patient = bid.
@@ -9867,5 +9881,6 @@ export default function PortfolioPage() {
     </div>
   );
 }
+
 
 
