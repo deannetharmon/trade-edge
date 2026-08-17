@@ -198,6 +198,7 @@ import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvi
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
+import { classifyTrendFromCloses } from '@/lib/portfolio/trendClassification';
 import type {
   Position, PositionLeg, PendingOrder, PositionSnapshot, TrendResult, PriceSupportAnalysis, Recommendation, ActionType, PositionIntent,
 } from '@/lib/portfolio-data/types';
@@ -2851,34 +2852,17 @@ async function getTrend(symbol: string, shortPutStrike: number | null = null): P
   const closes = bars.map((b: any) => Number(b.c)).filter((c: any): c is number => Number.isFinite(c));
   const supportAnalysis = buildPriceSupportAnalysis(bars, shortPutStrike);
 
-  if (closes.length < 50) {
-    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data', supportAnalysis };
-  }
-
-  const price = closes[closes.length - 1];
-  const ma20 = avgNumbers(closes.slice(-20));
-  const ma50 = avgNumbers(closes.slice(-50));
-  const mom20 = (price - closes[closes.length - 21]) / closes[closes.length - 21];
-  const low20 = Math.min(...closes.slice(-20));
-  const high20 = Math.max(...closes.slice(-20));
-  const higherLows = low20 > Math.min(...closes.slice(-40, -20)) * 0.985;
-  const lowerHighs = high20 < Math.max(...closes.slice(-40, -20)) * 1.015;
-
-  let score = 0;
-  if (price > ma20) score += 2; else score -= 2;
-  if (price > ma50) score += 2; else score -= 2;
-  if (ma20 > ma50) score += 2; else score -= 2;
-  if (mom20 > 0.03) score += 2; else if (mom20 < -0.03) score -= 2;
-  if (higherLows) score += 2; else if (lowerHighs) score -= 2;
-
-  const confidence = Math.min(100, Math.abs(score) * 10);
+  // PI-0006B-FOLLOWUP: trend/strategy/confidence scoring now lives in
+  // lib/portfolio/trendClassification.ts, shared with the batch trend
+  // fetch (trendFetch.ts) that feeds the recommendation engine's
+  // technicalAlignment input -- this call site no longer keeps its own
+  // copy of that math, so the per-card trend badge and the recommendation
+  // engine can never disagree about the same symbol's trend.
+  const classification = classifyTrendFromCloses(closes);
   const supportSuffix = supportAnalysis.verdict !== 'UNKNOWN'
     ? ` | Support ${supportAnalysis.verdict}: ${supportAnalysis.reason}`
     : '';
-
-  if (score >= 4) return { trend: 'uptrend', strategy: 'BPS', confidence, reason: `Price above MA20/MA50, positive momentum${supportSuffix}`, supportAnalysis };
-  if (score <= -4) return { trend: 'downtrend', strategy: 'BCS', confidence, reason: `Price below MA20/MA50, negative momentum${supportSuffix}`, supportAnalysis };
-  return { trend: 'sideways', strategy: 'IC', confidence, reason: `Mixed signals, range-bound${supportSuffix}`, supportAnalysis };
+  return { ...classification, reason: `${classification.reason}${supportSuffix}`, supportAnalysis };
 }
 // ── Helpers ────────────────────────────────────────────────────────────────
 function stratColor(strategy: string) {
@@ -9883,4 +9867,5 @@ export default function PortfolioPage() {
     </div>
   );
 }
+
 

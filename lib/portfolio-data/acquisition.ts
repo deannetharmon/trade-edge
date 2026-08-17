@@ -47,6 +47,7 @@ import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, 
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
 import { canonicalRecommendationPriority } from '@/lib/portfolio/canonicalRecommendationPresentation';
+import { technicalAlignmentForStrategy, type TrendDirection } from '@/lib/portfolio/trendClassification';
 import {
   classifyStopLossPolicy,
   evaluateStopBreach,
@@ -183,7 +184,20 @@ export function computeRawPositionValuation(pos: Position) {
 // evidence object -- and `liquidityTrapTriggered`, owned by
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
-export function scorePortfolioPositionObjective(pos: Position, now: Date = new Date(), priorPricingVerificationUnresolved = false): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
+export function scorePortfolioPositionObjective(
+  pos: Position,
+  now: Date = new Date(),
+  priorPricingVerificationUnresolved = false,
+  // PI-0006B-FOLLOWUP: closes the gap this function's own prior comment
+  // documented ("technicalAlignment is deliberately NOT wired in this
+  // slice"). Optional and defaults to undefined so every existing call
+  // site (including tests) that doesn't pass a trend continues to behave
+  // exactly as before -- technicalAlignmentForStrategy already returns
+  // 'unknown' for a missing/undefined trend, so omitting this argument
+  // is equivalent to the old always-unwired behavior, not a silent
+  // behavior change.
+  trendDirection?: TrendDirection,
+): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
   const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
   const decisionPosition: Position = supportedCreditEntry ? pos : {
     ...pos,
@@ -202,10 +216,13 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
       : undefined
   )) : undefined;
 
-  // technicalAlignment is deliberately NOT wired in this slice: trend
-  // (getTrend/TrendResult) is fetched asynchronously per-card and isn't
-  // available at this synchronous call site -- left as an accepted,
-  // documented gap for a future slice.
+  // PI-0006B-FOLLOWUP: technicalAlignment now wired through. trendDirection
+  // is undefined whenever the caller has no fresh trend for this symbol
+  // (batch fetch failed, or a call site hasn't been updated to pass one
+  // yet) -- technicalAlignmentForStrategy's own 'unknown' fallback means
+  // that's identical to this field's old always-omitted behavior, not a
+  // new failure mode.
+  const technicalAlignment = technicalAlignmentForStrategy(trendDirection ?? 'unknown', pos.strategy);
   const { netEdgeDeclinePct, netEdgeNegative } = computeNetEdgeEvidence(pos);
 
   // PI-0008B: reuses PI-0008A's Remaining Opportunity calculation (the exact
@@ -246,6 +263,7 @@ export function scorePortfolioPositionObjective(pos: Position, now: Date = new D
     marketableQuoteFreshness: deriveMarketableQuoteFreshness(pos.quoteCapturedAt, now),
     marketableQuoteCapturedAt: pos.quoteCapturedAt,
     priorPricingVerificationUnresolved,
+    technicalAlignment,
   }, now);
 
   return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
@@ -292,10 +310,19 @@ export async function fetchSnapshotStore(): Promise<Record<string, PositionSnaps
 
 // Attaches each position's snapshot history (sorted by date ascending) onto
 // the position object so the card render can compute net-edge peak/trend.
+//
+// PI-0006B-FOLLOWUP: gained an optional trendStore parameter -- a
+// symbol-keyed map of trend direction, as produced by
+// lib/portfolio/trendFetch.ts's fetchTrendStore(). Defaults to an empty
+// object so every existing caller (including tests) that doesn't pass
+// one continues to behave exactly as before: technicalAlignmentForStrategy
+// already treats a missing trend as 'unknown', the same as this field's
+// old always-omitted state.
 export function attachSnapshotHistory(
   positions: Position[],
   store: Record<string, PositionSnapshot[]>,
   previousPositions: Position[] = [],
+  trendStore: Record<string, TrendDirection> = {},
 ): Position[] {
   const previousByKey = new Map(previousPositions.map(position => [position.key, position]));
   const enriched = positions.map(p => {
@@ -309,7 +336,8 @@ export function attachSnapshotHistory(
       previous?.pricingDecisionEvidence?.verificationUnresolved === true ||
       previous?.pricingDecisionEvidence?.status === 'VERIFY_PRICING' ||
       previous?.recommendation?.kind === 'verify-pricing';
-    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved);
+    const trendDirection = trendStore[p.symbol.toUpperCase()];
+    const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved, trendDirection);
     return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
   return enriched.sort((a, b) => {
@@ -1902,3 +1930,4 @@ export function netEdgePeak(pos: Position): number | null {
   if (series.length === 0) return null;
   return Math.max(...series);
 }
+
