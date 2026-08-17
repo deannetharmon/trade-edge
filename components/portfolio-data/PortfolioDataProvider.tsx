@@ -43,6 +43,7 @@ import {
   computeNetEdgeEvidence,
   scorePortfolioRemainingOpportunity,
 } from '@/lib/portfolio-data/acquisition';
+import { fetchTrendStore } from '@/lib/portfolio/trendFetch';
 import type { PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import type { DecisionReviewStore } from '@/lib/decision-review';
 import { buildDashboardComposition, type DashboardComposition } from '@/lib/portfolio-intelligence/dashboardComposition';
@@ -120,16 +121,30 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       // history is contextual; if that endpoint fails, recompute from the
       // fresh broker positions with an empty store rather than publishing raw
       // positions or pretending recommendation reevaluation completed.
-      let snapshotStore: Record<string, PositionSnapshot[]> = {};
-      try {
-        snapshotStore = await fetchSnapshotStore();
-      } catch (snapshotError) {
-        console.error('Snapshot history fetch failed; recomputing from fresh broker positions:', snapshotError);
-      }
+      //
+      // PI-0006B-FOLLOWUP: trend store fetched in parallel, same
+      // non-blocking resilience as snapshot history -- a failed/partial
+      // trend fetch degrades individual positions to 'unknown' technical
+      // alignment (via technicalAlignmentForStrategy's own fallback), it
+      // never blocks or fails the refresh. Deduped by unique symbol across
+      // the whole freshly-loaded position set, not fetched per-position.
+      const [snapshotStore, trendStore] = await Promise.all([
+        fetchSnapshotStore().catch((snapshotError) => {
+          console.error('Snapshot history fetch failed; recomputing from fresh broker positions:', snapshotError);
+          return {} as Record<string, PositionSnapshot[]>;
+        }),
+        fetchTrendStore(data.map(p => p.symbol)).catch((trendError) => {
+          console.error('Trend store fetch failed; recomputing with unknown technical alignment:', trendError);
+          return {};
+        }),
+      ]);
+      const trendDirectionBySymbol = Object.fromEntries(
+        Object.entries(trendStore).map(([symbol, classification]) => [symbol, classification.trend])
+      );
       // Canonical recomputation owns the in-session Verify Pricing transition.
       // The provider supplies prior provenance but never authors or overwrites
       // recommendation policy after evaluation.
-      const updated = attachSnapshotHistory(data, snapshotStore, positionsRef.current);
+      const updated = attachSnapshotHistory(data, snapshotStore, positionsRef.current, trendDirectionBySymbol);
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
 
       callbacks?.onRawPositionsLoaded?.(data);
@@ -218,3 +233,4 @@ export function usePortfolioData(): PortfolioDataContextValue {
   }
   return ctx;
 }
+
