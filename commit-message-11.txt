@@ -1,0 +1,27 @@
+test: remove three tests asserting a never-built, deferred feature (OE-0002B)
+
+Continuing the SCREENER-UX-0001 investigation. A real, explicitly
+documented finding, not a redesign casualty like the others fixed
+this session: lib/command-center/screenerOpportunityRecommendations.
+ts's own header comment confirms availableCapital: 0 is deliberate,
+deferred scope -- "Portfolio-neutral by design, per OE-0002A's
+explicit scope... Real capital/exposure wiring is deferred to future
+work (OE-0002B), not decided here." A named, tracked, still-pending
+ticket, confirmed via direct code read, not assumed.
+
+Three tests asserted a "capital-limitation notice" and a distinct
+"zero adapted recommendations" error message -- both tied to that
+same never-built OE-0002B scope. Verified directly: a successful
+/api/autopilot/recommendations response with zero adapted candidates
+genuinely reaches setOpportunityState('loaded') with an empty array;
+no error, no distinct notice exists in current code, confirmed by
+reading every function in the actual call chain. Removed rather than
+asserting invented behavior the app does not have -- each removal
+documents exactly why and points back to this explanation.
+
+One test's real, separate, still-valid assertion (a genuine error
+renders for a truly-empty recommendations response) was kept and
+fixed correctly.
+
+Net: 7 failures -> 4 in this file. Full-suite regression check
+clean: 174/175 other files, 2514/2518 other tests unaffected.

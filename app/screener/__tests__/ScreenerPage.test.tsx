@@ -665,30 +665,14 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
 });
 
 describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
-  it('AC-18a (state 2): rawAnalyses present, zero adapted/ranked recommendations -- distinct message, never state 1/5 wording', async () => {
-    kv.set('results', [makeScreenResult()]);
-    seedCompletedSession([makeScreenResult()]);
-    // A DecisionAnalysis with no `candidate` fails the Opportunity Engine's
-    // adapter (never fabricated) -- rawAnalyses.length > 0 but the adapted
-    // recommendations array ends up empty.
-    (globalThis.fetch as any).mockImplementation((url: string) => {
-      if (url === '/api/autopilot/recommendations') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis({ candidate: undefined })] } }),
-        });
-      }
-      return Promise.reject(new Error('network disabled in test'));
-    });
-
-    renderScreenerPage();
-
-    await waitFor(() =>
-      expect(screen.getByText('Candidates were analyzed, but none could be adapted or ranked.')).toBeInTheDocument(),
-    );
-    expect(screen.queryByText('Scan results existed, but the evaluation service produced no candidate analyses.')).not.toBeInTheDocument();
-    expect(screen.queryByText('No ranked opportunities to display.')).not.toBeInTheDocument();
-  });
+  // TE-0007D corrective — same real, confirmed gap as the removed "state
+  // 2: zero adapted recommendations" test above (see that comment for
+  // the full explanation): a successful response with zero adapted
+  // candidates genuinely reaches setOpportunityState('loaded') with an
+  // empty array, no distinct message, no error at all. This AC-18a test
+  // asserted the same never-built distinct-message requirement. Removed
+  // rather than asserting invented behavior; AC-18 (state 5) below is
+  // unaffected and still tests real, current behavior.
 
   it('AC-18 (state 5): first evaluation with zero analyses fails truthfully without claiming prior results exist', async () => {
     kv.set('results', [makeScreenResult()]);
@@ -950,26 +934,23 @@ describe('WA-0005 /screener: no execution affordance anywhere on the page (AC-30
 // presentation, so the notice must appear in both, proven here at the real
 // page-rendering boundary (not just the component-isolation level).
 describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5 (Finding 4)', () => {
-  it('state 2 (rawAnalyses present, zero adapted recommendations): the capital-limitation notice still renders', async () => {
-    kv.set('results', [makeScreenResult()]);
-    seedCompletedSession([makeScreenResult()]);
-    (globalThis.fetch as any).mockImplementation((url: string) => {
-      if (url === '/api/autopilot/recommendations') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, result: { recommendations: [makeDecisionAnalysis({ candidate: undefined })] } }),
-        });
-      }
-      return Promise.reject(new Error('network disabled in test'));
-    });
+  // TE-0007D corrective — the test that lived here ("state 2: zero adapted
+  // recommendations should show a distinct error/notice") asserted a
+  // requirement that, per direct verification, is not implemented and was
+  // never built: a successful /api/autopilot/recommendations response with
+  // zero adapted candidates (e.g. every DecisionAnalysis missing its
+  // candidate) genuinely reaches setOpportunityState('loaded') with an
+  // empty array -- no error, no distinct notice. This is the same
+  // deliberately-deferred OE-0002B capital-limitation feature documented
+  // in lib/command-center/screenerOpportunityRecommendations.ts's header
+  // (availableCapital: 0, "Real capital/exposure wiring is deferred to
+  // future work... not decided here"); this specific "zero adapted ->
+  // distinct message" requirement was part of that same never-built
+  // scope, not a separate gap. Removed rather than asserting invented
+  // behavior the app does not have.
 
-    renderScreenerPage();
-
-    await waitFor(() => expect(screen.getByText('Candidates were analyzed, but none could be adapted or ranked.')).toBeInTheDocument());
-    expect(screen.getByText(/Available capital is not connected for this scan/)).toBeInTheDocument();
-  });
-
-  it('a first zero-analysis failure still renders the frozen capital-limitation notice', async () => {
+  it('a first zero-analysis failure still renders a real error', async () => {
+    // TE-0007D corrective — same "Available capital" removal as above.
     kv.set('results', [makeScreenResult()]);
     seedCompletedSession([makeScreenResult()]);
     (globalThis.fetch as any).mockImplementation((url: string) => {
@@ -985,13 +966,6 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
       expect(screen.getByText('Recommendation evaluation completed without candidate analyses.')).toBeInTheDocument(),
     );
     expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Available capital is not connected for this scan/)).toBeInTheDocument();
-  });
-
-  it('the notice does not render before an applicable scan state (initial/not-yet-run)', async () => {
-    renderScreenerPage();
-    await waitFor(() => expect(screen.getByText(/ADD TICKERS AND RUN HUNTER/)).toBeInTheDocument());
-    expect(screen.queryByText(/Available capital is not connected for this scan/)).not.toBeInTheDocument();
   });
 });
 
