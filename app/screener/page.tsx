@@ -9104,7 +9104,21 @@ export default function Home() {
                     // off on.
                     .sort(([, , , , aScore], [, , , , bScore]) => (bScore ?? -Infinity) - (aScore ?? -Infinity))
                   : [];
-                const pmccBestInScan = pmccTickerGroups.length > 1 ? pmccTickerGroups[0] : null;
+                // PMCC-CARD-SCORE-HEADER-0001 -- "Best in this scan" is a
+                // fixed, score-specific claim ("the highest-scoring
+                // structure in this scan"), independent of whatever sort
+                // field is currently selected -- computed as its own
+                // max-by-score reduction over every group, NOT read from
+                // pmccTickerGroups[0] (which tracks the selected sort
+                // field, not always score). Keeps the callout correct
+                // regardless of display order.
+                const pmccBestInScan = pmccTickerGroups.length > 1
+                  ? pmccTickerGroups.reduce<typeof pmccTickerGroups[number] | null>((best, group) => {
+                      if (group[4] == null) return best;
+                      if (best == null || best[4] == null || group[4] > best[4]) return group;
+                      return best;
+                    }, null)
+                  : null;
                 return (
                 <>
                   {filteredQualified.length > 0 && (
@@ -9667,6 +9681,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
