@@ -3632,6 +3632,20 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   // from the same readyInput fields the old `ready` boolean already used.
   const disqualified = Boolean(pair && (!pair.qualified || pair.failureReasons.length > 0));
   const dataNotReady = Boolean(pair && (!pair.longLeg.quote.readyInput || !pair.shortLeg.quote.readyInput));
+  // PMCC-TRADE-MARKET-CLOSED-0001 — Ian/Paul-signed-off distinction within
+  // not_ready: market_closed is a timing fact, not a data-integrity problem
+  // -- the quote is real, you're just choosing to submit an order that
+  // sits until the session opens. Every other not-ready cause (stale,
+  // too_wide, delayed, timestamp_missing -- see pmccQuoteQuality.ts's
+  // evaluatePmccQuoteQuality) reflects a genuinely unreliable quote and
+  // must keep blocking. A leg only ever contributes to this if it isn't
+  // ready in the first place (readyInput false) -- a ready leg's status
+  // is irrelevant here.
+  const blockingNotReadyReason = Boolean(pair && (
+    (!pair.longLeg.quote.readyInput && pair.longLeg.quote.status !== 'market_closed') ||
+    (!pair.shortLeg.quote.readyInput && pair.shortLeg.quote.status !== 'market_closed')
+  ));
+  const marketClosedOnly = dataNotReady && !blockingNotReadyReason;
   const readinessState: 'ready' | 'not_ready' | 'disqualified' = !pair
     ? 'disqualified'
     : disqualified
@@ -3640,6 +3654,13 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         ? 'not_ready'
         : 'ready';
   const ready = readinessState === 'ready';
+  // Trade is allowed when fully ready, OR when the only reason it isn't is
+  // the market being closed -- per Ian's explicit sign-off: "market_closed
+  // should warn, not block. The other not-ready causes should keep
+  // blocking." readinessState/READINESS_META (the dot/label) are
+  // unchanged -- still shows amber "Not ready" either way, since the card
+  // should still visibly flag it; only the Trade action itself unblocks.
+  const tradeAllowed = ready || (readinessState === 'not_ready' && marketClosedOnly);
   const READINESS_META: Record<typeof readinessState, { label: string; dot: string; text: string; border: string; bg: string }> = {
     ready:        { label: 'Ready',        dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
     not_ready:    { label: 'Not ready',    dot: 'bg-amber-400',   text: 'text-amber-400',   border: 'border-amber-700/70',   bg: 'bg-amber-500/5' },
@@ -3768,7 +3789,13 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     </button>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
       <p className={`rounded border ${readiness.border} ${readiness.text} px-3 py-2`}>
-        {readinessState === 'ready' ? 'Analysis ready.' : readinessState === 'disqualified' ? 'Disqualified — Open/Trade is blocked.' : 'Not Ready — Open/Trade is blocked.'}
+        {readinessState === 'ready'
+          ? 'Analysis ready.'
+          : readinessState === 'disqualified'
+            ? 'Disqualified — Open/Trade is blocked.'
+            : marketClosedOnly
+              ? 'Market closed — quotes will refresh at open. You can still submit; the order will queue until the regular session opens.'
+              : 'Not Ready — Open/Trade is blocked.'}
       </p>
 
       <button
@@ -3840,12 +3867,16 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
       </div>}
 
-      {ready && (
+      {tradeAllowed && (
         <button
           onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
-          className="w-full py-2 rounded-lg border border-cyan-500 text-cyan-300 text-xs font-bold tracking-widest hover:bg-cyan-500/10 transition-colors"
+          className={`w-full py-2 rounded-lg border text-xs font-bold tracking-widest transition-colors ${
+            marketClosedOnly
+              ? 'border-amber-500 text-amber-300 hover:bg-amber-500/10'
+              : 'border-cyan-500 text-cyan-300 hover:bg-cyan-500/10'
+          }`}
         >
-          ⚡ TRADE THIS
+          {marketClosedOnly ? '⚡ TRADE THIS — MARKET CLOSED' : '⚡ TRADE THIS'}
         </button>
       )}
       <button
@@ -9600,6 +9631,7 @@ export default function Home() {
     </div>
   );
 }
+
 
 
 
