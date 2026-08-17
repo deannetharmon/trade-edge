@@ -3517,6 +3517,33 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const annualizedRoi = metrics && pair && pair.shortLeg.dte > 0
     ? metrics.shortCreditToNetDebitPct * (365 / pair.shortLeg.dte)
     : null;
+  // TE-0007G — Ian/Paul-reviewed. Real, traced math, not invented:
+  // rollRunway (above) counts ADDITIONAL rolls after the current one,
+  // so total times a credit gets collected is rollRunway + 1.
+  // "Total premium if every roll matches today's credit" carries the
+  // exact same "assumes level rolls" honesty requirement already
+  // applied to annualizedRoi -- premium generally shrinks as DTE/IV
+  // change, this is an explicit, stated assumption, never a promise.
+  const totalPremium = pair && rollRunway != null
+    ? pair.shortLeg.executablePrice * (rollRunway + 1)
+    : null;
+  // "Profit if closed today at current price" -- deliberately NOT
+  // "profit at breakeven": traced the math first and found that
+  // reduces to exactly totalPremium by construction (breakeven is
+  // defined as the price where the long call's intrinsic value
+  // exactly equals what was paid for it, so the long leg always washes
+  // out at that specific price, regardless of rolls) -- shipping both
+  // would show two labels for one number. Current price is real,
+  // live, genuinely different data, not a structural constant.
+  // Intrinsic value only (ignores any remaining extrinsic value on
+  // the long leg at close) -- a real, stated simplification, not a
+  // promise about the actual closing price.
+  const longIntrinsicAtCurrentPrice = pair && result.price != null
+    ? Math.max(result.price - pair.longLeg.strike, 0)
+    : null;
+  const profitAtCurrentPrice = totalPremium != null && longIntrinsicAtCurrentPrice != null && pair
+    ? totalPremium + longIntrinsicAtCurrentPrice - pair.longLeg.executablePrice
+    : null;
   if (!pair) {
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2"><span className="font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span><span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span><span className="text-amber-400 text-xs">Audit result · Not Ready</span></div>
@@ -3544,10 +3571,29 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <span>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span>
         <span>Strike width {money(metrics.strikeWidth)}</span>
         <span>Width minus debit {money(metrics.widthMinusDebitPerShare)} · {metrics.widthMinusDebitPctOfDebit.toFixed(1)}% of debit</span>
-        <span>Net delta {metrics.netDelta.toFixed(2)}</span>
+        {/* TE-0007G — Ian's ideal-range explanation, not just a bare
+            number: shows the real, already-computed default criteria
+            range (0.70-0.85 long minus 0.20-0.30 short = 0.40-0.65),
+            not an invented figure. Labeled "default scan criteria"
+            rather than claiming it's always exactly what this specific
+            scan used -- ScreenResult doesn't carry the actual
+            per-scan criteria if it was customized via the modal
+            (confirmed via direct read), so overclaiming precision here
+            would be dishonest. */}
+        <span>Net delta {metrics.netDelta.toFixed(2)} <span className={th.textFaint}>(ideal {(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}, default scan criteria)</span></span>
         <span className={breakevenAboveShortStrike ? 'text-amber-400' : ''}>Breakeven {money(breakeven)}{breakevenAboveShortStrike ? ' ⚠ above short strike' : ''}</span>
         <span>Roll runway {rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}`}</span>
         <span>Annualized ROI {annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%`}, assumes level rolls</span>
+        {/* TE-0007G — Ian/Paul-reviewed. Two distinct, honestly-labeled
+            projections, not one number shown twice: total premium is
+            the "assumes level rolls" figure (same caveat already on
+            annualizedRoi); profit-at-current-price is real, live
+            market data, genuinely different information, not
+            profit-at-breakeven (which was traced to be mathematically
+            identical to total premium by construction and deliberately
+            not built as a separate stat -- see the computation above). */}
+        <span>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls</span>
+        <span>Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price</span>
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
     </button>

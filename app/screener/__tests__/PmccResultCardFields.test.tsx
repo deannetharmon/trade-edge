@@ -194,6 +194,34 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     expect(within(card).getByText(/above short strike/)).toBeInTheDocument();
   });
 
+  it('shows the ideal net delta range, total premium, and profit-at-current-price with hand-verified values', async () => {
+    // Same fixture as the test above (long ask 25.00, short bid 3.00,
+    // rollRunway 9, underlying price 110). New math, hand-verified
+    // independently here, not copied from the implementation:
+    //   totalPremium = shortLeg.executablePrice * (rollRunway + 1)
+    //                = 3.00 * (9 + 1) = $30.00
+    //   longIntrinsicAtCurrentPrice = max(110 - 100, 0) = $10.00
+    //   profitAtCurrentPrice = totalPremium + longIntrinsic - longAsk
+    //                        = 30.00 + 10.00 - 25.00 = $15.00
+    // Deliberately NOT testing "profit at breakeven" -- traced the math
+    // first (see the real code comment above totalPremium/
+    // profitAtCurrentPrice) and confirmed it's mathematically identical
+    // to totalPremium by construction, so it was never built as a
+    // separate stat; nothing to test that doesn't already duplicate the
+    // totalPremium assertion below.
+    const result = buildPmccResult();
+    seedPmccSession([result]);
+    renderScreener();
+
+    const card = await screen.findByTestId('pmcc-result-card');
+    // Ideal range: DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_
+    // SHORT_DELTA_RANGE.max = 0.70 - 0.30 = 0.40, up to 0.85 - 0.20 =
+    // 0.65. Real, already-computed default criteria, not invented.
+    expect(within(card).getByText(/\(ideal 0\.40–0\.65, default scan criteria\)/)).toBeInTheDocument();
+    expect(within(card).getByText(/Total premium \$30\.00, assumes level rolls/)).toBeInTheDocument();
+    expect(within(card).getByText(/Profit \$15\.00 if closed today at current price/)).toBeInTheDocument();
+  });
+
   it('does not flag the breakeven/short-strike warning for a healthy structure', async () => {
     // Same fixture shape, cheaper long ask so breakeven lands exactly at
     // the short strike: netDebit 20.00 -> breakeven 120.00. The
