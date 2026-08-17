@@ -5354,14 +5354,25 @@ function TakeProfitScale({
         <div
           className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-7 rounded-sm border-2 ${marketable ? 'bg-emerald-400 border-emerald-200' : 'bg-yellow-400 border-yellow-200'} shadow`}
           style={{ left: pct(handleX) }} />
+
+        {/* fills-now / waits-for-decay label — anchored to the handle's own
+            X position (handleX), same as every other marker on this track.
+            Previously this was a plain middle child of the flex row below,
+            centered by flexbox regardless of where the handle actually sat
+            -- misleading whenever the handle wasn't near the track's visual
+            center (confirmed live: handle left-of-center, label still
+            floating at the row's midpoint, reading as a separate threshold
+            marker instead of describing the handle itself). */}
+        <div
+          className={`absolute -translate-x-1/2 text-[8px] whitespace-nowrap ${th.textFaint}`}
+          style={{ left: pct(handleX), top: '100%', marginTop: '2px' }}>
+          {marketable ? 'fills now' : 'waits for decay'}
+        </div>
       </div>
 
-      <div className="flex items-center justify-between mt-1">
+      <div className="flex items-center justify-between mt-4">
         <span className={`text-[8px] ${th.textFaint}`}>
           {domainMax > span + 0.001 ? `$${domainMax.toFixed(2)} · loss` : `entry $${span.toFixed(2)} · 0%`}
-        </span>
-        <span className={`text-[8px] ${th.textFaint}`}>
-          {marketable ? 'fills now' : 'waits for decay'}
         </span>
         <span className={`text-[8px] ${th.textFaint}`}>$0.00 · 100%</span>
       </div>
@@ -9881,6 +9892,7 @@ export default function PortfolioPage() {
     </div>
   );
 }
+
 
 
 
