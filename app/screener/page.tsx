@@ -2597,7 +2597,10 @@ async function getAccountNumber(): Promise<string> {
 function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
   const instrType = result.underlyingType === 'index' ? 'Index Option' : 'Equity Option';
   const legs: any[] = [];
-  if (c.strategy === 'BPS') {
+  if (c.strategy === 'PMCC') {
+    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbolPMCC || c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
+    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbolPMCC || c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
+  } else if (c.strategy === 'BPS') {
     legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
     legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
   } else if (c.strategy === 'BCS') {
@@ -2611,14 +2614,16 @@ function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
   }
   return legs;
 }
-
 function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): any {
-  const credit = ((c.totalCredit ?? c.credit) * quantity).toFixed(2);
+  const isPMCC = c.strategy === 'PMCC';
+  const entryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
+  const val = (entryPrice * quantity).toFixed(2);
+  
   return {
     'time-in-force': 'GTC',
     'order-type': 'Limit',
-    price: credit,
-    'price-effect': 'Credit',
+    price: val,
+    'price-effect': isPMCC ? 'Debit' : 'Credit',
     legs: legs.map(l => ({ ...l, quantity })),
   };
 }
@@ -2633,31 +2638,31 @@ function TradeModal({ result, th, onClose }: {
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
 
-  // GTC profit target (default 50%)
+  const isPMCC = c.strategy === 'PMCC';
+
+  // Entry limit price (Debit for PMCC, Credit for Spread)
+  const defaultEntryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
+  const [entryLimit, setEntryLimit] = useState(parseFloat(defaultEntryPrice.toFixed(2)));
+
+  // GTC profit target (default 50% of the short call premium)
   const [gtcPct, setGtcPct] = useState(50);
-  const creditPerContract = c.totalCredit ?? c.credit;
+  const creditPerContract = isPMCC ? c.credit : (c.totalCredit ?? c.credit);
   const gtcBuyback = parseFloat((creditPerContract * (1 - gtcPct / 100)).toFixed(2));
 
-  // Stop loss (default 200% of credit = 2× credit debit to close)
-  const [stopPct, setStopPct] = useState(200);
-  const stopPrice = parseFloat((creditPerContract * (stopPct / 100)).toFixed(2));
+  // Stop loss
+  // Default: 200% for credit spreads (costs 2x credit to close), 20% for PMCC (loses 20% of net debit)
+  const [stopPct, setStopPct] = useState(isPMCC ? 20 : 200);
+  const stopPrice = isPMCC 
+    ? parseFloat((entryLimit * (1 - stopPct / 100)).toFixed(2)) // PMCC: Stop out at lower value (Credit to close)
+    : parseFloat((creditPerContract * (stopPct / 100)).toFixed(2)); // Spread: Stop out at higher cost (Debit to close)
 
-  // Stop-limit buffer — the stop leg must be submitted as 'Stop Limit',
-  // not plain 'Stop' (TastyTrade does not support stop-market orders on
-  // multi-leg spreads). This buffer sets how far above the stop-trigger
-  // price the limit sits, giving the order room to actually fill once
-  // triggered rather than resting unfilled on a fast move.
+  // Stop-limit buffer
   const [stopLimitBufferPct, setStopLimitBufferPct] = useState(5);
-  const stopLimitPrice = parseFloat((stopPrice * (1 + stopLimitBufferPct / 100)).toFixed(2));
-
-  // Entry limit price (default = credit, can tweak)
-  const [entryLimit, setEntryLimit] = useState(parseFloat(creditPerContract.toFixed(2)));
+  const stopLimitPrice = isPMCC
+    ? parseFloat((stopPrice * (1 - stopLimitBufferPct / 100)).toFixed(2)) // PMCC: Sell for even less credit if it drops fast
+    : parseFloat((stopPrice * (1 + stopLimitBufferPct / 100)).toFixed(2)); // Spread: Pay even more debit if it rises fast
 
   // ── OTM proximity hard gate ────────────────────────────────────────────
-  // Chasing premium on a tight-to-ITM strike is the exact mistake this is
-  // meant to catch. Threshold mirrors the same buffer table the rank score
-  // uses (index/etf/stock × DTE bucket), so if the score is already
-  // flagging a weak buffer dimension, order entry blocks too.
   const otmPct = (() => {
     if (result.price == null) return null;
     const price = result.price;
@@ -2669,64 +2674,287 @@ function TradeModal({ result, th, onClose }: {
         ((c.shortCallStrike - price) / price) * 100
       );
     }
-    return null;
+    return null; // N/A for PMCC where long is ITM
   })();
   const otmWarnThreshold = getOtmWarningThreshold(c.dte, result.underlyingType ?? 'stock');
   const otmTooTight = otmPct != null && otmPct < otmWarnThreshold;
   const [otmOverrideChecked, setOtmOverrideChecked] = useState(false);
   const otmGateBlocking = otmTooTight && !otmOverrideChecked;
 
-  const hasOccSymbols = c.shortOccSymbol && c.longOccSymbol &&
-    (c.strategy !== 'IC' || (c.shortCallOccSymbol && c.longCallOccSymbol));
+  const hasOccSymbols = isPMCC 
+    ? !!((c.shortOccSymbolPMCC || c.shortOccSymbol) && (c.longOccSymbolPMCC || c.longOccSymbol))
+    : !!(c.shortOccSymbol && c.longOccSymbol && (c.strategy !== 'IC' || (c.shortCallOccSymbol && c.longCallOccSymbol)));
 
-  const credit = entryLimit * quantity;
-  const maxLoss = (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
+  const tradeCostOrCredit = entryLimit * quantity;
+  const maxLoss = isPMCC 
+    ? tradeCostOrCredit * 100 
+    : (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
 
   const buildOtocoPayload = (qty: number) => {
-    const legs = buildOrderLegs(result, c);
-    const closingLegs = legs.map((l: any) => ({
+    const entryLegs = buildOrderLegs(result, c);
+    const closingLegs = entryLegs.map((l: any) => ({
       ...l,
       quantity: qty,
       action: l.action === 'Sell to Open' ? 'Buy to Close' : 'Sell to Close',
     }));
+
+    let profitTargetLegs = closingLegs;
+    if (isPMCC) {
+       // PMCC Profit Target: ONLY buy back the short call. Keep the LEAPS open.
+       profitTargetLegs = closingLegs.filter((l: any) => l.action === 'Buy to Close');
+    }
+
     return {
       type: 'OTOCO',
       'trigger-order': {
         'time-in-force': 'GTC',
         'order-type': 'Limit',
         price: entryLimit.toFixed(2),
-        'price-effect': 'Credit',
-        legs: legs.map((l: any) => ({ ...l, quantity: qty })),
+        'price-effect': isPMCC ? 'Debit' : 'Credit',
+        legs: entryLegs.map((l: any) => ({ ...l, quantity: qty })),
       },
       orders: [
         {
           'time-in-force': 'GTC',
           'order-type': 'Limit',
           price: gtcBuyback.toFixed(2),
-          'price-effect': 'Debit',
-          legs: closingLegs,
+          'price-effect': 'Debit', // Buying back a short option is always a Debit
+          legs: profitTargetLegs,
         },
         {
-          // NOTE: this OCO stop child must use 'order-type': 'Stop Limit'
-          // with BOTH stop-trigger and price. TastyTrade does not support
-          // stop-MARKET orders on multi-leg spreads (confirmed via their
-          // preflight rejection: "Orders with 2 or more legs cannot be
-          // placed as 'Market' orders" — a plain 'Stop' with no price
-          // executes as a market order once triggered, which is exactly
-          // what's disallowed here). The dry-run never caught this
-          // because TT doesn't support dry-running complex/OTOCO orders
-          // at all — only the live complex-order submission validates
-          // the full OTOCO structure.
           'time-in-force': 'GTC',
           'order-type': 'Stop Limit',
           'stop-trigger': stopPrice.toFixed(2),
           price: stopLimitPrice.toFixed(2),
-          'price-effect': 'Debit',
+          'price-effect': isPMCC ? 'Credit' : 'Debit', // PMCC stop = selling spread = Credit
           legs: closingLegs,
         },
       ],
     };
   };
+
+  const runDryRun = async () => {
+    setPhase('dryrun'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const legs = buildOrderLegs(result, c);
+      const payload = buildOrderPayload(c, quantity, legs);
+      payload.price = entryLimit.toFixed(2);
+      
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.data);
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const placeOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = buildOtocoPayload(quantity);
+      
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
+      setPhase('done');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const bpEffect = dryRunResult?.['buying-power-effect'];
+  const bpChange = bpEffect?.['change-in-buying-power'];
+  const bpEffect2 = bpEffect?.['change-in-buying-power-effect'];
+  const marginReq = bpEffect?.['change-in-margin-requirement'];
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE ORDER — {result.symbol}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        {!hasOccSymbols && (
+          <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
+            <p className="text-xs text-yellow-400">OCC symbols not available for this setup — rescan to populate them.</p>
+          </div>
+        )}
+
+        {otmTooTight && (
+          <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4 space-y-2">
+            <p className="text-xs text-red-400 font-bold">
+              ⚠ OTM buffer {otmPct!.toFixed(1)}% is below the {otmWarnThreshold}% threshold for this {result.underlyingType ?? 'stock'} / {c.dte}DTE setup — too close to the short strike.
+            </p>
+            <label className="flex items-center gap-2 text-[11px] text-red-300 cursor-pointer">
+              <input type="checkbox" checked={otmOverrideChecked} onChange={e => setOtmOverrideChecked(e.target.checked)} className="accent-red-500" />
+              I understand this is chasing premium on a tight strike and want to proceed anyway
+            </label>
+          </div>
+        )}
+
+        {/* Trade summary */}
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Strategy</span>
+            <span className={`font-bold ${c.strategy === 'BPS' ? 'text-emerald-400' : c.strategy === 'BCS' ? 'text-red-400' : 'text-purple-400'}`}>{c.strategy}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Strikes</span>
+            <span className={th.text}>{c.shortStrike} / {c.longStrike}{c.strategy === 'IC' ? ` · ${c.shortCallStrike} / ${c.longCallStrike}` : ''}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Expiry</span>
+            <span className={th.text}>{c.expiration} ({c.dte}d)</span>
+          </div>
+          <div className="flex justify-between text-xs items-center">
+            <span className={th.textFaint}>Entry limit / contract</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>−</button>
+              <span className={`${isPMCC ? 'text-red-400' : 'text-emerald-400'} font-bold text-xs w-12 text-center`}>${entryLimit.toFixed(2)}</span>
+              <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>+</button>
+            </div>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Order type</span>
+            <span className={th.text}>{isPMCC ? 'Net Debit' : 'Net Credit'} Limit · GTC</span>
+          </div>
+        </div>
+
+        {/* Quantity */}
+        <div className="flex items-center gap-3 mb-4">
+          <span className={`text-xs ${th.textFaint}`}>Contracts</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className={`w-7 h-7 rounded border ${th.border} ${th.textMuted} ac-hover-border text-sm`}>−</button>
+            <span className={`text-sm font-bold ${th.text} w-6 text-center`}>{quantity}</span>
+            <button onClick={() => setQuantity(q => Math.min(20, q + 1))} className={`w-7 h-7 rounded border ${th.border} ${th.textMuted} ac-hover-border text-sm`}>+</button>
+          </div>
+          <div className="ml-auto text-right">
+            <p className={`${isPMCC ? 'text-red-400' : 'text-emerald-400'} font-bold text-sm`}>${tradeCostOrCredit.toFixed(2)} {isPMCC ? 'debit' : 'credit'}</p>
+            <p className={`text-[10px] ${th.textFaint}`}>Max loss ~${maxLoss.toFixed(0)}</p>
+          </div>
+        </div>
+
+        {/* GTC Profit Target */}
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-bold tracking-widest text-emerald-400">GTC PROFIT TARGET</p>
+            <span className={`text-[9px] ${th.textFaint}`}>closes at ${gtcBuyback.toFixed(2)} debit</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {[25, 50, 65, 75].map(pct => (
+              <button key={pct} onClick={() => setGtcPct(pct)}
+                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${gtcPct === pct ? 'bg-emerald-600 border-emerald-500 text-white' : `${th.border} ${th.textFaint} hover:border-emerald-600`}`}>
+                {pct}%
+              </button>
+            ))}
+          </div>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close {isPMCC ? 'short call only' : 'spread'} at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} short premium is captured</p>
+        </div>
+
+        {/* Stop Loss */}
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4`}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-bold tracking-widest text-red-400">STOP LOSS</p>
+            <span className={`text-[9px] ${th.textFaint}`}>triggers at ${stopPrice.toFixed(2)} {isPMCC ? 'credit' : 'debit'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {(isPMCC ? [15, 20, 25, 30] : [150, 200, 250, 300]).map(pct => (
+              <button key={pct} onClick={() => setStopPct(pct)}
+                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${stopPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
+                {isPMCC ? `-${pct}%` : `${pct}%`}
+              </button>
+            ))}
+          </div>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>
+            {isPMCC 
+              ? `Stop triggers when total spread value drops to $${stopPrice.toFixed(2)} (${stopPct}% loss on initial debit)` 
+              : `Stop triggers when spread costs $${stopPrice.toFixed(2)} to close (${stopPct}% of credit = ${stopPct - 100}% loss on credit received)`}
+          </p>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-red-900/30">
+            <span className={`text-[9px] ${th.textFaint}`}>Stop-limit buffer</span>
+            <span className={`text-[9px] ${th.textFaint}`}>limit at ${stopLimitPrice.toFixed(2)} {isPMCC ? 'credit' : 'debit'}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            {[2, 5, 10, 15].map(pct => (
+              <button key={pct} onClick={() => setStopLimitBufferPct(pct)}
+                className={`flex-1 py-1 rounded text-[10px] font-bold border transition-colors ${stopLimitBufferPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
+                {isPMCC ? `-${pct}%` : `+${pct}%`}
+              </button>
+            ))}
+          </div>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop submits as Stop Limit — triggers at ${stopPrice.toFixed(2)}, fills up to ${stopLimitPrice.toFixed(2)} (required: TastyTrade does not allow stop-market orders on multi-leg spreads)</p>
+        </div>
+
+        {/* Dry run result */}
+        {dryRunResult && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
+            <p className="text-[10px] text-emerald-400 font-bold tracking-wider">DRY RUN PASSED</p>
+            {bpChange && <p className="text-xs text-emerald-300">Buying power: {bpEffect2 === 'Debit' ? '−' : '+'}${parseFloat(bpChange).toFixed(2)}</p>}
+            {marginReq && <p className="text-xs text-emerald-300">Margin required: ${parseFloat(marginReq).toFixed(2)}</p>}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
+            <p className="text-xs text-emerald-400 font-bold">✓ OTOCO order submitted — ID {orderId}</p>
+            <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) + stop loss ({stopPct}%) submitted as a single bracket order. Once entry fills, the OCO activates automatically.</p>
+            <p className="text-[10px] text-emerald-400/70">Verify the complex order in TastyTrade.</p>
+          </div>
+        )}
+
+        {phase === 'error' && error && (
+          <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4">
+            <p className="text-xs text-red-400">{error}</p>
+          </div>
+        )}
+
+        {phase !== 'done' && (
+          <div className="flex gap-2">
+            {!dryRunResult ? (
+              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun' || otmGateBlocking}
+                className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
+                {phase === 'dryrun' ? 'VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : 'VALIDATE ORDER'}
+              </button>
+            ) : (
+              <>
+                <button onClick={runDryRun} disabled={phase === 'dryrun' || otmGateBlocking}
+                  className={`py-2.5 px-3 border ${th.border} ${th.textFaint} rounded-xl text-xs ac-hover-border transition-colors disabled:opacity-40`}>
+                  ↺
+                </button>
+                <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
+                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC + STOP`}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <button onClick={onClose} className={`w-full py-2.5 border ${th.border} ${th.textMuted} rounded-xl text-xs font-bold tracking-widest`}>
+            CLOSE
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
