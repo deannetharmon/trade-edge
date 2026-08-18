@@ -2684,27 +2684,21 @@ function TradeModal({ result, th, onClose }: {
     ? tradeCostOrCredit * 100 
     : (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
 
-  const buildOtocoPayload = (qty: number) => {
-    const entryLegs = buildOrderLegs(result, c);
-    const closingLegs = entryLegs.map((l: any) => ({
+const buildOtoPayload = (qty: number) => {
+    const legs = buildOrderLegs(result, c);
+    const closingLegs = legs.map((l: any) => ({
       ...l,
       quantity: qty,
       action: l.action === 'Sell to Open' ? 'Buy to Close' : 'Sell to Close',
     }));
-
-    let profitTargetLegs = closingLegs;
-    if (isPMCC) {
-       profitTargetLegs = closingLegs.filter((l: any) => l.action === 'Buy to Close');
-    }
-
     return {
-      type: 'OTOCO',
+      type: 'OTO',
       'trigger-order': {
         'time-in-force': 'GTC',
         'order-type': 'Limit',
         price: entryLimit.toFixed(2),
-        'price-effect': isPMCC ? 'Debit' : 'Credit',
-        legs: entryLegs.map((l: any) => ({ ...l, quantity: qty })),
+        'price-effect': 'Credit',
+        legs: legs.map((l: any) => ({ ...l, quantity: qty })),
       },
       orders: [
         {
@@ -2712,14 +2706,6 @@ function TradeModal({ result, th, onClose }: {
           'order-type': 'Limit',
           price: gtcBuyback.toFixed(2),
           'price-effect': 'Debit',
-          legs: profitTargetLegs,
-        },
-        {
-          'time-in-force': 'GTC',
-          'order-type': 'Stop Limit',
-          'stop-trigger': stopPrice.toFixed(2),
-          price: stopLimitPrice.toFixed(2),
-          'price-effect': isPMCC ? 'Credit' : 'Debit',
           legs: closingLegs,
         },
       ],
@@ -2734,13 +2720,16 @@ function TradeModal({ result, th, onClose }: {
       const legs = buildOrderLegs(result, c);
       const payload = buildOrderPayload(c, quantity, legs);
       payload.price = entryLimit.toFixed(2);
-      
+      // Dry run on the entry leg only (TT doesn't support complex order dry-run)
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      // TEMP DEBUG -- remove once preflight failure is diagnosed
+      console.log('DRY_RUN_DEBUG payload sent:', payload);
+      console.log('DRY_RUN_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
       setDryRunResult(data?.data);
       setPhase('confirm');
@@ -2754,14 +2743,17 @@ function TradeModal({ result, th, onClose }: {
     try {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildOtocoPayload(quantity);
-      
+      // Single OTO complex order: entry → GTC profit target
+      const payload = buildOtoPayload(quantity);
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      // TEMP DEBUG -- remove once preflight failure is diagnosed
+      console.log('PLACE_ORDER_DEBUG payload sent:', JSON.stringify(payload, null, 2));
+      console.log('PLACE_ORDER_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
       setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
       setPhase('done');
@@ -2841,6 +2833,7 @@ function TradeModal({ result, th, onClose }: {
           </div>
         </div>
 
+        {/* GTC Profit Target */}
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] font-bold tracking-widest text-emerald-400">GTC PROFIT TARGET</p>
@@ -2854,42 +2847,10 @@ function TradeModal({ result, th, onClose }: {
               </button>
             ))}
           </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close {isPMCC ? 'short call only' : 'spread'} at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} short premium is captured</p>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} credit is captured</p>
         </div>
 
-        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4`}>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold tracking-widest text-red-400">STOP LOSS</p>
-            <span className={`text-[9px] ${th.textFaint}`}>triggers at ${stopPrice.toFixed(2)} {isPMCC ? 'credit' : 'debit'}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {(isPMCC ? [15, 20, 25, 30] : [150, 200, 250, 300]).map(pct => (
-              <button key={pct} onClick={() => setStopPct(pct)}
-                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${stopPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
-                {isPMCC ? `-${pct}%` : `${pct}%`}
-              </button>
-            ))}
-          </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>
-            {isPMCC 
-              ? `Stop triggers when total spread value drops to $${stopPrice.toFixed(2)} (${stopPct}% loss on initial debit)` 
-              : `Stop triggers when spread costs $${stopPrice.toFixed(2)} to close (${stopPct}% of credit = ${stopPct - 100}% loss on credit received)`}
-          </p>
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-red-900/30">
-            <span className={`text-[9px] ${th.textFaint}`}>Stop-limit buffer</span>
-            <span className={`text-[9px] ${th.textFaint}`}>limit at ${stopLimitPrice.toFixed(2)} {isPMCC ? 'credit' : 'debit'}</span>
-          </div>
-          <div className="flex items-center gap-2 mt-1.5">
-            {[2, 5, 10, 15].map(pct => (
-              <button key={pct} onClick={() => setStopLimitBufferPct(pct)}
-                className={`flex-1 py-1 rounded text-[10px] font-bold border transition-colors ${stopLimitBufferPct === pct ? 'bg-red-700 border-red-500 text-white' : `${th.border} ${th.textFaint} hover:border-red-700`}`}>
-                {isPMCC ? `-${pct}%` : `+${pct}%`}
-              </button>
-            ))}
-          </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop submits as Stop Limit — triggers at ${stopPrice.toFixed(2)}, fills up to ${stopLimitPrice.toFixed(2)}</p>
-        </div>
-
+        {/* Dry run result */}
         {dryRunResult && (
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
             <p className="text-[10px] text-emerald-400 font-bold tracking-wider">DRY RUN PASSED</p>
