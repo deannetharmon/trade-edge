@@ -479,7 +479,7 @@ export function exploreAllCandidatesForRank(
               ...result.checks,
               earnings: spreadEarningsCheck,
               credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
-              delta: { status: 'pass', value: baseCandidateDelta => baseCandidateDelta, reason: 'Short leg delta' },
+              delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
               pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
               roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
               oi: (() => {
