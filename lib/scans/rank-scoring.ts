@@ -54,11 +54,109 @@ export function scoreBuffer(bufferPct: number | null | undefined, dte: number, t
 }
 
 
+export interface PmccScoreBreakdown {
+  wmdScore: number;
+  longDeltaScore: number;
+  roiScore: number;
+  shortDeltaScore: number;
+  totalScore: number;
+  wmdPct: number;
+  annualizedRoi: number;
+}
+
+export function calculatePmccScore(
+  shortStrike: number,
+  longStrike: number,
+  netDebit: number,
+  longDelta: number,
+  shortDelta: number,
+  annualizedRoi: number
+): PmccScoreBreakdown {
+  const wmdPct = netDebit > 0 ? ((shortStrike - longStrike - netDebit) / netDebit) * 100 : 0;
+  let wmdBase = 0;
+  
+  if (wmdPct <= 0) {
+    wmdBase = 0;
+  } else if (wmdPct < 1.0) {
+    wmdBase = 25; 
+  } else if (wmdPct < 4.0) {
+    wmdBase = 40 + ((wmdPct - 1.0) / 3.0) * 29; 
+  } else if (wmdPct < 8.0) {
+    wmdBase = 70 + ((wmdPct - 4.0) / 4.0) * 29; 
+  } else {
+    wmdBase = 100;
+  }
+
+  let longDeltaBase = 0;
+  const absLongDelta = Math.abs(longDelta);
+  if (absLongDelta >= 0.82) longDeltaBase = 100;
+  else if (absLongDelta >= 0.80) longDeltaBase = 90;
+  else if (absLongDelta >= 0.77) longDeltaBase = 60;
+  else if (absLongDelta >= 0.73) longDeltaBase = 30;
+  else longDeltaBase = 0;
+
+  let roiBase = 0;
+  if (annualizedRoi > 75) roiBase = 70; 
+  else if (annualizedRoi >= 45) roiBase = 100; 
+  else if (annualizedRoi >= 35) roiBase = 80 + ((annualizedRoi - 35) / 10) * 15; 
+  else if (annualizedRoi >= 25) roiBase = 60 + ((annualizedRoi - 25) / 10) * 19; 
+  else roiBase = 40;
+
+  let shortDeltaBase = 0;
+  const absShortDelta = Math.abs(shortDelta);
+  if (absShortDelta < 0.20) shortDeltaBase = 90; 
+  else if (absShortDelta <= 0.24) shortDeltaBase = 100; 
+  else if (absShortDelta <= 0.28) shortDeltaBase = 80; 
+  else if (absShortDelta <= 0.33) shortDeltaBase = 50; 
+  else shortDeltaBase = 20;
+
+  const wmdScore = wmdBase * 0.35;
+  const longDeltaScore = longDeltaBase * 0.25;
+  const roiScore = roiBase * 0.25;
+  const shortDeltaScore = shortDeltaBase * 0.15;
+  const totalScore = wmdScore + longDeltaScore + roiScore + shortDeltaScore;
+
+  return {
+    wmdScore, longDeltaScore, roiScore, shortDeltaScore,
+    totalScore: Math.round(totalScore),
+    wmdPct, annualizedRoi
+  };
+}
+
 export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number; dims: DimensionScore } | null {
   const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
   const t = result.trendResult;
   const c = result.bestCandidate;
   const rsi14 = result.trendResult?.metrics?.rsi14 ?? null;
+
+  // ── PMCC Dedicated Scoring Branch ──────────────────────────────────────────
+  if (c && c.strategy === 'PMCC') {
+    const netDebit = c.netDebit ?? (c.longCost != null && c.credit != null ? c.longCost - c.credit : 1);
+    const annRoi = c.annualizedRoc ?? (c.roc * (365 / Math.max(1, c.dte)));
+
+    const pmccScores = calculatePmccScore(
+      c.shortStrike,
+      c.longStrike ?? 0,
+      netDebit,
+      c.longDelta ?? 0.80,
+      c.shortDelta ?? 0.20,
+      annRoi
+    );
+
+    return {
+      score: pmccScores.totalScore,
+      dims: {
+        momentum: 0,
+        ivr: 0,
+        emClearance: 0,
+        range: Math.round(pmccScores.longDeltaScore),
+        technical: Math.round(pmccScores.shortDeltaScore),
+        liquidity: Math.round(pmccScores.roiScore),
+        buffer: Math.round(pmccScores.wmdScore),
+        total: pmccScores.totalScore,
+      },
+    };
+  }
 
   // ── Momentum (30pts) ──────────────────────────────────────────────────────
   // trend engine momentum is signed (-48..+48); normalize by direction alignment
