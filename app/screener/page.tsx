@@ -2647,16 +2647,6 @@ function TradeModal({ result, th, onClose }: {
   const creditPerContract = isPMCC ? c.credit : (c.totalCredit ?? c.credit);
   const gtcBuyback = parseFloat((creditPerContract * (1 - gtcPct / 100)).toFixed(2));
 
-  const [stopPct, setStopPct] = useState(isPMCC ? 20 : 200);
-  const stopPrice = isPMCC 
-    ? parseFloat((entryLimit * (1 - stopPct / 100)).toFixed(2)) 
-    : parseFloat((creditPerContract * (stopPct / 100)).toFixed(2));
-
-  const [stopLimitBufferPct, setStopLimitBufferPct] = useState(5);
-  const stopLimitPrice = isPMCC
-    ? parseFloat((stopPrice * (1 - stopLimitBufferPct / 100)).toFixed(2)) 
-    : parseFloat((stopPrice * (1 + stopLimitBufferPct / 100)).toFixed(2));
-
   const otmPct = (() => {
     if (result.price == null) return null;
     const price = result.price;
@@ -2684,7 +2674,7 @@ function TradeModal({ result, th, onClose }: {
     ? tradeCostOrCredit * 100 
     : (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
 
-const buildOtoPayload = (qty: number) => {
+  const buildOtoPayload = (qty: number) => {
     const legs = buildOrderLegs(result, c);
     const closingLegs = legs.map((l: any) => ({
       ...l,
@@ -2720,16 +2710,12 @@ const buildOtoPayload = (qty: number) => {
       const legs = buildOrderLegs(result, c);
       const payload = buildOrderPayload(c, quantity, legs);
       payload.price = entryLimit.toFixed(2);
-      // Dry run on the entry leg only (TT doesn't support complex order dry-run)
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      // TEMP DEBUG -- remove once preflight failure is diagnosed
-      console.log('DRY_RUN_DEBUG payload sent:', payload);
-      console.log('DRY_RUN_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
       setDryRunResult(data?.data);
       setPhase('confirm');
@@ -2743,7 +2729,6 @@ const buildOtoPayload = (qty: number) => {
     try {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      // Single OTO complex order: entry → GTC profit target
       const payload = buildOtoPayload(quantity);
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
         method: 'POST',
@@ -2751,9 +2736,6 @@ const buildOtoPayload = (qty: number) => {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      // TEMP DEBUG -- remove once preflight failure is diagnosed
-      console.log('PLACE_ORDER_DEBUG payload sent:', JSON.stringify(payload, null, 2));
-      console.log('PLACE_ORDER_DEBUG full response:', data);
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
       setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
       setPhase('done');
@@ -2861,8 +2843,8 @@ const buildOtoPayload = (qty: number) => {
 
         {phase === 'done' && (
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
-            <p className="text-xs text-emerald-400 font-bold">✓ OTOCO order submitted — ID {orderId}</p>
-            <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) + stop loss ({stopPct}%) submitted as a single bracket order.</p>
+            <p className="text-xs text-emerald-400 font-bold">✓ OTO order submitted — ID {orderId}</p>
+            <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) submitted as a single bracket order.</p>
           </div>
         )}
 
@@ -2887,7 +2869,7 @@ const buildOtoPayload = (qty: number) => {
                 </button>
                 <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking}
                   className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
-                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC + STOP`}
+                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC`}
                 </button>
               </>
             )}
@@ -2903,7 +2885,6 @@ const buildOtoPayload = (qty: number) => {
     </div>
   );
 }
-
 
 function buildPmccOrderLegs(pair: PmccPairResult): any[] {
   return [
@@ -7430,11 +7411,6 @@ export default function Home() {
       setPmccLongDteMax(submitted.dte.longMax);
       persistPmccDteRanges(submitted.dte);
     }
-    // Switch to Filter mode immediately -- the same thing the main
-    // "SCAN SELECTED" button already does via RunModeModal's onRun handler
-    // before it calls runScreen(). Without this, PMCC/CSP/CC scans only set
-    // the toast's resultsHref link, leaving the visible UI on whatever mode
-    // (e.g. Rank) was last active until the person clicks "Open Results".
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setLoading(true);
@@ -7444,15 +7420,8 @@ export default function Home() {
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
 
-    // SCREENER-RESULTS-0001 — 'pmcc' session, filter mode only. Replaces,
-    // never merges into, whatever session was previously active.
     const pmccAsOf = new Date();
     const pmccMarketSession = derivePmccMarketSession(pmccAsOf);
-    // TE-0007D corrective — every field below now comes from the submitted
-    // modal criteria when present, falling back to the prior hardcoded
-    // DEFAULT_* constants only if this is ever invoked without going
-    // through the modal (defensive, not the normal path -- FIND PMCCs
-    // always opens the modal now).
     const pmccCriteria = {
       dte,
       longDelta: submitted?.longDelta ?? { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
@@ -7472,15 +7441,6 @@ export default function Home() {
       scope: { universeSymbols: pmcc, eligibleSymbols: pmcc },
       pmccSnapshot,
     });
-    // TE-0007F — Ian/Paul: score/pop/creditPct are structurally always
-    // null for PMCC (a debit structure, not a credit spread; PMCC's own
-    // roc field literally carries a pending('Generic spread scoring is
-    // not used for PMCC') placeholder, confirmed in pmccProduction.ts).
-    // Leaving the sort on one of those fields silently reproduces the
-    // "Contract order" bug this whole ticket exists to fix -- every
-    // candidate ties on null, order falls back to arrival order. Only
-    // resets when the CURRENT primary is one of those dead fields;
-    // never overrides a PMCC-relevant field the person already chose.
     if (filteredSort.primary === 'score' || filteredSort.primary === 'pop' || filteredSort.primary === 'creditPct') {
       setFilteredSort({ primary: 'widthMinusDebitPct', secondary: 'none' });
     }
@@ -7533,6 +7493,12 @@ export default function Home() {
       }
 
       session = completeSession(session);
+      session.results.sort((a, b) => {
+        const scoreA = pmccResultScore(a) ?? -Infinity;
+        const scoreB = pmccResultScore(b) ?? -Infinity;
+        return scoreB - scoreA;
+      });
+
       const committed = commitScanSession(session, () => {
         setResults(session.results);
         const cacheTs = Date.now();
@@ -7549,9 +7515,6 @@ export default function Home() {
       });
       void committed;
     } catch (e: any) {
-      // SCREENER-RESULTS-0001 corrective — same staleness guard as the
-      // other scan functions: a superseded PMCC scan's catch must not
-      // clobber a newer scan's loading/status/error/job state.
       if (isScanCurrent(session)) {
         setError(e.message);
         failScreenerJob(e.message);
@@ -7568,14 +7531,11 @@ export default function Home() {
         }
         session = completeSession(session);
         session.results.sort((a, b) => {
-        const scoreA = pmccResultScore(a) ?? -Infinity;
-        const scoreB = pmccResultScore(b) ?? -Infinity;
-        return scoreB - scoreA;
-      });
+          const scoreA = pmccResultScore(a) ?? -Infinity;
+          const scoreB = pmccResultScore(b) ?? -Infinity;
+          return scoreB - scoreA;
+        });
 
-      const committed = commitScanSession(session, () => {
-        setResults(session.results);
-        
         commitScanSession(session, () => {
           setResults(session.results);
           const cacheTs = Date.now();
