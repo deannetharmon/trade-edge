@@ -7606,6 +7606,15 @@ export default function Home() {
           session = recordSymbolFailed(session, symbol, reasonCode, audit);
         }
         session = completeSession(session);
+        session.results.sort((a, b) => {
+        const scoreA = pmccResultScore(a) ?? -Infinity;
+        const scoreB = pmccResultScore(b) ?? -Infinity;
+        return scoreB - scoreA;
+      });
+
+      const committed = commitScanSession(session, () => {
+        setResults(session.results);
+        
         commitScanSession(session, () => {
           setResults(session.results);
           const cacheTs = Date.now();
