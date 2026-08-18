@@ -74,45 +74,49 @@ export function calculatePmccScore(
   const wmdPct = netDebit > 0 ? ((shortStrike - longStrike - netDebit) / netDebit) * 100 : 0;
   let wmdBase = 0;
   
+  // Hardened WMD: Sub-3% gets heavily penalized to stop chasing thin upside
   if (wmdPct <= 0) {
     wmdBase = 0;
-  } else if (wmdPct < 1.0) {
-    wmdBase = 25; 
+  } else if (wmdPct < 2.0) {
+    wmdBase = 15; 
   } else if (wmdPct < 4.0) {
-    wmdBase = 40 + ((wmdPct - 1.0) / 3.0) * 29; 
+    wmdBase = 45; 
   } else if (wmdPct < 8.0) {
-    wmdBase = 70 + ((wmdPct - 4.0) / 4.0) * 29; 
+    wmdBase = 75; 
   } else {
     wmdBase = 100;
   }
 
+  // Hardened LEAPS Delta: Absolute floor at 0.80. Below 0.80 gets zeroed out.
   let longDeltaBase = 0;
   const absLongDelta = Math.abs(longDelta);
-  if (absLongDelta >= 0.82) longDeltaBase = 100;
-  else if (absLongDelta >= 0.80) longDeltaBase = 90;
-  else if (absLongDelta >= 0.77) longDeltaBase = 60;
-  else if (absLongDelta >= 0.73) longDeltaBase = 30;
-  else longDeltaBase = 0;
+  if (absLongDelta >= 0.82) {
+    longDeltaBase = 100;
+  } else if (absLongDelta >= 0.80) {
+    longDeltaBase = 85;
+  } else {
+    longDeltaBase = 0; // Hard zero for shallow LEAPS delta (< 0.80)
+  }
 
+  // Annualized Yield / Cash Flow
   let roiBase = 0;
-  if (annualizedRoi > 75) roiBase = 70; 
-  else if (annualizedRoi >= 45) roiBase = 100; 
-  else if (annualizedRoi >= 35) roiBase = 80 + ((annualizedRoi - 35) / 10) * 15; 
-  else if (annualizedRoi >= 25) roiBase = 60 + ((annualizedRoi - 25) / 10) * 19; 
-  else roiBase = 40;
+  if (annualizedRoi > 75) roiBase = 60; // Soft penalty for extreme yield chasing
+  else if (annualizedRoi >= 40) roiBase = 100; 
+  else if (annualizedRoi >= 25) roiBase = 80; 
+  else roiBase = 50;
 
+  // Short Leg Delta / POP Safety
   let shortDeltaBase = 0;
   const absShortDelta = Math.abs(shortDelta);
-  if (absShortDelta < 0.20) shortDeltaBase = 90; 
-  else if (absShortDelta <= 0.24) shortDeltaBase = 100; 
-  else if (absShortDelta <= 0.28) shortDeltaBase = 80; 
-  else if (absShortDelta <= 0.33) shortDeltaBase = 50; 
-  else shortDeltaBase = 20;
+  if (absShortDelta <= 0.25) shortDeltaBase = 100; 
+  else if (absShortDelta <= 0.30) shortDeltaBase = 70; 
+  else shortDeltaBase = 30;
 
-  const wmdScore = wmdBase * 0.35;
-  const longDeltaScore = longDeltaBase * 0.25;
-  const roiScore = roiBase * 0.25;
+  const wmdScore = wmdBase * 0.40;          // Increased weight to 40% for structural safety
+  const longDeltaScore = longDeltaBase * 0.30; // Increased weight to 30% for LEAPS quality
+  const roiScore = roiBase * 0.15;            // Reduced weight to 15% so yield doesn't dominate
   const shortDeltaScore = shortDeltaBase * 0.15;
+  
   const totalScore = wmdScore + longDeltaScore + roiScore + shortDeltaScore;
 
   return {
