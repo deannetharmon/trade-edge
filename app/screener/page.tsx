@@ -4697,14 +4697,19 @@ const strategyScores = useMemo(() => {
         <div className={`border-t ${th.border} px-4 py-3 space-y-3`}>
           {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{t.reason}</div>}
 
-          {/* Score breakdown in rank mode */}
+{/* Score breakdown in rank mode */}
           {isRankMode && scored && light && (
             <div className={`border ${light.border} ${light.bg} rounded-lg p-3`}>
               <div className="flex items-center justify-between mb-2">
                 <p className={`text-[10px] font-bold ${light.color}`}>{light.emoji} Score {scored.score}/100 — {light.label}</p>
               </div>
-              <div className="grid grid-cols-7 gap-2">
-                {[
+              <div className={`grid ${c?.strategy === 'PMCC' ? 'grid-cols-4' : 'grid-cols-7'} gap-2`}>
+                {(c?.strategy === 'PMCC' ? [
+                  { label: 'WMD Cushion', val: scored.dims.buffer, max: 35 },
+                  { label: 'Long Δ', val: scored.dims.range, max: 25 },
+                  { label: 'Ann. Yield', val: scored.dims.liquidity, max: 25 },
+                  { label: 'Short Δ', val: scored.dims.technical, max: 15 },
+                ] : [
                   { label: 'Momentum', val: scored.dims.momentum, max: rankConfig!.weightMomentum },
                   { label: 'IVR', val: scored.dims.ivr, max: rankConfig!.weightIvr ?? 15 },
                   { label: 'EM Clear', val: scored.dims.emClearance, max: rankConfig!.weightEmClearance ?? 15 },
@@ -4712,7 +4717,7 @@ const strategyScores = useMemo(() => {
                   { label: 'Technical', val: scored.dims.technical, max: rankConfig!.weightTechnical },
                   { label: 'Liquidity', val: scored.dims.liquidity, max: rankConfig!.weightLiquidity ?? 10 },
                   { label: 'Buffer', val: scored.dims.buffer, max: rankConfig!.weightBuffer ?? 10 },
-                ].map(d => (
+                ]).map(d => (
                   <div key={d.label} className="text-center">
                     <p className={`text-[8px] ${th.textFaint} mb-1`}>{d.label}</p>
                     <div className={`h-1 rounded-full bg-slate-700 mb-1`}>
