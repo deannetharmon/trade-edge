@@ -939,16 +939,48 @@ export function buildStopBreachObservations(pos: Pick<Position, 'currentValue' |
 }
 
 
-export async function loadPositions(): Promise<{ positions: Position[]; pendingOrders: PendingOrder[] }> {
-  const token = await getAccessToken();
+export interface PortfolioBrokerSource {
+  token: string;
+  accountNumber: string;
+  rawPositions: any[] | null;
+  rawLiveOrders: any[] | null;
+}
+
+// LCC-0001A: one account-scoped source feeds both the mature option adapter
+// below and the new portfolio snapshot normalizers. Positions and live orders
+// are each requested exactly once. A failed endpoint is retained as null so
+// snapshot data-quality logic can fail closed without inventing empty data.
+export async function acquirePortfolioBrokerSource(tokenOverride?: string): Promise<PortfolioBrokerSource> {
+  const token = tokenOverride ?? await getAccessToken();
   const accountsData = await ttFetch('/customers/me/accounts', token);
   const accounts = accountsData?.data?.items ?? [];
   if (accounts.length === 0) throw new Error('No accounts found');
   const accountNumber = accounts[0]?.account?.['account-number'];
   if (!accountNumber) throw new Error('Could not read account number');
 
-  const positionsData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
-  const rawPositions = positionsData?.data?.items ?? [];
+  const [positionsResult, liveOrdersResult] = await Promise.allSettled([
+    ttFetch(`/accounts/${accountNumber}/positions`, token),
+    ttFetch(`/accounts/${accountNumber}/orders/live`, token),
+  ]);
+  return {
+    token,
+    accountNumber,
+    rawPositions: positionsResult.status === 'fulfilled'
+      ? positionsResult.value?.data?.items ?? []
+      : null,
+    rawLiveOrders: liveOrdersResult.status === 'fulfilled'
+      ? liveOrdersResult.value?.data?.items ?? []
+      : null,
+  };
+}
+
+export async function loadPositions(
+  sourceOverride?: PortfolioBrokerSource,
+): Promise<{ positions: Position[]; pendingOrders: PendingOrder[] }> {
+  const source = sourceOverride ?? await acquirePortfolioBrokerSource();
+  const { token, accountNumber } = source;
+  if (source.rawPositions == null) throw new Error('Portfolio positions unavailable');
+  const rawPositions = source.rawPositions;
   const optionPositions = rawPositions.filter((p: any) =>
     p['instrument-type'] === 'Equity Option' || p['instrument-type'] === 'Index Option'
   );
@@ -1165,10 +1197,7 @@ export async function loadPositions(): Promise<{ positions: Position[]; pendingO
   }
 
   try {
-    const liveData = await Promise.allSettled([
-      ttFetch(`/accounts/${accountNumber}/orders/live`, token),
-    ]);
-    const allOrders = (liveData[0].status === 'fulfilled' ? liveData[0].value?.data?.items : null) ?? [];
+    const allOrders = source.rawLiveOrders ?? [];
     for (const order of allOrders) {
       const status = (order['status'] ?? '').toLowerCase();
       if (['working', 'live', 'contingent', 'received', 'pending', 'queued'].includes(status)) {
@@ -1930,4 +1959,3 @@ export function netEdgePeak(pos: Position): number | null {
   if (series.length === 0) return null;
   return Math.max(...series);
 }
-

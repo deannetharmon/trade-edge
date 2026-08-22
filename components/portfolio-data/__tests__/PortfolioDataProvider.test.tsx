@@ -10,8 +10,13 @@ const acquisition = vi.hoisted(() => ({
   computeNetEdgeEvidence: vi.fn(() => ({ netEdgeDeclinePct: null, netEdgeNegative: false })),
   scorePortfolioRemainingOpportunity: vi.fn(() => ({ remainingOpportunityPct: null })),
 }));
+const snapshotAcquisition = vi.hoisted(() => ({ acquirePortfolioSnapshot: vi.fn() }));
 
 vi.mock('@/lib/portfolio-data/acquisition', () => acquisition);
+vi.mock('@/lib/portfolio-snapshot/acquire', () => ({
+  LCC_0001A_SNAPSHOT_ENABLED: false,
+  acquirePortfolioSnapshot: snapshotAcquisition.acquirePortfolioSnapshot,
+}));
 vi.mock('@/lib/portfolio-intelligence/dashboardComposition', () => ({
   buildDashboardComposition: vi.fn(() => ({
     canonicalPriorities: null,
@@ -77,6 +82,7 @@ describe('PortfolioDataProvider refresh contract', () => {
     });
     expect(screen.getByTestId('loading')).toHaveTextContent('true');
     expect(acquisition.attachSnapshotHistory).not.toHaveBeenCalled();
+    expect(snapshotAcquisition.acquirePortfolioSnapshot).not.toHaveBeenCalled();
     await act(async () => {
       snapshots.resolve({});
       await pending;

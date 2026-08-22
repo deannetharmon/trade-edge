@@ -21,7 +21,16 @@ export interface PortfolioSnapshot {
   equities: EquityHolding[];
   options: Position[]; // existing type, unmodified
   workingOrders: WorkingOrder[];
+  coverageEvidence: SnapshotCoverageEvidence;
   dataQuality: SnapshotDataQuality;
+}
+
+export interface SnapshotCoverageEvidence {
+  existingShortCallsBySymbol: Record<string, number>;
+  workingShortCallsBySymbol: Record<string, number>;
+  unclassifiedSymbols: string[];
+  complete: boolean;
+  warnings: string[];
 }
 
 export type EquityDirection = 'Long' | 'Short';

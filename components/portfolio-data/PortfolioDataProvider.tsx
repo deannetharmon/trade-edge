@@ -35,6 +35,9 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import type { Position, PendingOrder, PositionSnapshot } from '@/lib/portfolio-data/types';
+import type { PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
+import { acquirePortfolioSnapshot, LCC_0001A_SNAPSHOT_ENABLED } from '@/lib/portfolio-snapshot/acquire';
+import { ACCOUNT_UNRESOLVED_REASON, POSITIONS_UNAVAILABLE_REASON } from '@/lib/portfolio-snapshot/dataQuality';
 import {
   loadPositions,
   loadAccountBalances,
@@ -74,6 +77,11 @@ export interface PortfolioDataContextValue {
   error: string;
   lastRefresh: Date | null;
   composition: DashboardComposition;
+  // LCC-0001A PR 2 — additive fields, per docs/design/LCC-0001A-technical-spec.md §10.3. Null
+  // when the LCC_0001A_SNAPSHOT_ENABLED flag is off (default) or before the first snapshot
+  // acquisition completes. No existing field's shape or timing contract changes.
+  snapshot: PortfolioSnapshot | null;
+  snapshotDataQuality: SnapshotDataQuality;
   setPositions: Dispatch<SetStateAction<Position[]>>;
   setPendingOrders: Dispatch<SetStateAction<PendingOrder[]>>;
   setDecisionReviews: Dispatch<SetStateAction<DecisionReviewStore>>;
@@ -93,6 +101,14 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  // LCC-0001A PR 2 — additive state. snapshotDataQuality defaults to 'unavailable' before any
+  // acquisition has run (or when the flag is off), never a fabricated 'ok'.
+  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [snapshotDataQuality, setSnapshotDataQuality] = useState<SnapshotDataQuality>({
+    status: 'unavailable',
+    staleQuotes: false,
+    warnings: [],
+  });
   // Monotonic request identity makes every portfolio refresh latest-wins.
   // A slower, older broker response can never overwrite newer quote evidence,
   // and only the current request is allowed to clear the shared loading state.
@@ -113,7 +129,29 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError('');
     try {
-      const { positions: data, pendingOrders: pendingData } = await loadPositions();
+      // With LCC-0001A enabled, the existing option view and the new snapshot
+      // are derived from one broker source. The legacy path is unchanged while
+      // the flag remains off.
+      const snapshotAcquisition = LCC_0001A_SNAPSHOT_ENABLED
+        ? await acquirePortfolioSnapshot()
+        : null;
+      const acquisitionReason = snapshotAcquisition?.snapshot.dataQuality.unavailableReason;
+      if (snapshotAcquisition &&
+          (acquisitionReason === ACCOUNT_UNRESOLVED_REASON || acquisitionReason === POSITIONS_UNAVAILABLE_REASON)) {
+        if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
+        const unavailableQuality = snapshotAcquisition.snapshot.dataQuality;
+        setSnapshotDataQuality(unavailableQuality);
+        setSnapshot(previous => previous
+          ? { ...previous, dataQuality: unavailableQuality }
+          : snapshotAcquisition.snapshot);
+        throw new Error(acquisitionReason);
+      }
+      const { positions: data, pendingOrders: pendingData } = snapshotAcquisition
+        ? {
+            positions: snapshotAcquisition.snapshot.options,
+            pendingOrders: snapshotAcquisition.pendingOrders,
+          }
+        : await loadPositions();
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
 
       // A refresh is not complete until canonical health, pricing evidence,
@@ -146,6 +184,15 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       // recommendation policy after evaluation.
       const updated = attachSnapshotHistory(data, snapshotStore, positionsRef.current, trendDirectionBySymbol);
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
+
+      if (snapshotAcquisition) {
+        // Publish the canonically recomputed Position[] on the snapshot too,
+        // so context.positions and snapshot.options cannot drift after the
+        // existing history/health enrichment step.
+        const nextSnapshot = { ...snapshotAcquisition.snapshot, options: updated };
+        setSnapshot(nextSnapshot);
+        setSnapshotDataQuality(nextSnapshot.dataQuality);
+      }
 
       callbacks?.onRawPositionsLoaded?.(data);
       setPositions(updated);
@@ -214,6 +261,8 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
     error,
     lastRefresh,
     composition,
+    snapshot,
+    snapshotDataQuality,
     setPositions,
     setPendingOrders,
     setDecisionReviews,
@@ -233,4 +282,3 @@ export function usePortfolioData(): PortfolioDataContextValue {
   }
   return ctx;
 }
-
