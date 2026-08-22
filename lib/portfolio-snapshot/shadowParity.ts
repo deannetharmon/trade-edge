@@ -41,6 +41,12 @@ export type CapacityShadowDifference =
   | { kind: 'warnings'; legacy: string[]; snapshot: string[] }
   | { kind: 'unavailableReason'; legacy: string | null; snapshot: string | null };
 
+export type CapacityShadowSkipReason =
+  | 'snapshot-missing'
+  | 'snapshot-last-known'
+  | 'snapshot-unavailable'
+  | 'snapshot-capacity-unavailable';
+
 interface CapacityShadowBase {
   comparedAt: string;
   snapshotAsOf: string | null;
@@ -48,7 +54,7 @@ interface CapacityShadowBase {
 }
 
 export type CapacityShadowResult =
-  | (CapacityShadowBase & { outcome: 'skipped'; reason: string; differences: [] })
+  | (CapacityShadowBase & { outcome: 'skipped'; reason: CapacityShadowSkipReason; differences: [] })
   | (CapacityShadowBase & { outcome: 'parity' | 'difference'; differences: CapacityShadowDifference[] });
 
 export type CapacityShadowLogger = (event: typeof CC_CAPACITY_SHADOW_EVENT, result: CapacityShadowResult) => void;

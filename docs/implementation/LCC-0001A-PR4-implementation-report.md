@@ -3,7 +3,8 @@
 **Status:** Implemented locally; ready for team review
 **Branch:** `feature/lcc-0001a-cc-capacity-shadow-parity`
 **Base:** merged PR #27 / `a877d7892a3b5bdcdd8e9942ae2edc1fa9890a30`
-**Implementation commit:** commit titled `Add LCC-0001A capacity shadow parity`
+**Implementation commits:** `f97c048` (`Add LCC-0001A capacity shadow parity`), followed by the
+commit titled `Add durable PR4 shadow monitoring`
 
 ## Outcome
 
@@ -21,8 +22,9 @@ cutover or capacity-math change occurs in this PR.
    already-acquired `PortfolioSnapshot` from the global `PortfolioDataProvider` into a local ref.
 4. After the legacy request resolves, a microtask performs the shadow comparison. A monotonically
    increasing request identity suppresses diagnostics for superseded capacity loads.
-5. Comparator or logger failure is swallowed inside the shadow boundary and cannot change or delay
-   the authoritative result.
+5. The result is submitted without awaiting it to an authenticated same-origin telemetry endpoint.
+6. Comparator, page-boundary, transport, collector, or storage failure is isolated and cannot change
+   or delay the authoritative result.
 
 The snapshot side performs no account, position, order, quote, balance, or token fetch. It consumes
 only Provider state. Snapshot acquisition remains independently controlled by
@@ -57,13 +59,45 @@ Symbols present on only one side are reported explicitly. Numeric comparisons ar
 floating-point tolerance was introduced because these reports should be the same normalized
 financial calculation, and tolerance could hide a real divergence.
 
-## Logging and redaction
+## Collection, logging, and redaction
 
 Diagnostics use the structured event name `lcc0001a.covered_call_capacity_shadow`. They contain only
-the normalized comparison schema. Tokens, sessions, account numbers, and raw broker payloads are
-never passed to the logger. Any occurrence of the snapshot account number in warnings or an
-unavailable reason is replaced with `[REDACTED_ACCOUNT]`; warnings are trimmed, deduplicated, and
-sorted. Logger failure returns `null` inside the isolated shadow boundary.
+the normalized comparison schema. Production collection is an unawaited same-origin POST to
+`/api/telemetry/cc-capacity-shadow`; browser `console.info` is development-only and is not Gate A
+evidence. The route requires the repository's NextAuth server session, derives no identity from the
+client, and never stores the authenticated user ID.
+
+The server accepts only these top-level fields: `outcome`, `comparedAt`, `snapshotAsOf`,
+`snapshotFreshness`, `differences`, and, for `skipped` only, `reason`. Difference variants have
+closed key sets for status, symbol-only, one of the nine approved capacity fields, warnings, or
+unavailable reason. Unexpected keys and non-finite financial values are rejected. Payloads are
+limited to 32 KiB, 100 differences, 50 warning strings per side, and bounded string lengths.
+
+Tokens, sessions, account numbers, and raw broker payloads are never part of the result schema. Any
+occurrence of the snapshot account number in warnings or an unavailable reason is replaced with
+`[REDACTED_ACCOUNT]` before transport; warnings are trimmed, deduplicated, and sorted. Route tests
+also reject unexpected identity/raw-payload fields. Transport, logger, route, and Redis failures are
+non-authoritative and produce no user-facing error.
+
+## Durable monitoring and queries
+
+The authenticated route reuses the repository's established `REDIS_URL`/ioredis telemetry
+infrastructure with a separate identifier-free namespace:
+
+- Daily hash: `lcc0001a:cc-capacity-shadow:counts:YYYY-MM-DD`
+- Recent events: `lcc0001a:cc-capacity-shadow:recent`
+
+Daily hashes count `total`, each `outcome:*`, each `skipped:*` reason, each `difference:*` kind, and
+each `field:*` mismatch. Operations can query a day's sample with Redis `HGETALL` on the daily key
+and inspect normalized recent evidence with `LRANGE lcc0001a:cc-capacity-shadow:recent 0 499`.
+The recent list is capped at 500 events. Daily hashes have a 90-day TTL; the bounded recent-list key
+has a key-level 90-day TTL refreshed when new events arrive.
+The route also emits the same validated event to centralized server runtime logs. No user or account
+identifier is used in Redis keys or values.
+
+This supplies countable evidence but does not select the monitoring window or sample threshold.
+Product/operations must choose a window compatible with the documented 90-day retention and review
+the stored evidence before PR 5.
 
 ## Feature flags
 
@@ -88,13 +122,21 @@ No combination makes the snapshot report authoritative.
 - `app/screener/page.tsx` — narrow flag-gated Provider snapshot bridge and best-effort shadow
   scheduling after the unchanged legacy acquisition.
 - `app/screener/__tests__/CcCapacityGate.test.tsx` — proves a differing shadow result cannot replace
-  the legacy eligible-holdings/capacity result.
+  the legacy eligible-holdings/capacity result, an older overlapping request cannot emit, and an
+  unexpected page-boundary shadow throw cannot affect the legacy UI.
+- `lib/portfolio-snapshot/shadowTelemetry.ts` and its tests — detached same-origin transport with
+  rejection isolation.
+- `lib/portfolio-snapshot/shadowTelemetrySchema.ts` — closed allowlist and size/count bounds.
+- `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — identifier-free daily Redis
+  counters and bounded recent evidence.
+- `app/api/telemetry/cc-capacity-shadow/route.ts` and its tests — authenticated validation,
+  centralized storage/logging, and failure responses isolated from the browser workflow.
 - This report.
 
 ## Verification
 
-- Focused PR 4 matrix (all snapshot tests, legacy capacity, Covered Call gate, Screener session
-  wiring, and launcher state): **153/153 passing** across 12 files.
+- Focused PR 4 matrix (all snapshot/telemetry tests, authenticated collector route, legacy capacity,
+  Covered Call gate, Screener session wiring, and launcher state): **168/168 passing** across 15 files.
 - TypeScript: only the merged-main baseline of 41 errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero PR 4 errors.
 - `npm run build`: passed. Local Redis `ECONNREFUSED` warnings were environmental because no local
@@ -107,9 +149,11 @@ harness but does not claim production parity evidence.
 
 ## Scope boundaries
 
-No live cutover, capacity-math change, legacy-path removal, API route, broker acquisition path,
-Portfolio UI change, persistence, allocation, lifecycle, launcher, PMCC ranking/scoring, PR 5, or
-LCC-0001B–E behavior was introduced. Differences are reported rather than normalized away.
+No live cutover, capacity-math change, legacy-path removal, broker acquisition path, Portfolio UI
+change, trading-domain persistence, allocation, lifecycle, launcher, PMCC ranking/scoring, PR 5, or
+LCC-0001B–E behavior was introduced. The only new route and persistence are the authenticated,
+identifier-free PR 4 diagnostic collector described above. Differences are reported rather than
+normalized away.
 
 ## Operational follow-up and PR 5 gate
 

@@ -63,6 +63,7 @@ import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
+import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
@@ -7757,7 +7758,19 @@ export default function Home() {
       if (ccCapacityShadowEnabled) {
         queueMicrotask(() => {
           if (shadowRequestId !== ccCapacityShadowRequestRef.current) return;
-          emitCoveredCallCapacityShadow(capacityReport, ccCapacityShadowSnapshotRef.current);
+          try {
+            emitCoveredCallCapacityShadow(
+              capacityReport,
+              ccCapacityShadowSnapshotRef.current,
+              (event, result) => {
+                if (process.env.NODE_ENV === 'development') console.info(event, result);
+                collectCoveredCallCapacityShadow(result);
+              },
+            );
+          } catch {
+            // Imported shadow code is non-authoritative. Even an unexpected synchronous failure
+            // at this page boundary must not surface through the legacy capacity workflow.
+          }
         });
       }
       setCcHoldingsLoading(false);
@@ -9653,7 +9666,6 @@ export default function Home() {
     </div>
   );
 }
-
 
 
 
