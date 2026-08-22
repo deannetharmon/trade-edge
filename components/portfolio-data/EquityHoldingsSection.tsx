@@ -38,6 +38,12 @@ function observedLabel(value: string | null): string {
   return Number.isNaN(date.getTime()) ? 'Timestamp unavailable' : `Snapshot observed ${date.toLocaleString()}`;
 }
 
+function quoteAsOfLabel(value: string | null): string {
+  if (!value) return 'Quote timestamp unavailable';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Quote timestamp unavailable' : `Quote as of ${date.toLocaleString()}`;
+}
+
 export function EquityHoldingsSection({ snapshot, th }: {
   snapshot: PortfolioSnapshot | null;
   th: typeof THEMES[Theme];
@@ -94,7 +100,7 @@ export function EquityHoldingsSection({ snapshot, th }: {
                 <p className={`mt-1 text-[10px] ${th.textFaint}`}>{holding.quantity.toLocaleString()} shares · {holding.direction === 'Short' ? 'No covered-call capacity' : 'Stock-only holding'}</p>
               </div>
               <p className={`text-[10px] ${!economicsCurrent ? 'text-amber-400' : th.textFaint}`}>
-                {!economicsCurrent ? (referencePrice ? 'Reference price · timestamp unavailable' : 'Pricing unavailable') : observedLabel(holding.quoteAsOf)}
+                {!economicsCurrent ? (referencePrice ? 'Reference price · timestamp unavailable' : 'Pricing unavailable') : quoteAsOfLabel(holding.quoteAsOf)}
               </p>
             </div>
 

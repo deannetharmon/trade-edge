@@ -48,6 +48,18 @@ describe('EquityHoldingsSection', () => {
     expect(screen.getAllByText('Unavailable')).toHaveLength(2);
   });
 
+  it('labels verified current economics with quote-specific provenance', () => {
+    render(<EquityHoldingsSection snapshot={snapshot({
+      equities: [holding({ staleQuote: false, quoteAsOf: '2026-08-22T17:55:00.000Z' })],
+    })} th={THEMES.dark} />);
+    const row = screen.getByTestId('equity-holding-MSFT-Long');
+    expect(row).toHaveTextContent('Current price');
+    expect(row).toHaveTextContent('Quote as of');
+    expect(row).not.toHaveTextContent('Snapshot observed');
+    expect(row).toHaveTextContent('$77,500.00');
+    expect(row).toHaveTextContent('$2,500.00');
+  });
+
   it('renders incomplete basis honestly', () => {
     render(<EquityHoldingsSection snapshot={snapshot({ equities: [holding({ basis: null, basisComplete: false })] })} th={THEMES.dark} />);
     expect(screen.getByText('Basis incomplete')).toBeInTheDocument();
