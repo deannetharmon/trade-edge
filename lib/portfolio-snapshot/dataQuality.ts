@@ -25,7 +25,7 @@ export const POSITIONS_UNAVAILABLE_REASON =
   'Portfolio snapshot unavailable: broker positions could not be loaded.';
 
 export const ORDERS_UNAVAILABLE_REASON =
-  'Coverage-dependent capacity unavailable: working orders could not be loaded.';
+  'Coverage-dependent capacity unavailable: complete order evidence could not be loaded.';
 
 export const ADJUSTED_DELIVERABLE_REASON =
   'Coverage-dependent capacity unavailable: an adjusted or unresolved option deliverable was detected.';

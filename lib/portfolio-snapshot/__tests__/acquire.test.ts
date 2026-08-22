@@ -69,11 +69,13 @@ describe('acquireSnapshot', () => {
     expect((await acquireSnapshot()).coverageEvidence.complete).toBe(false);
   });
 
-  it('stamps verified marks with the snapshot observation time', async () => {
+  it('keeps snapshot observation time separate from unknown quote provenance', async () => {
     const snapshot = await acquireSnapshot();
-    expect(snapshot.quoteAsOf).toBe(snapshot.asOf);
-    expect(snapshot.equities[0].quoteAsOf).toBe(snapshot.asOf);
-    expect(snapshot.equities[0].staleQuote).toBe(false);
+    expect(snapshot.asOf).toBeTruthy();
+    expect(snapshot.quoteAsOf).toBeNull();
+    expect(snapshot.equities[0].quoteAsOf).toBeNull();
+    expect(snapshot.equities[0].staleQuote).toBe(true);
+    expect(snapshot.dataQuality.staleQuotes).toBe(true);
   });
 
   it('fails closed when positions fail without invoking option normalization', async () => {

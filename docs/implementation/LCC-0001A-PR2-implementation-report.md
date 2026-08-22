@@ -1,7 +1,7 @@
 # LCC-0001A PR 2 — Implementation Report
 
 **Status:** Corrected after cross-functional review; ready for re-review
-**Implementation commits:** `271c673`, `85eb367`, and this final corrective commit
+**Implementation commits:** `271c673`, `85eb367`, `08369be`, plus the current provenance correction at branch HEAD
 **Branch:** `feature/lcc-0001a-unified-portfolio-snapshot`
 **Specification:** `docs/design/LCC-0001A-technical-spec.md`, rollout PR 2
 **Production flag:** `NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED=true`
@@ -131,11 +131,13 @@ must travel with that snapshot.
 Orders failure is not represented as zero reservations. Missing evidence always blocks a trusted
 capacity result.
 
-Equity economics use a positive broker mark when present. The snapshot acquisition `asOf` is stored
-as the observation time on that normalized quote; it is not represented as an exchange timestamp.
-A positive prior close is only a stale reference fallback and carries an explicit warning. A
-missing or incomplete multi-lot quote remains unavailable. Snapshot `staleQuotes` reflects these
-holding-level states.
+`PortfolioSnapshot.asOf` is acquisition observation time. It is never copied into `quoteAsOf`.
+Because the marked-position payload supplies no verified broker quote timestamp, holding and
+snapshot `quoteAsOf` remain null and mark-derived economics have unknown freshness (`staleQuote:
+true`). A positive prior close is only a stale reference fallback and carries an explicit warning.
+A missing or incomplete multi-lot quote remains unavailable. Snapshot `staleQuotes` reflects these
+holding-level states. PR 3 must not label unknown-freshness marks as live/current and must label any
+displayed close fallback “Prior close” or “Reference price.”
 
 ## 6. Provider behavior
 
@@ -161,8 +163,10 @@ Paul and Ian independently reviewed the interrupted draft and agreed on four blo
 
 Those four were resolved in `271c673`. A later Alan/Paul/Ian/Quinn/Diane review found duplicate
 broker observations, adjusted-deliverable risk, missing cached-data provenance, and undefined quote
-behavior. Commit `85eb367` resolved the first corrective round; this final corrective commit closes
-the partial-order-evidence and quote-provenance findings. PR 3 remains gated on team re-review.
+behavior. Commit `85eb367` resolved the first corrective round; commit `08369be` closed the
+partial-order-evidence behavior. The current branch-HEAD correction restores the approved
+`quoteAsOf` contract without changing the order/capacity work in `08369be`. PR 3 remains gated on
+team re-review.
 
 ## 8. Verification
 
@@ -186,8 +190,9 @@ The production feature remains off unless
 requires changing/unsetting the variable and rebuilding/redeploying the client bundle. The existing Provider path remains
 available and unchanged behind the off state.
 
-If code rollback is required before later PRs depend on this contract, revert the final corrective
-commit first, then `85eb367`, then `271c673`. PR 1's original commit (`3bab2b3`) may remain only if
+If code rollback is required before later PRs depend on this contract, revert the current provenance
+correction at branch HEAD first, then `08369be`, `85eb367`, and `271c673`, in that order. PR 1's
+original commit (`3bab2b3`) may remain only if
 its now-superseded pure-normalizer contract is still desired; otherwise revert it last.
 
 ## 10. Deferred work and PR 3 entry criteria
@@ -202,8 +207,9 @@ Deferred exactly as planned:
 
 PR 3 may begin only after this corrected report is re-reviewed. It must consume the published snapshot contract, keep
 its UI flag independent from the acquisition flag, and must not change capacity or acquisition
-semantics established here. Equity economics may render only from verified marked-position values;
-missing values must display as unavailable. The UI must distinguish `current` holdings from
+semantics established here. Mark-derived economics have unknown freshness without a verified broker
+quote timestamp and must not be labeled live/current; missing values must display as unavailable.
+The UI must distinguish `current` holdings from
 `last-known` cached holdings and show `lastSuccessfulAsOf` for the latter. Short stock remains visible
 and contributes no covered-call capacity. Redacted snapshot warning observability is assigned to the
 PR 4 shadow-mode instrumentation work.

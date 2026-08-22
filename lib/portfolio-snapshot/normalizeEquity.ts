@@ -63,7 +63,6 @@ function groupKey(symbol: string, direction: EquityDirection): string {
 export function normalizeEquityHoldings(
   rawPositions: RawPositionLike[],
   accountNumber: string,
-  observedAt: string | null = null,
 ): EquityHolding[] {
   const groups: Record<string, GroupAccumulator> = {};
   const directionBySymbol: Record<string, EquityDirection> = {};
@@ -138,9 +137,11 @@ export function normalizeEquityHoldings(
       currentPrice,
       marketValue: currentPrice == null ? null : currentPrice * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
       unrealizedPnl: currentPrice == null || basis == null ? null : (currentPrice - basis) * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
-      // observedAt is our acquisition observation time, not a broker exchange timestamp.
-      quoteAsOf: currentPrice == null ? null : observedAt,
-      staleQuote: currentPrice == null || observedAt == null || agg.anyQuoteFromClose,
+      // The marked-position payload does not carry a verified broker quote timestamp. Snapshot
+      // acquisition time belongs in PortfolioSnapshot.asOf and must not be fabricated as quote
+      // provenance. Mark and prior-close economics therefore have unknown freshness.
+      quoteAsOf: null,
+      staleQuote: true,
       deliverable: 'standard',
       dataQualityWarnings: agg.anyQuoteFromClose
         ? ['Current mark unavailable; using prior close as stale reference pricing.']
