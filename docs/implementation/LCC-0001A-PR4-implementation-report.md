@@ -6,8 +6,9 @@
 **Implementation commits:** `f97c0481c44d3d599d9ba13ab15e953b0a493208`
 (`Add LCC-0001A capacity shadow parity`), `49b513c1dfcf88cdddd974bfe2d89241d8165c52`
 (`Add durable PR4 shadow monitoring`), `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`
-(`Harden PR4 shadow telemetry integrity`), followed by the commit titled
-`Complete PR4 telemetry evidence safeguards`.
+(`Harden PR4 shadow telemetry integrity`), `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`
+(`Complete PR4 telemetry evidence safeguards`), followed by the commit titled
+`Enforce per-event PR4 telemetry retention`.
 
 ## Outcome
 
@@ -99,24 +100,38 @@ The authenticated route reuses the repository's established `REDIS_URL`/ioredis 
 infrastructure with a separate identifier-free namespace:
 
 - Daily hash: `lcc0001a:cc-capacity-shadow:counts:YYYY-MM-DD`
-- Recent-event sorted set: `lcc0001a:cc-capacity-shadow:recent`
+- Recent index: `lcc0001a:cc-capacity-shadow:recent:index`
+- Per-event payload: `lcc0001a:cc-capacity-shadow:recent:event:<HMAC event fingerprint>`
 - Rate window: `lcc0001a:cc-capacity-shadow:rate:<HMAC identity>:<server minute>`
 - Deduplication: `lcc0001a:cc-capacity-shadow:dedupe:<HMAC event fingerprint>`
 
 Daily hashes count `total`, each `outcome:*`, each `skipped:*` reason, each `difference:*` kind, and
 each `field:*` mismatch. The date suffix always comes from server receipt time. Operations can query
-a day's sample with Redis `HGETALL` on the daily key and inspect newest transformed evidence with
-`ZREVRANGE lcc0001a:cc-capacity-shadow:recent 0 499 WITHSCORES`.
+a day's sample with Redis `HGETALL` on the daily key. Live recent evidence must be read through the
+authenticated `GET /api/telemetry/cc-capacity-shadow?limit=500` boundary, which invokes
+`readCoveredCallCapacityShadowRecent()`; a raw index query is not evidence that a payload is live.
 
-Recent evidence is a sorted set scored only by server receipt milliseconds. Every accepted write
-removes scores older than 90 days, removes all but the newest 500 members, and refreshes a 90-day
-key TTL; therefore nothing can survive beyond the maximum age and entries may be removed sooner by
-the count cap. Daily hashes also have a 90-day TTL. Rate keys are atomically incremented with a 65-second TTL
+The recent index is scored only by server receipt milliseconds and contains only HMAC event
+fingerprints. Each transformed financial payload is stored separately with an absolute Redis
+`PXAT` expiry exactly 90 days after its own server receipt time. A later event cannot extend an
+earlier payload's lifetime. The atomic write script removes index entries at or beyond the inclusive
+90-day cutoff, deletes their payloads, and immediately deletes both index entry and payload for any
+event displaced by the 500-event cap. The supported read script applies the same inclusive age
+pruning, omits expired payloads, cleans dangling fingerprints, and returns at most 500 live payloads.
+The index may outlive an individual payload, but contains no symbols or capacity values and is never
+treated as financial evidence. Daily hashes also have a 90-day TTL. Rate keys are atomically incremented with a 65-second TTL
 and admit at most 60 submissions per authenticated identity per 60-second server window. Exact
 replays are suppressed for 24 hours with an HMAC event fingerprint. Duplicates return 202 and rate
 excess returns 429; neither increments monitoring counts nor appends recent evidence. The route logs
 only transformed evidence plus server receipt time. Redis keys contain keyed hashes, never raw
 identity. Rejected, duplicate, and rate-limited submissions are excluded from Gate A evidence.
+
+The write-side retention operations run inside the same Redis transaction as the daily counters;
+the small Lua command receives keys and values through `KEYS`/`ARGV`, never string interpolation.
+The authenticated read boundary runs a separate cleanup script before returning evidence. Stateful
+clock-driven tests prove quiet-period expiry after a later day-89 write, exclusion at the exact
+90-day boundary, complete quiet-period expiry, immediate event-1 payload deletion when event 501 is
+accepted, dangling-index cleanup, and server-receipt-time authority.
 
 This supplies countable evidence but does not select the monitoring window or sample threshold.
 Product/operations must choose a window compatible with the documented 90-day retention and review
@@ -153,16 +168,17 @@ No combination makes the snapshot report authoritative.
 - `lib/portfolio-snapshot/shadowTelemetryServer.ts` — server-only identity/event HMACs and
   irreversible warning/reason transformation.
 - `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — identifier-free daily Redis
-  counters, server-time age/count-bounded recent evidence, atomic rate limiting, and replay
-  suppression.
+  counters, per-event-expiring recent payloads, HMAC-only index, authenticated read cleanup, atomic
+  age/count enforcement, rate limiting, and replay suppression.
 - `app/api/telemetry/cc-capacity-shadow/route.ts` and its tests — authenticated validation,
-  centralized storage/logging, and failure responses isolated from the browser workflow.
+  centralized storage/logging, authenticated live-evidence reads, and failure responses isolated
+  from the browser workflow.
 - This report.
 
 ## Verification
 
 - Focused PR 4 matrix (all snapshot/telemetry tests, authenticated collector route, legacy capacity,
-  Covered Call gate, Screener session wiring, and launcher state): **230/230 passing** across 15 files.
+  Covered Call gate, Screener session wiring, and launcher state): **239/239 passing** across 15 files.
 - TypeScript: only the merged-main baseline of 41 errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero PR 4 errors.
 - `npm run build`: passed. Local Redis `ECONNREFUSED` warnings were environmental because no local
@@ -195,7 +211,8 @@ PR 4 completion alone does not close Gate A.
 ## Rollback
 
 Set `NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=false` and rebuild/redeploy, or revert the PR 4
-merge commit. Before merge, revert the commit titled `Complete PR4 telemetry evidence safeguards`,
-then `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`, then
+merge commit. Before merge, revert the commit titled `Enforce per-event PR4 telemetry retention`,
+then `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`, then
+`dc78b6d42cd27c092f53330ce12e683f5ecc26fe`, then
 `49b513c1dfcf88cdddd974bfe2d89241d8165c52`, then
 `f97c0481c44d3d599d9ba13ab15e953b0a493208`. The legacy report remains authoritative either way.

@@ -4,13 +4,16 @@ import {
   parseCapacityShadowTelemetry,
 } from '@/lib/portfolio-snapshot/shadowTelemetrySchema';
 
-const { getServerSession, ingestCoveredCallCapacityShadow } = vi.hoisted(() => ({
+const { getServerSession, ingestCoveredCallCapacityShadow, readCoveredCallCapacityShadowRecent } = vi.hoisted(() => ({
   getServerSession: vi.fn(), ingestCoveredCallCapacityShadow: vi.fn(),
+  readCoveredCallCapacityShadowRecent: vi.fn(),
 }));
 vi.mock('next-auth', () => ({ getServerSession }));
-vi.mock('@/lib/portfolio-snapshot/shadowTelemetryStore', () => ({ ingestCoveredCallCapacityShadow }));
+vi.mock('@/lib/portfolio-snapshot/shadowTelemetryStore', () => ({
+  ingestCoveredCallCapacityShadow, readCoveredCallCapacityShadowRecent,
+}));
 
-import { POST } from '../route';
+import { GET, POST } from '../route';
 
 const valid = {
   outcome: 'difference', comparedAt: '2026-08-22T18:01:00.000Z',
@@ -36,12 +39,35 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
     process.env.NEXTAUTH_SECRET = 'test-only-shadow-secret';
     getServerSession.mockReset().mockResolvedValue({ user: { id: 'server-only-user' } });
     ingestCoveredCallCapacityShadow.mockReset().mockResolvedValue('accepted');
+    readCoveredCallCapacityShadowRecent.mockReset().mockResolvedValue([]);
   });
 
   it('requires authentication', async () => {
     getServerSession.mockResolvedValue(null);
     expect((await POST(request(valid))).status).toBe(401);
     expect(ingestCoveredCallCapacityShadow).not.toHaveBeenCalled();
+  });
+
+  it('requires authentication for operational recent-evidence reads', async () => {
+    getServerSession.mockResolvedValue(null);
+    expect((await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'))).status).toBe(401);
+    expect(readCoveredCallCapacityShadowRecent).not.toHaveBeenCalled();
+  });
+
+  it('returns only live transformed evidence through the authenticated read boundary', async () => {
+    const event = { ...valid, receivedAt: '2026-08-22T18:05:00.000Z' };
+    readCoveredCallCapacityShadowRecent.mockResolvedValue([event]);
+    const response = await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow?limit=500'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ events: [event] });
+    expect(readCoveredCallCapacityShadowRecent).toHaveBeenCalledWith(
+      new Date('2026-08-22T18:05:00.000Z'), 500,
+    );
+  });
+
+  it('keeps operational read failures non-authoritative', async () => {
+    readCoveredCallCapacityShadowRecent.mockRejectedValue(new Error('redis unavailable'));
+    expect((await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'))).status).toBe(503);
   });
 
   it('accepts, records, and centrally logs only an allowlisted event', async () => {

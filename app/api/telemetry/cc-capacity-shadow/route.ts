@@ -2,7 +2,10 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { CC_CAPACITY_SHADOW_EVENT } from '@/lib/portfolio-snapshot/shadowParity';
-import { ingestCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetryStore';
+import {
+  ingestCoveredCallCapacityShadow,
+  readCoveredCallCapacityShadowRecent,
+} from '@/lib/portfolio-snapshot/shadowTelemetryStore';
 import { CC_CAPACITY_SHADOW_MAX_BYTES, parseCapacityShadowTelemetry } from '@/lib/portfolio-snapshot/shadowTelemetrySchema';
 import {
   fingerprintCapacityShadowEvent,
@@ -11,6 +14,19 @@ import {
 } from '@/lib/portfolio-snapshot/shadowTelemetryServer';
 
 export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const requested = Number(new URL(request.url).searchParams.get('limit') ?? '100');
+  const limit = Number.isFinite(requested) ? requested : 100;
+  try {
+    const events = await readCoveredCallCapacityShadowRecent(new Date(), limit);
+    return NextResponse.json({ events });
+  } catch {
+    return NextResponse.json({ error: 'Telemetry unavailable' }, { status: 503 });
+  }
+}
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
