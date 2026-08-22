@@ -17,6 +17,21 @@ import '@testing-library/jest-dom/vitest';
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioDataProvider';
 import PortfolioPage from '../page';
+import { resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
+import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
+import type { Position } from '@/lib/portfolio-data/types';
+
+const portfolioContextOverride = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+vi.mock('@/components/portfolio-data/PortfolioDataProvider', async () => {
+  const actual = await vi.importActual<typeof import('@/components/portfolio-data/PortfolioDataProvider')>('@/components/portfolio-data/PortfolioDataProvider');
+  return {
+    ...actual,
+    usePortfolioData: () => {
+      const value = actual.usePortfolioData();
+      return portfolioContextOverride.current ? { ...value, ...portfolioContextOverride.current } : value;
+    },
+  };
+});
 
 // Stub the live acquisition pipeline's two entry points so the page settles
 // into a clean, deterministic "loaded, zero positions" state instead of an
@@ -32,8 +47,70 @@ vi.mock('@/lib/portfolio-data/acquisition', async () => {
   };
 });
 
+const emptySnapshot = (status: 'ok' | 'unavailable' = 'ok'): PortfolioSnapshot => ({
+  accountNumber: 'ACC1', asOf: '2026-08-22T18:00:00.000Z', quoteAsOf: null,
+  equities: [], options: [], workingOrders: [],
+  coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: status === 'ok', warnings: [], hasAdjustedOrUnknownDeliverable: false },
+  dataQuality: { status, staleQuotes: true, warnings: [] }, freshness: 'current',
+  lastSuccessfulAsOf: status === 'ok' ? '2026-08-22T18:00:00.000Z' : null,
+});
+
+const optionPosition = {
+  key: 'AAPL::2026-09-18::200P', symbol: 'AAPL', expDate: '2026-09-18', dte: 27,
+  strategy: 'Short Put', legs: [{ symbol: 'AAPL  260918P00200000', optionType: 'P', strikePrice: 200, direction: 'Short', quantity: 1, avgOpenPrice: 2, currentPrice: 1 }],
+  quantity: 1, identity: null, structureAmbiguous: true, structureBlockMessage: 'Test fixture — actions blocked',
+  entryPriceEffect: 'Credit', entryCredit: 200, entryEconomicsComplete: true, creditReceived: 200,
+  currentValue: 100, closeValue: 100, closeNowPnl: 100, pnl: 100, pnlPct: 50, pnlReliable: true,
+  intent: 'income', plOpen: 100, targetPrice: 1, profitTarget: 0.5, maxRisk: 19800,
+  hitTarget: true, needsClose: false, entryDte: 30, entryDate: '2026-08-19', accountNumber: 'ACC1',
+  ivr: 30, iv: 25, hv30: 20, beta: 1, netDelta: 20, netVega: -5, pop: 70,
+  hasGtc: false, gtcOrderId: null, gtcOrderPrice: null, stopLossStatus: 'none', stopLossPrice: null,
+  stopLossPolicy: null, stopLossDisplayPolicy: null, stopLossClassification: null, stopLossBreach: null,
+  recommendation: null, objective: null, healthScore: null,
+} as unknown as Position;
+
+const populatedSnapshot: PortfolioSnapshot = {
+  ...emptySnapshot('ok'),
+  equities: [{
+    accountNumber: 'ACC1', symbol: 'MSFT', direction: 'Long', quantity: 250,
+    settledQuantity: null, basis: null, basisComplete: false, currentPrice: 310,
+    marketValue: 77500, unrealizedPnl: 2500, quoteAsOf: null, staleQuote: true,
+    deliverable: 'standard', dataQualityWarnings: [],
+  }],
+  options: [optionPosition],
+};
+
+describe('LCC-0001A PR3: Portfolio equity composition gate', () => {
+  it('preserves the legacy empty state when display is off', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: false, loading: false, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('legacy-empty');
+  });
+
+  it('renders an unavailable workspace, never a definitive empty claim, when display is on and snapshot is null', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('uses only the loading state during initial acquisition', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: true, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('loading');
+  });
+
+  it('keeps a prior snapshot and option cards visible during refresh', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: true, snapshot: emptySnapshot('unavailable'), optionCount: 1, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('renders one definitive empty state only when a successful snapshot proves the whole portfolio empty', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: emptySnapshot('ok'), optionCount: 0, pendingOrderCount: 0 })).toBe('empty');
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: emptySnapshot('unavailable'), optionCount: 0, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('keeps equity and option surfaces coexisting in the same workspace', () => {
+    const withEquity = { ...emptySnapshot('ok'), equities: [{ accountNumber: 'ACC1', symbol: 'MSFT', direction: 'Long' as const, quantity: 250, settledQuantity: null, basis: 300, basisComplete: true, currentPrice: 310, marketValue: 77500, unrealizedPnl: 2500, quoteAsOf: null, staleQuote: true, deliverable: 'standard' as const, dataQualityWarnings: [] }] };
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: withEquity, optionCount: 1, pendingOrderCount: 0 })).toBe('workspace');
+  });
+});
+
 describe('WA-0002: Portfolio default tab', () => {
   beforeEach(() => {
+    portfolioContextOverride.current = null;
     window.localStorage.clear();
     // Anything still calling fetch directly (e.g. the decision-reviews
     // route) rejects quickly and non-blockingly rather than hanging.
@@ -41,6 +118,7 @@ describe('WA-0002: Portfolio default tab', () => {
   });
 
   afterEach(() => {
+    portfolioContextOverride.current = null;
     vi.unstubAllGlobals();
   });
 
@@ -71,6 +149,55 @@ describe('WA-0002: Portfolio default tab', () => {
     // Neither the 'today', 'briefing', 'priorities', 'history', nor
     // 'balances' tab content is present -- only one tab's content renders.
     expect(screen.queryByText('Immediate Action')).not.toBeInTheDocument();
+  });
+
+  it('renders equity unavailable without claiming the portfolio is empty when display is on and acquisition is off', async () => {
+    process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED = 'true';
+    try {
+      render(
+        <PortfolioModeProvider>
+          <PortfolioDataProvider>
+            <PortfolioPage />
+          </PortfolioDataProvider>
+        </PortfolioModeProvider>,
+      );
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('unified portfolio snapshot'));
+      expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
+    } finally {
+      delete process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED;
+    }
+  });
+
+  it('renders a populated equity row and existing option card together through PortfolioPage', async () => {
+    process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED = 'true';
+    portfolioContextOverride.current = {
+      positions: [optionPosition], pendingOrders: [], snapshot: populatedSnapshot,
+      snapshotDataQuality: populatedSnapshot.dataQuality, loading: false, error: '',
+    };
+    try {
+      render(
+        <PortfolioModeProvider>
+          <PortfolioDataProvider>
+            <PortfolioPage />
+          </PortfolioDataProvider>
+        </PortfolioModeProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId('equity-holding-MSFT-Long')).toBeInTheDocument());
+      const equity = screen.getByTestId('equity-holding-MSFT-Long');
+      expect(equity).toHaveTextContent('250 shares');
+      expect(equity).toHaveTextContent('Basis incomplete');
+      expect(equity).toHaveTextContent('Basis unavailable');
+      expect(equity).toHaveTextContent('Reference price');
+      expect(equity).not.toHaveTextContent('Current price');
+      expect(equity).toHaveTextContent('Market valueUnavailable');
+      expect(equity).toHaveTextContent('Unrealized P/LUnavailable');
+      expect(screen.getByText('AAPL')).toBeInTheDocument();
+      expect(screen.getByText('Short Put')).toBeInTheDocument();
+      expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
+    } finally {
+      portfolioContextOverride.current = null;
+      delete process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED;
+    }
   });
 });
 
