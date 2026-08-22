@@ -8,8 +8,9 @@
 (`Add durable PR4 shadow monitoring`), `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`
 (`Harden PR4 shadow telemetry integrity`), `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`
 (`Complete PR4 telemetry evidence safeguards`), `0c17c36d3fc2f7fb1032198f500bb5a44d8e0be4`
-(`Enforce per-event PR4 telemetry retention`), followed by the commit titled
-`Restrict PR4 telemetry reads to operators`.
+(`Enforce per-event PR4 telemetry retention`), followed by
+`b49b6c73a1fe2e4046897ed250401f227cfa16a2`
+(`Restrict PR4 telemetry reads to operators`).
 
 ## Outcome
 
@@ -138,7 +139,7 @@ identity. Rejected, duplicate, and rate-limited submissions are excluded from Ga
 
 The write-side retention operations run inside the same Redis transaction as the daily counters;
 the small Lua command receives keys and values through `KEYS`/`ARGV`, never string interpolation.
-The authenticated read boundary runs a separate cleanup script before returning evidence. Stateful
+The operator-authorized read boundary runs a separate cleanup script before returning evidence. Stateful
 clock-driven tests prove quiet-period expiry after a later day-89 write, exclusion at the exact
 90-day boundary, complete quiet-period expiry, immediate event-1 payload deletion when event 501 is
 accepted, dangling-index cleanup, and server-receipt-time authority.
@@ -178,10 +179,10 @@ No combination makes the snapshot report authoritative.
 - `lib/portfolio-snapshot/shadowTelemetryServer.ts` — server-only identity/event HMACs and
   irreversible warning/reason transformation.
 - `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — raw-identity-free daily Redis
-  counters, per-event-expiring recent payloads, HMAC-only index, authenticated read cleanup, atomic
+  counters, per-event-expiring recent payloads, HMAC-only index, operator-authorized read cleanup, atomic
   age/count enforcement, rate limiting, and replay suppression.
 - `app/api/telemetry/cc-capacity-shadow/route.ts` and its tests — authenticated validation,
-  centralized storage/logging, authenticated live-evidence reads, and failure responses isolated
+  centralized storage/logging, operator-authorized live-evidence reads, and failure responses isolated
   from the browser workflow.
 - This report.
 
@@ -225,8 +226,8 @@ email. There is no implicit operator derived from the signed-in user, repository
 ## Rollback
 
 Set `NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=false` and rebuild/redeploy, or revert the PR 4
-merge commit. Before merge, revert the commit titled `Restrict PR4 telemetry reads to operators`,
-then `0c17c36d3fc2f7fb1032198f500bb5a44d8e0be4`, then
+merge commit. Before merge, revert `b49b6c73a1fe2e4046897ed250401f227cfa16a2`, then
+`0c17c36d3fc2f7fb1032198f500bb5a44d8e0be4`, then
 `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`, then
 `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`, then
 `49b513c1dfcf88cdddd974bfe2d89241d8165c52`, then
