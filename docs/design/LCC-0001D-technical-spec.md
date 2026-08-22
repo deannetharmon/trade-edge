@@ -11,6 +11,22 @@ recorded), LCC-0001C (corrected, published `3365657`)
 sequence, both approved mockups, and the current repository implementation cited throughout.
 **Does not implement application code. Does not begin LCC-0001E.**
 
+## Revision history
+
+- **v1 (commit `9f7f0e8`):** Initial specification. Left three open items: `partiallyFilled`
+  sub-transitions not literal in the ticket text, no confirmed expiration-price data source, and
+  unresolved migrated-allocation origination semantics.
+- **v2 (this revision):** Resolved all three open items by explicit product decision. (1)
+  `partiallyFilled` confirmed as a necessary, intentional lifecycle-state refinement (§5). (2)
+  Broker positions/executions/transactions/assignment activity are authoritative for expiration
+  outcomes; market price data is advisory-only; `classifyExpirationOutcome()` replaces the original
+  `classifyExpiration()` and falls back to `reconciliationRequired` whenever authoritative evidence
+  is unavailable, never inferring an outcome from price (§7). (3) `PmccOrigination` extended with
+  `UNKNOWN_MIGRATED` (also updated in the master architecture and LCC-0001B specification); every
+  migrated allocation carries this value unconditionally, never a guessed `CREATED_TOGETHER`/
+  `ADDED_TO_EXISTING_LONG_CALL` (§12.2). Updated §16 tests, §17 traceability/open items, §18 rollout,
+  and §20 self-review accordingly. No open items remain.
+
 ---
 
 ## 1. Objective
@@ -173,10 +189,15 @@ corrected master architecture §7.2 exactly:
 const ALLOWED_TRANSITIONS: Record<CycleStatus, CycleStatus[]> = {
   proposed: ['pending'],
   pending: ['open', 'cancelled', 'rejected', 'partiallyFilled'],
-  partiallyFilled: ['open', 'cancelled'],   // a partial fill can still complete to open, or the
-                                              // remainder can be cancelled -- not in the ticket's
-                                              // literal table but required for partial-fill
-                                              // consistency with LCC-0001C §11; see §17 open item
+  // Decision (LCC-0001D open item 1, resolved): partiallyFilled is kept as an explicit lifecycle
+  // state. It is a necessary refinement of the ticket's literal transition table -- which lists
+  // Partially Filled as a destination from Pending but never specifies what Partially Filled
+  // itself can transition to -- and is required to represent partial execution honestly, matching
+  // LCC-0001C §11's partial-fill handling. A partial fill can complete to open once the remainder
+  // fills, be cancelled if the remainder is abandoned, or (added here for consistency with every
+  // other pre-terminal state) require reconciliation if the partial-fill evidence itself becomes
+  // ambiguous (e.g. conflicting broker reports of what actually filled).
+  partiallyFilled: ['open', 'cancelled', 'reconciliationRequired'],
   open: ['closingPending', 'expired', 'assigned', 'reconciliationRequired'],
   closingPending: ['closed', 'reconciliationRequired'],
   cancelled: [],
@@ -260,31 +281,86 @@ one "roll P/L" that would obscure which leg produced which result.
 
 ## 7. Expiration handling
 
+**Decision (LCC-0001D open item 2, resolved):** broker positions, executions, transactions, and
+assignment activity are **authoritative** for expiration outcomes. Market expiration-price data is
+**advisory only** — it may inform a UI hint or an early warning, but it never by itself determines
+whether a cycle resolves to `expired` or `assigned`. When authoritative broker evidence is
+unavailable at the time expiration needs to be classified, the cycle transitions to
+`reconciliationRequired`, never to a guessed `expired`/`assigned` outcome inferred from an unofficial
+or missing price. This replaces the original draft's `classifyExpiration()` design, which incorrectly
+treated a caller-supplied price as sufficient to directly produce a final `expired`/`itm` outcome.
+
 `lib/lifecycle/expiration.ts`:
 
 ```ts
-export function classifyExpiration(
+// Advisory-only price evidence -- informs UI/warnings, never a final-outcome input by itself.
+export interface AdvisoryExpirationPriceEvidence {
+  source: 'marketDataProvider';       // reserved for a future named provider; not fetched by this
+                                        // module itself -- see the provider boundary below
+  priceAtOrNearExpiration: number | null;
+  asOf: string | null;
+  confidence: 'official' | 'delayed' | 'estimated' | null;
+}
+
+// Authoritative broker evidence -- the ONLY input that can produce a final expired/assigned outcome.
+export interface AuthoritativeExpirationEvidence {
+  // Broker no longer reports the option position open past expiration, AND no assignment/exercise
+  // transaction references it -> supports 'expired'.
+  positionClosedWithNoAssignmentEvidence: boolean;
+  // Broker reports an assignment/exercise transaction referencing this contract -> supports
+  // 'assigned'. Mutually exclusive with the above in valid evidence; both false or both true is
+  // itself a reconciliation-worthy disagreement (see reconciliation.ts, §10).
+  assignmentTransactionEvidence: boolean;
+  asOf: string | null;
+}
+
+export function classifyExpirationOutcome(
   cycle: ShortCallCycle,
-  strikePrice: number,
-  underlyingPriceAtExpiration: number | null,
-  exerciseByExceptionThreshold: number,   // e.g. $0.01 ITM, broker-specific; configurable, not
-                                            // hardcoded, since this varies by broker/contract
-): 'otm' | 'itm' | 'nearItmAttentionRequired'
+  authoritative: AuthoritativeExpirationEvidence,
+  advisory: AdvisoryExpirationPriceEvidence | null,   // optional, informational only
+): {
+  outcome: 'expired' | 'assigned' | 'reconciliationRequired';
+  reason: string;
+  advisoryPriceForDisplay: AdvisoryExpirationPriceEvidence | null;  // passed through unchanged,
+                                                                       // for UI display only --
+                                                                       // never consulted in the
+                                                                       // outcome logic above
+}
 ```
 
-- **OTM expiration** (`underlyingPriceAtExpiration < strikePrice` for a call, with a safety margin
-  below `exerciseByExceptionThreshold`) → `applyTransition(cycle, 'expired', { realizedPnl:
-  <full premium retained> })`; the linked `CoverageAllocation` releases (calls LCC-0001B's release
-  endpoint) — coverage is now available again, satisfying `ReadyForNextCall` (LCC-0001B §8.1 item 5).
-- **ITM or near-ITM expiration** → `applyTransition(cycle, 'reconciliationRequired', {})`, creating a
-  `ReconciliationItem` of type `assignmentExercise` — this ticket does **not** guess the outcome; it
-  waits for confirming broker evidence (§8) before resolving into `assigned` or another terminal
-  state.
-- **Timezone/exercise-by-exception/after-hours/broker-cutoff handling**: `underlyingPriceAtExpiration`
-  and the classification call are deliberately parameterized (not hardcoded to market-close-4pm-ET)
-  so the caller supplies the correct evidence for whichever cutoff actually applies — this ticket
-  defines the classification function's contract, not a fetch of "the" official expiration price,
-  since no such single existing source was found in the repository (open item, §17).
+**Outcome logic, authoritative-evidence-only:**
+
+- `authoritative.positionClosedWithNoAssignmentEvidence === true` **and**
+  `authoritative.assignmentTransactionEvidence === false` → `outcome: 'expired'`,
+  `applyTransition(cycle, 'expired', { realizedPnl: <full premium retained> })`; the linked
+  `CoverageAllocation` releases (LCC-0001B's release endpoint) — coverage becomes available again,
+  satisfying `ReadyForNextCall` (LCC-0001B §8.1 item 5).
+- `authoritative.assignmentTransactionEvidence === true` → `outcome: 'assigned'`, routed into §8's
+  assignment reconciliation (stock or PMCC path, disambiguated by `allocation.foundationType`).
+- **Any other case** — evidence missing, both flags false, both flags true (contradictory), or the
+  broker data simply hasn't arrived yet at classification time — → `outcome: 'reconciliationRequired'`,
+  creating a `ReconciliationItem` (`type: 'assignmentExercise'`). This is the fail-closed default:
+  **absence of authoritative evidence is never treated as license to infer an outcome from advisory
+  price data**, however confident that price data might look.
+- `advisory` (when supplied) is carried through unchanged into `advisoryPriceForDisplay` purely so the
+  UI (§14) can show a "likely OTM/ITM as of the last available quote" hint on a
+  `reconciliationRequired` item while the user waits for authoritative confirmation — it is read
+  nowhere in the `outcome`-producing logic above, and a test asserting this separation is required
+  (§16).
+
+**Provider boundary for future price evidence:** `AdvisoryExpirationPriceEvidence.source` is typed as
+a literal union reserved for exactly one named provider today (`'marketDataProvider'`, the same
+general-purpose market-data source used elsewhere in the app) so that adding a second provider later
+is a type extension, not a redesign — but no such provider is wired into `expiration.ts` by this
+ticket; supplying `advisory` is entirely optional and callers may omit it (`null`) with no change to
+the authoritative-evidence outcome logic.
+
+**Timezone/exercise-by-exception/after-hours/broker-cutoff handling**: `AuthoritativeExpirationEvidence`
+is deliberately evidence-shaped (booleans derived from broker data) rather than a raw timestamp/price
+comparison, so whichever cutoff rules actually govern a given broker's assignment reporting are
+encapsulated in how the caller derives `positionClosedWithNoAssignmentEvidence`/
+`assignmentTransactionEvidence` from the raw broker feed — this ticket does not hardcode a
+market-close-4pm-ET assumption anywhere in `classifyExpirationOutcome()` itself.
 
 ---
 
@@ -441,12 +517,18 @@ in LCC-0001A's spec; restated here since this is the ticket that actually implem
 
 `lib/migration/dryRun.ts::runMigrationDryRun()`:
 
-- For each candidate pair found by §12.1, proposes: one `CoverageAllocation`
-  (`source: 'migrated'`, `origination: 'CREATED_TOGETHER'` unless the pairing evidence suggests
-  otherwise — see the open item below), one `ShortCallCycle` (`status` inferred from the current
-  `Position`'s open/closed state — no lifecycle history is fabricated for cycles that predate this
-  ticket; a currently-open short call migrates to `status: 'open'` with `openedAt` taken from the best
-  available broker execution/order data, not backfilled speculatively).
+- For each candidate pair found by §12.1, proposes: one `CoverageAllocation` (`source: 'migrated'`,
+  `origination: 'UNKNOWN_MIGRATED'` — **decision (LCC-0001D open item 3, resolved): migration never
+  guesses `CREATED_TOGETHER` or `ADDED_TO_EXISTING_LONG_CALL`.** A migrated pair's actual creation
+  sequence — whether the user opened both legs together or added the short call to a pre-existing
+  long call — cannot be proven from position data alone, and guessing would misrepresent audit
+  history as more certain than it is. `UNKNOWN_MIGRATED` is used unconditionally for every migrated
+  allocation this ticket creates, regardless of how confident the pairing otherwise looks.
+  `source: 'migrated'` continues to identify the record's provenance as a separate, independent
+  field — `origination` and `source` are never conflated.), one `ShortCallCycle` (`status` inferred
+  from the current `Position`'s open/closed state — no lifecycle history is fabricated for cycles
+  that predate this ticket; a currently-open short call migrates to `status: 'open'` with `openedAt`
+  taken from the best available broker execution/order data, not backfilled speculatively).
 - **Ambiguity report**: any candidate that doesn't pair cleanly (missing execution history, unclear
   prior roll chains — since pre-migration rolls have no `RollEvent` records to reconstruct from,
   multiple plausible long-call matches for one short call, adjusted contracts) is listed separately,
@@ -571,7 +653,7 @@ Reconciliation, Replace Foundation"):
 |---|---|---|---|
 | `canTransition`/`applyTransition`: every allowed and prohibited transition in §5's table | Unit | `lib/lifecycle/__tests__/transitions.test.ts` | LCC-0001D "State-transition tests, including prohibited transitions" |
 | `executeRoll`: three-operation sequence, old cycle's realized P/L frozen, new cycle independent, no field copied instead of linked | Unit + Integration | `lib/lifecycle/__tests__/roll.test.ts` | "Roll" acceptance criterion |
-| `classifyExpiration`: OTM releases coverage, ITM/near-ITM routes to reconciliation | Unit | `lib/lifecycle/__tests__/expiration.test.ts` | Ticket "Expiration" scope |
+| `classifyExpirationOutcome`: authoritative evidence produces expired/assigned; missing/contradictory evidence → reconciliationRequired regardless of advisory price; advisory price never consulted in outcome logic (explicit test with advisory stripped/mocked) | Unit | `lib/lifecycle/__tests__/expiration.test.ts` | Ticket "Expiration" scope, LCC-0001D open item 2 (resolved) |
 | `reconcileStockAssignment`: 200 shares, 100 called away → 100 remain, capacity recalculates, `calledAwayReturn` reused not reimplemented | Integration | `lib/lifecycle/__tests__/assignment.test.ts` | "Stock assignment" acceptance criterion |
 | `reconcilePmccAssignment`: never assumes exercise, creates unresolved short-share reconciliation item | Integration | Same | "PMCC assignment" acceptance criterion |
 | `replaceFoundation`: both foundations retained in history, every active cycle revalidated | Integration | `lib/lifecycle/__tests__/foundationReplacement.test.ts` | "Foundation replacement" acceptance criterion |
@@ -579,6 +661,7 @@ Reconciliation, Replace Foundation"):
 | `applyCorrection`: broker reversal creates a reversal event, deletes nothing | Integration | `lib/lifecycle/__tests__/corrections.test.ts` | "Broker correction" acceptance criterion |
 | `findMigrationCandidates`: cross-bucket pairing, not `isPmccPosition()` | Unit | `lib/migration/__tests__/pmccPairing.test.ts` | Architecture review Finding A, carried into this ticket's own implementation |
 | `runMigrationDryRun`: simple, rolled (no `RollEvent` history to reconstruct — flagged ambiguous), partial, closed, ambiguous fixtures | Integration | `lib/migration/__tests__/dryRun.test.ts` | LCC-0001D "Validation" — Migration tests for simple/rolled/partial/closed/ambiguous |
+| `runMigrationDryRun`: every migrated allocation carries `origination: 'UNKNOWN_MIGRATED'` unconditionally, regardless of pairing confidence — never `CREATED_TOGETHER`/`ADDED_TO_EXISTING_LONG_CALL` | Unit | `lib/migration/__tests__/dryRun.test.ts` | LCC-0001D open item 3 (resolved) |
 | `applyMigration` rerun: same input twice, no duplicates (deterministic id derivation) | Integration | `lib/migration/__tests__/apply.test.ts` | "Migration rerun" acceptance criterion |
 | `rollbackMigration`: pre-accept (staging deletion) and post-accept (guarded, refuses if built-upon) paths | Integration | `lib/migration/__tests__/rollback.test.ts` | LCC-0001D "Validation" — Migration rollback |
 | Production-like dry-run with before/after P/L comparison, using `sumTotalSymbolExposure` for both sides | Integration | `lib/migration/__tests__/dryRun.test.ts` | LCC-0001D "Validation" |
@@ -608,27 +691,25 @@ tolerance threshold for "beyond rounding."
 
 All six acceptance criteria map to an explicit, named, testable mechanism.
 
-**Open items surfaced by this ticket, requiring resolution before the affected PRs:**
+**Open items from the original draft, now resolved:**
 
-1. **`partiallyFilled → open` / `partiallyFilled → cancelled` transitions (§5)** — the ticket's own
-   literal transition table does not include a `partiallyFilled` intermediate state at all (its table
-   goes `Pending → Cancelled | Rejected | Partially Filled` but never says what `Partially Filled`
-   itself can transition to). This spec added `partiallyFilled → open`/`partiallyFilled → cancelled`
-   to keep the state machine consistent with LCC-0001C's own partial-fill handling (§11 of that spec),
-   but this is this ticket's own addition, not a literal restatement of the ticket text. Needs
-   explicit confirmation this addition is correct rather than a misreading of the ticket's intent.
-2. **Official expiration-price/cutoff data source (§7)** — no existing single source of "the official
-   settlement price at expiration" was found in the repository; `classifyExpiration()`'s
-   `underlyingPriceAtExpiration` parameter is deliberately caller-supplied rather than internally
-   fetched. Confirm this is acceptable for the initial release, or identify the correct data source
-   before implementation.
-3. **Migrated allocation's `origination` value when pairing evidence is ambiguous (§12.2)** — this
-   spec defaults migrated PMCCs to `origination: 'CREATED_TOGETHER'` "unless the pairing evidence
-   suggests otherwise" without fully specifying what evidence would trigger the alternative
-   (`ADDED_TO_EXISTING_LONG_CALL`). Since migrated records predate any workflow-asserted origination
-   (LCC-0001B/C's mechanism, which only applies going forward), this may need its own small decision:
-   is `origination` even meaningful for migrated records, or should migrated allocations carry a
-   distinct `origination: null`-equivalent "unknown, pre-dates tracking" value instead of guessing?
+1. **`partiallyFilled` sub-transitions (§5) — resolved.** `partiallyFilled` is kept as an explicit
+   lifecycle state by decision, confirmed as a necessary refinement required to represent partial
+   execution honestly (matching LCC-0001C §11), not merely this ticket's own guess. Its transitions
+   (`open`, `cancelled`, `reconciliationRequired`) are final.
+2. **Expiration outcome evidence (§7) — resolved.** Broker positions, executions, transactions, and
+   assignment activity are authoritative; market expiration-price data is advisory-only and never
+   participates in the `expired`/`assigned` determination. `classifyExpirationOutcome()` replaces the
+   original draft's price-driven `classifyExpiration()`; when authoritative evidence is unavailable,
+   the outcome is unconditionally `reconciliationRequired`, never inferred from price. A provider
+   boundary (`AdvisoryExpirationPriceEvidence.source`) exists for future price evidence but is not
+   wired to a real data source by this ticket.
+3. **Migrated allocation origination (§12.2) — resolved.** Every migrated `CoverageAllocation`
+   carries `origination: 'UNKNOWN_MIGRATED'` unconditionally — migration never guesses
+   `CREATED_TOGETHER` or `ADDED_TO_EXISTING_LONG_CALL`. `PmccOrigination` (master architecture,
+   LCC-0001B) is extended with this third value specifically for this purpose.
+
+No open items remain in this ticket.
 
 ---
 
@@ -637,8 +718,9 @@ All six acceptance criteria map to an explicit, named, testable mechanism.
 Per the ticket's own "Rollout" section:
 
 1. **PR 1** — `lib/lifecycle/types.ts`, `transitions.ts`, full unit coverage. No consumer wiring.
-2. **PR 2** — `roll.ts`, `expiration.ts` (pending §17 item 2's data-source confirmation),
-   `assignment.ts` (calling LCC-0001C's `calledAwayReturn` directly, not reimplementing it).
+2. **PR 2** — `roll.ts`, `expiration.ts` (authoritative-evidence-driven, per resolved decision — no
+   longer pending confirmation), `assignment.ts` (calling LCC-0001C's `calledAwayReturn` directly, not
+   reimplementing it).
 3. **PR 3** — `foundationReplacement.ts`, `reconciliation.ts`, `corrections.ts`.
 4. **PR 4** — API routes (§13.1), `lib/lifecycle/store.ts`, `PortfolioDataProvider` wiring, behind a
    feature flag independent of A/B/C's flags.
@@ -711,12 +793,13 @@ convention.
   is architecturally incompatible with single-leg or cross-expiration short-call rolls (§2.2) — this
   ticket's roll logic is correctly specified as new, not an extension of that existing code.
 
-**Three open items remain, requiring team confirmation before their respective PRs** (§17): the added
-`partiallyFilled` sub-transitions not literally present in the ticket's transition table (item 1),
-the expiration-price data source (item 2), and migrated-record origination semantics for ambiguous
-pairing evidence (item 3). None of these are contradictions with approved requirements — they are
-implementation-detail gaps the ticket text itself does not fully specify, flagged rather than silently
-resolved. No contradiction with the epic, the ticket, the corrected architecture, the architecture
+**All three open items from the original draft are now resolved by explicit product decision** (§17):
+`partiallyFilled` is confirmed as a necessary, intentional lifecycle-state refinement, not a guess;
+expiration outcomes are now unconditionally authoritative-broker-evidence-driven with market price
+data reduced to advisory/display-only status and a `reconciliationRequired` fallback whenever
+authoritative evidence is unavailable; and migrated allocations unconditionally carry the newly-added
+`origination: 'UNKNOWN_MIGRATED'` rather than any guessed value. No open items remain in this
+document. No contradiction with the epic, the ticket, the corrected architecture, the architecture
 review, the LCC-0001A/B/C specs, the execution sequence, the mockups, or `PMCC_SPECIFICATION.md` was
 found, and none of the three resolved product decisions from the master architecture's §15.0 are
 reopened.

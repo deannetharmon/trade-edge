@@ -18,6 +18,13 @@ Equity-Aware LEAPS, Covered Call, and PMCC Lifecycle
   protection, PMCC origination persistence, PMCC scoring conflict routed to a separate ticket) are
   unchanged and were re-verified consistent throughout this revision. Status updated to "Approved
   pending team confirmation" as all eight review corrections are resolved.
+- **v3 (this revision):** Extended `PmccOrigination` with `UNKNOWN_MIGRATED`, per the LCC-0001D
+  decision resolving that ticket's third open item — migrated `CoverageAllocation` records whose
+  creation sequence cannot be proven never guess `CREATED_TOGETHER`/`ADDED_TO_EXISTING_LONG_CALL`.
+  Updated the type sketch (§5.2), §5.4's confirmed-decision paragraph, §10's migration text, §15.0,
+  and AD-4 accordingly. `source: 'migrated'` (a separate field) continues to identify provenance
+  independently of `origination`. No other content changed; this revision does not touch the
+  foundation-protection or PMCC-scoring decisions.
 
 ---
 
@@ -312,8 +319,11 @@ interface CoverageAllocation {
   status: 'proposed' | 'active' | 'released' | 'unresolved' | 'corrected';
   source: 'inferred' | 'userConfirmed' | 'imported' | 'migrated';
   // PMCC-only; null for equity foundations. Audit metadata, not a strategy
-  // classifier — see §5.4/§15.0.
-  origination: 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL' | null;
+  // classifier — see §5.4/§15.0. UNKNOWN_MIGRATED is reserved for migrated
+  // relationships whose creation sequence cannot be proven -- never guess
+  // CREATED_TOGETHER or ADDED_TO_EXISTING_LONG_CALL for those (LCC-0001D
+  // decision, see §15.0).
+  origination: 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL' | 'UNKNOWN_MIGRATED' | null;
   audit: AuditEvent[];
 }
 ```
@@ -368,8 +378,11 @@ counts as "created together" versus "added later."
 
 **Confirmed product decision (§15.0):** origination is persisted as audit metadata on the
 `CoverageAllocation`/strategy history record using the enum `PmccOrigination = 'CREATED_TOGETHER' |
-'ADDED_TO_EXISTING_LONG_CALL'`. It is shown in strategy detail and history views. A portfolio-level
-filter by origination is not required for the initial release.
+'ADDED_TO_EXISTING_LONG_CALL' | 'UNKNOWN_MIGRATED'`. It is shown in strategy detail and history
+views. A portfolio-level filter by origination is not required for the initial release.
+`UNKNOWN_MIGRATED` is reserved exclusively for LCC-0001D's migration path (§10) and is never assigned
+by either live entry workflow — those two always know their own origination directly, by
+construction (§4 above), and never need to guess.
 
 This resolves the four-way distinction requested without multiplying the Strategy enum — origination
 is metadata, not a fifth strategy type, since none of the approved tickets ask for a fifth top-level
@@ -544,10 +557,12 @@ Per LCC-0001D:
    finding A). This is favorable for migration: existing PMCC legs are **already independent
    positions today**, so migration's job is to create the missing `CoverageAllocation` relationship
    between two already-separate positions, not to split a fused one. Detected pairs then produce a
-   proposed `CoverageAllocation` (`source: 'migrated'`, `origination: 'CREATED_TOGETHER'` unless
-   evidence indicates otherwise) and an **ambiguity report** for anything that doesn't pair cleanly
-   (missing execution history, unclear roll chains, adjusted contracts, multiple plausible pairings
-   for the same underlying).
+   proposed `CoverageAllocation` (`source: 'migrated'`, `origination: 'UNKNOWN_MIGRATED'` — migrated
+   relationships never guess `CREATED_TOGETHER` or `ADDED_TO_EXISTING_LONG_CALL`, since a migrated
+   pair's creation sequence cannot be proven from position data alone; see LCC-0001D's technical
+   specification for the resolved decision) and an **ambiguity report** for anything that doesn't
+   pair cleanly (missing execution history, unclear roll chains, adjusted contracts, multiple
+   plausible pairings for the same underlying).
 2. **Stable migration identity**: every migrated record gets a deterministic id derived from the
    original broker position/transaction identifiers, so re-running migration is a no-op for records
    already migrated (idempotency, epic invariant 10).
@@ -706,11 +721,16 @@ section below has been updated to match.
   is out of scope for this epic and requires its own ticket with its own authorization model and audit
   requirements. See §7.6 and §12 for the corrected (unconditional) block behavior.
 - **PMCC origination (resolves former §15.1.2).** Origination is persisted as audit metadata using an
-  enum — `CREATED_TOGETHER` or `ADDED_TO_EXISTING_LONG_CALL` — on the `CoverageAllocation`/strategy
-  history record. It does not create a fifth strategy type; `PmccLongCallDiagonal` remains the single
-  strategy classification regardless of origination. Origination is shown in strategy detail and
-  history views. A portfolio-level filter by origination is **not required** for the initial release
-  (may be considered in a later ticket). See §5.4 for the updated enum name and §9.4/UI-boundary notes.
+  enum — `CREATED_TOGETHER`, `ADDED_TO_EXISTING_LONG_CALL`, or `UNKNOWN_MIGRATED` — on the
+  `CoverageAllocation`/strategy history record. It does not create a fifth strategy type;
+  `PmccLongCallDiagonal` remains the single strategy classification regardless of origination.
+  Origination is shown in strategy detail and history views. A portfolio-level filter by origination
+  is **not required** for the initial release (may be considered in a later ticket). See §5.4 for the
+  updated enum name and §9.4/UI-boundary notes. `UNKNOWN_MIGRATED` was added by a subsequent LCC-0001D
+  decision (see that ticket's technical specification, revision history) specifically for migrated
+  relationships whose creation sequence cannot be proven from position data alone — migration must
+  never guess `CREATED_TOGETHER` or `ADDED_TO_EXISTING_LONG_CALL`; `source: 'migrated'` (a separate
+  field, §4) continues to identify the record's provenance independently of `origination`.
 - **PMCC scoring conflict (resolves former §15.1.1).** LCC-0001E must not silently replace or
   reconcile the production scoring model. The discrepancy between `PMCC_SPECIFICATION.md` and the
   shipped `lib/scans/pmccScore.ts` is to be documented as a **separate prerequisite/product-decision
@@ -783,9 +803,11 @@ section below has been updated to match.
   explicit requirement).
 - **AD-3:** Rolls/corrections are append-only event sequences, never in-place mutations (epic
   invariant 7, LCC-0001D acceptance criteria).
-- **AD-4:** PMCC origination (created-together vs. added-later) is UI/audit metadata
-  (`PmccOrigination: 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL'`), not a distinct strategy
-  enum value (§5.4). Confirmed by product review, §15.0 — no portfolio filter required initially.
+- **AD-4:** PMCC origination (created-together vs. added-later vs. unprovable-at-migration) is
+  UI/audit metadata (`PmccOrigination: 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL' |
+  'UNKNOWN_MIGRATED'`), not a distinct strategy enum value (§5.4). Confirmed by product review,
+  §15.0 — no portfolio filter required initially. `UNKNOWN_MIGRATED` added by LCC-0001D decision;
+  migration never guesses the other two values.
 - **AD-5:** `covered-call-capacity.ts`'s existing fail-closed/unattributable-exposure pattern is the
   reference implementation for the new snapshot's `dataQuality` semantics, ported rather than
   redesigned.

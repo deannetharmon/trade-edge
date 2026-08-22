@@ -14,8 +14,13 @@ mockups, and the current repository implementation cited throughout.
 ## Revision history
 
 - **v1 (commit `170fb0d`, published `0a42cdc`):** Initial specification.
-- **v2 (this revision):** Recorded the resolved staleness-threshold decision (§13, §15, §17): 60
-  seconds, server-configurable, refresh-and-retry UI message on rejection. No other content changed.
+- **v2 (commit `3073a95`, published `0a42cdc`):** Recorded the resolved staleness-threshold decision
+  (§13, §15, §17): 60 seconds, server-configurable, refresh-and-retry UI message on rejection.
+- **v3 (this revision):** Extended `PmccOrigination` with `UNKNOWN_MIGRATED` (§4.1), per the LCC-0001D
+  decision resolving that ticket's third open item. Migrated `CoverageAllocation` records whose
+  creation sequence cannot be proven now carry `UNKNOWN_MIGRATED` rather than a guessed value; live
+  entry-workflow-created allocations (LCC-0001C) are unaffected and continue to assert
+  `CREATED_TOGETHER`/`ADDED_TO_EXISTING_LONG_CALL` directly as before.
 
 ---
 
@@ -86,7 +91,7 @@ direct implementation of master architecture §4.4 (`lib/coverage/`), §5.2–5.
 
 export type AllocationStatus = 'proposed' | 'active' | 'released' | 'unresolved' | 'corrected';
 export type AllocationSource = 'inferred' | 'userConfirmed' | 'imported' | 'migrated';
-export type PmccOrigination = 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL';
+export type PmccOrigination = 'CREATED_TOGETHER' | 'ADDED_TO_EXISTING_LONG_CALL' | 'UNKNOWN_MIGRATED';
 export type FoundationType = 'equity' | 'longCall';
 
 export interface CoverageAllocation {
@@ -109,7 +114,10 @@ export interface CoverageAllocation {
   effectiveTo: string | null;
   status: AllocationStatus;
   source: AllocationSource;
-  origination: PmccOrigination | null; // null for foundationType 'equity'; required for 'longCall'
+  origination: PmccOrigination | null; // null for foundationType 'equity'; required for 'longCall'.
+                                         // UNKNOWN_MIGRATED is set only by LCC-0001D's migration path
+                                         // (source: 'migrated') when the creation sequence cannot be
+                                         // proven -- never guessed by any live entry workflow.
   audit: AuditEvent[];
 }
 
