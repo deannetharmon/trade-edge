@@ -27,9 +27,26 @@ import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
 import { UNATTRIBUTABLE_EXPOSURE_REASON } from '@/lib/scans/covered-call-capacity';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
+import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 
 const getCoveredCallCapacityReportMock = vi.fn<[], Promise<CoveredCallCapacityReport>>();
 const getMarketMetricsMock = vi.fn();
+const emitCoveredCallCapacityShadowMock = vi.fn();
+const collectCoveredCallCapacityShadowMock = vi.fn();
+const shadowHarness = vi.hoisted(() => ({ snapshot: null as PortfolioSnapshot | null }));
+
+vi.mock('@/components/portfolio-data/PortfolioDataProvider', () => ({
+  usePortfolioData: () => ({ snapshot: shadowHarness.snapshot }),
+}));
+
+vi.mock('@/lib/portfolio-snapshot/shadowParity', () => ({
+  isCcCapacityShadowEnabled: (value = process.env.NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED) => value === 'true',
+  emitCoveredCallCapacityShadow: (...args: unknown[]) => emitCoveredCallCapacityShadowMock(...args),
+}));
+
+vi.mock('@/lib/portfolio-snapshot/shadowTelemetry', () => ({
+  collectCoveredCallCapacityShadow: (...args: unknown[]) => collectCoveredCallCapacityShadowMock(...args),
+}));
 
 vi.mock('@/lib/scans/tastytrade-client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/scans/tastytrade-client')>('@/lib/scans/tastytrade-client');
@@ -56,6 +73,12 @@ function renderScreener() {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(res => { resolve = res; });
+  return { promise, resolve };
+}
+
 async function addToUniverse(symbols: string) {
   const input = await screen.findByPlaceholderText(/Add tickers \(comma-separated\)/i);
   await userEvent.type(input, symbols);
@@ -79,10 +102,108 @@ describe('TE-0007C final corrective pass: CC capacity gate wiring', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
     getCoveredCallCapacityReportMock.mockReset();
     getMarketMetricsMock.mockReset().mockResolvedValue([]);
+    emitCoveredCallCapacityShadowMock.mockReset();
+    collectCoveredCallCapacityShadowMock.mockReset();
+    shadowHarness.snapshot = null;
+    vi.stubEnv('NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED', 'false');
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it('keeps the legacy capacity report authoritative when shadow comparison differs', async () => {
+    vi.stubEnv('NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED', 'true');
+    shadowHarness.snapshot = { asOf: '2026-08-22T18:00:00.000Z', freshness: 'current' } as PortfolioSnapshot;
+    getCoveredCallCapacityReportMock.mockResolvedValue({
+      status: 'ok',
+      bySymbol: {
+        NKE: {
+          sharesOwned: 300,
+          costBasis: 90,
+          costBasisComplete: true,
+          grossCoveredContracts: 3,
+          existingShortCallContracts: 1,
+          workingShortCallContracts: 0,
+          availableCoveredContracts: 2,
+          oversubscribed: false,
+          hasUnclassifiedExposure: false,
+        },
+      },
+      warnings: [],
+    });
+    emitCoveredCallCapacityShadowMock.mockReturnValue({ outcome: 'difference' });
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCcScan();
+
+    await waitFor(() => expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalled());
+    expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ok', bySymbol: expect.objectContaining({ NKE: expect.any(Object) }) }),
+      shadowHarness.snapshot,
+      expect.any(Function),
+    );
+    expect(await screen.findByRole('button', { name: /NKE \(2\)/i })).toBeInTheDocument();
+  });
+
+  it('suppresses the older shadow diagnostic when overlapping capacity loads resolve out of order', async () => {
+    vi.stubEnv('NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED', 'true');
+    shadowHarness.snapshot = { asOf: '2026-08-22T18:00:00.000Z', freshness: 'current' } as PortfolioSnapshot;
+    const older = deferred<CoveredCallCapacityReport>();
+    const newer = deferred<CoveredCallCapacityReport>();
+    getCoveredCallCapacityReportMock
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
+    await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalledTimes(1));
+    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
+    await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalledTimes(2));
+
+    const newerReport = {
+      status: 'ok' as const,
+      bySymbol: { NKE: {
+        sharesOwned: 200, costBasis: 90, costBasisComplete: true, grossCoveredContracts: 2,
+        existingShortCallContracts: 0, workingShortCallContracts: 0, availableCoveredContracts: 2,
+        oversubscribed: false, hasUnclassifiedExposure: false,
+      } },
+      warnings: [],
+    };
+    newer.resolve(newerReport);
+    await waitFor(() => expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalledTimes(1));
+    expect(emitCoveredCallCapacityShadowMock.mock.calls[0][0]).toBe(newerReport);
+    expect(await screen.findByRole('button', { name: /NKE \(2\)/i })).toBeInTheDocument();
+
+    older.resolve({ status: 'ok', bySymbol: {}, warnings: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates an unexpected page-boundary shadow throw from the authoritative legacy result', async () => {
+    vi.stubEnv('NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED', 'true');
+    shadowHarness.snapshot = { asOf: '2026-08-22T18:00:00.000Z', freshness: 'current' } as PortfolioSnapshot;
+    emitCoveredCallCapacityShadowMock.mockImplementation(() => { throw new Error('unexpected shadow failure'); });
+    getCoveredCallCapacityReportMock.mockResolvedValue({
+      status: 'ok',
+      bySymbol: { NKE: {
+        sharesOwned: 100, costBasis: 90, costBasisComplete: true, grossCoveredContracts: 1,
+        existingShortCallContracts: 0, workingShortCallContracts: 0, availableCoveredContracts: 1,
+        oversubscribed: false, hasUnclassifiedExposure: false,
+      } },
+      warnings: [],
+    });
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCcScan();
+    expect(await screen.findByRole('button', { name: /NKE \(1\)/i })).toBeInTheDocument();
+    expect(screen.queryByText(/unexpected shadow failure/i)).not.toBeInTheDocument();
+    expect(collectCoveredCallCapacityShadowMock).not.toHaveBeenCalled();
   });
 
   it('9. account-level unattributable exposure blocks the scan and shows the data-integrity message, not "no eligible holdings"', async () => {

@@ -60,6 +60,10 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
+import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
+import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
+import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
@@ -6340,10 +6344,23 @@ function TargetedScanResultsPanel({
 
 // ── Main App ───────────────────────────────────────────────────────────────
 export const dynamic = 'force-dynamic';
+
+function CcCapacityShadowSnapshotBridge({ onSnapshot }: { onSnapshot: (snapshot: PortfolioSnapshot | null) => void }) {
+  const { snapshot } = usePortfolioData();
+  useEffect(() => onSnapshot(snapshot), [onSnapshot, snapshot]);
+  return null;
+}
+
 export default function Home() {
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const [accent, setAccent] = useState<Accent>(getSavedAccent);
   const th = THEMES[theme];
+  const ccCapacityShadowEnabled = isCcCapacityShadowEnabled();
+  const ccCapacityShadowSnapshotRef = useRef<PortfolioSnapshot | null>(null);
+  const ccCapacityShadowRequestRef = useRef(0);
+  const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null) => {
+    ccCapacityShadowSnapshotRef.current = snapshot;
+  }, []);
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
 
@@ -7733,10 +7750,29 @@ export default function Home() {
   // gone stale while the modal sat open, without introducing shared-state
   // staleness tracking for a single cheap API call.
   const loadCcCapacity = async (): Promise<{ ok: boolean; eligibleHoldings: typeof ccEligibleHoldings; bySymbol?: Record<string, CoveredCallCapacity>; reason?: string }> => {
+    const shadowRequestId = ++ccCapacityShadowRequestRef.current;
     setCcHoldingsLoading(true);
     try {
       const token = await getAccessToken();
       const capacityReport = await getCoveredCallCapacityReport(token);
+      if (ccCapacityShadowEnabled) {
+        queueMicrotask(() => {
+          if (shadowRequestId !== ccCapacityShadowRequestRef.current) return;
+          try {
+            emitCoveredCallCapacityShadow(
+              capacityReport,
+              ccCapacityShadowSnapshotRef.current,
+              (event, result) => {
+                if (process.env.NODE_ENV === 'development') console.info(event, result);
+                collectCoveredCallCapacityShadow(result);
+              },
+            );
+          } catch {
+            // Imported shadow code is non-authoritative. Even an unexpected synchronous failure
+            // at this page boundary must not surface through the legacy capacity workflow.
+          }
+        });
+      }
       setCcHoldingsLoading(false);
       if (capacityReport.status !== 'ok') {
         const reason = capacityReport.unavailableReason
@@ -8123,6 +8159,7 @@ export default function Home() {
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      {ccCapacityShadowEnabled && <CcCapacityShadowSnapshotBridge onSnapshot={captureCcCapacityShadowSnapshot} />}
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 flex items-center justify-between sticky top-0 z-50 flex-col gap-0`}>
@@ -9629,9 +9666,6 @@ export default function Home() {
     </div>
   );
 }
-
-
-
 
 
 
