@@ -4,6 +4,10 @@ export const CC_CAPACITY_SHADOW_MAX_BYTES = 32_768;
 export const CC_CAPACITY_SHADOW_MAX_DIFFERENCES = 100;
 export const CC_CAPACITY_SHADOW_RECENT_LIMIT = 500;
 export const CC_CAPACITY_SHADOW_RETENTION_SECONDS = 60 * 60 * 24 * 90;
+export const CC_CAPACITY_SHADOW_MAX_CLOCK_SKEW_MS = 15 * 60 * 1000;
+export const CC_CAPACITY_SHADOW_RATE_LIMIT = 60;
+export const CC_CAPACITY_SHADOW_RATE_WINDOW_SECONDS = 60;
+export const CC_CAPACITY_SHADOW_DEDUPE_SECONDS = 60 * 60 * 24;
 
 const CAPACITY_FIELDS = new Set([
   'sharesOwned', 'costBasis', 'costBasisComplete', 'grossCoveredContracts',
@@ -23,7 +27,9 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean
 }
 
 function isTimestamp(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 40 && Number.isFinite(new Date(value).getTime());
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
 function isNullableTimestamp(value: unknown): value is string | null {
@@ -38,8 +44,27 @@ function isSymbol(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Z0-9.^/-]{1,32}$/.test(value);
 }
 
-function isScalar(value: unknown): value is number | boolean | null {
-  return value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isFieldValue(field: string, value: unknown): boolean {
+  switch (field) {
+    case 'sharesOwned':
+    case 'grossCoveredContracts':
+    case 'existingShortCallContracts':
+    case 'workingShortCallContracts':
+    case 'availableCoveredContracts':
+      return isNonNegativeInteger(value);
+    case 'costBasis':
+      return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    case 'costBasisComplete':
+    case 'oversubscribed':
+    case 'hasUnclassifiedExposure':
+      return typeof value === 'boolean';
+    default:
+      return false;
+  }
 }
 
 function isStringList(value: unknown): value is string[] {
@@ -62,8 +87,8 @@ function isDifference(value: unknown): value is CapacityShadowDifference {
         && isSymbol(value.symbol)
         && typeof value.field === 'string'
         && CAPACITY_FIELDS.has(value.field)
-        && isScalar(value.legacy)
-        && isScalar(value.snapshot);
+        && isFieldValue(value.field, value.legacy)
+        && isFieldValue(value.field, value.snapshot);
     case 'warnings':
       return hasOnlyKeys(value, ['kind', 'legacy', 'snapshot'])
         && isStringList(value.legacy)
@@ -77,7 +102,10 @@ function isDifference(value: unknown): value is CapacityShadowDifference {
   }
 }
 
-export function parseCapacityShadowTelemetry(value: unknown): CapacityShadowResult | null {
+export function parseCapacityShadowTelemetry(
+  value: unknown,
+  serverNow: Date = new Date(),
+): CapacityShadowResult | null {
   if (!isObject(value)) return null;
   const baseKeys = ['outcome', 'comparedAt', 'snapshotAsOf', 'snapshotFreshness', 'differences'];
   const outcome = value.outcome;
@@ -85,6 +113,7 @@ export function parseCapacityShadowTelemetry(value: unknown): CapacityShadowResu
   const allowed = outcome === 'skipped' ? [...baseKeys, 'reason'] : baseKeys;
   if (!hasOnlyKeys(value, allowed)) return null;
   if (!isTimestamp(value.comparedAt) || !isNullableTimestamp(value.snapshotAsOf)) return null;
+  if (Math.abs(new Date(value.comparedAt).getTime() - serverNow.getTime()) > CC_CAPACITY_SHADOW_MAX_CLOCK_SKEW_MS) return null;
   if (value.snapshotFreshness !== null && value.snapshotFreshness !== 'current' && value.snapshotFreshness !== 'last-known') return null;
   if (!Array.isArray(value.differences) || value.differences.length > CC_CAPACITY_SHADOW_MAX_DIFFERENCES) return null;
   if (!value.differences.every(isDifference)) return null;
