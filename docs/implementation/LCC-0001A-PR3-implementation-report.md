@@ -4,7 +4,7 @@
 **Branch:** `feature/lcc-0001a-equity-portfolio-ui`
 **Base:** merged PR #26 / `main`
 **Specification:** `docs/design/LCC-0001A-technical-spec.md`, rollout PR 3
-**Implementation commit:** `ff82044`; corrective commit is current branch HEAD
+**Implementation commits:** `ff82044` (initial UI), `853fda8` (workspace-state correction), plus the current branch-HEAD populated-page test correction
 
 ## Outcome
 
@@ -42,7 +42,8 @@ additive to the existing option cards and gated independently by
 - `components/portfolio-data/__tests__/EquityHoldingsSection.test.tsx` — focused rendering and flag
   contract coverage.
 - `app/portfolio/__tests__/PortfolioPage.test.tsx` — page composition, independent-flag,
-  loading/unavailable/empty, and equity-plus-option coexistence coverage.
+  loading/unavailable/empty coverage, plus a real populated `PortfolioPage` render proving the
+  250-share incomplete-basis equity row and existing option card coexist.
 - This report.
 
 ## Scope boundaries
@@ -53,7 +54,7 @@ changed. Mixed stock/option strategy grouping remains LCC-0001B scope.
 
 ## Verification
 
-- PR3 component, Portfolio page, Provider snapshot, and snapshot-domain tests: **85/85 passing**.
+- PR3 component, Portfolio page, Provider snapshot, and snapshot-domain tests: **86/86 passing**.
 - TypeScript: only the known **41** errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero new errors.
 - `git diff --check origin/main...HEAD`: clean after the corrective commit-range verification.
@@ -64,8 +65,9 @@ changed. Mixed stock/option strategy grouping remains LCC-0001B scope.
 ## Rollback
 
 Unset `NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED` and rebuild/redeploy to hide the equity UI
-without disabling snapshot acquisition. Code rollback is the single PR3 implementation commit;
-merged PR1/PR2 remains intact.
+without disabling snapshot acquisition. Before merge, revert the current branch-HEAD correction,
+then `853fda8`, then `ff82044`; after merge, revert PR #27's merge commit. Merged PR1/PR2 remains
+intact.
 
 ## Next gate
 
