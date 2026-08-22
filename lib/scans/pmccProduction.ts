@@ -135,7 +135,7 @@ function checksFor(pair: PmccPairResult | null): ScreenResult['checks'] {
   };
 }
 
-function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context: PmccProductionContext, order: number): ScreenResult {
+function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context: PmccProductionContext, order: number, cycleExpirations: string[] = []): ScreenResult {
   // PMCC-TREND-GATE-0001 -- reads context.trendResult, the same object
   // already attached below as `trendResult` (and already read by the
   // screener's group-header trend badge) -- one shared trend read, not a
@@ -166,12 +166,13 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
     underlyingType: context.underlyingType, ruleSetApplied: 'PMCC pairing engine v2', publishedOrder: order, checks: checksFor(pair),
     pmccPair: pair, pmccPairingCounts: session.counts, pmccIncompleteAnalysis: session.incompleteAnalysis,
     pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
+    pmccCriteria: session.criteria, pmccCycleExpirations: cycleExpirations,
   };
 }
 
-export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext): ScreenResult[] {
+export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext, cycleExpirations: string[] = []): ScreenResult[] {
   const retained = [...session.qualifiedPairs, ...session.nearMissPairs];
-  if (retained.length) return retained.map((pair, index) => resultForPair(pair, session, context, index + 1));
+  if (retained.length) return retained.map((pair, index) => resultForPair(pair, session, context, index + 1, cycleExpirations));
   const failReasons = pmccAuditReasons(session);
   return [{
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr, qualified: false, bestCandidate: null,
@@ -179,6 +180,7 @@ export function buildPmccScreenResults(session: PmccSessionResult, context: Pmcc
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock', underlyingType: context.underlyingType,
     ruleSetApplied: 'PMCC pairing engine v2', checks: checksFor(null), pmccPairingCounts: session.counts,
     pmccIncompleteAnalysis: session.incompleteAnalysis, pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
+    pmccCriteria: session.criteria, pmccCycleExpirations: cycleExpirations,
   }];
 }
 
@@ -220,7 +222,7 @@ export function runPmccProduction(
       asOf: new Date(snapshot.asOf),
       marketSession: snapshot.marketSession,
     });
-    return buildPmccScreenResults(pairing, context);
+    return buildPmccScreenResults(pairing, context, chain.cycleExpirations ?? chain.shortExpirations);
   } catch (error) {
     throw new PmccProductionError('PAIRING_ENGINE_FAILURE', error);
 
@@ -286,5 +288,4 @@ export async function runPmccSymbolProduction(args: {
     };
   }
 }
-
 

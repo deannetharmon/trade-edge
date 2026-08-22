@@ -37,7 +37,7 @@ import '@testing-library/jest-dom/vitest';
 import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
-import { createScanSession, recordSymbolEvaluated, completeSession } from '@/lib/screener/scanSession';
+import { createScanSession, recordSymbolEvaluated, completeSession, validateSessionData } from '@/lib/screener/scanSession';
 import { SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
 import { pairPmccCandidates } from '@/lib/scans/pmccPairing';
 import { buildPmccScreenResults } from '@/lib/scans/pmccProduction';
@@ -182,7 +182,12 @@ function seedPmccSession(results: ScreenResult[]) {
   });
   session = recordSymbolEvaluated(session, 'ACME', results);
   session = completeSession(session);
-  kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+  const validation = validateSessionData(session);
+  if (!validation.valid) throw new Error(`fixture invalid: ${validation.errors.join(',')}`);
+  const cached = { ...session, cacheProvenance: 'idb-cache' as const, cachedAt: Date.now() };
+  const cachedValidation = validateSessionData(cached);
+  if (!cachedValidation.valid) throw new Error(`cached fixture invalid: ${cachedValidation.errors.join(',')}`);
+  kv.set(SCAN_SESSION_CACHE_KEY, cached);
   kv.set('results', results);
 }
 
@@ -208,7 +213,12 @@ function seedPmccSessionMultiSymbol(results: ScreenResult[]) {
     session = recordSymbolEvaluated(session, symbol, group);
   }
   session = completeSession(session);
-  kv.set(SCAN_SESSION_CACHE_KEY, { ...session, cacheProvenance: 'idb-cache', cachedAt: Date.now() });
+  const validation = validateSessionData(session);
+  if (!validation.valid) throw new Error(`fixture invalid: ${validation.errors.join(',')}`);
+  const cached = { ...session, cacheProvenance: 'idb-cache' as const, cachedAt: Date.now() };
+  const cachedValidation = validateSessionData(cached);
+  if (!cachedValidation.valid) throw new Error(`cached fixture invalid: ${cachedValidation.errors.join(',')}`);
+  kv.set(SCAN_SESSION_CACHE_KEY, cached);
   kv.set('results', results);
 }
 
@@ -236,16 +246,20 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
 
     const card = await screen.findByTestId('pmcc-result-card');
     expect(within(card).getByText(/Extrinsic \$15\.00/)).toBeInTheDocument();
-    expect(within(card).getByText(/Breakeven \$122\.00/)).toBeInTheDocument();
-    expect(within(card).getByText(/Roll runway ~9 rolls/)).toBeInTheDocument();
-    expect(within(card).getByText(/Annualized ROI 165\.9%, assumes level rolls/)).toBeInTheDocument();
+    expect(card).toHaveTextContent(/Breakeven\s*\$122\.00/);
+    expect(card).toHaveTextContent(/Annualized ROI\s*165\.9%/);
+    expect(within(card).getByText(/100 shares/)).toBeInTheDocument();
+    expect(within(card).getByText(/Initial net debit \$2,200/)).toBeInTheDocument();
+    expect(within(card).getByText(/\$300 gross credit/)).toBeInTheDocument();
+    expect(within(card).getByText(/1 total cycle/)).toBeInTheDocument();
+    expect(within(card).getByText(/exits long call with 60 DTE remaining/)).toBeInTheDocument();
     // This fixture's breakeven ($122.00) is genuinely above the short
     // strike ($120) -- Ian's sanity check must flag it, not silently
     // show two numbers that don't reconcile.
-    expect(within(card).getByText(/above short strike/)).toBeInTheDocument();
+    expect(card).toHaveTextContent(/Breakeven\s*\$122\.00 ⚠/);
   });
 
-  it('shows the ideal net delta range, total premium, and profit-at-current-price with hand-verified values', async () => {
+  it('keeps speculative repeated premium and hypothetical profit off the card', async () => {
     // Same fixture as the test above (long ask 25.00, short bid 3.00,
     // rollRunway 9, underlying price 110). New math, hand-verified
     // independently here, not copied from the implementation:
@@ -268,9 +282,8 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     // Ideal range: DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_
     // SHORT_DELTA_RANGE.max = 0.70 - 0.30 = 0.40, up to 0.85 - 0.20 =
     // 0.65. Real, already-computed default criteria, not invented.
-    expect(within(card).getByText(/\(ideal 0\.40–0\.65, default scan criteria\)/)).toBeInTheDocument();
-    expect(within(card).getByText(/Total premium \$30\.00, assumes level rolls/)).toBeInTheDocument();
-    expect(within(card).getByText(/Profit \$15\.00 if closed today at current price/)).toBeInTheDocument();
+    expect(within(card).queryByText(/Total premium/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/Profit .* if closed today/)).not.toBeInTheDocument();
   });
 
   it('does not flag the breakeven/short-strike warning for a healthy structure', async () => {
@@ -292,8 +305,8 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     renderScreener();
 
     const card = await screen.findByTestId('pmcc-result-card');
-    expect(within(card).getByText(/Breakeven \$120\.00/)).toBeInTheDocument();
-    expect(within(card).queryByText(/above short strike/)).not.toBeInTheDocument();
+    expect(card).toHaveTextContent(/Breakeven\s*\$120\.00/);
+    expect(card).not.toHaveTextContent(/Breakeven\s*\$120\.00 ⚠/);
   });
 });
 
@@ -354,8 +367,8 @@ describe('PMCC results — real sort and OI filter (previously dead code paths)'
     expect(cards).toHaveLength(2);
     // The real, better structure (higher width-minus-debit%) must lead,
     // even though it has the later publishedOrder.
-    expect(within(cards[0]).getByText(/81\.8%/)).toBeInTheDocument();
-    expect(within(cards[1]).getByText(/11\.1%/)).toBeInTheDocument();
+    expect(cards[0]).toHaveTextContent(/Width minus debit\s*\$9\.00 · 81\.8%/);
+    expect(cards[1]).toHaveTextContent(/Width minus debit\s*\$1\.50 · 11\.1%/);
   });
 
   it('the min-OI floor is genuinely wired up and reactive for PMCC results (previously dead code)', async () => {

@@ -3,6 +3,8 @@ import type { PmccChainLeg } from './pmccTypes';
 export interface RawPmccChain {
   shortExpirations: string[];
   longExpirations: string[];
+  /** Listed expirations retained without quote fan-out for runway planning. */
+  cycleExpirations?: string[];
   chains: Record<string, Array<Record<string, unknown>>>;
 }
 

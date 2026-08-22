@@ -202,6 +202,9 @@ export interface ScreenResult {
   pmccIncompleteAnalysis?: boolean;
   pmccLegRejections?: import('./pmccTypes').PmccLegRejection[];
   pmccAsOf?: string;
+  /** Scan-time inputs used by the PMCC decision-card calculation contract. */
+  pmccCriteria?: import('./pmccTypes').PmccPairingCriteria;
+  pmccCycleExpirations?: string[];
   pmccAuditKind?: 'MARKET_DATA_FAILURE' | 'CHAIN_ADAPTATION_FAILURE' | 'PAIRING_ENGINE_FAILURE';
 }
 

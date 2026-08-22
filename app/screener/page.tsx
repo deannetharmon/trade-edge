@@ -46,6 +46,7 @@ import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computePmccScore } from '@/lib/scans/pmccScore';
+import { buildPmccDecisionCardMetrics } from '@/lib/scans/pmccDecisionCard';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -1196,15 +1197,16 @@ async function getPMCCChain(
   symbol: string,
   token: string,
   dteRanges: { shortMin: number; shortMax: number; longMin: number; longMax: number },
-): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
+): Promise<{ shortExpirations: string[]; longExpirations: string[]; cycleExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
   const classification = await classifyUnderlying(symbol, token);
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
-  const shortExpirations: string[] = [], longExpirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
+  const shortExpirations: string[] = [], longExpirations: string[] = [], cycleExpirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
     const dte = daysUntil(expDate);
+    if (dte > 0 && dte <= dteRanges.longMax) cycleExpirations.push(expDate);
     const { isShortWindow, isLongWindow } = classifyPmccDte(dte, dteRanges);
     if (!isShortWindow && !isLongWindow) continue;
     for (const strike of expGroup.strikes ?? []) {
@@ -1215,7 +1217,7 @@ async function getPMCCChain(
     if (isShortWindow) shortExpirations.push(expDate);
     if (isLongWindow) longExpirations.push(expDate);
   }
-  if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
+  if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, cycleExpirations, chains, isEtfOrIndex, classification };
   for (let i = 0; i < allOCCSymbols.length; i += 100) {
     const chunk = allOCCSymbols.slice(i, i + 100);
     const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
@@ -1243,8 +1245,8 @@ async function getPMCCChain(
       });
     }
   }
-  shortExpirations.sort(); longExpirations.sort();
-  return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
+  shortExpirations.sort(); longExpirations.sort(); cycleExpirations.sort();
+  return { shortExpirations, longExpirations, cycleExpirations, chains, isEtfOrIndex, classification };
 }
 
 // ── HUNTER Logic ─────────────────────────────────────────────────────────
@@ -3583,54 +3585,19 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   };
   const readiness = READINESS_META[readinessState];
   const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
+  const moneyTotal = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
+  }).format(value);
   const quoteLine = (leg: NonNullable<typeof pair>['longLeg']) =>
     `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
   const age = (leg: NonNullable<typeof pair>['longLeg']) => leg.quote.ageSeconds == null ? 'unknown age' : `${Math.round(leg.quote.ageSeconds)}s old`;
   const counts = result.pmccPairingCounts;
-  // TE-0007E — Diane/Ian/Paul/Alan-reviewed PMCC card fields (breakeven,
-  // promoted extrinsic, roll runway, annualized ROI). All four derive
-  // from real, already-computed PmccPairMetrics/PmccEligibleLeg fields --
-  // no new data sourcing. Roll runway and the ROI annualization both use
-  // THIS pair's own shortLeg.dte as the cycle length (confirmed with the
-  // team: self-consistent with what's already shown on the card, not a
-  // separate assumed constant like the criteria's 21-45 DTE target
-  // range, which would quietly diverge from the number on screen).
   const breakeven = metrics ? pair!.longLeg.strike + metrics.netDebitPerShare : null;
   // Ian's sanity check: a qualified pair should never have its breakeven
   // above the short strike -- that would mean max profit is already
   // structurally unreachable. Real validation, not just a display value.
   const breakevenAboveShortStrike = breakeven != null && pair && breakeven > pair.shortLeg.strike;
-  const rollRunway = pair && pair.shortLeg.dte > 0
-    ? Math.floor((pair.longLeg.dte - pair.shortLeg.dte) / pair.shortLeg.dte)
-    : null;
   const annualizedRoi = pmccAnnualizedRoi(result);
-  // TE-0007G — Ian/Paul-reviewed. Real, traced math, not invented:
-  // rollRunway (above) counts ADDITIONAL rolls after the current one,
-  // so total times a credit gets collected is rollRunway + 1.
-  // "Total premium if every roll matches today's credit" carries the
-  // exact same "assumes level rolls" honesty requirement already
-  // applied to annualizedRoi -- premium generally shrinks as DTE/IV
-  // change, this is an explicit, stated assumption, never a promise.
-  const totalPremium = pair && rollRunway != null
-    ? pair.shortLeg.executablePrice * (rollRunway + 1)
-    : null;
-  // "Profit if closed today at current price" -- deliberately NOT
-  // "profit at breakeven": traced the math first and found that
-  // reduces to exactly totalPremium by construction (breakeven is
-  // defined as the price where the long call's intrinsic value
-  // exactly equals what was paid for it, so the long leg always washes
-  // out at that specific price, regardless of rolls) -- shipping both
-  // would show two labels for one number. Current price is real,
-  // live, genuinely different data, not a structural constant.
-  // Intrinsic value only (ignores any remaining extrinsic value on
-  // the long leg at close) -- a real, stated simplification, not a
-  // promise about the actual closing price.
-  const longIntrinsicAtCurrentPrice = pair && result.price != null
-    ? Math.max(result.price - pair.longLeg.strike, 0)
-    : null;
-  const profitAtCurrentPrice = totalPremium != null && longIntrinsicAtCurrentPrice != null && pair
-    ? totalPremium + longIntrinsicAtCurrentPrice - pair.longLeg.executablePrice
-    : null;
   if (!pair) {
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2">
@@ -3669,11 +3636,28 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     earningsDeductionEnabled,
   }) : null;
 
+  const decision = buildPmccDecisionCardMetrics({
+    pair,
+    underlyingPrice: result.price,
+    criteria: result.pmccCriteria,
+    availableCycleExpirations: result.pmccCycleExpirations,
+  });
+  const targetLabel = {
+    target_match: 'Target match',
+    near_target: 'Near target',
+    outside_target: 'Outside target',
+    unavailable: 'Target unavailable',
+  }[decision.targetStatus];
+  const targetTone = decision.targetStatus === 'target_match'
+    ? 'text-emerald-400'
+    : decision.targetStatus === 'near_target'
+      ? 'text-amber-300'
+      : 'text-red-400';
+
   const decisionStrip = metrics ? [
     { label: 'Width minus debit', value: `${money(metrics.widthMinusDebitPerShare)} · ${metrics.widthMinusDebitPctOfDebit.toFixed(1)}%` },
     { label: 'Annualized ROI', value: annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%` },
     { label: 'Breakeven', value: `${money(breakeven)}${breakevenAboveShortStrike ? ' ⚠' : ''}`, warn: breakevenAboveShortStrike },
-    { label: 'Roll runway', value: rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}` },
     { label: 'Net delta', value: metrics.netDelta.toFixed(2), warn: disqualified },
   ] : [];
   return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
@@ -3693,7 +3677,30 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) {money(pair.shortLeg.executablePrice)} · OI {pair.shortLeg.openInterest}</span></div>
       </div>
-      {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
+      <div className="mt-3 grid gap-3 text-xs md:grid-cols-3">
+        <div className="rounded-lg border border-neutral-700/70 p-3">
+          <p className={`text-[10px] font-bold tracking-wider ${th.textFaint}`}>CAPITAL</p>
+          <p className="mt-1"><span className={th.textFaint}>100 shares</span><br/><b className="text-base">{moneyTotal(decision.shareCost)}</b></p>
+          <p className="mt-1">Long call {moneyTotal(decision.longCallCost)} · short credit −{moneyTotal(decision.currentCycleCredit)}</p>
+          <p><b>Initial net debit {moneyTotal(decision.initialNetDebit)}</b></p>
+          <p className={th.textMuted}>Cash outlay reduction {moneyTotal(decision.cashOutlayReduction)} · {decision.cashOutlayReductionPct?.toFixed(1) ?? '—'}% vs purchasing 100 shares</p>
+        </div>
+        <div className="rounded-lg border border-neutral-700/70 p-3">
+          <p className={`text-[10px] font-bold tracking-wider ${th.textFaint}`}>CURRENT CALL</p>
+          <p className="mt-1"><b className="text-base">{moneyTotal(decision.currentCycleCredit)}</b> gross credit</p>
+          <p>{decision.currentCycleCreditPct?.toFixed(1) ?? '—'}% of initial net debit</p>
+          <p className={targetTone}><b>{targetLabel}</b></p>
+          <p className={th.textMuted}>Target Δ{result.pmccCriteria ? `${result.pmccCriteria.shortDelta.min.toFixed(2)}–${result.pmccCriteria.shortDelta.max.toFixed(2)}` : '—'} · {result.pmccCriteria ? `${result.pmccCriteria.dte.shortMin}–${result.pmccCriteria.dte.shortMax}` : '—'} DTE</p>
+          <p>Selected Δ{pair.shortLeg.delta.toFixed(2)} · {pair.shortLeg.dte} DTE</p>
+        </div>
+        <div className="rounded-lg border border-neutral-700/70 p-3">
+          <p className={`text-[10px] font-bold tracking-wider ${th.textFaint}`}>THEORETICAL RUNWAY</p>
+          <p className="mt-1"><b className="text-base">{decision.totalCycles || '—'} total cycle{decision.totalCycles === 1 ? '' : 's'}</b></p>
+          <p>{decision.totalCycles ? `1 initial sale + ${decision.futureRolls} future roll${decision.futureRolls === 1 ? '' : 's'}` : 'Expiration calendar unavailable'}</p>
+          <p className={th.textMuted}>Actual listed expirations · exits long call with {decision.longExitBufferDays} DTE remaining</p>
+        </div>
+      </div>
+      {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
         {decisionStrip.map(field => (
           <span key={field.label} className={field.warn ? 'text-amber-400' : ''}>
             <span className={th.textFaint}>{field.label}</span><br/>{field.value}
@@ -3723,13 +3730,13 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <div><b>Long OCC:</b> {pair.longLeg.occSymbol}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
         <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
         {metrics && <div className="space-y-1">
-          <p>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract · Strike width {money(metrics.strikeWidth)}</p>
+          <p>Initial net debit {money(metrics.netDebitPerShare)}/share · {moneyTotal(metrics.netDebitPerShare * 100)}/contract · Strike width {money(metrics.strikeWidth)}</p>
           <p>Natural price: long ask {money(pair.longLeg.quote.ask)} minus short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}</p>
           <p>Long intrinsic {money(metrics.longIntrinsicPerShare)} · long extrinsic {money(metrics.longExtrinsicPerShare)}</p>
           <p>Short credit / net debit {metrics.shortCreditToNetDebitPct.toFixed(1)}% · short credit / long extrinsic {metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</p>
           <p>Width minus debit: {money(metrics.strikeWidth)} − {money(metrics.netDebitPerShare)} = {money(metrics.widthMinusDebitPerShare)}. This is structure economics, not maximum profit.</p>
           <p>Net delta ideal range: {(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}, default scan criteria.</p>
-          <p>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls. Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price.</p>
+          <p>Runway expirations: {decision.cycleExpirations.join(', ') || 'unavailable'} · formula {decision.formulaVersion}.</p>
         </div>}
       </div>}
 
@@ -9629,8 +9636,6 @@ export default function Home() {
     </div>
   );
 }
-
-
 
 
 
