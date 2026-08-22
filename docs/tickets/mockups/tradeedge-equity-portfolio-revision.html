@@ -1,0 +1,155 @@
+<style>
+  #te-equity-revision {
+    --te-page: light-dark(#f5f5f5, #0a0a0a);
+    --te-header: light-dark(#111111, #0f0f0f);
+    --te-side: light-dark(#ffffff, #0f0f0f);
+    --te-surface: light-dark(#ffffff, #171717);
+    --te-surface-2: light-dark(#f0f0f0, #222222);
+    --te-text: light-dark(#111111, #ffffff);
+    --te-muted: light-dark(#566170, #b8b8b8);
+    --te-faint: light-dark(#6b7280, #808080);
+    --te-border: light-dark(#e0e0e0, #2c2c2c);
+    --te-accent: #00d4aa;
+    --te-danger: light-dark(#b43d49, #ff6675);
+    --te-warning: light-dark(#996000, #f4b64b);
+    color: var(--te-text);
+    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  }
+  #te-equity-revision * { box-sizing:border-box; }
+  #te-equity-revision button { font:inherit; }
+  #te-equity-revision .switcher { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:10px; }
+  #te-equity-revision .switcher button { border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-muted); border-radius:8px; padding:7px 10px; cursor:pointer; }
+  #te-equity-revision .switcher button[aria-pressed="true"] { background:var(--te-text); color:var(--te-page); }
+  #te-equity-revision .app { background:var(--te-page); border:1px solid var(--te-border); border-radius:12px; overflow:hidden; }
+  #te-equity-revision .header { background:var(--te-header); color:#fff; padding:10px 16px 0; }
+  #te-equity-revision .brandrow { display:flex; align-items:center; justify-content:space-between; gap:14px; padding-bottom:8px; }
+  #te-equity-revision .brand { font-family:"DM Mono", ui-monospace, monospace; letter-spacing:.12em; font-weight:500; display:flex; align-items:center; gap:9px; }
+  #te-equity-revision .mark { width:31px; height:31px; border:1px solid rgba(0,212,170,.7); border-radius:50%; display:grid; place-items:center; color:var(--te-accent); }
+  #te-equity-revision .brand em { color:var(--te-accent); font-style:normal; }
+  #te-equity-revision .mode { color:#a7a7a7; }
+  #te-equity-revision .nav { display:flex; overflow-x:auto; border-top:1px solid rgba(255,255,255,.1); }
+  #te-equity-revision .nav span { padding:8px 11px; color:#9f9f9f; white-space:nowrap; letter-spacing:.08em; }
+  #te-equity-revision .nav .active { color:var(--te-accent); border-bottom:2px solid var(--te-accent); }
+  #te-equity-revision .layout { display:grid; grid-template-columns:235px minmax(0,1fr); min-height:560px; }
+  #te-equity-revision .side { background:var(--te-side); border-right:1px solid var(--te-border); padding:13px; }
+  #te-equity-revision .main { min-width:0; padding:18px; }
+  #te-equity-revision .panel { background:var(--te-surface); border:1px solid var(--te-border); border-radius:11px; padding:14px; }
+  #te-equity-revision .panel + .panel { margin-top:12px; }
+  #te-equity-revision h2, #te-equity-revision h3, #te-equity-revision p { margin-top:0; }
+  #te-equity-revision h2 { margin-bottom:5px; font-size:1.25rem; }
+  #te-equity-revision h3 { margin-bottom:6px; font-size:1rem; }
+  #te-equity-revision .sub { color:var(--te-muted); margin-bottom:14px; }
+  #te-equity-revision .label { color:var(--te-muted); letter-spacing:.1em; margin-bottom:8px; }
+  #te-equity-revision .row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 0; border-top:1px solid var(--te-border); }
+  #te-equity-revision .row:first-of-type { border-top:0; }
+  #te-equity-revision .small { color:var(--te-faint); }
+  #te-equity-revision .positive { color:var(--te-accent); }
+  #te-equity-revision .negative { color:var(--te-danger); }
+  #te-equity-revision .warning { color:var(--te-warning); }
+  #te-equity-revision .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:var(--te-surface-2); color:var(--te-muted); }
+  #te-equity-revision .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0; }
+  #te-equity-revision .metric { border-top:1px solid var(--te-border); padding:9px; }
+  #te-equity-revision .metric span { display:block; color:var(--te-faint); margin-bottom:3px; }
+  #te-equity-revision .holding-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+  #te-equity-revision .tree { margin-top:12px; border-left:2px solid var(--te-border); padding-left:15px; }
+  #te-equity-revision .branch { position:relative; padding:10px 0; border-top:1px solid var(--te-border); }
+  #te-equity-revision .branch:first-child { border-top:0; }
+  #te-equity-revision .branch::before { content:""; position:absolute; left:-21px; top:17px; width:10px; height:10px; border-radius:50%; background:var(--te-accent); }
+  #te-equity-revision .branch-grid { display:grid; grid-template-columns:minmax(0,1.35fr) .85fr .7fr auto; align-items:center; gap:10px; }
+  #te-equity-revision .action { border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-text); border-radius:7px; padding:7px 10px; cursor:pointer; }
+  #te-equity-revision .primary { background:var(--te-accent); border-color:var(--te-accent); color:#061613; font-weight:500; }
+  #te-equity-revision .actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  #te-equity-revision .capacity { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:10px; }
+  #te-equity-revision .unit { min-height:48px; border-radius:8px; padding:8px; background:var(--te-surface-2); display:flex; flex-direction:column; justify-content:space-between; }
+  #te-equity-revision .unit.allocated { background:color-mix(in srgb,var(--te-accent) 18%,var(--te-surface)); }
+  #te-equity-revision .unit.reserved { background:color-mix(in srgb,var(--te-warning) 18%,var(--te-surface)); }
+  #te-equity-revision .callout { margin-top:12px; border-left:3px solid var(--te-warning); padding:11px; background:var(--te-surface-2); }
+  #te-equity-revision .danger-callout { border-left-color:var(--te-danger); }
+  #te-equity-revision .dialog-wrap { position:relative; min-height:540px; }
+  #te-equity-revision .dim { opacity:.22; pointer-events:none; }
+  #te-equity-revision .dialog { position:absolute; z-index:2; top:28px; left:50%; transform:translateX(-50%); width:min(580px,calc(100% - 24px)); background:var(--te-surface); border:1px solid var(--te-border); border-radius:13px; padding:17px; box-shadow:0 22px 65px rgba(0,0,0,.45); }
+  #te-equity-revision .choice { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; padding:11px 0; border-top:1px solid var(--te-border); }
+  #te-equity-revision .choice:first-of-type { border-top:0; }
+  #te-equity-revision .screen { animation:te-eq-in .15s ease-out; }
+  @keyframes te-eq-in { from { opacity:.65; transform:translateY(2px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { #te-equity-revision .screen { animation:none; } }
+  @media (max-width:760px) {
+    #te-equity-revision .layout { grid-template-columns:1fr; }
+    #te-equity-revision .side { border-right:0; border-bottom:1px solid var(--te-border); }
+    #te-equity-revision .metrics { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .branch-grid { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .capacity { grid-template-columns:repeat(2,1fr); }
+    #te-equity-revision .mode { display:none; }
+  }
+</style>
+
+<div id="te-equity-revision">
+  <div class="switcher" aria-label="Equity portfolio states">
+    <button type="button" aria-pressed="true" data-view="mixed">Mixed AAPL position</button>
+    <button type="button" aria-pressed="false" data-view="stock">Stock-only holding</button>
+    <button type="button" aria-pressed="false" data-view="reservation">Working reservation</button>
+    <button type="button" aria-pressed="false" data-view="assignment">Assignment result</button>
+    <button type="button" aria-pressed="false" data-view="basis">Basis incomplete</button>
+    <button type="button" aria-pressed="false" data-view="unavailable">Data unavailable</button>
+  </div>
+  <div class="app">
+    <header class="header"><div class="brandrow"><div class="brand"><span class="mark">TE</span><span>TRADE<em>EDGE</em></span></div><span class="mode">LIVE PORTFOLIO</span></div><nav class="nav" aria-label="TradeEdge navigation"><span>HOME</span><span class="active">PORTFOLIO</span><span>SCREENER</span><span>INCOME ENGINE</span><span>REPEAT STRATEGIES</span><span>TRADE LOG</span><span>PERFORMANCE</span></nav></header>
+    <div id="te-equity-host"></div>
+  </div>
+
+  <template id="te-equity-mixed">
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">PORTFOLIO VIEWS</div><div class="row"><strong>Positions</strong><span>14</span></div><div class="row"><span>Equity holdings</span><span>4</span></div><div class="row"><span>Option positions</span><span>10</span></div></section><section class="panel"><div class="label">AAPL EXPOSURE</div><div class="row"><span>Shares</span><span>250</span></div><div class="row"><span>Long calls</span><span>1</span></div><div class="row"><span>Short calls</span><span>2</span></div></section></aside>
+      <main class="main"><h2>Positions</h2><p class="sub">Actual holdings appear first. Stock-backed and long-call-backed strategies remain visibly separate.</p><article class="panel"><div class="holding-head"><div><h2>AAPL</h2><span class="pill">2 strategies · 4 open positions</span></div><div><strong class="positive">+$8,240</strong><br><span class="small">Total AAPL exposure P/L · each instrument counted once</span></div></div>
+        <div class="metrics"><div class="metric"><span>Shares</span><strong>250</strong></div><div class="metric"><span>Share market value</span><strong>$47,000</strong></div><div class="metric"><span>Allocated shares</span><strong>100</strong></div><div class="metric"><span>Available share capacity</span><strong>1 call</strong></div></div>
+        <div class="label">STOCK HOLDING AND COVERED CALL</div><div class="tree">
+          <div class="branch"><div class="branch-grid"><div><strong>250 AAPL shares</strong><br><span class="small">Average basis $160.00 · Current $188.00</span></div><span>100 allocated</span><strong class="positive">+$7,000</strong><button class="action" data-go="stock">Open</button></div></div>
+          <div class="branch"><div class="branch-grid"><div><strong>Stock Covered Call</strong><br><span class="small">100 shares supporting Sep $200 call</span></div><span class="pill">Short Call Active</span><strong class="negative">−$125</strong><button class="action">Manage</button></div></div>
+          <div class="branch"><div class="branch-grid"><div><strong>50-share remainder</strong><br><span class="small">Displayed as owned shares · not enough for another standard contract</span></div><span>Unallocated</span><strong>—</strong><button class="action">Details</button></div></div>
+        </div>
+        <div class="label" style="margin-top:14px">SEPARATE LONG-CALL DIAGONAL</div><div class="tree"><div class="branch"><div class="branch-grid"><div><strong>PMCC · Jan 2028 $150 long call</strong><br><span class="small">One long call supporting Oct $205 short call · no share allocation</span></div><span class="pill">PMCC Active</span><strong class="positive">+$1,365</strong><button class="action">Open</button></div></div></div>
+        <div class="actions"><button class="action">View AAPL transactions</button><button class="action primary" data-go="stock">View stock holding</button></div>
+      </article></main>
+    </div>
+  </template>
+
+  <template id="te-equity-stock">
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">AAPL SHARES</div><div class="row"><span>Total</span><strong>250</strong></div><div class="row"><span>Allocated</span><span>100</span></div><div class="row"><span>Available units</span><span class="positive">1</span></div><div class="row"><span>Remainder</span><span>50</span></div></section></aside>
+      <main class="main"><div class="holding-head"><div><span class="pill">Equity Holding · Partially Allocated</span><h2 style="margin-top:8px">AAPL shares</h2><p class="small">Share ownership remains visible even when shares support a short call.</p></div><button class="action primary">Find Covered Call</button></div><div class="metrics"><div class="metric"><span>Quantity</span><strong>250</strong></div><div class="metric"><span>Average basis</span><strong>$160.00</strong></div><div class="metric"><span>Current price</span><strong>$188.00</strong></div><div class="metric"><span>Unrealized P/L</span><strong class="positive">+$7,000</strong></div></div>
+        <section class="panel"><h3>Share allocation</h3><div class="capacity"><div class="unit allocated"><strong>100 shares allocated</strong><span class="small">Sep $200 call</span></div><div class="unit"><strong>100 shares available</strong><span class="small">One standard unit</span></div><div class="unit"><strong>50-share remainder</strong><span class="small">Not a full unit</span></div></div><div class="callout"><strong>One new covered call available</strong><br><span class="small">Allocation is quantity-based unless the broker supplies a confirmed lot relationship.</span></div></section>
+        <section class="panel"><h3>Related option</h3><div class="branch-grid"><div><strong>Short Sep 2026 $200 call</strong><br><span class="small">Premium received $325 · Current liability $450</span></div><span>100 shares</span><strong class="negative">−$125</strong><button class="action">Manage</button></div></section></main>
+    </div>
+  </template>
+
+  <template id="te-equity-reservation">
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">MSFT SHARES</div><div class="row"><span>Total</span><strong>200</strong></div><div class="row"><span>Open calls</span><span>1</span></div><div class="row"><span>Working orders</span><span class="warning">1</span></div><div class="row"><span>Available</span><strong>0</strong></div></section></aside><main class="main"><span class="pill">Equity Holding · Fully Reserved</span><h2 style="margin-top:8px">MSFT · 200 shares</h2><p class="sub">Working sell-to-open orders reserve capacity before they fill.</p><section class="panel"><h3>Coverage capacity</h3><div class="capacity"><div class="unit allocated"><strong>100 shares allocated</strong><span class="small">Open Sep $450 call</span></div><div class="unit reserved"><strong>100 shares reserved</strong><span class="small">Working Oct $460 order</span></div></div><div class="callout"><strong>No additional covered call available</strong><br><span class="small">Cancel or resolve the working order before these shares can support another call.</span></div><div class="actions"><button class="action">Review working order</button><button class="action primary">Manage active call</button></div></section></main></div>
+  </template>
+
+  <template id="te-equity-assignment">
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">ASSIGNMENT RESULT</div><div class="row"><span>Before</span><span>200 shares</span></div><div class="row"><span>Called away</span><span class="negative">100 shares</span></div><div class="row"><span>Remaining</span><strong>100 shares</strong></div></section></aside><main class="main"><span class="pill">Covered Call · Completed</span><h2 style="margin-top:8px">AAPL assignment reconciled</h2><p class="sub">Broker activity confirms that 100 shares were sold at the $200 strike.</p><div class="metrics"><div class="metric"><span>Shares called away</span><strong>100</strong></div><div class="metric"><span>Assignment price</span><strong>$200.00</strong></div><div class="metric"><span>Short-call premium</span><strong>$325</strong></div><div class="metric"><span>Shares remaining</span><strong>100</strong></div></div><section class="panel"><div class="branch-grid"><div><strong>100 AAPL shares remain open</strong><br><span class="small">Coverage recalculated after assignment</span></div><span class="pill">Ready for Covered Call</span><strong class="positive">1 unit</strong><button class="action primary">Find next call</button></div></section><section class="panel"><h3>Completed strategy history</h3><div class="row"><span>100-share realized result</span><strong class="positive">+$4,325</strong></div><div class="row"><span>Basis evidence</span><span class="positive">Assigned lot verified</span></div><div class="row"><span>Completion reason</span><span>Assigned</span></div><div class="row"><span>Broker event</span><span>Matched</span></div></section></main></div>
+  </template>
+
+  <template id="te-equity-basis">
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">NVDA SHARES</div><div class="row"><span>Total</span><strong>200</strong></div><div class="row"><span>Basis-known shares</span><span>100</span></div><div class="row"><span>Basis status</span><span class="warning">Incomplete</span></div></section></aside><main class="main"><span class="pill">Equity Holding · Basis Incomplete</span><h2 style="margin-top:8px">NVDA · 200 shares</h2><p class="sub">All shares remain visible, but TradeEdge will not apply one lot’s basis to the entire holding.</p><section class="panel"><div class="metrics"><div class="metric"><span>Quantity</span><strong>200</strong></div><div class="metric"><span>Average basis</span><strong class="warning">Unavailable</strong></div><div class="metric"><span>Gross capacity</span><strong>2 calls</strong></div><div class="metric"><span>Basis-qualified scans</span><strong>Disabled</strong></div></div><div class="callout"><strong>Basis-dependent metrics unavailable</strong><br><span class="small">TradeEdge may show call candidates and verified capacity, but strike-versus-basis outcomes remain unavailable until every contributing lot has usable basis.</span></div><div class="actions"><button class="action">Review lots</button><button class="action primary">Find calls with basis metrics unavailable</button></div></section></main></div>
+  </template>
+
+  <template id="te-equity-unavailable">
+    <div class="dialog-wrap screen"><div class="layout dim"><aside class="side"></aside><main class="main"><h2>Portfolio positions</h2></main></div><section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="unavailable-title"><div class="label" style="color:var(--te-danger)">COVERAGE DATA UNAVAILABLE</div><h2 id="unavailable-title">Covered-call capacity could not be verified</h2><p class="sub">TradeEdge loaded holdings but could not match one open short option to an underlying symbol.</p><div class="callout danger-callout"><strong>No new covered calls will be recommended</strong><br><span class="small">The existing positions remain visible. Capacity-dependent actions are disabled until the broker data issue is resolved.</span></div><label class="choice"><input type="radio" checked name="next"><span><strong>Review unmatched option exposure</strong><br><span class="small">Identify the broker position preventing verification.</span></span></label><label class="choice"><input type="radio" name="next"><span><strong>Refresh broker positions and working orders</strong><br><span class="small">Retry using a new portfolio snapshot.</span></span></label><div class="actions"><button class="action">Return to Portfolio</button><button class="action primary">Continue review</button></div></section></div>
+  </template>
+</div>
+
+<script>
+  (() => {
+    const root = document.getElementById('te-equity-revision');
+    const host = root.querySelector('#te-equity-host');
+    const controls = [...root.querySelectorAll('[data-view]')];
+    const render = (name) => {
+      const template = root.querySelector(`#te-equity-${name}`);
+      if (!(template instanceof HTMLTemplateElement)) return;
+      host.replaceChildren(template.content.cloneNode(true));
+      controls.forEach(control => control.setAttribute('aria-pressed', String(control.dataset.view === name)));
+      root.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => render(button.dataset.go)));
+    };
+    controls.forEach(control => control.addEventListener('click', () => render(control.dataset.view)));
+    render('mixed');
+  })();
+</script>

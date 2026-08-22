@@ -1,0 +1,283 @@
+<style>
+  #te-integrated-flow {
+    --te-page: light-dark(#f5f5f5, #0a0a0a);
+    --te-header: light-dark(#111111, #0f0f0f);
+    --te-side: light-dark(#ffffff, #0f0f0f);
+    --te-surface: light-dark(#ffffff, #171717);
+    --te-surface-2: light-dark(#f0f0f0, #222222);
+    --te-text: light-dark(#111111, #ffffff);
+    --te-muted: light-dark(#555f6d, #b8b8b8);
+    --te-faint: light-dark(#6b7280, #808080);
+    --te-border: light-dark(#e0e0e0, #2c2c2c);
+    --te-accent: #00d4aa;
+    --te-blue: light-dark(#2457d6, #6f96ff);
+    --te-red: light-dark(#b53c49, #ff6675);
+    --te-amber: light-dark(#9c6500, #f5b84b);
+    color: var(--te-text);
+    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  }
+  #te-integrated-flow * { box-sizing: border-box; }
+  #te-integrated-flow button, #te-integrated-flow input { font: inherit; }
+  #te-integrated-flow .review-strip { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+  #te-integrated-flow .review-strip button {
+    border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-muted);
+    padding:7px 10px; border-radius:8px; cursor:pointer;
+  }
+  #te-integrated-flow .review-strip button[aria-pressed="true"] { background:var(--te-text); color:var(--te-page); }
+  #te-integrated-flow .app { background:var(--te-page); border:1px solid var(--te-border); border-radius:12px; overflow:hidden; }
+  #te-integrated-flow .top { background:var(--te-header); color:#fff; padding:10px 16px 0; }
+  #te-integrated-flow .brand-row { display:flex; justify-content:space-between; align-items:center; padding-bottom:8px; }
+  #te-integrated-flow .brand { display:flex; gap:9px; align-items:center; font-family:"DM Mono", ui-monospace, monospace; letter-spacing:.12em; font-weight:500; }
+  #te-integrated-flow .brand-mark { width:31px; height:31px; display:grid; place-items:center; border:1px solid rgba(0,212,170,.7); border-radius:50%; color:var(--te-accent); }
+  #te-integrated-flow .brand em { color:var(--te-accent); font-style:normal; }
+  #te-integrated-flow .mode { color:#a7a7a7; }
+  #te-integrated-flow .topnav { display:flex; gap:0; overflow-x:auto; border-top:1px solid rgba(255,255,255,.1); }
+  #te-integrated-flow .topnav span { padding:8px 11px; color:#9f9f9f; white-space:nowrap; letter-spacing:.08em; }
+  #te-integrated-flow .topnav .active { color:var(--te-accent); border-bottom:2px solid var(--te-accent); }
+  #te-integrated-flow .work { display:grid; grid-template-columns:250px minmax(0,1fr); min-height:560px; }
+  #te-integrated-flow .side { background:var(--te-side); border-right:1px solid var(--te-border); padding:13px; }
+  #te-integrated-flow .main { min-width:0; padding:18px; }
+  #te-integrated-flow .panel { background:var(--te-surface); border:1px solid var(--te-border); border-radius:11px; padding:14px; }
+  #te-integrated-flow .panel + .panel { margin-top:12px; }
+  #te-integrated-flow .label { color:var(--te-muted); letter-spacing:.1em; margin-bottom:8px; }
+  #te-integrated-flow .tickerbox { color:var(--te-text); background:var(--te-page); border:1px solid var(--te-border); border-radius:7px; padding:9px; width:100%; }
+  #te-integrated-flow .launchers { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:10px; }
+  #te-integrated-flow .launch, #te-integrated-flow .action {
+    border:1px solid var(--te-border); background:transparent; color:var(--te-text); border-radius:7px; padding:8px 10px; cursor:pointer;
+  }
+  #te-integrated-flow .launch.selected, #te-integrated-flow .action.primary { background:var(--te-accent); border-color:var(--te-accent); color:#061613; font-weight:500; }
+  #te-integrated-flow .launch.wide { grid-column:1/-1; }
+  #te-integrated-flow .small { color:var(--te-faint); }
+  #te-integrated-flow h2, #te-integrated-flow h3, #te-integrated-flow p { margin-top:0; }
+  #te-integrated-flow h2 { margin-bottom:5px; font-size:1.25rem; }
+  #te-integrated-flow h3 { margin-bottom:7px; font-size:1rem; }
+  #te-integrated-flow .sub { color:var(--te-muted); margin-bottom:15px; }
+  #te-integrated-flow .identity { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+  #te-integrated-flow .pill { display:inline-block; background:var(--te-surface-2); color:var(--te-muted); border-radius:999px; padding:4px 8px; }
+  #te-integrated-flow .score { color:var(--te-accent); font-size:1.35rem; font-weight:500; }
+  #te-integrated-flow .facts { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  #te-integrated-flow .fact { padding:10px; border-top:1px solid var(--te-border); }
+  #te-integrated-flow .fact span { display:block; color:var(--te-faint); margin-bottom:3px; }
+  #te-integrated-flow .callout { margin-top:12px; border-left:3px solid var(--te-accent); background:var(--te-surface-2); padding:11px; }
+  #te-integrated-flow .warning { border-left-color:var(--te-amber); }
+  #te-integrated-flow .danger { border-left-color:var(--te-red); }
+  #te-integrated-flow .actions { display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  #te-integrated-flow .action { background:var(--te-surface); }
+  #te-integrated-flow .position { display:grid; grid-template-columns:1.2fr .85fr .7fr auto; gap:12px; align-items:center; padding:12px 0; border-top:1px solid var(--te-border); }
+  #te-integrated-flow .position:first-of-type { border-top:0; }
+  #te-integrated-flow .positive { color:var(--te-accent); }
+  #te-integrated-flow .negative { color:var(--te-red); }
+  #te-integrated-flow .modal-layer { position:relative; min-height:520px; }
+  #te-integrated-flow .dimmed { opacity:.24; pointer-events:none; }
+  #te-integrated-flow .dialog { position:absolute; z-index:2; top:24px; left:50%; transform:translateX(-50%); width:min(560px,calc(100% - 24px)); background:var(--te-surface); border:1px solid var(--te-border); border-radius:13px; box-shadow:0 20px 60px rgba(0,0,0,.45); padding:17px; }
+  #te-integrated-flow .choice { display:grid; grid-template-columns:auto 1fr auto; gap:10px; padding:12px 0; border-top:1px solid var(--te-border); align-items:start; }
+  #te-integrated-flow .choice:first-of-type { border-top:0; }
+  #te-integrated-flow .columns { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  #te-integrated-flow .metric-row { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-top:1px solid var(--te-border); }
+  #te-integrated-flow .metric-row:first-of-type { border-top:0; }
+  #te-integrated-flow .history { border-left:2px solid var(--te-border); margin-left:6px; padding-left:16px; }
+  #te-integrated-flow .event { margin-bottom:14px; position:relative; }
+  #te-integrated-flow .event::before { content:""; position:absolute; left:-22px; top:4px; width:10px; height:10px; background:var(--te-accent); border-radius:50%; }
+  #te-integrated-flow .screen { animation:te-shift .15s ease-out; }
+  @keyframes te-shift { from { opacity:.65; transform:translateY(2px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { #te-integrated-flow .screen { animation:none; } }
+  @media (max-width:760px) {
+    #te-integrated-flow .work { grid-template-columns:1fr; }
+    #te-integrated-flow .side { border-right:0; border-bottom:1px solid var(--te-border); }
+    #te-integrated-flow .facts { grid-template-columns:1fr 1fr; }
+    #te-integrated-flow .position { grid-template-columns:1fr 1fr; }
+    #te-integrated-flow .columns { grid-template-columns:1fr; }
+    #te-integrated-flow .mode { display:none; }
+  }
+</style>
+
+<div id="te-integrated-flow">
+  <div class="review-strip" aria-label="Mockup screens">
+    <button type="button" aria-pressed="true" data-view="screener">Screener result</button>
+    <button type="button" aria-pressed="false" data-view="leaps">LEAPS result</button>
+    <button type="button" aria-pressed="false" data-view="plan">PMCC plan</button>
+    <button type="button" aria-pressed="false" data-view="coverage">Existing-position coverage</button>
+    <button type="button" aria-pressed="false" data-view="portfolio">Portfolio</button>
+    <button type="button" aria-pressed="false" data-view="detail">Position detail</button>
+    <button type="button" aria-pressed="false" data-view="roll">Roll</button>
+    <button type="button" aria-pressed="false" data-view="assignment">Assignment</button>
+    <button type="button" aria-pressed="false" data-view="ready">Ready for next call</button>
+    <button type="button" aria-pressed="false" data-view="covered">Stock covered call</button>
+    <button type="button" aria-pressed="false" data-view="partial">Partial execution</button>
+    <button type="button" aria-pressed="false" data-view="reconcile">Import reconciliation</button>
+    <button type="button" aria-pressed="false" data-view="replace">Replace foundation</button>
+    <button type="button" aria-pressed="false" data-view="blocked">Blocked close</button>
+  </div>
+  <div class="app">
+    <header class="top">
+      <div class="brand-row"><div class="brand"><span class="brand-mark">TE</span><span>TRADE<em>EDGE</em></span></div><span class="mode">LIVE PORTFOLIO</span></div>
+      <nav class="topnav" aria-label="TradeEdge navigation"><span>HOME</span><span data-nav="portfolio">PORTFOLIO</span><span data-nav="screener" class="active">SCREENER</span><span>INCOME ENGINE</span><span>REPEAT STRATEGIES</span><span>TRADE LOG</span><span>PERFORMANCE</span></nav>
+    </header>
+    <div id="te-integrated-host"></div>
+  </div>
+
+  <template id="te-view-screener">
+    <div class="work screen">
+      <aside class="side">
+        <section class="panel"><div class="label">OPPORTUNITY UNIVERSE</div><input class="tickerbox" value="AAPL, MSFT, NVDA" aria-label="Opportunity universe"><p class="small">3 tickers available for evaluation.</p>
+          <div class="launchers"><button class="launch">FIND SPREADS</button><button class="launch">FIND CSPs</button><button class="launch">FIND CCs</button><button class="launch selected">FIND PMCCs</button><button class="launch wide" data-go="leaps">FIND LEAPS</button></div>
+        </section>
+        <section class="panel"><div class="label">PMCC SETTINGS</div><div class="metric-row"><span class="small">Long DTE</span><span>365–730</span></div><div class="metric-row"><span class="small">Short DTE</span><span>21–45</span></div><div class="metric-row"><span class="small">Long delta</span><span>0.75–0.90</span></div></section>
+      </aside>
+      <main class="main">
+        <h2>Ranked opportunities</h2><p class="sub">PMCC scan · 3 symbols evaluated · Quotes captured 10:42 AM</p>
+        <article class="panel">
+          <div class="identity"><div><span class="pill">PMCC · Long Call Diagonal</span><h2 style="margin-top:8px">AAPL</h2><p class="small">Steady bullish trend · Liquid contracts · No earnings conflict</p></div><div><div class="score">87</div><span class="small">Decision score</span></div></div>
+          <div class="facts"><div class="fact"><span>Long call</span><strong>Jan 2028 $150</strong></div><div class="fact"><span>Short call</span><strong>Sep 2026 $200</strong></div><div class="fact"><span>Net debit</span><strong>$4,175</strong></div><div class="fact"><span>Short credit</span><strong>$325</strong></div></div>
+          <div class="callout"><strong>Why this qualifies</strong><br><span class="small">The long call meets duration, delta, intrinsic-value, and liquidity rules. The initial short call improves entry cost while staying above the long strike.</span></div>
+          <div class="actions"><button class="action">Compare legs</button><button class="action" data-go="leaps">Review long call only</button><button class="action primary" data-go="plan">Review PMCC plan</button></div>
+        </article>
+      </main>
+    </div>
+  </template>
+
+  <template id="te-view-leaps">
+    <div class="work screen">
+      <aside class="side"><section class="panel"><div class="label">OPPORTUNITY UNIVERSE</div><input class="tickerbox" value="AAPL, MSFT, NVDA" aria-label="Opportunity universe"><div class="launchers"><button class="launch">FIND SPREADS</button><button class="launch">FIND CSPs</button><button class="launch">FIND CCs</button><button class="launch">FIND PMCCs</button><button class="launch selected wide">FIND LEAPS</button></div></section><section class="panel"><div class="label">LEAPS SETTINGS</div><div class="metric-row"><span class="small">Target DTE</span><span>365–730</span></div><div class="metric-row"><span class="small">Target delta</span><span>0.75–0.90</span></div></section></aside>
+      <main class="main"><h2>Ranked LEAPS opportunities</h2><p class="sub">Long-call candidates are evaluated independently. Selling a short call is optional.</p>
+        <article class="panel"><div class="identity"><div><span class="pill">LEAPS candidate · Long call</span><h2 style="margin-top:8px">AAPL Jan 2028 $150 call</h2><p class="small">Steady bullish trend · 0.81 delta · Liquid contract</p></div><div><div class="score">84</div><span class="small">Decision score</span></div></div>
+          <div class="facts"><div class="fact"><span>Debit</span><strong>$4,500</strong></div><div class="fact"><span>Intrinsic value</span><strong>$3,800</strong></div><div class="fact"><span>Extrinsic value</span><strong>$700</strong></div><div class="fact"><span>Expiration</span><strong>Jan 2028</strong></div></div>
+          <div class="callout"><strong>Why this qualifies</strong><br><span class="small">The contract meets duration, delta, intrinsic-value, trend, and liquidity requirements as a standalone bullish position.</span></div>
+          <div class="actions"><button class="action" data-go="screener">Back to PMCC results</button><button class="action">Compare long calls</button><button class="action primary" data-go="long-plan">Review LEAPS plan</button></div>
+        </article>
+      </main>
+    </div>
+  </template>
+
+  <template id="te-view-plan">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">TRADE PLAN</div><div class="metric-row"><strong>1. Review</strong><span class="positive">Current</span></div><div class="metric-row"><span>2. Record execution</span><span>Next</span></div><div class="metric-row"><span>3. Track strategy</span><span>After fill</span></div></section></aside>
+      <main class="main"><div class="label">PROPOSED — NOT AN OPEN POSITION</div><h2>Review AAPL PMCC plan</h2><p class="sub">This scanner recommendation becomes a Portfolio strategy only after an execution is recorded or imported.</p>
+        <div class="columns"><section class="panel"><h3>Buy long-call foundation</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2028 $150 call</span></div><div class="metric-row"><span class="small">Expected debit</span><strong>$4,500</strong></div><div class="metric-row"><span class="small">Role</span><span>PMCC support</span></div></section><section class="panel"><h3>Sell initial short call</h3><div class="metric-row"><span class="small">Contract</span><span>Sep 2026 $200 call</span></div><div class="metric-row"><span class="small">Expected credit</span><strong>$325</strong></div><div class="metric-row"><span class="small">Support</span><span>Proposed long leg</span></div></section></div>
+        <div class="facts"><div class="fact"><span>Expected net debit</span><strong>$4,175</strong></div><div class="fact"><span>Strike width check</span><strong class="positive">Passes</strong></div><div class="fact"><span>Quote captured</span><strong>10:42 AM</strong></div><div class="fact"><span>Position state</span><strong>Proposed</strong></div></div>
+        <div class="callout"><strong>Coverage is already defined</strong><br><span class="small">Because this is a new two-leg PMCC plan, the proposed Jan 2028 long call supports the proposed short call. No coverage-choice step is needed.</span></div>
+        <div class="actions"><button class="action" data-go="screener">Back</button><button class="action">Save plan</button><button class="action" data-go="import">Import or match broker activity</button><button class="action primary" data-go="record">Record executed trade</button></div>
+      </main>
+    </div>
+  </template>
+
+  <template id="te-view-long-plan">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">TRADE PLAN</div><div class="metric-row"><strong>LEAPS only</strong><span class="positive">Selected</span></div><div class="metric-row"><span>Short call</span><span>None</span></div></section></aside>
+      <main class="main"><div class="label">PROPOSED — NOT AN OPEN POSITION</div><h2>Review AAPL LEAPS plan</h2><p class="sub">The long call can be opened and tracked without an initial short call.</p><section class="panel"><div class="identity"><div><span class="pill">Foundation Only</span><h2 style="margin-top:8px">Buy Jan 2028 $150 call</h2></div><strong>$4,500 expected debit</strong></div><div class="facts"><div class="fact"><span>Delta</span><strong>0.81</strong></div><div class="fact"><span>Intrinsic</span><strong>$3,800</strong></div><div class="fact"><span>Extrinsic</span><strong>$700</strong></div><div class="fact"><span>Short call</span><strong>Not included</strong></div></div></section><div class="actions"><button class="action" data-go="leaps">Back</button><button class="action">Save plan</button><button class="action" data-go="import">Import or match broker activity</button><button class="action primary" data-go="record">Record executed trade</button></div></main>
+    </div>
+  </template>
+
+  <template id="te-view-coverage">
+    <div class="modal-layer screen">
+      <div class="work dimmed"><aside class="side"><section class="panel"><div class="label">OPPORTUNITY UNIVERSE</div><p>AAPL, MSFT, NVDA</p></section></aside><main class="main"><h2>AAPL opportunity</h2><div class="panel"><p>Reviewing Sep 2026 $200 short call</p></div></main></div>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-title">
+        <div class="label">SELL CALL AGAINST EXISTING POSITION</div><h2 id="coverage-title">What supports this short call?</h2><p class="sub">MSFT Sep 2026 $450 call · Sell 1 · $285 expected opening credit</p>
+        <label class="choice"><input type="radio" name="support"><span><strong>100 MSFT shares</strong><br><span class="small">Creates a stock covered call. 100 of 200 shares will be allocated.</span></span><span class="pill">Eligible</span></label>
+        <label class="choice"><input type="radio" name="support" checked><span><strong>Jan 2028 $350 long call</strong><br><span class="small">Creates a PMCC. Assignment may create 100 short shares.</span></span><span class="pill">Eligible</span></label>
+        <div class="callout warning"><strong>TradeEdge will not guess</strong><br><span class="small">Both foundations are eligible, so your selection is required.</span></div>
+        <div class="actions"><button class="action" data-go="portfolio">Cancel</button><button class="action primary" data-go="existing-plan">Review trade plan</button></div>
+      </section>
+    </div>
+  </template>
+
+  <template id="te-view-existing-plan">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">TRADE PLAN</div><div class="metric-row"><span>Foundation</span><strong>Existing long call</strong></div><div class="metric-row"><span>New position</span><strong>Short call</strong></div></section></aside><main class="main"><div class="label">PROPOSED — NOT YET RECORDED</div><h2>Review call against existing position</h2><p class="sub">The existing MSFT Jan 2028 long call will support the new Sep 2026 short call.</p><div class="columns"><section class="panel"><h3>Existing foundation</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2028 $350 call</span></div><div class="metric-row"><span class="small">Current state</span><span>Foundation Only</span></div></section><section class="panel"><h3>New short call</h3><div class="metric-row"><span class="small">Sell to open</span><span>Sep 2026 $450 call</span></div><div class="metric-row"><span class="small">Expected credit</span><span>$285</span></div></section></div><div class="callout"><strong>After execution</strong><br><span class="small">The existing strategy changes from Foundation Only to Short Call Active. Both option positions remain independently tracked.</span></div><div class="actions"><button class="action" data-go="coverage">Back</button><button class="action">Import or match broker activity</button><button class="action primary" data-go="portfolio">Record executed trade</button></div></main></div>
+  </template>
+
+  <template id="te-view-portfolio">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">PORTFOLIO VIEWS</div><div class="metric-row"><strong>Positions</strong><span>12</span></div><div class="metric-row"><span>Today’s priorities</span><span>3</span></div><div class="metric-row"><span>Briefing</span><span>Ready</span></div></section></aside>
+      <main class="main"><h2>Positions</h2><p class="sub">Related instruments are grouped by strategy. Individual positions remain independently tracked.</p>
+        <section class="panel"><div class="identity"><div><h2>AAPL</h2><span class="pill">PMCC · Short Call Active</span></div><div><strong class="positive">+$1,725</strong><br><span class="small">Strategy P/L</span></div></div>
+          <div class="position"><div><strong>Jan 2028 $150 call</strong><br><span class="small">1 long call supporting 1 short call</span></div><span>$5,600 value</span><strong class="positive">+$1,100</strong><button class="action" data-go="detail">Open</button></div>
+          <div class="position"><div><strong>Sep 2026 $200 call</strong><br><span class="small">Active short-call cycle · 18 DTE</span></div><span>$450 liability</span><strong class="negative">−$125</strong><button class="action" data-go="roll">Manage</button></div>
+          <div class="actions"><button class="action">View completed cycles</button><button class="action" data-go="roll">Manage short call</button><button class="action primary" data-go="detail">View strategy</button></div>
+        </section>
+        <section class="panel"><div class="identity"><div><h2>MSFT</h2><span class="pill">LEAPS · Foundation Only</span></div><div><strong class="positive">+$420</strong><br><span class="small">Position P/L</span></div></div><div class="position"><div><strong>Jan 2028 $350 call</strong><br><span class="small">1 long call available · no active short call</span></div><span>$7,920 value</span><strong class="positive">+$420</strong><button class="action primary" data-go="coverage">Sell call against position</button></div></section>
+      </main>
+    </div>
+  </template>
+
+  <template id="te-view-record">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">EXECUTION SOURCE</div><div class="metric-row"><strong>Manual record</strong><span class="positive">Selected</span></div><div class="metric-row"><span>Broker import</span><span>Not used</span></div></section></aside><main class="main"><div class="label">RECORD EXECUTED TRADE</div><h2>Confirm actual fills</h2><p class="sub">TradeEdge records what executed, which may differ from the proposed prices.</p><div class="columns"><section class="panel"><h3>Long call fill</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2028 $150 call</span></div><div class="metric-row"><span class="small">Filled quantity</span><strong>1</strong></div><div class="metric-row"><span class="small">Actual debit</span><strong>$4,525</strong></div></section><section class="panel"><h3>Short call fill</h3><div class="metric-row"><span class="small">Contract</span><span>Sep 2026 $200 call</span></div><div class="metric-row"><span class="small">Filled quantity</span><strong>1</strong></div><div class="metric-row"><span class="small">Actual credit</span><strong>$320</strong></div></section></div><div class="callout"><strong>Complete two-leg execution</strong><br><span class="small">After confirmation, TradeEdge creates two positions and one PMCC relationship.</span></div><div class="actions"><button class="action" data-go="plan">Back</button><button class="action primary" data-go="portfolio">Confirm executed trade</button></div></main></div>
+  </template>
+
+  <template id="te-view-import">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">EXECUTION SOURCE</div><div class="metric-row"><span>Manual record</span><span>Available</span></div><div class="metric-row"><strong>Broker activity</strong><span class="positive">Selected</span></div></section></aside><main class="main"><div class="label">IMPORT OR MATCH BROKER ACTIVITY</div><h2>Match the proposed trade</h2><p class="sub">Executions establish transaction history. Broker snapshots support reconciliation without silently rewriting it.</p><section class="panel"><div class="position"><div><strong>AAPL Jan 2028 $150 call</strong><br><span class="small">Broker fill · Buy 1 @ $45.25</span></div><span class="positive">Matched</span><strong>10:44 AM</strong><button class="action">Review</button></div><div class="position"><div><strong>AAPL Sep 2026 $200 call</strong><br><span class="small">Broker fill · Sell 1 @ $3.20</span></div><span class="positive">Matched</span><strong>10:44 AM</strong><button class="action">Review</button></div></section><div class="actions"><button class="action" data-go="plan">Back</button><button class="action primary" data-go="portfolio">Confirm matches</button></div></main></div>
+  </template>
+
+  <template id="te-view-detail">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">AAPL STRATEGY</div><div class="metric-row"><span>State</span><strong>Short Call Active</strong></div><div class="metric-row"><span>Foundation</span><span>Long call</span></div><div class="metric-row"><span>Coverage</span><span>1 of 1 allocated</span></div></section></aside>
+      <main class="main"><div class="identity"><div><span class="pill">PMCC · Long Call Diagonal</span><h2 style="margin-top:8px">AAPL position detail</h2><p class="small">What should I do with this position? · 1 long call supporting 1 short call</p></div><button class="action primary" data-go="roll">Manage short call</button></div>
+        <div class="facts"><div class="fact"><span>Total strategy P/L</span><strong class="positive">+$1,725</strong></div><div class="fact"><span>Realized call P/L</span><strong>+$750</strong></div><div class="fact"><span>Net strategy basis</span><strong>$3,750</strong></div><div class="fact"><span>Next decision</span><strong>18 days</strong></div></div>
+        <div class="columns" style="margin-top:12px"><section class="panel"><h3>Long-call foundation</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2028 $150 call</span></div><div class="metric-row"><span class="small">Original basis</span><span>$4,500</span></div><div class="metric-row"><span class="small">Current value</span><span>$5,600</span></div><div class="metric-row"><span class="small">Intrinsic / extrinsic</span><span>$3,800 / $1,800</span></div></section>
+          <section class="panel"><h3>Active short call</h3><div class="metric-row"><span class="small">Contract</span><span>Sep 2026 $200 call</span></div><div class="metric-row"><span class="small">Premium received</span><span>$325</span></div><div class="metric-row"><span class="small">Current liability</span><span>$450</span></div><div class="metric-row"><span class="small">Unrealized P/L</span><span class="negative">−$125</span></div></section></div>
+        <section class="panel"><h3>Completed short-call cycles</h3><div class="history"><div class="event"><strong>Aug 2026 $195 call expired OTM</strong><br><span class="small">+$280 realized</span></div><div class="event"><strong>Jul 2026 $190 call bought to close</strong><br><span class="small">+$470 realized</span></div></div></section>
+      </main>
+    </div>
+  </template>
+
+  <template id="te-view-roll">
+    <div class="modal-layer screen"><div class="work dimmed"><aside class="side"></aside><main class="main"><h2>AAPL PMCC</h2><div class="panel">Position detail</div></main></div>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="roll-title"><div class="label">MANAGE SHORT CALL</div><h2 id="roll-title">Review roll</h2><p class="sub">The old call closes as a completed cycle. The replacement opens as a new liability.</p>
+        <div class="columns"><div class="panel"><h3>Close current cycle</h3><div class="metric-row"><span class="small">Buy to close</span><span>Sep $200 call</span></div><div class="metric-row"><span class="small">Closing debit</span><strong>$450</strong></div><div class="metric-row"><span class="small">Realized result</span><strong class="negative">−$125</strong></div></div>
+          <div class="panel"><h3>Open next cycle</h3><div class="metric-row"><span class="small">Sell to open</span><span>Oct $205 call</span></div><div class="metric-row"><span class="small">Opening credit</span><strong>$610</strong></div><div class="metric-row"><span class="small">Support</span><span>Jan 2028 $150 call</span></div></div></div>
+        <div class="callout"><strong>$160 net roll credit</strong><br><span class="small">Shown separately from the −$125 realized result on the closing cycle.</span></div><div class="actions"><button class="action" data-go="detail">Back</button><button class="action primary">Review order</button></div></section>
+    </div>
+  </template>
+
+  <template id="te-view-assignment">
+    <div class="modal-layer screen"><div class="work dimmed"><aside class="side"></aside><main class="main"><h2>Today’s priorities</h2><div class="panel">Assignment requires resolution</div></main></div>
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="assignment-title"><div class="label" style="color:var(--te-red)">ACTION NEEDED</div><h2 id="assignment-title">Resolve AAPL assignment</h2><p class="sub">The Sep $200 short call was assigned. The Jan 2028 $150 long call is still open.</p>
+        <div class="callout danger"><strong>Detected account effect</strong><br><span class="small">100 short AAPL shares. TradeEdge has not assumed that the long call was exercised.</span></div>
+        <label class="choice"><input type="radio" name="resolution"><span><strong>Shares purchased to cover</strong><br><span class="small">Match the covering stock transaction.</span></span></label>
+        <label class="choice"><input type="radio" name="resolution"><span><strong>Long call exercised</strong><br><span class="small">Match the exercise and share delivery.</span></span></label>
+        <label class="choice"><input type="radio" name="resolution"><span><strong>Long call sold; shares covered separately</strong><br><span class="small">Match both transactions.</span></span></label>
+        <label class="choice"><input type="radio" name="resolution"><span><strong>Short shares remain open</strong><br><span class="small">Keep this item in Action Needed.</span></span></label>
+        <div class="actions"><button class="action">Review broker activity</button><button class="action primary">Continue</button></div></section>
+    </div>
+  </template>
+
+  <template id="te-view-ready">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">AAPL STRATEGY</div><div class="metric-row"><span>State</span><strong class="positive">Ready for Next Call</strong></div><div class="metric-row"><span>Available support</span><span>1 long call</span></div></section></aside><main class="main"><div class="identity"><div><span class="pill">PMCC · Ready for Next Call</span><h2 style="margin-top:8px">AAPL</h2><p class="small">The Sep $200 call expired OTM. The long-call foundation remains open.</p></div><button class="action primary">Find next short call</button></div><section class="panel"><div class="position"><div><strong>Jan 2028 $150 call</strong><br><span class="small">Foundation available · no active short call</span></div><span>$5,600 value</span><strong class="positive">+$1,100</strong><button class="action">Open</button></div><div class="position"><div><strong>Sep 2026 $200 call</strong><br><span class="small">Expired OTM · completed cycle</span></div><span>$325 premium</span><strong class="positive">+$325 realized</strong><button class="action">History</button></div></section></main></div>
+  </template>
+
+  <template id="te-view-covered">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">MSFT STRATEGY</div><div class="metric-row"><span>State</span><strong>Short Call Active</strong></div><div class="metric-row"><span>Coverage</span><span>100 shares</span></div><div class="metric-row"><span>Available shares</span><span>100</span></div></section></aside><main class="main"><div class="identity"><div><span class="pill">Stock Covered Call</span><h2 style="margin-top:8px">MSFT</h2><p class="small">100 of 200 shares support one short call. Another 100 shares remain available.</p></div><button class="action primary">Sell another covered call</button></div><div class="columns"><section class="panel"><h3>Share foundation</h3><div class="metric-row"><span class="small">Total shares</span><span>200</span></div><div class="metric-row"><span class="small">Allocated</span><span>100</span></div><div class="metric-row"><span class="small">Available</span><span>100</span></div><div class="metric-row"><span class="small">Average basis</span><span>$395.20</span></div></section><section class="panel"><h3>Active short call</h3><div class="metric-row"><span class="small">Contract</span><span>Sep $450 call</span></div><div class="metric-row"><span class="small">Premium received</span><span>$285</span></div><div class="metric-row"><span class="small">If assigned</span><span>100 shares sold @ $450</span></div></section></div><div class="callout"><strong>Buy-write variation</strong><br><span class="small">When the shares and first short call execute together, TradeEdge records the same two positions with a shared opening order.</span></div></main></div>
+  </template>
+
+  <template id="te-view-partial">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">ORDER STATUS</div><div class="metric-row"><span>Requested legs</span><span>2</span></div><div class="metric-row"><span>Filled legs</span><strong class="negative">1</strong></div><div class="metric-row"><span>Strategy state</span><strong class="negative">Action Needed</strong></div></section></aside><main class="main"><div class="label" style="color:var(--te-red)">PARTIAL EXECUTION</div><h2>PMCC opening did not complete</h2><p class="sub">TradeEdge represents the actual fill instead of the intended two-leg strategy.</p><section class="panel"><div class="position"><div><strong>AAPL Jan 2028 $150 call</strong><br><span class="small">Buy 1 @ $45.25</span></div><span class="positive">Filled</span><strong>10:44 AM</strong><button class="action">Review</button></div><div class="position"><div><strong>AAPL Sep 2026 $200 call</strong><br><span class="small">Sell 1 @ $3.20 limit</span></div><span class="negative">Not filled</span><strong>Cancelled</strong><button class="action">Review</button></div></section><div class="callout danger"><strong>Current position: LEAPS only</strong><br><span class="small">No active short call exists. Record a later short-call fill only if it actually executes.</span></div><div class="actions"><button class="action">Keep LEAPS only</button><button class="action primary">Review replacement short call</button></div></main></div>
+  </template>
+
+  <template id="te-view-reconcile">
+    <div class="work screen"><aside class="side"><section class="panel"><div class="label">RECONCILIATION QUEUE</div><div class="metric-row"><span>Matched</span><span class="positive">18</span></div><div class="metric-row"><span>Needs review</span><strong class="negative">1</strong></div></section></aside><main class="main"><div class="label" style="color:var(--te-amber)">COVERAGE UNRESOLVED</div><h2>Choose the intended MSFT relationship</h2><p class="sub">The broker reported one short call, 200 shares, and one eligible long call. It did not identify strategy intent.</p><section class="panel"><label class="choice"><input type="radio" name="reconcile"><span><strong>Link to 100 MSFT shares</strong><br><span class="small">Classifies the position as a stock covered call.</span></span></label><label class="choice"><input type="radio" name="reconcile"><span><strong>Link to Jan 2028 $350 call</strong><br><span class="small">Classifies the position as a PMCC — long call diagonal.</span></span></label><label class="choice"><input type="radio" name="reconcile"><span><strong>Leave unresolved</strong><br><span class="small">Track the short call without inventing strategy intent.</span></span></label></section><div class="actions"><button class="action">Review transactions</button><button class="action primary">Confirm relationship</button></div></main></div>
+  </template>
+
+  <template id="te-view-replace">
+    <div class="modal-layer screen"><div class="work dimmed"><aside class="side"></aside><main class="main"><h2>AAPL strategy</h2></main></div><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="replace-title"><div class="label">REPLACE LONG-CALL FOUNDATION</div><h2 id="replace-title">Review foundation replacement</h2><p class="sub">The original long call closes and remains in history. The replacement must support the active short call.</p><div class="columns"><div class="panel"><h3>Close original</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2028 $150 call</span></div><div class="metric-row"><span class="small">Estimated proceeds</span><span>$5,600</span></div><div class="metric-row"><span class="small">Realized result</span><span class="positive">+$1,100</span></div></div><div class="panel"><h3>Open replacement</h3><div class="metric-row"><span class="small">Contract</span><span>Jan 2029 $160 call</span></div><div class="metric-row"><span class="small">Estimated debit</span><span>$5,950</span></div><div class="metric-row"><span class="small">Supports active call</span><span class="positive">Yes</span></div></div></div><label class="choice"><input type="checkbox" checked><span><strong>Continue the existing AAPL strategy history</strong><br><span class="small">Both foundations remain visible in the timeline.</span></span></label><div class="actions"><button class="action">Cancel</button><button class="action primary">Review replacement order</button></div></section></div>
+  </template>
+
+  <template id="te-view-blocked">
+    <div class="modal-layer screen"><div class="work dimmed"><aside class="side"></aside><main class="main"><h2>AAPL position detail</h2></main></div><section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="blocked-title"><div class="label" style="color:var(--te-red)">ACTION BLOCKED</div><h2 id="blocked-title">The long call supports an open short call</h2><p class="sub">Closing Jan 2028 $150 call would leave the Sep 2026 $200 short call unsupported.</p><div class="callout danger"><strong>Resolve coverage before closing</strong><br><span class="small">Close the short call, replace the foundation, or assign another eligible support source. TradeEdge will not silently create an uncovered call.</span></div><div class="actions"><button class="action">Return to position</button><button class="action">Replace foundation</button><button class="action primary">Close short call first</button></div></section></div>
+  </template>
+</div>
+
+<script>
+  (() => {
+    const root = document.getElementById('te-integrated-flow');
+    const host = root.querySelector('#te-integrated-host');
+    const tabs = [...root.querySelectorAll('[data-view]')];
+    const render = (name) => {
+      const template = root.querySelector(`#te-view-${name}`);
+      if (!(template instanceof HTMLTemplateElement)) return;
+      host.replaceChildren(template.content.cloneNode(true));
+      const activeReview = name === 'long-plan' ? 'leaps' : name === 'existing-plan' ? 'coverage' : ['record', 'import'].includes(name) ? 'plan' : name;
+      tabs.forEach(tab => tab.setAttribute('aria-pressed', String(tab.dataset.view === activeReview)));
+      root.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => render(button.dataset.go)));
+      const nav = root.querySelectorAll('[data-nav]');
+      const screenerViews = ['screener', 'leaps', 'plan', 'long-plan'];
+      nav.forEach(item => item.classList.toggle('active', item.dataset.nav === (screenerViews.includes(name) ? 'screener' : 'portfolio')));
+    };
+    tabs.forEach(tab => tab.addEventListener('click', () => render(tab.dataset.view)));
+    render('screener');
+  })();
+</script>
