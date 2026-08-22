@@ -11,6 +11,12 @@ Coverage Allocations and Strategy Composition
 mockups, and the current repository implementation cited throughout.
 **Does not implement application code. Does not begin LCC-0001C.**
 
+## Revision history
+
+- **v1 (commit `170fb0d`, published `0a42cdc`):** Initial specification.
+- **v2 (this revision):** Recorded the resolved staleness-threshold decision (§13, §15, §17): 60
+  seconds, server-configurable, refresh-and-retry UI message on rejection. No other content changed.
+
 ---
 
 ## 1. Objective
@@ -525,10 +531,16 @@ of reconciliation-adjacent behavior explicitly in its own scope:
   client, to prevent a stale/manipulated client state from creating an allocation that violates
   capacity. Given the existing browser-side-only TastyTrade constraint, the practical implementation
   is: the client includes its `PortfolioSnapshot.asOf` timestamp with the POST, and the server
-  rejects (422) if that timestamp is older than a short staleness threshold, rather than the server
-  re-fetching from TastyTrade itself (which would violate the existing IP-blocking constraint). This
-  is a **new, ticket-specific decision** not present in the master architecture and is flagged as an
-  open item for team confirmation, §17.
+  rejects (422) if that timestamp is older than a staleness threshold, rather than the server
+  re-fetching from TastyTrade itself (which would violate the existing IP-blocking constraint).
+
+  **Resolved (recorded before implementation PR 3):** the staleness threshold is **60 seconds**,
+  implemented as a **server-configurable** value (environment variable, not a hardcoded constant), so
+  it can be tuned without a code change if 60 seconds proves too tight or too loose in practice. On
+  rejection, the API returns a 422 with a message instructing the user to refresh Portfolio/Screener
+  before retrying — the UI surfaces this as an explicit "Your data is out of date — refresh and try
+  again" state, not a generic error. This closes the open item previously flagged here and in §17;
+  no further product decision is required before PR 3.
 
 ---
 
@@ -566,7 +578,7 @@ of reconciliation-adjacent behavior explicitly in its own scope:
 | `sumTotalSymbolExposure`: P/L deduplication across shares + covered call + long call + PMCC | Unit | `lib/coverage/__tests__/pnl.test.ts` | LCC-0001B "P/L deduplication" acceptance criterion |
 | `POST /api/coverage-allocations`: server-side invariant re-validation rejects a client-crafted violation | Integration | `app/api/coverage-allocations/__tests__/route.test.ts` | Master architecture §13.1 |
 | `POST .../release`: narrow endpoint cannot mutate any field but status/audit | Integration | Same | §9.2, epic invariant 9 |
-| Staleness-threshold rejection on stale client snapshot timestamp | Integration | Same | §13 open item — write test once team confirms the threshold value |
+| Staleness-threshold rejection on stale client snapshot timestamp (60s, server-configurable) | Integration | Same | §13 — decision recorded; include a test for the configurable-threshold override, not just the 60s default |
 | `PortfolioDataProvider`: allocations fetched alongside snapshot, generation-gated same as `Position[]` | Integration | `components/portfolio-data/__tests__/PortfolioDataProvider.test.tsx` (extends LCC-0001A's) | Consistency with LCC-0001A's PI-0014C convention |
 | Ambiguous import: existing uncovered short call with two eligible foundations surfaces confirmation, creates no allocation until confirmed | Integration | `lib/coverage/__tests__/ambiguousImport.test.ts` | §12 |
 | Suggestion-only inferred allocation: created as `proposed`, not `active`, until user confirms | Integration | Same | §12, ticket rollout requirement |
@@ -603,8 +615,8 @@ ticket's own rollout, per its "Rollout" section:
 2. **PR 2** — `lib/coverage/deriveStrategy.ts`, `inference.ts`, unit coverage against LCC-0001A
    snapshot fixtures. Still zero visible change.
 3. **PR 3** — `app/api/coverage-allocations/route.ts` + `[id]/release/route.ts`, `lib/coverage/store.ts`.
-   Server-side invariant re-validation and the staleness-threshold check (§13 open item — needs team
-   confirmation before this PR, not after) land here.
+   Server-side invariant re-validation and the staleness-threshold check (§13 — 60-second,
+   server-configurable threshold, decision recorded) land here.
 4. **PR 4** — `PortfolioDataProvider` wiring, **inference running in suggestion-only mode** (§12),
    behind its own feature flag, independent of LCC-0001A's equity-display flag.
 5. **PR 5** — Portfolio UI (§11): allocation display, coverage-choice dialog, blocked-close messaging.
@@ -688,16 +700,15 @@ standing convention.
   commit; the persistence pattern (§4.2, §10.1) is a direct structural copy of the verified
   `position-stop-policies` route and store, not an assumed pattern.
 
-**One new open item surfaced by this ticket, not present in any prior document:** §13's
-server-side snapshot-staleness validation approach (rejecting allocation-creation requests against a
-stale client-supplied `PortfolioSnapshot.asOf` timestamp, since the server cannot itself re-fetch
-from TastyTrade under the existing browser-side-only constraint) is a new design decision this ticket
-had to make to satisfy the master architecture's §13.1 security requirement concretely. It is
-technically sound but the specific staleness threshold is a product/ops judgment call, not a pure
-engineering one, and should be confirmed before PR 3 (§17) rather than defaulted silently during
-implementation.
+**One open item was surfaced by this ticket and has since been resolved:** §13's server-side
+snapshot-staleness validation approach (rejecting allocation-creation requests against a stale
+client-supplied `PortfolioSnapshot.asOf` timestamp, since the server cannot itself re-fetch from
+TastyTrade under the existing browser-side-only constraint) required a product/ops decision on the
+specific threshold. That decision — 60 seconds, server-configurable, with an explicit
+refresh-and-retry UI message on rejection — is now recorded in §13 and reflected in §15/§17. No open
+items remain.
 
 No contradiction with the epic, the ticket, the corrected architecture, the architecture review, the
 LCC-0001A spec, the execution sequence, the mockups, or `PMCC_SPECIFICATION.md` was found. This spec
-introduces no new product decision beyond the one flagged item above, and reopens none of the three
-resolved in the master architecture's §15.0.
+introduces no new open product decisions and reopens none of the three resolved in the master
+architecture's §15.0.
