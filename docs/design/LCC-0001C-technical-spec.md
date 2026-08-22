@@ -13,6 +13,23 @@ snapshot-staleness threshold), execution sequence, both approved mockups, and th
 implementation cited throughout.
 **Does not implement application code. Does not begin LCC-0001D.**
 
+## Revision history
+
+- **v1 (commit `8ba3de4`):** Initial specification. Incorrectly stated that no called-away
+  calculation existed in the repository, and recommended deferring the dividend/early-assignment
+  exposure check to LCC-0001E.
+- **v2 (this revision):** Corrected §7/§7.1 — `calledAwayReturn()` now reuses the existing
+  `lib/portfolio/positionLifecycle.ts::calcCalledAwayProfit()` directly (a real, correctly-formed,
+  previously-uncalled function) rather than introducing a new formula, and defines "verified stock
+  capital basis" precisely as `effectiveCostBasis × coveredShares`, gated on LCC-0001A's
+  `basisComplete`. Corrected §8/§8.1 — dividend and early-assignment exposure remains in LCC-0001C
+  scope; this ticket now defines and implements the reusable `assessDividendAssignmentRisk()`
+  contract with a mandatory `UNKNOWN` state whenever dividend data is unavailable (never silently
+  `LOW`), reusing `lib/help/optionsStrategyReference.ts`'s existing caveat strings for display only,
+  never as calculation input. Updated §2.1/§2.2 file lists, §16 test matrix, §17 traceability/open
+  items (both items now resolved), §18 implementation sequence, §19 exclusions, and §20 self-review
+  accordingly. No open items remain.
+
 ---
 
 ## 1. Objective
@@ -39,8 +56,9 @@ of master architecture §4.5 (`lib/position-entry/`) and §8.
 | `lib/position-entry/workflows/stockCoveredCall.ts` | Stock covered call entry (§6.3) |
 | `lib/position-entry/workflows/buyWrite.ts` | Buy-write entry (§6.4) |
 | `lib/position-entry/workflows/callAgainstPosition.ts` | Call against existing position (§6.5) |
-| `lib/position-entry/calculations.ts` | Required-calculation functions (§7) |
+| `lib/position-entry/calculations.ts` | Required-calculation functions (§7), including `calledAwayReturn()` as a thin wrapper over the existing `calcCalledAwayProfit()` |
 | `lib/position-entry/pmccValidation.ts` | PMCC leg validation (§8) |
+| `lib/position-entry/dividendAssignmentRisk.ts` | Dividend/early-assignment risk-state contract (§8.1) |
 | `lib/position-entry/__tests__/*` | Test suite (§16) |
 | `app/api/position-entry-plans/route.ts` | GET/POST for `SavedPlan` (§9.1) |
 | `app/api/position-entry-executions/route.ts` | GET/POST for `ExecutionRecord` (§9.1) |
@@ -53,6 +71,9 @@ of master architecture §4.5 (`lib/position-entry/`) and §8.
 | `lib/coverage/types.ts`, `invariants.ts`, `inference.ts`, `store.ts` (LCC-0001B) | Entry workflows call `POST /api/coverage-allocations` (LCC-0001B's route) at the moment execution evidence confirms a fill — this ticket's workflows are **callers** of LCC-0001B's API, not a reimplementation of it. |
 | `lib/scans/pmccPairing.ts`, `pmccChainAdapter.ts`, `pmccScore.ts`, `pmccProduction.ts` | Candidate discovery/pairing/ranking — reused unchanged for the "Discovery" stage (§5) feeding into `newPmcc.ts`'s planning stage. **Ranking (`pmccScore.ts`) is not modified by this ticket**, consistent with the resolved product decision (master architecture §15.0) that PMCC scoring changes require separate approval. |
 | `lib/portfolio/pmccLegEconomics.ts`, `pmccLegQuote.ts` | Existing leg-economics/quote-freshness helpers — reused for §7's calculation functions rather than reimplemented. |
+| `lib/portfolio/positionLifecycle.ts::calcCalledAwayProfit()` | Existing, correctly-formed called-away total-profit calculation (previously uncalled anywhere in the repo) — reused directly by `calculations.ts::calledAwayReturn()` (§7.1), not reimplemented. |
+| `lib/scans/covered-call-finder.ts` (`maxUpsideIfCalledAway` inline calc, `SpreadCandidate.ccMaxUpsideIfCalledAway`) | Existing discovery-stage, per-share, pre-trade called-away estimate — remains untouched; not modified, not superseded, not conflated with §7.1's tracking-stage `calledAwayReturn()`. |
+| `lib/help/optionsStrategyReference.ts` | Existing educational caveat strings (dividend/early-assignment prose) — reused for **display text only** in §8.1's `caveatText`, never as a calculation input. |
 | `lib/scans/financials.ts` (`calculatePmccCapital`, `resolveOptionContractMultiplier`) | Reused for net-debit/capital calculations (§7). |
 | `lib/optionSymbol.ts` (`parseOccSymbol`) | Reused for leg identity parsing during execution matching (§10). |
 | `lib/tastytrade/client.ts`, and `app/portfolio/page.tsx`'s private `ttPost`/`ttValidateOrder`/`ttPostComplex` (lines ~1113–1200) | **Not reused, not extended.** These implement TradeEdge-initiated order submission for existing option close/roll actions, ES-0001/ES-0002 safety-gated. This ticket's "Record Executed Trade" / "Import or Match Broker Activity" paths (§10) are evidence-recording only — they do not place broker orders. Automatic broker execution is an explicit LCC-0001C non-goal. |
@@ -338,8 +359,56 @@ item 2: this list was not previously mapped function-by-function).
 | Original transaction basis | `originalTransactionBasis(fills)` | Directly from `ExecutionFill.price`/`fees`, never re-derived |
 | Net strategy basis (explicitly non-tax) | `netStrategyBasis(foundationBasis, allocation)` | `foundationPnl` basis minus cumulative realized short-call premium; UI label always includes "not a tax basis" per ticket requirement |
 | Total strategy P/L (no double counting) | `totalStrategyPnl(strategy: DerivedStrategy)` | Delegates to LCC-0001B's `sumTotalSymbolExposure()` (LCC-0001B §8.2) restricted to `strategy.contributingPositionKeys` — reused, not reimplemented |
-| Called-away return | `calledAwayReturn(foundation, assignedFill)` | New calculation, `(strike - basis + premiumReceived) / basis` — no existing implementation found in the repo; see §17 open item |
+| Called-away profit | Existing `lib/portfolio/positionLifecycle.ts::calcCalledAwayProfit(callStrike, effectiveCostBasis, coveredShares, realizedPremiumPnl)` — **reused directly, not reimplemented**. This function already exists, is correctly formed (`(callStrike - effectiveCostBasis) * coveredShares + realizedPremiumPnl`), and is called by no current production code path (verified: zero callers found anywhere in the repo at the time of this ticket's original draft, which is why it was missed — it is dead code today, not missing code). This ticket becomes its first caller. |
+| Called-away return | `calledAwayReturn(foundation, assignedFill, allocation)` — **new, thin wrapper only**, defined as `calcCalledAwayProfit(...) / verifiedCapitalBasis`, where `verifiedCapitalBasis = effectiveCostBasis * coveredShares`. Returns `null` whenever `EquityHolding.basisComplete === false` (LCC-0001A) or `coveredShares <= 0` — never computed against an incomplete or fabricated basis. See §7.1 below for the exact contract; this wrapper introduces **no new profit math**, only a division and a null-safety gate over the existing function. |
 | Initial theoretical max loss (new 1:1 diagonal only) | `initialTheoreticalMaxLoss(netDebit)` | Existing `calculatePmccCapital` (financials.ts), reused. Explicitly **not** retained as a label after lifecycle changes — this function is only called at initial-entry display time, never re-invoked by any later lifecycle event (LCC-0001D scope) |
+
+### 7.1 Called-away return — corrected contract
+
+**Correction to the original draft of this ticket:** the original draft stated no called-away
+calculation existed in the repository. That was factually incorrect. Two existing calculations
+were found on closer inspection:
+
+- `lib/portfolio/positionLifecycle.ts::calcCalledAwayProfit()` (line 314) — the **tracking-stage**,
+  post-hoc total-dollar-profit calculation: `(callStrike - effectiveCostBasis) * coveredShares +
+  realizedPremiumPnl`. Currently has zero callers anywhere in the repository and zero test coverage
+  — it exists, is correctly formed, but has never been wired to anything. This ticket is its first
+  real caller.
+- `lib/scans/covered-call-finder.ts::maxUpsideIfCalledAway` (an inline calculation inside
+  `buildCcSpreadCandidate`, not an exported named function, line ~205) — the **discovery-stage**,
+  pre-trade, per-share estimate: `strike - costBasis + premiumPerShare` (using the scanned/assumed
+  mid premium, not a realized fill), returned as `ccMaxUpsideIfCalledAway` on `SpreadCandidate`,
+  already live, already tested (`covered-call-finder.test.ts` line 141), already rendered in
+  `app/screener/page.tsx` (line 4554). **This remains entirely untouched by LCC-0001C** — it is a
+  Screener/discovery-stage figure, out of this ticket's scope by the same discovery/planning/
+  execution-evidence/tracking boundary (§5) that governs everything else in this spec. Nothing in
+  LCC-0001C modifies `covered-call-finder.ts`.
+
+`calculations.ts::calledAwayReturn()` is implemented as:
+
+```ts
+export function calledAwayReturn(
+  callStrike: number,
+  foundation: EquityHolding,          // LCC-0001A type — supplies effectiveCostBasis, basisComplete
+  coveredShares: number,
+  realizedPremiumPnl: number,
+): number | null {
+  if (!foundation.basisComplete || foundation.basis == null) return null;
+  if (!(coveredShares > 0)) return null;
+  const profit = calcCalledAwayProfit(callStrike, foundation.basis, coveredShares, realizedPremiumPnl);
+  const verifiedCapitalBasis = foundation.basis * coveredShares;
+  if (!(verifiedCapitalBasis > 0)) return null;
+  return profit / verifiedCapitalBasis;
+}
+```
+
+This is a division and a null-safety gate composed **around** the existing, imported
+`calcCalledAwayProfit` — the profit arithmetic itself is not duplicated, re-derived, or approximated
+by a different formula anywhere in this ticket. "Verified stock capital basis" is defined precisely
+as `effectiveCostBasis × coveredShares`, gated on LCC-0001A's existing `basisComplete` flag exactly
+the same way `covered-call-finder.ts`'s `ccAssignmentWarning` already gates its own display — this
+ticket's null behavior is consistent with, not divergent from, the existing discovery-stage
+convention.
 
 ---
 
@@ -356,11 +425,98 @@ composing **existing** modules rather than new logic wherever one already exists
 | Long delta, intrinsic/extrinsic value | `pmccLegEconomics.ts`, reused |
 | Net debit and strike width | `financials.ts::calculatePmccCapital`, reused |
 | Liquidity and quote timestamps | `pmccQuoteQuality.ts::evaluatePmccQuoteQuality`, reused |
-| Dividend and early-assignment exposure | **No existing implementation found.** Flagged as an open item, §17 — this ticket cannot claim to implement a check that doesn't exist yet without either building new logic (out of this ticket's file-budget as scoped) or explicitly deferring it. Recommend deferring to LCC-0001E, since scanner transparency (where dividend/assignment risk is meant to be surfaced per that ticket's scope) is the more natural home. |
+| Dividend and early-assignment exposure | New `lib/position-entry/dividendAssignmentRisk.ts`, defined in this ticket (§8.1). **Remains in LCC-0001C scope**, per correction — not deferred. |
 
 **`initial net debit < strike width` is a warning signal, never a profitability guarantee** — this
 ticket's UI copy for this check must say so explicitly wherever it's rendered (ticket requirement,
 restated because it is a UI-copy requirement, not just a calculation one).
+
+### 8.1 Dividend and early-assignment exposure — reusable validation contract
+
+**Correction to the original draft of this ticket:** the original draft proposed deferring this check
+to LCC-0001E as a new-logic-avoidance measure. That is corrected here: the check remains LCC-0001C
+scope. What LCC-0001C actually builds is the **contract and risk-state model** (a pure, reusable
+function), and LCC-0001E's own future work is to **consume** that contract from its scanner
+discovery/transparency surfaces — LCC-0001C does not itself wire this into Screener result cards
+(that wiring, for whichever result cards LCC-0001E's reframed launchers own, is that ticket's job),
+but it does not leave the check unbuilt either.
+
+```ts
+// lib/position-entry/dividendAssignmentRisk.ts
+
+export type DividendAssignmentRiskState =
+  | 'LOW'                 // no ex-dividend date falls within the short call's remaining life, or
+                            // the underlying is confirmed non-dividend-paying
+  | 'ELEVATED'             // a known ex-dividend date falls before the short call's expiration
+                            // AND the short call is in-the-money or near-the-money
+  | 'UNKNOWN';             // required dividend data is unavailable — NEVER silently treated as LOW
+
+export interface DividendAssignmentRiskInput {
+  exDividendDate: string | null;        // null = "no known upcoming date" is NOT the same as
+                                          // "confirmed non-dividend-payer" -- see dataAvailable below
+  dataAvailable: boolean;                // false whenever the dividend-date source itself could not
+                                          // be queried/resolved -- distinct from "queried and found
+                                          // no upcoming date"
+  shortCallExpiration: string;
+  shortCallMoneyness: 'ITM' | 'NEAR_THE_MONEY' | 'OTM' | null;   // null if underlying/strike quote
+                                                                    // unavailable
+}
+
+export interface DividendAssignmentRiskResult {
+  state: DividendAssignmentRiskState;
+  reason: string;                        // always populated -- machine-checkable, not just for logs
+  caveatText: string | null;             // display-only caveat, sourced from
+                                          // lib/help/optionsStrategyReference.ts's existing
+                                          // assignmentExercise strings (see below) -- NEVER used in
+                                          // the state/reason computation itself
+}
+
+export function assessDividendAssignmentRisk(
+  input: DividendAssignmentRiskInput,
+): DividendAssignmentRiskResult
+```
+
+**State logic:**
+
+- `dataAvailable === false` → `state: 'UNKNOWN'`, `reason: 'Dividend data unavailable'`. This is the
+  explicit, mandatory fail-open-to-caution behavior the correction requires: **unavailable dividend
+  data is never silently classified as `LOW`.** A `DATA_UNAVAILABLE`-equivalent state (`'UNKNOWN'`)
+  is a first-class member of the enum, not an absence represented by `null` or a default.
+- `dataAvailable === true`, `exDividendDate == null` → `state: 'LOW'`, `reason: 'Confirmed
+  non-dividend-paying or no upcoming ex-dividend date'`.
+- `dataAvailable === true`, `exDividendDate` falls before `shortCallExpiration`, **and**
+  `shortCallMoneyness` is `'ITM'` or `'NEAR_THE_MONEY'` → `state: 'ELEVATED'`.
+- `dataAvailable === true`, `exDividendDate` falls before `shortCallExpiration`, but
+  `shortCallMoneyness` is `'OTM'` or unknown → `state: 'LOW'` with `reason` noting the date exists
+  but moneyness doesn't currently support early-assignment risk (a conservative-but-not-alarmist
+  classification, consistent with how `pmccScore.ts`'s existing `earningsFallsBeforeShortExpiration`
+  treats a similar date-window check for earnings).
+- `shortCallMoneyness === null` (quote unavailable) **and** a dividend date does fall in-window →
+  `state: 'UNKNOWN'`, `reason: 'Moneyness could not be verified to assess assignment risk'` — the
+  same fail-to-caution principle applied to the second required input, not just the first.
+
+**Educational caveat text, reused correctly (per the correction's explicit instruction):**
+`caveatText` is populated from the existing, unmodified strings in
+`lib/help/optionsStrategyReference.ts` (e.g., the `assignmentExercise` field's existing dividend/
+early-assignment language, lines ~99, 223, 270, 333 as applicable to the relevant strategy) — **these
+strings are reused for display only and never participate in the `state`/`reason` computation
+above.** `optionsStrategyReference.ts` contains no dividend-date data, no moneyness calculation, and
+no risk classification — treating its prose as a calculation input would be exactly the mistake this
+correction warns against, and `assessDividendAssignmentRisk()`'s pure logic never imports or
+branches on anything from that file; only the caller (the UI layer) separately looks up the matching
+caveat string for display alongside the computed `state`.
+
+**Data source note:** no existing dividend-date fetch exists anywhere in the repository (verified —
+absent from `covered-call-finder.ts`, `pmccPairing.ts`, and every other scans/portfolio module). This
+ticket defines the contract and its input shape (`DividendAssignmentRiskInput`) but does **not**
+build a new dividend-date data source — `dataAvailable: false` is the correct, honest state for this
+ticket's own callers until such a source exists, mirroring exactly how `earningsDate`/
+`earningsWithinExpiry` is already documented as "caller-computed" in `covered-call-finder.ts`
+(line 162) rather than fetched by the function itself. LCC-0001E, when it wires this contract into
+scanner transparency, is responsible for supplying a real `dataAvailable`/`exDividendDate` source if
+one becomes available; until then, every caller of `assessDividendAssignmentRisk()` in LCC-0001C's
+own workflows passes `dataAvailable: false` honestly, surfacing `UNKNOWN` with its warning rather than
+fabricating a `LOW` reading.
 
 ---
 
@@ -536,8 +692,12 @@ build, per standing convention.
 | `callAgainstPosition`: single eligible foundation preselected and disclosed; multiple → confirmation required | Integration | `lib/position-entry/__tests__/callAgainstPosition.test.ts` | Ticket "Call against existing position" scope |
 | `callAgainstPosition`: fully allocated foundation never appears as a sell-action target | Integration | Same | LCC-0001B §16 cross-check |
 | Partial/unequal/multi-fill matrix (§11's five rows) | Integration | `lib/position-entry/__tests__/partialExecution.test.ts` | Ticket "Partial execution" acceptance criteria |
-| Golden calculation tests (gross premium, liability, realized/unrealized splits, net strategy basis, called-away return placeholder, initial max loss) | Unit | `lib/position-entry/__tests__/calculations.test.ts` | **Requires Alan's approval per ticket validation requirement** — flagged, not self-approved here |
-| PMCC validation: every check in §8's table except dividend/assignment (deferred) | Unit | `lib/position-entry/__tests__/pmccValidation.test.ts` | Ticket "PMCC validation" scope |
+| Golden calculation tests (gross premium, liability, realized/unrealized splits, net strategy basis, called-away return, initial max loss) | Unit | `lib/position-entry/__tests__/calculations.test.ts` | **Requires Alan's approval per ticket validation requirement** — flagged, not self-approved here. Called-away return's underlying profit math is Alan's-approval-adjacent but not net-new: `calcCalledAwayProfit()` is existing, unreviewed-because-uncalled code; this ticket's own contribution is only the division/null-gate wrapper (§7.1), which should be a lighter review than a from-scratch formula. |
+| `calcCalledAwayProfit()` regression: existing function's behavior unchanged by becoming called for the first time | Unit | `lib/portfolio/__tests__/positionLifecycle.test.ts` (extended — this function currently has zero test coverage; adding coverage here rather than only in the new wrapper's tests keeps the existing module's own test file honest about what it covers) | §7.1 correction |
+| `calledAwayReturn()`: null when `basisComplete === false`, null when `coveredShares <= 0`, correct ratio when both are valid | Unit | `lib/position-entry/__tests__/calculations.test.ts` | §7.1 |
+| `assessDividendAssignmentRisk()`: `UNKNOWN` when `dataAvailable === false` (never `LOW`); `LOW` when confirmed no upcoming date; `ELEVATED` when in-window + ITM/near-the-money; `UNKNOWN` when moneyness unresolved despite an in-window date | Unit | `lib/position-entry/__tests__/dividendAssignmentRisk.test.ts` | §8.1 |
+| `assessDividendAssignmentRisk()`: `caveatText` sourced from `optionsStrategyReference.ts`, never influences `state`/`reason` (explicit test asserting state computation is unchanged with `caveatText` stripped/mocked) | Unit | Same | §8.1's explicit reuse-for-display-only requirement |
+| PMCC validation: every check in §8's table, including dividend/assignment exposure | Unit | `lib/position-entry/__tests__/pmccValidation.test.ts`, `dividendAssignmentRisk.test.ts` | Ticket "PMCC validation" scope — now complete, nothing deferred |
 | Two-step apply failure: allocation call fails after execution recorded → `ActionNeeded`, not silent inconsistency | Integration | `lib/position-entry/__tests__/applyConsistency.test.ts` | §14 |
 | Manual record vs. broker match: both converge on identical downstream `apply*Execution` behavior | Integration | `lib/position-entry/__tests__/executionEvidence.test.ts` | Ticket "Execution evidence" scope |
 | Accessibility: dialogs, coverage choice, confirmations | Component | Extends `app/screener/__tests__/*`, `app/portfolio/__tests__/*` | Ticket validation requirement |
@@ -561,42 +721,57 @@ build, per standing convention.
 
 All five acceptance criteria map to an explicit, named, testable mechanism.
 
-**Open items surfaced by this ticket, requiring resolution before the affected PRs:**
+**Open items from the original draft, now resolved:**
 
-1. **`calledAwayReturn` (§7)** — no existing implementation found anywhere in the repository. This
-   ticket specifies its formula but flags that it has not been validated against Alan's golden
-   fixtures (which this ticket's own validation requirement mandates). Do not implement PR 1's
-   calculation module without Alan's sign-off on this specific formula first.
-2. **Dividend and early-assignment exposure check (§8)** — no existing implementation found.
-   Recommended to defer to LCC-0001E (scanner transparency) rather than build new risk-assessment
-   logic inside this ticket's already-large scope. Needs explicit confirmation this deferral is
-   acceptable, since the ticket text lists it under LCC-0001C's own "PMCC validation" scope, not
-   LCC-0001E's.
+1. **Called-away return (§7, §7.1) — resolved.** The original draft incorrectly stated no called-away
+   calculation existed in the repository. Corrected: `calcCalledAwayProfit()`
+   (`lib/portfolio/positionLifecycle.ts`) already exists and is reused directly; this ticket adds only
+   a thin division/null-safety wrapper (`calledAwayReturn = calcCalledAwayProfit(...) /
+   (effectiveCostBasis × coveredShares)`, null when basis is incomplete). No duplicate profit math
+   was introduced. Alan's approval is still required for the golden-fixture test values (§16), which
+   is normal ticket process, not an unresolved design question — the calculation itself is no longer
+   an open item.
+2. **Dividend and early-assignment exposure check (§8, §8.1) — resolved.** Remains in LCC-0001C scope
+   per correction, not deferred. This ticket defines and implements the reusable
+   `assessDividendAssignmentRisk()` contract and its `LOW | ELEVATED | UNKNOWN` risk-state model,
+   with `UNKNOWN` as the mandatory, non-silent fallback whenever dividend data is unavailable.
+   LCC-0001E's own future scope is to *consume* this contract from scanner discovery/transparency
+   surfaces — that consumption, not the contract itself, is what's deferred, and that was always
+   correctly LCC-0001E's job regardless. No design question remains open.
+
+No open items remain in this ticket.
 
 ---
 
 ## 18. File-by-file implementation sequence
 
 1. `lib/position-entry/types.ts` — new (§4).
-2. `lib/position-entry/calculations.ts` — new, minus `calledAwayReturn` pending §17 item 1 (§7).
-3. `lib/position-entry/pmccValidation.ts` — new, minus dividend/assignment exposure pending §17 item 2 (§8).
-4. `app/api/position-entry-plans/route.ts` — new (§9.1).
-5. `app/api/position-entry-executions/route.ts` + `[id]/mark-applied/route.ts` — new (§9.1).
-6. `lib/position-entry/planStore.ts`, `executionStore.ts` — new (§9.2).
-7. `lib/position-entry/workflows/leapsOnly.ts` — new (§6.1).
-8. `lib/position-entry/workflows/stockCoveredCall.ts` — new (§6.3).
-9. `lib/position-entry/workflows/callAgainstPosition.ts` — new (§6.5).
-10. `lib/position-entry/workflows/newPmcc.ts` — new (§6.2).
-11. `lib/position-entry/workflows/buyWrite.ts` — new (§6.4).
-12. `components/portfolio-data/PortfolioDataProvider.tsx` — extend (§2.3).
-13. `app/screener/page.tsx` — extend, additive action wiring only (§2.3, §12).
-14. `app/portfolio/page.tsx` — extend, additive entry-point wiring only (§2.3, §12).
-15. Test files per §16, one per new module plus the extended existing suites named there.
+2. `lib/position-entry/calculations.ts` — new, complete including `calledAwayReturn()` as a wrapper
+   over the existing, now-imported `calcCalledAwayProfit()` (§7, §7.1).
+3. `lib/position-entry/dividendAssignmentRisk.ts` — new, complete (§8.1).
+4. `lib/position-entry/pmccValidation.ts` — new, complete, composing `dividendAssignmentRisk.ts`
+   alongside the other reused checks (§8).
+5. `app/api/position-entry-plans/route.ts` — new (§9.1).
+6. `app/api/position-entry-executions/route.ts` + `[id]/mark-applied/route.ts` — new (§9.1).
+7. `lib/position-entry/planStore.ts`, `executionStore.ts` — new (§9.2).
+8. `lib/position-entry/workflows/leapsOnly.ts` — new (§6.1).
+9. `lib/position-entry/workflows/stockCoveredCall.ts` — new (§6.3).
+10. `lib/position-entry/workflows/callAgainstPosition.ts` — new (§6.5).
+11. `lib/position-entry/workflows/newPmcc.ts` — new (§6.2).
+12. `lib/position-entry/workflows/buyWrite.ts` — new (§6.4).
+13. `components/portfolio-data/PortfolioDataProvider.tsx` — extend (§2.3).
+14. `app/screener/page.tsx` — extend, additive action wiring only (§2.3, §12).
+15. `app/portfolio/page.tsx` — extend, additive entry-point wiring only (§2.3, §12).
+16. Test files per §16, one per new module plus the extended existing suites named there, including
+    the new coverage added to `lib/portfolio/__tests__/positionLifecycle.test.ts` for
+    `calcCalledAwayProfit()` (§16).
 
-**Not touched:** `lib/scans/pmccPairing.ts`, `pmccScore.ts`, `pmccProduction.ts`, `pmccChainAdapter.ts`
-(discovery/ranking, unmodified); `lib/tastytrade/client.ts` and `app/portfolio/page.tsx`'s private
-`ttPost`/`ttValidateOrder`/`ttPostComplex` (no order submission added); `lib/coverage/*` (LCC-0001B,
-called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A, called, not modified).
+**Not touched:** `lib/scans/pmccPairing.ts`, `pmccScore.ts`, `pmccProduction.ts`, `pmccChainAdapter.ts`,
+`covered-call-finder.ts` (discovery/ranking and its own `maxUpsideIfCalledAway` estimate, unmodified,
+§7.1); `lib/help/optionsStrategyReference.ts` (read from, not modified, §8.1); `lib/tastytrade/client.ts`
+and `app/portfolio/page.tsx`'s private `ttPost`/`ttValidateOrder`/`ttPostComplex` (no order submission
+added); `lib/coverage/*` (LCC-0001B, called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A,
+called, not modified).
 
 ---
 
@@ -614,8 +789,14 @@ called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A, called, not modifi
 - **Scanner ranking changes, new launcher, Find LEAPS/Find Covered Calls/Calls Against My Positions
   as first-class Screener sections** — LCC-0001E. This ticket adds actions to *existing* result cards
   (§2.3, §12); building the reframed launcher and its four named sections is LCC-0001E's own scope.
-- **Dividend and early-assignment exposure check** — recommended deferral to LCC-0001E, pending
-  confirmation (§17 item 2).
+- **Wiring `assessDividendAssignmentRisk()` (§8.1) into Screener discovery/transparency surfaces** —
+  LCC-0001E. The contract itself (risk-state model, input shape, `UNKNOWN`-on-unavailable behavior)
+  is built and complete in this ticket; **only its consumption by LCC-0001E's reframed scanner
+  result cards is deferred**, which is a normal ticket-boundary handoff (build the reusable contract
+  here, wire it into the relevant surfaces there), not an unresolved design question left over from
+  this ticket. A real dividend-date data source, if one doesn't already exist by the time LCC-0001E
+  is implemented, is also that ticket's responsibility to supply — this ticket's own callers pass
+  `dataAvailable: false` honestly rather than inventing a data source.
 - **PMCC scoring changes** — out of scope for this ticket and the epic generally, per the resolved
   product decision (master architecture §15.0); this ticket explicitly reuses `pmccScore.ts`
   unmodified (§3).
@@ -633,7 +814,9 @@ called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A, called, not modifi
   call against existing position, execution evidence, required calculations, PMCC validation, partial
   execution) and all five acceptance criteria map to an explicit mechanism — §17 traceability table.
   Non-goals (automatic broker execution, automatic roll recommendations, assignment reconciliation,
-  scanner ranking changes) are respected and restated in §19.
+  scanner ranking changes) are respected and restated in §19. The "PMCC validation" scope item, which
+  explicitly names dividend/early-assignment exposure as part of LCC-0001C's own responsibility, is
+  now fully honored (§8.1) rather than partially deferred.
 - **Corrected master architecture:** §4.5, §8 are implemented without deviation. The
   discovery/planning/execution-evidence/tracking boundary (§5) is enforced at the type level
   (`SavedPlan` structurally cannot reach `lib/coverage/store.ts`'s API), not just by convention.
@@ -651,9 +834,10 @@ called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A, called, not modifi
   reimplementing staleness handling.
 - **Execution sequence / Gate C:** all four Gate C criteria (discovery/planning/execution/tracking
   remain distinct; LEAPS-only/PMCC/CC/buy-write/existing-position flows pass; partial/unequal fills
-  produce truthful position states; Alan's golden calculations pass) map to §5, §6, §11, and §17 item 1
-  respectively — the last one is flagged as **not yet satisfied**, since Alan's approval is a
-  precondition this document cannot self-certify.
+  produce truthful position states; Alan's golden calculations pass) map to §5, §6, §11, and §16
+  respectively. The last criterion (Alan's golden calculations) remains a precondition this document
+  cannot self-certify — that is normal process, not an unresolved design gap in this spec, since the
+  calculations themselves (including called-away return) are now fully and correctly specified.
 - **Mockups:** §12 explicitly maps every LCC-0001C mockup-map row to a concrete UI wiring point, and
   correctly attributes the launcher/section-level UI to LCC-0001E rather than claiming it here.
 - **`PMCC_SPECIFICATION.md`:** not applicable to this ticket's scope; `pmccScore.ts` explicitly
@@ -661,13 +845,17 @@ called, not modified); `lib/portfolio-snapshot/*` (LCC-0001A, called, not modifi
 - **Current code:** §2 verified every cited file/function against the repository at the synced
   commit, including confirming that TradeEdge-initiated order submission (`ttPost`/`ttValidateOrder`)
   is private to `app/portfolio/page.tsx` and is correctly excluded from this ticket's scope rather
-  than silently reused or duplicated.
+  than silently reused or duplicated. This revision specifically re-verified
+  `lib/portfolio/positionLifecycle.ts::calcCalledAwayProfit()` (exists, correctly formed, zero prior
+  callers) and `lib/scans/covered-call-finder.ts`'s inline `maxUpsideIfCalledAway` calculation (exists,
+  live, tested, a distinct discovery-stage figure this ticket does not touch) — the original draft's
+  claim that no called-away calculation existed was incorrect and is corrected throughout §7/§7.1.
 
-Two open items were surfaced during this review and are **not yet resolved**: `calledAwayReturn`'s
-formula requires Alan's sign-off before implementation (§17 item 1), and the dividend/early-assignment
-exposure check's deferral to LCC-0001E requires explicit team confirmation, since the ticket text
-places it in LCC-0001C's own scope (§17 item 2). Both are flagged rather than silently assumed or
-silently implemented without the required approval. No contradiction with the epic, the ticket, the
-corrected architecture, the architecture review, the LCC-0001A/B specs, the execution sequence, the
-mockups, or `PMCC_SPECIFICATION.md` was found, and none of the three resolved product decisions from
-the master architecture's §15.0 are reopened.
+**Both items flagged as open in the original draft are now resolved.** Called-away return reuses the
+existing `calcCalledAwayProfit()` directly, introducing no duplicate profit formula (§7.1). Dividend
+and early-assignment exposure remains in LCC-0001C scope as a reusable, fail-to-`UNKNOWN` contract
+(§8.1), with only its consumption by LCC-0001E's scanner surfaces deferred — a normal ticket-boundary
+handoff, not a design question. No open items remain in this document. No contradiction with the
+epic, the ticket, the corrected architecture, the architecture review, the LCC-0001A/B specs, the
+execution sequence, the mockups, or `PMCC_SPECIFICATION.md` was found, and none of the three resolved
+product decisions from the master architecture's §15.0 are reopened.
