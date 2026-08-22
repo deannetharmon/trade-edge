@@ -1,10 +1,23 @@
 # LCC-0001 — Master Technical Architecture
 Equity-Aware LEAPS, Covered Call, and PMCC Lifecycle
 
-**Status:** Draft for team review (Dane)
+**Status:** Approved pending team confirmation
 **Traces to:** LCC-0001 epic, execution sequence, tickets A–E, PMCC_SPECIFICATION.md,
 `tradeedge-integrated-leaps-flow.html`, `tradeedge-equity-portfolio-revision.html`
 **Does not implement application code.**
+
+## Revision history
+
+- **v1 (commit `ba60a81`):** Initial master architecture, per LCC-0001 review index review order.
+- **v2 (this revision):** Applied all eight corrections from
+  `docs/design/LCC-0001-architecture-review.md` (commit `6bbf3a5`): corrected migration detector
+  (§10), corrected adjusted-multiplier reference (§15.2), workflow-asserted PMCC origination (§5.4),
+  explicit proposed-allocation release rule (§5.3 invariant 8), reconciliation-trigger
+  cross-reference (§13.2), added migration test-matrix row (§13.3), added non-goals check (§3.1), and
+  added AD-1 supporting evidence (§15.4). The three product decisions recorded in §15.0 (foundation
+  protection, PMCC origination persistence, PMCC scoring conflict routed to a separate ticket) are
+  unchanged and were re-verified consistent throughout this revision. Status updated to "Approved
+  pending team confirmation" as all eight review corrections are resolved.
 
 ---
 
@@ -130,6 +143,18 @@ shadow-mode parity checks against the existing Covered Call capacity numbers bef
    transition-aware state machine; rolls/assignment/partial fills have no formal representation.
 6. Checked-in `PMCC_SPECIFICATION.md` is unreconciled with shipped `pmccScore.ts` (§2.3) — this
    predates LCC-0001 but blocks any LCC-0001E scoring change from proceeding safely until resolved.
+
+### 3.1 Non-goals check
+
+The epic's six non-goals (automatic exercise decisions, tax advice/tax-lot optimization, naked-call
+recommendations, automated roll recommendations without user initiation, portfolio-margin
+replication, multi-foundation support for a single short-call contract, a global navigation/shell
+redesign, and replacing the existing Screener/Portfolio/theme/accent systems) have been checked
+against the proposal in §4–§11. None is inadvertently introduced: allocation invariant 3 (§5.3)
+explicitly caps a single foundation to one simultaneous standard short-call allocation rather than
+enabling multi-foundation support; no roll, exercise, or assignment transition (§7) is triggered
+automatically without user action; and §4.1/§4.6 keep the existing shell, launcher, and theme/accent
+systems as the substrate rather than proposing a replacement.
 
 ---
 
@@ -310,6 +335,12 @@ Directly ported from the epic's cross-ticket invariant list (§ "Cross-ticket in
    fill event promotes them.
 7. Unresolvable coverage (unattributable exposure, unknown deliverable, unresolved account identity)
    → fail closed; no new `'active'` allocation is created, existing holdings remain visible.
+8. A `status: 'proposed'` allocation is released (transitioned to `'released'`, not left stale) in
+   lockstep with its backing working order's terminal state — cancelled, rejected, or expired. The
+   short-call lifecycle state machine (§7.2) governs the order/position side of this transition;
+   this invariant makes explicit that the allocation record tracks it in the same step, closing the
+   gap where a `'proposed'` reservation could otherwise outlive the order that justified it
+   (architecture review, data-model completeness).
 
 ### 5.4 Derived Strategy (projection only, `lib/coverage/deriveStrategy.ts`)
 
@@ -324,7 +355,16 @@ Distinguishing rule (directly answers the four cases named in this ticket):
 | **Standalone LEAPS** | Long call position, no active/proposed allocation referencing it as a foundation → `LongCallOnly`. |
 | **Stock-covered call** | Active allocation, `foundationType: 'equity'` → `StockCoveredCall`. |
 | **PMCC created together** | Two positions opened from one `position-entry` execution-evidence event (§8) with `foundationType: 'longCall'`, `source: 'userConfirmed'` at creation, single roll cycle count 0 → `PmccLongCallDiagonal`. |
-| **Call later written against existing LEAPS** | Long call position pre-dates the allocation and `foundationType: 'longCall'` → still classifies as `PmccLongCallDiagonal` for strategy grouping (per epic terminology: PMCC is a configuration, not an origination story), but is tagged `origination: 'ADDED_TO_EXISTING_LONG_CALL'` for audit/UI distinction only — **this is a presentation/audit distinction, not a different strategy enum value**, since Diane's mockups (Add Short Call to existing long call) route to the same PMCC detail surface as a freshly-opened PMCC. |
+| **Call later written against existing LEAPS** | Allocation created via the "Sell Call Against Position" workflow (§8) against a pre-existing long call and `foundationType: 'longCall'` → still classifies as `PmccLongCallDiagonal` for strategy grouping (per epic terminology: PMCC is a configuration, not an origination story), but is tagged `origination: 'ADDED_TO_EXISTING_LONG_CALL'` for audit/UI distinction only — **this is a presentation/audit distinction, not a different strategy enum value**, since Diane's mockups (Add Short Call to existing long call) route to the same PMCC detail surface as a freshly-opened PMCC. |
+
+**Origination is asserted by the originating workflow, not inferred from timing (architecture review
+finding, §4 item 4).** Each `CoverageAllocation` created by LCC-0001C's "New PMCC" entry path is
+tagged `origination: 'CREATED_TOGETHER'` directly by that workflow at execution-evidence time; each
+allocation created by the "Sell Call Against Position" path against an existing long call is tagged
+`origination: 'ADDED_TO_EXISTING_LONG_CALL'` directly by that workflow. There is no timestamp-based
+heuristic (e.g. "opened more than N days apart") anywhere in this determination — the workflow that
+created the allocation is definitionally the origination, which removes any ambiguity about what
+counts as "created together" versus "added later."
 
 **Confirmed product decision (§15.0):** origination is persisted as audit metadata on the
 `CoverageAllocation`/strategy history record using the enum `PmccOrigination = 'CREATED_TOGETHER' |
@@ -493,11 +533,21 @@ source for capacity/foundation-eligibility checks changes.
 
 Per LCC-0001D:
 
-1. **Dry-run/report-only mode** (`/api/migration/lcc-0001/dry-run`): reads existing PMCC positions
-   (identified via `positionLifecycle.ts::isPmccPosition()`, the current best-available detector),
-   proposes the split into independent long-call foundation + short-call cycle + `CoverageAllocation`
-   (`source: 'migrated'`), and produces an **ambiguity report** for anything that doesn't map
-   cleanly (missing execution history, unclear roll chains, adjusted contracts).
+1. **Dry-run/report-only mode** (`/api/migration/lcc-0001/dry-run`): identifies existing PMCC
+   candidates by **pairing across the existing `underlying::expiration` position buckets** — a
+   far-dated long call and a near-dated short call on the same underlying with compatible
+   deliverables — rather than via `positionLifecycle.ts::isPmccPosition()`. That function inspects
+   legs *within one already-bucketed `Position`*, and because `acquisition.ts` buckets raw broker
+   positions by `underlying::expiration` before classification ever runs, a real PMCC's two
+   different-expiration legs are already loaded as two separate `Position` objects and essentially
+   never appear together in one legs array for `isPmccPosition()` to detect (architecture review
+   finding A). This is favorable for migration: existing PMCC legs are **already independent
+   positions today**, so migration's job is to create the missing `CoverageAllocation` relationship
+   between two already-separate positions, not to split a fused one. Detected pairs then produce a
+   proposed `CoverageAllocation` (`source: 'migrated'`, `origination: 'CREATED_TOGETHER'` unless
+   evidence indicates otherwise) and an **ambiguity report** for anything that doesn't pair cleanly
+   (missing execution history, unclear roll chains, adjusted contracts, multiple plausible pairings
+   for the same underlying).
 2. **Stable migration identity**: every migrated record gets a deterministic id derived from the
    original broker position/transaction identifiers, so re-running migration is a no-op for records
    already migrated (idempotency, epic invariant 10).
@@ -576,7 +626,12 @@ Consolidated fail-closed contract, extending the pattern already proven in
 - `dataQuality.warnings[]` on the snapshot is logged (existing `warnings: string[]` pattern from
   `covered-call-capacity.ts`) with account identifiers redacted, per LCC-0001A's rollout section.
 - Reconciliation queue depth and unresolved-assignment counts are dashboard-exposed metrics per
-  LCC-0001D rollout.
+  LCC-0001D rollout. The full set of conditions that populate the queue (missing opening/closing
+  events, duplicate executions, corrected/reversed executions, assignment/exercise, stock
+  created/removed via assignment, snapshot/history disagreement, adjusted contracts, ambiguous
+  coverage, manual-then-broker-matched records) is enumerated exhaustively in LCC-0001D's own
+  "Reconciliation" scope section and is not restated here — this document tracks the metric, LCC-0001D
+  owns the trigger list.
 - Migration dry-run produces a structured before/after P/L diff report as its primary observability
   artifact.
 - Shadow-mode parity logging: old `buildCoveredCallCapacityReport()` vs new snapshot-derived capacity,
@@ -595,7 +650,7 @@ Directly maps to each ticket's Validation section; consolidated matrix:
 | Entry workflows (LEAPS-only, PMCC, CC, buy-write, partial/unequal/multi-fill) | Integration | `lib/position-entry/__tests__/` |
 | Lifecycle transitions incl. prohibited transitions | Unit | `lib/lifecycle/__tests__/shortCallCycle.test.ts` |
 | Roll, assignment (stock + PMCC), foundation replacement | Integration | `lib/lifecycle/__tests__/` |
-| Migration: simple, rolled, partial, closed, ambiguous; rerun idempotency; rollback | Integration | `lib/migration/__tests__/` |
+| Migration: already-independent positions correctly paired (the common case per architecture review finding A), rolled, partial, closed, ambiguous; rerun idempotency; rollback | Integration | `lib/migration/__tests__/` |
 | Portfolio/Screener capacity parity | Integration | existing `CcCapacityGate.test.tsx` extended |
 | Existing option close-order safety (regression) | Existing suite | `lib/portfolio/__tests__/closeOrderSafety.test.ts` — must stay green throughout |
 | PMCC ranking regression (unchanged scoring) | Existing suite | `lib/scans/__tests__/pmccProduction.test.ts` |
@@ -691,8 +746,12 @@ section below has been updated to match.
   and lifecycle events; no new datastore is proposed. If retention/query needs for reconciliation
   history exceed what Redis comfortably supports, this should be revisited before LCC-0001D.
 - "Standard" contract multiplier is assumed to be exactly 100 with no proposed change to that
-  constant; adjusted-deliverable handling is carried as a flag/override, not a parallel calculation
-  path, consistent with existing `CONTRACT_MULTIPLIER` usage in `positionMetrics.ts`.
+  constant. Adjusted-deliverable handling is carried as a flag/override, not a parallel calculation
+  path, and should be implemented against the existing `resolveOptionContractMultiplier()` /
+  `STANDARD_EQUITY_OPTION_MULTIPLIER` helpers in `lib/scans/financials.ts` — this is the more complete
+  existing reference for adjusted contracts (it already validates and falls back correctly), rather
+  than the bare `CONTRACT_MULTIPLIER = 100` constant in `positionMetrics.ts`, which has no
+  adjusted-deliverable handling of its own (architecture review finding B).
 
 ### 15.3 Principal risks
 
@@ -714,7 +773,12 @@ section below has been updated to match.
   closing/rolling/expiring/assigning/unlinking the dependent short call. Confirmed by product review,
   §15.0; any future override is a separately-ticketed, separately-authorized feature.
 - **AD-1:** Existing option-only `Position` model is kept and wrapped, not replaced (epic explicitly
-  allows this; avoids destabilizing `closeOrderSafety.ts`'s canonical-identity guarantees).
+  allows this; avoids destabilizing `closeOrderSafety.ts`'s canonical-identity guarantees). Supporting
+  evidence: `closeOrderSafety.ts`'s `StructureType` enum (`'NAKED' | 'VERTICAL' | 'IRON_CONDOR'`) has
+  no PMCC/diagonal structure type, because — consistent with architecture review finding A — a PMCC's
+  two legs are already loaded as two independent `Position` objects under the existing
+  `underlying::expiration` bucketing and are already independently closeable today. There is no
+  PMCC-shaped gap in `closeOrderSafety.ts` for LCC-0001B to patch.
 - **AD-2:** Strategy labels are pure projections, never persisted as primary truth (LCC-0001B
   explicit requirement).
 - **AD-3:** Rolls/corrections are append-only event sequences, never in-place mutations (epic
