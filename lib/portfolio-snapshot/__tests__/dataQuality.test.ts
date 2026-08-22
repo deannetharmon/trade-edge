@@ -8,10 +8,11 @@ import {
   ACCOUNT_UNRESOLVED_REASON,
   POSITIONS_UNAVAILABLE_REASON,
   ORDERS_UNAVAILABLE_REASON,
+  ADJUSTED_DELIVERABLE_REASON,
 } from '../dataQuality';
 
-const okShortCallResult = { bySymbol: {}, unclassifiedSymbols: new Set<string>(), hasUnattributableExposure: false, warnings: [] };
-const okWorkingCallResult = { bySymbol: {}, unclassifiedSymbols: new Set<string>(), hasUnattributableExposure: false, warnings: [] };
+const okShortCallResult = { bySymbol: {}, unclassifiedSymbols: new Set<string>(), hasUnattributableExposure: false, hasAdjustedOrUnknownDeliverable: false, warnings: [] };
+const okWorkingCallResult = { bySymbol: {}, unclassifiedSymbols: new Set<string>(), hasUnattributableExposure: false, hasAdjustedOrUnknownDeliverable: false, warnings: [] };
 
 describe('buildDataQuality', () => {
   it('fails closed when account identity is unresolved, before any per-symbol computation', () => {
@@ -74,6 +75,15 @@ describe('buildDataQuality', () => {
     expect(result.status).toBe('unavailable');
     expect(result.unavailableReason).toBe(ORDERS_UNAVAILABLE_REASON);
     expect(result.warnings).toContain(ORDERS_UNAVAILABLE_REASON);
+  });
+
+  it('fails capacity closed for adjusted deliverables', () => {
+    const result = buildDataQuality({
+      accountResolved: true, positionsLoaded: true, ordersLoaded: true,
+      shortCallResult: { ...okShortCallResult, hasAdjustedOrUnknownDeliverable: true },
+      workingCallResult: okWorkingCallResult,
+    });
+    expect(result).toMatchObject({ status: 'unavailable', unavailableReason: ADJUSTED_DELIVERABLE_REASON });
   });
 
   it('returns ok with no warnings when everything loads cleanly', () => {

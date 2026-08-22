@@ -138,15 +138,22 @@ describe('normalizeEquityHoldings', () => {
     expect(acc2[0].accountNumber).toBe('ACC2');
   });
 
-  it('leaves quote/valuation fields null and deliverable standard, since no quote source is wired in PR 1', () => {
+  it('keeps unavailable quote fields null and marks the quote stale', () => {
     const result = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC1');
     expect(result[0].currentPrice).toBeNull();
     expect(result[0].marketValue).toBeNull();
     expect(result[0].unrealizedPnl).toBeNull();
     expect(result[0].quoteAsOf).toBeNull();
-    expect(result[0].staleQuote).toBe(false);
+    expect(result[0].staleQuote).toBe(true);
     expect(result[0].deliverable).toBe('standard');
     expect(result[0].settledQuantity).toBeNull();
     expect(result[0].dataQualityWarnings).toEqual([]);
+  });
+
+  it('uses a verified broker mark for value and unrealized P/L', () => {
+    const result = normalizeEquityHoldings([
+      { ...equity('MSFT', 100, 'Long', 100), 'mark-price': '112.50' },
+    ], 'ACC1');
+    expect(result[0]).toMatchObject({ currentPrice: 112.5, marketValue: 11250, unrealizedPnl: 1250, staleQuote: false });
   });
 });

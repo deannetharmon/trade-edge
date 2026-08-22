@@ -7,7 +7,8 @@
 // payloads. It consumes acquirePortfolioBrokerSource(), then passes that exact source to the
 // mature loadPositions() option adapter and every new normalizer. One /positions response and one
 // /orders/live response therefore feed the complete snapshot; there is no parallel portfolio
-// acquisition path.
+// acquisition path. Marked positions, live orders, and complex-order evidence are acquired once
+// and passed into the mature adapter without re-fetching those endpoints.
 //
 // No consumer wiring beyond what PortfolioDataProvider.tsx needs to expose `snapshot`/
 // `snapshotDataQuality` (see that file's changes, PR 2 scope). Screener is not touched.
@@ -50,10 +51,8 @@ export const LCC_0001A_SNAPSHOT_ENABLED =
  * genuinely unexpected error (e.g. getAccessToken() itself throwing "Not authenticated") propagates,
  * matching PortfolioDataProvider's existing refresh() error handling for Position[] today.
  *
- * options.acquireOptions is left undefined by default here; PR 2 does not populate the equity
- * quote-resolution path (currentPrice/marketValue/unrealizedPnl/quoteAsOf/staleQuote on
- * EquityHolding remain null/false, per normalizeEquity.ts's own PR 1 scope note) -- that wiring is
- * explicitly deferred, not silently attempted.
+ * Equity quote economics use only broker mark/close evidence carried by the canonical marked
+ * positions response. Missing evidence remains null and stale; no price is fabricated.
  */
 export interface PortfolioSnapshotAcquisition {
   snapshot: PortfolioSnapshot;
@@ -74,6 +73,7 @@ function unavailableSnapshot(accountResolved: boolean): PortfolioSnapshot {
       unclassifiedSymbols: [],
       complete: false,
       warnings: [],
+      hasAdjustedOrUnknownDeliverable: false,
     },
     dataQuality: buildDataQuality({
       accountResolved,
@@ -82,6 +82,8 @@ function unavailableSnapshot(accountResolved: boolean): PortfolioSnapshot {
       shortCallResult: null,
       workingCallResult: null,
     }),
+    freshness: 'current',
+    lastSuccessfulAsOf: null,
   };
 }
 
@@ -150,10 +152,17 @@ export async function acquirePortfolioSnapshot(token?: string): Promise<Portfoli
         ])),
         complete: positionsLoaded && ordersLoaded &&
           !(shortCallResult?.hasUnattributableExposure ?? false) &&
-          !(workingCallResult?.hasUnattributableExposure ?? false),
+          !(workingCallResult?.hasUnattributableExposure ?? false) &&
+          !(shortCallResult?.hasAdjustedOrUnknownDeliverable ?? false) &&
+          !(workingCallResult?.hasAdjustedOrUnknownDeliverable ?? false),
         warnings: [...(shortCallResult?.warnings ?? []), ...(workingCallResult?.warnings ?? [])],
+        hasAdjustedOrUnknownDeliverable:
+          (shortCallResult?.hasAdjustedOrUnknownDeliverable ?? false) ||
+          (workingCallResult?.hasAdjustedOrUnknownDeliverable ?? false),
       },
       dataQuality,
+      freshness: 'current',
+      lastSuccessfulAsOf: asOf,
     },
     pendingOrders: optionResult.pendingOrders,
   };

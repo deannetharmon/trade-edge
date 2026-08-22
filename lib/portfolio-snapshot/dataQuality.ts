@@ -27,6 +27,9 @@ export const POSITIONS_UNAVAILABLE_REASON =
 export const ORDERS_UNAVAILABLE_REASON =
   'Coverage-dependent capacity unavailable: working orders could not be loaded.';
 
+export const ADJUSTED_DELIVERABLE_REASON =
+  'Coverage-dependent capacity unavailable: an adjusted or unresolved option deliverable was detected.';
+
 /**
  * Builds the snapshot's dataQuality block once account identity, positions, and orders have each
  * either succeeded or failed, and once (if positions succeeded) the short-call/working-order
@@ -72,6 +75,13 @@ export function buildDataQuality(input: {
 
   if (hasUnattributableExposure) {
     return { status: 'unavailable', unavailableReason: UNATTRIBUTABLE_EXPOSURE_REASON, staleQuotes: false, warnings };
+  }
+
+  const hasAdjustedDeliverable =
+    (input.shortCallResult?.hasAdjustedOrUnknownDeliverable ?? false) ||
+    (input.workingCallResult?.hasAdjustedOrUnknownDeliverable ?? false);
+  if (hasAdjustedDeliverable) {
+    return { status: 'unavailable', unavailableReason: ADJUSTED_DELIVERABLE_REASON, staleQuotes: false, warnings };
   }
 
   if (!input.ordersLoaded) {

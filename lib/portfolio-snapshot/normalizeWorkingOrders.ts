@@ -23,6 +23,8 @@ export interface RawOrderLegLike {
   'instrument-type'?: string;
   'option-type'?: string;
   quantity?: string | number;
+  multiplier?: string | number;
+  deliverable?: unknown;
 }
 
 export interface RawOrderLike {
@@ -42,6 +44,7 @@ export interface WorkingCallReservationResult {
   // cancelled/rejected/expired order, a buy-to-close leg, or a non-option leg never sets this.
   hasUnattributableExposure: boolean;
   warnings: string[];
+  hasAdjustedOrUnknownDeliverable: boolean;
 }
 
 // Broker status/action strings are normalized case/whitespace-insensitively -- a real payload may
@@ -66,6 +69,7 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
   const unclassifiedSymbols = new Set<string>();
   const warnings: string[] = [];
   let hasUnattributableExposure = false;
+  let hasAdjustedOrUnknownDeliverable = false;
 
   for (const order of rawOrders) {
     if (!OPEN_ORDER_STATUSES.has(normalizeToken(order.status))) continue;
@@ -77,6 +81,12 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
 
       const qty = Number(leg.quantity ?? 0);
       if (!(qty > 0)) continue; // not actually a working reservation -- irrelevant to attribution
+
+      const multiplier = leg.multiplier == null ? 100 : Number(leg.multiplier);
+      if (!Number.isFinite(multiplier) || multiplier !== 100 || leg.deliverable != null) {
+        hasAdjustedOrUnknownDeliverable = true;
+        warnings.push('Adjusted or unresolved working-order deliverable detected — Covered Call capacity cannot be safely verified.');
+      }
 
       const symbol = resolveUnderlyingSymbol(leg['underlying-symbol'], leg.symbol);
       if (!symbol) {
@@ -100,7 +110,7 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
       out[symbol] = (out[symbol] ?? 0) + qty;
     }
   }
-  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, warnings };
+  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, hasAdjustedOrUnknownDeliverable, warnings };
 }
 
 /**

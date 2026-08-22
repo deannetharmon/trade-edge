@@ -20,12 +20,8 @@
 // satisfies LCC-0001A's "Incomplete basis" acceptance criterion exactly as the existing module
 // already guarantees it: a partial-lot average is never presented as the whole-holding basis.
 //
-// This module is pure normalization only. No quote fetching, no broker acquisition, no consumer
-// wiring -- per LCC-0001A PR 1 scope (see docs/design/LCC-0001A-technical-spec.md §17/§18, PR 1).
-// currentPrice/marketValue/unrealizedPnl/quoteAsOf/staleQuote are therefore always null/false on
-// every EquityHolding this module produces; a later PR wires the same quote-resolution path
-// lib/portfolio-data/acquisition.ts already uses for option positions. deliverable is always
-// 'standard' in this PR -- no adjusted-contract evidence is read from raw positions yet.
+// This module is pure normalization only. It consumes broker mark/close evidence already present
+// on the canonical marked-position response; it never fetches quotes or fabricates missing values.
 
 import type { EquityDirection, EquityHolding } from './types';
 
@@ -39,6 +35,8 @@ export interface RawPositionLike {
   quantity?: string | number;
   'quantity-direction'?: string;
   'average-open-price'?: string | number;
+  'mark-price'?: string | number;
+  'close-price'?: string | number;
 }
 
 interface GroupAccumulator {
@@ -46,6 +44,8 @@ interface GroupAccumulator {
   costWeightedSum: number;
   costKnownShares: number;
   anyLotMissingBasis: boolean;
+  quoteWeightedSum: number;
+  quoteKnownShares: number;
 }
 
 function groupKey(symbol: string, direction: EquityDirection): string {
@@ -86,11 +86,16 @@ export function normalizeEquityHoldings(
 
     const key = groupKey(symbol, direction);
     if (!groups[key]) {
-      groups[key] = { shares: 0, costWeightedSum: 0, costKnownShares: 0, anyLotMissingBasis: false };
+      groups[key] = { shares: 0, costWeightedSum: 0, costKnownShares: 0, anyLotMissingBasis: false, quoteWeightedSum: 0, quoteKnownShares: 0 };
       directionBySymbol[key] = direction;
       symbolByKey[key] = symbol;
     }
     groups[key].shares += qty;
+    const quote = Number(p['mark-price'] ?? p['close-price']);
+    if (Number.isFinite(quote) && quote > 0) {
+      groups[key].quoteWeightedSum += quote * qty;
+      groups[key].quoteKnownShares += qty;
+    }
 
     const rawCost = p['average-open-price'];
     const cost = rawCost != null ? Number(rawCost) : NaN;
@@ -112,19 +117,22 @@ export function normalizeEquityHoldings(
     // it applied to the whole holding -- costBasis is null unless every contributing lot's basis
     // was known.
     const complete = agg.shares > 0 && !agg.anyLotMissingBasis && agg.costKnownShares === agg.shares;
+    const quoteComplete = agg.quoteKnownShares === agg.shares;
+    const currentPrice = quoteComplete ? agg.quoteWeightedSum / agg.quoteKnownShares : null;
+    const basis = complete ? agg.costWeightedSum / agg.costKnownShares : null;
     result.push({
       accountNumber,
       symbol: symbolByKey[key],
       direction: directionBySymbol[key],
       quantity: agg.shares,
       settledQuantity: null,
-      basis: complete ? agg.costWeightedSum / agg.costKnownShares : null,
+      basis,
       basisComplete: complete,
-      currentPrice: null,
-      marketValue: null,
-      unrealizedPnl: null,
+      currentPrice,
+      marketValue: currentPrice == null ? null : currentPrice * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
+      unrealizedPnl: currentPrice == null || basis == null ? null : (currentPrice - basis) * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
       quoteAsOf: null,
-      staleQuote: false,
+      staleQuote: currentPrice == null,
       deliverable: 'standard',
       dataQualityWarnings: [],
     });

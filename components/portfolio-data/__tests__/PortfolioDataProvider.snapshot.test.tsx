@@ -31,8 +31,9 @@ const position = (key: string) => ({ key, symbol: key, legs: [], accountNumber: 
 const snapshot = (positions: Position[], status: 'ok' | 'unavailable' = 'ok', reason?: string): PortfolioSnapshot => ({
   accountNumber: 'ACC1', asOf: '2026-08-22T00:00:00.000Z', quoteAsOf: null,
   equities: [], options: positions, workingOrders: [],
-  coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: status === 'ok', warnings: [] },
+  coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: status === 'ok', warnings: [], hasAdjustedOrUnknownDeliverable: false },
   dataQuality: { status, unavailableReason: reason, staleQuotes: false, warnings: [] },
+  freshness: 'current', lastSuccessfulAsOf: status === 'ok' ? '2026-08-22T00:00:00.000Z' : null,
 });
 function deferred<T>() {
   let resolve!: (value: T) => void;

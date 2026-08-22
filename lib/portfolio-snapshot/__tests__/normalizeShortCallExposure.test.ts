@@ -22,6 +22,10 @@ const longCall = (symbol: string, qty: number): RawPositionLike => ({
 });
 
 describe('normalizeShortCallExposure', () => {
+  it('flags an adjusted contract deliverable so capacity fails closed', () => {
+    const result = normalizeShortCallExposure([{ 'instrument-type': 'Equity Option', 'underlying-symbol': 'AAPL', 'option-type': 'C', 'quantity-direction': 'Short', quantity: 1, multiplier: 150 }]);
+    expect(result.hasAdjustedOrUnknownDeliverable).toBe(true);
+  });
   it('sums short call contracts per underlying', () => {
     const result = normalizeShortCallExposure([shortCall('AAPL', 1), shortCall('AAPL', 1)]);
     expect(result.bySymbol.AAPL).toBe(2);

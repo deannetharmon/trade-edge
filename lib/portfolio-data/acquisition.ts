@@ -677,14 +677,23 @@ export async function fetchAllComplexOrders(accountNumber: string, token: string
 }
 
 
-export async function fetchGtcOrders(accountNumber: string, token: string): Promise<GtcOrder[]> {
+export async function fetchGtcOrders(
+  accountNumber: string,
+  token: string,
+  evidence?: { rawLiveOrders: any[]; rawComplexOrders: any[] },
+): Promise<GtcOrder[]> {
   try {
     // Use /orders/live only — it returns working + recent 24h orders.
     // ?status=Open and ?per-page=250 are invalid params that return 400.
-    const [liveResult, complexResult] = await Promise.allSettled([
-      ttFetch(`/accounts/${accountNumber}/orders/live`, token),
-      fetchAllComplexOrders(accountNumber, token),
-    ]);
+    const [liveResult, complexResult] = evidence
+      ? [
+          { status: 'fulfilled', value: { data: { items: evidence.rawLiveOrders } } },
+          { status: 'fulfilled', value: { data: { items: evidence.rawComplexOrders } } },
+        ] as const
+      : await Promise.allSettled([
+          ttFetch(`/accounts/${accountNumber}/orders/live`, token),
+          fetchAllComplexOrders(accountNumber, token),
+        ]);
 
     // Build a map from individual order ID → complex order ID
     // Orders from /orders/live don't have complex-order-id, but we can look them up
@@ -944,6 +953,7 @@ export interface PortfolioBrokerSource {
   accountNumber: string;
   rawPositions: any[] | null;
   rawLiveOrders: any[] | null;
+  rawComplexOrders: any[] | null;
 }
 
 // LCC-0001A: one account-scoped source feeds both the mature option adapter
@@ -958,9 +968,10 @@ export async function acquirePortfolioBrokerSource(tokenOverride?: string): Prom
   const accountNumber = accounts[0]?.account?.['account-number'];
   if (!accountNumber) throw new Error('Could not read account number');
 
-  const [positionsResult, liveOrdersResult] = await Promise.allSettled([
-    ttFetch(`/accounts/${accountNumber}/positions`, token),
+  const [positionsResult, liveOrdersResult, complexOrdersResult] = await Promise.allSettled([
+    ttFetch(`/accounts/${accountNumber}/positions?include-marks=true`, token),
     ttFetch(`/accounts/${accountNumber}/orders/live`, token),
+    fetchAllComplexOrders(accountNumber, token),
   ]);
   return {
     token,
@@ -970,6 +981,9 @@ export async function acquirePortfolioBrokerSource(tokenOverride?: string): Prom
       : null,
     rawLiveOrders: liveOrdersResult.status === 'fulfilled'
       ? liveOrdersResult.value?.data?.items ?? []
+      : null,
+    rawComplexOrders: complexOrdersResult.status === 'fulfilled'
+      ? complexOrdersResult.value?.data?.items ?? []
       : null,
   };
 }
@@ -1184,7 +1198,12 @@ export async function loadPositions(
     }
   } catch {}
 
-  const gtcOrders = await fetchGtcOrders(accountNumber, token);
+  const gtcOrders = source.rawLiveOrders !== null && source.rawComplexOrders !== null
+    ? await fetchGtcOrders(accountNumber, token, {
+        rawLiveOrders: source.rawLiveOrders,
+        rawComplexOrders: source.rawComplexOrders,
+      })
+    : [];
   // TE-0002: recorded stop-policy provenance, fetched once per load exactly
   // like fetchEntrySnapshots(). Non-blocking on failure (fetchStopPolicies
   // already swallows errors and returns {}), which correctly degrades every
@@ -1211,8 +1230,8 @@ export async function loadPositions(
 
   const pendingOrders: PendingOrder[] = [];
   try {
-    const complexData = await fetchAllComplexOrders(accountNumber, token);
-    for (const order of complexData?.data?.items ?? []) {
+    const complexItems = source.rawComplexOrders ?? [];
+    for (const order of complexItems) {
       // Parent OCO envelope has no status/tif/type — check nested sub-orders instead
       const nestedOrders: any[] = order.orders ?? [];
       const hasActiveNested = nestedOrders.some(no => {
@@ -1335,8 +1354,7 @@ export async function loadPositions(
 
   const plBySymbol: Record<string, number> = {};
   try {
-    const plData = await ttFetch(`/accounts/${accountNumber}/positions?include-marks=true`, token);
-    for (const item of plData?.data?.items ?? []) {
+    for (const item of rawPositions) {
       const sym = item['underlying-symbol']; if (!sym) continue;
       const expDate = item['expires-at']?.slice(0, 10) ?? 'unknown';
       const key = `${sym}::${expDate}`;

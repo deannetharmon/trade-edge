@@ -142,7 +142,7 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
         const unavailableQuality = snapshotAcquisition.snapshot.dataQuality;
         setSnapshotDataQuality(unavailableQuality);
         setSnapshot(previous => previous
-          ? { ...previous, dataQuality: unavailableQuality }
+          ? { ...previous, dataQuality: unavailableQuality, freshness: 'last-known', lastSuccessfulAsOf: previous.lastSuccessfulAsOf ?? previous.asOf }
           : snapshotAcquisition.snapshot);
         throw new Error(acquisitionReason);
       }

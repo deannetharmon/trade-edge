@@ -11,7 +11,7 @@ const rawEquity = {
 };
 const option = { key: 'MSFT::2027', symbol: 'MSFT', accountNumber: 'ACC1', legs: [] } as unknown as Position;
 const source = (overrides: Record<string, unknown> = {}) => ({
-  token: 'token', accountNumber: 'ACC1', rawPositions: [rawEquity], rawLiveOrders: [], ...overrides,
+  token: 'token', accountNumber: 'ACC1', rawPositions: [rawEquity], rawLiveOrders: [], rawComplexOrders: [], ...overrides,
 });
 
 describe('acquireSnapshot', () => {

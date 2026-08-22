@@ -1,7 +1,7 @@
 # LCC-0001A PR 2 — Implementation Report
 
-**Status:** Complete and published for review
-**Implementation commit:** `271c673`
+**Status:** Corrected after cross-functional review; ready for re-review
+**Implementation commits:** `271c673` plus the corrective commit recorded in branch history
 **Branch:** `feature/lcc-0001a-unified-portfolio-snapshot`
 **Specification:** `docs/design/LCC-0001A-technical-spec.md`, rollout PR 2
 **Production flag:** `NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED=true`
@@ -32,7 +32,7 @@ mature `loadPositions()` path and every snapshot normalizer.
 
 - `lib/portfolio-data/acquisition.ts`
   - Adds `PortfolioBrokerSource` and `acquirePortfolioBrokerSource()`.
-  - Fetches the selected account's positions and live orders exactly once.
+  - Fetches marked positions, live orders, and paginated complex-order evidence once per acquisition and passes them into the mature adapter.
   - Allows `loadPositions(source)` to reuse that source while preserving `loadPositions()` as a
     compatibility wrapper.
 - `lib/portfolio-snapshot/acquire.ts`
@@ -66,20 +66,25 @@ mature `loadPositions()` path and every snapshot normalizer.
 
 ## 3. Final acquisition contract
 
-`acquirePortfolioBrokerSource()` resolves the account and issues one request each for:
+`acquirePortfolioBrokerSource()` resolves the account and acquires canonical evidence from:
 
 ```text
-/accounts/{accountNumber}/positions
+/accounts/{accountNumber}/positions?include-marks=true
 /accounts/{accountNumber}/orders/live
+/accounts/{accountNumber}/complex-orders?page-offset={page}&per-page=50
 ```
 
-The returned source contains the token, account number, raw positions, and raw live orders.
+The returned source contains the token, account number, marked raw positions, raw live orders, and
+the complete paginated complex-order result. `loadPositions(source)` reuses all three; it does not
+re-fetch any of them. Complex-order pagination can require multiple page requests, but each page is
+observed only once per acquisition.
 `acquirePortfolioSnapshot()` passes that same object to `loadPositions(source)` and to the equity,
 short-call, and working-order normalizers. Consequently:
 
 - `PortfolioDataProvider.positions` and `snapshot.options` originate from the same response;
 - `snapshot.equities` uses that response as well;
-- account numbers and acquisition timestamps cannot diverge between independently fetched views;
+- normalized views share one snapshot `asOf` and source object; this does not claim that the broker
+  payloads themselves carry an identical acquisition timestamp;
 - the mature option grouping, pricing, identity, and safety behavior stays in `loadPositions()`.
 
 With the flag off, the Provider continues to call the compatibility `loadPositions()` entry point.
@@ -95,6 +100,7 @@ interface SnapshotCoverageEvidence {
   unclassifiedSymbols: string[];
   complete: boolean;
   warnings: string[];
+  hasAdjustedOrUnknownDeliverable: boolean;
 }
 ```
 
@@ -115,7 +121,8 @@ must travel with that snapshot.
 | Positions request fails | Retain prior cached Provider state when available | Unavailable |
 | Live orders request fails | Current equities and options remain visible | Unavailable |
 | Unattributable short option/order | Current holdings remain visible for inspection | Unavailable account-wide |
-| Unclassified but attributable option | Current holdings remain visible | Conservatively reserved with warning |
+| Adjusted or unresolved option deliverable | Current holdings remain visible | Unavailable account-wide |
+| Unclassified but attributable option | Current holdings remain visible | Conservatively reserved with diagnostic flag |
 
 Orders failure is not represented as zero reservations. Missing evidence always blocks a trusted
 capacity result.
@@ -129,7 +136,9 @@ as the existing context `positions` and as `snapshot.options`, preventing post-e
 
 The existing generation checks remain authoritative. A superseded request cannot publish positions,
 snapshot state, or data quality. When a later positions/account refresh fails, the Provider retains
-the last successful holdings and marks snapshot quality unavailable.
+the last successful holdings, sets `freshness: 'last-known'`, retains `lastSuccessfulAsOf`, and marks
+snapshot quality unavailable. An orders-only failure leaves the newly acquired holdings marked
+`current` while disabling coverage-dependent capacity.
 
 ## 7. Review findings resolved
 
@@ -140,11 +149,13 @@ Paul and Ian independently reviewed the interrupted draft and agreed on four blo
 3. Capacity reconstructed synthetic broker payloads instead of consuming canonical evidence.
 4. Feature-enabled acquisition and latest-wins behavior lacked tests.
 
-All four are resolved in `271c673`. No blocker remains from their review.
+Those four were resolved in `271c673`. A later Alan/Paul/Ian/Quinn/Diane review found duplicate
+broker observations, adjusted-deliverable risk, missing cached-data provenance, and undefined quote
+behavior. The corrective commit resolves those findings. PR 3 remains gated on team re-review.
 
 ## 8. Verification
 
-- Corrected snapshot, acquisition, and Provider-focused regression run: **57/57 passing**.
+- Corrective snapshot, acquisition, and Provider-focused regression run: **59/59 passing**.
 - Combined snapshot and legacy covered-call-capacity run: **96 passing**, including the unchanged
   legacy capacity suite at **39/39 passing**.
 - `loadPositions()` Greek and entry-economics regression suite: **3/3 passing**.
@@ -160,7 +171,7 @@ pre-existing `toHaveBeenCalledWith` failures caused by an existing fourth argume
 
 The production feature remains off unless
 `NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED` is the literal string `true`. Immediate operational rollback
-is therefore to unset the variable or set it to any other value. The existing Provider path remains
+requires changing/unsetting the variable and rebuilding/redeploying the client bundle. The existing Provider path remains
 available and unchanged behind the off state.
 
 If code rollback is required before later PRs depend on this contract, revert `271c673`. PR 1's pure
@@ -177,6 +188,10 @@ Deferred exactly as planned:
 - Post-Gate-A cleanup: removal of the old private covered-call fetch path.
 - LCC-0001B–E: allocations, workflows, lifecycle, and scanner reframing.
 
-PR 3 may begin when this report is reviewed. It must consume the published snapshot contract, keep
+PR 3 may begin only after this corrected report is re-reviewed. It must consume the published snapshot contract, keep
 its UI flag independent from the acquisition flag, and must not change capacity or acquisition
-semantics established here.
+semantics established here. Equity economics may render only from verified marked-position values;
+missing values must display as unavailable. The UI must distinguish `current` holdings from
+`last-known` cached holdings and show `lastSuccessfulAsOf` for the latter. Short stock remains visible
+and contributes no covered-call capacity. Redacted snapshot warning observability is assigned to the
+PR 4 shadow-mode instrumentation work.

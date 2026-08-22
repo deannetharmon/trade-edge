@@ -23,6 +23,8 @@ export interface PortfolioSnapshot {
   workingOrders: WorkingOrder[];
   coverageEvidence: SnapshotCoverageEvidence;
   dataQuality: SnapshotDataQuality;
+  freshness: 'current' | 'last-known';
+  lastSuccessfulAsOf: string | null;
 }
 
 export interface SnapshotCoverageEvidence {
@@ -31,6 +33,7 @@ export interface SnapshotCoverageEvidence {
   unclassifiedSymbols: string[];
   complete: boolean;
   warnings: string[];
+  hasAdjustedOrUnknownDeliverable: boolean;
 }
 
 export type EquityDirection = 'Long' | 'Short';
@@ -58,10 +61,8 @@ export interface EquityHolding {
   // Ported from EquityHolding.costBasisComplete. True only when every contributing lot for this
   // symbol+direction group had a valid, positive average-open-price.
   basisComplete: boolean;
-  // Not populated by normalizeEquity.ts in this PR -- no quote source is wired in yet (PR 1 is
-  // types + pure normalization only, no consumer wiring). Carried as null/false rather than
-  // fabricated; a later PR wires the same quote-resolution path lib/portfolio-data/acquisition.ts
-  // already uses for option positions.
+  // Populated only from verified mark/close evidence on the canonical broker positions response.
+  // Missing evidence remains null/stale rather than being fabricated.
   currentPrice: number | null;
   marketValue: number | null;
   unrealizedPnl: number | null;

@@ -23,6 +23,8 @@ export interface RawPositionLike {
   'option-type'?: string;
   quantity?: string | number;
   'quantity-direction'?: string;
+  multiplier?: string | number;
+  deliverable?: unknown;
 }
 
 export interface ShortCallExposureResult {
@@ -43,6 +45,7 @@ export interface ShortCallExposureResult {
   // fail the whole report closed instead.
   hasUnattributableExposure: boolean;
   warnings: string[];
+  hasAdjustedOrUnknownDeliverable: boolean;
 }
 
 // Sums OPEN short equity/index call contracts per underlying symbol. Long calls never consume
@@ -56,6 +59,7 @@ export function normalizeShortCallExposure(rawPositions: RawPositionLike[]): Sho
   const unclassifiedSymbols = new Set<string>();
   const warnings: string[] = [];
   let hasUnattributableExposure = false;
+  let hasAdjustedOrUnknownDeliverable = false;
 
   for (const p of rawPositions) {
     const instrumentType = p['instrument-type'];
@@ -64,6 +68,12 @@ export function normalizeShortCallExposure(rawPositions: RawPositionLike[]): Sho
 
     const qty = Number(p.quantity ?? 0);
     if (!(qty > 0)) continue; // not actually open exposure -- irrelevant to attribution
+
+    const multiplier = p.multiplier == null ? 100 : Number(p.multiplier);
+    if (!Number.isFinite(multiplier) || multiplier !== 100 || p.deliverable != null) {
+      hasAdjustedOrUnknownDeliverable = true;
+      warnings.push('Adjusted or unresolved option deliverable detected — Covered Call capacity cannot be safely verified.');
+    }
 
     const symbol = resolveUnderlyingSymbol(p['underlying-symbol'], p.symbol);
     if (!symbol) {
@@ -91,5 +101,5 @@ export function normalizeShortCallExposure(rawPositions: RawPositionLike[]): Sho
 
     out[symbol] = (out[symbol] ?? 0) + qty;
   }
-  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, warnings };
+  return { bySymbol: out, unclassifiedSymbols, hasUnattributableExposure, hasAdjustedOrUnknownDeliverable, warnings };
 }

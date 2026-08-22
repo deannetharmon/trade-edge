@@ -23,6 +23,10 @@ const sellToOpenCallOrder = (symbol: string, qty: number, status = 'Live'): RawO
 });
 
 describe('normalizeWorkingCallReservations', () => {
+  it('flags an adjusted working-order deliverable so capacity fails closed', () => {
+    const result = normalizeWorkingCallReservations([{ status: 'Working', legs: [{ action: 'Sell to Open', 'instrument-type': 'Equity Option', 'underlying-symbol': 'AAPL', 'option-type': 'C', quantity: 1, multiplier: 150 }] }]);
+    expect(result.hasAdjustedOrUnknownDeliverable).toBe(true);
+  });
   it('reserves capacity for a live sell-to-open call order', () => {
     const result = normalizeWorkingCallReservations([sellToOpenCallOrder('AAPL', 1)]);
     expect(result.bySymbol.AAPL).toBe(1);

@@ -54,8 +54,11 @@ const snapshot = (
       .map(position => position.symbol),
     complete: true,
     warnings: [],
+    hasAdjustedOrUnknownDeliverable: false,
   },
   dataQuality: { status: 'ok', staleQuotes: false, warnings: [] },
+  freshness: 'current',
+  lastSuccessfulAsOf: '2026-08-22T00:00:00.000Z',
 });
 
 describe('computeCoveredCallCapacity', () => {
