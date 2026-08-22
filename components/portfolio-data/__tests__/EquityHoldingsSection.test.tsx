@@ -60,6 +60,32 @@ describe('EquityHoldingsSection', () => {
     expect(row).toHaveTextContent('$2,500.00');
   });
 
+  it('fails closed when quote provenance is malformed', () => {
+    render(<EquityHoldingsSection snapshot={snapshot({
+      equities: [holding({ staleQuote: false, quoteAsOf: 'not-a-timestamp' })],
+    })} th={THEMES.dark} />);
+    const row = screen.getByTestId('equity-holding-MSFT-Long');
+    expect(row).toHaveTextContent('Reference price');
+    expect(row).not.toHaveTextContent('Current price');
+    expect(row).not.toHaveTextContent('Quote as of');
+    expect(row).toHaveTextContent('Market valueUnavailable');
+    expect(row).toHaveTextContent('Unrealized P/LUnavailable');
+  });
+
+  it('fails closed when otherwise-current quote evidence belongs to last-known holdings', () => {
+    render(<EquityHoldingsSection snapshot={snapshot({
+      freshness: 'last-known',
+      lastSuccessfulAsOf: '2026-08-21T18:00:00.000Z',
+      equities: [holding({ staleQuote: false, quoteAsOf: '2026-08-22T17:55:00.000Z' })],
+    })} th={THEMES.dark} />);
+    const row = screen.getByTestId('equity-holding-MSFT-Long');
+    expect(screen.getByText(/Last known holdings/)).toBeInTheDocument();
+    expect(row).toHaveTextContent('Reference price');
+    expect(row).not.toHaveTextContent('Current price');
+    expect(row).toHaveTextContent('Market valueUnavailable');
+    expect(row).toHaveTextContent('Unrealized P/LUnavailable');
+  });
+
   it('renders incomplete basis honestly', () => {
     render(<EquityHoldingsSection snapshot={snapshot({ equities: [holding({ basis: null, basisComplete: false })] })} th={THEMES.dark} />);
     expect(screen.getByText('Basis incomplete')).toBeInTheDocument();

@@ -32,6 +32,10 @@ function money(value: number | null): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+function isValidTimestamp(value: string | null): value is string {
+  return value !== null && Number.isFinite(new Date(value).getTime());
+}
+
 function observedLabel(value: string | null): string {
   if (!value) return 'Timestamp unavailable';
   const date = new Date(value);
@@ -39,9 +43,8 @@ function observedLabel(value: string | null): string {
 }
 
 function quoteAsOfLabel(value: string | null): string {
-  if (!value) return 'Quote timestamp unavailable';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Quote timestamp unavailable' : `Quote as of ${date.toLocaleString()}`;
+  if (!isValidTimestamp(value)) return 'Quote timestamp unavailable';
+  return `Quote as of ${new Date(value).toLocaleString()}`;
 }
 
 export function EquityHoldingsSection({ snapshot, th }: {
@@ -82,8 +85,12 @@ export function EquityHoldingsSection({ snapshot, th }: {
       {snapshot.equities.length === 0 ? (
         <div className={`rounded-lg border ${th.border} ${th.card} p-4 text-xs ${th.textFaint}`}>No stock holdings found.</div>
       ) : snapshot.equities.map(holding => {
-        const economicsCurrent = holding.currentPrice != null && holding.staleQuote === false && holding.quoteAsOf !== null;
-        const referencePrice = holding.currentPrice != null && !economicsCurrent;
+        const hasFinitePrice = holding.currentPrice != null && Number.isFinite(holding.currentPrice);
+        const economicsCurrent = hasFinitePrice
+          && holding.staleQuote === false
+          && isValidTimestamp(holding.quoteAsOf)
+          && snapshot.freshness === 'current';
+        const referencePrice = hasFinitePrice && !economicsCurrent;
         const pnlTone = holding.unrealizedPnl == null ? th.textFaint : holding.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
         const symbolCapacity = capacity.status === 'ok' ? capacity.bySymbol[holding.symbol] : null;
         return (
