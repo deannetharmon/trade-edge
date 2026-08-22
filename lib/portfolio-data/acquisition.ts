@@ -680,16 +680,20 @@ export async function fetchAllComplexOrders(accountNumber: string, token: string
 export async function fetchGtcOrders(
   accountNumber: string,
   token: string,
-  evidence?: { rawLiveOrders: any[]; rawComplexOrders: any[] },
+  evidence?: { rawLiveOrders: any[] | null; rawComplexOrders: any[] | null },
 ): Promise<GtcOrder[]> {
   try {
     // Use /orders/live only — it returns working + recent 24h orders.
     // ?status=Open and ?per-page=250 are invalid params that return 400.
     const [liveResult, complexResult] = evidence
       ? [
-          { status: 'fulfilled', value: { data: { items: evidence.rawLiveOrders } } },
-          { status: 'fulfilled', value: { data: { items: evidence.rawComplexOrders } } },
-        ] as const
+          evidence.rawLiveOrders === null
+            ? { status: 'rejected', reason: new Error('Live orders unavailable') }
+            : { status: 'fulfilled', value: { data: { items: evidence.rawLiveOrders } } },
+          evidence.rawComplexOrders === null
+            ? { status: 'rejected', reason: new Error('Complex orders unavailable') }
+            : { status: 'fulfilled', value: { data: { items: evidence.rawComplexOrders } } },
+        ] as PromiseSettledResult<any>[]
       : await Promise.allSettled([
           ttFetch(`/accounts/${accountNumber}/orders/live`, token),
           fetchAllComplexOrders(accountNumber, token),
@@ -1198,12 +1202,13 @@ export async function loadPositions(
     }
   } catch {}
 
-  const gtcOrders = source.rawLiveOrders !== null && source.rawComplexOrders !== null
-    ? await fetchGtcOrders(accountNumber, token, {
-        rawLiveOrders: source.rawLiveOrders,
-        rawComplexOrders: source.rawComplexOrders,
-      })
-    : [];
+  // Consume whichever canonical order source succeeded. Missing evidence is handled as
+  // fail-closed snapshot quality by acquirePortfolioSnapshot; mature option-management evidence
+  // from the independently successful source must not be discarded and must not be re-fetched.
+  const gtcOrders = await fetchGtcOrders(accountNumber, token, {
+    rawLiveOrders: source.rawLiveOrders,
+    rawComplexOrders: source.rawComplexOrders,
+  });
   // TE-0002: recorded stop-policy provenance, fetched once per load exactly
   // like fetchEntrySnapshots(). Non-blocking on failure (fetchStopPolicies
   // already swallows errors and returns {}), which correctly degrades every

@@ -151,9 +151,26 @@ describe('normalizeEquityHoldings', () => {
   });
 
   it('uses a verified broker mark for value and unrealized P/L', () => {
+    const observedAt = '2026-08-22T12:00:00.000Z';
     const result = normalizeEquityHoldings([
       { ...equity('MSFT', 100, 'Long', 100), 'mark-price': '112.50' },
-    ], 'ACC1');
-    expect(result[0]).toMatchObject({ currentPrice: 112.5, marketValue: 11250, unrealizedPnl: 1250, staleQuote: false });
+    ], 'ACC1', observedAt);
+    expect(result[0]).toMatchObject({ currentPrice: 112.5, marketValue: 11250, unrealizedPnl: 1250, quoteAsOf: observedAt, staleQuote: false });
+  });
+
+  it.each(['0', '', 'invalid'])('falls back from mark %j to prior close and marks it stale', mark => {
+    const result = normalizeEquityHoldings([
+      { ...equity('MSFT', 100, 'Long', 100), 'mark-price': mark, 'close-price': '108' },
+    ], 'ACC1', '2026-08-22T12:00:00.000Z');
+    expect(result[0]).toMatchObject({ currentPrice: 108, staleQuote: true });
+    expect(result[0].dataQualityWarnings[0]).toContain('prior close');
+  });
+
+  it('does not fabricate a complete quote from mixed lots', () => {
+    const result = normalizeEquityHoldings([
+      { ...equity('MSFT', 100, 'Long', 100), 'mark-price': '110' },
+      equity('MSFT', 100, 'Long', 100),
+    ], 'ACC1', '2026-08-22T12:00:00.000Z');
+    expect(result[0]).toMatchObject({ currentPrice: null, quoteAsOf: null, staleQuote: true });
   });
 });

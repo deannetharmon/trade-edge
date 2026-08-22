@@ -46,6 +46,7 @@ interface GroupAccumulator {
   anyLotMissingBasis: boolean;
   quoteWeightedSum: number;
   quoteKnownShares: number;
+  anyQuoteFromClose: boolean;
 }
 
 function groupKey(symbol: string, direction: EquityDirection): string {
@@ -62,6 +63,7 @@ function groupKey(symbol: string, direction: EquityDirection): string {
 export function normalizeEquityHoldings(
   rawPositions: RawPositionLike[],
   accountNumber: string,
+  observedAt: string | null = null,
 ): EquityHolding[] {
   const groups: Record<string, GroupAccumulator> = {};
   const directionBySymbol: Record<string, EquityDirection> = {};
@@ -86,15 +88,20 @@ export function normalizeEquityHoldings(
 
     const key = groupKey(symbol, direction);
     if (!groups[key]) {
-      groups[key] = { shares: 0, costWeightedSum: 0, costKnownShares: 0, anyLotMissingBasis: false, quoteWeightedSum: 0, quoteKnownShares: 0 };
+      groups[key] = { shares: 0, costWeightedSum: 0, costKnownShares: 0, anyLotMissingBasis: false, quoteWeightedSum: 0, quoteKnownShares: 0, anyQuoteFromClose: false };
       directionBySymbol[key] = direction;
       symbolByKey[key] = symbol;
     }
     groups[key].shares += qty;
-    const quote = Number(p['mark-price'] ?? p['close-price']);
+    const mark = Number(p['mark-price']);
+    const close = Number(p['close-price']);
+    const hasMark = Number.isFinite(mark) && mark > 0;
+    const hasClose = Number.isFinite(close) && close > 0;
+    const quote = hasMark ? mark : hasClose ? close : NaN;
     if (Number.isFinite(quote) && quote > 0) {
       groups[key].quoteWeightedSum += quote * qty;
       groups[key].quoteKnownShares += qty;
+      if (!hasMark) groups[key].anyQuoteFromClose = true;
     }
 
     const rawCost = p['average-open-price'];
@@ -131,10 +138,13 @@ export function normalizeEquityHoldings(
       currentPrice,
       marketValue: currentPrice == null ? null : currentPrice * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
       unrealizedPnl: currentPrice == null || basis == null ? null : (currentPrice - basis) * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
-      quoteAsOf: null,
-      staleQuote: currentPrice == null,
+      // observedAt is our acquisition observation time, not a broker exchange timestamp.
+      quoteAsOf: currentPrice == null ? null : observedAt,
+      staleQuote: currentPrice == null || observedAt == null || agg.anyQuoteFromClose,
       deliverable: 'standard',
-      dataQualityWarnings: [],
+      dataQualityWarnings: agg.anyQuoteFromClose
+        ? ['Current mark unavailable; using prior close as stale reference pricing.']
+        : [],
     });
   }
   return result;

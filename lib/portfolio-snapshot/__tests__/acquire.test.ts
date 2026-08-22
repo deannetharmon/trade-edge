@@ -8,6 +8,7 @@ import { acquirePortfolioSnapshot, acquireSnapshot } from '../acquire';
 const rawEquity = {
   'instrument-type': 'Equity', 'underlying-symbol': 'MSFT', symbol: 'MSFT',
   quantity: 250, 'quantity-direction': 'Long', 'average-open-price': 300,
+  'mark-price': 310,
 };
 const option = { key: 'MSFT::2027', symbol: 'MSFT', accountNumber: 'ACC1', legs: [] } as unknown as Position;
 const source = (overrides: Record<string, unknown> = {}) => ({
@@ -44,6 +45,35 @@ describe('acquireSnapshot', () => {
     expect(snapshot.options).toEqual([option]);
     expect(snapshot.dataQuality.status).toBe('unavailable');
     expect(snapshot.coverageEvidence.complete).toBe(false);
+  });
+
+  it('keeps live evidence visible but fails capacity closed when complex orders fail', async () => {
+    adapter.acquirePortfolioBrokerSource.mockResolvedValue(source({ rawComplexOrders: null }));
+    const snapshot = await acquireSnapshot();
+    expect(snapshot.equities).toHaveLength(1);
+    expect(snapshot.workingOrders).toEqual([]);
+    expect(snapshot.dataQuality.status).toBe('unavailable');
+    expect(snapshot.coverageEvidence.complete).toBe(false);
+  });
+
+  it('fails capacity closed when live orders fail but complex evidence remains', async () => {
+    adapter.acquirePortfolioBrokerSource.mockResolvedValue(source({ rawLiveOrders: null, rawComplexOrders: [] }));
+    const snapshot = await acquireSnapshot();
+    expect(snapshot.equities).toHaveLength(1);
+    expect(snapshot.dataQuality.status).toBe('unavailable');
+    expect(snapshot.coverageEvidence.complete).toBe(false);
+  });
+
+  it('fails capacity closed when both order evidence sources fail', async () => {
+    adapter.acquirePortfolioBrokerSource.mockResolvedValue(source({ rawLiveOrders: null, rawComplexOrders: null }));
+    expect((await acquireSnapshot()).coverageEvidence.complete).toBe(false);
+  });
+
+  it('stamps verified marks with the snapshot observation time', async () => {
+    const snapshot = await acquireSnapshot();
+    expect(snapshot.quoteAsOf).toBe(snapshot.asOf);
+    expect(snapshot.equities[0].quoteAsOf).toBe(snapshot.asOf);
+    expect(snapshot.equities[0].staleQuote).toBe(false);
   });
 
   it('fails closed when positions fail without invoking option normalization', async () => {

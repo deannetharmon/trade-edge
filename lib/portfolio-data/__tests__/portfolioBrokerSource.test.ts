@@ -6,7 +6,7 @@ vi.mock('@/lib/tastytrade/client', () => ({
   getAccessToken: broker.getAccessToken, ttFetch: broker.ttFetch,
 }));
 
-import { acquirePortfolioBrokerSource, loadPositions } from '../acquisition';
+import { acquirePortfolioBrokerSource, fetchGtcOrders, loadPositions } from '../acquisition';
 
 describe('acquirePortfolioBrokerSource', () => {
   beforeEach(() => {
@@ -49,5 +49,21 @@ describe('acquirePortfolioBrokerSource', () => {
     const result = await acquirePortfolioBrokerSource();
     expect(result.rawPositions).toHaveLength(1);
     expect(result.rawLiveOrders).toBeNull();
+  });
+
+  it('preserves live GTC evidence when complex-order evidence is unavailable', async () => {
+    const orders = await fetchGtcOrders('ACC1', 'token', {
+      rawLiveOrders: [{ id: 1, status: 'Working', 'time-in-force': 'GTC', 'order-type': 'Limit', legs: [{ symbol: 'AAPL  260918C00200000', action: 'Sell to Open', quantity: 1 }] }],
+      rawComplexOrders: null,
+    });
+    expect(orders).toHaveLength(1);
+  });
+
+  it('preserves complex GTC evidence when live-order evidence is unavailable', async () => {
+    const orders = await fetchGtcOrders('ACC1', 'token', {
+      rawLiveOrders: null,
+      rawComplexOrders: [{ id: 2, orders: [{ id: 3, status: 'Working', 'time-in-force': 'GTC', 'order-type': 'Limit', legs: [{ symbol: 'AAPL  260918C00200000', action: 'Sell to Open', quantity: 1 }] }] }],
+    });
+    expect(orders.length).toBeGreaterThan(0);
   });
 });

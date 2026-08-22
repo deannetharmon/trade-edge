@@ -103,33 +103,38 @@ export async function acquirePortfolioSnapshot(token?: string): Promise<Portfoli
   const rawOrders = source.rawLiveOrders as RawOrderLike[] | null;
 
   const positionsLoaded = rawPositions !== null;
-  const ordersLoaded = rawOrders !== null;
+  const liveOrdersLoaded = rawOrders !== null;
+  const ordersLoaded = liveOrdersLoaded && source.rawComplexOrders !== null;
 
   // Equity visibility does not depend on orders having loaded -- per LCC-0001A's own fail-closed
   // table, equities/options remain visible when only working-order evidence is missing.
   const equities = positionsLoaded
-    ? normalizeEquityHoldings(rawPositions as RawPositionLike[], accountNumber)
+    ? normalizeEquityHoldings(rawPositions as RawPositionLike[], accountNumber, asOf)
     : [];
 
   const shortCallResult = positionsLoaded
     ? normalizeShortCallExposure(rawPositions as RawPositionLike[])
     : null;
 
-  const workingCallResult = ordersLoaded
+  const workingCallResult = liveOrdersLoaded
     ? normalizeWorkingCallReservations(rawOrders as RawOrderLike[])
     : null;
 
-  const workingOrders = ordersLoaded
+  const workingOrders = liveOrdersLoaded
     ? normalizeWorkingOrders(rawOrders as RawOrderLike[], accountNumber)
     : [];
 
-  const dataQuality = buildDataQuality({
+  const baseDataQuality = buildDataQuality({
     accountResolved: true,
     positionsLoaded,
     ordersLoaded,
     shortCallResult,
     workingCallResult,
   });
+  const dataQuality = {
+    ...baseDataQuality,
+    staleQuotes: equities.some(holding => holding.staleQuote),
+  };
 
   const optionResult = positionsLoaded
     ? await loadPositions(source)
@@ -139,7 +144,7 @@ export async function acquirePortfolioSnapshot(token?: string): Promise<Portfoli
     snapshot: {
       accountNumber,
       asOf,
-      quoteAsOf: null,
+      quoteAsOf: equities.some(holding => holding.quoteAsOf !== null) ? asOf : null,
       equities,
       options: optionResult.positions,
       workingOrders,

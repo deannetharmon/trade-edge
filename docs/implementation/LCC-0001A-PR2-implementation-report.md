@@ -1,7 +1,7 @@
 # LCC-0001A PR 2 — Implementation Report
 
 **Status:** Corrected after cross-functional review; ready for re-review
-**Implementation commits:** `271c673` plus the corrective commit recorded in branch history
+**Implementation commits:** `271c673`, `85eb367`, and this final corrective commit
 **Branch:** `feature/lcc-0001a-unified-portfolio-snapshot`
 **Specification:** `docs/design/LCC-0001A-technical-spec.md`, rollout PR 2
 **Production flag:** `NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED=true`
@@ -78,6 +78,10 @@ The returned source contains the token, account number, marked raw positions, ra
 the complete paginated complex-order result. `loadPositions(source)` reuses all three; it does not
 re-fetch any of them. Complex-order pagination can require multiple page requests, but each page is
 observed only once per acquisition.
+
+Live and complex evidence are consumed independently by the mature GTC adapter. If either request
+fails, evidence from the successful request remains available for existing option-management
+behavior, while snapshot coverage is explicitly incomplete and capacity fails closed.
 `acquirePortfolioSnapshot()` passes that same object to `loadPositions(source)` and to the equity,
 short-call, and working-order normalizers. Consequently:
 
@@ -127,6 +131,12 @@ must travel with that snapshot.
 Orders failure is not represented as zero reservations. Missing evidence always blocks a trusted
 capacity result.
 
+Equity economics use a positive broker mark when present. The snapshot acquisition `asOf` is stored
+as the observation time on that normalized quote; it is not represented as an exchange timestamp.
+A positive prior close is only a stale reference fallback and carries an explicit warning. A
+missing or incomplete multi-lot quote remains unavailable. Snapshot `staleQuotes` reflects these
+holding-level states.
+
 ## 6. Provider behavior
 
 The enabled path uses `acquirePortfolioSnapshot()` instead of invoking `loadPositions()` and
@@ -151,11 +161,13 @@ Paul and Ian independently reviewed the interrupted draft and agreed on four blo
 
 Those four were resolved in `271c673`. A later Alan/Paul/Ian/Quinn/Diane review found duplicate
 broker observations, adjusted-deliverable risk, missing cached-data provenance, and undefined quote
-behavior. The corrective commit resolves those findings. PR 3 remains gated on team re-review.
+behavior. Commit `85eb367` resolved the first corrective round; this final corrective commit closes
+the partial-order-evidence and quote-provenance findings. PR 3 remains gated on team re-review.
 
 ## 8. Verification
 
-- Corrective snapshot, acquisition, and Provider-focused regression run: **59/59 passing**.
+- Final snapshot, acquisition, broker-source, and Provider-focused regression run: **69/69 passing**.
+- Mature stop/GTC reconstruction and safety regression run: **49/49 passing**.
 - Combined snapshot and legacy covered-call-capacity run: **96 passing**, including the unchanged
   legacy capacity suite at **39/39 passing**.
 - `loadPositions()` Greek and entry-economics regression suite: **3/3 passing**.
@@ -174,9 +186,9 @@ The production feature remains off unless
 requires changing/unsetting the variable and rebuilding/redeploying the client bundle. The existing Provider path remains
 available and unchanged behind the off state.
 
-If code rollback is required before later PRs depend on this contract, revert `271c673`. PR 1's pure
-types/equity normalizer commit (`3bab2b3`) can remain because it has no consumer wiring or production
-behavior.
+If code rollback is required before later PRs depend on this contract, revert the final corrective
+commit first, then `85eb367`, then `271c673`. PR 1's original commit (`3bab2b3`) may remain only if
+its now-superseded pure-normalizer contract is still desired; otherwise revert it last.
 
 ## 10. Deferred work and PR 3 entry criteria
 

@@ -42,8 +42,8 @@ export const ADJUSTED_DELIVERABLE_REASON =
  *      (ported verbatim from the source module's fail-closed behavior).
  *   4. Working orders fetch failed (positions succeeded) -> unavailable for coverage-dependent
  *      computation while reliable equity/option holdings remain present for display.
- * Deliverable-incompatible/unknown conditions are surfaced per-holding via
- * EquityHolding.dataQualityWarnings, never escalated to account-wide unavailability here.
+ *   5. Adjusted or unresolved option deliverables -> unavailable account-wide because standard
+ *      100-share capacity math cannot safely represent them.
  */
 export function buildDataQuality(input: {
   accountResolved: boolean;
@@ -87,8 +87,7 @@ export function buildDataQuality(input: {
   if (!input.ordersLoaded) {
     // Positions succeeded and carry no unattributable exposure on their own, but working-order
     // evidence is missing -- equities/options remain visible; coverage-dependent capacity figures
-    // are not trustworthy. Represented as an 'ok'-status snapshot with an explicit warning, not as
-    // account-wide unavailability, since equity/option visibility is not itself compromised.
+    // are not trustworthy. Holdings remain visible, but coverage-dependent capacity is unavailable.
     warnings.push(ORDERS_UNAVAILABLE_REASON);
     return { status: 'unavailable', unavailableReason: ORDERS_UNAVAILABLE_REASON, staleQuotes: false, warnings };
   }
