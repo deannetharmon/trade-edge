@@ -42,6 +42,8 @@ export async function ingestCoveredCallCapacityShadow(
     const countsKey = `${CC_CAPACITY_SHADOW_REDIS_PREFIX}:counts:${day}`;
     const recentKey = `${CC_CAPACITY_SHADOW_REDIS_PREFIX}:recent`;
     const stored = { ...result, receivedAt: context.receivedAt };
+    const receivedAtMs = new Date(context.receivedAt).getTime();
+    const retentionCutoffMs = receivedAtMs - CC_CAPACITY_SHADOW_RETENTION_SECONDS * 1000;
     const tx = redis.multi();
     tx.hincrby(countsKey, 'total', 1);
     tx.hincrby(countsKey, `outcome:${result.outcome}`, 1);
@@ -51,8 +53,10 @@ export async function ingestCoveredCallCapacityShadow(
       if (difference.kind === 'field') tx.hincrby(countsKey, `field:${difference.field}`, 1);
     }
     tx.expire(countsKey, CC_CAPACITY_SHADOW_RETENTION_SECONDS);
-    tx.lpush(recentKey, JSON.stringify(stored));
-    tx.ltrim(recentKey, 0, CC_CAPACITY_SHADOW_RECENT_LIMIT - 1);
+    tx.zadd(recentKey, receivedAtMs, JSON.stringify(stored));
+    tx.zremrangebyscore(recentKey, '-inf', `(${retentionCutoffMs}`);
+    tx.zremrangebyrank(recentKey, 0, -(CC_CAPACITY_SHADOW_RECENT_LIMIT + 1));
+    tx.expire(recentKey, CC_CAPACITY_SHADOW_RETENTION_SECONDS);
     await tx.exec();
     return 'accepted';
   });

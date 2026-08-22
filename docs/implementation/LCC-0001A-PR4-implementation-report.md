@@ -5,8 +5,9 @@
 **Base:** merged PR #27 / `a877d7892a3b5bdcdd8e9942ae2edc1fa9890a30`
 **Implementation commits:** `f97c0481c44d3d599d9ba13ab15e953b0a493208`
 (`Add LCC-0001A capacity shadow parity`), `49b513c1dfcf88cdddd974bfe2d89241d8165c52`
-(`Add durable PR4 shadow monitoring`), followed by the commit titled
-`Harden PR4 shadow telemetry integrity`.
+(`Add durable PR4 shadow monitoring`), `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`
+(`Harden PR4 shadow telemetry integrity`), followed by the commit titled
+`Complete PR4 telemetry evidence safeguards`.
 
 ## Outcome
 
@@ -73,9 +74,11 @@ identity is never stored or logged.
 The server accepts only these top-level fields: `outcome`, `comparedAt`, `snapshotAsOf`,
 `snapshotFreshness`, `differences`, and, for `skipped` only, `reason`. Difference variants have
 closed key sets for status, symbol-only, one of the nine approved capacity fields, warnings, or
-unavailable reason. Each field mismatch has exact type/nullability rules: share and contract counts
-are non-negative safe integers, cost basis is a finite non-negative number or null, and boolean
-fields accept booleans only. Unexpected keys, negative counts, field/type mismatches, and non-finite
+unavailable reason. Each field mismatch has exact type/nullability rules: `sharesOwned` is a finite
+non-negative number and therefore preserves fractional holdings; the four contract counts are
+non-negative safe integers; `costBasis` is a finite non-negative number or null; and
+`costBasisComplete`, `oversubscribed`, and `hasUnclassifiedExposure` accept booleans only.
+Unexpected keys, negative counts, field/type mismatches, unsafe contract integers, and non-finite
 values are rejected. Payloads are limited to 32 KiB, 100 differences, 50 warning strings per side,
 and bounded string lengths.
 
@@ -96,17 +99,19 @@ The authenticated route reuses the repository's established `REDIS_URL`/ioredis 
 infrastructure with a separate identifier-free namespace:
 
 - Daily hash: `lcc0001a:cc-capacity-shadow:counts:YYYY-MM-DD`
-- Recent events: `lcc0001a:cc-capacity-shadow:recent`
+- Recent-event sorted set: `lcc0001a:cc-capacity-shadow:recent`
 - Rate window: `lcc0001a:cc-capacity-shadow:rate:<HMAC identity>:<server minute>`
 - Deduplication: `lcc0001a:cc-capacity-shadow:dedupe:<HMAC event fingerprint>`
 
 Daily hashes count `total`, each `outcome:*`, each `skipped:*` reason, each `difference:*` kind, and
 each `field:*` mismatch. The date suffix always comes from server receipt time. Operations can query
-a day's sample with Redis `HGETALL` on the daily key and inspect transformed recent evidence with
-`LRANGE lcc0001a:cc-capacity-shadow:recent 0 499`.
+a day's sample with Redis `HGETALL` on the daily key and inspect newest transformed evidence with
+`ZREVRANGE lcc0001a:cc-capacity-shadow:recent 0 499 WITHSCORES`.
 
-The recent list is a count-bounded 500-event diagnostic buffer; it does not claim per-event 90-day
-retention. Daily hashes have a 90-day TTL. Rate keys are atomically incremented with a 65-second TTL
+Recent evidence is a sorted set scored only by server receipt milliseconds. Every accepted write
+removes scores older than 90 days, removes all but the newest 500 members, and refreshes a 90-day
+key TTL; therefore nothing can survive beyond the maximum age and entries may be removed sooner by
+the count cap. Daily hashes also have a 90-day TTL. Rate keys are atomically incremented with a 65-second TTL
 and admit at most 60 submissions per authenticated identity per 60-second server window. Exact
 replays are suppressed for 24 hours with an HMAC event fingerprint. Duplicates return 202 and rate
 excess returns 429; neither increments monitoring counts nor appends recent evidence. The route logs
@@ -148,7 +153,8 @@ No combination makes the snapshot report authoritative.
 - `lib/portfolio-snapshot/shadowTelemetryServer.ts` — server-only identity/event HMACs and
   irreversible warning/reason transformation.
 - `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — identifier-free daily Redis
-  counters, bounded recent evidence, atomic rate limiting, and replay suppression.
+  counters, server-time age/count-bounded recent evidence, atomic rate limiting, and replay
+  suppression.
 - `app/api/telemetry/cc-capacity-shadow/route.ts` and its tests — authenticated validation,
   centralized storage/logging, and failure responses isolated from the browser workflow.
 - This report.
@@ -156,7 +162,7 @@ No combination makes the snapshot report authoritative.
 ## Verification
 
 - Focused PR 4 matrix (all snapshot/telemetry tests, authenticated collector route, legacy capacity,
-  Covered Call gate, Screener session wiring, and launcher state): **177/177 passing** across 15 files.
+  Covered Call gate, Screener session wiring, and launcher state): **230/230 passing** across 15 files.
 - TypeScript: only the merged-main baseline of 41 errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero PR 4 errors.
 - `npm run build`: passed. Local Redis `ECONNREFUSED` warnings were environmental because no local
@@ -189,6 +195,7 @@ PR 4 completion alone does not close Gate A.
 ## Rollback
 
 Set `NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=false` and rebuild/redeploy, or revert the PR 4
-merge commit. Before merge, revert the commit titled `Harden PR4 shadow telemetry integrity`, then
+merge commit. Before merge, revert the commit titled `Complete PR4 telemetry evidence safeguards`,
+then `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`, then
 `49b513c1dfcf88cdddd974bfe2d89241d8165c52`, then
 `f97c0481c44d3d599d9ba13ab15e953b0a493208`. The legacy report remains authoritative either way.

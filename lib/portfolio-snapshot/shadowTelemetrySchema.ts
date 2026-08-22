@@ -48,16 +48,21 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
 function isFieldValue(field: string, value: unknown): boolean {
   switch (field) {
     case 'sharesOwned':
+      return isNonNegativeFiniteNumber(value);
     case 'grossCoveredContracts':
     case 'existingShortCallContracts':
     case 'workingShortCallContracts':
     case 'availableCoveredContracts':
       return isNonNegativeInteger(value);
     case 'costBasis':
-      return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+      return value === null || isNonNegativeFiniteNumber(value);
     case 'costBasisComplete':
     case 'oversubscribed':
     case 'hasUnclassifiedExposure':

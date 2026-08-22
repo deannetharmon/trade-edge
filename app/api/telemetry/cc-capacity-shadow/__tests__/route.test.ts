@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CC_CAPACITY_SHADOW_MAX_BYTES } from '@/lib/portfolio-snapshot/shadowTelemetrySchema';
+import {
+  CC_CAPACITY_SHADOW_MAX_BYTES,
+  parseCapacityShadowTelemetry,
+} from '@/lib/portfolio-snapshot/shadowTelemetrySchema';
 
 const { getServerSession, ingestCoveredCallCapacityShadow } = vi.hoisted(() => ({
   getServerSession: vi.fn(), ingestCoveredCallCapacityShadow: vi.fn(),
@@ -20,6 +23,10 @@ function request(body: unknown, headers: Record<string, string> = {}): Request {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...headers },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
+}
+
+function fieldPayload(field: string, legacy: unknown, snapshot: unknown) {
+  return { ...valid, differences: [{ kind: 'field', symbol: 'AAPL', field, legacy, snapshot }] };
 }
 
 describe('POST /api/telemetry/cc-capacity-shadow', () => {
@@ -98,6 +105,65 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
     expect(ingestCoveredCallCapacityShadow).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['sharesOwned', 0, 250.5],
+    ['costBasis', null, 123.45],
+    ['costBasisComplete', false, true],
+    ['grossCoveredContracts', 0, 2],
+    ['existingShortCallContracts', 0, 2],
+    ['workingShortCallContracts', 0, 2],
+    ['availableCoveredContracts', 0, 2],
+    ['oversubscribed', false, true],
+    ['hasUnclassifiedExposure', false, true],
+  ])('accepts the complete %s field contract', async (field, legacy, snapshot) => {
+    expect((await POST(request(fieldPayload(field, legacy, snapshot)))).status).toBe(202);
+    expect(ingestCoveredCallCapacityShadow).toHaveBeenCalledOnce();
+  });
+
+  it.each(([
+    ['sharesOwned negative', 'sharesOwned', -0.5],
+    ['sharesOwned boolean', 'sharesOwned', true],
+    ['sharesOwned string', 'sharesOwned', '1.5'],
+    ['sharesOwned null', 'sharesOwned', null],
+    ['sharesOwned missing', 'sharesOwned', undefined],
+    ['costBasis negative', 'costBasis', -0.01],
+    ['costBasis boolean', 'costBasis', false],
+    ['costBasis string', 'costBasis', '12.5'],
+    ['costBasisComplete number', 'costBasisComplete', 1],
+    ['costBasisComplete string', 'costBasisComplete', 'true'],
+    ['costBasisComplete null', 'costBasisComplete', null],
+    ['oversubscribed number', 'oversubscribed', 1],
+    ['oversubscribed string', 'oversubscribed', 'false'],
+    ['oversubscribed null', 'oversubscribed', null],
+    ['hasUnclassifiedExposure number', 'hasUnclassifiedExposure', 0],
+    ['hasUnclassifiedExposure string', 'hasUnclassifiedExposure', 'true'],
+    ['hasUnclassifiedExposure null', 'hasUnclassifiedExposure', null],
+    ...['grossCoveredContracts', 'existingShortCallContracts', 'workingShortCallContracts', 'availableCoveredContracts']
+      .flatMap(field => [
+        [`${field} negative`, field, -1],
+        [`${field} fractional`, field, 1.5],
+        [`${field} boolean`, field, true],
+        [`${field} string`, field, '2'],
+        [`${field} null`, field, null],
+        [`${field} unsafe`, field, Number.MAX_SAFE_INTEGER + 1],
+      ]),
+  ]) as Array<[string, string, unknown]>)('rejects %s and performs no ingestion', async (_label, field, invalid) => {
+    expect((await POST(request(fieldPayload(field, invalid, 0)))).status).toBe(400);
+    expect(ingestCoveredCallCapacityShadow).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-finite numeric values at the runtime parser boundary', () => {
+    const now = new Date('2026-08-22T18:05:00.000Z');
+    for (const field of [
+      'sharesOwned', 'costBasis', 'grossCoveredContracts', 'existingShortCallContracts',
+      'workingShortCallContracts', 'availableCoveredContracts',
+    ]) {
+      expect(parseCapacityShadowTelemetry(fieldPayload(field, Number.NaN, 1), now)).toBeNull();
+      expect(parseCapacityShadowTelemetry(fieldPayload(field, Infinity, 1), now)).toBeNull();
+      expect(parseCapacityShadowTelemetry(fieldPayload(field, -Infinity, 1), now)).toBeNull();
+    }
+  });
+
   it('fingerprints free-form diagnostics before storage and server logging', async () => {
     const secret = 'acct-123 token-secret dean@example.com order-987 raw-broker-fragment';
     const body = {
@@ -108,11 +174,13 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
       ],
     };
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
-    expect((await POST(request(body))).status).toBe(202);
+    const response = await POST(request(body));
+    expect(response.status).toBe(202);
     const stored = JSON.stringify(ingestCoveredCallCapacityShadow.mock.calls);
     const logged = JSON.stringify(info.mock.calls);
     expect(stored).not.toContain(secret);
     expect(logged).not.toContain(secret);
+    expect(await response.text()).not.toContain(secret);
     expect(stored).toMatch(/warning:sha256:[a-f0-9]{24}/);
     expect(stored).toMatch(/reason:sha256:[a-f0-9]{24}/);
     info.mockRestore();
