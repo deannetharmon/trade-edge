@@ -3,6 +3,7 @@ import {
   classifyPositionLifecycle,
   isPmccPosition,
   isSpreadPosition,
+  isLeapsPosition,
   type LifecycleLeg,
 } from '../positionLifecycle';
 
@@ -110,6 +111,73 @@ describe('isPmccPosition', () => {
     expect(result.type).toBe('PMCC');
     expect(result.shortCalls).toHaveLength(1);
     expect(result.longCalls).toHaveLength(1);
+  });
+});
+
+describe('isLeapsPosition', () => {
+  it('classifies a standalone long-dated long call with no other legs as LEAPS', () => {
+    const legs = [callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60)];
+    expect(isLeapsPosition(legs)).toBe(true);
+  });
+
+  it('does not classify a short-dated long call (bought outright, not a LEAP) as LEAPS', () => {
+    const legs = [callLeg(occSymbol('UBER', 30, 'C', 60), 'Long', 60)];
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('boundary: DTE exactly at the cutoff does not qualify (must be strictly over)', () => {
+    const legs = [callLeg(occSymbol('UBER', 120, 'C', 60), 'Long', 60)];
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('boundary: DTE one day over the cutoff qualifies', () => {
+    const legs = [callLeg(occSymbol('UBER', 121, 'C', 60), 'Long', 60)];
+    expect(isLeapsPosition(legs)).toBe(true);
+  });
+
+  it('does not classify a long call once a short call is sold against it (that is PMCC, not LEAPS)', () => {
+    const legs = [
+      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
+      callLeg(occSymbol('UBER', 30, 'C', 80), 'Short', 80),
+    ];
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('does not classify a standalone long put as LEAPS (scoped to calls only)', () => {
+    const legs: LifecycleLeg[] = [
+      { symbol: occSymbol('UBER', 390, 'P', 60), optionType: 'P', strikePrice: 60, direction: 'Long', quantity: 1 },
+    ];
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('requires every long call in the group to be long-dated -- a mixed group does not qualify', () => {
+    const legs = [
+      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
+      callLeg(occSymbol('UBER', 30, 'C', 70), 'Long', 70),
+    ];
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('unparseable symbols never throw and never false-positive', () => {
+    const legs = [callLeg('not-a-real-occ-symbol', 'Long', 60)];
+    expect(() => isLeapsPosition(legs)).not.toThrow();
+    expect(isLeapsPosition(legs)).toBe(false);
+  });
+
+  it('classifyPositionLifecycle returns LEAPS, not UNKNOWN, for a standalone long-dated call (the gap this fix closes)', () => {
+    const legs = [callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60)];
+    const result = classifyPositionLifecycle({ symbol: 'UBER', legs });
+    expect(result.type).toBe('LEAPS');
+    expect(result.longCalls).toHaveLength(1);
+  });
+
+  it('classifyPositionLifecycle still returns PMCC, not LEAPS, once a qualifying short call exists', () => {
+    const legs = [
+      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
+      callLeg(occSymbol('UBER', 30, 'C', 80), 'Short', 80),
+    ];
+    const result = classifyPositionLifecycle({ symbol: 'UBER', legs });
+    expect(result.type).toBe('PMCC');
   });
 });
 

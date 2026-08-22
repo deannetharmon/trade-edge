@@ -28,6 +28,7 @@ export type PositionLifecycleType =
   | 'ASSIGNED_STOCK'
   | 'COVERED_CALL'
   | 'PMCC'
+  | 'LEAPS'
   | 'UNKNOWN';
 
 export interface LifecycleClassificationInput {
@@ -110,6 +111,16 @@ export function isSpreadPosition(legs: LifecycleLeg[] = []): boolean {
 const PMCC_SHORT_DTE_MAX = 60;
 const PMCC_LONG_DTE_MIN = 120;
 
+// A standalone long call held with no paired short leg -- previously fell all the way through
+// classifyPositionLifecycle to UNKNOWN, since isCoveredCall/isPmccPosition/isSpreadPosition all
+// require a second leg of some kind. Reuses PMCC_LONG_DTE_MIN as the "long-dated" bar so a solo
+// long call is held to the same DTE threshold PMCC's own long leg already uses -- a short-dated
+// long call bought outright (e.g. 30 DTE) is not a LEAP and should NOT classify here; it falls
+// through to SPREAD/UNKNOWN as before. Scoped to calls only, not puts -- in this app's context
+// LEAPS specifically anchors a future PMCC (a long call held on its own, eligible to later have a
+// short call sold against it), not a standalone long-dated put.
+const LEAPS_DTE_MIN = PMCC_LONG_DTE_MIN;
+
 function daysUntil(dateStr: string): number {
   const target = new Date(`${dateStr}T00:00:00Z`);
   const now = new Date();
@@ -135,6 +146,24 @@ export function isPmccPosition(legs: LifecycleLeg[] = []): boolean {
   });
 }
 
+
+// A standalone long call, no short call paired against it, no puts of either kind, and
+// long-dated (DTE > LEAPS_DTE_MIN). This is checked as its own case rather than left to fall
+// through to SPREAD/UNKNOWN -- a solo long call held on its own (eligible foundation for a future
+// PMCC, or simply a directional LEAP) is a distinct, meaningful position shape from an
+// unclassifiable one.
+export function isLeapsPosition(legs: LifecycleLeg[] = []): boolean {
+  const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
+
+  if (longCalls.length === 0) return false;
+  if (shortCalls.length > 0 || shortPuts.length > 0 || longPuts.length > 0) return false;
+
+  return longCalls.every(leg => {
+    const expiry = parseOccSymbol(leg.symbol).expiry;
+    if (!expiry) return false;
+    return daysUntil(expiry) > LEAPS_DTE_MIN;
+  });
+}
 
 export function isCashSecuredPut(legs: LifecycleLeg[] = []): boolean {
   const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
@@ -233,6 +262,20 @@ export function classifyPositionLifecycle(
       shortCalls,
       longCalls,
       reason: 'Long-dated deep-ITM-window call paired with a short-dated call (short DTE < 60, long DTE > 120).',
+    };
+  }
+
+  if (isLeapsPosition(legs)) {
+    return {
+      type: 'LEAPS',
+      symbol: input.symbol,
+      contracts,
+      shares,
+      shortPuts,
+      longPuts,
+      shortCalls,
+      longCalls,
+      reason: `Standalone long call with no paired short leg, DTE > ${LEAPS_DTE_MIN}.`,
     };
   }
 

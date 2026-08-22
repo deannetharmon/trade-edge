@@ -42,6 +42,7 @@ import {
   calculateRemainingOpportunity,
   normalizePositionObjectivePct,
   DEFAULT_POSITION_MANAGEMENT_POLICY,
+  type RemainingOpportunityLifecycle,
 } from '@/lib/portfolio-intelligence';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
@@ -101,6 +102,19 @@ export function scorePortfolioPositionHealth(pos: Position): PositionHealthScore
 // netEdgeLive/netEdgePeak already exist below in this file and are
 // synchronous (pos.snapshotHistory is attached before either caller runs --
 // see attachSnapshotHistory), so no new fetch/integration is needed.
+import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
+
+// LEAPS (TE-0007D-adjacent fix): a standalone long call has no credit-received basis at all --
+// it's a debit position, not a sold-premium one -- so it does not semantically belong in
+// remaining-opportunity/credit-decay scoring, which is inherently about %-of-credit-captured for
+// short-premium strategies. Narrowing here (rather than widening
+// RemainingOpportunityLifecycle to include 'LEAPS') keeps that type's meaning intact: every value
+// it accepts is a credit-based strategy shape. classifyPositionLifecycle's now-broader
+// PositionLifecycleType is narrowed to this function's actual domain at the one point they meet.
+function toRemainingOpportunityLifecycle(type: PositionLifecycleType): RemainingOpportunityLifecycle {
+  return type === 'LEAPS' ? 'UNKNOWN' : type;
+}
+
 export function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | null; netEdgeNegative: boolean | null } {
   const liveEdge = netEdgeLive(pos);
   const peakEdge = netEdgePeak(pos);
@@ -239,7 +253,7 @@ export function scorePortfolioPositionObjective(
     expDate: pos.expDate,
     netEdgeDeclinePct,
     netEdgeNegative,
-    lifecycleType: classifyPositionLifecycle(pos).type,
+    lifecycleType: toRemainingOpportunityLifecycle(classifyPositionLifecycle(pos).type),
   });
 
   // PI-0014: computed here (not inside evaluatePositionObjective) because
@@ -293,7 +307,7 @@ export function scorePortfolioRemainingOpportunity(pos: Position) {
     expDate: pos.expDate,
     netEdgeDeclinePct,
     netEdgeNegative,
-    lifecycleType: classifyPositionLifecycle(pos).type,
+    lifecycleType: toRemainingOpportunityLifecycle(classifyPositionLifecycle(pos).type),
   });
 }
 
