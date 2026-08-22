@@ -7,8 +7,9 @@
 (`Add LCC-0001A capacity shadow parity`), `49b513c1dfcf88cdddd974bfe2d89241d8165c52`
 (`Add durable PR4 shadow monitoring`), `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`
 (`Harden PR4 shadow telemetry integrity`), `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`
-(`Complete PR4 telemetry evidence safeguards`), followed by the commit titled
-`Enforce per-event PR4 telemetry retention`.
+(`Complete PR4 telemetry evidence safeguards`), `0c17c36d3fc2f7fb1032198f500bb5a44d8e0be4`
+(`Enforce per-event PR4 telemetry retention`), followed by the commit titled
+`Restrict PR4 telemetry reads to operators`.
 
 ## Outcome
 
@@ -97,7 +98,7 @@ windows, so a client cannot select monitoring keys with an arbitrary date.
 ## Durable monitoring and queries
 
 The authenticated route reuses the repository's established `REDIS_URL`/ioredis telemetry
-infrastructure with a separate identifier-free namespace:
+infrastructure with a raw-identity-free, HMAC-pseudonymous namespace:
 
 - Daily hash: `lcc0001a:cc-capacity-shadow:counts:YYYY-MM-DD`
 - Recent index: `lcc0001a:cc-capacity-shadow:recent:index`
@@ -108,8 +109,17 @@ infrastructure with a separate identifier-free namespace:
 Daily hashes count `total`, each `outcome:*`, each `skipped:*` reason, each `difference:*` kind, and
 each `field:*` mismatch. The date suffix always comes from server receipt time. Operations can query
 a day's sample with Redis `HGETALL` on the daily key. Live recent evidence must be read through the
-authenticated `GET /api/telemetry/cc-capacity-shadow?limit=500` boundary, which invokes
+operator-authorized `GET /api/telemetry/cc-capacity-shadow?limit=500` boundary, which invokes
 `readCoveredCallCapacityShadowRecent()`; a raw index query is not evidence that a payload is live.
+
+GET authorization is controlled only by the server-side
+`LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS` environment variable, a comma-separated email allowlist.
+Matching is trimmed, case-insensitive, exact-only, and ignores empty or malformed entries; wildcards
+and substrings never authorize. Missing/empty policy, missing caller email, and ordinary authenticated
+users fail closed with 403; unauthenticated callers receive 401. Every GET response uses
+`Cache-Control: private, no-store, max-age=0`. POST remains available to ordinary authenticated users
+because it writes validated/transformed evidence and cannot retrieve the global stream. Ownership is
+deliberately not retained, so evidence cannot be caller-scoped and only approved operators may read it.
 
 The recent index is scored only by server receipt milliseconds and contains only HMAC event
 fingerprints. Each transformed financial payload is stored separately with an absolute Redis
@@ -167,7 +177,7 @@ No combination makes the snapshot report authoritative.
 - `lib/portfolio-snapshot/shadowTelemetrySchema.ts` — closed allowlist and size/count bounds.
 - `lib/portfolio-snapshot/shadowTelemetryServer.ts` — server-only identity/event HMACs and
   irreversible warning/reason transformation.
-- `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — identifier-free daily Redis
+- `lib/portfolio-snapshot/shadowTelemetryStore.ts` and its tests — raw-identity-free daily Redis
   counters, per-event-expiring recent payloads, HMAC-only index, authenticated read cleanup, atomic
   age/count enforcement, rate limiting, and replay suppression.
 - `app/api/telemetry/cc-capacity-shadow/route.ts` and its tests — authenticated validation,
@@ -178,7 +188,7 @@ No combination makes the snapshot report authoritative.
 ## Verification
 
 - Focused PR 4 matrix (all snapshot/telemetry tests, authenticated collector route, legacy capacity,
-  Covered Call gate, Screener session wiring, and launcher state): **239/239 passing** across 15 files.
+  Covered Call gate, Screener session wiring, and launcher state): **248/248 passing** across 15 files.
 - TypeScript: only the merged-main baseline of 41 errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero PR 4 errors.
 - `npm run build`: passed. Local Redis `ECONNREFUSED` warnings were environmental because no local
@@ -208,11 +218,16 @@ The production monitoring duration/sample threshold remains deliberately unresol
 
 PR 4 completion alone does not close Gate A.
 
+Deployment prerequisite: Gate A monitoring cannot begin until the deployed server has
+`LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS` configured with at least one explicitly approved operator
+email. There is no implicit operator derived from the signed-in user, repository, or deployment.
+
 ## Rollback
 
 Set `NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=false` and rebuild/redeploy, or revert the PR 4
-merge commit. Before merge, revert the commit titled `Enforce per-event PR4 telemetry retention`,
-then `c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`, then
+merge commit. Before merge, revert the commit titled `Restrict PR4 telemetry reads to operators`,
+then `0c17c36d3fc2f7fb1032198f500bb5a44d8e0be4`, then
+`c54b815b10746f867ae6d3ec79c97c6e3c1b9f06`, then
 `dc78b6d42cd27c092f53330ce12e683f5ecc26fe`, then
 `49b513c1dfcf88cdddd974bfe2d89241d8165c52`, then
 `f97c0481c44d3d599d9ba13ab15e953b0a493208`. The legacy report remains authoritative either way.

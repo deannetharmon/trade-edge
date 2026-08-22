@@ -14,17 +14,47 @@ import {
 } from '@/lib/portfolio-snapshot/shadowTelemetryServer';
 
 export const dynamic = 'force-dynamic';
+const GET_CACHE_CONTROL = 'private, no-store, max-age=0';
+
+function getResponse(body: unknown, status: number): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': GET_CACHE_CONTROL },
+  });
+}
+
+function parseCcCapacityShadowOperators(value: string | undefined): Set<string> {
+  if (!value) return new Set();
+  const validEmail = /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/;
+  return new Set(value
+    .split(',')
+    .map(entry => entry.trim().toLowerCase())
+    .filter(entry => validEmail.test(entry)));
+}
+
+function isCcCapacityShadowOperator(
+  email: string | null | undefined,
+  configuredOperators = process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS,
+): boolean {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return false;
+  return parseCcCapacityShadowOperators(configuredOperators).has(normalized);
+}
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!session?.user) return getResponse({ error: 'Unauthorized' }, 401);
+  if (!isCcCapacityShadowOperator(session.user.email)) {
+    return getResponse({ error: 'Forbidden' }, 403);
+  }
   const requested = Number(new URL(request.url).searchParams.get('limit') ?? '100');
   const limit = Number.isFinite(requested) ? requested : 100;
   try {
     const events = await readCoveredCallCapacityShadowRecent(new Date(), limit);
-    return NextResponse.json({ events });
+    return getResponse({ events }, 200);
   } catch {
-    return NextResponse.json({ error: 'Telemetry unavailable' }, { status: 503 });
+    return getResponse({ error: 'Telemetry unavailable' }, 503);
   }
 }
 

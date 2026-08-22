@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CC_CAPACITY_SHADOW_MAX_BYTES,
   parseCapacityShadowTelemetry,
@@ -20,6 +20,8 @@ const valid = {
   snapshotAsOf: '2026-08-22T18:00:00.000Z', snapshotFreshness: 'current',
   differences: [{ kind: 'field', symbol: 'AAPL', field: 'sharesOwned', legacy: 100, snapshot: 200 }],
 };
+const originalOperators = process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS;
+const noStore = 'private, no-store, max-age=0';
 
 function request(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('http://localhost/api/telemetry/cc-capacity-shadow', {
@@ -37,9 +39,16 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-22T18:05:00.000Z'));
     process.env.NEXTAUTH_SECRET = 'test-only-shadow-secret';
+    delete process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS;
     getServerSession.mockReset().mockResolvedValue({ user: { id: 'server-only-user' } });
     ingestCoveredCallCapacityShadow.mockReset().mockResolvedValue('accepted');
     readCoveredCallCapacityShadowRecent.mockReset().mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalOperators === undefined) delete process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS;
+    else process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS = originalOperators;
   });
 
   it('requires authentication', async () => {
@@ -50,15 +59,41 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
 
   it('requires authentication for operational recent-evidence reads', async () => {
     getServerSession.mockResolvedValue(null);
-    expect((await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'))).status).toBe(401);
+    const response = await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'));
+    expect(response.status).toBe(401);
+    expect(response.headers.get('Cache-Control')).toBe(noStore);
     expect(readCoveredCallCapacityShadowRecent).not.toHaveBeenCalled();
   });
 
-  it('returns only live transformed evidence through the authenticated read boundary', async () => {
+  it.each([
+    ['missing email', { user: { id: 'ordinary-user' } }, 'ops@example.com'],
+    ['missing policy', { user: { email: 'ops@example.com' } }, undefined],
+    ['empty policy', { user: { email: 'ops@example.com' } }, '  , , '],
+    ['ordinary user', { user: { email: 'ordinary@example.com' } }, 'ops@example.com'],
+    ['substring match', { user: { email: 'notops@example.com' } }, 'ops@example.com'],
+    ['wildcard policy', { user: { email: 'user@example.com' } }, '*@example.com'],
+  ])('forbids GET for %s', async (_label, session, operators) => {
+    getServerSession.mockResolvedValue(session);
+    if (operators === undefined) delete process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS;
+    else process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS = operators;
+    const response = await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'));
+    expect(response.status).toBe(403);
+    expect(response.headers.get('Cache-Control')).toBe(noStore);
+    expect(readCoveredCallCapacityShadowRecent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['exact match', 'ops@example.com', 'ops@example.com'],
+    ['case-insensitive match', 'OPS@EXAMPLE.COM', 'ops@example.com'],
+    ['normalized entries', 'dean@example.com', ' , ops@example.com , , DEAN@example.com '],
+  ])('allows an operator GET by %s', async (_label, email, operators) => {
+    getServerSession.mockResolvedValue({ user: { email } });
+    process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS = operators;
     const event = { ...valid, receivedAt: '2026-08-22T18:05:00.000Z' };
     readCoveredCallCapacityShadowRecent.mockResolvedValue([event]);
     const response = await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow?limit=500'));
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe(noStore);
     expect(await response.json()).toEqual({ events: [event] });
     expect(readCoveredCallCapacityShadowRecent).toHaveBeenCalledWith(
       new Date('2026-08-22T18:05:00.000Z'), 500,
@@ -66,8 +101,19 @@ describe('POST /api/telemetry/cc-capacity-shadow', () => {
   });
 
   it('keeps operational read failures non-authoritative', async () => {
+    getServerSession.mockResolvedValue({ user: { email: 'ops@example.com' } });
+    process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS = 'ops@example.com';
     readCoveredCallCapacityShadowRecent.mockRejectedValue(new Error('redis unavailable'));
-    expect((await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'))).status).toBe(503);
+    const response = await GET(new Request('http://localhost/api/telemetry/cc-capacity-shadow'));
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe(noStore);
+  });
+
+  it('keeps POST available to an authenticated non-operator', async () => {
+    getServerSession.mockResolvedValue({ user: { id: 'ordinary-user', email: 'ordinary@example.com' } });
+    process.env.LCC_0001A_CC_CAPACITY_SHADOW_OPERATORS = 'ops@example.com';
+    expect((await POST(request(valid))).status).toBe(202);
+    expect(ingestCoveredCallCapacityShadow).toHaveBeenCalledOnce();
   });
 
   it('accepts, records, and centrally logs only an allowlisted event', async () => {
