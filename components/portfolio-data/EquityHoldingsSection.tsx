@@ -10,6 +10,23 @@ export function isEquityDisplayEnabled(value = process.env.NEXT_PUBLIC_LCC_0001A
 
 export const LCC_0001A_EQUITY_DISPLAY_ENABLED = isEquityDisplayEnabled();
 
+export type PositionsWorkspaceState = 'loading' | 'legacy-empty' | 'empty' | 'workspace';
+
+export function resolvePositionsWorkspaceState(input: {
+  equityDisplayEnabled: boolean;
+  loading: boolean;
+  snapshot: PortfolioSnapshot | null;
+  optionCount: number;
+  pendingOrderCount: number;
+}): PositionsWorkspaceState {
+  const hasLegacyData = input.optionCount > 0 || input.pendingOrderCount > 0;
+  if (input.loading && !input.snapshot && !hasLegacyData) return 'loading';
+  if (!input.equityDisplayEnabled) return hasLegacyData ? 'workspace' : 'legacy-empty';
+  if (!input.snapshot) return 'workspace';
+  const provenEmpty = input.snapshot.dataQuality.status === 'ok' && input.snapshot.equities.length === 0 && !hasLegacyData;
+  return provenEmpty ? 'empty' : 'workspace';
+}
+
 function money(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return 'Unavailable';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -59,8 +76,8 @@ export function EquityHoldingsSection({ snapshot, th }: {
       {snapshot.equities.length === 0 ? (
         <div className={`rounded-lg border ${th.border} ${th.card} p-4 text-xs ${th.textFaint}`}>No stock holdings found.</div>
       ) : snapshot.equities.map(holding => {
-        const economicsCurrent = holding.currentPrice != null && holding.staleQuote === false;
-        const referencePrice = holding.currentPrice != null && holding.staleQuote;
+        const economicsCurrent = holding.currentPrice != null && holding.staleQuote === false && holding.quoteAsOf !== null;
+        const referencePrice = holding.currentPrice != null && !economicsCurrent;
         const pnlTone = holding.unrealizedPnl == null ? th.textFaint : holding.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
         const symbolCapacity = capacity.status === 'ok' ? capacity.bySymbol[holding.symbol] : null;
         return (
@@ -76,8 +93,8 @@ export function EquityHoldingsSection({ snapshot, th }: {
                 </div>
                 <p className={`mt-1 text-[10px] ${th.textFaint}`}>{holding.quantity.toLocaleString()} shares · {holding.direction === 'Short' ? 'No covered-call capacity' : 'Stock-only holding'}</p>
               </div>
-              <p className={`text-[10px] ${holding.staleQuote ? 'text-amber-400' : th.textFaint}`}>
-                {holding.staleQuote ? (referencePrice ? 'Reference price · timestamp unavailable' : 'Pricing unavailable') : observedLabel(holding.quoteAsOf)}
+              <p className={`text-[10px] ${!economicsCurrent ? 'text-amber-400' : th.textFaint}`}>
+                {!economicsCurrent ? (referencePrice ? 'Reference price · timestamp unavailable' : 'Pricing unavailable') : observedLabel(holding.quoteAsOf)}
               </p>
             </div>
 

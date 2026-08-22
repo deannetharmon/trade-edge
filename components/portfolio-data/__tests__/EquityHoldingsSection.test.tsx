@@ -41,6 +41,13 @@ describe('EquityHoldingsSection', () => {
     expect(screen.queryByText('Current price')).not.toBeInTheDocument();
   });
 
+  it('defensively rejects a contradictory fresh flag without quote provenance', () => {
+    render(<EquityHoldingsSection snapshot={snapshot({ equities: [holding({ staleQuote: false, quoteAsOf: null })] })} th={THEMES.dark} />);
+    expect(screen.getByText('Reference price')).toBeInTheDocument();
+    expect(screen.queryByText('Current price')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+  });
+
   it('renders incomplete basis honestly', () => {
     render(<EquityHoldingsSection snapshot={snapshot({ equities: [holding({ basis: null, basisComplete: false })] })} th={THEMES.dark} />);
     expect(screen.getByText('Basis incomplete')).toBeInTheDocument();
@@ -61,6 +68,17 @@ describe('EquityHoldingsSection', () => {
     expect(screen.getByRole('status')).toHaveTextContent('capacity actions are disabled');
     expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
     expect(screen.getByTestId('equity-holding-MSFT-Long')).toBeInTheDocument();
+  });
+
+  it('keeps holdings visible and capacity unavailable for adjusted deliverable evidence', () => {
+    render(<EquityHoldingsSection snapshot={snapshot({
+      coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: false, warnings: ['Adjusted deliverable'], hasAdjustedOrUnknownDeliverable: true },
+      dataQuality: { status: 'unavailable', unavailableReason: 'Adjusted or unresolved option deliverable.', staleQuotes: true, warnings: ['Adjusted deliverable'] },
+    })} th={THEMES.dark} />);
+    expect(screen.getByTestId('equity-holding-MSFT-Long')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('capacity actions are disabled');
+    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('labels cached holdings with the last successful observation time', () => {

@@ -17,6 +17,8 @@ import '@testing-library/jest-dom/vitest';
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioDataProvider';
 import PortfolioPage from '../page';
+import { resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
+import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 
 // Stub the live acquisition pipeline's two entry points so the page settles
 // into a clean, deterministic "loaded, zero positions" state instead of an
@@ -30,6 +32,42 @@ vi.mock('@/lib/portfolio-data/acquisition', async () => {
     loadAccountBalances: vi.fn().mockResolvedValue(null),
     fetchSnapshotStore: vi.fn().mockResolvedValue({}),
   };
+});
+
+const emptySnapshot = (status: 'ok' | 'unavailable' = 'ok'): PortfolioSnapshot => ({
+  accountNumber: 'ACC1', asOf: '2026-08-22T18:00:00.000Z', quoteAsOf: null,
+  equities: [], options: [], workingOrders: [],
+  coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: status === 'ok', warnings: [], hasAdjustedOrUnknownDeliverable: false },
+  dataQuality: { status, staleQuotes: true, warnings: [] }, freshness: 'current',
+  lastSuccessfulAsOf: status === 'ok' ? '2026-08-22T18:00:00.000Z' : null,
+});
+
+describe('LCC-0001A PR3: Portfolio equity composition gate', () => {
+  it('preserves the legacy empty state when display is off', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: false, loading: false, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('legacy-empty');
+  });
+
+  it('renders an unavailable workspace, never a definitive empty claim, when display is on and snapshot is null', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('uses only the loading state during initial acquisition', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: true, snapshot: null, optionCount: 0, pendingOrderCount: 0 })).toBe('loading');
+  });
+
+  it('keeps a prior snapshot and option cards visible during refresh', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: true, snapshot: emptySnapshot('unavailable'), optionCount: 1, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('renders one definitive empty state only when a successful snapshot proves the whole portfolio empty', () => {
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: emptySnapshot('ok'), optionCount: 0, pendingOrderCount: 0 })).toBe('empty');
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: emptySnapshot('unavailable'), optionCount: 0, pendingOrderCount: 0 })).toBe('workspace');
+  });
+
+  it('keeps equity and option surfaces coexisting in the same workspace', () => {
+    const withEquity = { ...emptySnapshot('ok'), equities: [{ accountNumber: 'ACC1', symbol: 'MSFT', direction: 'Long' as const, quantity: 250, settledQuantity: null, basis: 300, basisComplete: true, currentPrice: 310, marketValue: 77500, unrealizedPnl: 2500, quoteAsOf: null, staleQuote: true, deliverable: 'standard' as const, dataQualityWarnings: [] }] };
+    expect(resolvePositionsWorkspaceState({ equityDisplayEnabled: true, loading: false, snapshot: withEquity, optionCount: 1, pendingOrderCount: 0 })).toBe('workspace');
+  });
 });
 
 describe('WA-0002: Portfolio default tab', () => {
@@ -71,6 +109,23 @@ describe('WA-0002: Portfolio default tab', () => {
     // Neither the 'today', 'briefing', 'priorities', 'history', nor
     // 'balances' tab content is present -- only one tab's content renders.
     expect(screen.queryByText('Immediate Action')).not.toBeInTheDocument();
+  });
+
+  it('renders equity unavailable without claiming the portfolio is empty when display is on and acquisition is off', async () => {
+    process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED = 'true';
+    try {
+      render(
+        <PortfolioModeProvider>
+          <PortfolioDataProvider>
+            <PortfolioPage />
+          </PortfolioDataProvider>
+        </PortfolioModeProvider>,
+      );
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('unified portfolio snapshot'));
+      expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
+    } finally {
+      delete process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED;
+    }
   });
 });
 

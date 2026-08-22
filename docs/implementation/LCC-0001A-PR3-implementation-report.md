@@ -1,9 +1,10 @@
 # LCC-0001A PR 3 — Equity Portfolio UI Implementation Report
 
-**Status:** Implemented; ready for team review  
-**Branch:** `feature/lcc-0001a-equity-portfolio-ui`  
-**Base:** merged PR #26 / `main`  
+**Status:** Corrected; ready for team re-review
+**Branch:** `feature/lcc-0001a-equity-portfolio-ui`
+**Base:** merged PR #26 / `main`
 **Specification:** `docs/design/LCC-0001A-technical-spec.md`, rollout PR 3
+**Implementation commit:** `ff82044`; corrective commit is current branch HEAD
 
 ## Outcome
 
@@ -27,6 +28,12 @@ additive to the existing option cards and gated independently by
 - Cached holdings render “Last known holdings” with `lastSuccessfulAsOf`; current holdings with
   incomplete order evidence remain distinguishable.
 - Display enabled while acquisition is disabled renders an explicit data-unavailable state.
+- Initial loading with no snapshot uses only the page loading state; it does not simultaneously
+  claim equity data is unavailable. A prior snapshot remains visible during refresh.
+- A definitive empty-portfolio message renders only when a successful snapshot proves equities,
+  options, and pending orders are all empty. Unknown equity data never becomes “no positions.”
+- Current economics require both `staleQuote === false` and non-null `quoteAsOf`; contradictory
+  future inputs fail safely to reference/unavailable presentation.
 
 ## Files
 
@@ -34,6 +41,8 @@ additive to the existing option cards and gated independently by
 - `components/portfolio-data/EquityHoldingsSection.tsx` — themed equity rows and honest data states.
 - `components/portfolio-data/__tests__/EquityHoldingsSection.test.tsx` — focused rendering and flag
   contract coverage.
+- `app/portfolio/__tests__/PortfolioPage.test.tsx` — page composition, independent-flag,
+  loading/unavailable/empty, and equity-plus-option coexistence coverage.
 - This report.
 
 ## Scope boundaries
@@ -44,10 +53,10 @@ changed. Mixed stock/option strategy grouping remains LCC-0001B scope.
 
 ## Verification
 
-- PR3 component, Portfolio page, Provider snapshot, and snapshot-domain tests: **76/76 passing**.
+- PR3 component, Portfolio page, Provider snapshot, and snapshot-domain tests: **85/85 passing**.
 - TypeScript: only the known **41** errors in
   `lib/portfolio/__tests__/trendClassification.test.ts`; zero new errors.
-- `git diff --check`: clean.
+- `git diff --check origin/main...HEAD`: clean after the corrective commit-range verification.
 - `npm run build`: passed (53/53 static pages generated). Local build emitted expected Redis
   `ECONNREFUSED` warnings because no development Redis instance was running; compilation, type
   validation, page generation, and optimization completed successfully.

@@ -187,7 +187,7 @@ import { PositionCompositionCard } from '@/features/portfolio/positions/Position
 // See docs/implementation/WA-0004-Briefing-Separation-Implementation-Report.md.
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
-import { EquityHoldingsSection, LCC_0001A_EQUITY_DISPLAY_ENABLED } from '@/components/portfolio-data/EquityHoldingsSection';
+import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
 // (see docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2). The
@@ -9532,6 +9532,15 @@ export default function PortfolioPage() {
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
+  const equityDisplayEnabled = isEquityDisplayEnabled();
+  const positionsWorkspaceState = resolvePositionsWorkspaceState({
+    equityDisplayEnabled,
+    loading,
+    snapshot,
+    optionCount: positions.length,
+    pendingOrderCount: pendingOrders.length,
+  });
+
 
   // PT-0002B: fail closed at the render boundary. LIVE account
   // content is never displayed while mode is unresolved, invalid,
@@ -9802,27 +9811,26 @@ export default function PortfolioPage() {
         <HealthyMonitoringSection monitor={todaysPrioritiesDashboard.monitor} th={th} />
       </div>
 
-      {loading && positions.length === 0 && pendingOrders.length === 0 && (
+      {positionsWorkspaceState === 'loading' && (
         <div className="flex items-center justify-center h-64">
           <div className={`text-sm ${th.textFaint} tracking-widest`}>FETCHING POSITIONS...</div>
         </div>
       )}
 
-      {!loading && !error && positions.length === 0 && pendingOrders.length === 0 &&
-        (!LCC_0001A_EQUITY_DISPLAY_ENABLED || !snapshot || snapshot.equities.length === 0) && (
+      {!error && (positionsWorkspaceState === 'legacy-empty' || positionsWorkspaceState === 'empty') && (
         <div className="flex flex-col items-center justify-center h-64 gap-2">
           <p className={`text-sm ${th.textFaint} tracking-widest`}>NO OPEN POSITIONS FOUND</p>
-          <p className={`text-xs ${th.textFaint}`}>Options positions from your TastyTrade account will appear here</p>
+          <p className={`text-xs ${th.textFaint}`}>{positionsWorkspaceState === 'empty' ? 'Stock and options positions from your TastyTrade account will appear here' : 'Options positions from your TastyTrade account will appear here'}</p>
         </div>
       )}
 
-      {(positions.length > 0 || pendingOrders.length > 0 || LCC_0001A_EQUITY_DISPLAY_ENABLED) && (
+      {positionsWorkspaceState === 'workspace' && (
         <>
           <div className="overflow-x-auto">
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>
               <PortfolioGreeksDashboard positions={positions} th={th} />
 
-              {LCC_0001A_EQUITY_DISPLAY_ENABLED && (
+              {equityDisplayEnabled && (
                 <EquityHoldingsSection snapshot={snapshot} th={th} />
               )}
 
@@ -9898,6 +9906,4 @@ export default function PortfolioPage() {
     </div>
   );
 }
-
-
 
