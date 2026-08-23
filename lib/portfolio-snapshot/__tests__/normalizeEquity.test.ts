@@ -8,6 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeEquityHoldings, type RawPositionLike } from '../normalizeEquity';
 
+const ASOF = '2026-08-22T20:00:00.000Z';
+
 const equity = (
   symbol: string,
   qty: number,
@@ -32,7 +34,7 @@ const option = (symbol: string): RawPositionLike => ({
 
 describe('normalizeEquityHoldings', () => {
   it('produces a Long EquityHolding with complete basis for a single-lot position', () => {
-    const result = normalizeEquityHoldings([equity('MSFT', 250, 'Long', 300)], 'ACC1');
+    const result = normalizeEquityHoldings([equity('MSFT', 250, 'Long', 300)], 'ACC1', ASOF);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       accountNumber: 'ACC1',
@@ -48,6 +50,7 @@ describe('normalizeEquityHoldings', () => {
     const result = normalizeEquityHoldings(
       [equity('AAPL', 100, 'Long', 100), equity('AAPL', 100, 'Long', 200)],
       'ACC1',
+      ASOF,
     );
     expect(result).toHaveLength(1);
     expect(result[0].quantity).toBe(200);
@@ -56,7 +59,7 @@ describe('normalizeEquityHoldings', () => {
   });
 
   it('retains short stock as a visible holding with direction Short (LCC-0001A "Short stock" criterion)', () => {
-    const result = normalizeEquityHoldings([equity('TSLA', 50, 'Short', 250)], 'ACC1');
+    const result = normalizeEquityHoldings([equity('TSLA', 50, 'Short', 250)], 'ACC1', ASOF);
     expect(result).toHaveLength(1);
     expect(result[0].direction).toBe('Short');
     expect(result[0].quantity).toBe(50);
@@ -68,6 +71,7 @@ describe('normalizeEquityHoldings', () => {
     const result = normalizeEquityHoldings(
       [equity('NVDA', 100, 'Long', 400), equity('NVDA', 30, 'Short', 500)],
       'ACC1',
+      ASOF,
     );
     expect(result).toHaveLength(2);
     const long = result.find(h => h.direction === 'Long');
@@ -82,6 +86,7 @@ describe('normalizeEquityHoldings', () => {
     const result = normalizeEquityHoldings(
       [equity('IBM', 100, 'Long', 140), equity('IBM', 100, 'Long')], // second lot: no average-open-price
       'ACC1',
+      ASOF,
     );
     expect(result).toHaveLength(1);
     expect(result[0].quantity).toBe(200);
@@ -90,7 +95,7 @@ describe('normalizeEquityHoldings', () => {
   });
 
   it('marks basis incomplete when the only lot has an invalid (non-positive) basis', () => {
-    const result = normalizeEquityHoldings([equity('GME', 10, 'Long', 0)], 'ACC1');
+    const result = normalizeEquityHoldings([equity('GME', 10, 'Long', 0)], 'ACC1', ASOF);
     expect(result[0].basisComplete).toBe(false);
     expect(result[0].basis).toBeNull();
   });
@@ -99,6 +104,7 @@ describe('normalizeEquityHoldings', () => {
     const result = normalizeEquityHoldings(
       [equity('ZERO', 0, 'Long', 10), equity('NEG', -5, 'Long', 10)],
       'ACC1',
+      ASOF,
     );
     expect(result).toHaveLength(0);
   });
@@ -110,36 +116,36 @@ describe('normalizeEquityHoldings', () => {
       'quantity-direction': 'Long',
       'average-open-price': 10,
     };
-    const result = normalizeEquityHoldings([noSymbol], 'ACC1');
+    const result = normalizeEquityHoldings([noSymbol], 'ACC1', ASOF);
     expect(result).toHaveLength(0);
   });
 
   it('ignores non-Equity instrument types entirely', () => {
-    const result = normalizeEquityHoldings([option('AAPL')], 'ACC1');
+    const result = normalizeEquityHoldings([option('AAPL')], 'ACC1', ASOF);
     expect(result).toHaveLength(0);
   });
 
   it('drops rows with an unrecognized quantity-direction value', () => {
-    const result = normalizeEquityHoldings([equity('WEIRD', 10, 'Sideways', 10)], 'ACC1');
+    const result = normalizeEquityHoldings([equity('WEIRD', 10, 'Sideways', 10)], 'ACC1', ASOF);
     expect(result).toHaveLength(0);
   });
 
   it('is idempotent: running the same input twice produces the same output, no duplicate holdings', () => {
     const input = [equity('MSFT', 250, 'Long', 300)];
-    const first = normalizeEquityHoldings(input, 'ACC1');
-    const second = normalizeEquityHoldings(input, 'ACC1');
+    const first = normalizeEquityHoldings(input, 'ACC1', ASOF);
+    const second = normalizeEquityHoldings(input, 'ACC1', ASOF);
     expect(second).toEqual(first);
   });
 
   it('carries the passed-in accountNumber onto every holding, keeping multiple accounts distinct', () => {
-    const acc1 = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC1');
-    const acc2 = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC2');
+    const acc1 = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC1', ASOF);
+    const acc2 = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC2', ASOF);
     expect(acc1[0].accountNumber).toBe('ACC1');
     expect(acc2[0].accountNumber).toBe('ACC2');
   });
 
   it('keeps unavailable quote fields null and marks the quote stale', () => {
-    const result = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC1');
+    const result = normalizeEquityHoldings([equity('MSFT', 100, 'Long', 100)], 'ACC1', ASOF);
     expect(result[0].currentPrice).toBeNull();
     expect(result[0].marketValue).toBeNull();
     expect(result[0].unrealizedPnl).toBeNull();
@@ -150,18 +156,18 @@ describe('normalizeEquityHoldings', () => {
     expect(result[0].dataQualityWarnings).toEqual([]);
   });
 
-  it('uses a verified broker mark for value and unrealized P/L', () => {
+  it('uses a verified broker mark for value, unrealized P/L, and marks the quote fresh with honest provenance', () => {
     const result = normalizeEquityHoldings([
       { ...equity('MSFT', 100, 'Long', 100), 'mark-price': '112.50' },
-    ], 'ACC1');
-    expect(result[0]).toMatchObject({ currentPrice: 112.5, marketValue: 11250, unrealizedPnl: 1250, quoteAsOf: null, staleQuote: true });
+    ], 'ACC1', ASOF);
+    expect(result[0]).toMatchObject({ currentPrice: 112.5, marketValue: 11250, unrealizedPnl: 1250, quoteAsOf: ASOF, staleQuote: false });
   });
 
-  it.each(['0', '', 'invalid'])('falls back from mark %j to prior close and marks it stale', mark => {
+  it.each(['0', '', 'invalid'])('falls back from mark %j to prior close, marks it stale, but still records honest fetch provenance', mark => {
     const result = normalizeEquityHoldings([
       { ...equity('MSFT', 100, 'Long', 100), 'mark-price': mark, 'close-price': '108' },
-    ], 'ACC1');
-    expect(result[0]).toMatchObject({ currentPrice: 108, staleQuote: true });
+    ], 'ACC1', ASOF);
+    expect(result[0]).toMatchObject({ currentPrice: 108, quoteAsOf: ASOF, staleQuote: true });
     expect(result[0].dataQualityWarnings[0]).toContain('prior close');
   });
 
@@ -169,7 +175,7 @@ describe('normalizeEquityHoldings', () => {
     const result = normalizeEquityHoldings([
       { ...equity('MSFT', 100, 'Long', 100), 'mark-price': '110' },
       equity('MSFT', 100, 'Long', 100),
-    ], 'ACC1');
+    ], 'ACC1', ASOF);
     expect(result[0]).toMatchObject({ currentPrice: null, quoteAsOf: null, staleQuote: true });
   });
 });

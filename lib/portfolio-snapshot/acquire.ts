@@ -109,7 +109,7 @@ export async function acquirePortfolioSnapshot(token?: string): Promise<Portfoli
   // Equity visibility does not depend on orders having loaded -- per LCC-0001A's own fail-closed
   // table, equities/options remain visible when only working-order evidence is missing.
   const equities = positionsLoaded
-    ? normalizeEquityHoldings(rawPositions as RawPositionLike[], accountNumber)
+    ? normalizeEquityHoldings(rawPositions as RawPositionLike[], accountNumber, asOf)
     : [];
 
   const shortCallResult = positionsLoaded

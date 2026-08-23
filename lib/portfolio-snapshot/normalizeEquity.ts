@@ -22,6 +22,9 @@
 //
 // This module is pure normalization only. It consumes broker mark/close evidence already present
 // on the canonical marked-position response; it never fetches quotes or fabricates missing values.
+// quoteAsOf/staleQuote are derived honestly from the caller-supplied asOf (the exact fetch
+// timestamp of the same round trip that produced the price) and whether every contributing lot's
+// price came from a live mark versus a prior-close fallback -- see the per-holding comments below.
 
 import type { EquityDirection, EquityHolding } from './types';
 
@@ -63,6 +66,7 @@ function groupKey(symbol: string, direction: EquityDirection): string {
 export function normalizeEquityHoldings(
   rawPositions: RawPositionLike[],
   accountNumber: string,
+  asOf: string,
 ): EquityHolding[] {
   const groups: Record<string, GroupAccumulator> = {};
   const directionBySymbol: Record<string, EquityDirection> = {};
@@ -137,11 +141,16 @@ export function normalizeEquityHoldings(
       currentPrice,
       marketValue: currentPrice == null ? null : currentPrice * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
       unrealizedPnl: currentPrice == null || basis == null ? null : (currentPrice - basis) * agg.shares * (directionBySymbol[key] === 'Short' ? -1 : 1),
-      // The marked-position payload does not carry a verified broker quote timestamp. Snapshot
-      // acquisition time belongs in PortfolioSnapshot.asOf and must not be fabricated as quote
-      // provenance. Mark and prior-close economics therefore have unknown freshness.
-      quoteAsOf: null,
-      staleQuote: true,
+      // asOf is the exact moment this position data (including mark/close-price) was fetched --
+      // the same round trip that produced currentPrice, so it's honest quote provenance rather
+      // than a fabricated one. Only set when a price is actually known; a holding with no usable
+      // quote at all has no meaningful "as of" moment for a price it doesn't have.
+      // staleQuote reflects whether every contributing lot's price came from the live mark field
+      // (fresh) versus at least one lot falling back to prior close (stale reference pricing) --
+      // NOT whether the timestamp itself is old. A quote fetched seconds ago from prior-close
+      // data is still stale in the sense that matters here: it doesn't reflect current trading.
+      quoteAsOf: quoteComplete ? asOf : null,
+      staleQuote: !quoteComplete || agg.anyQuoteFromClose,
       deliverable: 'standard',
       dataQualityWarnings: agg.anyQuoteFromClose
         ? ['Current mark unavailable; using prior close as stale reference pricing.']

@@ -69,13 +69,19 @@ describe('acquireSnapshot', () => {
     expect((await acquireSnapshot()).coverageEvidence.complete).toBe(false);
   });
 
-  it('keeps snapshot observation time separate from unknown quote provenance', async () => {
+  it('keeps snapshot observation time separate from unknown quote provenance, but records honest per-equity quote provenance when a live mark is present', async () => {
     const snapshot = await acquireSnapshot();
     expect(snapshot.asOf).toBeTruthy();
+    // Top-level PortfolioSnapshot.quoteAsOf remains a separate, still-unset aggregate concept --
+    // unaffected by per-equity quote provenance.
     expect(snapshot.quoteAsOf).toBeNull();
-    expect(snapshot.equities[0].quoteAsOf).toBeNull();
-    expect(snapshot.equities[0].staleQuote).toBe(true);
-    expect(snapshot.dataQuality.staleQuotes).toBe(true);
+    // rawEquity's fixture carries a valid mark-price (310), so this equity's own quote provenance
+    // is now honestly the snapshot's own fetch timestamp, and the quote is fresh (not stale) --
+    // per the fix wiring EquityHolding.quoteAsOf/staleQuote from the caller-supplied asOf and
+    // whether the price came from a live mark vs. a prior-close fallback.
+    expect(snapshot.equities[0].quoteAsOf).toBe(snapshot.asOf);
+    expect(snapshot.equities[0].staleQuote).toBe(false);
+    expect(snapshot.dataQuality.staleQuotes).toBe(false);
   });
 
   it('fails closed when positions fail without invoking option normalization', async () => {
