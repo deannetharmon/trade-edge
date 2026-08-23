@@ -1,0 +1,64 @@
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { THEMES } from '@/lib/theme';
+import type { Position } from '@/lib/portfolio-data/types';
+import type { PositionsWorkspaceModel } from '../model/types';
+import { PositionsWorkspace } from '../PositionsWorkspace';
+
+const position = {
+  key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
+  entryDate: '2026-08-20', stockPrice: 200, buffer: 12.9, legs: [], maxRisk: 1000,
+  maxRiskReliable: true, entryPriceEffect: 'Credit', entryEconomicsComplete: true, entryCredit: 9.35,
+  creditReceived: 9.35, closeValue: 9, currentValue: 9.1, closeNowPnl: 35, pnl: 28,
+  profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
+  netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
+  structureAmbiguous: false,
+} as Position;
+
+const model: PositionsWorkspaceModel = {
+  snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
+  dataQuality: { status: 'ok', staleQuotes: false, warnings: [] },
+  symbolGroups: [{
+    symbol: 'AAPL', underlyingPrice: 200, equityMarketValue: 47000, optionMarketValue: -900,
+    symbolUnrealizedPnl: 8240, equities: [], options: [position], instrumentCount: 1,
+    strategies: ['CSP'], needsAttention: false, contextualAction: null,
+    capacity: { status: 'ok', sharesOwned: 100, allocatedContracts: 0, reservedContracts: 0, availableContracts: 1, remainderShares: 0, basisComplete: true, blockingReason: null },
+  }],
+  analysisRows: [{ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: false }],
+};
+
+describe('PositionsWorkspace', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('switches between the accessible portfolio and analysis tabs', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    expect(screen.getByRole('tab', { name: 'Portfolio' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('region', { name: /AAPL position details/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('tab', { name: 'Position Analysis' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('columnheader', { name: 'Position' })).toBeInTheDocument();
+  });
+
+  it('applies filters only after Apply and exposes the active count', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Filter' }));
+    const dialog = screen.getByRole('dialog', { name: 'Filter positions' });
+    await user.type(within(dialog).getByLabelText('Symbol'), 'MSFT');
+    expect(screen.getByText('1 of 1 positions')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('button', { name: 'Filter 1' })).toBeInTheDocument();
+    expect(screen.getByText('0 of 1 positions')).toBeInTheDocument();
+  });
+
+  it('renders all fourteen headers in Full Detail', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.selectOptions(screen.getByLabelText('View'), 'full');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(14);
+  });
+});
