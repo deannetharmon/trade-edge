@@ -974,6 +974,53 @@ export interface PortfolioBrokerSource {
   rawComplexOrders: any[] | null;
 }
 
+// Tastytrade's positions `mark-price` field is deprecated and is not reliably
+// populated for every equity.  Keep `average-open-price` from the authoritative
+// position row, but supplement missing equity marks from the supported market
+// data endpoint so a valid broker basis can actually produce unrealized P/L.
+// A missing/crossed market quote remains missing; we never manufacture a price.
+export async function enrichEquityPositionMarks(rawPositions: any[], token: string): Promise<any[]> {
+  const missingSymbols = Array.from(new Set(rawPositions
+    .filter(position => position?.['instrument-type'] === 'Equity')
+    .filter(position => {
+      const mark = Number(position?.['mark-price']);
+      return !(Number.isFinite(mark) && mark > 0);
+    })
+    .map(position => String(position?.['underlying-symbol'] ?? position?.symbol ?? '').trim())
+    .filter(Boolean)));
+
+  if (missingSymbols.length === 0) return rawPositions;
+
+  const prices = new Map<string, number>();
+  for (let offset = 0; offset < missingSymbols.length; offset += 100) {
+    const batch = missingSymbols.slice(offset, offset + 100);
+    try {
+      const query = batch.map(symbol => `equity=${encodeURIComponent(symbol)}`).join('&');
+      const response = await ttFetch(`/market-data/by-type?${query}`, token);
+      for (const item of response?.data?.items ?? []) {
+        const symbol = String(item?.symbol ?? '').trim();
+        const bid = Number(item?.bid);
+        const ask = Number(item?.ask);
+        const mark = Number(item?.mark ?? item?.['mark-price']);
+        const price = resolveUnderlyingPrice(bid, ask, mark);
+        if (symbol && price != null) prices.set(symbol, price);
+      }
+    } catch {
+      // Positions remain visible with null quote economics. The normalizer
+      // reports the precise missing-quote condition rather than inventing P/L.
+    }
+  }
+
+  return rawPositions.map(position => {
+    if (position?.['instrument-type'] !== 'Equity') return position;
+    const existingMark = Number(position?.['mark-price']);
+    if (Number.isFinite(existingMark) && existingMark > 0) return position;
+    const symbol = String(position?.['underlying-symbol'] ?? position?.symbol ?? '').trim();
+    const price = prices.get(symbol);
+    return price == null ? position : { ...position, 'mark-price': price };
+  });
+}
+
 // LCC-0001A: one account-scoped source feeds both the mature option adapter
 // below and the new portfolio snapshot normalizers. Positions and live orders
 // are each requested exactly once. A failed endpoint is retained as null so
@@ -991,12 +1038,16 @@ export async function acquirePortfolioBrokerSource(tokenOverride?: string): Prom
     ttFetch(`/accounts/${accountNumber}/orders/live`, token),
     fetchAllComplexOrders(accountNumber, token),
   ]);
+  const rawPositions = positionsResult.status === 'fulfilled'
+    ? positionsResult.value?.data?.items ?? []
+    : null;
+  const markedPositions = rawPositions == null
+    ? null
+    : await enrichEquityPositionMarks(rawPositions, token);
   return {
     token,
     accountNumber,
-    rawPositions: positionsResult.status === 'fulfilled'
-      ? positionsResult.value?.data?.items ?? []
-      : null,
+    rawPositions: markedPositions,
     rawLiveOrders: liveOrdersResult.status === 'fulfilled'
       ? liveOrdersResult.value?.data?.items ?? []
       : null,

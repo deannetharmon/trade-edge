@@ -32,6 +32,23 @@ describe('acquirePortfolioBrokerSource', () => {
     expect(broker.ttFetch.mock.calls.filter(([path]) => String(path).endsWith('/orders/live'))).toHaveLength(1);
   });
 
+  it('supplements a missing deprecated equity position mark from supported market data', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [{ 'instrument-type': 'Equity', symbol: 'BE', 'underlying-symbol': 'BE', quantity: 100, 'quantity-direction': 'Long', 'average-open-price': 20 }] } };
+      if (path === '/market-data/by-type?equity=BE') return { data: { items: [{ symbol: 'BE', bid: '24.90', ask: '25.10' }] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await acquirePortfolioBrokerSource();
+    expect(result.rawPositions?.[0]).toMatchObject({
+      'average-open-price': 20,
+      'mark-price': 25,
+    });
+  });
+
   it('does not reacquire positions or order evidence when the mature adapter consumes the source', async () => {
     const source = await acquirePortfolioBrokerSource();
     await loadPositions(source);

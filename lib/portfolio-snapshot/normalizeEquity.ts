@@ -152,9 +152,11 @@ export function normalizeEquityHoldings(
       quoteAsOf: quoteComplete ? asOf : null,
       staleQuote: !quoteComplete || agg.anyQuoteFromClose,
       deliverable: 'standard',
-      dataQualityWarnings: agg.anyQuoteFromClose
-        ? ['Current mark unavailable; using prior close as stale reference pricing.']
-        : [],
+      dataQualityWarnings: [
+        ...(!complete ? ['Cost basis unavailable or incomplete in Tastytrade position data.'] : []),
+        ...(!quoteComplete ? ['Current equity quote unavailable from Tastytrade market data.'] : []),
+        ...(agg.anyQuoteFromClose ? ['Current mark unavailable; using prior close as stale reference pricing.'] : []),
+      ],
     });
   }
   return result;
