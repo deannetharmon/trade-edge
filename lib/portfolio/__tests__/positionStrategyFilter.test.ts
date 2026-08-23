@@ -7,7 +7,7 @@
 // among them. A position matching none of the seven keys must always return null, since the UI
 // treats null as "always show, regardless of filter state" rather than silently hiding it.
 import { describe, it, expect } from 'vitest';
-import { resolvePositionStrategyFilterKey, POSITION_STRATEGY_FILTER_KEYS } from '../page';
+import { resolvePositionStrategyFilterKey, POSITION_STRATEGY_FILTER_KEYS } from '@/lib/portfolio/positionStrategyFilter';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 
 // Real, dynamically-computed OCC symbols, matching the convention already established in

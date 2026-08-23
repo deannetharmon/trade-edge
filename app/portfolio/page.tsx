@@ -9,6 +9,11 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+import {
+  resolvePositionStrategyFilterKey,
+  POSITION_STRATEGY_FILTER_KEYS,
+  type PositionStrategyFilterKey,
+} from '@/lib/portfolio/positionStrategyFilter';
 // ES-0001: Live Close-Order Identity and Break-Even Safety -- see
 // docs/design/ES-0001-Live-Close-Order-Safety.md. Canonical single source
 // for deterministic economic-structure analysis, entry/close economics, the
@@ -2885,30 +2890,6 @@ function stratColor(strategy: string) {
   if (strategy === 'BCS') return 'text-red-400 border-red-700';
   if (strategy === 'IC')  return 'text-blue-400 ac-border-faint';
   return 'text-slate-400 border-slate-700';
-}
-
-// Positions Strategy Filter -- CSP/CC/PMCC/LEAP resolve from
-// classifyPositionLifecycle()'s lifecycle-level classification; BPS/BCS/IC
-// resolve from pos.strategy, since classifyPositionLifecycle only tags
-// those as the generic SPREAD bucket and doesn't distinguish among them.
-// A position resolving to neither (e.g. ASSIGNED_STOCK, a naked single-leg
-// PUT/CALL, or UNKNOWN) has no matching filter key at all -- resolvePositionStrategyFilterKey
-// returns null for it, and it's ALWAYS shown regardless of which filter
-// chips are toggled, since none of the seven checkboxes claim to cover it.
-export type PositionStrategyFilterKey = 'CSP' | 'CC' | 'PMCC' | 'LEAP' | 'BPS' | 'BCS' | 'IC';
-export const POSITION_STRATEGY_FILTER_KEYS: PositionStrategyFilterKey[] =
-  ['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC'];
-
-export function resolvePositionStrategyFilterKey(pos: Position): PositionStrategyFilterKey | null {
-  const lifecycleType = classifyPositionLifecycle(pos).type;
-  if (lifecycleType === 'CSP') return 'CSP';
-  if (lifecycleType === 'COVERED_CALL') return 'CC';
-  if (lifecycleType === 'PMCC') return 'PMCC';
-  if (lifecycleType === 'LEAPS') return 'LEAP';
-  if (pos.strategy === 'BPS') return 'BPS';
-  if (pos.strategy === 'BCS') return 'BCS';
-  if (pos.strategy === 'IC') return 'IC';
-  return null;
 }
 
 function pnlColor(pnl: number | null) { return pnl == null ? 'text-slate-400' : pnl >= 0 ? 'text-emerald-400' : 'text-red-400'; }
