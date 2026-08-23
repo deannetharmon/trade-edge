@@ -7,7 +7,13 @@
 // among them. A position matching none of the seven keys must always return null, since the UI
 // treats null as "always show, regardless of filter state" rather than silently hiding it.
 import { describe, it, expect } from 'vitest';
-import { resolvePositionStrategyFilterKey, POSITION_STRATEGY_FILTER_KEYS } from '@/lib/portfolio/positionStrategyFilter';
+import {
+  resolvePositionStrategyFilterKey,
+  POSITION_STRATEGY_FILTER_KEYS,
+  POSITION_STRATEGY_FILTER_GROUPS,
+  resolvePositionStrategyDisplayLabel,
+  stratColorForFilterKey,
+} from '@/lib/portfolio/positionStrategyFilter';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 
 // Real, dynamically-computed OCC symbols, matching the convention already established in
@@ -188,5 +194,92 @@ describe('resolvePositionStrategyFilterKey', () => {
     };
     expect(passes(unclassified)).toBe(true);
     expect(passes(classified)).toBe(false);
+  });
+});
+
+describe('POSITION_STRATEGY_FILTER_GROUPS', () => {
+  it('covers exactly the nine keys across its groups, with no duplicates or omissions', () => {
+    const flattened = POSITION_STRATEGY_FILTER_GROUPS.flatMap(g => g.keys);
+    expect(new Set(flattened)).toEqual(new Set(POSITION_STRATEGY_FILTER_KEYS));
+    expect(flattened).toHaveLength(POSITION_STRATEGY_FILTER_KEYS.length);
+  });
+
+  it('places CSP last in Income and PUT first in Directional, so they render adjacent across the group boundary', () => {
+    const income = POSITION_STRATEGY_FILTER_GROUPS.find(g => g.label === 'Income')!;
+    const directional = POSITION_STRATEGY_FILTER_GROUPS.find(g => g.label === 'Directional')!;
+    expect(income.keys[income.keys.length - 1]).toBe('CSP');
+    expect(directional.keys[0]).toBe('PUT');
+  });
+
+  it('NAKED is its own group, distinct from Income and Directional', () => {
+    const risk = POSITION_STRATEGY_FILTER_GROUPS.find(g => g.label === 'Risk')!;
+    expect(risk.keys).toEqual(['NAKED']);
+  });
+});
+
+describe('resolvePositionStrategyDisplayLabel', () => {
+  it('labels a standalone long put as LONG PUT, distinct from a CSP\'s bare CSP label', () => {
+    const csp = position({ strategy: 'NONE', legs: [leg({ optionType: 'P', direction: 'Short' })] });
+    const longPut = position({
+      strategy: 'NONE',
+      legs: [{ symbol: occSymbol('SPY', 30, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+    });
+    expect(resolvePositionStrategyDisplayLabel(csp)).toBe('CSP');
+    expect(resolvePositionStrategyDisplayLabel(longPut)).toBe('LONG PUT');
+  });
+
+  it('labels an uncovered short call as NAKED CALL, an uncovered short put group as NAKED PUT, and both together as NAKED STRANGLE', () => {
+    const nakedCall = position({
+      strategy: 'NONE',
+      legs: [leg({ optionType: 'C', direction: 'Short', symbol: occSymbol('TSLA', 20, 'C', 300), strikePrice: 300 })],
+    });
+    const nakedPuts = position({
+      strategy: 'NONE',
+      legs: [
+        leg({ optionType: 'P', direction: 'Short', symbol: occSymbol('AAPL', 20, 'P', 200), strikePrice: 200 }),
+        leg({ optionType: 'P', direction: 'Short', symbol: occSymbol('AAPL', 20, 'P', 190), strikePrice: 190 }),
+      ],
+    });
+    const nakedStrangle = position({
+      strategy: 'NONE',
+      legs: [
+        leg({ optionType: 'C', direction: 'Short', symbol: occSymbol('AAPL', 20, 'C', 220), strikePrice: 220 }),
+        leg({ optionType: 'P', direction: 'Short', symbol: occSymbol('AAPL', 20, 'P', 190), strikePrice: 190 }),
+      ],
+    });
+    expect(resolvePositionStrategyDisplayLabel(nakedCall)).toBe('NAKED CALL');
+    expect(resolvePositionStrategyDisplayLabel(nakedPuts)).toBe('NAKED PUT');
+    expect(resolvePositionStrategyDisplayLabel(nakedStrangle)).toBe('NAKED STRANGLE');
+  });
+
+  it('matches the plain filter key for CSP/CC/PMCC/LEAP/BPS/BCS/IC', () => {
+    const bps = position({
+      strategy: 'BPS',
+      legs: [
+        leg({ optionType: 'P', direction: 'Short', strikePrice: 100 }),
+        leg({ optionType: 'P', direction: 'Long', strikePrice: 95 }),
+      ],
+    });
+    expect(resolvePositionStrategyDisplayLabel(bps)).toBe('BPS');
+  });
+
+  it('falls back to pos.strategy unchanged for a position outside the nine buckets', () => {
+    const pos = position({ strategy: 'UNKNOWN', legs: [] });
+    expect(resolvePositionStrategyDisplayLabel(pos)).toBe('UNKNOWN');
+  });
+});
+
+describe('stratColorForFilterKey', () => {
+  it('returns a distinct color for NAKED (risk-flagged) and PUT (directional)', () => {
+    expect(stratColorForFilterKey('NAKED')).toContain('red');
+    expect(stratColorForFilterKey('PUT')).toContain('amber');
+    expect(stratColorForFilterKey('LEAP')).toContain('violet');
+  });
+
+  it('returns null for CSP/CC/PMCC and for an unclassified (null) key, deferring to the caller\'s existing color logic', () => {
+    expect(stratColorForFilterKey('CSP')).toBeNull();
+    expect(stratColorForFilterKey('CC')).toBeNull();
+    expect(stratColorForFilterKey('PMCC')).toBeNull();
+    expect(stratColorForFilterKey(null)).toBeNull();
   });
 });

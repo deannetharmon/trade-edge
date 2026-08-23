@@ -66,3 +66,60 @@ export function resolvePositionStrategyFilterKey(pos: Position): PositionStrateg
   if (isNakedPosition(pos.legs)) return 'NAKED';
   return null;
 }
+
+// -- Filter chip grouping -----------------------------------------------------
+//
+// The nine keys cluster into three families. CSP and PUT sit deliberately
+// adjacent across the Income/Directional boundary (last in Income, first in
+// Directional) -- they're opposites, not variants (CSP collects premium,
+// PUT pays it), so adjacency here is for easy side-by-side contrast, not
+// because they belong in the same family.
+export interface PositionStrategyFilterGroup {
+  label: string;
+  keys: PositionStrategyFilterKey[];
+}
+
+export const POSITION_STRATEGY_FILTER_GROUPS: PositionStrategyFilterGroup[] = [
+  { label: 'Income', keys: ['CC', 'PMCC', 'BPS', 'BCS', 'IC', 'CSP'] },
+  { label: 'Directional', keys: ['PUT', 'LEAP'] },
+  { label: 'Risk', keys: ['NAKED'] },
+];
+
+// -- Card/row display label ---------------------------------------------------
+//
+// The existing pos.strategy field (and strategyLabelForStructure in
+// closeOrderSafety.ts, which produces it for most positions) is leg-type/
+// structure-type only -- a naked short put (CSP) and a standalone long put
+// both render as bare 'PUT', and a naked short call renders as bare 'CALL'
+// with no indication it's uncovered. pos.strategy itself is left untouched
+// (its own comment states it's never used for any safety decision, but it's
+// also read from several other display call sites this change doesn't
+// touch) -- this is a purely additive label used only where the card badge
+// renders, falling back to pos.strategy unchanged for anything outside the
+// nine filter buckets (ASSIGNED_STOCK, UNKNOWN, etc.).
+export function resolvePositionStrategyDisplayLabel(pos: Position): string {
+  const key = resolvePositionStrategyFilterKey(pos);
+  if (key === null) return pos.strategy;
+  if (key === 'PUT') return 'LONG PUT';
+  if (key === 'NAKED') {
+    const { shortPuts, shortCalls } = splitOptionLegs(pos.legs);
+    if (shortCalls.length > 0 && shortPuts.length > 0) return 'NAKED STRANGLE';
+    return shortCalls.length > 0 ? 'NAKED CALL' : 'NAKED PUT';
+  }
+  return key;
+}
+
+// Color classes for the card badge, keyed off the resolved filter key rather
+// than the display label text (avoids string-matching "NAKED CALL" etc.).
+// Falls back to the caller's own existing stratColor(pos.strategy) handling
+// for anything outside the nine buckets -- this function only opinionates on
+// what it actually classifies.
+export function stratColorForFilterKey(key: PositionStrategyFilterKey | null): string | null {
+  if (key === 'NAKED') return 'text-red-400 border-red-700';
+  if (key === 'PUT') return 'text-amber-400 border-amber-700';
+  if (key === 'LEAP') return 'text-violet-400 border-violet-700';
+  if (key === 'BPS') return 'text-emerald-400 border-emerald-700';
+  if (key === 'BCS') return 'text-red-400 border-red-700';
+  if (key === 'IC') return 'text-blue-400 ac-border-faint';
+  return null; // CSP/CC/PMCC and null (unclassified) defer to the caller's existing color logic
+}

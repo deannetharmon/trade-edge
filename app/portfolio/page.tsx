@@ -12,6 +12,9 @@ import {
 import {
   resolvePositionStrategyFilterKey,
   POSITION_STRATEGY_FILTER_KEYS,
+  POSITION_STRATEGY_FILTER_GROUPS,
+  resolvePositionStrategyDisplayLabel,
+  stratColorForFilterKey,
   type PositionStrategyFilterKey,
 } from '@/lib/portfolio/positionStrategyFilter';
 // ES-0001: Live Close-Order Identity and Break-Even Safety -- see
@@ -7853,7 +7856,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
               <p className={`font-bold ${th.text} text-sm leading-tight`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol}</p>
-              <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold ${stratColor(pos.strategy)}`}>{pos.strategy}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold ${stratColorForFilterKey(resolvePositionStrategyFilterKey(pos)) ?? stratColor(pos.strategy)}`}>{resolvePositionStrategyDisplayLabel(pos)}</span>
               {/* Chart button */}
               <div className="relative mt-1">
                 <button
@@ -8807,24 +8810,30 @@ function PositionStrategyFilterBar({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className={`text-[10px] ${th.textFaint} tracking-widest font-bold uppercase mr-1`}>Strategy</span>
-      {POSITION_STRATEGY_FILTER_KEYS.map(key => {
-        const isSelected = selected.has(key);
-        return (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => onToggle(key)}
-            className={`text-[10px] px-2.5 py-1 border rounded font-bold uppercase tracking-wide transition-colors ${
-              isSelected
-                ? 'border-blue-500 text-blue-400 bg-blue-500/10'
-                : `${th.textFaint} border-slate-700 opacity-50 hover:opacity-80`
-            }`}
-          >
-            {key}
-          </button>
-        );
-      })}
+      {POSITION_STRATEGY_FILTER_GROUPS.map((group, groupIdx) => (
+        <div key={group.label} className="flex items-center gap-2">
+          {groupIdx > 0 && <span className={`w-px h-4 bg-slate-700 mx-0.5`} aria-hidden="true" />}
+          {group.keys.map(key => {
+            const isSelected = selected.has(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => onToggle(key)}
+                title={group.label}
+                className={`text-[10px] px-2.5 py-1 border rounded font-bold uppercase tracking-wide transition-colors ${
+                  isSelected
+                    ? 'border-blue-500 text-blue-400 bg-blue-500/10'
+                    : `${th.textFaint} border-slate-700 opacity-50 hover:opacity-80`
+                }`}
+              >
+                {key}
+              </button>
+            );
+          })}
+        </div>
+      ))}
       <button
         type="button"
         onClick={onClearOrSelectAll}

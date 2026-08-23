@@ -192,7 +192,12 @@ describe('WA-0002: Portfolio default tab', () => {
       expect(equity).toHaveTextContent('Market valueUnavailable');
       expect(equity).toHaveTextContent('Unrealized P/LUnavailable');
       expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('Short Put')).toBeInTheDocument();
+      // Badge now reflects the accurate resolvePositionStrategyDisplayLabel(pos) classification
+      // (a single short put with no hedge is a CSP) rather than the fixture's literal
+      // pos.strategy string ('Short Put'), per the Positions Strategy Filter card-label fix.
+      // getAllByText, not getByText -- 'CSP' now also appears as a filter chip label above the
+      // position list, so the exact string is no longer unique to the card badge.
+      expect(screen.getAllByText('CSP').length).toBeGreaterThan(0);
       expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
     } finally {
       portfolioContextOverride.current = null;
