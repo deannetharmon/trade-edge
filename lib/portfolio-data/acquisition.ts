@@ -1616,6 +1616,8 @@ export async function loadPositions(
     const anyLegCrossed = legs.some(
       (l: any) => crossedSymbols.has(l.symbol?.replace(/\s+/g, ''))
     );
+    // Debit P/L is available for display, but credit-specific recommendation
+    // policy must not consume it until debit lifecycle rules are modeled.
     const pnlReliable = entryEconomicsComplete && hasCurrentPrices && !anyLegUnpriceable && !anyLegCrossed && !isNetDebit;
     const defaultIntent: PositionIntent = strategy === 'PUT' ? 'acquisition' : 'income';
     const intent: PositionIntent = intentOverrides[key] ?? defaultIntent;
@@ -1630,9 +1632,10 @@ export async function loadPositions(
     // into a named, directly-tested function (rather than leaving it
     // inline) is what let that gap be caught and regression-tested.
     const pnl = entryEconomicsComplete
-      ? computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue })
+      ? computePositionPnl({ isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, signedEntryAmount: signedNetPremium, currentValue })
       : null;
-    const pnlPct = creditReceived !== 0 && pnl != null ? (pnl / Math.abs(creditReceived)) * 100 : null;
+    const entryAmount = signedNetPremium == null ? null : Math.abs(signedNetPremium);
+    const pnlPct = entryAmount != null && entryAmount > 0 && pnl != null ? (pnl / entryAmount) * 100 : null;
     const profitTarget = profitTargets[key] ?? 0.5;
     // PM-0001 debit guard: a net-debit structure's `creditReceived` above is
     // a floored $0.00, not a real credit -- computing a target price or a
@@ -1678,7 +1681,7 @@ export async function loadPositions(
     const brokerGreeks = aggregateBrokerPositionGreeks(legs, {
       theta: thetaMap, gamma: gammaMap, delta: deltaMap, vega: vegaMap,
     });
-    const resolvedEntryCredit = entryEconomicsComplete ? Math.abs(creditReceived) : null;
+    const resolvedEntryCredit = entryEconomicsComplete && signedNetPremium != null ? Math.abs(signedNetPremium) : null;
     const supportedCreditEntry =
       entryEconomicsComplete &&
       entryPriceEffect === 'Credit' &&
@@ -1701,7 +1704,9 @@ export async function loadPositions(
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: supportedCreditEntry && hasCloseValue ? resolvedEntryCredit - Math.abs(closeValue) : null,
+      closeNowPnl: entryEconomicsComplete && resolvedEntryCredit != null && hasCloseValue
+        ? (isNetDebit ? Math.abs(closeValue) - resolvedEntryCredit : resolvedEntryCredit - Math.abs(closeValue))
+        : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
       plOpen: plBySymbol[key] != null ? Math.round(plBySymbol[key] * 100) / 100 : null,
       maxRisk: calculateMaxRisk(positionLegs, creditReceived, strategy),

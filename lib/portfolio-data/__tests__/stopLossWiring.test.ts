@@ -572,21 +572,21 @@ describe('full debit-structure acceptance (PM-0001 corrective round 2)', () => {
     expect(flooredCreditReceived).toBe(0);
   });
 
-  it('produces entryPriceEffect "Debit", pnl null (via the real computePositionPnl formula), and pnlPct null', () => {
+  it('produces entryPriceEffect "Debit" and observational P/L from verified debit economics', () => {
     const entryPriceEffect: Position['entryPriceEffect'] = isNetDebit ? 'Debit' : 'Credit';
     const pnl = computePositionPnl({
       isNetDebit,
       hasCurrentPrices: true,
       anyLegCrossed: false,
       creditReceived: flooredCreditReceived,
+      signedEntryAmount: signedNetPremium,
       currentValue,
     });
-    const pnlPct = flooredCreditReceived !== 0 && pnl != null ? (pnl / Math.abs(flooredCreditReceived)) * 100 : null;
+    const pnlPct = signedNetPremium != null && pnl != null ? (pnl / Math.abs(signedNetPremium)) * 100 : null;
 
     expect(entryPriceEffect).toBe('Debit');
-    expect(pnl).toBeNull();
-    expect(pnl).not.toBe(-currentValue); // the exact round-2 defect
-    expect(pnlPct).toBeNull();
+    expect(pnl).toBe(50);
+    expect(pnlPct).toBe(25);
   });
 
   it('produces no P/L-driven TAKE_PROFIT or CUT_LOSSES recommendation, and pop/hitTarget stay unavailable', () => {

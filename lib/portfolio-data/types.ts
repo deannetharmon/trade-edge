@@ -71,10 +71,9 @@ export interface Position {
   // $0.00 for backward-compatible display (calculateSpreadCredit) -- that
   // $0.00 must never be read as a genuine zero-credit entry.
   // `entryPriceEffect` is the explicit, honest tag: 'Credit' for a real
-  // net-credit structure, 'Debit' for a detected net-debit structure (this
-  // ticket does not add debit-strategy support -- POP/targetPrice/hitTarget
-  // are all forced unavailable/inert for these, see loadPositions'
-  // isNetDebit guard), 'Unknown' only if the signed premium couldn't be
+  // net-credit structure, 'Debit' for a detected net-debit structure (debit
+  // P/L is supported for display while credit-specific POP/target/hit-target
+  // policy remains unavailable/inert), 'Unknown' only if the signed premium couldn't be
   // computed at all. The ES-0001 canonical `identity` (signed entry
   // economics) is unaffected by this field -- it remains the sole source
   // for close/roll actions.
@@ -88,7 +87,7 @@ export interface Position {
   creditReceived: number;
   currentValue: number | null;
   closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
-  closeNowPnl: number | null;   // credit - closeValue — matches the close/cut-losses modal exactly
+  closeNowPnl: number | null;   // credit - close cost, or liquidation proceeds - entry debit
   pnl: number | null;
   pnlPct: number | null;
   pnlReliable: boolean;
