@@ -22,6 +22,7 @@ export default defineConfig({
       // components/ and app/ (see the comments below).
       'lib/**/__tests__/**/*.test.tsx',
       'features/**/__tests__/**/*.test.tsx',
+      'features/**/__tests__/**/*.test.ts',
       // OE-0001 correction: components/opportunity-engine/__tests__ is the
       // first test under components/ -- without this glob its component
       // test would silently never run under `npm test`.
