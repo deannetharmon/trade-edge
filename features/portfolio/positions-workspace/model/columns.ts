@@ -1,0 +1,34 @@
+import type { AnalysisColumnId, AnalysisViewId } from './types';
+
+export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: string; group: string }> = [
+  { id: 'identity', label: 'Position', group: 'Position' },
+  { id: 'dates', label: 'Entry / Expiry / DTE', group: 'Position' },
+  { id: 'underlying', label: 'Underlying / OTM', group: 'Position' },
+  { id: 'strike', label: 'Strike / Breakeven', group: 'Position' },
+  { id: 'capital', label: 'Buying power / Cash', group: 'Economics' },
+  { id: 'entry', label: 'Credit / Debit', group: 'Economics' },
+  { id: 'value', label: 'Buyback / Value', group: 'Economics' },
+  { id: 'pnl', label: 'Open P/L / Target', group: 'Economics' },
+  { id: 'evolution', label: 'Trade Evolution', group: 'Movement' },
+  { id: 'movement', label: 'What Moved', group: 'Movement' },
+  { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
+  { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
+  { id: 'orders', label: 'GTC / Stop', group: 'Orders' },
+  { id: 'recommendation', label: 'Suggested action', group: 'Recommendation' },
+] as const;
+
+const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'value', 'pnl', 'movement', 'orders', 'recommendation'];
+const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'movement', 'greeks', 'volatility', 'recommendation'];
+const FULL = ANALYSIS_COLUMNS.map(column => column.id);
+
+export function columnsForView(view: Exclude<AnalysisViewId, 'custom'>): AnalysisColumnId[] {
+  return view === 'management' ? [...MANAGEMENT] : view === 'risk' ? [...RISK] : [...FULL];
+}
+
+export function sanitizeColumns(value: unknown): AnalysisColumnId[] {
+  if (!Array.isArray(value)) return columnsForView('management');
+  const valid = new Set(ANALYSIS_COLUMNS.map(column => column.id));
+  const selected = Array.from(new Set(value.filter((id): id is AnalysisColumnId => typeof id === 'string' && valid.has(id as AnalysisColumnId))));
+  if (!selected.includes('identity')) selected.unshift('identity');
+  return selected.length >= 2 ? selected : columnsForView('management');
+}

@@ -1,4 +1,4 @@
-<style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>TradeEdge Equity-Aware Positions</title><style>
   #te-equity-revision {
     --te-page: light-dark(#f5f5f5, #0a0a0a);
     --te-header: light-dark(#111111, #0f0f0f);
@@ -17,7 +17,9 @@
   }
   #te-equity-revision * { box-sizing:border-box; }
   #te-equity-revision button { font:inherit; }
-  #te-equity-revision .switcher { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:10px; }
+  #te-equity-revision .review-tools { margin-bottom:10px; padding:9px; border:1px dashed #9ca3af; border-radius:9px; background:#f8fafc; color:#334155; }
+  #te-equity-revision .review-tools::before { content:"PROTOTYPE STATES · NOT PART OF PRODUCT UI"; display:block; font-size:.68rem; font-weight:700; letter-spacing:.1em; margin-bottom:7px; }
+  #te-equity-revision .switcher { display:flex; flex-wrap:wrap; gap:7px; }
   #te-equity-revision .switcher button { border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-muted); border-radius:8px; padding:7px 10px; cursor:pointer; }
   #te-equity-revision .switcher button[aria-pressed="true"] { background:var(--te-text); color:var(--te-page); }
   #te-equity-revision .app { background:var(--te-page); border:1px solid var(--te-border); border-radius:12px; overflow:hidden; }
@@ -31,6 +33,7 @@
   #te-equity-revision .nav span { padding:8px 11px; color:#9f9f9f; white-space:nowrap; letter-spacing:.08em; }
   #te-equity-revision .nav .active { color:var(--te-accent); border-bottom:2px solid var(--te-accent); }
   #te-equity-revision .layout { display:grid; grid-template-columns:235px minmax(0,1fr); min-height:560px; }
+  #te-equity-revision .overview-layout { grid-template-columns:1fr; }
   #te-equity-revision .side { background:var(--te-side); border-right:1px solid var(--te-border); padding:13px; }
   #te-equity-revision .main { min-width:0; padding:18px; }
   #te-equity-revision .panel { background:var(--te-surface); border:1px solid var(--te-border); border-radius:11px; padding:14px; }
@@ -51,6 +54,136 @@
   #te-equity-revision .metric { border-top:1px solid var(--te-border); padding:9px; }
   #te-equity-revision .metric span { display:block; color:var(--te-faint); margin-bottom:3px; }
   #te-equity-revision .holding-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+  #te-equity-revision .page-head { display:flex; justify-content:space-between; align-items:flex-end; gap:18px; margin-bottom:16px; }
+  #te-equity-revision .page-head .actions { margin:0; }
+  #te-equity-revision .summary-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px; }
+  #te-equity-revision .summary-card { background:var(--te-surface); border:1px solid var(--te-border); border-radius:10px; padding:12px; }
+  #te-equity-revision .summary-card span { display:block; color:var(--te-faint); font-size:.82rem; margin-bottom:4px; }
+  #te-equity-revision .summary-card strong { font-size:1.08rem; }
+  #te-equity-revision .symbol-card { padding:0; overflow:hidden; }
+  #te-equity-revision .symbol-head { display:grid; grid-template-columns:minmax(210px,1fr) repeat(3,minmax(105px,auto)); align-items:center; gap:20px; padding:16px; border-bottom:1px solid var(--te-border); }
+  #te-equity-revision .symbol-title { display:flex; align-items:center; gap:10px; }
+  #te-equity-revision .symbol-badge { width:42px; height:42px; border-radius:10px; display:grid; place-items:center; background:color-mix(in srgb,var(--te-accent) 14%,var(--te-surface)); color:var(--te-accent); font-weight:700; }
+  #te-equity-revision .symbol-stat span { display:block; color:var(--te-faint); font-size:.78rem; margin-bottom:2px; }
+  #te-equity-revision .capacity-line { margin:12px 16px; padding:9px 11px; border-radius:8px; background:var(--te-surface-2); display:flex; flex-wrap:wrap; gap:7px; color:var(--te-muted); }
+  #te-equity-revision .capacity-line strong { color:var(--te-text); }
+  #te-equity-revision .strategy-block { margin:0 16px 14px; border:1px solid var(--te-border); border-radius:9px; overflow:hidden; }
+  #te-equity-revision .strategy-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 12px; background:var(--te-surface-2); }
+  #te-equity-revision .strategy-name { display:flex; align-items:center; gap:8px; }
+  #te-equity-revision .status-dot { width:8px; height:8px; border-radius:50%; background:var(--te-accent); }
+  #te-equity-revision .instrument-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(120px,.7fr) minmax(85px,.5fr) auto; align-items:center; gap:10px; padding:12px; border-top:1px solid var(--te-border); }
+  #te-equity-revision .instrument-row .action { padding:7px 8px; font-size:.82rem; white-space:nowrap; }
+  #te-equity-revision .instrument-row:first-of-type { border-top:0; }
+  #te-equity-revision .instrument-type { display:block; color:var(--te-faint); font-size:.74rem; letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }
+  #te-equity-revision .relationship { color:var(--te-muted); font-size:.85rem; }
+  #te-equity-revision .pnl span { display:block; color:var(--te-faint); font-size:.75rem; }
+  #te-equity-revision .attention { color:var(--te-warning); }
+  #te-equity-revision .overview-tools { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+  #te-equity-revision .workspace-switch { display:flex; align-items:center; gap:4px; padding:4px; margin-bottom:14px; width:max-content; background:var(--te-surface-2); border:1px solid var(--te-border); border-radius:10px; }
+  #te-equity-revision .workspace-switch button { border:0; background:transparent; color:var(--te-muted); border-radius:7px; padding:8px 13px; cursor:pointer; font-weight:600; }
+  #te-equity-revision .workspace-switch button.active { background:var(--te-surface); color:var(--te-text); box-shadow:0 1px 4px rgba(0,0,0,.16); }
+  #te-equity-revision .workspace-switch .view-purpose { padding:0 8px; color:var(--te-faint); font-size:.78rem; font-weight:400; }
+  #te-equity-revision .view-tabs { display:flex; gap:4px; padding:3px; background:var(--te-surface-2); border-radius:8px; }
+  #te-equity-revision .view-tab { border:0; background:transparent; color:var(--te-muted); padding:6px 9px; border-radius:6px; }
+  #te-equity-revision .view-tab.active { background:var(--te-surface); color:var(--te-text); box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  #te-equity-revision .portfolio-workspace { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 355px; gap:12px; align-items:start; }
+  #te-equity-revision .position-list { background:var(--te-surface); border:1px solid var(--te-border); border-radius:10px; overflow:hidden; }
+  #te-equity-revision .list-head, #te-equity-revision .position-summary { display:grid; grid-template-columns:minmax(155px,1.15fr) minmax(100px,.8fr) 95px 105px 105px; align-items:center; gap:10px; }
+  #te-equity-revision .list-head { padding:8px 12px; color:var(--te-faint); font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; background:var(--te-surface-2); }
+  #te-equity-revision .position-summary { width:100%; border:0; border-top:1px solid var(--te-border); background:var(--te-surface); color:var(--te-text); text-align:left; padding:11px 12px; cursor:pointer; }
+  #te-equity-revision .position-summary:first-of-type { border-top:0; }
+  #te-equity-revision .position-summary:hover, #te-equity-revision .position-summary.selected { background:color-mix(in srgb,var(--te-accent) 7%,var(--te-surface)); }
+  #te-equity-revision .position-summary.selected { box-shadow:inset 4px 0 #2563eb; outline:1px solid color-mix(in srgb,#2563eb 45%,var(--te-border)); }
+  #te-equity-revision .position-summary.selected .symbol-badge::after { content:"✓"; position:absolute; right:-4px; bottom:-4px; width:16px; height:16px; border-radius:50%; display:grid; place-items:center; background:#2563eb; color:#fff; font-size:.65rem; border:2px solid var(--te-surface); }
+  #te-equity-revision button:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
+  #te-equity-revision .symbol-cell { display:flex; align-items:center; gap:9px; min-width:0; }
+  #te-equity-revision .symbol-cell > span:last-child { min-width:0; }
+  #te-equity-revision .symbol-cell .symbol-badge { position:relative; width:36px; height:36px; flex:0 0 auto; font-size:.75rem; }
+  #te-equity-revision .symbol-cell .small { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #te-equity-revision .cell-label { display:none; }
+  #te-equity-revision .detail-drawer { background:var(--te-surface); border:1px solid var(--te-border); border-radius:10px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.12); }
+  #te-equity-revision .drawer-head { padding:14px; border-bottom:1px solid var(--te-border); }
+  #te-equity-revision .drawer-title { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  #te-equity-revision .drawer-title-main { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex:1; }
+  #te-equity-revision .drawer-close { border:0; background:transparent; color:var(--te-muted); padding:3px 5px; border-radius:5px; cursor:pointer; }
+  #te-equity-revision.detail-closed .portfolio-workspace { grid-template-columns:1fr; }
+  #te-equity-revision.detail-closed .detail-drawer { display:none; }
+  #te-equity-revision .drawer-capacity { margin-top:10px; color:var(--te-muted); font-size:.82rem; line-height:1.5; }
+  #te-equity-revision .drawer-section { padding:12px 14px; border-top:1px solid var(--te-border); }
+  #te-equity-revision .drawer-section:first-of-type { border-top:0; }
+  #te-equity-revision .drawer-strategy { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }
+  #te-equity-revision .drawer-instrument { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:8px 0; border-top:1px solid var(--te-border); }
+  #te-equity-revision .drawer-instrument .small { font-size:.78rem; }
+  #te-equity-revision .drawer-actions { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:7px; padding:12px 14px; background:var(--te-surface-2); }
+  #te-equity-revision .analysis-view[hidden], #te-equity-revision .portfolio-view[hidden] { display:none; }
+  #te-equity-revision .analysis-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:10px; }
+  #te-equity-revision .column-groups { display:flex; flex-wrap:wrap; gap:6px; }
+  #te-equity-revision .analysis-controls { display:grid; gap:7px; justify-items:end; }
+  #te-equity-revision .analysis-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
+  #te-equity-revision .control-label { display:flex; align-items:center; gap:7px; color:var(--te-muted); font-size:.82rem; }
+  #te-equity-revision .control-select { border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-text); border-radius:7px; padding:7px 30px 7px 9px; font:inherit; }
+  #te-equity-revision .control-count { display:inline-grid; place-items:center; min-width:19px; height:19px; padding:0 5px; border-radius:999px; background:var(--te-accent); color:#061613; font-size:.68rem; font-weight:700; }
+  #te-equity-revision .control-count[hidden] { display:none; }
+  #te-equity-revision .control-dialog { width:min(640px,calc(100vw - 28px)); max-height:min(82vh,720px); border:1px solid var(--te-border); border-radius:12px; padding:0; background:var(--te-surface); color:var(--te-text); box-shadow:0 22px 65px rgba(0,0,0,.45); }
+  #te-equity-revision .control-dialog::backdrop { background:rgba(0,0,0,.55); }
+  #te-equity-revision .dialog-head, #te-equity-revision .dialog-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--te-border); }
+  #te-equity-revision .dialog-head h3 { margin:0; }
+  #te-equity-revision .dialog-body { padding:14px 16px; overflow:auto; max-height:58vh; }
+  #te-equity-revision .dialog-foot { border-top:1px solid var(--te-border); border-bottom:0; justify-content:flex-end; }
+  #te-equity-revision .dialog-close { border:0; background:transparent; color:var(--te-muted); cursor:pointer; padding:5px; }
+  #te-equity-revision .filter-grid, #te-equity-revision .columns-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 22px; }
+  #te-equity-revision .filter-group, #te-equity-revision .column-category { border:0; padding:0; margin:0; }
+  #te-equity-revision .filter-group legend, #te-equity-revision .column-category legend { font-weight:700; margin-bottom:8px; }
+  #te-equity-revision .check-list { display:grid; gap:7px; }
+  #te-equity-revision .check-list label { display:flex; align-items:flex-start; gap:8px; color:var(--te-muted); }
+  #te-equity-revision .empty-results { padding:24px; text-align:center; color:var(--te-muted); }
+  #te-equity-revision .preset-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px; }
+  #te-equity-revision .preset-label { color:var(--te-faint); font-size:.7rem; letter-spacing:.07em; text-transform:uppercase; }
+  #te-equity-revision .preset-chip { border:1px solid var(--te-border); background:var(--te-surface-2); color:var(--te-muted); border-radius:7px; padding:6px 10px; cursor:pointer; font-size:.78rem; font-weight:600; }
+  #te-equity-revision .preset-chip[aria-pressed="true"] { color:#061613; border-color:var(--te-accent); background:var(--te-accent); }
+  #te-equity-revision .column-chip { border:1px solid var(--te-border); background:var(--te-surface); color:var(--te-muted); border-radius:999px; padding:6px 9px; cursor:pointer; font-size:.78rem; }
+  #te-equity-revision .column-chip[aria-pressed="true"] { color:var(--te-text); border-color:color-mix(in srgb,var(--te-accent) 55%,var(--te-border)); background:color-mix(in srgb,var(--te-accent) 9%,var(--te-surface)); }
+  #te-equity-revision .analysis-scroll { overflow-x:auto; border:1px solid var(--te-border); border-radius:10px; background:var(--te-surface); }
+  #te-equity-revision .analysis-table { width:100%; min-width:1760px; border-collapse:collapse; table-layout:fixed; font-size:.78rem; }
+  #te-equity-revision .analysis-table th { position:sticky; top:0; z-index:1; background:var(--te-surface-2); color:var(--te-faint); text-align:left; font-size:.68rem; letter-spacing:.055em; text-transform:uppercase; padding:8px; border-bottom:1px solid var(--te-border); }
+  #te-equity-revision .analysis-table td { vertical-align:top; padding:10px 8px; border-bottom:1px solid var(--te-border); line-height:1.3; }
+  #te-equity-revision .analysis-table tr:last-child td { border-bottom:0; }
+  #te-equity-revision .analysis-table tr:hover td { background:color-mix(in srgb,var(--te-accent) 4%,var(--te-surface)); }
+  #te-equity-revision .analysis-table th:nth-child(1), #te-equity-revision .analysis-table td:nth-child(1) { width:116px; position:sticky; left:0; z-index:2; background:var(--te-surface); }
+  #te-equity-revision .analysis-table th:nth-child(1) { background:var(--te-surface-2); z-index:3; }
+  #te-equity-revision .analysis-table th:nth-child(2), #te-equity-revision .analysis-table td:nth-child(2) { width:132px; }
+  #te-equity-revision .analysis-table th:nth-child(3), #te-equity-revision .analysis-table td:nth-child(3) { width:105px; }
+  #te-equity-revision .analysis-table th:nth-child(4), #te-equity-revision .analysis-table td:nth-child(4) { width:118px; }
+  #te-equity-revision .analysis-table th:nth-child(5), #te-equity-revision .analysis-table td:nth-child(5) { width:118px; }
+  #te-equity-revision .analysis-table th:nth-child(6), #te-equity-revision .analysis-table td:nth-child(6) { width:104px; }
+  #te-equity-revision .analysis-table th:nth-child(7), #te-equity-revision .analysis-table td:nth-child(7) { width:102px; }
+  #te-equity-revision .analysis-table th:nth-child(8), #te-equity-revision .analysis-table td:nth-child(8) { width:108px; }
+  #te-equity-revision .analysis-table th:nth-child(9), #te-equity-revision .analysis-table td:nth-child(9) { width:190px; }
+  #te-equity-revision .analysis-table th:nth-child(10), #te-equity-revision .analysis-table td:nth-child(10) { width:180px; }
+  #te-equity-revision .analysis-table th:nth-child(11), #te-equity-revision .analysis-table td:nth-child(11) { width:150px; }
+  #te-equity-revision .analysis-table th:nth-child(12), #te-equity-revision .analysis-table td:nth-child(12) { width:150px; }
+  #te-equity-revision .analysis-table th:nth-child(13), #te-equity-revision .analysis-table td:nth-child(13) { width:140px; }
+  #te-equity-revision .analysis-table th:nth-child(14), #te-equity-revision .analysis-table td:nth-child(14) { width:155px; }
+  #te-equity-revision .analysis-table .ticker { font-size:.9rem; }
+  #te-equity-revision .contract-badge { display:inline-block; margin-top:4px; padding:2px 5px; border:1px solid var(--te-border); border-radius:4px; color:var(--te-muted); font-size:.66rem; }
+  #te-equity-revision .cell-stack { display:grid; gap:2px; }
+  #te-equity-revision .cell-stack .small { font-size:.69rem; }
+  #te-equity-revision .movement-grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; font-family:"DM Mono",ui-monospace,monospace; font-size:.69rem; }
+  #te-equity-revision .movement-baseline { display:block; color:var(--te-faint); font-size:.65rem; margin-bottom:5px; }
+  #te-equity-revision .movement-explain { margin-top:7px; border-top:1px solid var(--te-border); padding-top:6px; }
+  #te-equity-revision .movement-explain summary { color:#2563eb; cursor:pointer; font-weight:600; font-size:.69rem; }
+  #te-equity-revision .movement-explain p { margin:6px 0 0; color:var(--te-muted); font-size:.69rem; line-height:1.4; }
+  #te-equity-revision .mini-actions { display:flex; gap:5px; margin-top:8px; white-space:nowrap; }
+  #te-equity-revision .mini-actions button { border:1px solid var(--te-border); background:transparent; color:var(--te-text); border-radius:5px; padding:4px 6px; font-size:.68rem; cursor:pointer; }
+  #te-equity-revision .management-actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+  #te-equity-revision .management-actions button, #te-equity-revision .intent-control { border:1px solid var(--te-border); background:transparent; color:var(--te-text); border-radius:5px; padding:4px 6px; font-size:.66rem; cursor:pointer; }
+  #te-equity-revision .management-actions .take-profit { border-color:var(--te-accent); color:var(--te-accent); }
+  #te-equity-revision .management-actions .close-roll { border-color:#8b5cf6; color:#8b5cf6; }
+  #te-equity-revision .management-actions .set-stop { border-color:var(--te-danger); color:var(--te-danger); }
+  #te-equity-revision .intent-wrap { display:flex; align-items:center; gap:5px; margin-top:6px; color:var(--te-faint); font-size:.66rem; }
+  #te-equity-revision .safety-note { display:block; margin-top:5px; color:var(--te-warning); font-size:.64rem; }
+  #te-equity-revision .analysis-note { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:9px 11px; color:var(--te-muted); font-size:.78rem; border-bottom:1px solid var(--te-border); }
+  #te-equity-revision .analysis-legend { display:flex; flex-wrap:wrap; gap:12px; }
   #te-equity-revision .tree { margin-top:12px; border-left:2px solid var(--te-border); padding-left:15px; }
   #te-equity-revision .branch { position:relative; padding:10px 0; border-top:1px solid var(--te-border); }
   #te-equity-revision .branch:first-child { border-top:0; }
@@ -73,49 +206,115 @@
   #te-equity-revision .screen { animation:te-eq-in .15s ease-out; }
   @keyframes te-eq-in { from { opacity:.65; transform:translateY(2px); } to { opacity:1; transform:none; } }
   @media (prefers-reduced-motion:reduce) { #te-equity-revision .screen { animation:none; } }
+  @media (min-width:761px) and (max-width:1100px) {
+    #te-equity-revision .portfolio-workspace { grid-template-columns:minmax(390px,1fr) 355px; }
+    #te-equity-revision .list-head { display:none; }
+    #te-equity-revision .position-summary { grid-template-columns:minmax(130px,1.15fr) minmax(85px,.75fr) auto minmax(90px,.8fr); }
+    #te-equity-revision .position-summary > :nth-child(3) { display:none; }
+    #te-equity-revision .position-summary > strong { white-space:nowrap; }
+  }
   @media (max-width:760px) {
     #te-equity-revision .layout { grid-template-columns:1fr; }
     #te-equity-revision .side { border-right:0; border-bottom:1px solid var(--te-border); }
     #te-equity-revision .metrics { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .page-head { align-items:flex-start; flex-direction:column; }
+    #te-equity-revision .summary-strip { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .symbol-head { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .symbol-title { grid-column:1/-1; }
+    #te-equity-revision .instrument-row { grid-template-columns:1fr 1fr; }
+    #te-equity-revision .instrument-row .action { justify-self:end; }
+    #te-equity-revision .overview-tools { align-items:flex-start; flex-direction:column; }
+    #te-equity-revision .workspace-switch { width:100%; }
+    #te-equity-revision .workspace-switch button { flex:1; }
+    #te-equity-revision .workspace-switch .view-purpose { display:none; }
+    #te-equity-revision .analysis-head { align-items:flex-start; flex-direction:column; }
+    #te-equity-revision .analysis-controls { justify-items:start; }
+    #te-equity-revision .preset-row { justify-content:flex-start; }
+    #te-equity-revision .analysis-toolbar { justify-content:flex-start; }
+    #te-equity-revision .filter-grid, #te-equity-revision .columns-grid { grid-template-columns:1fr; }
+    #te-equity-revision .portfolio-workspace { grid-template-columns:1fr; }
+    #te-equity-revision .detail-drawer { display:none; }
+    #te-equity-revision.mobile-detail-open .position-list { display:none; }
+    #te-equity-revision.mobile-detail-open .detail-drawer { display:block; }
+    #te-equity-revision.mobile-detail-open .drawer-close .close-label { display:inline; }
+    #te-equity-revision .list-head { display:none; }
+    #te-equity-revision .position-summary { grid-template-columns:1fr 1fr; gap:8px 12px; padding:13px; }
+    #te-equity-revision .symbol-cell { grid-column:1/-1; }
+    #te-equity-revision .cell-label { display:block; color:var(--te-faint); font-size:.7rem; margin-bottom:2px; }
     #te-equity-revision .branch-grid { grid-template-columns:1fr 1fr; }
     #te-equity-revision .capacity { grid-template-columns:repeat(2,1fr); }
     #te-equity-revision .mode { display:none; }
   }
-</style>
+</style></head><body>
 
 <div id="te-equity-revision">
-  <div class="switcher" aria-label="Equity portfolio states">
+  <div class="review-tools" data-review-only="true"><div class="switcher" aria-label="Prototype portfolio states">
     <button type="button" aria-pressed="true" data-view="mixed">Mixed AAPL position</button>
     <button type="button" aria-pressed="false" data-view="stock">Stock-only holding</button>
     <button type="button" aria-pressed="false" data-view="reservation">Working reservation</button>
     <button type="button" aria-pressed="false" data-view="assignment">Assignment result</button>
     <button type="button" aria-pressed="false" data-view="basis">Basis incomplete</button>
     <button type="button" aria-pressed="false" data-view="unavailable">Data unavailable</button>
-  </div>
+  </div></div>
   <div class="app">
-    <header class="header"><div class="brandrow"><div class="brand"><span class="mark">TE</span><span>TRADE<em>EDGE</em></span></div><span class="mode">LIVE PORTFOLIO</span></div><nav class="nav" aria-label="TradeEdge navigation"><span>HOME</span><span class="active">PORTFOLIO</span><span>SCREENER</span><span>INCOME ENGINE</span><span>REPEAT STRATEGIES</span><span>TRADE LOG</span><span>PERFORMANCE</span></nav></header>
+    <header class="header"><div class="brandrow"><div class="brand"><span class="mark">TE</span><span>TRADE<em>EDGE</em></span></div><span class="mode">SAMPLE PORTFOLIO</span></div><nav class="nav" aria-label="TradeEdge navigation"><span>HOME</span><span class="active">PORTFOLIO</span><span>SCREENER</span><span>INCOME ENGINE</span><span>REPEAT STRATEGIES</span><span>TRADE LOG</span><span>PERFORMANCE</span></nav></header>
     <div id="te-equity-host"></div>
   </div>
 
   <template id="te-equity-mixed">
-    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">PORTFOLIO VIEWS</div><div class="row"><strong>Positions</strong><span>14</span></div><div class="row"><span>Equity holdings</span><span>4</span></div><div class="row"><span>Option positions</span><span>10</span></div></section><section class="panel"><div class="label">AAPL EXPOSURE</div><div class="row"><span>Shares</span><span>250</span></div><div class="row"><span>Long calls</span><span>1</span></div><div class="row"><span>Short calls</span><span>2</span></div></section></aside>
-      <main class="main"><h2>Positions</h2><p class="sub">Actual holdings appear first. Stock-backed and long-call-backed strategies remain visibly separate.</p><article class="panel"><div class="holding-head"><div><h2>AAPL</h2><span class="pill">2 strategies · 4 open positions</span></div><div><strong class="positive">+$8,240</strong><br><span class="small">Total AAPL exposure P/L · each instrument counted once</span></div></div>
-        <div class="metrics"><div class="metric"><span>Shares</span><strong>250</strong></div><div class="metric"><span>Share market value</span><strong>$47,000</strong></div><div class="metric"><span>Allocated shares</span><strong>100</strong></div><div class="metric"><span>Available share capacity</span><strong>1 call</strong></div></div>
-        <div class="label">STOCK HOLDING AND COVERED CALL</div><div class="tree">
-          <div class="branch"><div class="branch-grid"><div><strong>250 AAPL shares</strong><br><span class="small">Average basis $160.00 · Current $188.00</span></div><span>100 allocated</span><strong class="positive">+$7,000</strong><button class="action" data-go="stock">Open</button></div></div>
-          <div class="branch"><div class="branch-grid"><div><strong>Stock Covered Call</strong><br><span class="small">100 shares supporting Sep $200 call</span></div><span class="pill">Short Call Active</span><strong class="negative">−$125</strong><button class="action">Manage</button></div></div>
-          <div class="branch"><div class="branch-grid"><div><strong>50-share remainder</strong><br><span class="small">Displayed as owned shares · not enough for another standard contract</span></div><span>Unallocated</span><strong>—</strong><button class="action">Details</button></div></div>
+    <div class="layout overview-layout screen">
+      <main class="main"><div class="page-head"><div><h2>Positions</h2><p class="sub" style="margin-bottom:0">Move between portfolio structure and contract-level management without losing context.</p></div></div>
+        <div class="workspace-switch" role="tablist" aria-label="Positions workspace view"><button class="active" type="button" role="tab" aria-selected="true" data-workspace-view="portfolio">Portfolio</button><button type="button" role="tab" aria-selected="false" data-workspace-view="analysis">Position Analysis</button><span class="view-purpose">Structure &amp; capacity ↔ risk &amp; execution</span></div>
+        <div class="portfolio-view" data-workspace-panel="portfolio" role="tabpanel">
+        <div class="summary-strip"><div class="summary-card"><span>Visible position value</span><strong>$164,660</strong></div><div class="summary-card"><span>Unrealized P/L</span><strong class="positive">+$13,095</strong></div><div class="summary-card"><span>Today’s P/L</span><strong class="positive">+$842</strong></div><div class="summary-card"><span>Needs attention</span><strong class="warning">1 position</strong></div></div>
+        <div class="overview-tools"><div class="view-tabs" aria-label="Position filters"><button class="view-tab active" aria-pressed="true">All 6 symbols</button><button class="view-tab" aria-pressed="false">Needs Attention 1</button><button class="view-tab" aria-pressed="false">Ready for Short Call 2</button></div><div class="actions" style="margin:0"><button class="action">Filter instruments</button><button class="action">History</button></div></div>
+        <div class="portfolio-workspace"><section class="position-list" aria-label="Portfolio positions"><div class="list-head"><span>Position</span><span>Strategy</span><span>Market value</span><span>Unrealized P/L</span><span>Status</span></div>
+          <button class="position-summary selected" type="button" data-symbol="AAPL" aria-current="true" aria-expanded="true" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">AAPL</span><span><strong>AAPL</strong><span class="small">$188.00 · 4 instruments</span></span></span><span><span class="cell-label">Strategy</span>Stock CC + PMCC</span><span><span class="cell-label">Market value</span>$47,000</span><strong class="positive"><span class="cell-label">Unrealized P/L</span>+$8,240</strong><span class="positive"><span class="cell-label">Status</span>100 shares available</span></button>
+          <button class="position-summary" type="button" data-symbol="MSFT" aria-expanded="false" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">MSFT</span><span><strong>MSFT</strong><span class="small">$512.40 · 2 instruments</span></span></span><span><span class="cell-label">Strategy</span>Covered Call</span><span><span class="cell-label">Market value</span>$38,200</span><strong class="positive"><span class="cell-label">Unrealized P/L</span>+$3,110</strong><span class="warning"><span class="cell-label">Status</span>Capacity reserved</span></button>
+          <button class="position-summary" type="button" data-symbol="NVDA" aria-expanded="false" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">NVDA</span><span><strong>NVDA</strong><span class="small">$176.20 · 1 instrument</span></span></span><span><span class="cell-label">Strategy</span>Stock</span><span><span class="cell-label">Market value</span>$35,240</span><strong class="positive"><span class="cell-label">Unrealized P/L</span>+$1,330</strong><span class="warning"><span class="cell-label">Status</span>Basis incomplete</span></button>
+          <button class="position-summary" type="button" data-symbol="AMD" aria-expanded="false" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">AMD</span><span><strong>AMD</strong><span class="small">$214.65 · 2 instruments</span></span></span><span><span class="cell-label">Strategy</span>PMCC</span><span><span class="cell-label">Market value</span>$5,980</span><strong class="positive"><span class="cell-label">Unrealized P/L</span>+$620</strong><span><span class="cell-label">Status</span>Monitoring</span></button>
+          <button class="position-summary" type="button" data-symbol="TSLA" aria-expanded="false" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">TSLA</span><span><strong>TSLA</strong><span class="small">$339.70 · 3 instruments</span></span></span><span><span class="cell-label">Strategy</span>Stock CC</span><span><span class="cell-label">Market value</span>$31,400</span><strong class="negative"><span class="cell-label">Unrealized P/L</span>−$620</strong><span><span class="cell-label">Status</span>Monitoring</span></button>
+          <button class="position-summary" type="button" data-symbol="PLTR" aria-expanded="false" aria-controls="position-detail"><span class="symbol-cell"><span class="symbol-badge">PLTR</span><span><strong>PLTR</strong><span class="small">$182.10 · 2 instruments</span></span></span><span><span class="cell-label">Strategy</span>LEAPS</span><span><span class="cell-label">Market value</span>$6,840</span><strong class="positive"><span class="cell-label">Unrealized P/L</span>+$415</strong><span class="positive"><span class="cell-label">Status</span>Long-call foundation available</span></button>
+        </section>
+        <aside class="detail-drawer" id="position-detail" role="region" aria-labelledby="position-detail-title"><div class="drawer-head"><div class="drawer-title"><div class="drawer-title-main"><div><span class="instrument-type">Selected position</span><h2 id="position-detail-title" style="margin:0">AAPL</h2><span class="small">$47,000 equity market value</span></div><div class="pnl"><strong class="positive">+$8,240</strong><span>Symbol unrealized P/L</span></div></div><button class="drawer-close" type="button" aria-label="Close AAPL position details">✕ <span class="close-label">Close</span></button></div><div class="drawer-capacity"><strong>250 shares</strong> · 100 allocated to open calls · 0 reserved by working orders · <span class="positive">100 available</span> · 50-share remainder<br><strong class="positive">Supports 1 covered-call contract</strong></div></div>
+          <section class="drawer-section"><div class="drawer-strategy"><strong>Stock &amp; Covered Call</strong><span class="pill">1 contract available</span></div><div class="drawer-instrument"><div><strong>250 shares</strong><br><span class="small">Basis $160 · 100 allocated to Sep 2026 $200 short call</span></div><div class="pnl"><strong class="positive">+$7,000</strong><span>Unrealized P/L</span></div></div><div class="drawer-instrument"><div><strong>Short Sep 2026 $200 call</strong><br><span class="small">Covered by 100 AAPL shares</span></div><div class="pnl"><strong class="negative">−$125</strong><span>Unrealized P/L</span></div></div></section>
+          <section class="drawer-section"><div class="drawer-strategy"><strong>PMCC</strong><span class="pill">Active</span></div><div class="drawer-instrument"><div><strong>Long Jan 2028 $150 call</strong><br><span class="small">Allocated to Oct 2026 $205 short call</span></div><div class="pnl"><strong class="positive">+$1,490</strong><span>Unrealized P/L</span></div></div><div class="drawer-instrument"><div><strong>Short Oct 2026 $205 call</strong><br><span class="small">Supported by 1 Jan 2028 $150 long call</span></div><div class="pnl"><strong class="negative">−$125</strong><span>Unrealized P/L</span></div></div></section>
+          <div class="drawer-actions"><button class="action" data-go="stock">Review Holding</button><button class="action">Find Covered Call</button><button class="action primary" data-open-analysis="AAPL">Open Full Analysis</button></div></aside></div>
         </div>
-        <div class="label" style="margin-top:14px">SEPARATE LONG-CALL DIAGONAL</div><div class="tree"><div class="branch"><div class="branch-grid"><div><strong>PMCC · Jan 2028 $150 long call</strong><br><span class="small">One long call supporting Oct $205 short call · no share allocation</span></div><span class="pill">PMCC Active</span><strong class="positive">+$1,365</strong><button class="action">Open</button></div></div></div>
-        <div class="actions"><button class="action">View AAPL transactions</button><button class="action primary" data-go="stock">View stock holding</button></div>
-      </article></main>
+        <section class="analysis-view" data-workspace-panel="analysis" role="tabpanel" hidden>
+          <div class="analysis-head"><div><h3 style="margin-bottom:3px">Position Analysis</h3><span class="small">Compare live contract economics, risk, targets, and order state. Four open option positions shown.</span></div><div class="analysis-controls"><div class="analysis-toolbar"><label class="control-label" for="analysis-view-select">View <select id="analysis-view-select" class="control-select"><option value="management">Management</option><option value="risk">Risk</option><option value="full" selected>Full Detail</option><option value="custom">Custom</option></select></label><button class="action" type="button" data-open-dialog="filter-dialog">Filter <span class="control-count" data-filter-count hidden>0</span></button><button class="action" type="button" data-open-dialog="columns-dialog">Customize Columns</button></div></div></div>
+          <div class="overview-tools"><span class="small" data-result-summary>Showing all 4 open contracts</span><div class="actions" style="margin:0"><button class="action">Export</button></div></div>
+          <div class="analysis-scroll"><div class="analysis-note"><span>Scroll horizontally for the full operational record; the contract identity stays pinned.</span><span class="analysis-legend"><span class="positive">● On plan</span><span class="warning">● Review</span><span class="negative">● Invalid / missing</span></span></div>
+            <table class="analysis-table"><thead><tr><th>Position</th><th>Entry / Expiry / DTE</th><th>Underlying / OTM</th><th>Strike / Breakeven</th><th data-group-col="economics">Buying power / Cash</th><th data-group-col="economics">Credit / Debit</th><th data-group-col="economics">Buyback / Value</th><th data-group-col="economics">Open P/L / Target</th><th data-group-col="risk">Trade Evolution</th><th data-group-col="risk">What Moved</th><th data-group-col="risk">Greeks</th><th data-group-col="risk">IV / IVR</th><th data-group-col="orders">GTC / Stop</th><th data-group-col="orders">Suggested action</th></tr></thead><tbody>
+              <tr data-analysis-symbol="ORCL"><td><strong class="ticker">ORCL</strong><br><span class="contract-badge">SHORT CALL</span><br><span class="small">1 contract · Covered</span></td><td><div class="cell-stack"><span>Entered Aug 20</span><strong>Sep 25, 2026</strong><span class="small">32 DTE · 36d held</span></div></td><td><div class="cell-stack"><strong>$146.77</strong><span class="positive">8.0% OTM</span></div></td><td><div class="cell-stack"><strong>$126.95 → $135</strong><span class="small">Eff. buy / Strike</span></div></td><td data-group-col="economics"><div class="cell-stack"><span class="warning">$13,500 secured</span><span>$635 mid</span></div></td><td data-group-col="economics"><strong class="positive">$805 credit</strong></td><td data-group-col="economics"><div class="cell-stack"><strong>$690</strong><span class="small">Marketable estimate</span></div></td><td data-group-col="economics"><div class="cell-stack"><strong class="positive">+$115 (+14.3%)</strong><span>$402.50 target · 50% unlikely</span></div></td><td data-group-col="risk"><span class="movement-baseline">First tracked → now</span><div class="movement-grid"><span class="positive">POP 76→84%</span><span class="positive">Δ 36→30</span><span>θ 14→15/d</span><span>Γ 1.24→1.19</span><span>V −18→−16</span><span>Edge +$3→+$4/d</span><span class="positive">OTM 6.1→8.0%</span><span>IV 48→46%</span><span>IVR 58→63</span><span>DTE 68→32</span></div></td><td data-group-col="risk"><span class="movement-baseline">Prior snapshot → now</span><div class="cell-stack"><span class="positive">Stock +$1.18 · P/L +$42</span><span class="positive">Buffer +0.8pt · POP +3pt</span><span>Edge +$1/d · IV −1pt</span><span>Δ −0.03 · θ +$1/d</span></div><details class="movement-explain"><summary>Why this changed</summary><p>The larger OTM buffer and lower delta improved POP since yesterday. Hold remains appropriate because favorable decay strengthened. This explanation uses the prior snapshot only, not first-tracked history.</p></details></td><td data-group-col="risk"><div class="cell-stack"><strong>Theta +$15/d</strong><span>Γ −1.19 · Vega −$16</span><span class="small">Theta−Gamma +$4/d</span></div></td><td data-group-col="risk"><div class="cell-stack"><strong class="positive">IV 46%</strong><span class="positive">IVR 63 · Good premium</span></div></td><td data-group-col="orders"><div class="cell-stack"><strong class="positive">GTC Live</strong><span class="negative">Stop: None</span></div></td><td data-group-col="orders"><strong class="warning">Hold Position</strong><span class="small">Decay remains favorable</span><div class="management-actions"><button class="take-profit">Take Profit</button><button class="close-roll">Close/Roll</button><button class="set-stop">Set Stop</button></div><label class="intent-wrap">Intent <select class="intent-control"><option selected>Income</option><option>Exit</option><option>Roll</option></select></label><span class="safety-note">Actions open review; no broker order is sent from this mockup.</span><div class="mini-actions"><button>Intelligence</button><button>Explain Recommendation</button></div></td></tr>
+              <tr data-analysis-symbol="BE"><td><strong class="ticker">BE</strong><br><span class="contract-badge">SHORT CALL</span><br><span class="small">1 contract · Covered</span></td><td><div class="cell-stack"><span>Entered Aug 20</span><strong>Sep 25, 2026</strong><span class="small">32 DTE · 36d held</span></div></td><td><div class="cell-stack"><strong>$200.95</strong><span class="positive">12.9% OTM</span></div></td><td><div class="cell-stack"><strong>$165.65 → $175</strong><span class="small">Eff. buy / Strike</span></div></td><td data-group-col="economics"><div class="cell-stack"><span class="warning">$17,500 secured</span><span>$950 mid</span></div></td><td data-group-col="economics"><strong class="positive">$935 credit</strong></td><td data-group-col="economics"><strong>$907.50</strong></td><td data-group-col="economics"><div class="cell-stack"><strong class="positive">+$28 (+2.9%)</strong><span>$467.50 target · 50% unlikely</span></div></td><td data-group-col="risk"><span class="movement-baseline">First tracked → now</span><div class="movement-grid"><span class="positive">POP 70→76%</span><span class="positive">Δ 25→24</span><span>θ 21→24/d</span><span class="negative">Γ .55→.61</span><span>V −18→−20</span><span class="negative">Edge +$2→−$22/d</span><span class="positive">OTM 11.3→12.9%</span><span>IV 92→97%</span><span>IVR 22→16</span><span>DTE 68→32</span></div></td><td data-group-col="risk"><span class="movement-baseline">Prior snapshot → now</span><div class="cell-stack"><span>Stock +$0.42 · P/L +$11</span><span class="positive">Buffer +0.5pt · POP +2pt</span><span class="negative">Edge −$6/d · IV +3pt</span><span>Γ +.01 · Vega −$2</span></div><details class="movement-explain"><summary>Why this changed</summary><p>IV expanded while modeled net edge deteriorated by $6/day. That prior-snapshot move—not the full trade history—is why Cut Losses remains the recommendation.</p></details></td><td data-group-col="risk"><div class="cell-stack"><strong>Theta +$24/d</strong><span>Γ −0.61 · Vega −$20</span><span class="negative">Theta−Gamma −$22/d</span></div></td><td data-group-col="risk"><div class="cell-stack"><strong>IV 97%</strong><span class="negative">IVR 16 · Poor premium</span></div></td><td data-group-col="orders"><div class="cell-stack"><span class="negative">GTC None</span><span class="negative">Stop None</span></div></td><td data-group-col="orders"><strong>Cut Losses</strong><span class="small">Review poor premium efficiency</span><div class="management-actions"><button class="close-roll">Close/Roll</button><button class="set-stop">Set Stop</button></div><label class="intent-wrap">Intent <select class="intent-control"><option>Income</option><option selected>Exit</option><option>Roll</option></select></label><span class="safety-note">Take Profit is withheld because the target has not been reached.</span><div class="mini-actions"><button>Intelligence</button><button>Explain Recommendation</button></div></td></tr>
+              <tr data-analysis-symbol="MRNA"><td><strong class="ticker">MRNA</strong><br><span class="contract-badge warning">LONG PUT</span><br><span class="small">1 contract · Defined risk</span></td><td><div class="cell-stack"><span>Entry pending import</span><strong>Nov 20, 2026</strong><span class="small">88 DTE · 91d entry</span></div></td><td><div class="cell-stack"><strong>$145.84</strong><span class="small">OTM unavailable</span></div></td><td><div class="cell-stack"><strong>$140 put</strong><span class="small">Breakeven pending basis</span></div></td><td data-group-col="economics"><strong class="negative">Max risk unavailable</strong></td><td data-group-col="economics"><strong class="warning">Debit · unsupported</strong></td><td data-group-col="economics"><div class="cell-stack"><strong>$2,357.50</strong><span class="warning">$2,200 marketable</span></div></td><td data-group-col="economics"><div class="cell-stack"><strong class="negative">−$217</strong><span class="warning">Target unavailable</span></div></td><td data-group-col="risk"><span class="movement-baseline">First tracked → now</span><div class="movement-grid"><span>POP —</span><span>Δ —</span><span>θ −14→−14/d</span><span>Γ .56→.56</span><span>V +28→+28</span><span>Edge −$25→−$25/d</span><span>OTM —</span><span>IV 60→60%</span><span>IVR 75→75</span><span>DTE 91→88</span></div><span class="warning small">New baseline · insufficient history</span></td><td data-group-col="risk"><span class="movement-baseline">Prior snapshot → now</span><div class="cell-stack"><span class="warning">Tracking · first daily snapshot</span><span class="small">Movement appears after the next qualified snapshot.</span></div><details class="movement-explain"><summary>Why this changed</summary><p>No qualified prior snapshot exists, so TradeEdge cannot attribute movement or claim a recommendation change. Resolve basis first; first-tracked values remain a separate baseline.</p></details></td><td data-group-col="risk"><div class="cell-stack"><strong>Theta −$14/d</strong><span>Γ +0.56 · Vega +$28</span><span class="warning">Model unsupported</span></div></td><td data-group-col="risk"><div class="cell-stack"><strong>IV 60%</strong><span class="positive">IVR 75 · Excellent</span></div></td><td data-group-col="orders"><div class="cell-stack"><strong class="positive">GTC Live</strong><span class="negative">Stop Invalid</span></div></td><td data-group-col="orders"><strong>Basis review required</strong><span class="small">Resolve entry basis before order guidance</span><div class="management-actions"><button class="close-roll">Close/Roll</button></div><label class="intent-wrap">Intent <select class="intent-control"><option selected>Hedge</option><option>Exit</option></select></label><span class="safety-note">Take Profit and Set Stop are withheld because basis and stop validation are incomplete.</span><div class="mini-actions"><button>Intelligence</button><button>Explain Recommendation</button></div></td></tr>
+              <tr data-analysis-symbol="AAPL"><td><strong class="ticker">AAPL</strong><br><span class="contract-badge">SHORT CALL</span><br><span class="small">1 contract · PMCC</span></td><td><div class="cell-stack"><span>Entered Jul 18</span><strong>Oct 16, 2026</strong><span class="small">54 DTE · 36d held</span></div></td><td><div class="cell-stack"><strong>$188.00</strong><span class="positive">9.0% OTM</span></div></td><td><div class="cell-stack"><strong>$205 strike</strong><span class="small">Supported by Jan 2028 $150 call</span></div></td><td data-group-col="economics"><strong>$4,860 PMCC capital</strong></td><td data-group-col="economics"><strong class="positive">$410 credit</strong></td><td data-group-col="economics"><strong>$535 liability</strong></td><td data-group-col="economics"><div class="cell-stack"><strong class="negative">−$125 (−30.5%)</strong><span>$205 target · 50%</span></div></td><td data-group-col="risk"><span class="movement-baseline">First tracked → now</span><div class="movement-grid"><span class="positive">POP 68→72%</span><span class="positive">Δ 32→28</span><span>θ 9→11/d</span><span>Γ .82→.74</span><span>V −15→−13</span><span class="positive">Edge +$3→+$6/d</span><span class="positive">OTM 6.7→9.0%</span><span>IV 41→38%</span><span>IVR 39→44</span><span>DTE 90→54</span></div></td><td data-group-col="risk"><span class="movement-baseline">Prior snapshot → now</span><div class="cell-stack"><span class="positive">Stock −$1.20 · P/L +$36</span><span class="positive">Buffer +0.7pt · POP +2pt</span><span class="positive">Edge +$2/d · IV −2pt</span><span>Δ −0.03 · Vega −$1</span></div><details class="movement-explain"><summary>Why this changed</summary><p>The stock decline widened the buffer, improving POP and modeled edge since the prior snapshot. Monitor remains appropriate because the PMCC foundation is verified.</p></details></td><td data-group-col="risk"><div class="cell-stack"><strong>Theta +$11/d</strong><span>Γ −0.74 · Vega −$13</span><span class="positive">Net PMCC theta +$6/d</span></div></td><td data-group-col="risk"><div class="cell-stack"><strong>IV 38%</strong><span>IVR 44 · Fair</span></div></td><td data-group-col="orders"><div class="cell-stack"><strong class="positive">GTC Live</strong><span>Stop: 2× credit</span></div></td><td data-group-col="orders"><strong>Monitor PMCC</strong><span class="small">Foundation coverage verified</span><div class="management-actions"><button class="close-roll">Close/Roll</button><button class="set-stop">Set Stop</button></div><label class="intent-wrap">Intent <select class="intent-control"><option selected>Income</option><option>Exit</option><option>Roll</option></select></label><span class="safety-note">Take Profit is withheld while open P/L remains negative.</span><div class="mini-actions"><button>Intelligence</button><button>Explain Recommendation</button></div></td></tr>
+            </tbody></table>
+          </div>
+          <dialog class="control-dialog" id="filter-dialog" aria-labelledby="filter-dialog-title"><form method="dialog" data-filter-form><div class="dialog-head"><div><h3 id="filter-dialog-title">Filter positions</h3><span class="small">Choose which contracts appear in Position Analysis.</span></div><button class="dialog-close" value="cancel" aria-label="Close filters">✕</button></div><div class="dialog-body"><div class="filter-grid">
+            <fieldset class="filter-group"><legend>Symbol</legend><div class="check-list"><label><input type="checkbox" name="symbol" value="ORCL"> ORCL</label><label><input type="checkbox" name="symbol" value="BE"> BE</label><label><input type="checkbox" name="symbol" value="MRNA"> MRNA</label><label><input type="checkbox" name="symbol" value="AAPL"> AAPL</label></div></fieldset>
+            <fieldset class="filter-group"><legend>Strategy type</legend><div class="check-list"><label><input type="checkbox" name="strategy" value="short-premium"> Short premium</label><label><input type="checkbox" name="strategy" value="long-option"> Long option</label><label><input type="checkbox" name="strategy" value="pmcc"> PMCC</label></div></fieldset>
+            <fieldset class="filter-group"><legend>Attention</legend><div class="check-list"><label><input type="checkbox" name="attention" value="true"> Needs action</label><label><input type="checkbox" name="attention" value="false"> On plan</label></div></fieldset>
+            <fieldset class="filter-group"><legend>Open P/L</legend><div class="check-list"><label><input type="checkbox" name="pnl" value="profit"> Profit</label><label><input type="checkbox" name="pnl" value="loss"> Loss</label></div></fieldset>
+          </div></div><div class="dialog-foot"><button class="action" type="button" data-clear-filters>Clear All</button><button class="action" value="cancel">Cancel</button><button class="action primary" value="apply" data-apply-filters>Apply Filters</button></div></form></dialog>
+          <dialog class="control-dialog" id="columns-dialog" aria-labelledby="columns-dialog-title"><form method="dialog" data-columns-form><div class="dialog-head"><div><h3 id="columns-dialog-title">Customize columns</h3><span class="small">Manual changes create a Custom view.</span></div><button class="dialog-close" value="cancel" aria-label="Close column customization">✕</button></div><div class="dialog-body"><div class="columns-grid">
+            <fieldset class="column-category"><legend>Position</legend><div class="check-list"><label><input type="checkbox" data-column-number="1"> Position</label><label><input type="checkbox" data-column-number="2"> Entry / Expiry / DTE</label><label><input type="checkbox" data-column-number="3"> Underlying / OTM</label><label><input type="checkbox" data-column-number="4"> Strike / Breakeven</label></div></fieldset>
+            <fieldset class="column-category"><legend>Economics</legend><div class="check-list"><label><input type="checkbox" data-column-number="5"> Buying power / Cash</label><label><input type="checkbox" data-column-number="6"> Credit / Debit</label><label><input type="checkbox" data-column-number="7"> Buyback / Value</label><label><input type="checkbox" data-column-number="8"> Open P/L / Target</label></div></fieldset>
+            <fieldset class="column-category"><legend>Movement</legend><div class="check-list"><label><input type="checkbox" data-column-number="9"> Trade Evolution</label><label><input type="checkbox" data-column-number="10"> What Moved</label></div></fieldset>
+            <fieldset class="column-category"><legend>Risk &amp; Greeks</legend><div class="check-list"><label><input type="checkbox" data-column-number="11"> Greeks</label><label><input type="checkbox" data-column-number="12"> IV / IVR</label></div></fieldset>
+            <fieldset class="column-category"><legend>Orders</legend><div class="check-list"><label><input type="checkbox" data-column-number="13"> GTC / Stop</label></div></fieldset>
+            <fieldset class="column-category"><legend>Recommendation</legend><div class="check-list"><label><input type="checkbox" data-column-number="14"> Suggested action</label></div></fieldset>
+          </div></div><div class="dialog-foot"><button class="action" type="button" data-reset-columns>Reset to preset</button><button class="action" value="cancel">Cancel</button><button class="action primary" value="apply" data-apply-columns>Apply Columns</button></div></form></dialog>
+        </section>
+      </main>
     </div>
   </template>
 
   <template id="te-equity-stock">
-    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">AAPL SHARES</div><div class="row"><span>Total</span><strong>250</strong></div><div class="row"><span>Allocated</span><span>100</span></div><div class="row"><span>Available units</span><span class="positive">1</span></div><div class="row"><span>Remainder</span><span>50</span></div></section></aside>
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">AAPL SHARES</div><div class="row"><span>Total</span><strong>250</strong></div><div class="row"><span>Allocated</span><span>100</span></div><div class="row"><span>Available</span><span class="positive">100 shares</span></div><div class="row"><span>Remainder</span><span>50 shares</span></div></section></aside>
       <main class="main"><div class="holding-head"><div><span class="pill">Equity Holding · Partially Allocated</span><h2 style="margin-top:8px">AAPL shares</h2><p class="small">Share ownership remains visible even when shares support a short call.</p></div><button class="action primary">Find Covered Call</button></div><div class="metrics"><div class="metric"><span>Quantity</span><strong>250</strong></div><div class="metric"><span>Average basis</span><strong>$160.00</strong></div><div class="metric"><span>Current price</span><strong>$188.00</strong></div><div class="metric"><span>Unrealized P/L</span><strong class="positive">+$7,000</strong></div></div>
-        <section class="panel"><h3>Share allocation</h3><div class="capacity"><div class="unit allocated"><strong>100 shares allocated</strong><span class="small">Sep $200 call</span></div><div class="unit"><strong>100 shares available</strong><span class="small">One standard unit</span></div><div class="unit"><strong>50-share remainder</strong><span class="small">Not a full unit</span></div></div><div class="callout"><strong>One new covered call available</strong><br><span class="small">Allocation is quantity-based unless the broker supplies a confirmed lot relationship.</span></div></section>
+        <section class="panel"><h3>Share allocation</h3><div class="capacity"><div class="unit allocated"><strong>100 shares allocated</strong><span class="small">Sep $200 call</span></div><div class="unit"><strong>100 shares available</strong><span class="small">Supports 1 covered-call contract</span></div><div class="unit"><strong>50-share remainder</strong><span class="small">Not enough for a standard contract</span></div></div><div class="callout"><strong>One new covered-call contract available</strong><br><span class="small">Allocation is quantity-based unless the broker supplies a confirmed lot relationship.</span></div></section>
         <section class="panel"><h3>Related option</h3><div class="branch-grid"><div><strong>Short Sep 2026 $200 call</strong><br><span class="small">Premium received $325 · Current liability $450</span></div><span>100 shares</span><strong class="negative">−$125</strong><button class="action">Manage</button></div></section></main>
     </div>
   </template>
@@ -125,31 +324,185 @@
   </template>
 
   <template id="te-equity-assignment">
-    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">ASSIGNMENT RESULT</div><div class="row"><span>Before</span><span>200 shares</span></div><div class="row"><span>Called away</span><span class="negative">100 shares</span></div><div class="row"><span>Remaining</span><strong>100 shares</strong></div></section></aside><main class="main"><span class="pill">Covered Call · Completed</span><h2 style="margin-top:8px">AAPL assignment reconciled</h2><p class="sub">Broker activity confirms that 100 shares were sold at the $200 strike.</p><div class="metrics"><div class="metric"><span>Shares called away</span><strong>100</strong></div><div class="metric"><span>Assignment price</span><strong>$200.00</strong></div><div class="metric"><span>Short-call premium</span><strong>$325</strong></div><div class="metric"><span>Shares remaining</span><strong>100</strong></div></div><section class="panel"><div class="branch-grid"><div><strong>100 AAPL shares remain open</strong><br><span class="small">Coverage recalculated after assignment</span></div><span class="pill">Ready for Covered Call</span><strong class="positive">1 unit</strong><button class="action primary">Find next call</button></div></section><section class="panel"><h3>Completed strategy history</h3><div class="row"><span>100-share realized result</span><strong class="positive">+$4,325</strong></div><div class="row"><span>Basis evidence</span><span class="positive">Assigned lot verified</span></div><div class="row"><span>Completion reason</span><span>Assigned</span></div><div class="row"><span>Broker event</span><span>Matched</span></div></section></main></div>
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">ASSIGNMENT RESULT</div><div class="row"><span>Before</span><span>200 shares</span></div><div class="row"><span>Called away</span><span class="negative">100 shares</span></div><div class="row"><span>Remaining</span><strong>100 shares</strong></div></section></aside><main class="main"><span class="pill">Covered Call · Completed</span><h2 style="margin-top:8px">AAPL assignment reconciled</h2><p class="sub">Broker activity confirms that 100 shares were sold at the $200 strike.</p><div class="metrics"><div class="metric"><span>Shares called away</span><strong>100</strong></div><div class="metric"><span>Assignment price</span><strong>$200.00</strong></div><div class="metric"><span>Short-call premium</span><strong>$325</strong></div><div class="metric"><span>Shares remaining</span><strong>100</strong></div></div><section class="panel"><div class="branch-grid"><div><strong>100 AAPL shares remain open</strong><br><span class="small">Coverage recalculated after assignment</span></div><span class="pill">Ready for Covered Call</span><strong class="positive">Supports 1 contract</strong><button class="action primary">Find next call</button></div></section><section class="panel"><h3>Completed strategy history</h3><div class="row"><span>100-share realized result</span><strong class="positive">+$4,325</strong></div><div class="row"><span>Basis evidence</span><span class="positive">Assigned lot verified</span></div><div class="row"><span>Completion reason</span><span>Assigned</span></div><div class="row"><span>Broker event</span><span>Matched</span></div></section></main></div>
   </template>
 
   <template id="te-equity-basis">
-    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">NVDA SHARES</div><div class="row"><span>Total</span><strong>200</strong></div><div class="row"><span>Basis-known shares</span><span>100</span></div><div class="row"><span>Basis status</span><span class="warning">Incomplete</span></div></section></aside><main class="main"><span class="pill">Equity Holding · Basis Incomplete</span><h2 style="margin-top:8px">NVDA · 200 shares</h2><p class="sub">All shares remain visible, but TradeEdge will not apply one lot’s basis to the entire holding.</p><section class="panel"><div class="metrics"><div class="metric"><span>Quantity</span><strong>200</strong></div><div class="metric"><span>Average basis</span><strong class="warning">Unavailable</strong></div><div class="metric"><span>Gross capacity</span><strong>2 calls</strong></div><div class="metric"><span>Basis-qualified scans</span><strong>Disabled</strong></div></div><div class="callout"><strong>Basis-dependent metrics unavailable</strong><br><span class="small">TradeEdge may show call candidates and verified capacity, but strike-versus-basis outcomes remain unavailable until every contributing lot has usable basis.</span></div><div class="actions"><button class="action">Review lots</button><button class="action primary">Find calls with basis metrics unavailable</button></div></section></main></div>
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">NVDA SHARES</div><div class="row"><span>Total</span><strong>200</strong></div><div class="row"><span>Basis-known shares</span><span>100</span></div><div class="row"><span>Basis status</span><span class="warning">Incomplete</span></div></section></aside><main class="main"><span class="pill">Equity Holding · Basis Incomplete</span><h2 style="margin-top:8px">NVDA · 200 shares</h2><p class="sub">All shares remain visible, but TradeEdge will not apply one lot’s basis to the entire holding.</p><section class="panel"><div class="metrics"><div class="metric"><span>Quantity</span><strong>200</strong></div><div class="metric"><span>Average basis</span><strong class="warning">Unavailable · 100 of 200 shares known</strong></div><div class="metric"><span>Verified capacity</span><strong>Supports 2 contracts</strong></div><div class="metric"><span>Strike-vs-basis metrics</span><strong class="warning">Unavailable</strong></div></div><div class="callout"><strong>Basis-dependent metrics unavailable</strong><br><span class="small">TradeEdge may show call candidates and verified capacity, but strike-versus-basis outcomes remain unavailable until every contributing lot has usable basis.</span></div><div class="actions"><button class="action">Review lots</button><button class="action primary">Find Covered Calls</button></div></section></main></div>
   </template>
 
   <template id="te-equity-unavailable">
-    <div class="dialog-wrap screen"><div class="layout dim"><aside class="side"></aside><main class="main"><h2>Portfolio positions</h2></main></div><section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="unavailable-title"><div class="label" style="color:var(--te-danger)">COVERAGE DATA UNAVAILABLE</div><h2 id="unavailable-title">Covered-call capacity could not be verified</h2><p class="sub">TradeEdge loaded holdings but could not match one open short option to an underlying symbol.</p><div class="callout danger-callout"><strong>No new covered calls will be recommended</strong><br><span class="small">The existing positions remain visible. Capacity-dependent actions are disabled until the broker data issue is resolved.</span></div><label class="choice"><input type="radio" checked name="next"><span><strong>Review unmatched option exposure</strong><br><span class="small">Identify the broker position preventing verification.</span></span></label><label class="choice"><input type="radio" name="next"><span><strong>Refresh broker positions and working orders</strong><br><span class="small">Retry using a new portfolio snapshot.</span></span></label><div class="actions"><button class="action">Return to Portfolio</button><button class="action primary">Continue review</button></div></section></div>
-  </template>
-</div>
+    <div class="layout screen"><aside class="side"><section class="panel"><div class="label">KNOWN HOLDINGS</div><div class="row"><span>AAPL shares</span><strong>250</strong></div><div class="row"><span>Option positions</span><strong>3</strong></div><div class="row"><span>Coverage status</span><span class="negative">Unresolved</span></div></section></aside><main class="main"><div class="label" style="color:var(--te-danger)">COVERAGE DATA UNAVAILABLE</div><h2>Positions remain visible; new covered calls are paused</h2><p class="sub">TradeEdge loaded the holdings but could not match one open short option to an underlying symbol.</p><section class="panel"><div class="row"><span>250 AAPL shares</span><strong>$47,000 equity market value</strong></div><div class="row"><span>Open option instruments</span><strong>3</strong></div><div class="callout danger-callout"><strong>Capacity unavailable</strong><br><span class="small">No new covered calls will be recommended until the unmatched short-call exposure is resolved. Reliable holdings remain available for review.</span></div><div class="actions"><button class="action">Refresh Portfolio Data</button><button class="action primary">Review Unmatched Exposure</button></div></section></main></div>
+  </template></div>
 
 <script>
   (() => {
     const root = document.getElementById('te-equity-revision');
     const host = root.querySelector('#te-equity-host');
     const controls = [...root.querySelectorAll('[data-view]')];
+    const storageKey = 'tradeedge.positions.mockup.preferences.v1';
+    const defaults = { workspace:'portfolio', analysisView:'full', filters:{ symbol:[], strategy:[], attention:[], pnl:[] }, customColumns:Array.from({length:14},(_,i)=>i+1) };
+    const loadPreferences = () => { try { const value = JSON.parse(localStorage.getItem(storageKey)); return value && typeof value === 'object' ? { ...defaults, ...value, filters:{...defaults.filters,...(value.filters || {})} } : {...defaults}; } catch (_) { return {...defaults}; } };
+    let preferences = loadPreferences();
+    const savePreferences = () => { try { localStorage.setItem(storageKey, JSON.stringify(preferences)); } catch (_) { /* Storage can be unavailable in private or embedded contexts. */ } };
+    const detailData = {
+      MSFT: { value:'$38,200 equity market value', pnl:'+$3,110', tone:'positive', capacity:'200 shares · 100 allocated · 100 reserved by a working order · 0 available', strategy:'Covered Call', status:'Working order reserves all remaining capacity', action:'Review Working Order' },
+      NVDA: { value:'$35,240 equity market value', pnl:'+$1,330', tone:'positive', capacity:'200 shares · basis known for 100 · verified quantity supports 2 contracts', strategy:'Stock Holding', status:'Basis incomplete · strike-vs-basis metrics unavailable', action:'Review Basis' },
+      AMD: { value:'$5,980 option market value', pnl:'+$620', tone:'positive', capacity:'1 long-call foundation · allocated to 1 short call', strategy:'PMCC', status:'Coverage verified · monitoring', action:'Review PMCC' },
+      TSLA: { value:'$31,400 equity market value', pnl:'−$620', tone:'negative', capacity:'200 shares · 100 allocated · 100 available', strategy:'Stock & Covered Call', status:'Supports 1 additional covered-call contract', action:'Find Covered Call' },
+      PLTR: { value:'$6,840 option market value', pnl:'+$415', tone:'positive', capacity:'1 unallocated long-call foundation', strategy:'LEAPS', status:'Long-call foundation available for a compatible short call', action:'Find Short Call' }
+    };
+    const wireOverview = () => {
+      const rows = [...root.querySelectorAll('.position-summary')];
+      const drawer = root.querySelector('#position-detail');
+      const defaultDrawer = drawer?.innerHTML ?? '';
+      let selectedRow = rows.find(row => row.classList.contains('selected')) ?? rows[0];
+      const wireClose = () => {
+        const close = root.querySelector('.drawer-close');
+        close?.addEventListener('click', () => {
+          root.classList.add('detail-closed');
+          root.classList.remove('mobile-detail-open');
+          selectedRow?.setAttribute('aria-expanded', 'false');
+          selectedRow?.focus();
+        });
+      };
+      const showDetail = row => {
+        selectedRow = row;
+        rows.forEach(candidate => {
+          const active = candidate === row;
+          candidate.classList.toggle('selected', active);
+          candidate.setAttribute('aria-expanded', String(active));
+          active ? candidate.setAttribute('aria-current', 'true') : candidate.removeAttribute('aria-current');
+        });
+        root.classList.remove('detail-closed');
+        root.classList.add('mobile-detail-open');
+        const symbol = row.dataset.symbol;
+        const data = detailData[symbol];
+        if (drawer && symbol === 'AAPL') drawer.innerHTML = defaultDrawer;
+        if (drawer && data) drawer.innerHTML = `<div class="drawer-head"><div class="drawer-title"><div class="drawer-title-main"><div><span class="instrument-type">Selected position</span><h2 id="position-detail-title" style="margin:0">${symbol}</h2><span class="small">${data.value}</span></div><div class="pnl"><strong class="${data.tone}">${data.pnl}</strong><span>Symbol unrealized P/L</span></div></div><button class="drawer-close" type="button" aria-label="Close ${symbol} position details">✕ <span class="close-label">Close</span></button></div><div class="drawer-capacity">${data.capacity}</div></div><section class="drawer-section"><div class="drawer-strategy"><strong>${data.strategy}</strong><span class="pill">${data.status}</span></div><p class="small">Select the position action to review its instruments, relationships, and broker evidence.</p></section><div class="drawer-actions"><button class="action">${data.action}</button><button class="action primary" data-open-analysis="${symbol}">Open Full Analysis</button></div>`;
+        wireClose();
+        wireAnalysisLinks();
+      };
+      const setWorkspaceView = (name, symbol) => {
+        preferences.workspace = name;
+        savePreferences();
+        root.querySelectorAll('[data-workspace-view]').forEach(button => {
+          const active = button.dataset.workspaceView === name;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-selected', String(active));
+        });
+        root.querySelectorAll('[data-workspace-panel]').forEach(panel => { panel.hidden = panel.dataset.workspacePanel !== name; });
+        if (name === 'analysis' && symbol) {
+          root.querySelectorAll('[data-analysis-symbol]').forEach(row => {
+            const match = row.dataset.analysisSymbol === symbol;
+            row.style.outline = match ? '2px solid #2563eb' : '';
+            row.style.outlineOffset = match ? '-2px' : '';
+          });
+        }
+      };
+      const wireAnalysisLinks = () => root.querySelectorAll('[data-open-analysis]').forEach(button => button.addEventListener('click', () => setWorkspaceView('analysis', button.dataset.openAnalysis)));
+      rows.forEach(row => row.addEventListener('click', () => showDetail(row)));
+      wireClose();
+      wireAnalysisLinks();
+      root.querySelectorAll('[data-workspace-view]').forEach(button => button.addEventListener('click', () => setWorkspaceView(button.dataset.workspaceView)));
+      const presetColumns = {
+        management: [1, 2, 3, 4, 7, 8, 10, 13, 14],
+        risk: [1, 2, 3, 4, 8, 9, 10, 11, 12, 14],
+        full: Array.from({ length: 14 }, (_, index) => index + 1)
+      };
+      const viewSelect = root.querySelector('#analysis-view-select');
+      const applyColumns = (shown, viewName) => {
+        root.querySelectorAll('.analysis-table tr').forEach(row => [...row.children].forEach((cell, index) => { cell.hidden = !shown.includes(index + 1); }));
+        const table = root.querySelector('.analysis-table');
+        if (table) table.style.minWidth = shown.length >= 13 ? '1760px' : shown.length >= 10 ? '1320px' : '1180px';
+        if (viewSelect) viewSelect.value = viewName;
+      };
+      const applyView = name => {
+        const safeName = ['management','risk','full','custom'].includes(name) ? name : 'full';
+        const shown = safeName === 'custom' ? preferences.customColumns : presetColumns[safeName];
+        preferences.analysisView = safeName;
+        applyColumns(Array.isArray(shown) && shown.length ? shown : presetColumns.full, safeName);
+        savePreferences();
+      };
+      viewSelect?.addEventListener('change', () => applyView(viewSelect.value));
+      const columnDialog = root.querySelector('#columns-dialog');
+      const syncColumnDialog = () => {
+        const shown = preferences.analysisView === 'custom' ? preferences.customColumns : presetColumns[preferences.analysisView] || presetColumns.full;
+        columnDialog?.querySelectorAll('[data-column-number]').forEach(input => { input.checked = shown.includes(Number(input.dataset.columnNumber)); });
+      };
+      root.querySelector('[data-reset-columns]')?.addEventListener('click', () => {
+        const base = preferences.analysisView === 'custom' ? presetColumns.full : presetColumns[preferences.analysisView];
+        columnDialog?.querySelectorAll('[data-column-number]').forEach(input => { input.checked = base.includes(Number(input.dataset.columnNumber)); });
+      });
+      root.querySelector('[data-apply-columns]')?.addEventListener('click', event => {
+        const selected = [...columnDialog.querySelectorAll('[data-column-number]:checked')].map(input => Number(input.dataset.columnNumber));
+        if (!selected.includes(1)) selected.unshift(1);
+        preferences.customColumns = selected;
+        preferences.analysisView = 'custom';
+        applyColumns(selected, 'custom');
+        savePreferences();
+      });
+      const filterDialog = root.querySelector('#filter-dialog');
+      const filterMap = { ORCL:{strategy:'short-premium',attention:'false',pnl:'profit'}, BE:{strategy:'short-premium',attention:'true',pnl:'profit'}, MRNA:{strategy:'long-option',attention:'true',pnl:'loss'}, AAPL:{strategy:'pmcc',attention:'false',pnl:'loss'} };
+      const syncFilterDialog = () => filterDialog?.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = (preferences.filters[input.name] || []).includes(input.value); });
+      const applyFilters = () => {
+        let visible = 0;
+        root.querySelectorAll('[data-analysis-symbol]').forEach(row => {
+          const symbol = row.dataset.analysisSymbol;
+          const meta = filterMap[symbol];
+          const matches = ['symbol','strategy','attention','pnl'].every(key => !preferences.filters[key].length || preferences.filters[key].includes(key === 'symbol' ? symbol : meta[key]));
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        const count = Object.values(preferences.filters).reduce((total, values) => total + values.length, 0);
+        const badge = root.querySelector('[data-filter-count]');
+        if (badge) { badge.textContent = count; badge.hidden = count === 0; }
+        const summary = root.querySelector('[data-result-summary]');
+        if (summary) summary.textContent = count ? `Showing ${visible} of 4 open contracts · ${count} active ${count === 1 ? 'filter' : 'filters'}` : 'Showing all 4 open contracts';
+      };
+      root.querySelector('[data-clear-filters]')?.addEventListener('click', () => filterDialog?.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; }));
+      root.querySelector('[data-apply-filters]')?.addEventListener('click', () => {
+        const next = { symbol:[], strategy:[], attention:[], pnl:[] };
+        filterDialog.querySelectorAll('input[type="checkbox"]:checked').forEach(input => next[input.name].push(input.value));
+        preferences.filters = next;
+        applyFilters();
+        savePreferences();
+      });
+      root.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => {
+        const dialog = root.querySelector(`#${button.dataset.openDialog}`);
+        if (dialog === columnDialog) syncColumnDialog();
+        if (dialog === filterDialog) syncFilterDialog();
+        dialog?.showModal();
+      }));
+      applyView(preferences.analysisView);
+      applyFilters();
+      setWorkspaceView(preferences.workspace);
+      root.querySelectorAll('.view-tab').forEach(tab => tab.addEventListener('click', () => {
+        root.querySelectorAll('.view-tab').forEach(candidate => {
+          const active = candidate === tab;
+          candidate.classList.toggle('active', active);
+          candidate.setAttribute('aria-pressed', String(active));
+        });
+      }));
+      root.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !root.classList.contains('detail-closed')) {
+          root.querySelector('.drawer-close')?.click();
+        }
+      }, { once:true });
+    };
     const render = (name) => {
       const template = root.querySelector(`#te-equity-${name}`);
       if (!(template instanceof HTMLTemplateElement)) return;
       host.replaceChildren(template.content.cloneNode(true));
+      if (name === 'assignment') {
+        const replacementAction = [...host.querySelectorAll('button')].find(button => button.textContent.trim() === 'Find next call');
+        if (replacementAction) replacementAction.textContent = 'Find Replacement';
+      }
       controls.forEach(control => control.setAttribute('aria-pressed', String(control.dataset.view === name)));
       root.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => render(button.dataset.go)));
+      if (name === 'mixed') wireOverview();
     };
     controls.forEach(control => control.addEventListener('click', () => render(control.dataset.view)));
     render('mixed');
   })();
-</script>
+</script></body></html>

@@ -196,6 +196,8 @@ import { PositionCompositionCard } from '@/features/portfolio/positions/Position
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
+import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
+import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
 // (see docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2). The
@@ -9247,7 +9249,7 @@ export default function PortfolioPage() {
   // exact same context. See components/portfolio-data/
   // PortfolioDataProvider.tsx's module doc for the full rationale.
   const {
-    positions, pendingOrders, balances, decisionReviews, loading, error, lastRefresh, composition, snapshot,
+    positions, pendingOrders, balances, decisionReviews, loading, error, lastRefresh, composition, snapshot, snapshotDataQuality,
     setPositions, setPendingOrders, setDecisionReviews, setError,
     refresh: refreshPortfolioData, refreshBalances, refreshDecisionReviews,
   } = usePortfolioData();
@@ -9628,6 +9630,13 @@ export default function PortfolioPage() {
     optionCount: positions.length,
     pendingOrderCount: pendingOrders.length,
   });
+  const positionsWorkspaceV2Enabled = isPositionsWorkspaceV2Enabled();
+  const positionsWorkspaceModel = useMemo(() => buildPositionsWorkspaceModel({
+    snapshot,
+    positions,
+    pendingOrders,
+    snapshotDataQuality,
+  }), [snapshot, positions, pendingOrders, snapshotDataQuality]);
 
 
   // PT-0002B: fail closed at the render boundary. LIVE account
@@ -9914,6 +9923,15 @@ export default function PortfolioPage() {
 
       {positionsWorkspaceState === 'workspace' && (
         <>
+          {positionsWorkspaceV2Enabled ? (
+            <PositionsWorkspace
+              model={positionsWorkspaceModel}
+              th={th}
+              getManagementActions={position => (['TAKE_PROFIT', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
+                .filter(action => isActionRelevant(position, action))}
+              onExecute={(position, action) => openBatch([{ pos: position, action }])}
+            />
+          ) : (
           <div className="overflow-x-auto">
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>
               <PortfolioGreeksDashboard positions={positions} th={th} />
@@ -9970,6 +9988,7 @@ export default function PortfolioPage() {
               })()}
             </div>
           </div>
+          )}
         </>
       )}
 
@@ -10007,4 +10026,3 @@ export default function PortfolioPage() {
     </div>
   );
 }
-
