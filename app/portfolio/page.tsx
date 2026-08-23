@@ -9264,10 +9264,9 @@ export default function PortfolioPage() {
       return next;
     });
   }, []);
-  // Positions with no matching filter key (ASSIGNED_STOCK, naked single-leg
-  // PUT/CALL, UNKNOWN) are always shown -- none of the seven chips claims
-  // to cover them, so filtering never silently hides an unclassified
-  // position.
+  // Positions with no matching filter key (ASSIGNED_STOCK, or UNKNOWN) are
+  // always shown -- none of the nine chips claims to cover them, so
+  // filtering never silently hides an unclassified position.
   const filteredPositions = useMemo(
     () => positions.filter(p => {
       const key = resolvePositionStrategyFilterKey(p);

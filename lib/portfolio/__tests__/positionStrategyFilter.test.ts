@@ -113,7 +113,44 @@ describe('resolvePositionStrategyFilterKey', () => {
     expect(resolvePositionStrategyFilterKey(ic)).toBe('IC');
   });
 
-  it('returns null for a position matching none of the seven keys (e.g. assigned stock) -- always shown, never silently filtered', () => {
+  it('resolves a standalone long put (any DTE, ungated) to PUT', () => {
+    const shortDated = position({
+      strategy: 'NONE',
+      legs: [{ symbol: occSymbol('SPY', 15, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+    });
+    const longDated = position({
+      strategy: 'NONE',
+      legs: [{ symbol: occSymbol('SPY', 400, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+    });
+    expect(resolvePositionStrategyFilterKey(shortDated)).toBe('PUT');
+    expect(resolvePositionStrategyFilterKey(longDated)).toBe('PUT');
+  });
+
+  it('resolves an uncovered (naked) short call with no shares and no long leg to NAKED', () => {
+    const pos = position({
+      strategy: 'NONE',
+      legs: [leg({ optionType: 'C', direction: 'Short', symbol: occSymbol('TSLA', 20, 'C', 300), strikePrice: 300 })],
+    });
+    expect(resolvePositionStrategyFilterKey(pos)).toBe('NAKED');
+  });
+
+  it('resolves two or more uncovered short puts (not a single CSP) to NAKED', () => {
+    const pos = position({
+      strategy: 'NONE',
+      legs: [
+        leg({ optionType: 'P', direction: 'Short', symbol: occSymbol('AAPL', 20, 'P', 200), strikePrice: 200 }),
+        leg({ optionType: 'P', direction: 'Short', symbol: occSymbol('AAPL', 20, 'P', 190), strikePrice: 190 }),
+      ],
+    });
+    expect(resolvePositionStrategyFilterKey(pos)).toBe('NAKED');
+  });
+
+  it('a single uncovered short put still resolves to CSP, not NAKED (no double bucketing)', () => {
+    const pos = position({ strategy: 'NONE', legs: [leg({ optionType: 'P', direction: 'Short' })] });
+    expect(resolvePositionStrategyFilterKey(pos)).toBe('CSP');
+  });
+
+  it('returns null for a position matching none of the nine keys (e.g. assigned stock) -- always shown, never silently filtered', () => {
     const pos = position({
       strategy: 'NONE',
       legs: [],
@@ -127,10 +164,10 @@ describe('resolvePositionStrategyFilterKey', () => {
     expect(resolvePositionStrategyFilterKey(pos)).toBeNull();
   });
 
-  it('POSITION_STRATEGY_FILTER_KEYS contains exactly the seven required keys, no more, no fewer', () => {
+  it('POSITION_STRATEGY_FILTER_KEYS contains exactly the nine required keys, no more, no fewer', () => {
     expect(new Set(POSITION_STRATEGY_FILTER_KEYS)).toEqual(
-      new Set(['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC']),
+      new Set(['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC', 'PUT', 'NAKED']),
     );
-    expect(POSITION_STRATEGY_FILTER_KEYS).toHaveLength(7);
+    expect(POSITION_STRATEGY_FILTER_KEYS).toHaveLength(9);
   });
 });
