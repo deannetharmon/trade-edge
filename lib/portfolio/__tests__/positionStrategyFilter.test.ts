@@ -170,4 +170,23 @@ describe('resolvePositionStrategyFilterKey', () => {
     );
     expect(POSITION_STRATEGY_FILTER_KEYS).toHaveLength(9);
   });
+
+  it('Clear All (an empty selected set) still leaves an unclassified position visible -- filtering logic itself, not the button, is what page.tsx applies', () => {
+    // Mirrors app/portfolio/page.tsx's filteredPositions predicate:
+    // key === null || selected.has(key). An empty Set correctly excludes
+    // every classified position while a null-key position remains shown.
+    const unclassified = position({
+      strategy: 'NONE',
+      legs: [],
+      stockPosition: { symbol: 'GME', quantity: 100, averageOpenPrice: 20, currentPrice: 22 },
+    } as Partial<Position>);
+    const classified = position({ strategy: 'NONE', legs: [leg({ optionType: 'P', direction: 'Short' })] });
+    const emptySelection = new Set<string>();
+    const passes = (pos: Position) => {
+      const key = resolvePositionStrategyFilterKey(pos);
+      return key === null || emptySelection.has(key);
+    };
+    expect(passes(unclassified)).toBe(true);
+    expect(passes(classified)).toBe(false);
+  });
 });

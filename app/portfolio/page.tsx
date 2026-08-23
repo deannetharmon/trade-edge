@@ -8796,12 +8796,14 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
 // Placed above PositionSection so it filters the flat positions list
 // independent of health/priority grouping elsewhere on the page.
 function PositionStrategyFilterBar({
-  selected, onToggle, th,
+  selected, onToggle, onClearOrSelectAll, th,
 }: {
   selected: Set<PositionStrategyFilterKey>;
   onToggle: (key: PositionStrategyFilterKey) => void;
+  onClearOrSelectAll: () => void;
   th: any;
 }) {
+  const allCleared = selected.size === 0;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className={`text-[10px] ${th.textFaint} tracking-widest font-bold uppercase mr-1`}>Strategy</span>
@@ -8823,6 +8825,13 @@ function PositionStrategyFilterBar({
           </button>
         );
       })}
+      <button
+        type="button"
+        onClick={onClearOrSelectAll}
+        className={`text-[10px] px-2.5 py-1 border rounded font-bold uppercase tracking-wide transition-colors border-slate-600 ${th.textFaint} hover:opacity-80 ml-1`}
+      >
+        {allCleared ? 'Select All' : 'Clear All'}
+      </button>
     </div>
   );
 }
@@ -9263,6 +9272,14 @@ export default function PortfolioPage() {
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+  }, []);
+  // Single state-aware toggle: clears every chip when at least one is
+  // selected, restores all nine when none are -- so the same button always
+  // does "the other thing" rather than needing two separate buttons.
+  const clearOrSelectAllStrategyFilters = useCallback(() => {
+    setStrategyFilters(prev =>
+      prev.size > 0 ? new Set() : new Set(POSITION_STRATEGY_FILTER_KEYS),
+    );
   }, []);
   // Positions with no matching filter key (ASSIGNED_STOCK, or UNKNOWN) are
   // always shown -- none of the nine chips claims to cover them, so
@@ -9908,7 +9925,7 @@ export default function PortfolioPage() {
                 return (
                   <>
                     {positions.length > 0 && (
-                      <PositionStrategyFilterBar selected={strategyFilters} onToggle={toggleStrategyFilter} th={th} />
+                      <PositionStrategyFilterBar selected={strategyFilters} onToggle={toggleStrategyFilter} onClearOrSelectAll={clearOrSelectAllStrategyFilters} th={th} />
                     )}
                     {pendingOrders.length > 0 && (
                       <PendingOrdersSection
