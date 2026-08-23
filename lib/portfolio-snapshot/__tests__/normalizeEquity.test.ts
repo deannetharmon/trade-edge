@@ -153,7 +153,15 @@ describe('normalizeEquityHoldings', () => {
     expect(result[0].staleQuote).toBe(true);
     expect(result[0].deliverable).toBe('standard');
     expect(result[0].settledQuantity).toBeNull();
-    expect(result[0].dataQualityWarnings).toEqual([]);
+    expect(result[0].dataQualityWarnings).toEqual(['Current equity quote unavailable from Tastytrade market data.']);
+  });
+
+  it('explains when Tastytrade did not provide a complete cost basis', () => {
+    const result = normalizeEquityHoldings([
+      { ...equity('BE', 100), 'mark-price': '25' },
+    ], 'ACC1', ASOF);
+    expect(result[0].unrealizedPnl).toBeNull();
+    expect(result[0].dataQualityWarnings).toContain('Cost basis unavailable or incomplete in Tastytrade position data.');
   });
 
   it('uses a verified broker mark for value, unrealized P/L, and marks the quote fresh with honest provenance', () => {
