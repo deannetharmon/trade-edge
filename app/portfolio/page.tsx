@@ -2886,6 +2886,31 @@ function stratColor(strategy: string) {
   if (strategy === 'IC')  return 'text-blue-400 ac-border-faint';
   return 'text-slate-400 border-slate-700';
 }
+
+// Positions Strategy Filter -- CSP/CC/PMCC/LEAP resolve from
+// classifyPositionLifecycle()'s lifecycle-level classification; BPS/BCS/IC
+// resolve from pos.strategy, since classifyPositionLifecycle only tags
+// those as the generic SPREAD bucket and doesn't distinguish among them.
+// A position resolving to neither (e.g. ASSIGNED_STOCK, a naked single-leg
+// PUT/CALL, or UNKNOWN) has no matching filter key at all -- resolvePositionStrategyFilterKey
+// returns null for it, and it's ALWAYS shown regardless of which filter
+// chips are toggled, since none of the seven checkboxes claim to cover it.
+export type PositionStrategyFilterKey = 'CSP' | 'CC' | 'PMCC' | 'LEAP' | 'BPS' | 'BCS' | 'IC';
+export const POSITION_STRATEGY_FILTER_KEYS: PositionStrategyFilterKey[] =
+  ['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC'];
+
+export function resolvePositionStrategyFilterKey(pos: Position): PositionStrategyFilterKey | null {
+  const lifecycleType = classifyPositionLifecycle(pos).type;
+  if (lifecycleType === 'CSP') return 'CSP';
+  if (lifecycleType === 'COVERED_CALL') return 'CC';
+  if (lifecycleType === 'PMCC') return 'PMCC';
+  if (lifecycleType === 'LEAPS') return 'LEAP';
+  if (pos.strategy === 'BPS') return 'BPS';
+  if (pos.strategy === 'BCS') return 'BCS';
+  if (pos.strategy === 'IC') return 'IC';
+  return null;
+}
+
 function pnlColor(pnl: number | null) { return pnl == null ? 'text-slate-400' : pnl >= 0 ? 'text-emerald-400' : 'text-red-400'; }
 function dteColor(dte: number) { if (dte <= 7) return 'text-red-500 font-bold'; if (dte <= 21) return 'text-yellow-400 font-bold'; return 'text-slate-400'; }
 
@@ -8786,6 +8811,41 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
 }
 
 // ── Pending Orders Section ──────────────────────────────────────────────────
+// Positions Strategy Filter chips -- multi-select, default all selected.
+// Placed above PositionSection so it filters the flat positions list
+// independent of health/priority grouping elsewhere on the page.
+function PositionStrategyFilterBar({
+  selected, onToggle, th,
+}: {
+  selected: Set<PositionStrategyFilterKey>;
+  onToggle: (key: PositionStrategyFilterKey) => void;
+  th: any;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className={`text-[10px] ${th.textFaint} tracking-widest font-bold uppercase mr-1`}>Strategy</span>
+      {POSITION_STRATEGY_FILTER_KEYS.map(key => {
+        const isSelected = selected.has(key);
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={isSelected}
+            onClick={() => onToggle(key)}
+            className={`text-[10px] px-2.5 py-1 border rounded font-bold uppercase tracking-wide transition-colors ${
+              isSelected
+                ? 'border-blue-500 text-blue-400 bg-blue-500/10'
+                : `${th.textFaint} border-slate-700 opacity-50 hover:opacity-80`
+            }`}
+          >
+            {key}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
@@ -9212,6 +9272,28 @@ export default function PortfolioPage() {
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  // Positions Strategy Filter -- default all seven selected, per spec.
+  const [strategyFilters, setStrategyFilters] = useState<Set<PositionStrategyFilterKey>>(
+    new Set(POSITION_STRATEGY_FILTER_KEYS),
+  );
+  const toggleStrategyFilter = useCallback((key: PositionStrategyFilterKey) => {
+    setStrategyFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+  // Positions with no matching filter key (ASSIGNED_STOCK, naked single-leg
+  // PUT/CALL, UNKNOWN) are always shown -- none of the seven chips claims
+  // to cover them, so filtering never silently hides an unclassified
+  // position.
+  const filteredPositions = useMemo(
+    () => positions.filter(p => {
+      const key = resolvePositionStrategyFilterKey(p);
+      return key === null || strategyFilters.has(key);
+    }),
+    [positions, strategyFilters],
+  );
   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
   const [clearingSnapshots, setClearingSnapshots] = useState(false);
   const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType }[] | null>(null);
@@ -9838,8 +9920,16 @@ export default function PortfolioPage() {
                 // Flat list: no section grouping (does not generalize to PMCC/LEAPS).
                 // Per-card banners convey each position's status. PositionSection
                 // sorts by lifecycle (CSP/stock/CC/spread/PMCC) internally.
+                // Positions Strategy Filter narrows this flat list only -- it does
+                // not affect PortfolioGreeksDashboard above (portfolio-wide Greeks
+                // summary intentionally always reflects the full, unfiltered
+                // portfolio) or PendingOrdersSection (orders aren't yet classified
+                // by strategy).
                 return (
                   <>
+                    {positions.length > 0 && (
+                      <PositionStrategyFilterBar selected={strategyFilters} onToggle={toggleStrategyFilter} th={th} />
+                    )}
                     {pendingOrders.length > 0 && (
                       <PendingOrdersSection
                         orders={pendingOrders} th={th}
@@ -9849,10 +9939,10 @@ export default function PortfolioPage() {
                         onReplace={replacePendingOrder}
                       />
                     )}
-                    {positions.length > 0 && (
+                    {filteredPositions.length > 0 && (
                       <PositionSection
                         title="Positions" titleColor={th.textFaint}
-                        positions={positions} th={th} checked={checked}
+                        positions={filteredPositions} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
@@ -9863,6 +9953,11 @@ export default function PortfolioPage() {
                         decisionReviews={decisionReviews} onSaveDecisionReview={handleSaveDecisionReview}
                         focusKey={focusPositionKey}
                       />
+                    )}
+                    {positions.length > 0 && filteredPositions.length === 0 && (
+                      <p className={`text-xs ${th.textFaint} tracking-wide px-1`}>
+                        No open positions match the selected strategy filters.
+                      </p>
                     )}
                   </>
                 );
