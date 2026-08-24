@@ -3385,6 +3385,8 @@ function BatchConfirmModal({
       let completed = 0;
 
       for (const item of activeItems) {
+        let cancelledExistingGtc = false;
+        let replacementSubmitted = false;
         try {
           let orderId: string;
 
@@ -3392,9 +3394,16 @@ function BatchConfirmModal({
           if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key) && item.pos.gtcOrderId) {
             try {
               const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
+              if (gtcComplexId) {
+                throw new Error('The existing close is part of a complex/OCO order and cannot be reconstructed exactly from position data. Manage that order in TastyTrade rather than replacing it here.');
+              }
+              if (item.pos.gtcOrderPrice == null || !Number.isFinite(item.pos.gtcOrderPrice) || item.pos.gtcOrderPrice <= 0) {
+                throw new Error('The existing GTC price is unavailable, so TradeEdge cannot guarantee restoration if replacement fails. No order was cancelled.');
+              }
               console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${item.pos.gtcOrderId} complexId=${gtcComplexId}`);
               const cancelResult = await cancelOrder(item.pos.accountNumber, item.pos.gtcOrderId, token, gtcComplexId);
               console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, cancelResult);
+              cancelledExistingGtc = true;
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
@@ -3563,6 +3572,7 @@ function BatchConfirmModal({
             throw new Error(`Blocked by safety gate: ${submission.reason}`);
           }
           orderId = submission.result;
+          if (!isDeferredRollTrigger) replacementSubmitted = true;
 
           if (item.action === 'CLOSE_ROLL' && rollMode[item.pos.key] === 'roll') {
             const ri = rollInputs[item.pos.key];
@@ -3677,6 +3687,7 @@ function BatchConfirmModal({
               }
               orderId = otocoSubmission.result.orderId;
               openId = otocoSubmission.result.openId;
+              replacementSubmitted = true;
 
               writeAuditEntry({
                 id: crypto.randomUUID(), timestamp: new Date().toISOString(),
@@ -3724,7 +3735,44 @@ function BatchConfirmModal({
           }
 
         } catch (e: any) {
-          results.push({ symbol: item.pos.symbol, action: item.action, orderId: '—', status: 'error', error: e.message, limitPrice: item.limitPrice, estPnl: item.estPnl });
+          let reportedError = e.message ?? 'Order failed.';
+          if (!dryRun && cancelledExistingGtc && !replacementSubmitted && item.pos.gtcOrderPrice != null && item.closeIdentity) {
+            try {
+              const restorePrice = item.pos.gtcOrderPrice;
+              const restoreBody = buildCloseOrder(item.pos, restorePrice, 'GTC');
+              const restorePnl = creditClosePnlDollars(item.closeIdentity.entryPricePointsPerUnit, restorePrice, item.closeIdentity.quantity);
+              const restoreGateInput: LiveCloseOrderSafetyInput = {
+                identity: item.closeIdentity,
+                requestedQuantity: item.closeIdentity.quantity,
+                closeableQuantity: item.closeIdentity.quantity,
+                pricingIntent: 'PROFIT_TARGET',
+                requestedClosePriceEffect: 'Debit',
+                closePricePointsPerUnit: restorePrice,
+                quote: item.closeQuote ? { netBid: item.closeQuote.netBid, netAsk: item.closeQuote.netAsk, netMid: item.closeQuote.netMid, fetchedAtMs: item.quoteFetchedAt ?? null } : null,
+                actualOrder: {
+                  legs: restoreBody.legs.map(l => ({ symbol: l.symbol, quantity: l.quantity, direction: (l.action === 'Buy to Close' ? 'Short' : 'Long') as 'Short' | 'Long' })),
+                  limitPricePointsPerUnit: restorePrice,
+                  priceEffect: 'Debit',
+                  orderType: restoreBody['order-type'],
+                  timeInForce: restoreBody['time-in-force'],
+                },
+                displayedExpectedPnlDollars: restorePnl,
+              };
+              const restored = await submitCloseOrderIfSafe(
+                { identity: item.closeIdentity, structureAmbiguous: item.pos.structureAmbiguous, structureBlockMessage: item.pos.structureBlockMessage },
+                restoreGateInput,
+                async () => {
+                  const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, restoreBody);
+                  return String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
+                },
+              );
+              if (!restored.submitted) throw new Error(restored.reason);
+              reportedError += ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+            } catch (restoreErr: any) {
+              reportedError += ` CRITICAL: replacement failed after the original GTC was cancelled, and automatic restoration also failed (${restoreErr?.message ?? 'unknown restoration failure'}). Verify working orders in TastyTrade immediately.`;
+            }
+          }
+          results.push({ symbol: item.pos.symbol, action: item.action, orderId: '—', status: 'error', error: reportedError, limitPrice: item.limitPrice, estPnl: item.estPnl });
           writeAuditEntry({
             id: crypto.randomUUID(), timestamp: new Date().toISOString(),
             symbol: item.pos.symbol, strategy: item.pos.strategy, action: item.action,
