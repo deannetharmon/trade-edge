@@ -89,7 +89,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute }: { model: P
 
 const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close Position / Roll', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
 
-function AnalysisRow({ position: p, columns, th, actions, onExecute }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType) => void }) {
+function AnalysisRow({ position: p, columns, th, actions, onExecute }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void }) {
   const first = p.snapshotHistory?.[0]; const prior = p.snapshotHistory?.[p.snapshotHistory.length - 1];
   const cell: Record<AnalysisColumnId, ReactNode> = {
     identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{p.strategy}</span><span className={th.textFaint}>{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span></>,
