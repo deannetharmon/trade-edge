@@ -6688,6 +6688,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     pos.stopLossClassification === 'NO_STOP'    ? '+ Set Stop'      :
     pos.stopLossClassification === 'TOO_LOOSE'  ? '⚠ Update Stop'   :
     pos.stopLossClassification === 'TOO_TIGHT'  ? '⚠ Verify Stop'   :
+    pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? '⚠ Verify Stop' :
+    pos.stopLossClassification === 'INVALID' ? '⚠ Repair Stop' :
     '✎ Stop';
 
   const stopParsed  = parseFloat(stopPrice || '0');
@@ -6713,6 +6715,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     <div className="relative">
       <button
         ref={btnRef}
+        aria-label={`${btnLabel.replace(/^[^A-Za-z]+/, '')} for ${pos.symbol}`}
         disabled={pos.structureAmbiguous}
         title={pos.structureAmbiguous ? (pos.structureBlockMessage ?? 'Ambiguous position structure -- stop loss disabled.') : undefined}
         onClick={e => { e.stopPropagation(); if (pos.structureAmbiguous) return; open ? setOpen(false) : handleOpen(); }}
@@ -9971,6 +9974,9 @@ export default function PortfolioPage() {
               getManagementActions={position => (['TAKE_PROFIT', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
               onExecute={(position, action) => openBatch([{ pos: position, action }])}
+              renderStopControl={position => position.stopLossClassification === 'NO_STOP'
+                ? <SetStopLossButton pos={position} th={th} />
+                : null}
             />
           ) : (
           <div className="overflow-x-auto">

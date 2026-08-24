@@ -3,22 +3,21 @@ import type { AnalysisColumnId, AnalysisViewId } from './types';
 export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: string; group: string }> = [
   { id: 'identity', label: 'Position', group: 'Position' },
   { id: 'dates', label: 'Entry / Expiry / DTE', group: 'Position' },
-  { id: 'underlying', label: 'Underlying / OTM', group: 'Position' },
+  { id: 'underlying', label: 'Underlying / Moneyness', group: 'Position' },
   { id: 'strike', label: 'Strike / Breakeven', group: 'Position' },
-  { id: 'capital', label: 'Buying power / Cash', group: 'Economics' },
+  { id: 'capital', label: 'Capital / Collateral', group: 'Economics' },
   { id: 'entry', label: 'Credit / Debit', group: 'Economics' },
   { id: 'value', label: 'Buyback / Value', group: 'Economics' },
   { id: 'pnl', label: 'Open P/L / Target', group: 'Economics' },
   { id: 'evolution', label: 'Trade Evolution', group: 'Movement' },
-  { id: 'movement', label: 'What Moved', group: 'Movement' },
   { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
   { id: 'orders', label: 'GTC / Stop', group: 'Orders' },
   { id: 'recommendation', label: 'Suggested action', group: 'Recommendation' },
 ] as const;
 
-const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'value', 'pnl', 'movement', 'orders', 'recommendation'];
-const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'movement', 'greeks', 'volatility', 'recommendation'];
+const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'recommendation'];
+const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'greeks', 'volatility', 'recommendation'];
 const FULL = ANALYSIS_COLUMNS.map(column => column.id);
 
 export function columnsForView(view: Exclude<AnalysisViewId, 'custom'>): AnalysisColumnId[] {

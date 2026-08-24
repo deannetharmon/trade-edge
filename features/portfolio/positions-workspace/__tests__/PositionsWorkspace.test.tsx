@@ -14,7 +14,7 @@ const position = {
   profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
   netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
   structureAmbiguous: false,
-} as Position;
+} as unknown as Position;
 
 const model: PositionsWorkspaceModel = {
   snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
@@ -54,11 +54,12 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText('0 of 1 positions')).toBeInTheDocument();
   });
 
-  it('renders all fourteen headers in Full Detail', async () => {
+  it('renders all thirteen headers in Full Detail without What Moved', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     await user.selectOptions(screen.getByLabelText('View'), 'full');
-    expect(screen.getAllByRole('columnheader')).toHaveLength(14);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(13);
+    expect(screen.queryByRole('columnheader', { name: 'What Moved' })).not.toBeInTheDocument();
   });
 });

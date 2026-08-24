@@ -42,9 +42,10 @@ describe('positions workspace model', () => {
 });
 
 describe('analysis controls', () => {
-  it('defines all fourteen columns and protects identity', () => {
-    expect(ANALYSIS_COLUMNS).toHaveLength(14);
-    expect(columnsForView('full')).toHaveLength(14);
+  it('defines thirteen columns without the obsolete movement column and protects identity', () => {
+    expect(ANALYSIS_COLUMNS).toHaveLength(13);
+    expect(columnsForView('full')).toHaveLength(13);
+    expect(ANALYSIS_COLUMNS.map(column => column.id)).not.toContain('movement');
     expect(sanitizeColumns(['pnl'])).toEqual(['identity', 'pnl']);
   });
 
@@ -59,5 +60,10 @@ describe('analysis controls', () => {
     expect(decodePreferences(JSON.stringify({ version: 2, workspaceView: 'analysis' }))).toMatchObject({ version: 1, workspaceView: 'portfolio' });
     const decoded = decodePreferences(JSON.stringify({ version: 1, workspaceView: 'analysis', analysisView: 'custom', filters: { symbol: 'AAPL', unknown: true }, customColumnIds: ['identity', 'pnl', 'future'] }));
     expect(decoded).toMatchObject({ workspaceView: 'analysis', analysisView: 'custom', filters: { symbol: 'AAPL', strategy: '', attention: 'all', pnl: 'all' }, customColumnIds: ['identity', 'pnl'] });
+  });
+
+  it('silently migrates a saved movement column while retaining valid selections', () => {
+    const decoded = decodePreferences(JSON.stringify({ version: 1, workspaceView: 'analysis', analysisView: 'custom', filters: {}, customColumnIds: ['identity', 'movement', 'pnl', 'orders'] }));
+    expect(decoded.customColumnIds).toEqual(['identity', 'pnl', 'orders']);
   });
 });
