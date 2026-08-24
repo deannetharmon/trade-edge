@@ -78,6 +78,7 @@ import {
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
+import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -2948,7 +2949,7 @@ function BatchConfirmModal({
   dryRun,
   th,
 }: {
-  items: { pos: Position; action: ActionType }[];
+  items: { pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[];
   onClose: () => void;
   onSuccess: () => void;
   dryRun: boolean;
@@ -2963,7 +2964,11 @@ function BatchConfirmModal({
 
   // Roll state per position
   const [rollInputs, setRollInputs] = useState<Record<string, { expiry: string; shortStrike: string; longStrike: string; credit: string }>>({});
-  const [rollMode, setRollMode] = useState<Record<string, string>>({});
+  const [rollMode, setRollMode] = useState<Record<string, string>>(() => Object.fromEntries(
+    initialItems
+      .filter(item => item.action === 'CLOSE_ROLL')
+      .map(item => [item.pos.key, item.initialRollMode ?? 'close']),
+  ));
   const [rollSuggestions, setRollSuggestions] = useState<Record<string, RollSuggestion | null>>({});
   const [rollCandidatePicks, setRollCandidatePicks] = useState<Record<string, CategorizedRollPick[]>>({});
   const [rollSearchLoading, setRollSearchLoading] = useState<Record<string, boolean>>({});
@@ -3381,9 +3386,9 @@ function BatchConfirmModal({
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
-              // TastyTrade may reject cancel if order is in terminal/partial state.
-              // Proceed with placing the new order — TT will reject it if the old one
-              // is still truly active, but the user will see a clear error message.
+              // Never submit a second close order while the original GTC may still
+              // be working. The broker state must be resolved before continuing.
+              throw new Error(`Existing GTC could not be cancelled. No replacement order was submitted. Verify working orders in TastyTrade, then retry. (${cancelErr?.message ?? 'cancel failed'})`);
             }
           }
 
@@ -6658,14 +6663,14 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // Dollar P/L — the actual $ result if each order fills, so the trader never
   // has to convert per-contract prices/multiples in their head.
   const gtcProfitDollars  = clean$((creditPerContract - gtcParsed) * qty * 100);
-  const stopLossDollars   = clean$((stopParsed - creditPerContract) * qty * 100); // negative = net loss
+  const stopOutcomePnlDollars = creditClosePnlDollars(creditPerContract, stopParsed, qty);
   const suggGtcProfitDollars = suggestion ? clean$((creditPerContract - suggestion.gtcPrice) * qty * 100) : null;
-  const suggStopLossDollars  = suggestion ? clean$((suggestion.stopPrice - creditPerContract) * qty * 100) : null;
+  const suggStopOutcomePnlDollars = suggestion ? creditClosePnlDollars(creditPerContract, suggestion.stopPrice, qty) : null;
   // Breakeven context: how far the stop sits from true max risk, so "2.5x credit"
   // isn't read as the whole loss story on a defined-risk spread.
   const reliableMaxRisk = reliableSupportedMaxRisk(pos);
   const stopPctOfMaxRisk = reliableMaxRisk != null && reliableMaxRisk > 0
-    ? (Math.abs(stopLossDollars) / reliableMaxRisk) * 100
+    ? (Math.abs(stopOutcomePnlDollars) / reliableMaxRisk) * 100
     : null;
 
   return (
@@ -6791,8 +6796,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                         ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
                         : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
                     </p>
-                    {suggStopLossDollars != null && (
-                      <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
+                    {suggStopOutcomePnlDollars != null && (
+                      <p className={`text-[11px] font-bold mt-0.5 ${suggStopOutcomePnlDollars >= 0 ? 'text-emerald-300' : 'text-orange-300'}`}>{signedDollar(suggStopOutcomePnlDollars)}</p>
                     )}
                   </div>
                 </div>
@@ -6883,7 +6888,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               </div>
               {!stopError && stopParsed > 0 && (
                 <p className="text-[11px] font-bold text-orange-400 mt-0.5 ml-28">
-                  -${Math.abs(stopLossDollars).toFixed(2)} if stop fills
+                  {protectiveStopOutcomeLabel(stopOutcomePnlDollars)} if stop fills
                 </p>
               )}
               {stopError && <p className="text-[9px] text-red-400 mt-1 ml-28">{stopError}</p>}
@@ -6912,7 +6917,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               <p className="text-[10px] text-orange-300">
                 {needsOco ? '2.' : '1.'} Place {needsOco ? 'OCO' : 'Stop Limit GTC'}:
                 {needsOco && ` profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`}
-                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} (-${Math.abs(stopLossDollars).toFixed(2)})
+                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} ({protectiveStopOutcomeLabel(stopOutcomePnlDollars)})
               </p>
               {effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint}`}>
@@ -6954,8 +6959,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 : hasErrors
                 ? 'Fix errors above to continue'
                 : needsOco
-                ? `Review OCO — profit +$${gtcProfitDollars.toFixed(2)} / stop -$${Math.abs(stopLossDollars).toFixed(2)}`
-                : `Review Stop — loss -$${Math.abs(stopLossDollars).toFixed(2)}`}
+                ? `Review OCO — profit +${gtcProfitDollars.toFixed(2)} / stop ${signedDollar(stopOutcomePnlDollars)}`
+                : `Review Stop — ${protectiveStopOutcomeLabel(stopOutcomePnlDollars)}`}
             </button>
           )}
 
@@ -9304,7 +9309,7 @@ export default function PortfolioPage() {
   );
   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
   const [clearingSnapshots, setClearingSnapshots] = useState(false);
-  const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType }[] | null>(null);
+  const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[] | null>(null);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
@@ -9618,7 +9623,7 @@ export default function PortfolioPage() {
   const onToggleAll = (keys: string[], select: boolean) => setChecked(prev => { const n = new Set(prev); keys.forEach(k => select ? n.add(k) : n.delete(k)); return n; });
   const onClear = () => setChecked(new Set());
 
-  const openBatch = (items: { pos: Position; action: ActionType }[]) => { if (items.length > 0) setBatchItems(items); };
+  const openBatch = (items: { pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[]) => { if (items.length > 0) setBatchItems(items); };
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
@@ -9927,9 +9932,9 @@ export default function PortfolioPage() {
             <PositionsWorkspace
               model={positionsWorkspaceModel}
               th={th}
-              getManagementActions={position => (['TAKE_PROFIT', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
+              getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
-              onExecute={(position, action) => openBatch([{ pos: position, action }])}
+              onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
             />
           ) : (
           <div className="overflow-x-auto">
