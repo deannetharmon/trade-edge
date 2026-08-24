@@ -64,7 +64,7 @@ function SymbolDetail({ group, th, mobile, onBack, onClose }: { group: SymbolGro
 
 interface ManagementActionProps {
   getManagementActions?: (position: Position) => ActionType[];
-  onExecute?: (position: Position, action: ActionType) => void;
+  onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void;
 }
 
 function AnalysisView({ model, th, getManagementActions, onExecute }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
@@ -87,7 +87,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute }: { model: P
   </>;
 }
 
-const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit', CLOSE_ROLL: 'Close/Roll', PLACE_GTC: 'Place GTC', CUT_LOSSES: 'Cut Losses' };
+const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close Position / Roll', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
 
 function AnalysisRow({ position: p, columns, th, actions, onExecute }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType) => void }) {
   const first = p.snapshotHistory?.[0]; const prior = p.snapshotHistory?.[p.snapshotHistory.length - 1];
@@ -105,7 +105,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute }: { positio
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     orders: <><span className={p.hasGtc ? 'text-emerald-400' : 'text-amber-300'}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className="block">Stop {p.stopLossClassification.replaceAll('_', ' ')}</span></>,
-    recommendation: <><b className="text-white">{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-56 flex-wrap gap-1">{actions.map(action => <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
+    recommendation: <><b className="text-white">{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-64 flex-wrap gap-1">{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-11 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
   };
   return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
 }
