@@ -2997,9 +2997,10 @@ function BatchConfirmModal({
       const item = batchItems.find(i => i.pos.key === key);
       if (!item) return;
       const token = await getAccessToken();
-      const [freshPrice, closeQuote] = await Promise.all([
+      const [freshPrice, closeQuote, optimizedClose] = await Promise.all([
         fetchFreshPositionPrice(item.pos, token).catch(() => null),
         fetchCloseQuote(item.pos, token).catch(() => null),
+        fetchCloseLimit(item.pos, token, 0.5).catch(() => null),
       ]);
       const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
       const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
@@ -3012,16 +3013,27 @@ function BatchConfirmModal({
       // default, unless the operator has manually typed a limit (tracked
       // via limitOverrides) -- a deliberate override is never silently
       // clobbered by a refresh.
-      const isManuallySet = limitOverrides[key] != null;
+      // AI Optimize is an explicit operator action, so it may replace a
+      // previously typed limit after refreshing the evidence. The input is
+      // cleared visibly rather than being silently overwritten.
+      setLimitOverrides(prev => { const next = { ...prev }; delete next[key]; return next; });
       const freshMarketable = closeQuote?.netAsk ?? freshPerContract;
       setBatchItems(prev => prev.map(i => {
         if (i.pos.key !== key) return i;
         const next = { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() };
-        if (i.action === 'TAKE_PROFIT' && !isManuallySet && freshMarketable != null) {
-          next.limitPrice = parseFloat(Math.max(freshMarketable, 0.01).toFixed(2));
-        }
+        const optimized = i.action === 'TAKE_PROFIT'
+          ? freshMarketable
+          : (i.action === 'CUT_LOSSES' || i.action === 'CLOSE_ROLL')
+            ? (optimizedClose ?? freshMarketable)
+            : null;
+        if (optimized != null) next.limitPrice = parseFloat(Math.max(optimized, 0.01).toFixed(2));
         return next;
       }));
+      const refreshedVerdictAction = item.action === 'CLOSE_ROLL' ? 'CLOSE_ROLL' : item.action === 'TAKE_PROFIT' ? 'TAKE_PROFIT' : item.action === 'CUT_LOSSES' ? 'CUT_LOSSES' : null;
+      if (refreshedVerdictAction) {
+        const verdict = await evaluateAction(item.pos, refreshedVerdictAction).catch(() => null);
+        if (verdict) setVerdicts(prev => ({ ...prev, [key]: verdict }));
+      }
     } catch (e: any) {
       console.warn('Quote refresh failed:', e.message);
     } finally {
@@ -3969,7 +3981,7 @@ function BatchConfirmModal({
                               onClick={() => refreshItemQuote(item.pos.key)}
                               disabled={refreshingQuote.has(item.pos.key)}
                               className="text-[9px] px-1.5 py-0.5 rounded border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50">
-                              {refreshingQuote.has(item.pos.key) ? '...' : '↻ refresh'}
+                              {refreshingQuote.has(item.pos.key) ? 'Optimizing…' : '◈ AI Optimize'}
                             </button>
                           </div>
                         )}
