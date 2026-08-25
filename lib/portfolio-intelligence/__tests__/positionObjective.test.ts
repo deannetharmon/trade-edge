@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
 import { cohereManagementIntentPresentation } from '@/lib/portfolio-intelligence/objectives/positionObjective';
 import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult } from '@/lib/portfolio-intelligence/managementIntent';
 
 const NOW = new Date('2026-07-11T13:00:00.000Z');
 
@@ -174,7 +175,7 @@ describe('recommendation presentation coherence', () => {
     const intent = {
       intent: 'CUT_LOSSES', label: 'Cut Losses', reasons: [], alternatives: [], candidates: [],
       winnerScore: 10, runnerUpIntent: null, runnerUpScore: 0, margin: 10, confidenceTier: 'Low',
-    } as const;
+    } as ManagementIntentResult;
     const presentation = cohereManagementIntentPresentation(intent, 'No primary action rule triggered.');
     expect(presentation.label).toBe('Hold Position');
     expect(presentation.primaryReason).toBe('Recommendation evidence is unavailable; continue monitoring.');
