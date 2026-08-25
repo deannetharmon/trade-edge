@@ -73,7 +73,7 @@ function SymbolDetail({ group, th, mobile, onBack, onClose }: { group: SymbolGro
 
 interface ManagementActionProps {
   getManagementActions?: (position: Position) => ActionType[];
-  onExecute?: (position: Position, action: ActionType) => void;
+  onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void;
   renderStopControl?: (position: Position) => ReactNode;
 }
 
@@ -97,7 +97,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   </>;
 }
 
-const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit', CLOSE_ROLL: 'Close/Roll', PLACE_GTC: 'Place GTC', CUT_LOSSES: 'Cut Losses' };
+const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close Position / Roll', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
 
 function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = '' }: { label: string; prior: number | null | undefined; current: number | null | undefined; tone: SemanticTone; digits?: number; suffix?: string }) {
   const material = tone !== 'neutral';
@@ -112,7 +112,7 @@ function recommendationTone(position: Position): SemanticTone {
   return 'neutral';
 }
 
-function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType) => void; renderStopControl?: (position: Position) => ReactNode }) {
+function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode }) {
   const first = p.snapshotHistory?.[0];
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
@@ -136,7 +136,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span>{p.entryPriceEffect === 'Debit' && <span className={`mt-1 block max-w-44 ${th.textFaint}`}>Debit stop submission remains blocked until the canonical sell-to-close stop path supports it.</span>}</>,
-    recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-56 flex-wrap gap-1">{actions.map(action => <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
+    recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-64 flex-wrap gap-1">{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-11 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
   };
   return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
 }

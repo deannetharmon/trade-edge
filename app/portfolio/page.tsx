@@ -78,6 +78,8 @@ import {
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
+import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
+import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -2979,7 +2981,7 @@ function BatchConfirmModal({
   dryRun,
   th,
 }: {
-  items: { pos: Position; action: ActionType }[];
+  items: { pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[];
   onClose: () => void;
   onSuccess: () => void;
   dryRun: boolean;
@@ -2994,7 +2996,11 @@ function BatchConfirmModal({
 
   // Roll state per position
   const [rollInputs, setRollInputs] = useState<Record<string, { expiry: string; shortStrike: string; longStrike: string; credit: string }>>({});
-  const [rollMode, setRollMode] = useState<Record<string, string>>({});
+  const [rollMode, setRollMode] = useState<Record<string, string>>(() => Object.fromEntries(
+    initialItems
+      .filter(item => item.action === 'CLOSE_ROLL')
+      .map(item => [item.pos.key, item.initialRollMode ?? 'close']),
+  ));
   const [rollSuggestions, setRollSuggestions] = useState<Record<string, RollSuggestion | null>>({});
   const [rollCandidatePicks, setRollCandidatePicks] = useState<Record<string, CategorizedRollPick[]>>({});
   const [rollSearchLoading, setRollSearchLoading] = useState<Record<string, boolean>>({});
@@ -3023,9 +3029,10 @@ function BatchConfirmModal({
       const item = batchItems.find(i => i.pos.key === key);
       if (!item) return;
       const token = await getAccessToken();
-      const [freshPrice, closeQuote] = await Promise.all([
+      const [freshPrice, closeQuote, optimizedClose] = await Promise.all([
         fetchFreshPositionPrice(item.pos, token).catch(() => null),
         fetchCloseQuote(item.pos, token).catch(() => null),
+        fetchCloseLimit(item.pos, token, 0.5).catch(() => null),
       ]);
       const qty = item.pos.quantity; // ES-0001: canonical quantity, not an arbitrary leg
       const freshPerContract = freshPrice != null ? freshPrice / (qty * 100) : null;
@@ -3038,16 +3045,27 @@ function BatchConfirmModal({
       // default, unless the operator has manually typed a limit (tracked
       // via limitOverrides) -- a deliberate override is never silently
       // clobbered by a refresh.
-      const isManuallySet = limitOverrides[key] != null;
+      // AI Optimize is an explicit operator action, so it may replace a
+      // previously typed limit after refreshing the evidence. The input is
+      // cleared visibly rather than being silently overwritten.
+      setLimitOverrides(prev => { const next = { ...prev }; delete next[key]; return next; });
       const freshMarketable = closeQuote?.netAsk ?? freshPerContract;
       setBatchItems(prev => prev.map(i => {
         if (i.pos.key !== key) return i;
         const next = { ...i, closeQuote, freshPrice, freshPerContract, quoteFetchedAt: Date.now() };
-        if (i.action === 'TAKE_PROFIT' && !isManuallySet && freshMarketable != null) {
-          next.limitPrice = parseFloat(Math.max(freshMarketable, 0.01).toFixed(2));
-        }
+        const optimized = i.action === 'TAKE_PROFIT'
+          ? freshMarketable
+          : (i.action === 'CUT_LOSSES' || i.action === 'CLOSE_ROLL')
+            ? (optimizedClose ?? freshMarketable)
+            : null;
+        if (optimized != null) next.limitPrice = parseFloat(Math.max(optimized, 0.01).toFixed(2));
         return next;
       }));
+      const refreshedVerdictAction = item.action === 'CLOSE_ROLL' ? 'CLOSE_ROLL' : item.action === 'TAKE_PROFIT' ? 'TAKE_PROFIT' : item.action === 'CUT_LOSSES' ? 'CUT_LOSSES' : null;
+      if (refreshedVerdictAction) {
+        const verdict = await evaluateAction(item.pos, refreshedVerdictAction).catch(() => null);
+        if (verdict) setVerdicts(prev => ({ ...prev, [key]: verdict }));
+      }
     } catch (e: any) {
       console.warn('Quote refresh failed:', e.message);
     } finally {
@@ -3404,22 +3422,48 @@ function BatchConfirmModal({
       let completed = 0;
 
       for (const item of activeItems) {
+        let cancelledExistingGtc = false;
+        let replacementSubmitted = false;
         try {
           let orderId: string;
 
           // AUTO CANCEL EXISTING GTC IF USER CONFIRMED
-          if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key) && item.pos.gtcOrderId) {
+          if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key)) {
             try {
               const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
-              console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${item.pos.gtcOrderId} complexId=${gtcComplexId}`);
-              const cancelResult = await cancelOrder(item.pos.accountNumber, item.pos.gtcOrderId, token, gtcComplexId);
-              console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, cancelResult);
+              const cancellation = await cancelExistingGtcForReplacement(
+                {
+                  hasGtc: item.pos.hasGtc,
+                  confirmed: gtcConfirmed.has(item.pos.key),
+                  orderId: item.pos.gtcOrderId,
+                  complexOrderId: gtcComplexId,
+                  originalPrice: item.pos.gtcOrderPrice,
+                },
+                async orderId => {
+                  console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${orderId} complexId=${gtcComplexId}`);
+                  const result = await cancelOrder(item.pos.accountNumber, orderId, token, gtcComplexId);
+                  console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, result);
+                  return result;
+                },
+              );
+              cancelledExistingGtc = cancellation.cancelled;
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
-              // TastyTrade may reject cancel if order is in terminal/partial state.
-              // Proceed with placing the new order — TT will reject it if the old one
-              // is still truly active, but the user will see a clear error message.
+              // Helper policy errors are already operator-ready and must be
+              // displayed exactly. Broker cancellation failures get additional
+              // uncertainty guidance.
+              const cancelMessage = cancelErr?.message ?? 'cancel failed';
+              if (
+                cancelMessage.startsWith('Existing GTC order ID is unavailable.') ||
+                cancelMessage.startsWith('The existing close is part of a complex/OCO order') ||
+                cancelMessage.startsWith('The existing GTC price is unavailable')
+              ) {
+                throw cancelErr;
+              }
+              // Never submit a second close order while the original GTC may still
+              // be working. The broker state must be resolved before continuing.
+              throw new Error(`Existing GTC could not be cancelled. No replacement order was submitted. Verify working orders in TastyTrade, then retry. (${cancelMessage})`);
             }
           }
 
@@ -3581,6 +3625,7 @@ function BatchConfirmModal({
             throw new Error(`Blocked by safety gate: ${submission.reason}`);
           }
           orderId = submission.result;
+          if (!isDeferredRollTrigger) replacementSubmitted = true;
 
           if (item.action === 'CLOSE_ROLL' && rollMode[item.pos.key] === 'roll') {
             const ri = rollInputs[item.pos.key];
@@ -3695,6 +3740,7 @@ function BatchConfirmModal({
               }
               orderId = otocoSubmission.result.orderId;
               openId = otocoSubmission.result.openId;
+              replacementSubmitted = true;
 
               writeAuditEntry({
                 id: crypto.randomUUID(), timestamp: new Date().toISOString(),
@@ -3742,7 +3788,54 @@ function BatchConfirmModal({
           }
 
         } catch (e: any) {
-          results.push({ symbol: item.pos.symbol, action: item.action, orderId: '—', status: 'error', error: e.message, limitPrice: item.limitPrice, estPnl: item.estPnl });
+          let reportedError = e.message ?? 'Order failed.';
+          if (!dryRun) {
+            try {
+              const restorationMessage = await restoreOriginalGtcIfNeeded(
+                {
+                  cancelled: cancelledExistingGtc,
+                  replacementSubmitted,
+                  originalPrice: item.pos.gtcOrderPrice,
+                },
+                async restorePrice => {
+                  if (!item.closeIdentity) throw new Error('Canonical position identity is unavailable for restoration.');
+              const restoreBody = buildCloseOrder(item.pos, restorePrice, 'GTC');
+              const restorePnl = creditClosePnlDollars(item.closeIdentity.entryPricePointsPerUnit, restorePrice, item.closeIdentity.quantity);
+              const restoreGateInput: LiveCloseOrderSafetyInput = {
+                identity: item.closeIdentity,
+                requestedQuantity: item.closeIdentity.quantity,
+                closeableQuantity: item.closeIdentity.quantity,
+                pricingIntent: 'PROFIT_TARGET',
+                requestedClosePriceEffect: 'Debit',
+                closePricePointsPerUnit: restorePrice,
+                quote: item.closeQuote ? { netBid: item.closeQuote.netBid, netAsk: item.closeQuote.netAsk, netMid: item.closeQuote.netMid, fetchedAtMs: item.quoteFetchedAt ?? null } : null,
+                actualOrder: {
+                  legs: restoreBody.legs.map(l => ({ symbol: l.symbol, quantity: l.quantity, direction: (l.action === 'Buy to Close' ? 'Short' : 'Long') as 'Short' | 'Long' })),
+                  limitPricePointsPerUnit: restorePrice,
+                  priceEffect: 'Debit',
+                  orderType: restoreBody['order-type'],
+                  timeInForce: restoreBody['time-in-force'],
+                },
+                displayedExpectedPnlDollars: restorePnl,
+              };
+              const restored = await submitCloseOrderIfSafe(
+                { identity: item.closeIdentity, structureAmbiguous: item.pos.structureAmbiguous, structureBlockMessage: item.pos.structureBlockMessage },
+                restoreGateInput,
+                async () => {
+                  const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, restoreBody);
+                  return String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
+                },
+              );
+              if (!restored.submitted) throw new Error(restored.reason);
+                  return ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+                },
+              );
+              if (restorationMessage) reportedError += restorationMessage;
+            } catch (restoreErr: any) {
+              reportedError += criticalGtcRestorationWarning(restoreErr);
+            }
+          }
+          results.push({ symbol: item.pos.symbol, action: item.action, orderId: '—', status: 'error', error: reportedError, limitPrice: item.limitPrice, estPnl: item.estPnl });
           writeAuditEntry({
             id: crypto.randomUUID(), timestamp: new Date().toISOString(),
             symbol: item.pos.symbol, strategy: item.pos.strategy, action: item.action,
@@ -3996,7 +4089,7 @@ function BatchConfirmModal({
                               onClick={() => refreshItemQuote(item.pos.key)}
                               disabled={refreshingQuote.has(item.pos.key)}
                               className="text-[9px] px-1.5 py-0.5 rounded border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 disabled:opacity-50">
-                              {refreshingQuote.has(item.pos.key) ? '...' : '↻ refresh'}
+                              {refreshingQuote.has(item.pos.key) ? 'Optimizing…' : '◈ AI Optimize'}
                             </button>
                           </div>
                         )}
@@ -6701,14 +6794,14 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // Dollar P/L — the actual $ result if each order fills, so the trader never
   // has to convert per-contract prices/multiples in their head.
   const gtcProfitDollars  = clean$((creditPerContract - gtcParsed) * qty * 100);
-  const stopLossDollars   = clean$((stopParsed - creditPerContract) * qty * 100); // negative = net loss
+  const stopOutcomePnlDollars = creditClosePnlDollars(creditPerContract, stopParsed, qty);
   const suggGtcProfitDollars = suggestion ? clean$((creditPerContract - suggestion.gtcPrice) * qty * 100) : null;
-  const suggStopLossDollars  = suggestion ? clean$((suggestion.stopPrice - creditPerContract) * qty * 100) : null;
+  const suggStopOutcomePnlDollars = suggestion ? creditClosePnlDollars(creditPerContract, suggestion.stopPrice, qty) : null;
   // Breakeven context: how far the stop sits from true max risk, so "2.5x credit"
   // isn't read as the whole loss story on a defined-risk spread.
   const reliableMaxRisk = reliableSupportedMaxRisk(pos);
   const stopPctOfMaxRisk = reliableMaxRisk != null && reliableMaxRisk > 0
-    ? (Math.abs(stopLossDollars) / reliableMaxRisk) * 100
+    ? (Math.abs(stopOutcomePnlDollars) / reliableMaxRisk) * 100
     : null;
 
   return (
@@ -6835,8 +6928,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                         ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
                         : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
                     </p>
-                    {suggStopLossDollars != null && (
-                      <p className="text-[11px] font-bold text-orange-300 mt-0.5">-${Math.abs(suggStopLossDollars).toFixed(2)}</p>
+                    {suggStopOutcomePnlDollars != null && (
+                      <p className={`text-[11px] font-bold mt-0.5 ${suggStopOutcomePnlDollars >= 0 ? 'text-emerald-300' : 'text-orange-300'}`}>{signedDollar(suggStopOutcomePnlDollars)}</p>
                     )}
                   </div>
                 </div>
@@ -6927,7 +7020,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               </div>
               {!stopError && stopParsed > 0 && (
                 <p className="text-[11px] font-bold text-orange-400 mt-0.5 ml-28">
-                  -${Math.abs(stopLossDollars).toFixed(2)} if stop fills
+                  {protectiveStopOutcomeLabel(stopOutcomePnlDollars)} if stop fills
                 </p>
               )}
               {stopError && <p className="text-[9px] text-red-400 mt-1 ml-28">{stopError}</p>}
@@ -6956,7 +7049,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               <p className="text-[10px] text-orange-300">
                 {needsOco ? '2.' : '1.'} Place {needsOco ? 'OCO' : 'Stop Limit GTC'}:
                 {needsOco && ` profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`}
-                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} (-${Math.abs(stopLossDollars).toFixed(2)})
+                {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} ({protectiveStopOutcomeLabel(stopOutcomePnlDollars)})
               </p>
               {effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint}`}>
@@ -6998,8 +7091,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 : hasErrors
                 ? 'Fix errors above to continue'
                 : needsOco
-                ? `Review OCO — profit +$${gtcProfitDollars.toFixed(2)} / stop -$${Math.abs(stopLossDollars).toFixed(2)}`
-                : `Review Stop — loss -$${Math.abs(stopLossDollars).toFixed(2)}`}
+                ? `Review OCO — profit ${signedDollar(gtcProfitDollars)} / stop ${signedDollar(stopOutcomePnlDollars)}`
+                : `Review Stop — ${protectiveStopOutcomeLabel(stopOutcomePnlDollars)}`}
             </button>
           )}
 
@@ -9348,7 +9441,7 @@ export default function PortfolioPage() {
   );
   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
   const [clearingSnapshots, setClearingSnapshots] = useState(false);
-  const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType }[] | null>(null);
+  const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[] | null>(null);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
@@ -9662,7 +9755,7 @@ export default function PortfolioPage() {
   const onToggleAll = (keys: string[], select: boolean) => setChecked(prev => { const n = new Set(prev); keys.forEach(k => select ? n.add(k) : n.delete(k)); return n; });
   const onClear = () => setChecked(new Set());
 
-  const openBatch = (items: { pos: Position; action: ActionType }[]) => { if (items.length > 0) setBatchItems(items); };
+  const openBatch = (items: { pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[]) => { if (items.length > 0) setBatchItems(items); };
   const onGroupAction = (pos: Position[], action: ActionType) => openBatch(pos.map(p => ({ pos: p, action })));
   const onBulkExecute = (items: { pos: Position; action: ActionType }[]) => { openBatch(items); onClear(); };
 
@@ -9971,9 +10064,9 @@ export default function PortfolioPage() {
             <PositionsWorkspace
               model={positionsWorkspaceModel}
               th={th}
-              getManagementActions={position => (['TAKE_PROFIT', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
+              getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
-              onExecute={(position, action) => openBatch([{ pos: position, action }])}
+              onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
               renderStopControl={position => position.stopLossClassification === 'NO_STOP'
                 ? <SetStopLossButton pos={position} th={th} />
                 : null}
