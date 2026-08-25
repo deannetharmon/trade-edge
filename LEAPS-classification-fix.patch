@@ -1,0 +1,245 @@
+From 81c5c06f8684ea74fe3990052da3598082faec27 Mon Sep 17 00:00:00 2001
+From: Dean Harmon <deannetharmon@users.noreply.github.com>
+Date: Sat, 22 Aug 2026 23:55:27 +0000
+Subject: [PATCH] Classify standalone long-dated calls as LEAPS instead of
+ UNKNOWN
+
+Adds a LEAPS branch to classifyPositionLifecycle() (lib/portfolio/positionLifecycle.ts):
+a long call with no paired short call, no puts, and DTE > 120 (reusing PMCC's existing
+long-leg threshold for consistency) now classifies as LEAPS instead of falling through to
+UNKNOWN. Scoped to calls only -- a standalone long put is not treated as a LEAP in this app's
+context, since LEAPS here specifically anchors a future covered-call/PMCC foundation.
+
+Ordered after the PMCC check so a long call that already has a qualifying short call sold
+against it still classifies as PMCC, not LEAPS.
+
+lib/portfolio-data/acquisition.ts: narrows the new, broader PositionLifecycleType down to
+RemainingOpportunityLifecycle at the two call sites feeding scorePortfolioRemainingOpportunity/
+calculateRemainingOpportunity. LEAPS positions are debit-based (bought, not sold for credit)
+and don't semantically belong in %-of-credit-captured scoring, so LEAPS maps to UNKNOWN there
+rather than widening that type to accept a value it has no real meaning for.
+
+9 new tests covering the LEAPS branch (standalone call, short-dated exclusion, DTE boundary,
+PMCC precedence, put exclusion, mixed-DTE group rejection, unparseable-symbol safety).
+
+Verified: 19/19 positionLifecycle tests pass, full regression suite shows zero new failures
+(3 pre-existing failures in greekAcquisitionWiring.test.ts confirmed present on clean main
+before this change), typecheck shows the same 41 pre-existing errors as clean main baseline,
+zero new.
+---
+ lib/portfolio-data/acquisition.ts             | 18 ++++-
+ .../__tests__/positionLifecycle.test.ts       | 68 +++++++++++++++++++
+ lib/portfolio/positionLifecycle.ts            | 43 ++++++++++++
+ 3 files changed, 127 insertions(+), 2 deletions(-)
+
+diff --git a/lib/portfolio-data/acquisition.ts b/lib/portfolio-data/acquisition.ts
+index a402545..7ed0dbd 100644
+--- a/lib/portfolio-data/acquisition.ts
++++ b/lib/portfolio-data/acquisition.ts
+@@ -42,6 +42,7 @@ import {
+   calculateRemainingOpportunity,
+   normalizePositionObjectivePct,
+   DEFAULT_POSITION_MANAGEMENT_POLICY,
++  type RemainingOpportunityLifecycle,
+ } from '@/lib/portfolio-intelligence';
+ import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
+ import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
+@@ -101,6 +102,19 @@ export function scorePortfolioPositionHealth(pos: Position): PositionHealthScore
+ // netEdgeLive/netEdgePeak already exist below in this file and are
+ // synchronous (pos.snapshotHistory is attached before either caller runs --
+ // see attachSnapshotHistory), so no new fetch/integration is needed.
++import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
++
++// LEAPS (TE-0007D-adjacent fix): a standalone long call has no credit-received basis at all --
++// it's a debit position, not a sold-premium one -- so it does not semantically belong in
++// remaining-opportunity/credit-decay scoring, which is inherently about %-of-credit-captured for
++// short-premium strategies. Narrowing here (rather than widening
++// RemainingOpportunityLifecycle to include 'LEAPS') keeps that type's meaning intact: every value
++// it accepts is a credit-based strategy shape. classifyPositionLifecycle's now-broader
++// PositionLifecycleType is narrowed to this function's actual domain at the one point they meet.
++function toRemainingOpportunityLifecycle(type: PositionLifecycleType): RemainingOpportunityLifecycle {
++  return type === 'LEAPS' ? 'UNKNOWN' : type;
++}
++
+ export function computeNetEdgeEvidence(pos: Position): { netEdgeDeclinePct: number | null; netEdgeNegative: boolean | null } {
+   const liveEdge = netEdgeLive(pos);
+   const peakEdge = netEdgePeak(pos);
+@@ -239,7 +253,7 @@ export function scorePortfolioPositionObjective(
+     expDate: pos.expDate,
+     netEdgeDeclinePct,
+     netEdgeNegative,
+-    lifecycleType: classifyPositionLifecycle(pos).type,
++    lifecycleType: toRemainingOpportunityLifecycle(classifyPositionLifecycle(pos).type),
+   });
+ 
+   // PI-0014: computed here (not inside evaluatePositionObjective) because
+@@ -293,7 +307,7 @@ export function scorePortfolioRemainingOpportunity(pos: Position) {
+     expDate: pos.expDate,
+     netEdgeDeclinePct,
+     netEdgeNegative,
+-    lifecycleType: classifyPositionLifecycle(pos).type,
++    lifecycleType: toRemainingOpportunityLifecycle(classifyPositionLifecycle(pos).type),
+   });
+ }
+ 
+diff --git a/lib/portfolio/__tests__/positionLifecycle.test.ts b/lib/portfolio/__tests__/positionLifecycle.test.ts
+index e53dd6e..439c27a 100644
+--- a/lib/portfolio/__tests__/positionLifecycle.test.ts
++++ b/lib/portfolio/__tests__/positionLifecycle.test.ts
+@@ -3,6 +3,7 @@ import {
+   classifyPositionLifecycle,
+   isPmccPosition,
+   isSpreadPosition,
++  isLeapsPosition,
+   type LifecycleLeg,
+ } from '../positionLifecycle';
+ 
+@@ -113,3 +114,70 @@ describe('isPmccPosition', () => {
+   });
+ });
+ 
++describe('isLeapsPosition', () => {
++  it('classifies a standalone long-dated long call with no other legs as LEAPS', () => {
++    const legs = [callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60)];
++    expect(isLeapsPosition(legs)).toBe(true);
++  });
++
++  it('does not classify a short-dated long call (bought outright, not a LEAP) as LEAPS', () => {
++    const legs = [callLeg(occSymbol('UBER', 30, 'C', 60), 'Long', 60)];
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('boundary: DTE exactly at the cutoff does not qualify (must be strictly over)', () => {
++    const legs = [callLeg(occSymbol('UBER', 120, 'C', 60), 'Long', 60)];
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('boundary: DTE one day over the cutoff qualifies', () => {
++    const legs = [callLeg(occSymbol('UBER', 121, 'C', 60), 'Long', 60)];
++    expect(isLeapsPosition(legs)).toBe(true);
++  });
++
++  it('does not classify a long call once a short call is sold against it (that is PMCC, not LEAPS)', () => {
++    const legs = [
++      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
++      callLeg(occSymbol('UBER', 30, 'C', 80), 'Short', 80),
++    ];
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('does not classify a standalone long put as LEAPS (scoped to calls only)', () => {
++    const legs: LifecycleLeg[] = [
++      { symbol: occSymbol('UBER', 390, 'P', 60), optionType: 'P', strikePrice: 60, direction: 'Long', quantity: 1 },
++    ];
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('requires every long call in the group to be long-dated -- a mixed group does not qualify', () => {
++    const legs = [
++      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
++      callLeg(occSymbol('UBER', 30, 'C', 70), 'Long', 70),
++    ];
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('unparseable symbols never throw and never false-positive', () => {
++    const legs = [callLeg('not-a-real-occ-symbol', 'Long', 60)];
++    expect(() => isLeapsPosition(legs)).not.toThrow();
++    expect(isLeapsPosition(legs)).toBe(false);
++  });
++
++  it('classifyPositionLifecycle returns LEAPS, not UNKNOWN, for a standalone long-dated call (the gap this fix closes)', () => {
++    const legs = [callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60)];
++    const result = classifyPositionLifecycle({ symbol: 'UBER', legs });
++    expect(result.type).toBe('LEAPS');
++    expect(result.longCalls).toHaveLength(1);
++  });
++
++  it('classifyPositionLifecycle still returns PMCC, not LEAPS, once a qualifying short call exists', () => {
++    const legs = [
++      callLeg(occSymbol('UBER', 390, 'C', 60), 'Long', 60),
++      callLeg(occSymbol('UBER', 30, 'C', 80), 'Short', 80),
++    ];
++    const result = classifyPositionLifecycle({ symbol: 'UBER', legs });
++    expect(result.type).toBe('PMCC');
++  });
++});
++
+diff --git a/lib/portfolio/positionLifecycle.ts b/lib/portfolio/positionLifecycle.ts
+index fad3304..30969ba 100644
+--- a/lib/portfolio/positionLifecycle.ts
++++ b/lib/portfolio/positionLifecycle.ts
+@@ -28,6 +28,7 @@ export type PositionLifecycleType =
+   | 'ASSIGNED_STOCK'
+   | 'COVERED_CALL'
+   | 'PMCC'
++  | 'LEAPS'
+   | 'UNKNOWN';
+ 
+ export interface LifecycleClassificationInput {
+@@ -110,6 +111,16 @@ export function isSpreadPosition(legs: LifecycleLeg[] = []): boolean {
+ const PMCC_SHORT_DTE_MAX = 60;
+ const PMCC_LONG_DTE_MIN = 120;
+ 
++// A standalone long call held with no paired short leg -- previously fell all the way through
++// classifyPositionLifecycle to UNKNOWN, since isCoveredCall/isPmccPosition/isSpreadPosition all
++// require a second leg of some kind. Reuses PMCC_LONG_DTE_MIN as the "long-dated" bar so a solo
++// long call is held to the same DTE threshold PMCC's own long leg already uses -- a short-dated
++// long call bought outright (e.g. 30 DTE) is not a LEAP and should NOT classify here; it falls
++// through to SPREAD/UNKNOWN as before. Scoped to calls only, not puts -- in this app's context
++// LEAPS specifically anchors a future PMCC (a long call held on its own, eligible to later have a
++// short call sold against it), not a standalone long-dated put.
++const LEAPS_DTE_MIN = PMCC_LONG_DTE_MIN;
++
+ function daysUntil(dateStr: string): number {
+   const target = new Date(`${dateStr}T00:00:00Z`);
+   const now = new Date();
+@@ -136,6 +147,24 @@ export function isPmccPosition(legs: LifecycleLeg[] = []): boolean {
+ }
+ 
+ 
++// A standalone long call, no short call paired against it, no puts of either kind, and
++// long-dated (DTE > LEAPS_DTE_MIN). This is checked as its own case rather than left to fall
++// through to SPREAD/UNKNOWN -- a solo long call held on its own (eligible foundation for a future
++// PMCC, or simply a directional LEAP) is a distinct, meaningful position shape from an
++// unclassifiable one.
++export function isLeapsPosition(legs: LifecycleLeg[] = []): boolean {
++  const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
++
++  if (longCalls.length === 0) return false;
++  if (shortCalls.length > 0 || shortPuts.length > 0 || longPuts.length > 0) return false;
++
++  return longCalls.every(leg => {
++    const expiry = parseOccSymbol(leg.symbol).expiry;
++    if (!expiry) return false;
++    return daysUntil(expiry) > LEAPS_DTE_MIN;
++  });
++}
++
+ export function isCashSecuredPut(legs: LifecycleLeg[] = []): boolean {
+   const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
+ 
+@@ -236,6 +265,20 @@ export function classifyPositionLifecycle(
+     };
+   }
+ 
++  if (isLeapsPosition(legs)) {
++    return {
++      type: 'LEAPS',
++      symbol: input.symbol,
++      contracts,
++      shares,
++      shortPuts,
++      longPuts,
++      shortCalls,
++      longCalls,
++      reason: `Standalone long call with no paired short leg, DTE > ${LEAPS_DTE_MIN}.`,
++    };
++  }
++
+   if (isSpreadPosition(legs)) {
+     return {
+       type: 'SPREAD',
+-- 
+2.43.0
+

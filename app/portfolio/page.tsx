@@ -1531,7 +1531,7 @@ function toActualReplacementEvidence(orderBody: OrderBody): ActualReplacementOrd
 }
 
 // ── Order Builders ─────────────────────────────────────────────────────────
-function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' = 'Day'): OrderBody {
+function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' = 'Day', requestedEffect?: 'Debit' | 'Credit'): OrderBody {
   const itype = instrType(pos.symbol);
   const effectiveTif = (!isMarketOpen() && tif === 'Day') ? 'GTC' : tif;
   // TastyTrade price convention: price is always a POSITIVE magnitude, and the
@@ -1542,7 +1542,7 @@ function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' =
   // Hardcoding 'Debit' was the root cause of close / close-roll rejections.
   // TastyTrade rejects Market orders on multi-leg spreads, so always Limit.
   // Floor the MAGNITUDE at $0.01 (never a sub-penny or zero price).
-  const priceEffect: 'Debit' | 'Credit' = limitPrice < 0 ? 'Credit' : 'Debit';
+  const priceEffect: 'Debit' | 'Credit' = requestedEffect ?? (limitPrice < 0 ? 'Credit' : 'Debit');
   const safePrice = Math.max(Math.abs(limitPrice), 0.01);
   return {
     'order-type': 'Limit',
@@ -1556,6 +1556,37 @@ function buildCloseOrder(pos: Position, limitPrice: number, tif: 'GTC' | 'Day' =
       'instrument-type': itype,
     })),
   };
+}
+
+function closePriceEffectFor(identity: CanonicalCloseIdentity): 'Debit' | 'Credit' {
+  return identity.entryPriceEffect === 'Debit' ? 'Credit' : 'Debit';
+}
+
+function expectedClosePnl(identity: CanonicalCloseIdentity, closePricePoints: number): number {
+  const entryCashFlow = identity.entryPriceEffect === 'Credit'
+    ? identity.entryPricePointsPerUnit
+    : -identity.entryPricePointsPerUnit;
+  const closeCashFlow = closePriceEffectFor(identity) === 'Credit'
+    ? Math.abs(closePricePoints)
+    : -Math.abs(closePricePoints);
+  return (entryCashFlow + closeCashFlow) * identity.quantity * identity.contractMultiplier;
+}
+
+function closeQuoteForSafety(identity: CanonicalCloseIdentity, quote: CloseQuote | null | undefined, fetchedAtMs: number | null) {
+  if (!quote) return null;
+  if (closePriceEffectFor(identity) === 'Credit') {
+    // fetchCloseQuote is signed as debit-to-close. For a long option its
+    // values are negative, and its netAsk is the marketable Sell-to-Close
+    // credit (the underlying legs sell at bid). Normalize to a conventional
+    // positive credit quote before safety validation.
+    return {
+      netBid: Math.abs(quote.netAsk),
+      netAsk: Math.abs(quote.netBid),
+      netMid: Math.abs(quote.netMid),
+      fetchedAtMs,
+    };
+  }
+  return { netBid: quote.netBid, netAsk: quote.netAsk, netMid: quote.netMid, fetchedAtMs };
 }
 
 function buildOpenSpreadOrder(
@@ -3089,6 +3120,8 @@ function BatchConfirmModal({
             continue;
           }
           const closeIdentity: CanonicalCloseIdentity = pos.identity;
+          const closePriceEffect = closePriceEffectFor(closeIdentity);
+          const isDebitEntry = closeIdentity.entryPriceEffect === 'Debit';
 
           const freshPrice = await fetchFreshPositionPrice(pos, token);
           const qty = closeIdentity.quantity;
@@ -3117,13 +3150,15 @@ function BatchConfirmModal({
           let priceError: string | null = null;
 
           const effectiveValue = freshPrice ?? pos.currentValue;
-          const effectivePerContract = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
+          const effectivePerContractRaw = closeQuote?.netMid ?? freshPerContract ?? (pos.currentValue != null ? pos.currentValue / (qty * 100) : null);
+          const effectivePerContract = effectivePerContractRaw == null ? null : Math.abs(effectivePerContractRaw);
           // Take Profit's whole purpose is closing at a price you can
           // actually get filled at today -- mid is a theoretical reference,
           // not a real fill level, and defaulting to it overstates
           // achievable profit versus the marketable (ask-side) price.
           // Falls back to mid only when no marketable quote is available.
-          const marketablePerContract = closeQuote?.netAsk ?? effectivePerContract;
+          const marketableRaw = closeQuote?.netAsk;
+          const marketablePerContract = marketableRaw == null ? effectivePerContract : Math.abs(marketableRaw);
 
           if (action === 'TAKE_PROFIT') {
             // Default to the real marketable (fillable) price, not mid.
@@ -3156,8 +3191,8 @@ function BatchConfirmModal({
             // Balanced (mid->natural) optimizer; final per-leg refinement runs
             // at submit time in submitAll where fresh quotes are available.
             const optimized = await fetchCloseLimit(pos, token, 0.5).catch(() => null);
-            if (optimized != null && optimized > 0) {
-              limitPrice = parseFloat(Math.max(optimized, 0.01).toFixed(2));
+            if (optimized != null && optimized !== 0) {
+              limitPrice = parseFloat(Math.max(Math.abs(optimized), 0.01).toFixed(2));
             } else if (effectivePerContract != null) {
               limitPrice = parseFloat(Math.max(effectivePerContract, 0.01).toFixed(2));
             } else {
@@ -3179,7 +3214,7 @@ function BatchConfirmModal({
           // persists across sessions instead of expiring at end of day. Only a
           // deliberate intraday close would want Day, which we don't issue here.
           const tif: 'GTC' | 'Day' = 'GTC';
-          const orderBody = buildCloseOrder(pos, limitPrice, tif);
+          const orderBody = buildCloseOrder(pos, limitPrice, tif, closePriceEffect);
           // CORRECTIVE ROUND 2: estPnl is the P/L that would be REALIZED if
           // THIS order fills at its own limit price -- (creditPerContract -
           // limitPrice) * qty * 100 for a credit-entry/debit-close, exactly
@@ -3189,9 +3224,9 @@ function BatchConfirmModal({
           // general from what this specific limit-priced order would
           // realize -- using it as `displayedExpectedPnl` would cross-check
           // the gate against the wrong figure.
-          const estPnl = (creditPerContract - limitPrice) * qty * 100;
+          const estPnl = expectedClosePnl(closeIdentity, limitPrice);
 
-          const pricingIntent: PricingIntent =
+          const pricingIntent: PricingIntent = isDebitEntry ? 'MARKETABLE' :
             action === 'CLOSE_ROLL' ? 'ROLL' :
             action === 'CUT_LOSSES' ? 'STOP_LOSS' :
             action === 'PLACE_GTC' ? 'PROFIT_TARGET' :
@@ -3215,7 +3250,7 @@ function BatchConfirmModal({
               direction: (l.action === 'Buy to Close' ? 'Short' : 'Long') as 'Short' | 'Long',
             })),
             limitPricePointsPerUnit: limitPrice,
-            priceEffect: 'Debit',
+            priceEffect: closePriceEffect,
             orderType: orderBody['order-type'],
             timeInForce: orderBody['time-in-force'],
           };
@@ -3224,9 +3259,9 @@ function BatchConfirmModal({
             requestedQuantity: qty,
             closeableQuantity: closeIdentity.quantity,
             pricingIntent,
-            requestedClosePriceEffect: 'Debit',
+            requestedClosePriceEffect: closePriceEffect,
             closePricePointsPerUnit: limitPrice,
-            quote: closeQuote ? { netBid: closeQuote.netBid, netAsk: closeQuote.netAsk, netMid: closeQuote.netMid, fetchedAtMs: Date.now() } : null,
+            quote: closeQuoteForSafety(closeIdentity, closeQuote, Date.now()),
             actualOrder,
             displayedExpectedPnlDollars: estPnl,
           };
@@ -3294,7 +3329,8 @@ function BatchConfirmModal({
       if (ovr !== undefined && ovr !== '') {
         const parsed = parseFloat(ovr);
         if (!isNaN(parsed) && parsed > 0) {
-          const updatedBody = buildCloseOrder(i.pos, parsed, i.orderBody['time-in-force'] as 'GTC' | 'Day');
+          const closePriceEffect = closePriceEffectFor(i.closeIdentity!);
+          const updatedBody = buildCloseOrder(i.pos, parsed, i.orderBody['time-in-force'] as 'GTC' | 'Day', closePriceEffect);
           // ES-0001 (corrective round 2): re-validate against the OVERRIDDEN
           // price with the SAME full live gate (structure/economics/
           // quantity/price/quote/payload cross-check, all in points) -- an
@@ -3309,7 +3345,7 @@ function BatchConfirmModal({
               direction: (l.action === 'Buy to Close' ? 'Short' : 'Long') as 'Short' | 'Long',
             })),
             limitPricePointsPerUnit: parsed,
-            priceEffect: 'Debit',
+            priceEffect: closePriceEffect,
             orderType: updatedBody['order-type'],
             timeInForce: updatedBody['time-in-force'],
           };
@@ -3319,11 +3355,11 @@ function BatchConfirmModal({
                 requestedQuantity: i.closeIdentity.quantity,
                 closeableQuantity: i.closeIdentity.quantity,
                 pricingIntent: 'CUSTOM',
-                requestedClosePriceEffect: 'Debit',
+                requestedClosePriceEffect: closePriceEffect,
                 closePricePointsPerUnit: parsed,
-                quote: i.closeQuote ? { netBid: i.closeQuote.netBid, netAsk: i.closeQuote.netAsk, netMid: i.closeQuote.netMid, fetchedAtMs: i.quoteFetchedAt ?? null } : null,
+                quote: closeQuoteForSafety(i.closeIdentity, i.closeQuote, i.quoteFetchedAt ?? null),
                 actualOrder: updatedActualOrder,
-                displayedExpectedPnlDollars: (i.closeIdentity.entryPricePointsPerUnit - parsed) * i.closeIdentity.quantity * 100,
+                displayedExpectedPnlDollars: expectedClosePnl(i.closeIdentity, parsed),
               })
             : i.safetyCheck;
           // PT-FIX-DRIFT: mark this item's price as operator-set -- both
@@ -3338,22 +3374,22 @@ function BatchConfirmModal({
       return { ...i, isUserSet: false };
     });
 
-  const totalDebit = activeItems.reduce((s, i) => s + i.limitPrice, 0);
+  const totalCloseCashFlow = activeItems.reduce((sum, item) =>
+    sum + (closePriceEffectFor(item.closeIdentity!) === 'Credit' ? item.limitPrice : -item.limitPrice), 0);
   const totalEstPnl = activeItems.reduce((s, i) => {
     // Live per-item P&L from the CURRENT effective limit (override or item
     // default), matching the per-card display — not the frozen enrich-time
     // estPnl, which doesn't move when the limit is dragged/snapped/edited.
-    const q = i.closeIdentity!.quantity;
-    const creditPc = i.closeIdentity!.entryPricePointsPerUnit;
     const ovr = limitOverrides[i.pos.key];
     const effLimit = (ovr !== undefined && ovr !== '' && !isNaN(parseFloat(ovr)))
       ? parseFloat(ovr)
       : i.limitPrice;
-    const livePnl = (creditPc - effLimit) * q * 100;
+    const livePnl = expectedClosePnl(i.closeIdentity!, effLimit);
     return s + livePnl;
   }, 0);
   const warningCount = activeItems.filter(i => i.stalePriceWarning || i.duplicateGtcWarning).length;
   const priceErrorCount = activeItems.filter(i => i.priceError != null).length;
+  const hasBlockingSafetyIssue = activeItems.some(i => i.safetyCheck && !i.safetyCheck.ok);
 
   const needsGtcConfirmation = activeItems.filter(item =>
     item.pos.hasGtc && (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL')
@@ -3436,7 +3472,6 @@ function BatchConfirmModal({
               const liveTotal = await fetchFreshPositionPrice(item.pos, token);
               const qty = item.closeIdentity!.quantity;
               const livePerContract = liveTotal != null ? liveTotal / (qty * 100) : null;
-              const creditPerContract = item.closeIdentity!.entryPricePointsPerUnit;
 
               if (livePerContract != null) {
                 if (item.action === 'PLACE_GTC' && item.limitPrice >= livePerContract) {
@@ -3455,8 +3490,8 @@ function BatchConfirmModal({
                     // decides on a resubmit rather than the code deciding for
                     // them.
                     if ((item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (item as any).isUserSet) {
-                      const yourPnl = (creditPerContract - item.limitPrice) * qty * 100;
-                      const livePnl = (creditPerContract - livePerContract) * qty * 100;
+                      const yourPnl = expectedClosePnl(item.closeIdentity!, item.limitPrice);
+                      const livePnl = expectedClosePnl(item.closeIdentity!, livePerContract);
                       throw new Error(
                         `Blocked: your price $${item.limitPrice.toFixed(2)} (P&L $${yourPnl.toFixed(2)}) is ${(pctFromLive * 100).toFixed(0)}% from live $${livePerContract.toFixed(2)} (P&L $${livePnl.toFixed(2)}). Refresh the quote and resubmit to confirm.`
                       );
@@ -3496,11 +3531,11 @@ function BatchConfirmModal({
                       // Fall back to livePerContract if the per-leg
                       // optimizer can't quote.
                       const optimized = await fetchCloseLimit(item.pos, token, 0.5).catch(() => null);
-                      freshLimit = (optimized != null && optimized > 0)
-                        ? parseFloat(Math.max(optimized, 0.01).toFixed(2))
+                      freshLimit = (optimized != null && optimized !== 0)
+                        ? parseFloat(Math.max(Math.abs(optimized), 0.01).toFixed(2))
                         : parseFloat(Math.max(livePerContract, 0.01).toFixed(2));
                     }
-                    item.orderBody = buildCloseOrder(item.pos, freshLimit, item.orderBody['time-in-force'] as 'GTC' | 'Day');
+                    item.orderBody = buildCloseOrder(item.pos, freshLimit, item.orderBody['time-in-force'] as 'GTC' | 'Day', closePriceEffectFor(item.closeIdentity!));
                     (item as any).limitPrice = freshLimit;
                   }
                 }
@@ -3528,14 +3563,14 @@ function BatchConfirmModal({
             quantity: l.quantity,
             direction: (l.action === 'Buy to Close' ? 'Short' : 'Long') as 'Short' | 'Long',
           }));
-          const finalPricingIntent: PricingIntent =
+          const finalPricingIntent: PricingIntent = item.closeIdentity!.entryPriceEffect === 'Debit' ? 'MARKETABLE' :
             item.action === 'CLOSE_ROLL' ? 'ROLL' :
             item.action === 'CUT_LOSSES' ? 'STOP_LOSS' :
             item.action === 'PLACE_GTC' ? 'PROFIT_TARGET' :
             item.action === 'TAKE_PROFIT' ? 'MARKETABLE' :
             'CUSTOM';
           const finalDisplayedPnlDollars = item.closeIdentity
-            ? (item.closeIdentity.entryPricePointsPerUnit - item.limitPrice) * item.closeIdentity.quantity * 100
+            ? expectedClosePnl(item.closeIdentity, item.limitPrice)
             : (item.estPnl ?? 0);
           const structureGuardInput = {
             identity: item.closeIdentity ?? null,
@@ -3547,13 +3582,13 @@ function BatchConfirmModal({
             requestedQuantity: item.closeIdentity!.quantity,
             closeableQuantity: item.closeIdentity!.quantity,
             pricingIntent: finalPricingIntent,
-            requestedClosePriceEffect: 'Debit',
+            requestedClosePriceEffect: closePriceEffectFor(item.closeIdentity!),
             closePricePointsPerUnit: item.limitPrice,
-            quote: item.closeQuote ? { netBid: item.closeQuote.netBid, netAsk: item.closeQuote.netAsk, netMid: item.closeQuote.netMid, fetchedAtMs: item.quoteFetchedAt ?? null } : null,
+            quote: closeQuoteForSafety(item.closeIdentity!, item.closeQuote, item.quoteFetchedAt ?? null),
             actualOrder: {
               legs: finalActualLegs,
               limitPricePointsPerUnit: item.limitPrice,
-              priceEffect: 'Debit',
+              priceEffect: closePriceEffectFor(item.closeIdentity!),
               orderType: item.orderBody['order-type'],
               timeInForce: item.orderBody['time-in-force'],
             },
@@ -4030,11 +4065,8 @@ function BatchConfirmModal({
                           />
                         </div>
                         {(() => {
-                          const q = item.closeIdentity!.quantity;
-                          const creditPc = item.closeIdentity!.entryPricePointsPerUnit;
                           const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
-                          // Live P&L follows the current limit: credit kept minus cost to close.
-                          const livePnl = parseFloat(((creditPc - effLimit) * q * 100).toFixed(2));
+                          const livePnl = parseFloat(expectedClosePnl(item.closeIdentity!, effLimit).toFixed(2));
                           return (
                             <p className={`text-[10px} font-bold ${livePnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {livePnl >= 0 ? '+' : ''}${livePnl.toFixed(2)}
@@ -4045,7 +4077,7 @@ function BatchConfirmModal({
                       </div>
                     </div>
 
-                    {!isExcluded && (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (
+                    {!isExcluded && item.closeIdentity!.entryPriceEffect !== 'Debit' && (item.action === 'TAKE_PROFIT' || item.action === 'CUT_LOSSES' || item.action === 'CLOSE_ROLL') && (
                       <div className="px-4 pb-2">
                         {item.quoteFetchedAt != null && (
                           <div className="flex items-center justify-end gap-1.5 mb-1">
@@ -4091,7 +4123,9 @@ function BatchConfirmModal({
                         <p className={`text-[9px] ${th.textFaint} mt-0.5`}>
                           Entry {item.closeIdentity!.entryPriceEffect === 'Debit' ? 'debit' : 'credit'} {item.closeIdentity!.entryPricePointsPerUnit.toFixed(2)}/ct
                           {' · '}Close limit ${item.limitPrice.toFixed(2)}/ct
-                          {item.closeQuote?.netAsk != null && ` · Marketable (ask) $${item.closeQuote.netAsk.toFixed(2)}/ct`}
+                          {item.closeIdentity!.entryPriceEffect === 'Debit'
+                            ? item.closeQuote?.netAsk != null && ` · Marketable sale (bid) $${Math.abs(item.closeQuote.netAsk).toFixed(2)}/ct`
+                            : item.closeQuote?.netAsk != null && ` · Marketable buyback (ask) $${Math.abs(item.closeQuote.netAsk).toFixed(2)}/ct`}
                           {' · fees excluded from all P&L figures shown here'}
                         </p>
                         {item.safetyCheck && item.safetyCheck.issues.length > 0 && (
@@ -4106,7 +4140,14 @@ function BatchConfirmModal({
                       </div>
                     )}
 
-                    {item.action === 'CLOSE_ROLL' && !isExcluded && (
+                    {item.action === 'CLOSE_ROLL' && !isExcluded && item.closeIdentity!.entryPriceEffect === 'Debit' && (
+                      <div className={`px-4 py-3 border-t ${th.borderLight}`}>
+                        <p className="text-[10px] font-bold text-emerald-400">SELL TO CLOSE</p>
+                        <p className={`text-[9px] ${th.textFaint} mt-1`}>Debit-position rolling is not enabled. This order closes the existing long option only.</p>
+                      </div>
+                    )}
+
+                    {item.action === 'CLOSE_ROLL' && !isExcluded && item.closeIdentity!.entryPriceEffect !== 'Debit' && (
                       <div className={`px-4 pb-3 border-t ${th.borderLight}`}>
                         <div className="flex items-center gap-2 pt-2 pb-2">
                           <span className={`text-[9px} ${th.textFaint} uppercase`}>Action:</span>
@@ -4280,8 +4321,8 @@ function BatchConfirmModal({
                     <p className={`text-sm font-bold ${th.text}`}>{activeItems.length}</p>
                   </div>
                   <div>
-                    <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>Total Debit</p>
-                    <p className="text-sm font-bold text-blue-400" style={{ fontFamily: "'DM Mono', monospace" }}>${totalDebit.toFixed(2)}</p>
+                    <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>{totalCloseCashFlow >= 0 ? 'Total Credit' : 'Total Debit'}</p>
+                    <p className="text-sm font-bold text-blue-400" style={{ fontFamily: "'DM Mono', monospace" }}>${Math.abs(totalCloseCashFlow).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>Est. P&L</p>
@@ -4297,8 +4338,8 @@ function BatchConfirmModal({
                     CONFIRM REPLACING EXISTING GTC TO CONTINUE
                   </button>
                 ) : (
-                  <button onClick={submitAll} disabled={activeItems.length === 0}
-                    className={`flex-1 py-3 text-white rounded-xl text-xs font-bold tracking-widest transition-colors ${dryRun ? 'bg-amber-600 hover:bg-amber-500' : 'ac-btn-solid'}`}>
+                  <button onClick={submitAll} disabled={activeItems.length === 0 || priceErrorCount > 0 || hasBlockingSafetyIssue}
+                    className={`flex-1 py-3 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed ${dryRun ? 'bg-amber-600 hover:bg-amber-500' : 'ac-btn-solid'}`}>
                     {dryRun
                       ? `⚗ DRY RUN — Simulate ${activeItems.length} Order${activeItems.length !== 1 ? 's' : ''}`
                       : /* PT-0002B, Mandatory Invariant 6: the actual mode is part of the
@@ -6740,6 +6781,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     pos.stopLossClassification === 'NO_STOP'    ? '+ Set Stop'      :
     pos.stopLossClassification === 'TOO_LOOSE'  ? '⚠ Update Stop'   :
     pos.stopLossClassification === 'TOO_TIGHT'  ? '⚠ Verify Stop'   :
+    pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? '⚠ Verify Stop' :
+    pos.stopLossClassification === 'INVALID' ? '⚠ Repair Stop' :
     '✎ Stop';
 
   const stopParsed  = parseFloat(stopPrice || '0');
@@ -6765,6 +6808,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     <div className="relative">
       <button
         ref={btnRef}
+        aria-label={`${btnLabel.replace(/^[^A-Za-z]+/, '')} for ${pos.symbol}`}
         disabled={pos.structureAmbiguous}
         title={pos.structureAmbiguous ? (pos.structureBlockMessage ?? 'Ambiguous position structure -- stop loss disabled.') : undefined}
         onClick={e => { e.stopPropagation(); if (pos.structureAmbiguous) return; open ? setOpen(false) : handleOpen(); }}
@@ -9989,17 +10033,17 @@ export default function PortfolioPage() {
           nothing itself. Portfolio Health, Top Risks, and Capital & Income
           are intentionally not rendered here -- all three are already fully
           owned by Mission Control (/dashboard, MB-0002). */}
-      <div className="px-6">
+      {!positionsWorkspaceV2Enabled && <div className="px-6">
         <PositionCompositionCard review={portfolioReview} loading={loading} th={th} />
-      </div>
+      </div>}
 
       {/* WA-0003: Healthy-Monitoring Relocation (CES section 10) --
           extracted verbatim from TodaysPrioritiesDashboard.tsx's old
           Monitor section. Informational only: no completion control, never
           counted in Today's Priorities' open queue/count. */}
-      <div className="px-6">
+      {!positionsWorkspaceV2Enabled && <div className="px-6">
         <HealthyMonitoringSection monitor={todaysPrioritiesDashboard.monitor} th={th} />
-      </div>
+      </div>}
 
       {positionsWorkspaceState === 'loading' && (
         <div className="flex items-center justify-center h-64">
@@ -10023,6 +10067,9 @@ export default function PortfolioPage() {
               getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
               onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
+              renderStopControl={position => position.stopLossClassification === 'NO_STOP'
+                ? <SetStopLossButton pos={position} th={th} />
+                : null}
             />
           ) : (
           <div className="overflow-x-auto">

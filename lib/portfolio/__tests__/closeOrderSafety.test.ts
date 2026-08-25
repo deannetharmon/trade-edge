@@ -626,7 +626,7 @@ describe('runLiveCloseOrderSafetyGate', () => {
     expect(result.issues.map(i => i.ruleId)).toContain('BREAK_EVEN_PNL_MISMATCH');
   });
 
-  it('hard-blocks a debit-opened position\'s live submission (production wiring does not yet support it) with ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE', () => {
+  it('allows a debit-opened position to close-only for a marketable Credit', () => {
     const legs = [
       leg({ symbol: 'CS', optionType: 'C', strikePrice: 560, direction: 'Short', quantity: 1, avgOpenPrice: 0.60 }),
       leg({ symbol: 'CL', optionType: 'C', strikePrice: 555, direction: 'Long', quantity: 1, avgOpenPrice: 1.10 }),
@@ -639,14 +639,37 @@ describe('runLiveCloseOrderSafetyGate', () => {
       identity: idResult.identity,
       requestedQuantity: 1,
       closeableQuantity: 1,
+      pricingIntent: 'MARKETABLE',
       requestedClosePriceEffect: 'Credit',
       closePricePointsPerUnit: 0.50,
+      quote: { netBid: 0.50, netAsk: 0.55, netMid: 0.525, fetchedAtMs: Date.now() },
       actualOrder: {
         legs: idResult.identity.legs.map(l => ({ symbol: l.symbol, quantity: 1, direction: l.direction })),
         limitPricePointsPerUnit: 0.50,
         priceEffect: 'Credit',
       },
       displayedExpectedPnlDollars: 0,
+    }));
+    expect(result.ok).toBe(true);
+    expect(result.plan?.expectedRealizedPnlDollars).toBeCloseTo(0, 5);
+  });
+
+  it('still blocks rolling a debit-opened position', () => {
+    const legs = [leg({ symbol: 'CL', optionType: 'C', strikePrice: 555, direction: 'Long', quantity: 1, avgOpenPrice: 1.10 })];
+    const analysis = analyzePositionStructure(legs);
+    if (analysis.status !== 'RESOLVED') throw new Error('fixture error');
+    const idResult = buildCanonicalCloseIdentity(analysis.structures[0], 'K', 'AAPL', '2024-09-20');
+    if (!idResult.ok) throw new Error('fixture error');
+    const result = runLiveCloseOrderSafetyGate(validInput({
+      identity: idResult.identity,
+      requestedQuantity: 1,
+      closeableQuantity: 1,
+      pricingIntent: 'ROLL',
+      requestedClosePriceEffect: 'Credit',
+      closePricePointsPerUnit: 1.00,
+      quote: { netBid: 1.00, netAsk: 1.05, netMid: 1.025, fetchedAtMs: Date.now() },
+      actualOrder: { legs: idResult.identity.legs.map(l => ({ symbol: l.symbol, quantity: 1, direction: l.direction })), limitPricePointsPerUnit: 1.00, priceEffect: 'Credit' },
+      displayedExpectedPnlDollars: -10,
     }));
     expect(result.ok).toBe(false);
     expect(result.issues.map(i => i.ruleId)).toContain('ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE');

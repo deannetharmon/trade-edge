@@ -28,8 +28,20 @@ describe('positions workspace model', () => {
     const model = buildPositionsWorkspaceModel({ snapshot: snapshot([second, first]), positions: [second, first], pendingOrders: [], snapshotDataQuality: quality });
     expect(model.symbolGroups.map(group => group.symbol)).toEqual(['AAPL']);
     expect(model.symbolGroups[0].instrumentCount).toBe(3);
-    expect(model.symbolGroups[0].symbolUnrealizedPnl).toBe(5100);
+    expect(model.symbolGroups[0].symbolUnrealizedPnl).toBe(5200);
+    expect(model.symbolGroups[0].unrealizedPnlMid.value).toBe(5200);
+    expect(model.symbolGroups[0].optionCloseNowPnl.value).toBe(100);
     expect(model.symbolGroups[0].capacity).toMatchObject({ sharesOwned: 250, allocatedContracts: 1, availableContracts: 1, remainderShares: 50 });
+  });
+
+  it('preserves whole-position option value units and reports partial midpoint P/L honestly', () => {
+    const priced = position({ key: 'AAPL-priced', currentValue: 760, pnl: 40, closeNowPnl: 35, quantity: 5 });
+    const missing = position({ key: 'AAPL-missing', currentValue: null, pnl: null, closeNowPnl: null });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([priced, missing]), positions: [priced, missing], pendingOrders: [], snapshotDataQuality: quality });
+    const group = model.symbolGroups[0];
+    expect(group.optionMarketValue).toBe(760);
+    expect(group.unrealizedPnlMid).toMatchObject({ completeness: 'partial', includedCount: 2, expectedCount: 3, value: 5040 });
+    expect(group.optionCloseNowPnl).toMatchObject({ completeness: 'partial', value: 35 });
   });
 
   it('fails capacity closed without hiding holdings', () => {
@@ -42,9 +54,10 @@ describe('positions workspace model', () => {
 });
 
 describe('analysis controls', () => {
-  it('defines all fourteen columns and protects identity', () => {
-    expect(ANALYSIS_COLUMNS).toHaveLength(14);
-    expect(columnsForView('full')).toHaveLength(14);
+  it('defines thirteen columns without the obsolete movement column and protects identity', () => {
+    expect(ANALYSIS_COLUMNS).toHaveLength(13);
+    expect(columnsForView('full')).toHaveLength(13);
+    expect(ANALYSIS_COLUMNS.map(column => column.id)).not.toContain('movement');
     expect(sanitizeColumns(['pnl'])).toEqual(['identity', 'pnl']);
   });
 
@@ -59,5 +72,10 @@ describe('analysis controls', () => {
     expect(decodePreferences(JSON.stringify({ version: 2, workspaceView: 'analysis' }))).toMatchObject({ version: 1, workspaceView: 'portfolio' });
     const decoded = decodePreferences(JSON.stringify({ version: 1, workspaceView: 'analysis', analysisView: 'custom', filters: { symbol: 'AAPL', unknown: true }, customColumnIds: ['identity', 'pnl', 'future'] }));
     expect(decoded).toMatchObject({ workspaceView: 'analysis', analysisView: 'custom', filters: { symbol: 'AAPL', strategy: '', attention: 'all', pnl: 'all' }, customColumnIds: ['identity', 'pnl'] });
+  });
+
+  it('silently migrates a saved movement column while retaining valid selections', () => {
+    const decoded = decodePreferences(JSON.stringify({ version: 1, workspaceView: 'analysis', analysisView: 'custom', filters: {}, customColumnIds: ['identity', 'movement', 'pnl', 'orders'] }));
+    expect(decoded.customColumnIds).toEqual(['identity', 'pnl', 'orders']);
   });
 });

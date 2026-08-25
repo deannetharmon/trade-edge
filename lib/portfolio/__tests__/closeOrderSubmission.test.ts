@@ -387,7 +387,7 @@ describe('submitCloseOrderIfSafe -- credit break-even (debit-opened positions ha
     expect(result.submitted && Math.abs(result.safetyCheck.plan!.expectedRealizedPnlDollars)).toBeLessThan(0.01);
   });
 
-  it('a debit-opened position is hard-blocked from live submission entirely -- the broker mock is never called even with an otherwise-valid break-even plan', async () => {
+  it('submits an otherwise-valid debit-position Sell-to-Close break-even plan', async () => {
     const legs = [
       leg({ symbol: 'CS', optionType: 'C', strikePrice: 560, direction: 'Short', quantity: 3, avgOpenPrice: 0.60 }),
       leg({ symbol: 'CL', optionType: 'C', strikePrice: 555, direction: 'Long', quantity: 3, avgOpenPrice: 1.10 }),
@@ -416,11 +416,9 @@ describe('submitCloseOrderIfSafe -- credit break-even (debit-opened positions ha
       brokerMock
     );
 
-    expect(result.submitted).toBe(false);
-    expect(brokerMock).not.toHaveBeenCalled();
-    if (!result.submitted) {
-      expect(result.safetyCheck?.issues.map(i => i.ruleId)).toContain('ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE');
-    }
+    expect(result.submitted).toBe(true);
+    expect(brokerMock).toHaveBeenCalledOnce();
+    if (result.submitted) expect(result.safetyCheck.plan?.expectedRealizedPnlDollars).toBeCloseTo(0, 5);
   });
 });
 

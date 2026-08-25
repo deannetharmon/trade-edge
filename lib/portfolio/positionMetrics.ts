@@ -205,8 +205,8 @@ export function computeCreditPerContract(
 // per contract-count already embedded in each leg's own quantity (i.e. the
 // whole-position total, same convention as calculateSpreadCredit in
 // acquisition.ts) -- but WITHOUT flooring a debit to 0. Used only by the
-// debit-trade guard (see isNetDebitStructure) to detect the case a floored
-// $0.00 display credit would otherwise silently mask.
+// debit-trade path (see isNetDebitStructure) and to prevent the legacy
+// floored $0.00 display credit from masking verified debit economics.
 export function computeSignedNetPremium(
   legs: readonly { direction: 'Short' | 'Long'; quantity: number; avgOpenPrice: number }[]
 ): number;
@@ -237,23 +237,26 @@ export interface ComputePositionPnlInput {
   hasCurrentPrices: boolean;
   anyLegCrossed: boolean;
   creditReceived: number;
+  signedEntryAmount?: number | null;
   currentValue: number;
 }
 
-// The EXACT pnl formula acquisition.ts's loadPositions() uses -- extracted
-// so the debit-guard/crossed-quote-guard interaction is unit-tested against
+// The exact P/L formula acquisition.ts's loadPositions() uses -- extracted
+// so credit/debit and crossed-quote behavior is unit-tested against
 // the real production calculation, not a reimplementation or a
 // mapping-only test.
 //
-// PM-0001 corrective round 2: this MUST gate on `isNetDebit`. Without it, a
-// net-debit structure's `creditReceived` (floored to $0.00 by
-// calculateSpreadCredit) silently produced `pnl = 0 - Math.abs(currentValue)`
-// -- a fabricated loss equal to the full buyback cost, exactly the defect
-// PM-0001 was meant to eliminate. The debit guard had already been applied
-// to `pop`/`targetPrice`/`hitTarget` but was missed here in round 1.
+// Credit P/L is entry credit minus close cost. Debit P/L is liquidation
+// value minus the verified signed entry debit. Debit P/L remains unavailable
+// unless that signed entry amount is present, so the legacy floored $0
+// credit can never fabricate a full-value loss.
 export function computePositionPnl(input: ComputePositionPnlInput): number | null {
-  const { isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, currentValue } = input;
-  if (isNetDebit || !hasCurrentPrices || anyLegCrossed) return null;
+  const { isNetDebit, hasCurrentPrices, anyLegCrossed, creditReceived, signedEntryAmount, currentValue } = input;
+  if (!hasCurrentPrices || anyLegCrossed) return null;
+  if (isNetDebit) {
+    if (signedEntryAmount == null || !Number.isFinite(signedEntryAmount) || signedEntryAmount >= 0) return null;
+    return Math.abs(currentValue) - Math.abs(signedEntryAmount);
+  }
   return Math.abs(creditReceived) - Math.abs(currentValue);
 }
 

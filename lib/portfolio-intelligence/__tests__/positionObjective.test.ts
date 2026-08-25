@@ -9,7 +9,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
-import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
+import { buildObjectiveFromRecommendation, cohereManagementIntentRecommendation, isHoldOnlyLegacyReason } from '@/lib/portfolio-intelligence/objectives/positionObjective';
+import type { PortfolioRecommendation, PositionObjectiveInput } from '@/lib/portfolio-intelligence';
+import type { ManagementIntentResult } from '@/lib/portfolio-intelligence/managementIntent';
 
 const NOW = new Date('2026-07-11T13:00:00.000Z');
 
@@ -43,6 +45,8 @@ describe('PI-002: assignment-risk parity', () => {
     // below) are unchanged, per ticket requirement #8.
     expect(legacyRecommendation.label).toBe('Reduce Risk');
     expect(legacyRecommendation.managementIntent?.intent).toBe('REDUCE_RISK');
+    expect(legacyRecommendation.primaryReason).toBe(legacyRecommendation.managementIntent?.reasons[0]);
+    expect(legacyRecommendation.primaryReason).not.toContain('No primary action rule triggered');
     expect(objective).not.toBeNull();
     expect(objective!.type).toBe('REVIEW_THREATENED_POSITION');
     expect(objective!.ruleId).toBe('OBJ-ASSIGNMENT-RISK');
@@ -163,6 +167,111 @@ describe('PI-002: watch parity', () => {
     expect(legacyRecommendation.urgency).toBe('medium');
     expect(legacyRecommendation.confidence).toBe(70);
     expect(objective!.type).toBe('MANAGE_POSITION');
+  });
+});
+
+describe('recommendation presentation coherence', () => {
+  const recommendation = (overrides: Partial<PortfolioRecommendation> = {}): PortfolioRecommendation => ({
+    positionId: 'pos_1',
+    symbol: 'AMD',
+    kind: 'close-loser',
+    label: 'Exit Position',
+    urgency: 'critical',
+    confidence: 91,
+    primaryReason: 'Health score is 85; no primary action rule triggered.',
+    supportingReasons: ['No primary action rule triggered.', 'DTE: 5'],
+    suggestedAction: 'Close the position.',
+    computedAt: NOW.toISOString(),
+    ...overrides,
+  });
+
+  const intent = (
+    managementIntent: ManagementIntentResult['intent'],
+    label: string,
+    reasons: string[],
+  ): ManagementIntentResult => ({
+    intent: managementIntent,
+    label,
+    reasons,
+    alternatives: [],
+    candidates: [],
+    winnerScore: 10,
+    runnerUpIntent: null,
+    runnerUpScore: 0,
+    margin: 10,
+    confidenceTier: 'Low',
+  });
+
+  it.each([
+    ['CUT_LOSSES', 'Cut Losses', 'Loss threshold breached'],
+    ['REDUCE_RISK', 'Reduce Risk', 'Moneyness buffer is tight'],
+    ['TAKE_PROFIT', 'Take Profit', 'Profit target reached'],
+  ] as const)('keeps %s label and reasons coherent without hold-only wording', (managementIntent, label, reason) => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation(),
+      intent(managementIntent, label, [reason]),
+    );
+    expect(coherent.label).toBe(label);
+    expect(coherent.primaryReason).toBe(reason);
+    expect(coherent.managementIntent?.intent).toBe(managementIntent);
+    expect(isHoldOnlyLegacyReason(coherent.primaryReason)).toBe(false);
+    expect(coherent.supportingReasons.some(isHoldOnlyLegacyReason)).toBe(false);
+    expect(coherent.supportingReasons).toContain(reason);
+    expect(coherent.supportingReasons).toContain('DTE: 5');
+  });
+
+  it('makes HOLD_POSITION a genuine non-actionable hold', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation({
+        kind: 'hold',
+        label: 'Hold',
+        urgency: 'low',
+        primaryReason: 'No primary action rule triggered.',
+        suggestedAction: 'Continue monitoring.',
+      }),
+      intent('HOLD_POSITION', 'Hold Position', ['Continue monitoring current evidence.']),
+    );
+    expect(coherent.kind).toBe('hold');
+    expect(coherent.label).toBe('Hold Position');
+    expect(coherent.urgency).toBe('low');
+    expect(coherent.primaryReason).toBe('Continue monitoring current evidence.');
+    expect(coherent.suggestedAction).toBe('Continue monitoring the position.');
+    expect(coherent.managementIntent?.intent).toBe('HOLD_POSITION');
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).toBeNull();
+  });
+
+  it('preserves an independently evidenced legacy action when the intent selector only returns Hold', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation({
+        kind: 'earnings-risk',
+        label: 'earnings-risk',
+        urgency: 'high',
+        primaryReason: 'Earnings occur before expiration.',
+        suggestedAction: 'Review the position before earnings.',
+      }),
+      intent('HOLD_POSITION', 'Hold Position', ['Continue monitoring current evidence.']),
+    );
+    expect(coherent.kind).toBe('earnings-risk');
+    expect(coherent.label).toBe('earnings-risk');
+    expect(coherent.urgency).toBe('high');
+    expect(coherent.primaryReason).toBe('Earnings occur before expiration.');
+    expect(coherent.managementIntent).toBeUndefined();
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).not.toBeNull();
+  });
+
+  it('fails closed across the complete recommendation when a non-hold intent has no evidence reason', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation(),
+      intent('CUT_LOSSES', 'Cut Losses', []),
+    );
+    expect(coherent.kind).toBe('hold');
+    expect(coherent.label).toBe('Hold Position');
+    expect(coherent.urgency).toBe('low');
+    expect(coherent.primaryReason).toBe('Recommendation evidence is unavailable; continue monitoring.');
+    expect(coherent.supportingReasons).toEqual([]);
+    expect(coherent.suggestedAction).toBe('Continue monitoring the position.');
+    expect(coherent.managementIntent).toBeUndefined();
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).toBeNull();
   });
 });
 

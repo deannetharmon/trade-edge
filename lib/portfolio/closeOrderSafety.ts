@@ -580,16 +580,17 @@ export function runLiveCloseOrderSafetyGate(input: LiveCloseOrderSafetyInput): S
   const issues: SafetyCheckIssue[] = [];
   const push = (ruleId: SafetyRuleId, message: string) => issues.push({ ruleId, severity: 'block', message });
 
-  // Debit-opened positions: the pure identity/plan/break-even math below
-  // correctly supports both directions (see the corrective-round-2 test
-  // suite), but app/portfolio/page.tsx's surrounding default-price/GTC/stop
-  // computations are not yet wired to derive a Credit close for a
-  // debit-opened position -- they assume credit-at-entry throughout. Rather
-  // than claim support that does not actually exist in the production path,
-  // this is hard-blocked here until that wiring is done.
+  // A debit-opened position may only be sold to close for a Credit through
+  // the marketable/custom close-only path. Credit-target, stop, and roll
+  // workflows still encode credit-position lifecycle policy and remain
+  // blocked until their debit equivalents are explicitly modeled.
   if (input.identity.entryPriceEffect === 'Debit') {
-    push('ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE', 'This position was opened for a net debit. Live close/roll/stop-loss submission for debit-opened positions is not yet supported by this UI (the surrounding default-price computations assume a credit entry) -- close this position manually at the broker.');
-    return { ok: false, issues };
+    if (input.requestedClosePriceEffect !== 'Credit') {
+      push('ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE', 'A debit-opened long option must close for a Credit using Sell to Close.');
+    }
+    if (!['MARKETABLE', 'CUSTOM', 'BREAK_EVEN'].includes(input.pricingIntent)) {
+      push('ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE', 'Debit-position roll, profit-target, and stop workflows are not enabled. Use close-only Sell to Close.');
+    }
   }
 
   // Quote evidence -- `== null` deliberately catches BOTH `null` (explicit

@@ -258,20 +258,27 @@ describe('computePositionPnl', () => {
     expect(pnl).toBeCloseTo(1260 - 1750, 5); // -490, matches the MU fixture from the base PM-0001 report
   });
 
-  // The defect this round fixes: a net-debit structure's creditReceived is
-  // floored to $0.00 by calculateSpreadCredit, so WITHOUT the isNetDebit
-  // gate this same call would have returned `0 - 1750 = -1750` -- a
-  // fabricated loss equal to the full buyback cost. It must return null.
-  it('a net-debit structure never produces pnl = -currentValue (the round-2 defect)', () => {
+  it('computes debit-position pnl as liquidation value minus verified entry debit', () => {
     const pnl = computePositionPnl({
       isNetDebit: true,
       hasCurrentPrices: true,
       anyLegCrossed: false,
       creditReceived: 0, // floored, as calculateSpreadCredit would produce for a debit
-      currentValue: 1750,
+      signedEntryAmount: -1200,
+      currentValue: -1750,
+    });
+    expect(pnl).toBe(550);
+  });
+
+  it('keeps debit pnl unavailable without verified signed entry economics', () => {
+    const pnl = computePositionPnl({
+      isNetDebit: true,
+      hasCurrentPrices: true,
+      anyLegCrossed: false,
+      creditReceived: 0,
+      currentValue: -1750,
     });
     expect(pnl).toBeNull();
-    expect(pnl).not.toBe(-1750);
   });
 
   // Crossed-quote control: even a genuinely credit (non-debit) position
@@ -306,6 +313,7 @@ describe('computePositionPnl', () => {
       hasCurrentPrices: true,
       anyLegCrossed: true,
       creditReceived: 0,
+      signedEntryAmount: -400,
       currentValue: 500,
     });
     expect(pnl).toBeNull();

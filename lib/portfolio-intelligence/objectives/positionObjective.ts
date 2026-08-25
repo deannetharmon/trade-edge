@@ -298,6 +298,98 @@ function isShortPremiumStrategy(strategy: string | null | undefined): boolean {
   );
 }
 
+export function isHoldOnlyLegacyReason(reason: string): boolean {
+  return /no primary action rule triggered\.?/i.test(reason);
+}
+
+const HOLD_EVIDENCE_UNAVAILABLE_REASON = 'Recommendation evidence is unavailable; continue monitoring.';
+const HOLD_SUGGESTED_ACTION = 'Continue monitoring the position.';
+
+export function cohereManagementIntentRecommendation(
+  recommendation: PortfolioRecommendation,
+  intentResult: ManagementIntentResult | undefined,
+): PortfolioRecommendation {
+  if (!intentResult) return recommendation;
+
+  const canonicalReason = intentResult.reasons[0];
+  if (intentResult.intent === 'HOLD_POSITION') {
+    if (recommendation.kind !== 'hold') {
+      return {
+        ...recommendation,
+        supportingReasons: [recommendation.primaryReason, ...recommendation.supportingReasons]
+          .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
+          .slice(0, 4),
+        managementIntent: undefined,
+      };
+    }
+    return {
+      ...recommendation,
+      kind: 'hold',
+      label: 'Hold Position',
+      urgency: 'low',
+      primaryReason: canonicalReason ?? recommendation.primaryReason,
+      supportingReasons: intentResult.reasons
+        .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
+        .slice(0, 4),
+      suggestedAction: HOLD_SUGGESTED_ACTION,
+      managementIntent: intentResult,
+    };
+  }
+  if (!canonicalReason) {
+    return {
+      ...recommendation,
+      kind: 'hold',
+      label: 'Hold Position',
+      urgency: 'low',
+      primaryReason: HOLD_EVIDENCE_UNAVAILABLE_REASON,
+      supportingReasons: [],
+      suggestedAction: HOLD_SUGGESTED_ACTION,
+      managementIntent: undefined,
+    };
+  }
+
+  const supportingReasons = [
+    ...intentResult.reasons,
+    recommendation.primaryReason,
+    ...recommendation.supportingReasons,
+  ]
+    .filter(reason => reason && !isHoldOnlyLegacyReason(reason))
+    .filter((reason, index, reasons) => reasons.indexOf(reason) === index)
+    .slice(0, 4);
+
+  return {
+    ...recommendation,
+    label: intentResult.label,
+    primaryReason: canonicalReason,
+    supportingReasons,
+    managementIntent: intentResult,
+  };
+}
+
+export function cohereManagementIntentPresentation(
+  intentResult: ManagementIntentResult | undefined,
+  legacyPrimaryReason: string,
+): { label: string | null; primaryReason: string; managementIntent: ManagementIntentResult | undefined } {
+  const recommendation: PortfolioRecommendation = {
+    positionId: 'presentation-only',
+    symbol: '',
+    kind: 'hold',
+    label: 'hold',
+    urgency: 'low',
+    confidence: 0,
+    primaryReason: legacyPrimaryReason,
+    supportingReasons: [],
+    suggestedAction: HOLD_SUGGESTED_ACTION,
+    computedAt: new Date(0).toISOString(),
+  };
+  const coherent = cohereManagementIntentRecommendation(recommendation, intentResult);
+  return {
+    label: intentResult ? coherent.label : null,
+    primaryReason: coherent.primaryReason,
+    managementIntent: coherent.managementIntent,
+  };
+}
+
 function makeLegacyRecommendation(
   input: PositionObjectiveInput,
   kind: PortfolioRecommendationKind,
@@ -309,30 +401,19 @@ function makeLegacyRecommendation(
   now: Date = new Date(),
   intentResult?: ManagementIntentResult,
 ): PortfolioRecommendation {
-  // PI-0006B: intentResult's own reasons (the specific evidence that won it
-  // the recommendation) lead; PI-0006A's dte/pnlPct/buffer/healthScore
-  // bullets follow as supporting context. Capped at 4 total, same as
-  // buildSupportingReasons already did on its own.
-  const mergedReasons = intentResult
-    ? [...intentResult.reasons, ...supportingReasons].slice(0, 4)
-    : supportingReasons;
-
-  return {
+  const recommendation: PortfolioRecommendation = {
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
     symbol: input.symbol,
     kind,
-    // PI-0006B: decisive, user-facing label sourced from the canonical
-    // intent selector -- see classifyIntentContext() above and
-    // selectManagementIntent() in ../managementIntent.ts.
-    label: intentResult?.label ?? kind,
+    label: kind,
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
     primaryReason,
-    supportingReasons: mergedReasons,
+    supportingReasons,
     suggestedAction,
     computedAt: now.toISOString(),
-    managementIntent: intentResult,
   };
+  return cohereManagementIntentRecommendation(recommendation, intentResult);
 }
 
 // Maps a legacy urgency directly onto a PortfolioObjective priority. `watch`
@@ -622,6 +703,15 @@ export interface PositionObjectiveResult {
   pricingDecisionEvidence: PortfolioPricingDecisionEvidence;
 }
 
+export function buildObjectiveFromRecommendation(
+  input: PositionObjectiveInput,
+  recommendation: PortfolioRecommendation,
+  now: Date = new Date(),
+): PortfolioObjective | null {
+  return recommendation.kind === 'hold' ? null : buildObjective(input, recommendation, now);
+}
+
+
 // PI-0006A: builds 2-4 concise evidence bullets from data this function
 // already has in scope -- health-score factors first (most specific),
 // padded out with the already-normalized dte/pnlPct/buffer/healthScore
@@ -902,7 +992,7 @@ export function evaluatePositionObjective(
     legacy = { ...legacy, label: 'Verify Pricing' };
   }
 
-  const objective = legacy.kind === 'hold' ? null : buildObjective(input, legacy, now);
+  const objective = buildObjectiveFromRecommendation(input, legacy, now);
 
   // PI-0014 follow-up (Product Owner review): liquidityTrapTriggered is a
   // decision-engine property, owned here, not by lib/positionValuation's

@@ -5,7 +5,7 @@ export type PositionsWorkspaceView = 'portfolio' | 'analysis';
 export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
 export type AnalysisColumnId =
   | 'identity' | 'dates' | 'underlying' | 'strike' | 'capital' | 'entry'
-  | 'value' | 'pnl' | 'evolution' | 'movement' | 'greeks' | 'volatility'
+  | 'value' | 'pnl' | 'evolution' | 'greeks' | 'volatility'
   | 'orders' | 'recommendation';
 
 export interface PositionAnalysisFilters {
@@ -24,6 +24,28 @@ export interface CapacityViewModel {
   remainderShares: number;
   basisComplete: boolean;
   blockingReason: string | null;
+  unallocatedShares: number;
+}
+
+export type SymbolAssetComposition = 'equity-only' | 'long-option-only' | 'short-option-only' | 'mixed-options' | 'equity-and-options' | 'ambiguous';
+export type InstrumentRole = 'long-equity' | 'short-equity' | 'long-call' | 'long-put' | 'short-call' | 'short-put' | 'multi-leg-option-structure' | 'ambiguous-option-structure';
+export interface FinancialAggregate {
+  value: number | null;
+  completeness: 'complete' | 'partial' | 'unavailable' | 'not-applicable';
+  includedCount: number;
+  expectedCount: number;
+  excludedInstrumentKeys: string[];
+  reasons: string[];
+  basis: 'mark-mid' | 'marketable-close' | 'mixed' | null;
+  asOf: string | null;
+}
+export interface OptionInstrumentViewModel {
+  key: string;
+  position: Position;
+  role: InstrumentRole;
+  roleLabel: string;
+  midpointLabel: string;
+  marketableLabel: string;
 }
 
 export interface SymbolGroupViewModel {
@@ -39,6 +61,17 @@ export interface SymbolGroupViewModel {
   capacity: CapacityViewModel;
   needsAttention: boolean;
   contextualAction: 'covered-call' | 'short-call' | 'replacement' | null;
+  composition: SymbolAssetComposition;
+  compositionLabel: string;
+  equityMarketValueAggregate: FinancialAggregate;
+  longOptionValueMid: FinancialAggregate;
+  optionBuybackMid: FinancialAggregate;
+  optionMarketableClose: FinancialAggregate;
+  unrealizedPnlMid: FinancialAggregate;
+  optionCloseNowPnl: FinancialAggregate;
+  unrealizedPnlPct: number | null;
+  unrealizedPnlPctReason: string | null;
+  optionInstruments: OptionInstrumentViewModel[];
 }
 
 export interface PositionAnalysisRowViewModel {
