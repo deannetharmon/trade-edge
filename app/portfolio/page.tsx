@@ -79,7 +79,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
-import { cancelExistingGtcForReplacement, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
+import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -3786,7 +3786,7 @@ function BatchConfirmModal({
               );
               if (restorationMessage) reportedError += restorationMessage;
             } catch (restoreErr: any) {
-              reportedError += ` CRITICAL: replacement failed after the original GTC was cancelled, and automatic restoration also failed (${restoreErr?.message ?? 'unknown restoration failure'}). Verify working orders in TastyTrade immediately.`;
+              reportedError += criticalGtcRestorationWarning(restoreErr);
             }
           }
           results.push({ symbol: item.pos.symbol, action: item.action, orderId: '—', status: 'error', error: reportedError, limitPrice: item.limitPrice, estPnl: item.estPnl });
