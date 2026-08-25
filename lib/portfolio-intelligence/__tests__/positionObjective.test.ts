@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
+import { cohereManagementIntentPresentation } from '@/lib/portfolio-intelligence/objectives/positionObjective';
 import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
 
 const NOW = new Date('2026-07-11T13:00:00.000Z');
@@ -43,6 +44,8 @@ describe('PI-002: assignment-risk parity', () => {
     // below) are unchanged, per ticket requirement #8.
     expect(legacyRecommendation.label).toBe('Reduce Risk');
     expect(legacyRecommendation.managementIntent?.intent).toBe('REDUCE_RISK');
+    expect(legacyRecommendation.primaryReason).toBe(legacyRecommendation.managementIntent?.reasons[0]);
+    expect(legacyRecommendation.primaryReason).not.toContain('No primary action rule triggered');
     expect(objective).not.toBeNull();
     expect(objective!.type).toBe('REVIEW_THREATENED_POSITION');
     expect(objective!.ruleId).toBe('OBJ-ASSIGNMENT-RISK');
@@ -163,6 +166,19 @@ describe('PI-002: watch parity', () => {
     expect(legacyRecommendation.urgency).toBe('medium');
     expect(legacyRecommendation.confidence).toBe(70);
     expect(objective!.type).toBe('MANAGE_POSITION');
+  });
+});
+
+describe('recommendation presentation coherence', () => {
+  it('fails closed when a non-hold intent has no evidence reason', () => {
+    const intent = {
+      intent: 'CUT_LOSSES', label: 'Cut Losses', reasons: [], alternatives: [], candidates: [],
+      winnerScore: 10, runnerUpIntent: null, runnerUpScore: 0, margin: 10, confidenceTier: 'Low',
+    } as const;
+    const presentation = cohereManagementIntentPresentation(intent, 'No primary action rule triggered.');
+    expect(presentation.label).toBe('Hold Position');
+    expect(presentation.primaryReason).toBe('Recommendation evidence is unavailable; continue monitoring.');
+    expect(presentation.managementIntent).toBeUndefined();
   });
 });
 
