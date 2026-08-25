@@ -298,6 +298,21 @@ function isShortPremiumStrategy(strategy: string | null | undefined): boolean {
   );
 }
 
+export function cohereManagementIntentPresentation(
+  intentResult: ManagementIntentResult | undefined,
+  legacyPrimaryReason: string,
+): { label: string | null; primaryReason: string; managementIntent: ManagementIntentResult | undefined } {
+  if (!intentResult) return { label: null, primaryReason: legacyPrimaryReason, managementIntent: undefined };
+  if (intentResult.intent === 'HOLD_POSITION') {
+    return { label: intentResult.label, primaryReason: intentResult.reasons[0] ?? legacyPrimaryReason, managementIntent: intentResult };
+  }
+  const canonicalReason = intentResult.reasons[0];
+  if (!canonicalReason) {
+    return { label: 'Hold Position', primaryReason: 'Recommendation evidence is unavailable; continue monitoring.', managementIntent: undefined };
+  }
+  return { label: intentResult.label, primaryReason: canonicalReason, managementIntent: intentResult };
+}
+
 function makeLegacyRecommendation(
   input: PositionObjectiveInput,
   kind: PortfolioRecommendationKind,
@@ -318,14 +333,7 @@ function makeLegacyRecommendation(
         .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
         .slice(0, 4)
     : supportingReasons;
-  const canonicalIntentReason = intentResult?.reasons[0];
-  const intentHasEvidence = intentResult?.intent === 'HOLD_POSITION' || Boolean(canonicalIntentReason);
-  const displayedIntent = intentResult && intentHasEvidence ? intentResult : undefined;
-  const displayedPrimaryReason = canonicalIntentReason ?? (
-    intentResult && intentResult.intent !== 'HOLD_POSITION'
-      ? 'Recommendation evidence is unavailable; continue monitoring.'
-      : primaryReason
-  );
+  const presentation = cohereManagementIntentPresentation(intentResult, primaryReason);
 
   return {
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
@@ -334,14 +342,14 @@ function makeLegacyRecommendation(
     // PI-0006B: decisive, user-facing label sourced from the canonical
     // intent selector -- see classifyIntentContext() above and
     // selectManagementIntent() in ../managementIntent.ts.
-    label: displayedIntent?.label ?? (intentResult ? 'Hold Position' : kind),
+    label: presentation.label ?? kind,
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
-    primaryReason: displayedPrimaryReason,
+    primaryReason: presentation.primaryReason,
     supportingReasons: mergedReasons,
     suggestedAction,
     computedAt: now.toISOString(),
-    managementIntent: displayedIntent,
+    managementIntent: presentation.managementIntent,
   };
 }
 
