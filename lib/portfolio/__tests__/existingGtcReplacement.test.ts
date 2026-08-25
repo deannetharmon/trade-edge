@@ -76,6 +76,41 @@ describe('existing GTC replacement safety', () => {
     );
   });
 
+  it('blocks replacement when an existing GTC order ID is unavailable', async () => {
+    const cancel = vi.fn();
+    const submitReplacement = vi.fn();
+    const restore = vi.fn();
+
+    await expect(
+      (async () => {
+        const cancellation = await cancelExistingGtcForReplacement(
+          {
+            hasGtc: true,
+            confirmed: true,
+            orderId: null,
+            originalPrice: 4.03,
+          },
+          cancel,
+        );
+        await submitReplacement();
+        await restoreOriginalGtcIfNeeded(
+          {
+            cancelled: cancellation.cancelled,
+            replacementSubmitted: false,
+            originalPrice: cancellation.originalPrice,
+          },
+          restore,
+        );
+      })(),
+    ).rejects.toThrow(
+      'Existing GTC order ID is unavailable. No replacement was submitted. Verify working orders in TastyTrade.',
+    );
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(submitReplacement).not.toHaveBeenCalled();
+    expect(restore).not.toHaveBeenCalled();
+  });
+
   it('blocks complex/OCO replacement before cancellation', async () => {
     const cancel = vi.fn();
 
