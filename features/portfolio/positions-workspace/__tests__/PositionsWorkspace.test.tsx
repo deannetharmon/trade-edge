@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '@/lib/theme';
@@ -137,13 +137,35 @@ describe('PositionsWorkspace', () => {
     const next = { ...model, analysisRows: [{ id: withLeg.key, position: withLeg, symbol: withLeg.symbol, strategy: withLeg.strategy, needsAttention: false }] };
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    expect(screen.getByRole('columnheader', { name: 'Price / Moneyness' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Price / Strike Distance' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / Breakeven' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
     expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
+  });
+
+  it('lazy-loads one underlying chart at a time and links to TradingView', async () => {
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (String(input).startsWith('/api/chart')) return { ok: true, json: async () => ({ bars: [{ c: 100 }, { c: 102 }] }) } as Response;
+      return { ok: true, json: async () => ({ notes: {} }) } as Response;
+    });
+    const user = userEvent.setup();
+    const second = { ...position, key: 'MSFT-2', symbol: 'MSFT' } as Position;
+    const next = { ...model, analysisRows: [model.analysisRows[0], { id: second.key, position: second, symbol: second.symbol, strategy: second.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith('/api/chart'))).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Quick chart for AAPL' }));
+    expect(await screen.findByRole('dialog', { name: 'Quick chart for AAPL' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open AAPL in TradingView, opens in new tab' })).toHaveAttribute('href', 'https://www.tradingview.com/chart/?symbol=AAPL');
+    await waitFor(() => expect(screen.getByText(/\+2.0% 30d/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Quick chart for MSFT' }));
+    expect(await screen.findByRole('dialog', { name: 'Quick chart for MSFT' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Quick chart for AAPL' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Quick chart for MSFT' })).not.toBeInTheDocument();
   });
 
   it('reuses the supplied analysis path with the clicked canonical identity and clears stale analysis', async () => {
