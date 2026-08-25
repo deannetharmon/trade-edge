@@ -161,6 +161,20 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
+  it('keeps follow-up conversation locked to the analyzed position snapshot', async () => {
+    const user = userEvent.setup();
+    const onAnalyze = vi.fn(async (selected: Position) => ({ positionKey: selected.key, symbol: selected.symbol, recommendation: 'HOLD', confidence: 'HIGH', summary: 'Position summary', reasoning: 'Canonical evidence', risks: [], catalysts: [], generatedAt: '2026-08-25T14:30:00Z' }));
+    const renderAnalysisConversation = vi.fn((selected: Position) => <label>Follow-up for {selected.symbol}<textarea aria-label={`Ask a follow-up about ${selected.symbol}`} /></label>);
+    render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    expect(await screen.findByRole('textbox', { name: 'Ask a follow-up about AAPL' })).toBeInTheDocument();
+    await user.click(screen.getByText('Position context locked for this conversation'));
+    expect(screen.getByText(/Position ID: AAPL-1/)).toBeInTheDocument();
+    expect(screen.getByText(/Follow-ups retain this snapshot and conversation history/)).toBeInTheDocument();
+    expect(renderAnalysisConversation).toHaveBeenCalledWith(position, expect.objectContaining({ positionKey: position.key }));
+  });
+
   it('saves notes on Enter, enforces 25 characters, and restores saved notes after remount', async () => {
     const store: Record<string, string> = {};
     vi.mocked(fetch).mockImplementation(async (_input, init) => {

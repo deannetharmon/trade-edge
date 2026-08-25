@@ -2583,6 +2583,8 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
 
   return [
     'POSITION SNAPSHOT — USE THIS DATA FOR EVERY FOLLOW-UP ANSWER',
+    `Canonical position ID: ${pos.key}`,
+    `Snapshot captured: ${analysis.generatedAt}`,
     `Position type: ${inferPositionStructure(pos)}`,
     `Platform strategy label: ${pos.strategy}`,
     `Symbol: ${pos.symbol}`,
@@ -2600,11 +2602,16 @@ function buildPositionChatContext(pos: Position, analysis: PositionAnalysis): st
     `OTM buffer to short strike: ${fmtPct(pos.buffer)}`,
     '',
     'P&L / PREMIUM',
-    `Total entry credit: ${creditEntryComplete ? fmtMoney(entryCredit) : 'unavailable — supported credit entry not established'}`,
+    `Opening price effect: ${pos.entryPriceEffect}`,
+    `Opening ${pos.entryPriceEffect === 'Debit' ? 'debit' : pos.entryPriceEffect === 'Credit' ? 'credit' : 'economics'}: ${pos.entryEconomicsComplete && pos.entryCredit != null ? fmtMoney(pos.entryCredit) : 'unavailable — broker opening economics incomplete'}`,
+    `Total entry credit: ${creditEntryComplete ? fmtMoney(entryCredit) : 'not applicable or unavailable — supported credit entry not established'}`,
     `Entry credit per short contract: ${fmtMoney(creditPerContract)}`,
-    `Current buyback / mark value: ${fmtMoney(pos.currentValue)}`,
+    `Current midpoint position value: ${fmtMoney(pos.currentValue)}`,
+    `Marketable close-now value: ${fmtMoney(pos.closeValue)}`,
     `Current mark per short contract: ${fmtMoney(currentPerContract)}`,
-    `Open P&L: ${fmtSignedMoney(pos.pnl)}`,
+    `Canonical unrealized P&L at midpoint: ${fmtSignedMoney(pos.pnl)}`,
+    `Executable close-now P&L estimate: ${fmtSignedMoney(pos.closeNowPnl)}`,
+    `Canonical unrealized P&L percent: ${fmtPct(pos.pnlPct)}`,
     `Profit captured: ${fmtPct(pnlCapture)}`,
     `Profit target: ${creditEntryComplete ? `${Math.round(pos.profitTarget * 100)}% | target buyback ${fmtMoney(pos.targetPrice)}` : 'unavailable — supported credit entry not established'}`,
     `Premium still above target buyback: ${fmtMoney(remainingToTarget)}`,
@@ -5115,10 +5122,6 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
 }
 
 function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos: Position; th: typeof THEMES[Theme] }) {
-  // The first chat message is hidden from the UI, but sent to the AI on every follow-up.
-  // It contains the actual position numbers so the chat answers do not become generic.
-  const chatContext = buildPositionChatContext(pos, analysis);
-
   return (
     <div className={`border-t ${th.border}`} style={{ background: 'rgba(99,102,241,0.04)' }}>
       <div className="px-4 py-4 space-y-3">
@@ -5183,14 +5186,20 @@ function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos:
         </div>
       </div>
 
-      <ChatThread
-        initialContext={chatContext}
-        systemPrompt={TRADING_CHAT_PROMPT}
-        placeholder={`Ask about ${analysis.symbol}... e.g. "Should I roll to next month?"`}
-        th={th}
-      />
+      <PositionAnalysisConversation analysis={analysis} pos={pos} th={th} />
     </div>
   );
+}
+
+function PositionAnalysisConversation({ analysis, pos, th }: { analysis: PositionAnalysis; pos: Position; th: typeof THEMES[Theme] }) {
+  const chatContext = buildPositionChatContext(pos, analysis);
+  return <ChatThread
+    key={`${pos.key}:${analysis.generatedAt}`}
+    initialContext={chatContext}
+    systemPrompt={TRADING_CHAT_PROMPT}
+    placeholder={`Ask about ${analysis.symbol}... e.g. "What would change this recommendation?"`}
+    th={th}
+  />;
 }
 
 function PortfolioAnalysisPanel({ analysis, positions, onClose, th }: {
@@ -10068,6 +10077,7 @@ export default function PortfolioPage() {
                 .filter(action => isActionRelevant(position, action))}
               onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
               onAnalyze={position => analyzePosition(position, null)}
+              renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
               renderStopControl={position => position.stopLossClassification === 'NO_STOP'
                 ? <SetStopLossButton pos={position} th={th} />
                 : null}
