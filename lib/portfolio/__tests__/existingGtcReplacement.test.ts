@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   cancelExistingGtcForReplacement,
+  criticalGtcRestorationWarning,
   restoreOriginalGtcIfNeeded,
 } from '../existingGtcReplacement';
 
@@ -67,6 +68,12 @@ describe('existing GTC replacement safety', () => {
         restore,
       ),
     ).rejects.toThrow('restore rejected');
+  });
+
+  it('produces the critical broker-verification warning when restoration fails', () => {
+    expect(criticalGtcRestorationWarning(new Error('restore rejected'))).toBe(
+      ' CRITICAL: replacement failed after the original GTC was cancelled, and automatic restoration also failed (restore rejected). Verify working orders in TastyTrade immediately.',
+    );
   });
 
   it('blocks complex/OCO replacement before cancellation', async () => {
