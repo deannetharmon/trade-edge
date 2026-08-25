@@ -3,9 +3,9 @@ import type { AnalysisColumnId, AnalysisViewId } from './types';
 export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: string; group: string }> = [
   { id: 'identity', label: 'Position', group: 'Position' },
   { id: 'dates', label: 'Entry / Expiry / DTE', group: 'Position' },
-  { id: 'underlying', label: 'Underlying / Moneyness', group: 'Position' },
+  { id: 'underlying', label: 'Price / Moneyness', group: 'Position' },
   { id: 'strike', label: 'Strike / Breakeven', group: 'Position' },
-  { id: 'capital', label: 'Capital / Collateral', group: 'Economics' },
+  { id: 'capital', label: 'Capital', group: 'Economics' },
   { id: 'entry', label: 'Credit / Debit', group: 'Economics' },
   { id: 'value', label: 'Buyback / Value', group: 'Economics' },
   { id: 'pnl', label: 'Open P/L / Target', group: 'Economics' },
@@ -13,11 +13,12 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
   { id: 'orders', label: 'GTC / Stop', group: 'Orders' },
+  { id: 'notes', label: 'Notes', group: 'Position' },
   { id: 'recommendation', label: 'Suggested action', group: 'Recommendation' },
 ] as const;
 
-const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'recommendation'];
-const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'greeks', 'volatility', 'recommendation'];
+const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'notes', 'recommendation'];
+const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'greeks', 'volatility', 'notes', 'recommendation'];
 const FULL = ANALYSIS_COLUMNS.map(column => column.id);
 
 export function columnsForView(view: Exclude<AnalysisViewId, 'custom'>): AnalysisColumnId[] {

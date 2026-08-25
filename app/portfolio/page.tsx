@@ -10067,6 +10067,7 @@ export default function PortfolioPage() {
               getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
               onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
+              onAnalyze={position => analyzePosition(position, null)}
               renderStopControl={position => position.stopLossClassification === 'NO_STOP'
                 ? <SetStopLossButton pos={position} th={th} />
                 : null}

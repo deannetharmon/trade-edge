@@ -54,9 +54,9 @@ describe('positions workspace model', () => {
 });
 
 describe('analysis controls', () => {
-  it('defines thirteen columns without the obsolete movement column and protects identity', () => {
-    expect(ANALYSIS_COLUMNS).toHaveLength(13);
-    expect(columnsForView('full')).toHaveLength(13);
+  it('defines fourteen columns without the obsolete movement column and protects identity', () => {
+    expect(ANALYSIS_COLUMNS).toHaveLength(14);
+    expect(columnsForView('full')).toHaveLength(14);
     expect(ANALYSIS_COLUMNS.map(column => column.id)).not.toContain('movement');
     expect(sanitizeColumns(['pnl'])).toEqual(['identity', 'pnl']);
   });

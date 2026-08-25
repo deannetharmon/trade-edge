@@ -8,6 +8,7 @@ import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
 import { buildCapitalViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, SEMANTIC_TONE_CLASS, stopPresentation, type SemanticTone } from './model/presentation';
+import { buildBreakevenViewModel } from './model/breakeven';
 import type { AnalysisColumnId, AnalysisViewId, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
@@ -16,6 +17,19 @@ export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_PO
 
 const money = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
 const number = (value: number | null | undefined, digits = 1) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
+const POSITION_NOTE_MAX_LENGTH = 25;
+
+export interface WorkspaceAiAnalysis {
+  positionKey: string;
+  symbol: string;
+  recommendation: string;
+  confidence: string;
+  summary: string;
+  reasoning: string;
+  risks: string[];
+  catalysts: string[];
+  generatedAt: string;
+}
 
 export function profitTargetPresentation(position: Pick<Position, 'entryPriceEffect' | 'entryEconomicsComplete' | 'profitTarget'>): string {
   const target = position.profitTarget;
@@ -83,25 +97,67 @@ interface ManagementActionProps {
   getManagementActions?: (position: Position) => ActionType[];
   onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void;
   renderStopControl?: (position: Position) => ReactNode;
+  onAnalyze?: (position: Position) => Promise<WorkspaceAiAnalysis>;
 }
 
-function AnalysisView({ model, th, getManagementActions, onExecute, renderStopControl }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
+function AnalysisView({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const [hydrated, setHydrated] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState(preferences.filters);
   const [draftColumns, setDraftColumns] = useState<AnalysisColumnId[]>(preferences.customColumnIds);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [notesLoadError, setNotesLoadError] = useState<string | null>(null);
+  const [analysisPosition, setAnalysisPosition] = useState<Position | null>(null);
+  const [analysis, setAnalysis] = useState<WorkspaceAiAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   useEffect(() => { const loaded = loadPreferences(); setPreferences(loaded); setDraftFilters(loaded.filters); setDraftColumns(loaded.customColumnIds); setHydrated(true); }, []);
   useEffect(() => { if (hydrated) savePreferences(preferences); }, [preferences, hydrated]);
+  useEffect(() => {
+    if (typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-notes').then(async response => {
+      if (!response.ok) throw new Error((await response.json().catch(() => ({})))?.error ?? 'Unable to load notes');
+      const payload = await response.json();
+      if (active) setNotes(payload.notes ?? {});
+    }).catch(error => { if (active) setNotesLoadError(error instanceof Error ? error.message : 'Unable to load notes'); });
+    return () => { active = false; };
+  }, []);
+  const noteStorageKey = (position: Position) => `${encodeURIComponent(position.accountNumber || model.accountNumber || '')}::${encodeURIComponent(position.key)}`;
+  const saveNote = async (position: Position, note: string) => {
+    const accountNumber = position.accountNumber || model.accountNumber;
+    if (!accountNumber) throw new Error('Broker account identity is unavailable');
+    const response = await fetch('/api/position-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: position.key, note }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error ?? 'Unable to save note');
+    setNotes(current => ({ ...current, [noteStorageKey(position)]: note }));
+  };
+  const analyze = async (position: Position) => {
+    if (!onAnalyze || analysisLoading) return;
+    setAnalysisPosition(position);
+    setAnalysis(null);
+    setAnalysisError(null);
+    setAnalysisLoading(true);
+    try {
+      const result = await onAnalyze(position);
+      if (result.positionKey !== position.key) throw new Error('Analysis identity did not match the selected position');
+      setAnalysis(result);
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
+    } finally { setAnalysisLoading(false); }
+  };
   const columns = preferences.analysisView === 'custom' ? preferences.customColumnIds : columnsForView(preferences.analysisView);
   const rows = model.analysisRows.filter(row => matchesAnalysisFilters(row, preferences.filters));
   const chooseView = (view: AnalysisViewId) => setPreferences(current => ({ ...current, analysisView: view, customColumnIds: view === 'custom' ? current.customColumnIds : columnsForView(view) }));
   return <>
     <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}><label className={`text-xs ${th.textMuted}`}>View <select value={preferences.analysisView} onChange={event => chooseView(event.target.value as AnalysisViewId)} className="ml-2 min-h-11 rounded border border-white/20 bg-slate-950 px-3 text-white focus:ring-2 focus:ring-teal-400"><option value="management">Management</option><option value="risk">Risk</option><option value="full">Full Detail</option><option value="custom">Custom</option></select></label><button type="button" onClick={() => { setDraftFilters(preferences.filters); setFilterOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Filter{activeFilterCount(preferences.filters) ? ` ${activeFilterCount(preferences.filters)}` : ''}</button><button type="button" onClick={() => { setDraftColumns(columns); setColumnsOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Customize Columns</button><span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span></div>
-    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" className={`whitespace-nowrap border-b border-r border-white/10 bg-slate-950 px-3 py-3 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''}`}>{column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} />)}</tbody></table></div>
+    {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
+    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' || column.id === 'underlying' ? 'w-32 max-w-32' : column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{column.id === 'strike' ? <><span className="block">Strike /</span><span className="block">Breakeven</span></> : column.id === 'underlying' ? <><span className="block">Price /</span><span className="block">Moneyness</span></> : column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} />)}</tbody></table></div>
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
+    {analysisPosition && <DialogShell title={`AI analysis — ${analysisPosition.symbol}`} onClose={() => { if (!analysisLoading) setAnalysisPosition(null); }}><div aria-live="polite">{analysisLoading ? <p>Analyzing {analysisPosition.symbol}…</p> : analysisError ? <div><p role="alert" className="text-red-400">{analysisError}</p><button type="button" onClick={() => analyze(analysisPosition)} className="mt-3 min-h-8 rounded border border-white/20 px-3 text-xs focus:ring-2 focus:ring-teal-400">Retry analysis</button></div> : analysis ? <div className="space-y-3 text-sm"><p className="text-[10px] uppercase tracking-wider text-white/50">AI interpretation · deterministic Suggested Action remains authoritative</p><p><b>{analysis.recommendation}</b> · {analysis.confidence} confidence</p><p>{analysis.summary}</p><p>{analysis.reasoning}</p>{analysis.risks.length > 0 && <div><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(risk => <li key={risk}>{risk}</li>)}</ul></div>}<p className="text-xs text-white/50">Advisory analysis only. No brokerage order is prepared or submitted.</p></div> : null}</div></DialogShell>}
   </>;
 }
 
@@ -120,13 +176,28 @@ function recommendationTone(position: Position): SemanticTone {
   return 'neutral';
 }
 
-function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode }) {
+function PositionNoteEditor({ position, savedNote, onSave }: { position: Position; savedNote: string; onSave: (position: Position, note: string) => Promise<void> }) {
+  const [draft, setDraft] = useState(savedNote);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setDraft(savedNote); setState('idle'); setError(null); }, [savedNote, position.key]);
+  const save = async () => {
+    if (draft === savedNote || state === 'saving') return;
+    if (draft.length > POSITION_NOTE_MAX_LENGTH) { setError(`Maximum ${POSITION_NOTE_MAX_LENGTH} characters`); setState('error'); return; }
+    setState('saving'); setError(null);
+    try { await onSave(position, draft); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+  };
+  return <label className="block"><span className="sr-only">Note for {position.symbol} {position.strategy} position</span><input aria-label={`Note for ${position.symbol} ${position.strategy} position`} value={draft} maxLength={POSITION_NOTE_MAX_LENGTH} onChange={event => { setDraft(event.target.value); setState('idle'); }} onBlur={() => void save()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void save(); } else if (event.key === 'Escape') { event.preventDefault(); setDraft(savedNote); setState('idle'); setError(null); } }} className="h-8 w-36 rounded border border-white/20 bg-transparent px-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400" /><span className="mt-1 block text-[9px] text-white/40">{draft.length}/{POSITION_NOTE_MAX_LENGTH} · {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : 'Enter or blur to save'}</span></label>;
+}
+
+function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, savedNote, onSaveNote }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void> }) {
   const first = p.snapshotHistory?.[0];
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
   const pnl = p.closeNowPnl ?? p.pnl;
   const stop = stopPresentation(p.stopLossClassification);
   const stopControl = renderStopControl?.(p) ?? null;
+  const breakeven = buildBreakevenViewModel(p);
   const entryTone = p.entryPriceEffect === 'Credit' ? 'positive' : p.entryPriceEffect === 'Debit' ? 'warning' : 'neutral';
   const firstPnl = first?.pnl;
   const firstBuffer = first?.buffer ?? p.otmAtEntry;
@@ -135,7 +206,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{p.strategy}</span><span className={th.textFaint}>{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span></>,
     dates: <>{p.entryDate ?? 'Entry unavailable'}<b className="block text-white">{p.expDate}</b><span>{p.dte} DTE</span></>,
     underlying: <><b className="text-white">{money(p.stockPrice)}</b>{moneyness ? <span className={`block ${SEMANTIC_TONE_CLASS[moneyness.tone]}`}>{moneyness.state === 'ATM' ? 'ATM' : `${moneyness.distancePct.toFixed(1)}% ${moneyness.state}`}</span> : <span className={`block ${th.textFaint}`} title="No unambiguous canonical management leg">Moneyness unavailable</span>}</>,
-    strike: <>{p.legs.map(leg => `${leg.strikePrice}${leg.optionType}`).join(' / ') || '—'}</>,
+    strike: <><span className="block">{p.legs.map(leg => `${leg.strikePrice}${leg.optionType}`).join(' / ') || '—'}</span><span className={`block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `BE ${breakeven.values.map(value => value.toFixed(2)).join(' / ')}` : 'BE —'}</span></>,
     capital: <><b className="text-white">{capital.label}</b>{capital.value == null ? <span className={`block max-w-40 ${th.textFaint}`} title={capital.reason}>{capital.reason}</span> : <span className="block">{capital.suffix ? `${capital.value}${capital.suffix}` : money(capital.value)}</span>}</>,
     entry: <><b className={SEMANTIC_TONE_CLASS[entryTone]}>{p.entryPriceEffect}</b><span className={`block ${SEMANTIC_TONE_CLASS[entryTone]}`}>{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
     value: <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
@@ -144,7 +215,8 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span>{p.entryPriceEffect === 'Debit' && <span className={`mt-1 block max-w-44 ${th.textFaint}`}>Debit stop submission remains blocked until the canonical sell-to-close stop path supports it.</span>}</>,
-    recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-64 flex-wrap gap-1">{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-11 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
+    notes: <PositionNoteEditor position={p} savedNote={savedNote} onSave={onSaveNote} />,
+    recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span><span className="mt-2 flex max-w-64 flex-wrap gap-1"><button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze with AI</button>{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span><span className={`mt-1 block ${th.textFaint}`}>Suggested Action is deterministic. Actions open review only; no order is submitted here.</span></>,
   };
   return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
 }
@@ -159,9 +231,9 @@ function ColumnsDialog({ selected, setSelected, preset, onClose, onApply }: { se
   return <DialogShell title="Customize columns" onClose={onClose}><div className="grid gap-2 sm:grid-cols-2">{ANALYSIS_COLUMNS.map(column => <label key={column.id} className="flex min-h-11 items-center gap-2 rounded border border-white/10 px-3 text-xs"><input type="checkbox" checked={selected.includes(column.id)} disabled={column.id === 'identity'} onChange={() => toggle(column.id)} /><span><b className="block">{column.label}</b><span className="text-white/50">{column.group}</span></span></label>)}</div><div className="mt-5 flex justify-between"><button onClick={() => setSelected(columnsForView(preset === 'custom' ? 'management' : preset))} className="min-h-11 px-3 text-xs">Reset to preset</button><div className="flex gap-2"><button onClick={onClose} className="min-h-11 rounded border border-white/20 px-4 text-xs">Cancel</button><button disabled={selected.length < 2} onClick={onApply} className="min-h-11 rounded bg-teal-500 px-4 text-xs font-bold text-slate-950 disabled:opacity-40">Apply</button></div></div></DialogShell>;
 }
 
-export function PositionsWorkspace({ model, th, getManagementActions, onExecute, renderStopControl }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
+export function PositionsWorkspace({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
   const [view, setView] = useState<'portfolio' | 'analysis'>('portfolio');
   useEffect(() => { const loaded = loadPreferences(); setView(loaded.workspaceView); }, []);
   const switchView = (next: 'portfolio' | 'analysis') => { setView(next); const loaded = loadPreferences(); savePreferences({ ...loaded, workspaceView: next }); };
-  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} />}</section>;
+  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} />}</section>;
 }

@@ -6,7 +6,7 @@ export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
 export type AnalysisColumnId =
   | 'identity' | 'dates' | 'underlying' | 'strike' | 'capital' | 'entry'
   | 'value' | 'pnl' | 'evolution' | 'greeks' | 'volatility'
-  | 'orders' | 'recommendation';
+  | 'orders' | 'notes' | 'recommendation';
 
 export interface PositionAnalysisFilters {
   symbol: string;
@@ -83,6 +83,7 @@ export interface PositionAnalysisRowViewModel {
 }
 
 export interface PositionsWorkspaceModel {
+  accountNumber: string | null;
   snapshotAsOf: string | null;
   quoteAsOf: string | null;
   dataQuality: SnapshotDataQuality;
