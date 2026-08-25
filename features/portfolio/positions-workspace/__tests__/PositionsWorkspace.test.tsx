@@ -18,6 +18,7 @@ const position = {
 const aggregate = (value: number | null, basis: 'mark-mid' | 'marketable-close' = 'mark-mid') => ({ value, completeness: 'complete' as const, includedCount: 1, expectedCount: 1, excludedInstrumentKeys: [], reasons: [], basis, asOf: '2026-08-23T12:00:00Z' });
 
 const model: PositionsWorkspaceModel = {
+  accountNumber: 'ACC-1',
   snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
   dataQuality: { status: 'ok', staleQuotes: false, warnings: [] },
   symbolGroups: [{
@@ -37,7 +38,10 @@ const model: PositionsWorkspaceModel = {
 };
 
 describe('PositionsWorkspace', () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ notes: {} }) }));
+  });
 
   it('switches between the accessible portfolio and analysis tabs', async () => {
     const user = userEvent.setup();
@@ -66,12 +70,12 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText('0 of 1 positions')).toBeInTheDocument();
   });
 
-  it('renders all thirteen headers in Full Detail without What Moved', async () => {
+  it('renders all fourteen headers in Full Detail without What Moved', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     await user.selectOptions(screen.getByLabelText('View'), 'full');
-    expect(screen.getAllByRole('columnheader')).toHaveLength(13);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(14);
     expect(screen.queryByRole('columnheader', { name: 'What Moved' })).not.toBeInTheDocument();
   });
 
@@ -125,5 +129,58 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText('Cut Losses')).toBeInTheDocument();
     expect(screen.getByText('Loss threshold breached')).toBeInTheDocument();
     expect(screen.queryByText('Upcoming earnings')).not.toBeInTheDocument();
+  });
+
+  it('shows compact intentional headers, canonical breakeven, Notes before Suggested action, and compact actions', async () => {
+    const user = userEvent.setup();
+    const withLeg = { ...position, legs: [{ symbol: 'put', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 9.1 }] } as Position;
+    const next = { ...model, analysisRows: [{ id: withLeg.key, position: withLeg, symbol: withLeg.symbol, strategy: withLeg.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('columnheader', { name: 'Price / Moneyness' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Strike / Breakeven' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
+    expect(screen.getByText('BE 165.65')).toBeInTheDocument();
+    const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
+    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
+    expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
+  });
+
+  it('reuses the supplied analysis path with the clicked canonical identity and clears stale analysis', async () => {
+    const user = userEvent.setup();
+    const second = { ...position, key: 'MSFT-2', symbol: 'MSFT' } as Position;
+    const onAnalyze = vi.fn(async (selected: Position) => ({ positionKey: selected.key, symbol: selected.symbol, recommendation: 'HOLD', confidence: 'HIGH', summary: `Summary ${selected.symbol}`, reasoning: 'Canonical evidence', risks: [], catalysts: [], generatedAt: '2026-08-25T00:00:00Z' }));
+    const next = { ...model, analysisRows: [model.analysisRows[0], { id: second.key, position: second, symbol: second.symbol, strategy: second.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} onAnalyze={onAnalyze} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const buttons = screen.getAllByRole('button', { name: 'Analyze with AI' });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[1]);
+    expect(await screen.findByText('Summary MSFT')).toBeInTheDocument();
+    expect(onAnalyze).toHaveBeenCalledWith(second);
+    expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
+  });
+
+  it('saves notes on Enter, enforces 25 characters, and restores saved notes after remount', async () => {
+    const store: Record<string, string> = {};
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        store[`${encodeURIComponent(body.accountNumber)}::${encodeURIComponent(body.positionKey)}`] = body.note;
+        return { ok: true, json: async () => ({ ok: true, note: body.note }) } as Response;
+      }
+      return { ok: true, json: async () => ({ notes: store }) } as Response;
+    });
+    const user = userEvent.setup();
+    const first = render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const input = screen.getByRole('textbox', { name: /Note for AAPL CSP position/ });
+    await user.type(input, 'abcdefghijklmnopqrstuvwxyZ{enter}');
+    expect(input).toHaveValue('abcdefghijklmnopqrstuvwxy');
+    expect(await screen.findByText(/Saved/)).toBeInTheDocument();
+    first.unmount();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(await screen.findByDisplayValue('abcdefghijklmnopqrstuvwxy')).toBeInTheDocument();
   });
 });

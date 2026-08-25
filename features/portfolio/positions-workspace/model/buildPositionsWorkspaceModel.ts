@@ -72,6 +72,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     };
   });
   return {
+    accountNumber: snapshot?.accountNumber ?? input.positions[0]?.accountNumber ?? null,
     snapshotAsOf: snapshot?.asOf ?? null,
     quoteAsOf: snapshot?.quoteAsOf ?? null,
     dataQuality: snapshot?.dataQuality ?? input.snapshotDataQuality,
