@@ -1,0 +1,329 @@
+From 38021b3758c75f413a3bf5e899a65cf8b5221d92 Mon Sep 17 00:00:00 2001
+From: Dean Harmon <deannetharmon@users.noreply.github.com>
+Date: Sun, 23 Aug 2026 00:08:28 +0000
+Subject: [PATCH] Add Positions Strategy Filter (CSP, CC, PMCC, LEAP, BPS, BCS,
+ IC)
+
+Adds a multi-select strategy filter bar above the flat Positions list on the
+Portfolio page, defaulting to all seven strategies selected.
+
+resolvePositionStrategyFilterKey(pos) classifies each position into one of the seven
+filter keys:
+  - CSP, CC, PMCC, LEAP resolve from classifyPositionLifecycle()'s lifecycle-level
+    classification (LEAP relies on the just-shipped LEAPS lifecycle type).
+  - BPS, BCS, IC resolve from pos.strategy, since classifyPositionLifecycle only tags
+    those as the generic SPREAD bucket and doesn't distinguish among them.
+  - A position matching none of the seven (ASSIGNED_STOCK, a naked single-leg PUT/CALL,
+    UNKNOWN) resolves to null and is ALWAYS shown regardless of filter state -- none of
+    the seven chips claims to cover it, so filtering never silently hides an
+    unclassified position.
+
+PositionStrategyFilterBar renders the seven toggleable chips; filteredPositions (a
+useMemo over the existing  array) is what actually gets passed to
+PositionSection. PortfolioGreeksDashboard and PendingOrdersSection are deliberately
+NOT filtered -- portfolio-wide Greeks and pending orders aren't in scope for a
+strategy-specific view.
+
+8 new tests for the classifier covering all seven keys plus the always-shown null case.
+Verified: existing PortfolioPage.test.tsx suite (13 tests) still passes unmodified,
+typecheck shows the same 41 pre-existing baseline errors, zero new.
+---
+ .../__tests__/positionStrategyFilter.test.ts  | 136 ++++++++++++++++++
+ app/portfolio/page.tsx                        |  99 ++++++++++++-
+ 2 files changed, 233 insertions(+), 2 deletions(-)
+ create mode 100644 app/portfolio/__tests__/positionStrategyFilter.test.ts
+
+diff --git a/app/portfolio/__tests__/positionStrategyFilter.test.ts b/app/portfolio/__tests__/positionStrategyFilter.test.ts
+new file mode 100644
+index 0000000..53c5b8c
+--- /dev/null
++++ b/app/portfolio/__tests__/positionStrategyFilter.test.ts
+@@ -0,0 +1,136 @@
++// app/portfolio/__tests__/positionStrategyFilter.test.ts
++//
++// Tests resolvePositionStrategyFilterKey(), the pure classifier backing the Positions Strategy
++// Filter (CSP/CC/PMCC/LEAP/BPS/BCS/IC). CSP/CC/PMCC/LEAP resolve from classifyPositionLifecycle()'s
++// lifecycle-level classification; BPS/BCS/IC resolve from pos.strategy, since
++// classifyPositionLifecycle only tags those as the generic SPREAD bucket and doesn't distinguish
++// among them. A position matching none of the seven keys must always return null, since the UI
++// treats null as "always show, regardless of filter state" rather than silently hiding it.
++import { describe, it, expect } from 'vitest';
++import { resolvePositionStrategyFilterKey, POSITION_STRATEGY_FILTER_KEYS } from '../page';
++import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
++
++// Real, dynamically-computed OCC symbols, matching the convention already established in
++// lib/portfolio/__tests__/positionLifecycle.test.ts -- avoids hardcoded-expiration flakiness.
++function occSymbol(root: string, daysFromNow: number, type: 'C' | 'P', strike: number): string {
++  const d = new Date();
++  d.setUTCDate(d.getUTCDate() + daysFromNow);
++  const yy = String(d.getUTCFullYear()).slice(-2);
++  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
++  const dd = String(d.getUTCDate()).padStart(2, '0');
++  return `${root}${yy}${mm}${dd}${type}${String(strike * 1000).padStart(8, '0')}`;
++}
++
++function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
++  return {
++    symbol: occSymbol('MU', 30, 'P', 95),
++    optionType: 'P',
++    strikePrice: 95,
++    direction: 'Short',
++    quantity: 1,
++    avgOpenPrice: 2.5,
++    currentPrice: null,
++    ...overrides,
++  };
++}
++
++function position(overrides: Partial<Position> = {}): Position {
++  return {
++    key: 'MU::test', symbol: 'MU', expDate: '2026-09-18', dte: 30,
++    strategy: 'BPS', legs: [leg()],
++    quantity: 1, identity: null, structureAmbiguous: false, structureBlockMessage: null,
++    entryPriceEffect: 'Credit', creditReceived: 50, currentValue: 45, closeValue: null,
++    closeNowPnl: null, pnl: 5, pnlPct: 10, pnlReliable: false, intent: 'income', plOpen: null,
++    targetPrice: 25, profitTarget: 0.5, maxRisk: 450, hitTarget: false, needsClose: false,
++    entryDte: 45, entryDate: '2026-08-01', accountNumber: 'ACCT-1', ivr: 50, iv: 40,
++    hv30: 35, beta: 1.1, netDelta: -0.1, netVega: -0.2, pop: 70, hasGtc: true,
++    gtcOrderId: 'gtc-1', gtcOrderPrice: 0.25, stopLossStatus: 'none', stopLossPrice: null,
++    stopLossPolicy: null, stopLossDisplayPolicy: null, stopLossClassification: 'NO_STOP',
++    stopLossOrderStatus: null, quoteWidthEvidence: null, quoteCapturedAt: null, stockPrice: 110,
++    buffer: 8, putBufferPct: 8, callBufferPct: null, theta: 0.5, gamma: -0.02,
++    earningsDate: null,
++    ...overrides,
++  } as Position;
++}
++
++describe('resolvePositionStrategyFilterKey', () => {
++  it('resolves a single short put with no hedge to CSP', () => {
++    const pos = position({ legs: [leg({ optionType: 'P', direction: 'Short' })] });
++    expect(resolvePositionStrategyFilterKey(pos)).toBe('CSP');
++  });
++
++  it('resolves stock plus a short call to CC', () => {
++    const pos = position({
++      legs: [leg({ optionType: 'C', direction: 'Short', symbol: occSymbol('AAPL', 30, 'C', 200) })],
++      stockPosition: { symbol: 'AAPL', quantity: 100, averageOpenPrice: 190, currentPrice: 195 },
++    } as Partial<Position>);
++    expect(resolvePositionStrategyFilterKey(pos)).toBe('CC');
++  });
++
++  it('resolves a real PMCC shape to PMCC', () => {
++    const pos = position({
++      legs: [
++        leg({ optionType: 'C', direction: 'Short', symbol: occSymbol('NVDA', 30, 'C', 900), strikePrice: 900 }),
++        leg({ optionType: 'C', direction: 'Long', symbol: occSymbol('NVDA', 400, 'C', 600), strikePrice: 600 }),
++      ],
++    });
++    expect(resolvePositionStrategyFilterKey(pos)).toBe('PMCC');
++  });
++
++  it('resolves a standalone long-dated call to LEAP', () => {
++    const pos = position({
++      legs: [leg({ optionType: 'C', direction: 'Long', symbol: occSymbol('UBER', 390, 'C', 60), strikePrice: 60 })],
++    });
++    expect(resolvePositionStrategyFilterKey(pos)).toBe('LEAP');
++  });
++
++  it('resolves pos.strategy BPS/BCS/IC for spreads classifyPositionLifecycle only tags as SPREAD', () => {
++    const bps = position({
++      strategy: 'BPS',
++      legs: [
++        leg({ optionType: 'P', direction: 'Short', strikePrice: 100 }),
++        leg({ optionType: 'P', direction: 'Long', strikePrice: 95 }),
++      ],
++    });
++    const bcs = position({
++      strategy: 'BCS',
++      legs: [
++        leg({ optionType: 'C', direction: 'Short', strikePrice: 100 }),
++        leg({ optionType: 'C', direction: 'Long', strikePrice: 105 }),
++      ],
++    });
++    const ic = position({
++      strategy: 'IC',
++      legs: [
++        leg({ optionType: 'P', direction: 'Short', strikePrice: 95 }),
++        leg({ optionType: 'P', direction: 'Long', strikePrice: 90 }),
++        leg({ optionType: 'C', direction: 'Short', strikePrice: 105 }),
++        leg({ optionType: 'C', direction: 'Long', strikePrice: 110 }),
++      ],
++    });
++    expect(resolvePositionStrategyFilterKey(bps)).toBe('BPS');
++    expect(resolvePositionStrategyFilterKey(bcs)).toBe('BCS');
++    expect(resolvePositionStrategyFilterKey(ic)).toBe('IC');
++  });
++
++  it('returns null for a position matching none of the seven keys (e.g. assigned stock) -- always shown, never silently filtered', () => {
++    const pos = position({
++      strategy: 'NONE',
++      legs: [],
++      stockPosition: { symbol: 'GME', quantity: 100, averageOpenPrice: 20, currentPrice: 22 },
++    } as Partial<Position>);
++    expect(resolvePositionStrategyFilterKey(pos)).toBeNull();
++  });
++
++  it('returns null for UNKNOWN-classified positions', () => {
++    const pos = position({ strategy: 'UNKNOWN', legs: [] });
++    expect(resolvePositionStrategyFilterKey(pos)).toBeNull();
++  });
++
++  it('POSITION_STRATEGY_FILTER_KEYS contains exactly the seven required keys, no more, no fewer', () => {
++    expect(new Set(POSITION_STRATEGY_FILTER_KEYS)).toEqual(
++      new Set(['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC']),
++    );
++    expect(POSITION_STRATEGY_FILTER_KEYS).toHaveLength(7);
++  });
++});
+diff --git a/app/portfolio/page.tsx b/app/portfolio/page.tsx
+index f096d2e..b231444 100644
+--- a/app/portfolio/page.tsx
++++ b/app/portfolio/page.tsx
+@@ -2886,6 +2886,31 @@ function stratColor(strategy: string) {
+   if (strategy === 'IC')  return 'text-blue-400 ac-border-faint';
+   return 'text-slate-400 border-slate-700';
+ }
++
++// Positions Strategy Filter -- CSP/CC/PMCC/LEAP resolve from
++// classifyPositionLifecycle()'s lifecycle-level classification; BPS/BCS/IC
++// resolve from pos.strategy, since classifyPositionLifecycle only tags
++// those as the generic SPREAD bucket and doesn't distinguish among them.
++// A position resolving to neither (e.g. ASSIGNED_STOCK, a naked single-leg
++// PUT/CALL, or UNKNOWN) has no matching filter key at all -- resolvePositionStrategyFilterKey
++// returns null for it, and it's ALWAYS shown regardless of which filter
++// chips are toggled, since none of the seven checkboxes claim to cover it.
++export type PositionStrategyFilterKey = 'CSP' | 'CC' | 'PMCC' | 'LEAP' | 'BPS' | 'BCS' | 'IC';
++export const POSITION_STRATEGY_FILTER_KEYS: PositionStrategyFilterKey[] =
++  ['CSP', 'CC', 'PMCC', 'LEAP', 'BPS', 'BCS', 'IC'];
++
++export function resolvePositionStrategyFilterKey(pos: Position): PositionStrategyFilterKey | null {
++  const lifecycleType = classifyPositionLifecycle(pos).type;
++  if (lifecycleType === 'CSP') return 'CSP';
++  if (lifecycleType === 'COVERED_CALL') return 'CC';
++  if (lifecycleType === 'PMCC') return 'PMCC';
++  if (lifecycleType === 'LEAPS') return 'LEAP';
++  if (pos.strategy === 'BPS') return 'BPS';
++  if (pos.strategy === 'BCS') return 'BCS';
++  if (pos.strategy === 'IC') return 'IC';
++  return null;
++}
++
+ function pnlColor(pnl: number | null) { return pnl == null ? 'text-slate-400' : pnl >= 0 ? 'text-emerald-400' : 'text-red-400'; }
+ function dteColor(dte: number) { if (dte <= 7) return 'text-red-500 font-bold'; if (dte <= 21) return 'text-yellow-400 font-bold'; return 'text-slate-400'; }
+ 
+@@ -8786,6 +8811,41 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
+ }
+ 
+ // ── Pending Orders Section ──────────────────────────────────────────────────
++// Positions Strategy Filter chips -- multi-select, default all selected.
++// Placed above PositionSection so it filters the flat positions list
++// independent of health/priority grouping elsewhere on the page.
++function PositionStrategyFilterBar({
++  selected, onToggle, th,
++}: {
++  selected: Set<PositionStrategyFilterKey>;
++  onToggle: (key: PositionStrategyFilterKey) => void;
++  th: any;
++}) {
++  return (
++    <div className="flex flex-wrap items-center gap-2">
++      <span className={`text-[10px] ${th.textFaint} tracking-widest font-bold uppercase mr-1`}>Strategy</span>
++      {POSITION_STRATEGY_FILTER_KEYS.map(key => {
++        const isSelected = selected.has(key);
++        return (
++          <button
++            key={key}
++            type="button"
++            aria-pressed={isSelected}
++            onClick={() => onToggle(key)}
++            className={`text-[10px] px-2.5 py-1 border rounded font-bold uppercase tracking-wide transition-colors ${
++              isSelected
++                ? 'border-blue-500 text-blue-400 bg-blue-500/10'
++                : `${th.textFaint} border-slate-700 opacity-50 hover:opacity-80`
++            }`}
++          >
++            {key}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
++
+ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace }: {
+   orders: PendingOrder[]; th: typeof THEMES[Theme];
+   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
+@@ -9212,6 +9272,28 @@ export default function PortfolioPage() {
+   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
+   const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
+   const [checked, setChecked] = useState<Set<string>>(new Set());
++  // Positions Strategy Filter -- default all seven selected, per spec.
++  const [strategyFilters, setStrategyFilters] = useState<Set<PositionStrategyFilterKey>>(
++    new Set(POSITION_STRATEGY_FILTER_KEYS),
++  );
++  const toggleStrategyFilter = useCallback((key: PositionStrategyFilterKey) => {
++    setStrategyFilters(prev => {
++      const next = new Set(prev);
++      if (next.has(key)) next.delete(key); else next.add(key);
++      return next;
++    });
++  }, []);
++  // Positions with no matching filter key (ASSIGNED_STOCK, naked single-leg
++  // PUT/CALL, UNKNOWN) are always shown -- none of the seven chips claims
++  // to cover them, so filtering never silently hides an unclassified
++  // position.
++  const filteredPositions = useMemo(
++    () => positions.filter(p => {
++      const key = resolvePositionStrategyFilterKey(p);
++      return key === null || strategyFilters.has(key);
++    }),
++    [positions, strategyFilters],
++  );
+   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
+   const [clearingSnapshots, setClearingSnapshots] = useState(false);
+   const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType }[] | null>(null);
+@@ -9838,8 +9920,16 @@ export default function PortfolioPage() {
+                 // Flat list: no section grouping (does not generalize to PMCC/LEAPS).
+                 // Per-card banners convey each position's status. PositionSection
+                 // sorts by lifecycle (CSP/stock/CC/spread/PMCC) internally.
++                // Positions Strategy Filter narrows this flat list only -- it does
++                // not affect PortfolioGreeksDashboard above (portfolio-wide Greeks
++                // summary intentionally always reflects the full, unfiltered
++                // portfolio) or PendingOrdersSection (orders aren't yet classified
++                // by strategy).
+                 return (
+                   <>
++                    {positions.length > 0 && (
++                      <PositionStrategyFilterBar selected={strategyFilters} onToggle={toggleStrategyFilter} th={th} />
++                    )}
+                     {pendingOrders.length > 0 && (
+                       <PendingOrdersSection
+                         orders={pendingOrders} th={th}
+@@ -9849,10 +9939,10 @@ export default function PortfolioPage() {
+                         onReplace={replacePendingOrder}
+                       />
+                     )}
+-                    {positions.length > 0 && (
++                    {filteredPositions.length > 0 && (
+                       <PositionSection
+                         title="Positions" titleColor={th.textFaint}
+-                        positions={positions} th={th} checked={checked}
++                        positions={filteredPositions} th={th} checked={checked}
+                         onToggle={onToggle} onToggleAll={onToggleAll}
+                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
+                         groupAction="HOLD" onGroupAction={onGroupAction}
+@@ -9864,6 +9954,11 @@ export default function PortfolioPage() {
+                         focusKey={focusPositionKey}
+                       />
+                     )}
++                    {positions.length > 0 && filteredPositions.length === 0 && (
++                      <p className={`text-xs ${th.textFaint} tracking-wide px-1`}>
++                        No open positions match the selected strategy filters.
++                      </p>
++                    )}
+                   </>
+                 );
+               })()}
+-- 
+2.43.0
+

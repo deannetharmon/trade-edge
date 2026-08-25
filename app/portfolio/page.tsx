@@ -9940,17 +9940,17 @@ export default function PortfolioPage() {
           nothing itself. Portfolio Health, Top Risks, and Capital & Income
           are intentionally not rendered here -- all three are already fully
           owned by Mission Control (/dashboard, MB-0002). */}
-      <div className="px-6">
+      {!positionsWorkspaceV2Enabled && <div className="px-6">
         <PositionCompositionCard review={portfolioReview} loading={loading} th={th} />
-      </div>
+      </div>}
 
       {/* WA-0003: Healthy-Monitoring Relocation (CES section 10) --
           extracted verbatim from TodaysPrioritiesDashboard.tsx's old
           Monitor section. Informational only: no completion control, never
           counted in Today's Priorities' open queue/count. */}
-      <div className="px-6">
+      {!positionsWorkspaceV2Enabled && <div className="px-6">
         <HealthyMonitoringSection monitor={todaysPrioritiesDashboard.monitor} th={th} />
-      </div>
+      </div>}
 
       {positionsWorkspaceState === 'loading' && (
         <div className="flex items-center justify-center h-64">

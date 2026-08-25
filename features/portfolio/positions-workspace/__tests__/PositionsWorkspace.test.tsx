@@ -9,12 +9,14 @@ import { PositionsWorkspace } from '../PositionsWorkspace';
 const position = {
   key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
   entryDate: '2026-08-20', stockPrice: 200, buffer: 12.9, legs: [], maxRisk: 1000,
-  maxRiskReliable: true, entryPriceEffect: 'Credit', entryEconomicsComplete: true, entryCredit: 9.35,
-  creditReceived: 9.35, closeValue: 9, currentValue: 9.1, closeNowPnl: 35, pnl: 28,
+  maxRiskReliable: true, entryPriceEffect: 'Credit', entryEconomicsComplete: true, entryCredit: 935,
+  creditReceived: 935, closeValue: 900, currentValue: 910, closeNowPnl: 35, pnl: 25,
   profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
   netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
   structureAmbiguous: false,
 } as unknown as Position;
+
+const aggregate = (value: number | null, basis: 'mark-mid' | 'marketable-close' = 'mark-mid') => ({ value, completeness: 'complete' as const, includedCount: 1, expectedCount: 1, excludedInstrumentKeys: [], reasons: [], basis, asOf: '2026-08-23T12:00:00Z' });
 
 const model: PositionsWorkspaceModel = {
   snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
@@ -23,7 +25,14 @@ const model: PositionsWorkspaceModel = {
     symbol: 'AAPL', underlyingPrice: 200, equityMarketValue: 47000, optionMarketValue: -900,
     symbolUnrealizedPnl: 8240, equities: [], options: [position], instrumentCount: 1,
     strategies: ['CSP'], needsAttention: false, contextualAction: null,
-    capacity: { status: 'ok', sharesOwned: 100, allocatedContracts: 0, reservedContracts: 0, availableContracts: 1, remainderShares: 0, basisComplete: true, blockingReason: null },
+    capacity: { status: 'ok', sharesOwned: 100, allocatedContracts: 0, reservedContracts: 0, availableContracts: 1, remainderShares: 0, basisComplete: true, blockingReason: null, unallocatedShares: 100 },
+    composition: 'short-option-only', compositionLabel: 'Short put',
+    equityMarketValueAggregate: { ...aggregate(null), completeness: 'not-applicable', includedCount: 0, expectedCount: 0, basis: null },
+    longOptionValueMid: { ...aggregate(null), completeness: 'not-applicable', includedCount: 0, expectedCount: 0, basis: null },
+    optionBuybackMid: aggregate(910), optionMarketableClose: aggregate(900, 'marketable-close'),
+    unrealizedPnlMid: aggregate(28), optionCloseNowPnl: aggregate(35, 'marketable-close'),
+    unrealizedPnlPct: 3, unrealizedPnlPctReason: null,
+    optionInstruments: [{ key: position.key, position, role: 'short-put', roleLabel: 'Short put', midpointLabel: 'Buyback obligation (mid)', marketableLabel: 'Marketable buyback cost' }],
   }],
   analysisRows: [{ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: false }],
 };
@@ -36,6 +45,10 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     expect(screen.getByRole('tab', { name: 'Portfolio' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('region', { name: /AAPL position details/i })).toBeInTheDocument();
+    expect(screen.getByText('No equity holding')).toBeInTheDocument();
+    expect(screen.getAllByText(/Buyback obligation \(mid\)/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Average basis unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Coverage relationship unresolved/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('tab', { name: 'Position Analysis' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('columnheader', { name: 'Position' })).toBeInTheDocument();
