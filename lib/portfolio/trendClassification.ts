@@ -88,7 +88,11 @@ export type TechnicalAlignment = 'aligned' | 'against' | 'neutral' | 'unknown';
 // classified with the bullish set here, matching how the position's
 // thesis (not its short leg's week-to-week management) relates to trend.
 const BULLISH_STRATEGIES = new Set(['BPS', 'CSP', 'PMCC']);
-const BEARISH_STRATEGIES = new Set(['BCS', 'CC']);
+const BEARISH_STRATEGIES = new Set(['BCS']);
+// A covered call is an income overlay on owned stock, not a bearish
+// directional thesis like a bear call spread. Recognized trends are
+// therefore neutral for CC; an unknown trend still fails closed below.
+const DIRECTION_AGNOSTIC_STRATEGIES = new Set(['CC', 'IC']);
 
 /**
  * Maps a trend direction and a POSITION's own strategy to whether the
@@ -109,6 +113,7 @@ export function technicalAlignmentForStrategy(
   strategy: string | null | undefined,
 ): TechnicalAlignment {
   if (trend === 'unknown' || !strategy) return 'unknown';
+  if (DIRECTION_AGNOSTIC_STRATEGIES.has(strategy)) return 'neutral';
   if (trend === 'sideways') return 'neutral';
   const bullish = BULLISH_STRATEGIES.has(strategy);
   const bearish = BEARISH_STRATEGIES.has(strategy);
