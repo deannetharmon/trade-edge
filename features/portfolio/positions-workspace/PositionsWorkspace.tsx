@@ -17,6 +17,14 @@ export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_PO
 const money = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
 const number = (value: number | null | undefined, digits = 1) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
 
+export function profitTargetPresentation(position: Pick<Position, 'entryPriceEffect' | 'entryEconomicsComplete' | 'profitTarget'>): string {
+  const target = position.profitTarget;
+  if (position.entryPriceEffect !== 'Credit' || position.entryEconomicsComplete !== true) return 'Target unavailable';
+  if (!Number.isFinite(target) || target < 0 || target > 1) return 'Target unavailable';
+  const percent = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(target * 100);
+  return `Target ${percent}%`;
+}
+
 function AggregateValue({ aggregate, absent }: { aggregate: FinancialAggregate; absent: string }) {
   if (aggregate.completeness === 'not-applicable') return <span className="text-white/40">{absent}</span>;
   if (aggregate.completeness === 'unavailable') return <span className="text-white/40">Unavailable{aggregate.reasons[0] ? ` — ${aggregate.reasons[0]}` : ''}</span>;
@@ -131,7 +139,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     capital: <><b className="text-white">{capital.label}</b>{capital.value == null ? <span className={`block max-w-40 ${th.textFaint}`} title={capital.reason}>{capital.reason}</span> : <span className="block">{capital.suffix ? `${capital.value}${capital.suffix}` : money(capital.value)}</span>}</>,
     entry: <><b className={SEMANTIC_TONE_CLASS[entryTone]}>{p.entryPriceEffect}</b><span className={`block ${SEMANTIC_TONE_CLASS[entryTone]}`}>{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
     value: <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
-    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}</b><span className="block">Target {p.profitTarget}%</span></>,
+    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}</b><span className="block">{profitTargetPresentation(p)}</span></>,
     evolution: <><span className="block text-white">first tracked → now</span><SemanticComparison label="P/L" prior={firstPnl} current={pnl} tone={comparisonTone(firstPnl, pnl)} digits={0} /><SemanticComparison label="POP" prior={first?.pop ?? p.popAtEntry} current={p.pop} tone={comparisonTone(first?.pop ?? p.popAtEntry, p.pop)} /><SemanticComparison label="Δ" prior={first?.netDelta ?? p.deltaAtEntry} current={p.netDelta} tone={directionalMovementTone(first?.netDelta ?? p.deltaAtEntry, p.netDelta)} /><SemanticComparison label="Θ" prior={first?.theta ?? p.thetaAtEntry} current={p.theta} tone={directionalMovementTone(first?.theta ?? p.thetaAtEntry, p.theta)} /><SemanticComparison label="Γ" prior={first?.gamma ?? p.gammaAtEntry} current={p.gamma} tone={directionalMovementTone(first?.gamma ?? p.gammaAtEntry, p.gamma)} digits={3} /><SemanticComparison label="V" prior={first?.netVega ?? p.vegaAtEntry} current={p.netVega} tone={directionalMovementTone(first?.netVega ?? p.vegaAtEntry, p.netVega)} /><SemanticComparison label="IV" prior={first?.iv ?? p.ivAtEntry} current={p.iv} tone={directionalMovementTone(first?.iv ?? p.ivAtEntry, p.iv)} suffix="%" /><SemanticComparison label="IVR" prior={first?.ivr ?? p.ivrAtEntry} current={p.ivr} tone={directionalMovementTone(first?.ivr ?? p.ivrAtEntry, p.ivr)} /><SemanticComparison label="Moneyness" prior={firstBuffer} current={p.buffer} tone={bufferTone} suffix="%" /><span className="block"><span className="text-white/70">DTE </span><span className="text-white/40">{first?.dte ?? p.dteAtEntry ?? '—'}</span><span className="px-1 text-white/30">→</span><span className={p.dte <= 21 ? 'font-semibold text-red-400' : p.dte <= 35 ? 'font-semibold text-amber-300' : 'text-white/50'}>{p.dte}</span></span></>,
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
