@@ -14,7 +14,7 @@ const position = {
   profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
   netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
   structureAmbiguous: false,
-} as Position;
+} as unknown as Position;
 
 const model: PositionsWorkspaceModel = {
   snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
