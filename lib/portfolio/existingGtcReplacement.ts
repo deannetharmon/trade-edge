@@ -64,3 +64,8 @@ export async function restoreOriginalGtcIfNeeded<T>(
   }
   return restore(context.originalPrice);
 }
+
+export function criticalGtcRestorationWarning(error: unknown): string {
+  const detail = error instanceof Error ? error.message : 'unknown restoration failure';
+  return ` CRITICAL: replacement failed after the original GTC was cancelled, and automatic restoration also failed (${detail}). Verify working orders in TastyTrade immediately.`;
+}
