@@ -79,6 +79,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
+import { cancelExistingGtcForReplacement, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -3394,16 +3395,22 @@ function BatchConfirmModal({
           if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key) && item.pos.gtcOrderId) {
             try {
               const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
-              if (gtcComplexId) {
-                throw new Error('The existing close is part of a complex/OCO order and cannot be reconstructed exactly from position data. Manage that order in TastyTrade rather than replacing it here.');
-              }
-              if (item.pos.gtcOrderPrice == null || !Number.isFinite(item.pos.gtcOrderPrice) || item.pos.gtcOrderPrice <= 0) {
-                throw new Error('The existing GTC price is unavailable, so TradeEdge cannot guarantee restoration if replacement fails. No order was cancelled.');
-              }
-              console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${item.pos.gtcOrderId} complexId=${gtcComplexId}`);
-              const cancelResult = await cancelOrder(item.pos.accountNumber, item.pos.gtcOrderId, token, gtcComplexId);
-              console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, cancelResult);
-              cancelledExistingGtc = true;
+              const cancellation = await cancelExistingGtcForReplacement(
+                {
+                  hasGtc: item.pos.hasGtc,
+                  confirmed: gtcConfirmed.has(item.pos.key),
+                  orderId: item.pos.gtcOrderId,
+                  complexOrderId: gtcComplexId,
+                  originalPrice: item.pos.gtcOrderPrice,
+                },
+                async orderId => {
+                  console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${orderId} complexId=${gtcComplexId}`);
+                  const result = await cancelOrder(item.pos.accountNumber, orderId, token, gtcComplexId);
+                  console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, result);
+                  return result;
+                },
+              );
+              cancelledExistingGtc = cancellation.cancelled;
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
@@ -3736,9 +3743,16 @@ function BatchConfirmModal({
 
         } catch (e: any) {
           let reportedError = e.message ?? 'Order failed.';
-          if (!dryRun && cancelledExistingGtc && !replacementSubmitted && item.pos.gtcOrderPrice != null && item.closeIdentity) {
+          if (!dryRun) {
             try {
-              const restorePrice = item.pos.gtcOrderPrice;
+              const restorationMessage = await restoreOriginalGtcIfNeeded(
+                {
+                  cancelled: cancelledExistingGtc,
+                  replacementSubmitted,
+                  originalPrice: item.pos.gtcOrderPrice,
+                },
+                async restorePrice => {
+                  if (!item.closeIdentity) throw new Error('Canonical position identity is unavailable for restoration.');
               const restoreBody = buildCloseOrder(item.pos, restorePrice, 'GTC');
               const restorePnl = creditClosePnlDollars(item.closeIdentity.entryPricePointsPerUnit, restorePrice, item.closeIdentity.quantity);
               const restoreGateInput: LiveCloseOrderSafetyInput = {
@@ -3767,7 +3781,10 @@ function BatchConfirmModal({
                 },
               );
               if (!restored.submitted) throw new Error(restored.reason);
-              reportedError += ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+                  return ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+                },
+              );
+              if (restorationMessage) reportedError += restorationMessage;
             } catch (restoreErr: any) {
               reportedError += ` CRITICAL: replacement failed after the original GTC was cancelled, and automatic restoration also failed (${restoreErr?.message ?? 'unknown restoration failure'}). Verify working orders in TastyTrade immediately.`;
             }
