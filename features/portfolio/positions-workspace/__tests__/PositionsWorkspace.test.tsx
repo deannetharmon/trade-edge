@@ -138,7 +138,7 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('columnheader', { name: 'Price / Strike Distance' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Strike / Breakeven' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Strike Gap' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);

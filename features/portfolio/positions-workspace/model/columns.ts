@@ -4,7 +4,7 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'identity', label: 'Position', group: 'Position' },
   { id: 'dates', label: 'Entry / Expiry / DTE', group: 'Position' },
   { id: 'underlying', label: 'Price / Strike Distance', group: 'Position' },
-  { id: 'strike', label: 'Strike / Breakeven', group: 'Position' },
+  { id: 'strike', label: 'Strike Gap', group: 'Position' },
   { id: 'capital', label: 'Capital', group: 'Economics' },
   { id: 'entry', label: 'Credit / Debit', group: 'Economics' },
   { id: 'value', label: 'Buyback / Value', group: 'Economics' },
