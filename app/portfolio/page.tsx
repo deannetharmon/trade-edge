@@ -3414,9 +3414,20 @@ function BatchConfirmModal({
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
+              // Helper policy errors are already operator-ready and must be
+              // displayed exactly. Broker cancellation failures get additional
+              // uncertainty guidance.
+              const cancelMessage = cancelErr?.message ?? 'cancel failed';
+              if (
+                cancelMessage.startsWith('Existing GTC order ID is unavailable.') ||
+                cancelMessage.startsWith('The existing close is part of a complex/OCO order') ||
+                cancelMessage.startsWith('The existing GTC price is unavailable')
+              ) {
+                throw cancelErr;
+              }
               // Never submit a second close order while the original GTC may still
               // be working. The broker state must be resolved before continuing.
-              throw new Error(`Existing GTC could not be cancelled. No replacement order was submitted. Verify working orders in TastyTrade, then retry. (${cancelErr?.message ?? 'cancel failed'})`);
+              throw new Error(`Existing GTC could not be cancelled. No replacement order was submitted. Verify working orders in TastyTrade, then retry. (${cancelMessage})`);
             }
           }
 
