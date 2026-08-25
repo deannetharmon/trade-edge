@@ -312,19 +312,39 @@ export function cohereManagementIntentRecommendation(
   if (!intentResult) return recommendation;
 
   const canonicalReason = intentResult.reasons[0];
-  if (intentResult.intent === 'HOLD_POSITION' || !canonicalReason) {
-    const primaryReason = canonicalReason ?? HOLD_EVIDENCE_UNAVAILABLE_REASON;
+  if (intentResult.intent === 'HOLD_POSITION') {
+    if (recommendation.kind !== 'hold') {
+      return {
+        ...recommendation,
+        supportingReasons: [recommendation.primaryReason, ...recommendation.supportingReasons]
+          .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
+          .slice(0, 4),
+        managementIntent: undefined,
+      };
+    }
     return {
       ...recommendation,
       kind: 'hold',
       label: 'Hold Position',
       urgency: 'low',
-      primaryReason,
-      supportingReasons: intentResult.intent === 'HOLD_POSITION'
-        ? intentResult.reasons.filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index).slice(0, 4)
-        : [],
+      primaryReason: canonicalReason ?? recommendation.primaryReason,
+      supportingReasons: intentResult.reasons
+        .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
+        .slice(0, 4),
       suggestedAction: HOLD_SUGGESTED_ACTION,
-      managementIntent: intentResult.intent === 'HOLD_POSITION' ? intentResult : undefined,
+      managementIntent: intentResult,
+    };
+  }
+  if (!canonicalReason) {
+    return {
+      ...recommendation,
+      kind: 'hold',
+      label: 'Hold Position',
+      urgency: 'low',
+      primaryReason: HOLD_EVIDENCE_UNAVAILABLE_REASON,
+      supportingReasons: [],
+      suggestedAction: HOLD_SUGGESTED_ACTION,
+      managementIntent: undefined,
     };
   }
 
