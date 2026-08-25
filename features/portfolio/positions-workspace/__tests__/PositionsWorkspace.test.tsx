@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '@/lib/theme';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
@@ -14,7 +14,7 @@ const position = {
   profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
   netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
   structureAmbiguous: false,
-} as Position;
+} as unknown as Position;
 
 const model: PositionsWorkspaceModel = {
   snapshotAsOf: '2026-08-23T12:00:00Z', quoteAsOf: null,
@@ -60,5 +60,46 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     await user.selectOptions(screen.getByLabelText('View'), 'full');
     expect(screen.getAllByRole('columnheader')).toHaveLength(14);
+  });
+
+  it('exposes Cut Losses and routes it through the existing review flow', async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} getManagementActions={() => ['CUT_LOSSES']} onExecute={onExecute} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Cut Losses' }));
+    expect(onExecute).toHaveBeenCalledWith(position, 'CUT_LOSSES');
+  });
+
+  it('keeps Close Position and Roll Position as separate explicit choices', async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} getManagementActions={() => ['CLOSE_ROLL']} onExecute={onExecute} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Close Position' }));
+    expect(onExecute).toHaveBeenLastCalledWith(position, 'CLOSE_ROLL', 'close');
+    await user.click(screen.getByRole('button', { name: 'Roll Position' }));
+    expect(onExecute).toHaveBeenLastCalledWith(position, 'CLOSE_ROLL', 'roll');
+  });
+
+  it('explains the displayed management recommendation with its matching reason', async () => {
+    const user = userEvent.setup();
+    const recommendedPosition = {
+      ...position,
+      recommendation: {
+        label: 'Cut Losses',
+        primaryReason: 'Upcoming earnings',
+        managementIntent: { reasons: ['Loss threshold breached'] },
+      },
+    } as Position;
+    const recommendationModel = {
+      ...model,
+      analysisRows: [{ id: recommendedPosition.key, position: recommendedPosition, symbol: recommendedPosition.symbol, strategy: recommendedPosition.strategy, needsAttention: true }],
+    } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={recommendationModel} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByText('Cut Losses')).toBeInTheDocument();
+    expect(screen.getByText('Loss threshold breached')).toBeInTheDocument();
+    expect(screen.queryByText('Upcoming earnings')).not.toBeInTheDocument();
   });
 });
