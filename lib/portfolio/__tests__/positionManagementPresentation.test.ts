@@ -9,6 +9,7 @@ describe('position management presentation economics', () => {
   it('shows a profitable protective stop as profit, not loss', () => {
     const pnl = creditClosePnlDollars(8.05, 7.55, 1);
     expect(pnl).toBe(50);
+    expect(signedDollar(pnl)).toBe('+$50.00');
     expect(protectiveStopOutcomeLabel(pnl)).toBe('protected profit +$50.00');
   });
 
