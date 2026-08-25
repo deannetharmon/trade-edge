@@ -141,6 +141,9 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('columnheader', { name: 'Strike / Breakeven' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
+    const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
+    const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
+    expect(strikeGapCellText.indexOf('12.5% OTM')).toBeLessThan(strikeGapCellText.indexOf('chart'));
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
     expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
