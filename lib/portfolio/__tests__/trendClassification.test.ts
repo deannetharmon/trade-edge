@@ -11,6 +11,7 @@
 // a test -- these cases exist so the next classification error doesn't
 // have to wait for another real-money example to surface it.
 
+import { describe, expect, it } from 'vitest';
 import { technicalAlignmentForStrategy, classifyTrendFromCloses } from '../trendClassification';
 
 describe('technicalAlignmentForStrategy', () => {
