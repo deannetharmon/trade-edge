@@ -3392,7 +3392,7 @@ function BatchConfirmModal({
           let orderId: string;
 
           // AUTO CANCEL EXISTING GTC IF USER CONFIRMED
-          if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key) && item.pos.gtcOrderId) {
+          if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key)) {
             try {
               const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
               const cancellation = await cancelExistingGtcForReplacement(
@@ -7036,7 +7036,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 : hasErrors
                 ? 'Fix errors above to continue'
                 : needsOco
-                ? `Review OCO — profit +${gtcProfitDollars.toFixed(2)} / stop ${signedDollar(stopOutcomePnlDollars)}`
+                ? `Review OCO — profit ${signedDollar(gtcProfitDollars)} / stop ${signedDollar(stopOutcomePnlDollars)}`
                 : `Review Stop — ${protectiveStopOutcomeLabel(stopOutcomePnlDollars)}`}
             </button>
           )}
