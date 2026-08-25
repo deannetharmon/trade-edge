@@ -94,6 +94,9 @@ export interface Position {
   intent: PositionIntent;
   plOpen: number | null;
   targetPrice: number;
+  // Canonical profit-target fraction in the inclusive 0..1 range (for
+  // example, 0.5 means 50%). Calculation and order code consume the
+  // fraction directly; presentation code is responsible for percent display.
   profitTarget: number;
   maxRisk: number;
   maxRiskReliable?: boolean;
