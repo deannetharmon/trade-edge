@@ -9,8 +9,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
-import { cohereManagementIntentPresentation } from '@/lib/portfolio-intelligence/objectives/positionObjective';
-import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
+import { buildObjectiveFromRecommendation, cohereManagementIntentRecommendation, isHoldOnlyLegacyReason } from '@/lib/portfolio-intelligence/objectives/positionObjective';
+import type { PortfolioRecommendation, PositionObjectiveInput } from '@/lib/portfolio-intelligence';
 import type { ManagementIntentResult } from '@/lib/portfolio-intelligence/managementIntent';
 
 const NOW = new Date('2026-07-11T13:00:00.000Z');
@@ -171,15 +171,82 @@ describe('PI-002: watch parity', () => {
 });
 
 describe('recommendation presentation coherence', () => {
-  it('fails closed when a non-hold intent has no evidence reason', () => {
-    const intent = {
-      intent: 'CUT_LOSSES', label: 'Cut Losses', reasons: [], alternatives: [], candidates: [],
-      winnerScore: 10, runnerUpIntent: null, runnerUpScore: 0, margin: 10, confidenceTier: 'Low',
-    } as ManagementIntentResult;
-    const presentation = cohereManagementIntentPresentation(intent, 'No primary action rule triggered.');
-    expect(presentation.label).toBe('Hold Position');
-    expect(presentation.primaryReason).toBe('Recommendation evidence is unavailable; continue monitoring.');
-    expect(presentation.managementIntent).toBeUndefined();
+  const recommendation = (overrides: Partial<PortfolioRecommendation> = {}): PortfolioRecommendation => ({
+    positionId: 'pos_1',
+    symbol: 'AMD',
+    kind: 'close-loser',
+    label: 'Exit Position',
+    urgency: 'critical',
+    confidence: 91,
+    primaryReason: 'Health score is 85; no primary action rule triggered.',
+    supportingReasons: ['No primary action rule triggered.', 'DTE: 5'],
+    suggestedAction: 'Close the position.',
+    computedAt: NOW.toISOString(),
+    ...overrides,
+  });
+
+  const intent = (
+    managementIntent: ManagementIntentResult['intent'],
+    label: string,
+    reasons: string[],
+  ): ManagementIntentResult => ({
+    intent: managementIntent,
+    label,
+    reasons,
+    alternatives: [],
+    candidates: [],
+    winnerScore: 10,
+    runnerUpIntent: null,
+    runnerUpScore: 0,
+    margin: 10,
+    confidenceTier: 'Low',
+  });
+
+  it.each([
+    ['CUT_LOSSES', 'Cut Losses', 'Loss threshold breached'],
+    ['REDUCE_RISK', 'Reduce Risk', 'Moneyness buffer is tight'],
+    ['TAKE_PROFIT', 'Take Profit', 'Profit target reached'],
+  ] as const)('keeps %s label and reasons coherent without hold-only wording', (managementIntent, label, reason) => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation(),
+      intent(managementIntent, label, [reason]),
+    );
+    expect(coherent.label).toBe(label);
+    expect(coherent.primaryReason).toBe(reason);
+    expect(coherent.managementIntent?.intent).toBe(managementIntent);
+    expect(isHoldOnlyLegacyReason(coherent.primaryReason)).toBe(false);
+    expect(coherent.supportingReasons.some(isHoldOnlyLegacyReason)).toBe(false);
+    expect(coherent.supportingReasons).toContain(reason);
+    expect(coherent.supportingReasons).toContain('DTE: 5');
+  });
+
+  it('makes HOLD_POSITION a genuine non-actionable hold', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation(),
+      intent('HOLD_POSITION', 'Hold Position', ['Continue monitoring current evidence.']),
+    );
+    expect(coherent.kind).toBe('hold');
+    expect(coherent.label).toBe('Hold Position');
+    expect(coherent.urgency).toBe('low');
+    expect(coherent.primaryReason).toBe('Continue monitoring current evidence.');
+    expect(coherent.suggestedAction).toBe('Continue monitoring the position.');
+    expect(coherent.managementIntent?.intent).toBe('HOLD_POSITION');
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).toBeNull();
+  });
+
+  it('fails closed across the complete recommendation when a non-hold intent has no evidence reason', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation(),
+      intent('CUT_LOSSES', 'Cut Losses', []),
+    );
+    expect(coherent.kind).toBe('hold');
+    expect(coherent.label).toBe('Hold Position');
+    expect(coherent.urgency).toBe('low');
+    expect(coherent.primaryReason).toBe('Recommendation evidence is unavailable; continue monitoring.');
+    expect(coherent.supportingReasons).toEqual([]);
+    expect(coherent.suggestedAction).toBe('Continue monitoring the position.');
+    expect(coherent.managementIntent).toBeUndefined();
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).toBeNull();
   });
 });
 
