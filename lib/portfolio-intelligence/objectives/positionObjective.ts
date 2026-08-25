@@ -314,8 +314,18 @@ function makeLegacyRecommendation(
   // bullets follow as supporting context. Capped at 4 total, same as
   // buildSupportingReasons already did on its own.
   const mergedReasons = intentResult
-    ? [...intentResult.reasons, ...supportingReasons].slice(0, 4)
+    ? [...intentResult.reasons, primaryReason, ...supportingReasons]
+        .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
+        .slice(0, 4)
     : supportingReasons;
+  const canonicalIntentReason = intentResult?.reasons[0];
+  const intentHasEvidence = intentResult?.intent === 'HOLD_POSITION' || Boolean(canonicalIntentReason);
+  const displayedIntent = intentResult && intentHasEvidence ? intentResult : undefined;
+  const displayedPrimaryReason = canonicalIntentReason ?? (
+    intentResult && intentResult.intent !== 'HOLD_POSITION'
+      ? 'Recommendation evidence is unavailable; continue monitoring.'
+      : primaryReason
+  );
 
   return {
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
@@ -324,14 +334,14 @@ function makeLegacyRecommendation(
     // PI-0006B: decisive, user-facing label sourced from the canonical
     // intent selector -- see classifyIntentContext() above and
     // selectManagementIntent() in ../managementIntent.ts.
-    label: intentResult?.label ?? kind,
+    label: displayedIntent?.label ?? (intentResult ? 'Hold Position' : kind),
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
-    primaryReason,
+    primaryReason: displayedPrimaryReason,
     supportingReasons: mergedReasons,
     suggestedAction,
     computedAt: now.toISOString(),
-    managementIntent: intentResult,
+    managementIntent: displayedIntent,
   };
 }
 
