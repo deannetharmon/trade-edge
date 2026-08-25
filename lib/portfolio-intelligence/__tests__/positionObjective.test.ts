@@ -222,7 +222,13 @@ describe('recommendation presentation coherence', () => {
 
   it('makes HOLD_POSITION a genuine non-actionable hold', () => {
     const coherent = cohereManagementIntentRecommendation(
-      recommendation(),
+      recommendation({
+        kind: 'hold',
+        label: 'Hold',
+        urgency: 'low',
+        primaryReason: 'No primary action rule triggered.',
+        suggestedAction: 'Continue monitoring.',
+      }),
       intent('HOLD_POSITION', 'Hold Position', ['Continue monitoring current evidence.']),
     );
     expect(coherent.kind).toBe('hold');
@@ -232,6 +238,25 @@ describe('recommendation presentation coherence', () => {
     expect(coherent.suggestedAction).toBe('Continue monitoring the position.');
     expect(coherent.managementIntent?.intent).toBe('HOLD_POSITION');
     expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).toBeNull();
+  });
+
+  it('preserves an independently evidenced legacy action when the intent selector only returns Hold', () => {
+    const coherent = cohereManagementIntentRecommendation(
+      recommendation({
+        kind: 'earnings-risk',
+        label: 'earnings-risk',
+        urgency: 'high',
+        primaryReason: 'Earnings occur before expiration.',
+        suggestedAction: 'Review the position before earnings.',
+      }),
+      intent('HOLD_POSITION', 'Hold Position', ['Continue monitoring current evidence.']),
+    );
+    expect(coherent.kind).toBe('earnings-risk');
+    expect(coherent.label).toBe('earnings-risk');
+    expect(coherent.urgency).toBe('high');
+    expect(coherent.primaryReason).toBe('Earnings occur before expiration.');
+    expect(coherent.managementIntent).toBeUndefined();
+    expect(buildObjectiveFromRecommendation(baseInput(), coherent, NOW)).not.toBeNull();
   });
 
   it('fails closed across the complete recommendation when a non-hold intent has no evidence reason', () => {
