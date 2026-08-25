@@ -4929,7 +4929,8 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     { role: 'assistant', content: initialContext },
   ]);
   const [input, setInput] = useState('');
-  const [pendingImage, setPendingImage] = useState<{ base64: string; mediaType: string; preview: string } | null>(null);
+  const [pendingImages, setPendingImages] = useState<Array<{ base64: string; mediaType: string; preview: string; name: string }>>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -4945,30 +4946,42 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     }
   }, [messages]);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const [meta, base64] = dataUrl.split(',');
-      const mediaType = meta.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
-      setPendingImage({ base64, mediaType, preview: dataUrl });
-    };
-    reader.readAsDataURL(file);
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
+    if (files.length === 0) return;
+    if (pendingImages.length + files.length > 5) {
+      setAttachmentError('Attach up to 5 images to one question.');
+      return;
+    }
+    setAttachmentError(null);
+    const images = await Promise.all(files.map(file => new Promise<{ base64: string; mediaType: string; preview: string; name: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const [meta, base64] = dataUrl.split(',');
+        resolve({ base64, mediaType: meta.match(/:(.*?);/)?.[1] ?? file.type ?? 'image/jpeg', preview: dataUrl, name: file.name });
+      };
+      reader.readAsDataURL(file);
+    }))).catch(cause => {
+      setAttachmentError(cause instanceof Error ? cause.message : 'Unable to read attachments');
+      return [];
+    });
+    if (images.length > 0) setPendingImages(current => [...current, ...images]);
   };
 
   const send = async () => {
     const text = input.trim();
-    if (!text && !pendingImage || loading) return;
+    if (!text && pendingImages.length === 0 || loading) return;
     setInput('');
     setError(null);
     const parts: ChatContentPart[] = [];
-    if (pendingImage) parts.push({ type: 'image', source: { type: 'base64', media_type: pendingImage.mediaType, data: pendingImage.base64 } });
+    pendingImages.forEach(image => parts.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } }));
     if (text) parts.push({ type: 'text', text });
-    const userMsg: ChatMessage = { role: 'user', content: parts.length === 1 && !pendingImage ? text : parts };
-    setPendingImage(null);
+    const userMsg: ChatMessage = { role: 'user', content: pendingImages.length === 0 ? text : parts };
+    setPendingImages([]);
+    setAttachmentError(null);
     const next: ChatMessage[] = [...messages, userMsg];
     setMessages(next);
     setLoading(true);
@@ -4992,10 +5005,9 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     return content.filter((p): p is ChatMessagePart => p.type === 'text').map(p => p.text).join(' ');
   };
 
-  const getMessageImage = (content: ChatMessage['content']): string | null => {
-    if (typeof content === 'string') return null;
-    const img = content.find((p): p is ChatImagePart => p.type === 'image');
-    return img ? `data:${img.source.media_type};base64,${img.source.data}` : null;
+  const getMessageImages = (content: ChatMessage['content']): string[] => {
+    if (typeof content === 'string') return [];
+    return content.filter((p): p is ChatImagePart => p.type === 'image').map(img => `data:${img.source.media_type};base64,${img.source.data}`);
   };
 
   // Suggested follow-up prompts shown below the initial analysis
@@ -5022,10 +5034,10 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
                   : `${th.card} border ${th.border} ${th.textMuted}`
               }`}>
                 {(() => {
-                  const imgSrc = getMessageImage(m.content);
+                  const imageSources = getMessageImages(m.content);
                   const txt = getMessageText(m.content);
                   return (<>
-                    {imgSrc && <img src={imgSrc} alt="attachment" className="rounded-lg max-w-full mb-1.5" style={{ maxHeight: '180px', objectFit: 'contain' }} />}
+                    {imageSources.length > 0 && <div className="mb-1.5 grid grid-cols-2 gap-1.5">{imageSources.map((src, imageIndex) => <img key={imageIndex} src={src} alt={`Attachment ${imageIndex + 1}`} className="rounded-lg max-w-full" style={{ maxHeight: '180px', objectFit: 'contain' }} />)}</div>}
                     {txt && <span>{txt}</span>}
                   </>);
                 })()}
@@ -5067,22 +5079,15 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
 
       {/* Input */}
       <div className="px-4 py-3 space-y-2">
-        {/* Image preview */}
-        {pendingImage && (
-          <div className="relative inline-block">
-            <img src={pendingImage.preview} alt="pending" className="rounded-lg max-h-24 object-contain border border-indigo-500/40" />
-            <button onClick={() => setPendingImage(null)}
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-slate-700 border border-slate-500 text-slate-300 text-[9px] flex items-center justify-center hover:bg-red-600 transition-colors">
-              ✕
-            </button>
-          </div>
-        )}
+        {pendingImages.length > 0 && <div className="flex flex-wrap gap-2" aria-label="Pending image attachments">{pendingImages.map((image, index) => <div key={`${image.name}-${index}`} className="relative inline-block"><img src={image.preview} alt={image.name} className="rounded-lg max-h-24 object-contain border border-indigo-500/40" /><button type="button" aria-label={`Remove ${image.name}`} onClick={() => setPendingImages(current => current.filter((_, currentIndex) => currentIndex !== index))} className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-slate-500 bg-slate-700 text-[9px] text-slate-300 hover:bg-red-600">✕</button></div>)}</div>}
+        {attachmentError && <p role="alert" className="text-[10px] text-red-400">{attachmentError}</p>}
         <div className="flex items-end gap-2">
           {/* Hidden file input */}
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={event => void handleImageSelect(event)} />
           {/* Attach button */}
           <button onClick={() => fileInputRef.current?.click()} disabled={loading}
-            title="Attach image"
+            title="Attach up to 5 images"
+            aria-label="Attach images"
             className={`shrink-0 w-8 h-8 rounded-xl border ${th.border} ${th.textFaint} hover:border-indigo-500 hover:text-indigo-400 disabled:opacity-40 flex items-center justify-center transition-colors`}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
@@ -5104,7 +5109,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
               el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
             }}
           />
-          <button onClick={send} disabled={loading || (!input.trim() && !pendingImage)}
+          <button onClick={send} disabled={loading || (!input.trim() && pendingImages.length === 0)}
             className="shrink-0 w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white flex items-center justify-center transition-colors text-sm">
             ↑
           </button>
