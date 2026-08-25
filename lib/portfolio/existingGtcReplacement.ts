@@ -20,8 +20,13 @@ export async function cancelExistingGtcForReplacement(
   input: ExistingGtcReplacementInput,
   cancel: (orderId: string) => Promise<unknown>,
 ): Promise<CancelledGtcContext> {
-  if (!input.hasGtc || !input.confirmed || !input.orderId) {
+  if (!input.hasGtc || !input.confirmed) {
     return { cancelled: false, originalPrice: null };
+  }
+  if (!input.orderId) {
+    throw new Error(
+      'Existing GTC order ID is unavailable. No replacement was submitted. Verify working orders in TastyTrade.',
+    );
   }
   if (input.complexOrderId) {
     throw new Error(
