@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '@/lib/theme';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
-import { PositionsWorkspace } from '../PositionsWorkspace';
+import { PositionsWorkspace, profitTargetPresentation } from '../PositionsWorkspace';
 
 const position = {
   key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
   entryDate: '2026-08-20', stockPrice: 200, buffer: 12.9, legs: [], maxRisk: 1000,
   maxRiskReliable: true, entryPriceEffect: 'Credit', entryEconomicsComplete: true, entryCredit: 935,
   creditReceived: 935, closeValue: 900, currentValue: 910, closeNowPnl: 35, pnl: 25,
-  profitTarget: 50, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
+  profitTarget: 0.5, snapshotHistory: [], netDelta: -0.22, theta: 0.24, gamma: -0.006,
   netVega: -0.2, iv: 46, ivr: 63, hasGtc: true, stopLossClassification: 'NO_STOP',
   structureAmbiguous: false,
 } as unknown as Position;
@@ -93,6 +93,17 @@ describe('PositionsWorkspace', () => {
     expect(onExecute).toHaveBeenLastCalledWith(position, 'CLOSE_ROLL', 'close');
     await user.click(screen.getByRole('button', { name: 'Roll Position' }));
     expect(onExecute).toHaveBeenLastCalledWith(position, 'CLOSE_ROLL', 'roll');
+  });
+
+  it('formats canonical credit targets and hides targets for unsupported economics', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByText('Target 50%')).toBeInTheDocument();
+    expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 0.25 })).toBe('Target 25%');
+    expect(profitTargetPresentation({ entryPriceEffect: 'Debit', entryEconomicsComplete: true, profitTarget: 0.5 })).toBe('Target unavailable');
+    expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: false, profitTarget: 0.5 })).toBe('Target unavailable');
+    expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 50 })).toBe('Target unavailable');
   });
 
   it('explains the displayed management recommendation with its matching reason', async () => {
