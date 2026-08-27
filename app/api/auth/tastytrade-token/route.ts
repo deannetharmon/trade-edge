@@ -24,7 +24,12 @@ export async function POST() {
 
   const response = await fetch(TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+      // Tastytrade requires a product/version User-Agent for API requests.
+      'User-Agent': 'trade-edge/1.0',
+    },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: decrypt(credentials.refresh_token),
@@ -38,8 +43,9 @@ export async function POST() {
   let data: { access_token?: string; refresh_token?: string; error?: string; error_description?: string } = {};
   try { data = JSON.parse(body); } catch { /* handled below */ }
   if (!response.ok || !data.access_token) {
+    const detail = data.error_description ?? data.error ?? body.slice(0, 300) ?? 'Unknown error';
     return NextResponse.json(
-      { error: data.error_description ?? data.error ?? 'Tastytrade token exchange failed' },
+      { error: `Tastytrade token exchange failed (${response.status}): ${detail}` },
       { status: response.status === 401 ? 401 : 502 },
     );
   }
