@@ -30,13 +30,14 @@ export async function getAccessToken(): Promise<string> {
 }
 
 export async function ttFetch(path: string, token: string) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  void token; // Credentials are held by the signed-in user's server-side record.
+  const res = await fetch(`/api/tastytrade/proxy?path=${encodeURIComponent(path)}`, {
+    headers: { Accept: 'application/json' },
     cache: 'no-store',
   });
   if (res.status === 401) {
     sessionStorage.removeItem('tt_access_token');
-    return ttFetch(path, await getAccessToken());
+    throw new Error('Session expired');
   }
   if (!res.ok) { const text = await res.text(); throw new Error(`${path} failed (${res.status}): ${text.slice(0, 120)}`); }
   return res.json();
