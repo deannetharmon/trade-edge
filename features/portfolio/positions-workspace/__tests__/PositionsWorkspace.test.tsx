@@ -131,21 +131,26 @@ describe('PositionsWorkspace', () => {
     expect(screen.queryByText('Upcoming earnings')).not.toBeInTheDocument();
   });
 
-  it('shows compact intentional headers, canonical breakeven, Notes before Suggested action, and compact actions', async () => {
+  it('shows compact intentional headers, canonical breakeven, Notes before Suggested Action, and compact actions', async () => {
     const user = userEvent.setup();
     const withLeg = { ...position, legs: [{ symbol: 'put', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 9.1 }] } as Position;
     const next = { ...model, analysisRows: [{ id: withLeg.key, position: withLeg, symbol: withLeg.symbol, strategy: withLeg.strategy, needsAttention: false }] };
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('columnheader', { name: 'Strike Gap' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Strike / Breakeven' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Entry Credit / Debit' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Close Value' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'P/L / Target' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
     const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
     const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
     expect(strikeGapCellText.indexOf('12.5% OTM')).toBeLessThan(strikeGapCellText.indexOf('chart'));
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
-    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
+    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested Action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
   });
 
@@ -186,7 +191,7 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
-  it('saves notes on Enter, enforces 25 characters, and restores saved notes after remount', async () => {
+  it('saves notes on Enter, accepts up to 150 characters, and restores saved notes after remount', async () => {
     const store: Record<string, string> = {};
     vi.mocked(fetch).mockImplementation(async (_input, init) => {
       if (init?.method === 'POST') {
@@ -200,12 +205,13 @@ describe('PositionsWorkspace', () => {
     const first = render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     const input = screen.getByRole('textbox', { name: /Note for AAPL CSP position/ });
-    await user.type(input, 'abcdefghijklmnopqrstuvwxyZ{enter}');
-    expect(input).toHaveValue('abcdefghijklmnopqrstuvwxy');
+    const note = 'a'.repeat(150);
+    await user.type(input, `${note}Z{enter}`);
+    expect(input).toHaveValue(note);
     expect(await screen.findByText(/Saved/)).toBeInTheDocument();
     first.unmount();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    expect(await screen.findByDisplayValue('abcdefghijklmnopqrstuvwxy')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue(note)).toBeInTheDocument();
   });
 });

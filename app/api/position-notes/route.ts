@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import Redis from 'ioredis';
 import { authOptions } from '@/lib/auth';
 
-const POSITION_NOTE_MAX_LENGTH = 25;
+const POSITION_NOTE_MAX_LENGTH = 150;
 type NoteStore = Record<string, string>;
 const redis = new Redis(process.env.REDIS_URL!);
 const redisKey = (userId: string) => `position-notes:${userId}`;
