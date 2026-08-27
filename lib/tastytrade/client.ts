@@ -13,35 +13,47 @@
 // See docs/design/TC-0001-Trade-Command-Center.md's Corrective Round
 // Addendum and docs/reviews/TC-0001-Implementation-Report.md for the full
 // symbol-by-symbol relocation audit.
+//
+// SILENT-REAUTH FIX (this revision): TastyTrade's /oauth/token endpoint
+// rejects both (a) direct browser fetch calls, via CORS, and (b)
+// server-to-server calls from Vercel's serverless IP range, via a 401
+// returned before the request reaches TastyTrade's real auth layer
+// (confirmed by manual testing). The only path TastyTrade supports for a
+// deployment like this is a real browser navigation through their
+// /oauth/authorize page. Since the user has already granted this app
+// access, that redirect auto-approves and bounces straight back via
+// /api/callback -> /auth/complete in well under a second, so it reads as
+// "silent" even though it is technically a full navigation. getAccessToken()
+// now triggers that redirect instead of POSTing to /oauth/token directly.
 
 export const BASE = 'https://api.tastytrade.com';
 
 export const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 
+function redirectToSilentReauth(): never {
+  const returnTo = typeof window !== 'undefined'
+    ? window.location.pathname + window.location.search
+    : '/portfolio';
+  if (typeof window !== 'undefined') {
+    window.location.href = `/api/tastytrade/authorize?return_to=${encodeURIComponent(returnTo)}`;
+  }
+  throw new Error('Redirecting to re-authenticate with TastyTrade');
+}
+
 // ── Auth & API ─────────────────────────────────────────────────────────────
 export async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
   if (cached) return cached;
+
   const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) {
-    sessionStorage.removeItem('tt_access_token');
-    localStorage.removeItem('tt_refresh_token');
-    window.location.href = '/login';
-    throw new Error('Session expired');
+  if (!refreshToken) {
+    redirectToSilentReauth();
   }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
-  sessionStorage.setItem('tt_access_token', token);
-  if (data.refresh_token && data.refresh_token !== refreshToken) localStorage.setItem('tt_refresh_token', data.refresh_token);
-  return token;
+
+  // Access token missing/expired and there is no supported way to refresh
+  // it from here (see note above) -- send the browser through TastyTrade's
+  // own re-authorization redirect instead of calling /oauth/token directly.
+  redirectToSilentReauth();
 }
 
 export async function ttFetch(path: string, token: string) {
@@ -49,7 +61,10 @@ export async function ttFetch(path: string, token: string) {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     cache: 'no-store',
   });
-  if (res.status === 401) { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
+  if (res.status === 401) {
+    sessionStorage.removeItem('tt_access_token');
+    redirectToSilentReauth();
+  }
   if (!res.ok) { const text = await res.text(); throw new Error(`${path} failed (${res.status}): ${text.slice(0, 120)}`); }
   return res.json();
 }

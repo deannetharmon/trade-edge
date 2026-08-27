@@ -20,6 +20,7 @@ export default function AuthCompletePage() {
   useEffect(() => {
     const accessToken  = getCookie('tt_access_token_temp');
     const refreshToken = getCookie('tt_refresh_token_temp');
+    const returnTo     = getCookie('tt_return_to_temp');
 
     if (accessToken && refreshToken) {
       sessionStorage.setItem('tt_access_token', accessToken);
@@ -28,8 +29,9 @@ export default function AuthCompletePage() {
       // Clean up the temp cookies
       deleteCookie('tt_access_token_temp');
       deleteCookie('tt_refresh_token_temp');
+      deleteCookie('tt_return_to_temp');
 
-      router.replace('/portfolio');
+      router.replace(returnTo || '/portfolio');
     } else {
       // Tokens missing — OAuth flow didn't complete properly
       router.replace('/login?error=Auth+session+lost.+Please+try+again.');
