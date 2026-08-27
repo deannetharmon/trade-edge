@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(`${BASE}/oauth/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         client_id: CLIENT_ID,
@@ -69,7 +69,6 @@ export async function GET(req: NextRequest) {
     };
 
     response.cookies.set('tt_access_token_temp', data.access_token, cookieOpts);
-    response.cookies.set('tt_refresh_token_temp', data.refresh_token, cookieOpts);
     // Clear the client secret temp cookie
     response.cookies.set('tt_client_secret_temp', '', { ...cookieOpts, maxAge: 0 });
 

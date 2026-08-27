@@ -6,6 +6,7 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
+import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 
 if (typeof document !== 'undefined') {
   if (!document.getElementById('hunter-font')) {
@@ -233,15 +234,10 @@ type RulesType = typeof DEFAULT_RULES;
 async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
   if (cached) return cached;
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }) });
-  if (!res.ok) { sessionStorage.removeItem('tt_access_token'); localStorage.removeItem('tt_refresh_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  const data = await res.json(); const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
+  let token: string;
+  try { token = await refreshBrowserAccessToken(); }
+  catch { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
   sessionStorage.setItem('tt_access_token', token);
-  if (data.refresh_token && data.refresh_token !== refreshToken) localStorage.setItem('tt_refresh_token', data.refresh_token);
   return token;
 }
 async function ttFetch(path: string, token: string) {

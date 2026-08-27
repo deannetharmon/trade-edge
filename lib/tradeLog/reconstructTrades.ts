@@ -14,6 +14,7 @@
 // (there is now exactly one implementation), which is the "unless an
 // existing bug is corrected" case called out in the PI-0008E ticket.
 //
+import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 // PI-0008E also closes two silent-data-loss gaps identified in PI-0008D:
 //   - Partial closes: the old code required exact quantity equality between
 //     an opening and closing transaction, so a partial close (different
@@ -89,20 +90,10 @@ export const LS_KEY: Record<TimeRange, string> = {
 export async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
   if (cached) return cached;
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) { sessionStorage.removeItem('tt_access_token'); localStorage.removeItem('tt_refresh_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
+  let token: string;
+  try { token = await refreshBrowserAccessToken(); }
+  catch { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
   sessionStorage.setItem('tt_access_token', token);
-  if (data.refresh_token && data.refresh_token !== refreshToken) localStorage.setItem('tt_refresh_token', data.refresh_token);
   return token;
 }
 

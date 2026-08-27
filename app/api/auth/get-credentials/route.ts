@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { encrypt, decrypt } from '@/lib/crypto';
+import { encrypt } from '@/lib/crypto';
 import Redis from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL!);
@@ -21,11 +21,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ hasCredentials: false });
   }
 
-  return NextResponse.json({
-    hasCredentials: true,
-    refreshToken: decrypt(data.refresh_token),
-    clientSecret: decrypt(data.client_secret),
-  });
+  return NextResponse.json({ hasCredentials: true });
 }
 
 export async function PATCH(req: NextRequest) {

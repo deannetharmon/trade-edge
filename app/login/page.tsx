@@ -4,32 +4,14 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-const BASE = 'https://api.tastytrade.com';
-const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-
-async function getAccessTokenFromRefresh(
-  refreshToken: string,
-  clientSecret: string
-): Promise<{ accessToken: string; newRefreshToken?: string }> {
-  const res = await fetch(`${BASE}/oauth/token`, {
+async function getAccessToken(): Promise<string> {
+  const res = await fetch('/api/auth/tastytrade-token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-      client_secret: clientSecret,
-    }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error_description ?? data?.error ?? 'Connection failed');
-  if (!data.access_token) throw new Error('No access token returned');
-  return {
-    accessToken: data.access_token,
-    newRefreshToken: data.refresh_token && data.refresh_token !== refreshToken
-      ? data.refresh_token
-      : undefined,
-  };
+  if (!data.accessToken) throw new Error('No access token returned');
+  return data.accessToken;
 }
 
 function EyeIcon({ open }: { open: boolean }) {
@@ -78,21 +60,8 @@ function LoginContent() {
           const data = await res.json();
 
           if (data.hasCredentials) {
-            const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
-              data.refreshToken,
-              data.clientSecret
-            );
+            const accessToken = await getAccessToken();
             sessionStorage.setItem('tt_access_token', accessToken);
-            localStorage.setItem('tt_refresh_token', newRefreshToken ?? data.refreshToken);
-            localStorage.setItem('tt_client_secret', data.clientSecret);
-
-            if (newRefreshToken) {
-              await fetch('/api/auth/get-credentials', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ refreshToken: newRefreshToken }),
-              });
-            }
 
             router.replace(redirect);
           } else {
@@ -119,23 +88,17 @@ function LoginContent() {
     setError('');
 
     try {
-      const { accessToken, newRefreshToken } = await getAccessTokenFromRefresh(
-        refreshToken.trim(),
-        clientSecret.trim()
-      );
-
       await fetch('/api/auth/save-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          refreshToken: newRefreshToken ?? refreshToken.trim(),
+          refreshToken: refreshToken.trim(),
           clientSecret: clientSecret.trim(),
         }),
       });
 
+      const accessToken = await getAccessToken();
       sessionStorage.setItem('tt_access_token', accessToken);
-      localStorage.setItem('tt_refresh_token', newRefreshToken ?? refreshToken.trim());
-      localStorage.setItem('tt_client_secret', clientSecret.trim());
 
       router.replace(redirect);
     } catch (e: any) {

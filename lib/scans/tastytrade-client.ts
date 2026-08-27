@@ -1,6 +1,7 @@
 // lib/scans/tastytrade-client.ts
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
 import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './constants';
+import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 // TE-0007C fix-forward: covered-call capacity must be fetched the same way
 // every other TastyTrade call in this file is -- browser-side, with the
 // bearer token from getAccessToken() -- not through a Next.js server route.
@@ -74,24 +75,15 @@ export async function getAccessToken(): Promise<string> {
   } catch {}
 
   // 3. Use refresh token to get a new access token
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) {
+  let token: string;
+  try {
+    token = await refreshBrowserAccessToken();
+  } catch {
     sessionStorage.removeItem('tt_access_token');
     try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
-    localStorage.removeItem('tt_refresh_token');
     window.location.href = '/login';
     throw new Error('Session expired');
   }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
 
   // Store in both sessionStorage and localStorage
   sessionStorage.setItem('tt_access_token', token);
@@ -100,10 +92,6 @@ export async function getAccessToken(): Promise<string> {
     localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
   } catch {}
 
-  // Save rotated refresh token if TastyTrade issued a new one
-  if (data.refresh_token && data.refresh_token !== refreshToken) {
-    localStorage.setItem('tt_refresh_token', data.refresh_token);
-  }
   return token;
 }
 
@@ -398,5 +386,3 @@ export async function getCspCapitalContext(token: string): Promise<CspCapitalCon
     return UNRESOLVED_CSP_CAPITAL;
   }
 }
-
-

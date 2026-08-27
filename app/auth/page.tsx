@@ -23,15 +23,12 @@ export default function AuthComplete() {
 
   useEffect(() => {
     const accessToken = getCookie('tt_access_token_temp');
-    const refreshToken = getCookie('tt_refresh_token_temp');
-
-    if (!accessToken || !refreshToken) {
+    if (!accessToken) {
       setError('Token cookies not found. The OAuth flow may have timed out. Please try again.');
       return;
     }
 
     try {
-      localStorage.setItem('tt_refresh_token', refreshToken);
       sessionStorage.setItem('tt_access_token', accessToken);
     } catch {
       setError('Could not save tokens to local storage. Check your browser privacy settings.');
@@ -40,7 +37,6 @@ export default function AuthComplete() {
 
     // Clean up temp cookies
     deleteCookie('tt_access_token_temp');
-    deleteCookie('tt_refresh_token_temp');
 
     router.replace('/portfolio');
   }, [router]);

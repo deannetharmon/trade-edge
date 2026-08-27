@@ -13,6 +13,7 @@ import {
   type WheelChainResult,
   type WheelChainLeg,
 } from '@/lib/wheel/chainSearch';
+import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -33,34 +34,21 @@ async function getAccessToken(): Promise<string> {
     }
   } catch {}
 
-  const refreshToken = localStorage.getItem('tt_refresh_token');
-  const clientSecret = localStorage.getItem('tt_client_secret') ?? '';
-  if (!refreshToken || !clientSecret) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-
-  const res = await fetch(`${BASE}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, client_secret: clientSecret }),
-  });
-  if (!res.ok) {
+  let token: string;
+  try {
+    token = await refreshBrowserAccessToken();
+  } catch {
     sessionStorage.removeItem('tt_access_token');
     try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
-    localStorage.removeItem('tt_refresh_token');
     window.location.href = '/login';
     throw new Error('Session expired');
   }
-  const data = await res.json();
-  const token = data.access_token;
-  if (!token) { window.location.href = '/login'; throw new Error('No token'); }
 
   sessionStorage.setItem('tt_access_token', token);
   try {
     localStorage.setItem(LS_ACCESS_TOKEN, token);
     localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
   } catch {}
-  if (data.refresh_token && data.refresh_token !== refreshToken) {
-    localStorage.setItem('tt_refresh_token', data.refresh_token);
-  }
   return token;
 }
 

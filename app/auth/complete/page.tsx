@@ -19,16 +19,13 @@ export default function AuthCompletePage() {
 
   useEffect(() => {
     const accessToken  = getCookie('tt_access_token_temp');
-    const refreshToken = getCookie('tt_refresh_token_temp');
     const returnTo     = getCookie('tt_return_to_temp');
 
-    if (accessToken && refreshToken) {
+    if (accessToken) {
       sessionStorage.setItem('tt_access_token', accessToken);
-      localStorage.setItem('tt_refresh_token', refreshToken);
 
       // Clean up the temp cookies
       deleteCookie('tt_access_token_temp');
-      deleteCookie('tt_refresh_token_temp');
       deleteCookie('tt_return_to_temp');
 
       router.replace(returnTo || '/portfolio');
