@@ -187,7 +187,7 @@ describe('PositionsWorkspace', () => {
     expect(buttons).toHaveLength(2);
     await user.click(buttons[1]);
     expect(await screen.findByText('Summary MSFT')).toBeInTheDocument();
-    expect(onAnalyze).toHaveBeenCalledWith(second);
+    expect(onAnalyze).toHaveBeenCalledWith(second, '');
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 

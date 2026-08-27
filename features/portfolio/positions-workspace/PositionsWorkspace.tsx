@@ -99,7 +99,7 @@ interface ManagementActionProps {
   getManagementActions?: (position: Position) => ActionType[];
   onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void;
   renderStopControl?: (position: Position) => ReactNode;
-  onAnalyze?: (position: Position) => Promise<WorkspaceAiAnalysis>;
+  onAnalyze?: (position: Position, traderNote: string) => Promise<WorkspaceAiAnalysis>;
 }
 
 function AnalysisView({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme] } & ManagementActionProps) {
@@ -146,7 +146,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     setAnalysisError(null);
     setAnalysisLoading(true);
     try {
-      const result = await onAnalyze(position);
+      const result = await onAnalyze(position, notes[noteStorageKey(position)] ?? '');
       if (result.positionKey !== position.key) throw new Error('Analysis identity did not match the selected position');
       setAnalysis(result);
     } catch (error) {
