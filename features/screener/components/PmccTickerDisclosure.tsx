@@ -13,7 +13,7 @@ import { useId, type ReactNode } from 'react';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export function PmccTickerDisclosure({
-  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, bestScore, itemLabel = 'qualified structure', defaultOpen, borderClassName, children,
+  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, bestScore, bestScoreLabel = 'Score', itemLabel = 'qualified structure', defaultOpen, borderClassName, children,
 }: {
   symbol: string;
   price: number | null;
@@ -28,6 +28,7 @@ export function PmccTickerDisclosure({
   // same convention bestWidthMinusDebitPct/bestAnnualizedRoiPct already
   // use.
   bestScore?: number | null;
+  bestScoreLabel?: string;
   // SCREENER-PMCC-DISQUALIFIED-GROUPING-0001 -- this component now also
   // groups the near-miss and audit sections (Dean's explicit ask: "It
   // should behave just like the qualified list"), which are not
@@ -54,7 +55,7 @@ export function PmccTickerDisclosure({
         aria-label={accessibleName} onClick={toggle}
         className="flex w-full items-center justify-between text-left text-[10px] font-bold tracking-wider text-amber-300">
         <span className="flex items-center gap-2 flex-wrap">
-          {bestScore != null && <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">Score {bestScore}</span>}
+          {bestScore != null && <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">{bestScoreLabel} {bestScore}</span>}
           <span>{symbol}</span>
           {price != null && <span className="text-white/50 font-normal">${price.toFixed(2)}</span>}
           <span className="font-normal">{countLabel}</span>
@@ -67,5 +68,4 @@ export function PmccTickerDisclosure({
     </section>
   );
 }
-
 

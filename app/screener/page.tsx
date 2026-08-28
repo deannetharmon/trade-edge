@@ -48,6 +48,7 @@ import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computePmccScore } from '@/lib/scans/pmccScore';
+import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
@@ -3416,6 +3417,12 @@ type ResultCardProps = {
   onTrade?: (result: ScreenResult) => void;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
+  pmccBestFit?: {
+    profile: PmccBestFitProfile;
+    score: number;
+    runnerUp: ScreenResult | null;
+    earningsBlocksRecommendation: boolean;
+  };
 };
 
 // PMCC-CARD-0001 item 4 — reuses the exact chart/sparkline/TradingView
@@ -3555,7 +3562,7 @@ function PmccLegRejectionAudit({ rejections, summary }: {
   </section>;
 }
 
-function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
+function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showPairLookup, setShowPairLookup] = useState(false);
   const [showQuoteDetail, setShowQuoteDetail] = useState(false);
@@ -3621,6 +3628,9 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
   const age = (leg: NonNullable<typeof pair>['longLeg']) => leg.quote.ageSeconds == null ? 'unknown age' : `${Math.round(leg.quote.ageSeconds)}s old`;
   const counts = result.pmccPairingCounts;
+  const runnerUpPair = pmccBestFit?.runnerUp?.pmccPair;
+  const bestFitInputs = (candidate: ScreenResult) => candidate.pmccPair && candidate.price != null ? ({ shortDelta: candidate.pmccPair.shortLeg.delta, shortDte: candidate.pmccPair.shortLeg.dte, shortStrike: candidate.pmccPair.shortLeg.strike, underlyingPrice: candidate.price, shortCredit: candidate.pmccPair.shortLeg.executablePrice, shortSpreadPct: candidate.pmccPair.shortLeg.quote.spreadPct, shortOpenInterest: candidate.pmccPair.shortLeg.openInterest }) : null;
+  const runnerUpComparison = pmccBestFit?.runnerUp ? (() => { const winner = bestFitInputs(result); const runner = bestFitInputs(pmccBestFit.runnerUp!); return winner && runner ? describePmccBestFitComparison(pmccBestFit.profile, winner, runner) : null; })() : null;
   const rejectionSummary = summarizePmccLegRejections(result.pmccLegRejections);
   const rejectedLegCount = result.pmccLegRejections?.length ?? 0;
   // TE-0007E — Diane/Ian/Paul/Alan-reviewed PMCC card fields (breakeven,
@@ -3715,7 +3725,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
     <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
       <div className="flex flex-wrap items-center gap-2">
-        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">Score {score.total}</span>}
+        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">Quality {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAPS PMCC' : 'PMCC'}</span>
@@ -3737,6 +3747,14 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         ))}
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
+      {pmccBestFit && (pmccBestFit.earningsBlocksRecommendation ? (
+        <p className="mt-2 rounded border border-amber-700 bg-amber-950/30 px-2 py-1.5 text-[10px] font-semibold text-amber-200">Earnings before short expiry — Best Fit is informational, not a recommendation.</p>
+      ) : (
+        <div className="mt-2 rounded border border-cyan-800 bg-cyan-950/20 px-2 py-1.5 text-[10px] text-cyan-100" aria-label={`Why this is Best ${pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)}`}>
+          <b>Why this is Best {pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)} ({pmccBestFit.score}):</b> {pmccBestFitReason(pmccBestFit.profile)}
+          {runnerUpPair && <span className="block mt-1 text-cyan-200">Versus runner-up {pmccBestFit.runnerUp!.symbol} {runnerUpPair.shortLeg.strike}C{runnerUpComparison ? `: ${runnerUpComparison}` : '.'}</span>}
+        </div>
+      ))}
       {heldLong && <p className="mt-2 text-[10px] text-cyan-300">Portfolio-derived candidate · proposed short call only · no order ticket is available.</p>}
     </button>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
@@ -5975,6 +5993,33 @@ function pmccResultScore(result: ScreenResult): number | null {
   }).total;
 }
 
+function pmccBestFitScore(result: ScreenResult, profile: PmccBestFitProfile): number | null {
+  const pair = result.pmccPair;
+  if (!pair || result.price == null) return null;
+  return computePmccBestFit(profile, {
+    shortDelta: pair.shortLeg.delta, shortDte: pair.shortLeg.dte,
+    shortStrike: pair.shortLeg.strike, underlyingPrice: result.price,
+    shortCredit: pair.shortLeg.executablePrice,
+    shortSpreadPct: pair.shortLeg.quote.spreadPct, shortOpenInterest: pair.shortLeg.openInterest,
+  });
+}
+
+function pmccEarningsBlocksBestFit(result: ScreenResult): boolean {
+  const expiration = result.pmccPair?.shortLeg.expiration;
+  if (!result.earningsDate || !expiration) return false;
+  const earnings = new Date(`${result.earningsDate}T00:00:00`);
+  const expiry = new Date(`${expiration}T23:59:59`);
+  if (!Number.isFinite(earnings.getTime()) || !Number.isFinite(expiry.getTime())) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return earnings >= today && earnings <= expiry;
+}
+
+function pmccBestFitReason(profile: PmccBestFitProfile): string {
+  if (profile === 'income') return 'Execution quality (spread and open interest) leads credit per day.';
+  if (profile === 'upside') return 'Lower short delta and more out-of-the-money cushion lead the fit.';
+  return 'Short delta near 0.30, out-of-the-money cushion, DTE, credit, and execution are balanced.';
+}
+
 // SCREENER-OI-0001 — maps a real SpreadCandidate/ScreenResult strategy
 // string onto the canonical OiStrategy union. Every strategy the Screener
 // actually produces candidates for today (CSP/CC/BPS/BCS/IC/PMCC) maps
@@ -6569,6 +6614,7 @@ export default function Home() {
   // audit trail of *why* something didn't qualify, not a ranked results list.
   const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
   const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
+  const [pmccBestFitProfile, setPmccBestFitProfile] = useState<PmccBestFitProfile>('balanced');
   // PMCC-VIEW-MODE-0001 -- Diane's original score mockup was a flat,
   // globally-ranked list (no ticker grouping); PmccTickerDisclosure was a
   // separate, later feature (Ian's per-ticker triage ask). The two got
@@ -8259,6 +8305,18 @@ export default function Home() {
         : null,
     };
   });
+  // "Score" in PMCC controls means profile-based Best Fit. The card's own
+  // PMCC score remains a separate quality-health badge, so a saturated ROI
+  // score cannot flatten the recommendation order.
+  if (activeSession?.requestedStrategy === 'pmcc' && effectiveFilteredSort.primary === 'score') {
+    filteredQualified = [...filteredQualified].sort((a, b) => {
+      const delta = (pmccBestFitScore(b, pmccBestFitProfile) ?? -Infinity) - (pmccBestFitScore(a, pmccBestFitProfile) ?? -Infinity);
+      if (delta !== 0) return delta;
+      const spread = (a.pmccPair?.shortLeg.quote.spreadPct ?? Infinity) - (b.pmccPair?.shortLeg.quote.spreadPct ?? Infinity);
+      if (spread !== 0) return spread;
+      return (b.pmccPair?.shortLeg.openInterest ?? -Infinity) - (a.pmccPair?.shortLeg.openInterest ?? -Infinity);
+    });
+  }
 
   // SCREENER-LAUNCHER-0001 corrective pass — identifies the ONE launcher
   // whose own scan invocation is currently in flight, replacing the
@@ -8962,6 +9020,19 @@ export default function Home() {
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
+                    <div className="mb-2 flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Best fit</span>
+                      {(['balanced', 'income', 'upside'] as const).map(profile => (
+                        <button key={profile} onClick={() => { setPmccBestFitProfile(profile); setFilteredSort({ primary: 'score', secondary: 'none' }); }}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            pmccBestFitProfile === profile ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                          }`}>
+                          {profile[0].toUpperCase() + profile.slice(1)}
+                        </button>
+                      ))}
+                      <span className={`text-[9px] ${th.textFaint}`}>Ranks qualified PMCCs; it never relaxes eligibility.</span>
+                    </div>
+                    <p className={`mb-2 text-[9px] ${th.textFaint}`}>The Quality badge measures qualification health. Selecting Score ranks by the active Best Fit profile.</p>
                     <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
                     {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
                         rank (Diane's original score mockup); grouped is
@@ -9126,7 +9197,8 @@ export default function Home() {
                   return (
                     <div key={resultKey}>
                       {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
-                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
+                        pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                     </div>
                   );
@@ -9138,6 +9210,12 @@ export default function Home() {
                       group.push(result); groups.set(expiration, group); return groups;
                     }, new Map<string, ScreenResult[]>()).entries()).sort(([a], [b]) => a.localeCompare(b))
                   : [];
+                const pmccBestFitRanked = activePmccSession
+                  ? filteredQualified.map(result => ({ result, score: pmccBestFitScore(result, pmccBestFitProfile) }))
+                    .filter((item): item is { result: ScreenResult; score: number } => item.score != null)
+                    .sort((a, b) => b.score - a.score || (a.result.pmccPair?.shortLeg.quote.spreadPct ?? Infinity) - (b.result.pmccPair?.shortLeg.quote.spreadPct ?? Infinity) || (b.result.pmccPair?.shortLeg.openInterest ?? -Infinity) - (a.result.pmccPair?.shortLeg.openInterest ?? -Infinity))
+                  : [];
+                const pmccBestFitWinner = pmccBestFitRanked[0] ?? null;
                 // TE-0007H — Ian's real, priority addition: "I'd want a
                 // collapsed view: ticker, best width-minus-debit%, best
                 // annualized ROI, count of qualified structures... more
@@ -9165,7 +9243,7 @@ export default function Home() {
                       // mockup: group headers lead with score, not width/
                       // ROI. Uses the same shared pmccResultScore() the
                       // sort and best-in-scan callout use.
-                      const scores = group.map(r => pmccResultScore(r)).filter((v): v is number => v != null);
+                      const scores = group.map(r => pmccBestFitScore(r, pmccBestFitProfile)).filter((v): v is number => v != null);
                       return [
                         symbol, group,
                         widthPcts.length > 0 ? Math.max(...widthPcts) : null,
@@ -9195,13 +9273,7 @@ export default function Home() {
                 // pmccTickerGroups[0] (which tracks the selected sort
                 // field, not always score). Keeps the callout correct
                 // regardless of display order.
-                const pmccBestInScan = pmccTickerGroups.length > 1
-                  ? pmccTickerGroups.reduce<typeof pmccTickerGroups[number] | null>((best, group) => {
-                      if (group[4] == null) return best;
-                      if (best == null || best[4] == null || group[4] > best[4]) return group;
-                      return best;
-                    }, null)
-                  : null;
+                const pmccBestInScan = pmccTickerGroups.length > 1 ? pmccBestFitWinner : null;
                 return (
                 <>
                   {filteredQualified.length > 0 && (
@@ -9218,12 +9290,12 @@ export default function Home() {
                           project scope (see memory: "Best Opportunities
                           never shows PMCC or CC candidates -- intentional,
                           documented scope"). */}
-                      {pmccBestInScan && pmccBestInScan[4] != null && (
+                      {pmccBestInScan && (
                         <div className="mb-2 flex items-center gap-2 rounded-lg border border-cyan-600/60 bg-cyan-500/5 px-3 py-2 text-xs">
-                          <span className={th.textFaint}>Best in this scan</span>
-                          <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] font-bold text-cyan-300">Score {pmccBestInScan[4]}</span>
-                          <span className="font-bold">{pmccBestInScan[0]}</span>
-                          {pmccBestInScan[1][0]?.price != null && <span className={th.textFaint}>${pmccBestInScan[1][0].price.toFixed(2)}</span>}
+                          <span className={th.textFaint}>{pmccEarningsBlocksBestFit(pmccBestInScan.result) ? 'Best Fit (informational)' : 'Best in this scan'}</span>
+                          <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] font-bold text-cyan-300">Best {pmccBestFitProfile[0].toUpperCase() + pmccBestFitProfile.slice(1)} {pmccBestInScan.score}</span>
+                          <span className="font-bold">{pmccBestInScan.result.symbol} {pmccBestInScan.result.pmccPair?.shortLeg.strike}C</span>
+                          {pmccBestInScan.result.price != null && <span className={th.textFaint}>${pmccBestInScan.result.price.toFixed(2)}</span>}
                         </div>
                       )}
                       <div className="space-y-2">
@@ -9236,7 +9308,7 @@ export default function Home() {
                         )) : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                           <PmccTickerDisclosure key={symbol} symbol={symbol}
                             price={group[0]?.price ?? null} candidateCount={group.length}
-                            bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore}
+                            bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore} bestScoreLabel="Best Fit"
                             defaultOpen={pmccTickerGroups.length === 1} borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </PmccTickerDisclosure>
