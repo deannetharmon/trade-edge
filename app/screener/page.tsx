@@ -63,7 +63,7 @@ import {
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
-import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
@@ -6357,8 +6357,8 @@ function TargetedScanResultsPanel({
 export const dynamic = 'force-dynamic';
 
 function CcCapacityShadowSnapshotBridge({ onSnapshot }: { onSnapshot: (snapshot: PortfolioSnapshot | null) => void }) {
-  const { snapshot } = usePortfolioData();
-  useEffect(() => onSnapshot(snapshot), [onSnapshot, snapshot]);
+  const portfolioData = useOptionalPortfolioData();
+  useEffect(() => onSnapshot(portfolioData?.snapshot ?? null), [onSnapshot, portfolioData?.snapshot]);
   return null;
 }
 
@@ -6368,9 +6368,11 @@ export default function Home() {
   const th = THEMES[theme];
   const ccCapacityShadowEnabled = isCcCapacityShadowEnabled();
   const ccCapacityShadowSnapshotRef = useRef<PortfolioSnapshot | null>(null);
+  const [portfolioSnapshot, setPortfolioSnapshot] = useState<PortfolioSnapshot | null>(null);
   const ccCapacityShadowRequestRef = useRef(0);
   const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null) => {
     ccCapacityShadowSnapshotRef.current = snapshot;
+    setPortfolioSnapshot(snapshot);
   }, []);
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
@@ -6441,6 +6443,14 @@ export default function Home() {
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
   const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
   const [pmccLongDteMax, setPmccLongDteMax] = useState(PMCC_LONG_DTE_MAX);
+  const heldPmccCandidates = useMemo(
+    () => selectHeldPmccLongCandidates(portfolioSnapshot, {
+      shortMin: pmccShortDteMin, shortMax: pmccShortDteMax,
+      longMin: pmccLongDteMin, longMax: pmccLongDteMax,
+    }).candidates,
+    [portfolioSnapshot, pmccShortDteMin, pmccShortDteMax, pmccLongDteMin, pmccLongDteMax],
+  );
+  const canLaunchPmcc = opportunityUniverse.length > 0 || heldPmccCandidates.length > 0;
   useEffect(() => {
     try {
       const saved = localStorage.getItem(LS_PMCC_DTE);
@@ -8317,8 +8327,8 @@ export default function Home() {
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
                 onClick={() => setShowPmccScanModal(true)}
-                disabled={loading || !opportunityUniverse.length}
-                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : undefined}
+                disabled={loading || !canLaunchPmcc}
+                title={!canLaunchPmcc ? 'Add a ticker or connect a portfolio containing an eligible held long call.' : 'Scans selected tickers and eligible held long calls from your portfolio.'}
               >
                 {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
@@ -9660,6 +9670,7 @@ export default function Home() {
         <PmccScanModal
           th={th}
           selectedTickerCount={opportunityUniverse.length}
+          heldLongCandidateCount={heldPmccCandidates.length}
           initial={{
             dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
             longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
@@ -9683,8 +9694,5 @@ export default function Home() {
     </div>
   );
 }
-
-
-
 
 

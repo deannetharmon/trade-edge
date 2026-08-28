@@ -276,9 +276,15 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
 }
 
 export function usePortfolioData(): PortfolioDataContextValue {
-  const ctx = useContext(PortfolioDataContext);
+  const ctx = useOptionalPortfolioData();
   if (!ctx) {
     throw new Error('usePortfolioData must be used within a PortfolioDataProvider');
   }
   return ctx;
+}
+
+/** Optional consumer seam for route-level enhancements that must remain
+ * renderable in isolated tools/tests where the app-shell provider is absent. */
+export function useOptionalPortfolioData(): PortfolioDataContextValue | null {
+  return useContext(PortfolioDataContext);
 }
