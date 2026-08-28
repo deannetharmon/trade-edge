@@ -42,12 +42,13 @@ import {
   DEFAULT_PMCC_PAIRING_LIMITS,
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '@/lib/scans/pmccConfig';
-import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib/scans/pmccTypes';
+import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
 import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computePmccScore } from '@/lib/scans/pmccScore';
+import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -3535,6 +3536,25 @@ function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSp
   );
 }
 
+function PmccLegRejectionAudit({ rejections, summary }: {
+  rejections: readonly PmccLegRejection[];
+  summary: ReturnType<typeof summarizePmccLegRejections>;
+}) {
+  return <section className="mt-2 rounded border border-neutral-800 bg-neutral-900/40 p-3 text-xs" aria-label="Option-chain exclusions">
+    <p className="font-semibold">Option-chain exclusions ({rejections.length} excluded contract{rejections.length === 1 ? '' : 's'})</p>
+    <p className="mt-1 text-[10px] text-neutral-400">These individual contracts were removed before PMCC pairing; they do not equal rejected PMCC structures. A contract can appear in more than one reason below.</p>
+    <ul className="mt-2 space-y-1 text-[11px]">
+      {summary.map(item => <li key={item.code}><span className="font-semibold">{item.affectedLegs}</span> contract{item.affectedLegs === 1 ? '' : 's'} · {item.message}</li>)}
+    </ul>
+    <details className="mt-3">
+      <summary>View individual excluded contracts ({rejections.length})</summary>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px]">
+        {rejections.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}
+      </ul>
+    </details>
+  </section>;
+}
+
 function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showPairLookup, setShowPairLookup] = useState(false);
@@ -3601,6 +3621,8 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
     `Bid ${money(leg.quote.bid)} · Ask ${money(leg.quote.ask)} · Mid ${money(leg.quote.midpoint)} · Width ${money(leg.quote.width)} (${leg.quote.spreadPct?.toFixed(1) ?? '—'}%)`;
   const age = (leg: NonNullable<typeof pair>['longLeg']) => leg.quote.ageSeconds == null ? 'unknown age' : `${Math.round(leg.quote.ageSeconds)}s old`;
   const counts = result.pmccPairingCounts;
+  const rejectionSummary = summarizePmccLegRejections(result.pmccLegRejections);
+  const rejectedLegCount = result.pmccLegRejections?.length ?? 0;
   // TE-0007E — Diane/Ian/Paul/Alan-reviewed PMCC card fields (breakeven,
   // promoted extrinsic, roll runway, annualized ROI). All four derive
   // from real, already-computed PmccPairMetrics/PmccEligibleLeg fields --
@@ -3658,7 +3680,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
-      {(result.pmccLegRejections?.length ?? 0) > 0 && <details className="mt-2 text-xs"><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
+      {rejectedLegCount > 0 && <PmccLegRejectionAudit rejections={result.pmccLegRejections!} summary={rejectionSummary} />}
       <p className="mt-2 rounded border border-red-700 px-3 py-2 text-xs text-red-300">Disqualified — Open/Trade is blocked. No executable pair met criteria.</p>
     </article>;
   }
@@ -3793,7 +3815,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>Qualification and near-miss reasons:</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
         {counts && <div><b>Pairing/accounting:</b> {counts.eligibleLongLegs} eligible long · {counts.eligibleShortLegs} eligible short · {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations evaluated · {counts.qualifiedPairsRetained} qualified retained · {counts.nearMissPairsRetained} near-miss retained · {counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention} omitted</div>}
         {result.pmccIncompleteAnalysis && <p className="font-bold text-amber-400">Incomplete analysis: the safety limit prevented some combinations from being evaluated.</p>}
-        {(result.pmccLegRejections?.length ?? 0) > 0 && <details><summary>Leg rejection reasons ({result.pmccLegRejections!.length})</summary><ul className="mt-1 list-disc pl-5">{result.pmccLegRejections!.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}</ul></details>}
+        {rejectedLegCount > 0 && <PmccLegRejectionAudit rejections={result.pmccLegRejections!} summary={rejectionSummary} />}
         <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
       </div>}
 

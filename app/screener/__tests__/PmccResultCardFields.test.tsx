@@ -223,6 +223,31 @@ function renderScreener() {
 }
 
 describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annualized ROI)', () => {
+  it('summarizes option-chain exclusions before exposing the raw contract audit', async () => {
+    const pairing = pairPmccCandidates({
+      symbol: 'ACME', underlyingPrice: 110,
+      longLegs: [makeLeg('long')],
+      shortLegs: [
+        makeLeg('short'),
+        makeLeg('short', { strike: 105, openInterest: 50 }),
+      ],
+      criteria, asOf, marketSession: 'open',
+    });
+    const [result] = buildPmccScreenResults(pairing, { symbol: 'ACME', price: 110, ivr: 35, underlyingType: 'stock' });
+    seedPmccSession([result]);
+    renderScreener();
+
+    const card = await screen.findByTestId('pmcc-result-card');
+    fireEvent.click(within(card).getByRole('button', { name: /expand ACME PMCC details/i }));
+    fireEvent.click(within(card).getByRole('button', { name: /show qualification and audit detail/i }));
+
+    expect(within(card).getByLabelText('Option-chain exclusions')).toHaveTextContent('Option-chain exclusions (1 excluded contract)');
+    expect(within(card).getAllByText(/Short call is not out of the money/)).toHaveLength(2);
+    expect(within(card).getAllByText(/Open interest is below the submitted minimum/)).toHaveLength(2);
+    expect(within(card).getByText(/do not equal rejected PMCC structures/i)).toBeInTheDocument();
+    expect(within(card).getByText(/View individual excluded contracts \(1\)/)).toBeInTheDocument();
+  });
+
   it('renders breakeven, promoted extrinsic, roll runway, and an honestly-labeled annualized ROI with hand-verified values', async () => {
     const result = buildPmccResult();
     // Sanity-check the fixture's own real, independently-computed metrics
