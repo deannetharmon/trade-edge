@@ -110,11 +110,11 @@ describe('TE-0007: launcher routing', () => {
     expect(screen.queryByText('CSP LIST')).not.toBeInTheDocument();
   });
 
-  it('5. empty universe disables Find Spreads, Find CSPs, and Find PMCCs', async () => {
+  it('5. empty universe disables Find Spreads and Find CSPs, but PMCC remains available for portfolio-held long calls', async () => {
     renderScreener();
     expect(await screen.findByRole('button', { name: 'FIND SPREADS' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled();
   });
 
   it('6. Find LEAPS is disabled and invokes no scanner', async () => {

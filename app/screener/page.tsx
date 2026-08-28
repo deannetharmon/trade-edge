@@ -6450,7 +6450,6 @@ export default function Home() {
     }).candidates,
     [portfolioSnapshot, pmccShortDteMin, pmccShortDteMax, pmccLongDteMin, pmccLongDteMax],
   );
-  const canLaunchPmcc = opportunityUniverse.length > 0 || heldPmccCandidates.length > 0;
   useEffect(() => {
     try {
       const saved = localStorage.getItem(LS_PMCC_DTE);
@@ -8327,8 +8326,8 @@ export default function Home() {
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
                 onClick={() => setShowPmccScanModal(true)}
-                disabled={loading || !canLaunchPmcc}
-                title={!canLaunchPmcc ? 'Add a ticker or connect a portfolio containing an eligible held long call.' : 'Scans selected tickers and eligible held long calls from your portfolio.'}
+                disabled={loading}
+                title="Scans selected tickers and eligible held long calls from your portfolio. No ticker is required to review portfolio LEAPS."
               >
                 {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
@@ -9694,5 +9693,4 @@ export default function Home() {
     </div>
   );
 }
-
 

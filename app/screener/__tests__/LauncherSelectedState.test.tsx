@@ -355,7 +355,7 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     // shares, not the Opportunity Universe.
     expect(await screen.findByRole('button', { name: 'FIND SPREADS' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'FIND CCs' })).not.toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));

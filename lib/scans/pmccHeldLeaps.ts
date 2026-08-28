@@ -27,7 +27,10 @@ export interface HeldPmccSelection {
 }
 
 function exactOneLongCall(position: Position): HeldPmccLongCandidate | null {
-  if (position.structureAmbiguous || position.identity == null) return null;
+  // Discovery is review-only: a close-order identity is not relevant to
+  // whether the broker reports one exact long call. Structural ambiguity is
+  // still a hard exclusion, and execution remains unavailable on this path.
+  if (position.structureAmbiguous) return null;
   if (position.legs.length !== 1) return null;
   const leg = position.legs[0];
   if (leg.direction !== 'Long' || leg.optionType !== 'C' || !Number.isFinite(leg.strikePrice) || leg.quantity <= 0) return null;
