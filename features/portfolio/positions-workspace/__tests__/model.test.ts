@@ -51,6 +51,29 @@ describe('positions workspace model', () => {
     expect(model.symbolGroups[0].capacity).toMatchObject({ status: 'unavailable', blockingReason: 'Working orders unavailable' });
     expect(model.symbolGroups[0].contextualAction).toBeNull();
   });
+
+  it('derives portfolio-first PMCC and covered-call eligibility with exact evidence', () => {
+    const heldLongCall = position({
+      key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+    });
+    const longPut = position({
+      key: 'AAPL-long-put', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
+      legs: [{ symbol: 'AAPL  270618P00150000', optionType: 'P', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+    });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall, longPut]), positions: [heldLongCall, longPut], pendingOrders: [], snapshotDataQuality: quality });
+    expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'eligible', exactContract: 'AAPL  270618C00150000' }),
+      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-put', status: 'not-eligible', reason: expect.stringContaining('long put') }),
+      expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 1, reservedContracts: 0, availableContracts: 1 }),
+    ]));
+  });
+
+  it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
+    const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }] });
+    const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });
+    expect(model.incomeOpportunities).toEqual([expect.objectContaining({ kind: 'pmcc-short-call', status: 'unavailable', reason: expect.stringContaining('Current attributable') })]);
+  });
 });
 
 describe('analysis controls', () => {

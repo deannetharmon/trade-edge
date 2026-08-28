@@ -1,6 +1,6 @@
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { Position } from '@/lib/portfolio-data/types';
-import type { PositionsWorkspaceInput, PositionsWorkspaceModel, SymbolGroupViewModel } from './types';
+import type { ExistingIncomeOpportunity, PositionsWorkspaceInput, PositionsWorkspaceModel, SymbolGroupViewModel } from './types';
 import { aggregateFinancialValues, aggregatePnlPercentage, buildOptionInstrumentViewModel, classifySymbolComposition, compositionLabel, optionMidpointValue } from './valuation';
 
 function finiteSum(values: Array<number | null | undefined>): number | null {
@@ -10,6 +10,58 @@ function finiteSum(values: Array<number | null | undefined>): number | null {
 
 function optionMarketValue(position: Position): number | null {
   return optionMidpointValue(position);
+}
+
+function snapshotFreshness(input: PositionsWorkspaceInput): string {
+  if (input.snapshot?.freshness === 'current' && input.snapshot.dataQuality.status === 'ok') return 'Current broker evidence';
+  return input.snapshot?.dataQuality.unavailableReason ?? input.snapshotDataQuality.unavailableReason ?? 'Broker evidence is unavailable or not current';
+}
+
+function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncomeOpportunity[] {
+  const snapshot = input.snapshot;
+  const snapshotReady = snapshot?.freshness === 'current' && snapshot.dataQuality.status === 'ok' && Boolean(snapshot.accountNumber);
+  const freshness = snapshotFreshness(input);
+  const options = snapshot?.options ?? input.positions;
+  const opportunities: ExistingIncomeOpportunity[] = options.map(position => {
+    const legs = Array.isArray(position.legs) ? position.legs : [];
+    const leg = legs.length === 1 ? legs[0] : null;
+    const exactContract = leg?.symbol?.trim() || null;
+    const base = {
+      id: `pmcc:${position.key}`, kind: 'pmcc-short-call' as const, symbol: position.symbol,
+      positionKey: position.key, title: 'PMCC short call', freshness, exactContract,
+      sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
+    };
+    if (!snapshotReady) return { ...base, status: 'unavailable' as const, reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.' };
+    if (position.accountNumber !== snapshot!.accountNumber) return { ...base, status: 'not-eligible' as const, reason: 'Position account identity does not match the active broker account.' };
+    if (position.structureAmbiguous || legs.length !== 1) return { ...base, status: 'not-eligible' as const, reason: 'Position is multi-leg, structurally ambiguous, or missing leg evidence.' };
+    if (leg?.direction !== 'Long' || leg.optionType !== 'C' || !exactContract) {
+      return { ...base, status: 'not-eligible' as const, reason: leg?.optionType === 'P' ? 'A long put cannot serve as a PMCC long-call base.' : 'Position is not an exact single long call.' };
+    }
+    return { ...base, status: 'eligible' as const, reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.' };
+  });
+
+  const capacityReport = snapshot ? buildSnapshotCapacityReport(snapshot) : null;
+  for (const holding of snapshot?.equities ?? []) {
+    const capacity = capacityReport?.status === 'ok' ? capacityReport.bySymbol[holding.symbol] : null;
+    const base = {
+      id: `covered-call:${holding.symbol}`, kind: 'covered-call' as const, symbol: holding.symbol,
+      positionKey: null, title: 'Covered call', freshness, exactContract: null,
+      sharesOwned: holding.direction === 'Long' ? holding.quantity : 0,
+      allocatedContracts: capacity?.existingShortCallContracts ?? null,
+      reservedContracts: capacity?.workingShortCallContracts ?? null,
+      availableContracts: capacity?.availableCoveredContracts ?? null,
+    };
+    if (!snapshotReady || capacityReport?.status !== 'ok') {
+      opportunities.push({ ...base, status: 'unavailable', reason: 'Current share and short-call commitment evidence is required to verify covered-call capacity.' });
+    } else if (holding.direction !== 'Long' || holding.quantity <= 0) {
+      opportunities.push({ ...base, status: 'not-eligible', reason: 'No long shares are available to cover a call.' });
+    } else if (!capacity || capacity.availableCoveredContracts <= 0) {
+      opportunities.push({ ...base, status: 'no-capacity', reason: 'Fully covered / no available capacity after existing and working short calls.' });
+    } else {
+      opportunities.push({ ...base, status: 'eligible', reason: 'Share capacity is verified. Short-call timing has not yet been evaluated.' });
+    }
+  }
+  return opportunities;
 }
 
 export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): PositionsWorkspaceModel {
@@ -78,5 +130,6 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     dataQuality: snapshot?.dataQuality ?? input.snapshotDataQuality,
     symbolGroups,
     analysisRows: input.positions.map(position => ({ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: Boolean(position.needsClose || position.structureAmbiguous || position.recommendation && position.recommendation.kind !== 'hold') })),
+    incomeOpportunities: buildIncomeOpportunities(input),
   };
 }

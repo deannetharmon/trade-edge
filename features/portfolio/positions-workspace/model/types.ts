@@ -82,6 +82,30 @@ export interface PositionAnalysisRowViewModel {
   needsAttention: boolean;
 }
 
+export type ExistingIncomeOpportunityKind = 'pmcc-short-call' | 'covered-call';
+export type ExistingIncomeOpportunityStatus = 'eligible' | 'no-capacity' | 'not-eligible' | 'unavailable';
+
+/**
+ * A portfolio-first, review-only income opportunity. This deliberately does
+ * not assert that writing a call is attractive; timing policy is evaluated in
+ * a later approved slice.
+ */
+export interface ExistingIncomeOpportunity {
+  id: string;
+  kind: ExistingIncomeOpportunityKind;
+  status: ExistingIncomeOpportunityStatus;
+  symbol: string;
+  positionKey: string | null;
+  title: string;
+  reason: string;
+  freshness: string;
+  exactContract: string | null;
+  sharesOwned: number | null;
+  allocatedContracts: number | null;
+  reservedContracts: number | null;
+  availableContracts: number | null;
+}
+
 export interface PositionsWorkspaceModel {
   accountNumber: string | null;
   snapshotAsOf: string | null;
@@ -89,6 +113,7 @@ export interface PositionsWorkspaceModel {
   dataQuality: SnapshotDataQuality;
   symbolGroups: SymbolGroupViewModel[];
   analysisRows: PositionAnalysisRowViewModel[];
+  incomeOpportunities?: ExistingIncomeOpportunity[];
 }
 
 export interface PositionsWorkspaceInput {

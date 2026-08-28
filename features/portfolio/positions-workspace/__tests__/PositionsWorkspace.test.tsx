@@ -191,6 +191,28 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
+  it('shows portfolio-first income eligibility and keeps its review explicitly non-actionable', async () => {
+    const user = userEvent.setup();
+    const next = {
+      ...model,
+      incomeOpportunities: [{
+        id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'eligible', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call',
+        reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', freshness: 'Current broker evidence', exactContract: 'AAPL  270618C00150000',
+        sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
+      }, {
+        id: 'covered-call:AAPL', kind: 'covered-call', status: 'no-capacity', symbol: 'AAPL', positionKey: null, title: 'Covered call',
+        reason: 'Fully covered / no available capacity after existing and working short calls.', freshness: 'Current broker evidence', exactContract: null,
+        sharesOwned: 100, allocatedContracts: 1, reservedContracts: 0, availableContracts: 0,
+      }],
+    } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('region', { name: 'Existing-position income eligibility' })).toBeInTheDocument();
+    expect(screen.getByText('Fully covered / no available capacity')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Review' }));
+    expect(screen.getByRole('status')).toHaveTextContent('no recommendation, ticket, or order has been created');
+  });
+
   it('saves notes on Enter, accepts up to 150 characters, and restores saved notes after remount', async () => {
     const store: Record<string, string> = {};
     vi.mocked(fetch).mockImplementation(async (_input, init) => {
