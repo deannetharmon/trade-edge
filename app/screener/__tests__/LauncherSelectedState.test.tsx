@@ -201,14 +201,11 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     await waitFor(() => expectOnlyPressed('cc'));
   });
 
-  it('5. a PMCC session fills only FIND PMCCs', async () => {
-    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
+  it('5. FIND PMCCs does not open the obsolete long-leg configuration dialog', async () => {
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
-    await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
-    await waitFor(() => expectOnlyPressed('pmcc'));
+    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
   });
 
   it('6. a restored CSP session selects FIND CSPs, not FIND SPREADS', async () => {
@@ -301,27 +298,21 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     expectOnlyPressed('cc');
   });
 
-  it('13. a completed PMCC session survives opening and cancelling an unrelated CC modal', async () => {
+  it('13. PMCC direct launch does not interfere with an unrelated CC modal', async () => {
     // Closes the one gap not already covered by test 8 (which checks
     // *selection state* survives an unrelated modal open/cancel) -- this
     // checks the actual *result content* survives too, not just which
     // launcher button is highlighted.
-    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
     renderScreener();
     await addToUniverse('NVDA');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
-    await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
-    await waitFor(() => expectOnlyPressed('pmcc'));
-    const resultCountBefore = screen.getAllByText(/NVDA/i).length;
 
     await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
     const ccModal = await screen.findByRole('dialog', { name: /COVERED CALL SCAN/i });
     await userEvent.click(within(ccModal).getByRole('button', { name: /cancel/i }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /COVERED CALL SCAN/i })).not.toBeInTheDocument());
 
-    expectOnlyPressed('pmcc');
-    expect(screen.getAllByText(/NVDA/i).length).toBe(resultCountBefore);
+    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
   });
 
   it('9. exactly one enabled launcher can be selected at a time', async () => {
@@ -339,11 +330,11 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     });
   });
 
-  it('10. FIND LEAPS — COMING SOON remains disabled and does not use an active pressed state', async () => {
+  it('10. FIND LEAPS is enabled with selected tickers and does not use an active pressed state', async () => {
     renderScreener();
     await addToUniverse('NVDA');
     const findLeaps = await screen.findByRole('button', { name: /FIND LEAPS/i });
-    expect(findLeaps).toBeDisabled();
+    expect(findLeaps).toBeEnabled();
     expect(findLeaps).not.toHaveAttribute('aria-pressed', 'true');
   });
 

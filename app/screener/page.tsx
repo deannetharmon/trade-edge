@@ -147,7 +147,6 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
-import { PmccScanModal, type PmccScanCriteria } from '@/features/screener/components/PmccScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -6449,30 +6448,9 @@ export default function Home() {
   const [cspCashOverride, setCspCashOverride] = useState('');
   const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
-  const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
-  const [pmccLongDteMax, setPmccLongDteMax] = useState(PMCC_LONG_DTE_MAX);
-  const selectHeldPmccCandidates = useCallback((dte: { shortMin: number; shortMax: number; longMin: number; longMax: number }) => {
-    if (portfolioSnapshot?.freshness === 'current' && portfolioSnapshot.dataQuality.status === 'ok') {
-      return selectHeldPmccLongCandidates(portfolioSnapshot, dte);
-    }
-    return selectHeldPmccLongCandidatesFromPositions(portfolioPositions, dte);
-  }, [portfolioPositions, portfolioSnapshot]);
-  const heldPmccCandidates = useMemo(
-    () => selectHeldPmccCandidates({
-      shortMin: pmccShortDteMin, shortMax: pmccShortDteMax,
-      longMin: pmccLongDteMin, longMax: pmccLongDteMax,
-    }).candidates,
-    [selectHeldPmccCandidates, pmccShortDteMin, pmccShortDteMax, pmccLongDteMin, pmccLongDteMax],
-  );
-  // Discovery is deliberately broader than the active scan range so the
-  // launcher can explain why a held LEAPS is not currently in scope instead
-  // of misleadingly reporting that the portfolio contains none.
-  const discoveredHeldPmccCandidates = useMemo(
-    () => selectHeldPmccCandidates({
-      shortMin: 0, shortMax: 0, longMin: 0, longMax: 10_000,
-    }).candidates,
-    [selectHeldPmccCandidates],
-  );
+  // PMCC discovery always starts with every eligible long call the account
+  // already owns. Long-call DTE and delta are not finder inputs here: those
+  // belong to the separate Find LEAPS workflow.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(LS_PMCC_DTE);
@@ -6480,13 +6458,8 @@ export default function Home() {
       const parsed = JSON.parse(saved);
       if (Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
       if (Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
-      if (Number.isFinite(parsed.longMin)) setPmccLongDteMin(parsed.longMin);
-      if (Number.isFinite(parsed.longMax)) setPmccLongDteMax(parsed.longMax);
     } catch {}
   }, []);
-  const persistPmccDteRanges = (ranges: { shortMin: number; shortMax: number; longMin: number; longMax: number }) => {
-    try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify(ranges)); } catch {}
-  };
   // TE-0007C — CC's scan universe comes from verified account holdings, not
   // a free-form ticker list (unlike CSP/PMCC), so its state shape differs:
   // no `ccTickers` string, just the holdings the API reports plus a
@@ -6535,8 +6508,12 @@ export default function Home() {
   // the persisted-defaults/preset layer CC intentionally doesn't have yet.
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
-  const [showPmccScanModal, setShowPmccScanModal] = useState(false);
   const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
+  const [leapsResults, setLeapsResults] = useState<Array<{
+    symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
+    openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
+  }>>([]);
+  const [showLeapsResults, setShowLeapsResults] = useState(false);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
@@ -7452,9 +7429,11 @@ export default function Home() {
   // prior strategy results. TE-0007: no longer reads a separate PMCC-only
   // ticker list; uses the same normalized array every other strategy
   // button reads.
-  const runPMCCScan = async (submitted?: PmccScanCriteria) => {
+  const runPMCCScan = async () => {
+    // FIND PMCCs manages existing long calls. Selected tickers narrow the
+    // broker-discovered holdings; they never create a new long-leg search.
     const pmcc = opportunityUniverse;
-    const dte = submitted?.dte ?? { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax };
+    const dte = { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: 0, longMax: 10_000 };
     if (!isValidPmccDteRanges(dte)) {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
       return;
@@ -7464,22 +7443,24 @@ export default function Home() {
     // positions; use those rather than treating an intentionally-null
     // optional snapshot as an empty portfolio.
     const heldSnapshot = ccCapacityShadowSnapshotRef.current;
-    const heldSelection = heldSnapshot?.freshness === 'current' && heldSnapshot.dataQuality.status === 'ok'
-      ? selectHeldPmccLongCandidates(heldSnapshot, dte)
-      : selectHeldPmccLongCandidatesFromPositions(pmccPortfolioPositionsRef.current, dte);
-    const scanSymbols = Array.from(new Set([...pmcc, ...heldSelection.candidates.map(candidate => candidate.underlyingSymbol)]));
+    const discoveryRange = { shortMin: dte.shortMin, shortMax: dte.shortMax, longMin: 0, longMax: 10_000 };
+    const discoveredSelection = heldSnapshot?.freshness === 'current' && heldSnapshot.dataQuality.status === 'ok'
+      ? selectHeldPmccLongCandidates(heldSnapshot, discoveryRange)
+      : selectHeldPmccLongCandidatesFromPositions(pmccPortfolioPositionsRef.current, discoveryRange);
+    const heldCandidates = pmcc.length
+      ? discoveredSelection.candidates.filter(candidate => pmcc.includes(candidate.underlyingSymbol))
+      : discoveredSelection.candidates;
+    const heldSelection = { ...discoveredSelection, candidates: heldCandidates };
+    const scanSymbols = Array.from(new Set(heldCandidates.map(candidate => candidate.underlyingSymbol)));
     if (!scanSymbols.length) {
-      setError('No tickers in the Opportunity Universe or eligible held long calls in the active portfolio.');
+      setError(pmcc.length
+        ? 'No eligible held long calls match the selected tickers in the active portfolio.'
+        : 'No eligible held long calls were found in the active portfolio.');
       return;
     }
+    const heldLongDtes = heldCandidates.map(candidate => candidate.dte);
+    const effectiveDte = { ...dte, longMin: Math.min(...heldLongDtes), longMax: Math.max(...heldLongDtes) };
     setError('');
-    if (submitted) {
-      setPmccShortDteMin(submitted.dte.shortMin);
-      setPmccShortDteMax(submitted.dte.shortMax);
-      setPmccLongDteMin(submitted.dte.longMin);
-      setPmccLongDteMax(submitted.dte.longMax);
-      persistPmccDteRanges(submitted.dte);
-    }
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setLoading(true);
@@ -7492,12 +7473,15 @@ export default function Home() {
     const pmccAsOf = new Date();
     const pmccMarketSession = derivePmccMarketSession(pmccAsOf);
     const pmccCriteria = {
-      dte,
-      longDelta: submitted?.longDelta ?? { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
-      shortDelta: submitted?.shortDelta ?? { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
-      longOiMin: submitted?.longOiMin ?? DEFAULT_PMCC_LONG_OI_MIN,
-      shortOiMin: submitted?.shortOiMin ?? DEFAULT_PMCC_SHORT_OI_MIN,
-      requireDebitBelowWidth: submitted?.requireDebitBelowWidth ?? true,
+      dte: effectiveDte,
+      // The long leg is already owned. These criteria are retained only for
+      // the pairing engine's audit record; they are not user filters for a
+      // held position and cannot exclude a held LEAPS from discovery.
+      longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
+      shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
+      longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+      shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
+      requireDebitBelowWidth: true,
       quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY },
       limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
     };
@@ -7537,8 +7521,8 @@ export default function Home() {
           acquire: async () => {
             const [pmccChain, price] = await Promise.all([
               getPMCCChain(symbol, token, {
-                shortMin: dte.shortMin, shortMax: dte.shortMax,
-                longMin: dte.longMin, longMax: dte.longMax,
+                shortMin: effectiveDte.shortMin, shortMax: effectiveDte.shortMax,
+                longMin: effectiveDte.longMin, longMax: effectiveDte.longMax,
               }),
               getQuote(symbol, token),
             ]);
@@ -7551,7 +7535,7 @@ export default function Home() {
                 symbol, price: price as number, ivr: metrics.ivRank ?? null,
                 earningsDate: metrics.earningsExpectedDate ?? null,
                 trendResult, underlyingType: pmccChain.classification,
-                requireTrendAlignmentForPmcc: submitted?.requireTrendAlignmentForPmcc ?? true,
+                requireTrendAlignmentForPmcc: true,
               },
             };
           },
@@ -7618,6 +7602,44 @@ export default function Home() {
         setStatus('');
         setLoading(false);
       }
+    }
+  };
+
+  // Find LEAPS is deliberately independent from PMCC. It discovers possible
+  // new long calls only for trader-supplied tickers; it never reads holdings
+  // and never pairs a short call.
+  const runLeapsScan = async () => {
+    if (!opportunityUniverse.length) {
+      setError('Add at least one ticker to the Opportunity Universe before finding new LEAPS candidates.');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    setStatus('Finding LEAPS candidates...');
+    try {
+      const token = await getAccessToken();
+      const found = (await Promise.all(opportunityUniverse.map(async symbol => {
+        const chain = await getPMCCChain(symbol, token, {
+          shortMin: 0, shortMax: 0, longMin: PMCC_LONG_DTE_MIN, longMax: PMCC_LONG_DTE_MAX,
+        });
+        return adaptPmccChain(symbol, chain).longLegs
+          .filter(leg => leg.optionType === 'C'
+            && leg.delta != null
+            && leg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min
+            && leg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max
+            && (leg.openInterest ?? 0) >= DEFAULT_PMCC_LONG_OI_MIN)
+          .map(leg => ({
+            symbol, expiration: leg.expiration, dte: daysUntil(leg.expiration), strike: leg.strike,
+            delta: leg.delta, openInterest: leg.openInterest, bid: leg.bid, ask: leg.ask, occSymbol: leg.occSymbol,
+          }));
+      }))).flat().sort((a, b) => a.symbol.localeCompare(b.symbol) || a.dte - b.dte || a.strike - b.strike);
+      setLeapsResults(found);
+      setShowLeapsResults(true);
+    } catch (scanError: any) {
+      setError(scanError?.message ?? 'Unable to load LEAPS candidates from broker market data.');
+    } finally {
+      setStatus('');
+      setLoading(false);
     }
   };
   
@@ -7899,14 +7921,10 @@ export default function Home() {
       const allScannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
       const eligibleSymbols = allScannable.map(h => h.symbol);
 
-      // SCREENER-RESULTS-0001 — an empty ORDINARY Opportunity Universe must
-      // never silently behave as "Scan all eligible holdings." Previously,
-      // `universeNarrows` was false whenever the universe was empty
-      // (`opportunityUniverse.length > 0 && !bypassUniverse`), which made
-      // `scannable` fall through to `allScannable` — i.e. every eligible
-      // holding — even though the trader never asked for that. The override
-      // must be an explicit choice (bypassUniverse === true), never inferred
-      // from an empty list.
+      // An empty selected-ticker list means the account is the scope. The
+      // launcher makes this explicit by passing bypassUniverse=true; direct
+      // callers retain the guard so they cannot widen a selected list by
+      // accident.
       if (!bypassUniverse && opportunityUniverse.length === 0) {
         const msg = 'Your Opportunity Universe is empty. Add tickers to it, or use "Scan all eligible holdings" to scan every covered-call-eligible holding.';
         setError(msg);
@@ -8341,9 +8359,9 @@ export default function Home() {
                 label="FIND CCs"
                 isSelected={activeSession?.requestedStrategy === 'cc'}
                 isRunning={runningLauncher === 'cc'}
-                onClick={() => { setCcBypassUniverse(false); setShowCcScanModal(true); void loadCcCapacity(); }}
+                onClick={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
                 disabled={loading}
-                title="Uses verified owned shares. The Opportunity Universe can narrow eligible holdings but cannot add uncovered symbols."
+                title="Scans verified stock holdings. Selected tickers narrow holdings; with none selected, scans every eligible holding."
               >
                 {runningLauncher === 'cc' ? 'SCANNING...' : 'FIND CCs'}
               </LauncherButton>
@@ -8352,23 +8370,25 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={() => setShowPmccScanModal(true)}
+                onClick={() => void runPMCCScan()}
                 disabled={loading}
-                title="Scans selected tickers and eligible held long calls from your portfolio. No ticker is required to review portfolio LEAPS."
+                title="Scans short calls against eligible long calls already held in your portfolio. Selected tickers only narrow those holdings."
               >
                 {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
-              <button disabled
-                title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
-                className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border ${th.border} ${th.textFaint} opacity-50 cursor-not-allowed text-[10px]`}>
-                FIND LEAPS — COMING SOON
-              </button>
+              <LauncherButton
+                strategy="spreads"
+                label="FIND LEAPS"
+                isSelected={false}
+                isRunning={false}
+                onClick={() => void runLeapsScan()}
+                disabled={loading || !opportunityUniverse.length}
+                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : 'Finds new long-call candidates for the selected tickers.'}
+              >
+                FIND LEAPS
+              </LauncherButton>
             </div>
 
-            {/* PMCC DTE SETTINGS disclosure removed -- superseded by
-                PmccScanModal, which now owns these same fields (same
-                aria-labels preserved) inside the pre-scan modal FIND
-                PMCCs opens, matching CSP/CC/Spreads' pattern. */}
             <details className="text-[9px]">
               <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>CSP SETTINGS</summary>
               <div className="mt-2">
@@ -8408,21 +8428,12 @@ export default function Home() {
               </p>
             ) : ccEligibleHoldings.length === 0 ? (
               <p className={`text-[10px] ${th.textFaint}`}>
-                {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — run a scan to check your account.'}
+                {ccHoldingsLoading ? 'Loading eligible holdings…' : 'No eligible holdings loaded yet — choose FIND CCs to check your account.'}
               </p>
             ) : opportunityUniverse.length === 0 ? (
-              // SCREENER-RESULTS-0001 — an empty Opportunity Universe no
-              // longer silently scans every eligible holding (that was the
-              // exact bug this ticket fixes: "an empty ordinary Opportunity
-              // Universe must not silently behave as the override"). This
-              // is the explicit affordance for the override in that case —
-              // previously there was no dedicated empty-universe branch at
-              // all, so the override button never rendered here; the old
-              // (buggy) auto-scan-all behavior was the only way to reach
-              // every eligible holding from an empty universe.
               <div className="space-y-1.5">
                 <p className={`text-[10px] ${th.textFaint}`}>
-                  Your Opportunity Universe is empty. FIND CCs won&apos;t scan anything until you add tickers, or you can scan every eligible holding directly:
+                  FIND CCs scans every eligible stock holding when no ticker is selected. Add tickers only to narrow the account holdings it checks.
                 </p>
                 <button onClick={() => runCcScan(true)} disabled={loading}
                   className="w-full text-[10px] font-bold tracking-widest py-1.5 rounded-lg border border-cyan-500 text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-40">
@@ -8770,7 +8781,7 @@ export default function Home() {
                   )}
                   <button onClick={downloadCSV} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>↓ CSV</button>
                   {activeSession?.requestedStrategy === 'pmcc' ? (
-                    <button onClick={() => setShowPmccScanModal(true)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
+                    <button onClick={() => void runPMCCScan()} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
                       RESCAN PMCC ↺
                     </button>
                   ) : (
@@ -9692,29 +9703,13 @@ export default function Home() {
           }}
         />
       )}
-      {showPmccScanModal && (
-        <PmccScanModal
-          th={th}
-          selectedTickerCount={opportunityUniverse.length}
-          heldLongDtes={discoveredHeldPmccCandidates.map(candidate => candidate.dte)}
-          initial={{
-            dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
-            longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
-            shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
-            longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
-            shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
-            requireDebitBelowWidth: true,
-            requireTrendAlignmentForPmcc: true,
-          }}
-          onClose={() => {
-            setShowPmccScanModal(false);
-            requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND PMCCs"]')?.focus());
-          }}
-          onRun={(criteria) => {
-            setShowPmccScanModal(false);
-            void runPMCCScan(criteria);
-          }}
-        />
+      {showLeapsResults && (
+        <div role="dialog" aria-label="LEAPS CANDIDATES" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
+          <div className={`max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl border ${th.border} ${th.card} p-5`}>
+            <div className="mb-4 flex items-start justify-between gap-4"><div><h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2><p className={`mt-1 text-[10px] ${th.textMuted}`}>{leapsResults.length ? 'New long-call candidates only; review before opening a trade.' : 'No candidates matched the current DTE, delta, and liquidity criteria.'}</p></div><button onClick={() => setShowLeapsResults(false)} aria-label="Close LEAPS candidates" className={`rounded border ${th.border} px-2 py-1 ${th.textMuted}`}>×</button></div>
+            {leapsResults.length > 0 && <div className="space-y-2">{leapsResults.map(candidate => <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`} className={`grid grid-cols-5 gap-2 rounded border ${th.border} p-2 text-[11px]`}><span className={`${th.text} font-bold`}>{candidate.symbol}</span><span>{candidate.expiration}<br /><span className={th.textMuted}>{candidate.dte} DTE</span></span><span>${candidate.strike.toFixed(2)} C</span><span>Δ {candidate.delta?.toFixed(2) ?? '—'}<br /><span className={th.textMuted}>OI {candidate.openInterest ?? '—'}</span></span><span>Bid {candidate.bid?.toFixed(2) ?? '—'}<br />Ask {candidate.ask?.toFixed(2) ?? '—'}</span></div>)}</div>}
+          </div>
+        </div>
       )}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>

@@ -239,7 +239,7 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     expect(csp).toHaveAttribute('aria-busy', 'false');
   });
 
-  it('7. a completed CC session and a completed PMCC session both receive the same white/black selected treatment', async () => {
+  it('7. a completed CC session receives the selected white/black treatment', async () => {
     getCoveredCallCapacityReportMock.mockResolvedValue({ status: 'ok', bySymbol: { NKE: holding() }, warnings: [] });
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol)));
     renderScreener();
@@ -255,15 +255,6 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     // corrects) survives alongside the new white treatment.
     expect(cc.className).not.toMatch(/bg-cyan-500(?!\/)/);
 
-    getMarketMetricsMock.mockClear();
-    await addToUniverse('AAPL');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
-    await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
-    const { pmcc } = launcherButtons();
-    await waitFor(() => expect(pmcc).toHaveAttribute('aria-pressed', 'true'));
-    expect(pmcc.className).toMatch(/bg-white/);
-    expect(pmcc.className).toMatch(/text-black/);
   });
 
   it('8. no checkmark glyph remains anywhere in the launcher DOM', async () => {
@@ -279,14 +270,14 @@ describe('SCREENER-LAUNCHER-0001 corrective: isolated running label', () => {
     expect(csp.querySelector('span')).toBeNull();
   });
 
-  it('9. FIND LEAPS remains disabled and unchanged by this pass', async () => {
+  it('9. FIND LEAPS is enabled when tickers are selected', async () => {
     renderScreener();
     await addToUniverse('NVDA');
     const leaps = await screen.findByRole('button', { name: /FIND LEAPS/i });
-    expect(leaps).toBeDisabled();
-    expect(leaps).toHaveTextContent('FIND LEAPS — COMING SOON');
-    expect(leaps).not.toHaveAttribute('aria-pressed');
-    expect(leaps).not.toHaveAttribute('aria-busy');
+    expect(leaps).toBeEnabled();
+    expect(leaps).toHaveTextContent('FIND LEAPS');
+    expect(leaps).toHaveAttribute('aria-pressed', 'false');
+    expect(leaps).toHaveAttribute('aria-busy', 'false');
   });
 
   it('10. existing click handlers and disabled conditions remain intact', async () => {

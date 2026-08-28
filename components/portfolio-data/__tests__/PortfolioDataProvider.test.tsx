@@ -88,7 +88,7 @@ describe('PortfolioDataProvider refresh contract', () => {
       await pending;
     });
 
-    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, []);
+    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, [], {});
     expect(result).toEqual({ status: 'success', positions: [recomputed] });
     expect(screen.getByTestId('keys')).toHaveTextContent('MU');
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
@@ -164,7 +164,7 @@ describe('PortfolioDataProvider refresh contract', () => {
     let result!: PortfolioRefreshResult;
     await act(async () => { result = await context.refresh(); });
 
-    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, []);
+    expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, [], {});
     expect(result).toEqual({ status: 'success', positions: [recomputed] });
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
   });
@@ -194,7 +194,7 @@ describe('PortfolioDataProvider refresh contract', () => {
       expect(result.positions[0].pricingDecisionEvidence?.marketableDecisionEligible).toBe(false);
       expect(result.positions[0].recommendation?.primaryReason).toContain('current broker leg quotes are incomplete');
     }
-    expect(acquisition.attachSnapshotHistory).toHaveBeenLastCalledWith([incomplete], {}, [previous]);
+    expect(acquisition.attachSnapshotHistory).toHaveBeenLastCalledWith([incomplete], {}, [previous], {});
 
     const eligible = position('MU', 'watch');
     acquisition.loadPositions.mockResolvedValue({ positions: [eligible], pendingOrders: [] });

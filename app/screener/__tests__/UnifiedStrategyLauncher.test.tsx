@@ -6,10 +6,8 @@
 // mocked/spied, everything else is the real component.
 //
 // Covers the ticket's two required test groups:
-//   - Launcher routing (8): every strategy button reads the same canonical
-//     Opportunity Universe, CSP/PMCC no longer have independent ticker
-//     state, empty-universe disabling, LEAPS deferral, mode/job-kind
-//     correctness.
+//   - Launcher routing: LEAPS uses supplied tickers; CC and PMCC discover
+//     eligible bases from the account and use supplied tickers only to narrow.
 //   - Covered Call intersection (8): the universe can narrow CC's eligible
 //     holdings but can never create eligibility.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -94,13 +92,12 @@ describe('TE-0007: launcher routing', () => {
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'MU']));
   });
 
-  it('3. Find PMCCs passes the same canonical universe to the PMCC scan', async () => {
+  it('3. Find PMCCs starts directly from held long calls and never opens a long-leg configuration dialog', async () => {
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
-    await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
-    expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NVDA', 'AAPL']));
+    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/No eligible held long calls match the selected tickers/i)).toBeInTheDocument();
   });
 
   it('4. CSP and PMCC no longer maintain independent ticker states — no separate LIST cards remain', async () => {
@@ -117,17 +114,12 @@ describe('TE-0007: launcher routing', () => {
     expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled();
   });
 
-  it('6. Find LEAPS is disabled and invokes no scanner', async () => {
+  it('6. Find LEAPS is enabled for a supplied ticker universe', async () => {
     renderScreener();
     await addToUniverse('NVDA');
     const findLeaps = await screen.findByRole('button', { name: /FIND LEAPS/i });
-    expect(findLeaps).toBeDisabled();
-    expect(findLeaps).toHaveAttribute(
-      'title',
-      'Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately.'
-    );
-    await userEvent.click(findLeaps);
-    expect(getMarketMetricsMock).not.toHaveBeenCalled();
+    expect(findLeaps).toBeEnabled();
+    expect(findLeaps).toHaveAttribute('title', 'Finds new long-call candidates for the selected tickers.');
   });
 
   it('7. confirming the default CSP modal selection switches the visible results mode to filter', async () => {
@@ -184,19 +176,10 @@ describe('TE-0007: Covered Call universe intersection', () => {
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(['NKE']);
   });
 
-  it('2. empty universe never implicitly scans all eligible holdings; the explicit override does', async () => {
-    // SCREENER-RESULTS-0001 — an empty ordinary Opportunity Universe must
-    // never silently behave as "Scan all eligible holdings." This test used
-    // to assert exactly that (buggy) implicit behavior; it now asserts the
-    // ticket-mandated fix: no scan happens until the trader either adds
-    // tickers or explicitly clicks the override.
+  it('2. empty selected-ticker list scans every verified eligible stock holding', async () => {
     mockHoldings({ NKE: holding(), AAPL: holding() });
     renderScreener();
     await clickFindCoveredCalls();
-    expect(getMarketMetricsMock).not.toHaveBeenCalled();
-
-    const bypassBtn = await screen.findByRole('button', { name: /Scan all eligible holdings/i });
-    await userEvent.click(bypassBtn);
     await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'AAPL']));
     expect(getMarketMetricsMock.mock.calls[0][0]).toHaveLength(2);

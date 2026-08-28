@@ -40,8 +40,11 @@ type RawPositionLike = RawEquityPositionLike & RawShortCallPositionLike;
  * NEXT_PUBLIC_ prefix is required since this flag is read client-side (PortfolioDataProvider is a
  * 'use client' component).
  */
+// The canonical account snapshot is now required by Portfolio, Find CCs,
+// and Find PMCCs. A deployment can only opt out explicitly while rolling
+// back; an unset variable must never silently hide stock holdings.
 export const LCC_0001A_SNAPSHOT_ENABLED =
-  process.env.NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED === 'true';
+  process.env.NEXT_PUBLIC_LCC_0001A_SNAPSHOT_ENABLED !== 'false';
 
 /**
  * Acquires and normalizes one account-scoped PortfolioSnapshot. Never throws for expected
