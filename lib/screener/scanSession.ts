@@ -876,7 +876,19 @@ function isValidPmccResult(value: Record<string, unknown>, snapshot: PmccScanSna
   if (!isValidPmccLeg(pair.longLeg, 'long', value.symbol) || !isValidPmccLeg(pair.shortLeg, 'short', value.symbol)) return false;
   const longLeg = pair.longLeg as Record<string, unknown>;
   const shortLeg = pair.shortLeg as Record<string, unknown>;
-  if (pair.pairId !== `${longLeg.candidateId}::${shortLeg.candidateId}`) return false;
+  const canonicalPairId = `${longLeg.candidateId}::${shortLeg.candidateId}`;
+  const entryMode = pair.entryMode;
+  if (entryMode == null || entryMode === 'new-pmcc') {
+    if (pair.pairId !== canonicalPairId || pair.heldLongLeg != null) return false;
+  } else if (entryMode === 'covered-short-call-against-held-leaps') {
+    const held = pair.heldLongLeg as Record<string, unknown> | null;
+    if (held == null
+      || typeof held.accountNumber !== 'string' || held.accountNumber.length === 0
+      || typeof held.positionKey !== 'string' || held.positionKey.length === 0
+      || !Number.isInteger(held.quantity) || Number(held.quantity) <= 0
+      || held.occSymbol !== longLeg.occSymbol
+      || pair.pairId !== `${canonicalPairId}:held:${held.positionKey}`) return false;
+  } else return false;
   return pair.metrics === null ? pair.insufficientData === true : isValidPmccMetrics(pair.metrics);
 }
 

@@ -127,3 +127,37 @@ deployed as a separate commit so it is easy to diagnose and roll back.
 
 Once approved, implementation will be delivered with the acceptance tests
 above and a separate deployment commit for the browser-to-server fetch repair.
+
+## Implementation update — 2026-08-27
+
+**Disposition:** Implemented as the approved phase-1, review-only workflow;
+awaiting Dean's review and deployment.
+
+- `lib/scans/pmccHeldLeaps.ts` now selects only current, active-account,
+  unambiguous, single-leg long calls and records exclusion reasons.
+- Held contracts are matched to the live chain by OCC identity, underlying,
+  call type, expiration, and strike. An unmatched held contract produces an
+  audit result; it cannot fall back to a new-long PMCC candidate.
+- Held pairs are marked `covered-short-call-against-held-leaps`, include the
+  attributable account/position/quantity metadata, and bypass the new-entry
+  long open-interest floor only. Their DTE, delta, quote, and short-leg
+  requirements remain enforced.
+- The PMCC card identifies the long call as **HELD**, discloses the exact
+  contract and proposed short-call quote/economics, and renders a review-only
+  notice instead of a trade button.
+- The existing PMCC two-leg ticket has a defensive runtime guard that rejects
+  a held-LEAPS result even if it were invoked outside the normal UI path.
+- Persisted scan-session validation verifies the held-contract binding and
+  rejects a modified contract identity.
+
+Validation completed:
+
+```text
+npx vitest run lib/scans/__tests__/pmccHeldLeaps.test.ts lib/scans/__tests__/pmccProduction.test.ts
+# 19 tests passed
+npx tsc --noEmit --incremental false
+git diff --check
+```
+
+The browser-to-server Tastytrade scanner fetch repair remains a separate,
+small commit as proposed.

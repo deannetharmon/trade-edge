@@ -4,6 +4,7 @@ import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccC
 import { pairPmccCandidates } from '../pmccPairing';
 import { buildPmccFailureAuditResult, buildPmccScreenResults, derivePmccMarketSession, pmccAuditReasons, PmccProductionError, runPmccProduction, runPmccSymbolProduction } from '../pmccProduction';
 import type { PmccChainLeg, PmccPairingCriteria, PmccSessionResult } from '../pmccTypes';
+import type { HeldPmccLongCandidate } from '../pmccHeldLeaps';
 
 const asOf = new Date('2026-08-14T15:00:00.000Z');
 const criteria: PmccPairingCriteria = {
@@ -147,6 +148,57 @@ describe('PMCC production integration', () => {
       adapt,
       pair: vi.fn(() => { throw new Error('bad config'); }),
     })).toThrowError(PmccProductionError);
+  });
+
+  it('uses an exact held long as the only long candidate and marks the result review-only', () => {
+    const held: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'held-gs', underlyingSymbol: 'GS',
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', strike: 720, quantity: 2,
+    };
+    const results = runPmccProduction(
+      { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+      { adapt: vi.fn(() => ({ longLegs: [leg('long', 720), leg('long', 700)], shortLegs: [leg('short', 1070)] })), pair: pairPmccCandidates },
+      [held],
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].pmccPair).toMatchObject({
+      entryMode: 'covered-short-call-against-held-leaps',
+      heldLongLeg: { accountNumber: '5WT00001', positionKey: 'held-gs', quantity: 2 },
+      longLeg: { occSymbol: held.occSymbol },
+    });
+    expect(results[0].candidateId).toContain(':held:held-gs');
+  });
+
+  it('does not substitute a new long entry when the held contract is absent', () => {
+    const held: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',
+      occSymbol: 'missing', expiration: '2027-06-18', strike: 720, quantity: 1,
+    };
+    const results = runPmccProduction(
+      { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+      { adapt: vi.fn(() => ({ longLegs: [leg('long', 700)], shortLegs: [leg('short', 1070)] })), pair: pairPmccCandidates },
+      [held],
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].pmccPair).toBeUndefined();
+    expect(results[0].failReasons.join(' ')).toContain('could not be matched exactly');
+  });
+
+  it('persists held-long identity and rejects a corrupted held contract binding', () => {
+    const held: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'persisted-held', underlyingSymbol: 'GS',
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', strike: 720, quantity: 1,
+    };
+    const results = runPmccProduction(
+      { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+      { adapt: vi.fn(() => ({ longLegs: [leg('long', 720)], shortLegs: [leg('short', 1070)] })), pair: pairPmccCandidates }, [held],
+    );
+    let session = createScanSession({ mode: 'filter', requestedStrategy: 'pmcc', scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot });
+    session = completeSession(recordSymbolEvaluated(session, 'GS', results));
+    expect(validateSessionData(JSON.parse(JSON.stringify(session))).valid).toBe(true);
+    const corrupted = JSON.parse(JSON.stringify(session));
+    corrupted.results[0].pmccPair.heldLongLeg.occSymbol = 'wrong';
+    expect(validateSessionData(corrupted)).toMatchObject({ valid: false, errors: expect.arrayContaining(['INVALID_PMCC_RESULT']) });
   });
 
   it('derives deterministic NYSE session state including holidays', () => {

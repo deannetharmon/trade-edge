@@ -2,6 +2,7 @@ import type { CheckResult, ScreenResult, SpreadCandidate, TrendResult } from './
 import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
 import type { PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
+import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHeldLeaps';
 // PMCC-TREND-GATE-0001 -- cross-domain import (lib/scans -> lib/portfolio)
 // is intentional: technicalAlignmentForStrategy's own doc comment already
 // declares itself "the single source of truth for both the screener's
@@ -203,6 +204,7 @@ export function runPmccProduction(
   context: PmccProductionContext,
   snapshot: PmccScanSnapshot,
   dependencies: PmccProductionDependencies = { adapt: adaptPmccChain, pair: pairPmccCandidates },
+  heldLongCandidates: readonly HeldPmccLongCandidate[] = [],
 ): ScreenResult[] {
   let adapted: ReturnType<typeof adaptPmccChain>;
   try {
@@ -211,15 +213,46 @@ export function runPmccProduction(
     throw new PmccProductionError('CHAIN_ADAPTATION_FAILURE', error);
   }
   try {
+    const heldCandidatesForSymbol = heldLongCandidates.filter(candidate => candidate.underlyingSymbol === context.symbol);
+    const matchedHeldLongs = heldCandidatesForSymbol.flatMap(candidate => {
+      const match = matchHeldPmccLongCandidate(candidate, adapted.longLegs);
+      return match == null ? [] : [{ candidate, leg: match }];
+    });
+    // A portfolio-derived scan must not silently fall back to a fresh long
+    // entry when the owned contract is unavailable from the live chain.
+    if (heldCandidatesForSymbol.length > 0 && matchedHeldLongs.length === 0) {
+      return [buildPmccFailureAuditResult(
+        context, snapshot.asOf, 'CHAIN_ADAPTATION_FAILURE',
+        'Held long call could not be matched exactly in the live option chain',
+      )];
+    }
     const pairing = dependencies.pair({
       symbol: context.symbol,
       underlyingPrice: context.price,
-      longLegs: adapted.longLegs,
+      longLegs: matchedHeldLongs.length ? matchedHeldLongs.map(value => value.leg) : adapted.longLegs,
       shortLegs: adapted.shortLegs,
-      criteria: snapshot.criteria,
+      // OI is an entry-liquidity criterion for a newly purchased long. The
+      // held contract still exposes OI in the UI, but is not rejected solely
+      // for that new-entry floor.
+      criteria: matchedHeldLongs.length ? { ...snapshot.criteria, longOiMin: 0 } : snapshot.criteria,
       asOf: new Date(snapshot.asOf),
       marketSession: snapshot.marketSession,
     });
+    if (matchedHeldLongs.length) {
+      const heldByOcc = new Map(matchedHeldLongs.map(value => [value.leg.occSymbol, value.candidate]));
+      const annotate = (pair: PmccPairResult): PmccPairResult => {
+        const held = heldByOcc.get(pair.longLeg.occSymbol);
+        if (!held) return pair;
+        return {
+          ...pair,
+          pairId: `${pair.pairId}:held:${held.positionKey}`,
+          entryMode: 'covered-short-call-against-held-leaps',
+          heldLongLeg: { accountNumber: held.accountNumber, positionKey: held.positionKey, quantity: held.quantity, occSymbol: held.occSymbol },
+        };
+      };
+      pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);
+      pairing.nearMissPairs = pairing.nearMissPairs.map(annotate);
+    }
     return buildPmccScreenResults(pairing, context);
   } catch (error) {
     throw new PmccProductionError('PAIRING_ENGINE_FAILURE', error);
@@ -254,6 +287,7 @@ export async function runPmccSymbolProduction(args: {
   fallbackContext: Omit<PmccProductionContext, 'price'> & { price: number | null };
   acquire: () => Promise<{ chain: RawPmccChain; context: PmccProductionContext }>;
   dependencies?: PmccProductionDependencies;
+  heldLongCandidates?: readonly HeldPmccLongCandidate[];
 }): Promise<PmccSymbolProductionOutcome> {
   let acquired: { chain: RawPmccChain; context: PmccProductionContext };
   try {
@@ -273,7 +307,7 @@ export async function runPmccSymbolProduction(args: {
   try {
     return {
       status: 'evaluated',
-      results: runPmccProduction(acquired.chain, acquired.context, args.snapshot, args.dependencies),
+      results: runPmccProduction(acquired.chain, acquired.context, args.snapshot, args.dependencies, args.heldLongCandidates),
     };
   } catch (error) {
     const kind = error instanceof PmccProductionError ? error.stage : 'PAIRING_ENGINE_FAILURE';
@@ -286,5 +320,4 @@ export async function runPmccSymbolProduction(args: {
     };
   }
 }
-
 

@@ -43,6 +43,8 @@ import {
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib/scans/pmccTypes';
+import { selectHeldPmccLongCandidates } from '@/lib/scans/pmccHeldLeaps';
+import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computePmccScore } from '@/lib/scans/pmccScore';
@@ -2891,10 +2893,7 @@ function TradeModal({ result, th, onClose }: {
 }
 
 function buildPmccOrderLegs(pair: PmccPairResult): any[] {
-  return [
-    { 'instrument-type': 'Equity Option', symbol: pair.longLeg.occSymbol, quantity: 1, action: 'Buy to Open' },
-    { 'instrument-type': 'Equity Option', symbol: pair.shortLeg.occSymbol, quantity: 1, action: 'Sell to Open' },
-  ];
+  return buildNewPmccEntryOrderLegs(pair);
 }
 
 // PmccTradeModal — a real fork of TradeModal, not a shared component with
@@ -2919,6 +2918,15 @@ function PmccTradeModal({ result, th, onClose }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
 }) {
   const pair = result.pmccPair!;
+  if (pair.entryMode === 'covered-short-call-against-held-leaps') {
+    return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+      <div className={`w-full max-w-md rounded-xl border ${th.border} ${th.sidebar} p-5`} role="dialog" aria-modal="true">
+        <h2 className={`text-sm font-bold ${th.text}`}>HELD LEAPS REVIEW ONLY</h2>
+        <p className={`mt-3 text-sm ${th.textMuted}`}>This result uses a long call already held in your portfolio. TradeEdge has not created an order ticket. Review the proposed short call before taking any action in your broker.</p>
+        <button onClick={onClose} className={`mt-5 w-full rounded-lg border ${th.border} py-2 text-xs font-bold ${th.textMuted}`}>CLOSE</button>
+      </div>
+    </div>;
+  }
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
   const [dryRunResult, setDryRunResult] = useState<any>(null);
@@ -3541,6 +3549,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
   const [sparkData, setSparkData] = useState<number[] | null>(null);
   const [sparkLoading, setSparkLoading] = useState(false);
   const pair = result.pmccPair;
+  const heldLong = pair?.entryMode === 'covered-short-call-against-held-leaps';
   const metrics = pair?.metrics;
   // PMCC-CARD-0001 — Ian/Paul-signed-off three-state readiness, replacing the
   // old binary ready/not-ready text. Disqualified (failed real criteria) is
@@ -3686,7 +3695,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">Score {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
-        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">PMCC</span>
+        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAPS PMCC' : 'PMCC'}</span>
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
         <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold ${readiness.text}`}>
           <span className={`inline-block w-2 h-2 rounded-full ${readiness.dot}`} />
@@ -3694,7 +3703,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         </span>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">BUY</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable cost (ask) {money(pair.longLeg.executablePrice)} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) {money(pair.shortLeg.executablePrice)} · OI {pair.shortLeg.openInterest}</span></div>
       </div>
       {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
@@ -3705,6 +3714,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         ))}
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
+      {heldLong && <p className="mt-2 text-[10px] text-cyan-300">Portfolio-derived candidate · proposed short call only · no order ticket is available.</p>}
     </button>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
       <p className={`rounded border ${readiness.border} ${readiness.text} px-3 py-2`}>
@@ -3724,7 +3734,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <span>Show quote and pricing detail</span><span>{showQuoteDetail ? '▴' : '▾'}</span>
       </button>
       {showQuoteDetail && <div className={`border-t ${th.border} pt-3 space-y-3`}>
-        <div><b>Long OCC:</b> {pair.longLeg.occSymbol}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
+        <div><b>{heldLong ? 'Held long OCC' : 'Long OCC'}:</b> {pair.longLeg.occSymbol}{heldLong && <><br/>Active account {pair.heldLongLeg?.accountNumber ?? '—'} · Position {pair.heldLongLeg?.positionKey ?? '—'} · Held quantity {pair.heldLongLeg?.quantity ?? '—'}</>}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
         <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
         {metrics && <div className="space-y-1">
           <p>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract · Strike width {money(metrics.strikeWidth)}</p>
@@ -3786,7 +3796,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
         <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
       </div>}
 
-      {tradeAllowed && (
+      {tradeAllowed && !heldLong && (
         <button
           onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
           className={`w-full py-2 rounded-lg border text-xs font-bold tracking-widest transition-colors ${
@@ -3798,6 +3808,7 @@ function PmccResultCard({ result, th, onTrade }: ResultCardProps) {
           {marketClosedOnly ? '⚡ TRADE THIS — MARKET CLOSED' : '⚡ TRADE THIS'}
         </button>
       )}
+      {heldLong && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Review-only: this screen proposes a short call against the exact long call held in the active account. It cannot submit or construct an order.</p>}
       <button
         onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
         className="w-full py-1.5 rounded-lg border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:border-neutral-500 transition-colors"
@@ -7411,13 +7422,18 @@ export default function Home() {
   // button reads.
   const runPMCCScan = async (submitted?: PmccScanCriteria) => {
     const pmcc = opportunityUniverse;
-    if (!pmcc.length) {
-      setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
-      return;
-    }
     const dte = submitted?.dte ?? { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax };
     if (!isValidPmccDteRanges(dte)) {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
+      return;
+    }
+    // Portfolio-derived long calls are an additive scan source. The snapshot
+    // bridge is always mounted; an absent/stale snapshot safely contributes
+    // no candidates and leaves the existing universe scan unchanged.
+    const heldSelection = selectHeldPmccLongCandidates(ccCapacityShadowSnapshotRef.current, dte);
+    const scanSymbols = Array.from(new Set([...pmcc, ...heldSelection.candidates.map(candidate => candidate.underlyingSymbol)]));
+    if (!scanSymbols.length) {
+      setError('No tickers in the Opportunity Universe or eligible held long calls in the active portfolio.');
       return;
     }
     setError('');
@@ -7432,7 +7448,7 @@ export default function Home() {
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
     setLoading(true);
     startScreenerJob({
-      kind: 'pmcc', label: 'PMCC scan', total: pmcc.length,
+      kind: 'pmcc', label: 'PMCC scan', total: scanSymbols.length,
       status: 'Starting PMCC scan...', resultsHref: '/screener?mode=filter',
     });
     const pushStatus = (label: string) => { setStatus(label); updateScreenerJob({ status: label, phase: 'running' }); };
@@ -7455,7 +7471,7 @@ export default function Home() {
     let session = beginScanSession({
       mode: 'filter',
       requestedStrategy: 'pmcc',
-      scope: { universeSymbols: pmcc, eligibleSymbols: pmcc },
+      scope: { universeSymbols: scanSymbols, eligibleSymbols: scanSymbols },
       pmccSnapshot,
     });
     if (filteredSort.primary === 'score' || filteredSort.primary === 'pop' || filteredSort.primary === 'creditPct') {
@@ -7485,8 +7501,8 @@ export default function Home() {
           acquire: async () => {
             const [pmccChain, price] = await Promise.all([
               getPMCCChain(symbol, token, {
-                shortMin: pmccShortDteMin, shortMax: pmccShortDteMax,
-                longMin: pmccLongDteMin, longMax: pmccLongDteMax,
+                shortMin: dte.shortMin, shortMax: dte.shortMax,
+                longMin: dte.longMin, longMax: dte.longMax,
               }),
               getQuote(symbol, token),
             ]);
@@ -7503,6 +7519,7 @@ export default function Home() {
               },
             };
           },
+          heldLongCandidates: heldSelection.candidates.filter(candidate => candidate.underlyingSymbol === symbol),
         });
         session = outcome.status === 'evaluated'
           ? recordSymbolEvaluated(session, symbol, outcome.results)
@@ -8159,7 +8176,7 @@ export default function Home() {
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      {ccCapacityShadowEnabled && <CcCapacityShadowSnapshotBridge onSnapshot={captureCcCapacityShadowSnapshot} />}
+      <CcCapacityShadowSnapshotBridge onSnapshot={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 flex items-center justify-between sticky top-0 z-50 flex-col gap-0`}>
@@ -9666,9 +9683,6 @@ export default function Home() {
     </div>
   );
 }
-
-
-
 
 
 

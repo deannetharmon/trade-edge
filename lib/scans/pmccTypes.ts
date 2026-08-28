@@ -148,6 +148,15 @@ export interface PmccPairResult {
   failureReasons: PmccFailureReason[];
   primaryFailureReason: PmccFailureReason | null;
   orderingLabel: 'Contract order';
+  /** New PMCC entries buy two legs. Held-long results are review-only and
+   * may only ever propose the short call against this broker-owned contract. */
+  entryMode?: 'new-pmcc' | 'covered-short-call-against-held-leaps';
+  heldLongLeg?: {
+    accountNumber: string;
+    positionKey: string;
+    quantity: number;
+    occSymbol: string;
+  };
 }
 
 export interface PmccPairingCounts {
@@ -211,4 +220,3 @@ export interface PmccOnDemandResult {
   shortLegRejection: PmccLegRejection | null;
   chainMissing: { long: boolean; short: boolean };
 }
-
