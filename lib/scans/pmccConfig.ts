@@ -8,7 +8,10 @@ export const DEFAULT_PMCC_LONG_DELTA_RANGE: PmccDeltaRange = {
 
 export const DEFAULT_PMCC_SHORT_DELTA_RANGE: PmccDeltaRange = {
   min: 0.20,
-  max: 0.30,
+  // A 0.30 ceiling excluded otherwise liquid, conventional covered-call
+  // candidates such as UBER's 0.32-delta call.  This is a preference band,
+  // not a safety boundary; the hard validated ceiling remains 0.40.
+  max: 0.35,
 };
 
 export const PMCC_LONG_DELTA_BOUNDS: PmccDeltaRange = {

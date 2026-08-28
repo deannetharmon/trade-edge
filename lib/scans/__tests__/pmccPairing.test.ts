@@ -104,6 +104,16 @@ describe('pairPmccCandidates', () => {
     expect(result.counts.structurallyValidPairs).toBe(1);
   });
 
+  it('does not apply new-long purchase economics to a PMCC based on an exact held LEAPS', () => {
+    const held = longLeg({ delta: 0.95, openInterest: 1, bid: 200, ask: 400 });
+    const result = pairPmccCandidates({
+      symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg()],
+      criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+    });
+    expect(result.qualifiedPairs).toHaveLength(1);
+    expect(result.qualifiedPairs[0].longLeg.occSymbol).toBe(held.occSymbol);
+  });
+
   it('reports distinct leg rejections when no long or short is eligible', () => {
     const result = run(
       [longLeg({ delta: 0.60 })],

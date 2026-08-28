@@ -169,6 +169,26 @@ describe('PMCC production integration', () => {
     expect(results[0].candidateId).toContain(':held:held-gs');
   });
 
+  it('retains a held-LEAPS PMCC even when the held long fails new-entry delta and quote rules', () => {
+    const held: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'held-gs-exception', underlyingSymbol: 'GS',
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
+    };
+    const results = runPmccProduction(
+      { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+      {
+        adapt: vi.fn(() => ({
+          longLegs: [leg('long', 720, { delta: 0.95, openInterest: 1, bid: 200, ask: 400 })],
+          shortLegs: [leg('short', 1070)],
+        })),
+        pair: pairPmccCandidates,
+      },
+      [held],
+    );
+    expect(results[0].qualified).toBe(true);
+    expect(results[0].pmccPair?.entryMode).toBe('covered-short-call-against-held-leaps');
+  });
+
   it('does not substitute a new long entry when the held contract is absent', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',

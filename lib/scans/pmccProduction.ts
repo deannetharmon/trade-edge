@@ -235,6 +235,7 @@ export function runPmccProduction(
       // held contract still exposes OI in the UI, but is not rejected solely
       // for that new-entry floor.
       criteria: matchedHeldLongs.length ? { ...snapshot.criteria, longOiMin: 0 } : snapshot.criteria,
+      heldLongOccSymbols: new Set(matchedHeldLongs.map(value => `occ:${value.leg.occSymbol?.replace(/\s+/g, '').toUpperCase()}`)),
       asOf: new Date(snapshot.asOf),
       marketSession: snapshot.marketSession,
     });
@@ -320,4 +321,3 @@ export async function runPmccSymbolProduction(args: {
     };
   }
 }
-

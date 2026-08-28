@@ -106,6 +106,7 @@ function filterLegs(
   criteria: PmccPairingCriteria,
   asOf: Date,
   marketSession: PmccMarketSession,
+  heldLongOccSymbols: ReadonlySet<string> = new Set(),
 ): { eligible: PmccEligibleLeg[]; rejected: PmccLegRejection[] } {
   const eligible: PmccEligibleLeg[] = [];
   const rejected: PmccLegRejection[] = [];
@@ -121,6 +122,7 @@ function filterLegs(
     if (leg.optionType !== 'C') reasons.push(reason('INVALID_OPTION_TYPE'));
     if (normalizedSymbol !== symbol) reasons.push(reason('UNDERLYING_MISMATCH'));
     const identity = legIdentity(leg);
+    const isHeldLong = role === 'long' && identity != null && heldLongOccSymbols.has(identity);
     if (identity == null) reasons.push(reason('INVALID_OCC_IDENTITY'));
     else if (seen.has(identity)) reasons.push(reason('DUPLICATE_CONTRACT'));
 
@@ -130,16 +132,16 @@ function filterLegs(
 
     const delta = leg.delta == null ? null : Math.abs(leg.delta);
     if (delta == null || !Number.isFinite(delta)) reasons.push(reason('INSUFFICIENT_DATA', 'Delta is missing or invalid'));
-    else if (delta < deltaRange.min || delta > deltaRange.max) reasons.push(reason('DELTA_OUT_OF_RANGE'));
+    else if (!isHeldLong && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
 
     if (leg.openInterest == null || !Number.isFinite(leg.openInterest)) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
-    else if (leg.openInterest < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
+    else if (!isHeldLong && leg.openInterest < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
 
     if (role === 'long' && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
     if (role === 'short' && !(leg.strike > underlyingPrice)) reasons.push(reason('SHORT_NOT_OTM'));
 
     const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession);
-    if (!quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));
+    if (!isHeldLong && !quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));
 
     const executablePrice = role === 'long' ? quote.ask : quote.bid;
     const intrinsic = role === 'long' ? Math.max(underlyingPrice - leg.strike, 0) : null;
@@ -190,13 +192,22 @@ function pairMetrics(longLeg: PmccEligibleLeg, shortLeg: PmccEligibleLeg): PmccP
   };
 }
 
-function evaluatePair(longLeg: PmccEligibleLeg, shortLeg: PmccEligibleLeg, criteria: PmccPairingCriteria): { pair: PmccPairResult; structurallyValid: boolean } {
+function evaluatePair(
+  longLeg: PmccEligibleLeg,
+  shortLeg: PmccEligibleLeg,
+  criteria: PmccPairingCriteria,
+  heldLongOccSymbols: ReadonlySet<string> = new Set(),
+): { pair: PmccPairResult; structurallyValid: boolean } {
   const failures: PmccFailureReason[] = [];
+  const isHeldLong = heldLongOccSymbols.has(longLeg.candidateId);
   if (longLeg.expiration <= shortLeg.expiration) failures.push(reason('LONG_EXPIRATION_NOT_LATER'));
   if (longLeg.strike >= shortLeg.strike) failures.push(reason('LONG_STRIKE_NOT_BELOW_SHORT'));
   const metrics = pairMetrics(longLeg, shortLeg);
   if (metrics == null) failures.push(reason('INSUFFICIENT_DATA'));
-  else {
+  // These are entry-price tests for purchasing a new long call. A held
+  // LEAPS PMCC submits only the short call, so reusing them would falsely
+  // reject an existing covered position based on a purchase it will not make.
+  else if (!isHeldLong) {
     if (!(metrics.netDebitPerShare > 0)) failures.push(reason('NET_DEBIT_NOT_POSITIVE'));
     if (criteria.requireDebitBelowWidth && !(metrics.netDebitPerShare < metrics.strikeWidth)) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
   }
@@ -237,13 +248,14 @@ export function pairPmccCandidates(input: {
   criteria: PmccPairingCriteria;
   asOf: Date;
   marketSession: PmccMarketSession;
+  heldLongOccSymbols?: ReadonlySet<string>;
 }): PmccSessionResult {
   validateCriteria(input.criteria);
   if (!Number.isFinite(input.underlyingPrice) || input.underlyingPrice <= 0) throw new Error('Invalid PMCC underlying price');
   const symbol = input.symbol.trim().toUpperCase();
   if (!symbol) throw new Error('Invalid PMCC symbol');
 
-  const longs = filterLegs('long', input.longLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession);
+  const longs = filterLegs('long', input.longLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession, input.heldLongOccSymbols);
   const shorts = filterLegs('short', input.shortLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession);
   const counts = emptyCounts();
   counts.eligibleLongLegs = longs.eligible.length;
@@ -255,7 +267,7 @@ export function pairPmccCandidates(input: {
   outer: for (const longLeg of longs.eligible) {
     for (const shortLeg of shorts.eligible) {
       if (counts.combinationsEvaluated >= input.criteria.limits.maxCombinationsEvaluated) break outer;
-      const evaluated = evaluatePair(longLeg, shortLeg, input.criteria);
+      const evaluated = evaluatePair(longLeg, shortLeg, input.criteria, input.heldLongOccSymbols);
       counts.combinationsEvaluated += 1;
       if (evaluated.structurallyValid) counts.structurallyValidPairs += 1;
       if (evaluated.pair.qualified) allQualified.push(evaluated.pair);
@@ -341,4 +353,3 @@ export function evaluatePmccPairOnDemand(input: {
   }
   return { outcome: 'pair_rejected', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
 }
-
