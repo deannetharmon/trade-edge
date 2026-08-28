@@ -18,11 +18,10 @@ export const classificationCache = new Map<string, 'index' | 'etf' | 'stock'>();
 
 
 export async function ttFetch(path: string, token: string): Promise<any> {
-  const res = await fetch(`${BASE}${path}`, {
+  void token; // Broker credentials and reads stay server-side to avoid browser CORS failures.
+  const res = await fetch(`/api/tastytrade/proxy?path=${encodeURIComponent(path)}`, {
     cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Accept: 'application/json' },
   });
 
   if (res.status === 401) {
@@ -32,21 +31,7 @@ export async function ttFetch(path: string, token: string): Promise<any> {
       localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY);
     } catch {}
 
-    const freshToken = await getAccessToken();
-
-    const retry = await fetch(`${BASE}${path}`, {
-      cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${freshToken}`,
-      },
-    });
-
-    if (!retry.ok) {
-      const text = await retry.text();
-      throw new Error(`${path} failed (${retry.status}): ${text.slice(0, 200)}`);
-    }
-
-    return retry.json();
+    throw new Error('Session expired');
   }
 
   if (!res.ok) {
