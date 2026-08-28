@@ -77,6 +77,19 @@ function stablePairOrder(a: PmccPairResult, b: PmccPairResult): number {
     || a.shortLeg.occSymbol.localeCompare(b.shortLeg.occSymbol);
 }
 
+/** For a held LEAPS PMCC, the long is already fixed. Rank the available
+ * short strikes inside the requested DTE window instead of using the
+ * preferred delta band as an on/off eligibility gate. */
+function heldPmccPairOrder(criteria: PmccPairingCriteria) {
+  const targetDelta = (criteria.shortDelta.min + criteria.shortDelta.max) / 2;
+  return (a: PmccPairResult, b: PmccPairResult): number =>
+    Math.abs(a.shortLeg.delta - targetDelta) - Math.abs(b.shortLeg.delta - targetDelta)
+    || (a.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY) - (b.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY)
+    || b.shortLeg.openInterest - a.shortLeg.openInterest
+    || b.shortLeg.executablePrice - a.shortLeg.executablePrice
+    || stablePairOrder(a, b);
+}
+
 function validateCriteria(criteria: PmccPairingCriteria): void {
   if (!isValidPmccDteRanges(criteria.dte)) throw new Error('Invalid PMCC DTE ranges');
   if (!isValidPmccDeltaRange(criteria.longDelta, PMCC_LONG_DELTA_BOUNDS)) throw new Error('Invalid PMCC long delta range');
@@ -107,6 +120,7 @@ function filterLegs(
   asOf: Date,
   marketSession: PmccMarketSession,
   heldLongOccSymbols: ReadonlySet<string> = new Set(),
+  allowShortDeltaOutsideTarget = false,
 ): { eligible: PmccEligibleLeg[]; rejected: PmccLegRejection[] } {
   const eligible: PmccEligibleLeg[] = [];
   const rejected: PmccLegRejection[] = [];
@@ -132,7 +146,8 @@ function filterLegs(
 
     const delta = leg.delta == null ? null : Math.abs(leg.delta);
     if (delta == null || !Number.isFinite(delta)) reasons.push(reason('INSUFFICIENT_DATA', 'Delta is missing or invalid'));
-    else if (!isHeldLong && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
+    else if (!isHeldLong && !(role === 'short' && allowShortDeltaOutsideTarget)
+      && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
 
     if (leg.openInterest == null || !Number.isFinite(leg.openInterest)) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
     else if (!isHeldLong && leg.openInterest < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
@@ -256,7 +271,11 @@ export function pairPmccCandidates(input: {
   if (!symbol) throw new Error('Invalid PMCC symbol');
 
   const longs = filterLegs('long', input.longLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession, input.heldLongOccSymbols);
-  const shorts = filterLegs('short', input.shortLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession);
+  const isHeldPmccScan = (input.heldLongOccSymbols?.size ?? 0) > 0;
+  const shorts = filterLegs(
+    'short', input.shortLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession,
+    new Set(), isHeldPmccScan,
+  );
   const counts = emptyCounts();
   counts.eligibleLongLegs = longs.eligible.length;
   counts.eligibleShortLegs = shorts.eligible.length;
@@ -275,8 +294,9 @@ export function pairPmccCandidates(input: {
     }
   }
   counts.combinationsOmittedBySafetyLimit = counts.potentialCombinations - counts.combinationsEvaluated;
-  allQualified.sort(stablePairOrder);
-  allNearMisses.sort(stablePairOrder);
+  const orderPairs = isHeldPmccScan ? heldPmccPairOrder(input.criteria) : stablePairOrder;
+  allQualified.sort(orderPairs);
+  allNearMisses.sort(orderPairs);
   counts.qualifiedPairsBeforeRetention = allQualified.length;
   counts.nearMissPairsBeforeRetention = allNearMisses.length;
   const qualifiedPairs = allQualified.slice(0, input.criteria.limits.maxQualifiedPairsRetained);

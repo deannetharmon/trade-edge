@@ -147,6 +147,7 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
+import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -6450,6 +6451,10 @@ export default function Home() {
   const [cspCashOverride, setCspCashOverride] = useState('');
   const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
+  const [pmccShortDeltaMin, setPmccShortDeltaMin] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.min);
+  const [pmccShortDeltaMax, setPmccShortDeltaMax] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.max);
+  const [pmccShortOiMin, setPmccShortOiMin] = useState(DEFAULT_PMCC_SHORT_OI_MIN);
+  const [pmccMaxSpreadPct, setPmccMaxSpreadPct] = useState(DEFAULT_PMCC_QUOTE_POLICY.qualifyingSpreadPctMax);
   // PMCC discovery always starts with every eligible long call the account
   // already owns. Long-call DTE and delta are not finder inputs here: those
   // belong to the separate Find LEAPS workflow.
@@ -6460,6 +6465,10 @@ export default function Home() {
       const parsed = JSON.parse(saved);
       if (Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
       if (Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
+      if (Number.isFinite(parsed.shortDeltaMin)) setPmccShortDeltaMin(parsed.shortDeltaMin);
+      if (Number.isFinite(parsed.shortDeltaMax)) setPmccShortDeltaMax(parsed.shortDeltaMax);
+      if (Number.isFinite(parsed.shortOiMin)) setPmccShortOiMin(parsed.shortOiMin);
+      if (Number.isFinite(parsed.maxSpreadPct)) setPmccMaxSpreadPct(parsed.maxSpreadPct);
     } catch {}
   }, []);
   // TE-0007C — CC's scan universe comes from verified account holdings, not
@@ -6503,6 +6512,7 @@ export default function Home() {
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showCspRunModal, setShowCspRunModal] = useState(false);
+  const [showPmccScanModal, setShowPmccScanModal] = useState(false);
   const [showCcScanModal, setShowCcScanModal] = useState(false);
   // DEFAULT_CC_RULES until a modal run overrides it -- matches the "opening
   // the modal copies saved defaults into a draft, only a submitted run
@@ -7431,11 +7441,11 @@ export default function Home() {
   // prior strategy results. TE-0007: no longer reads a separate PMCC-only
   // ticker list; uses the same normalized array every other strategy
   // button reads.
-  const runPMCCScan = async () => {
+  const runPMCCScan = async (request?: PmccScanRequest) => {
     // FIND PMCCs manages existing long calls. Selected tickers narrow the
     // broker-discovered holdings; they never create a new long-leg search.
     const pmcc = opportunityUniverse;
-    const dte = { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: 0, longMax: 10_000 };
+    const dte = { shortMin: request?.shortDteMin ?? pmccShortDteMin, shortMax: request?.shortDteMax ?? pmccShortDteMax, longMin: 0, longMax: 10_000 };
     if (!isValidPmccDteRanges(dte)) {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
       return;
@@ -7493,11 +7503,11 @@ export default function Home() {
       // the pairing engine's audit record; they are not user filters for a
       // held position and cannot exclude a held LEAPS from discovery.
       longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
-      shortDelta: { ...DEFAULT_PMCC_SHORT_DELTA_RANGE },
+      shortDelta: { min: request?.shortDeltaMin ?? pmccShortDeltaMin, max: request?.shortDeltaMax ?? pmccShortDeltaMax },
       longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
-      shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
+      shortOiMin: request?.shortOiMin ?? pmccShortOiMin,
       requireDebitBelowWidth: true,
-      quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY },
+      quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY, qualifyingSpreadPctMax: request?.maxSpreadPct ?? pmccMaxSpreadPct },
       limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
     };
     const pmccSnapshot: PmccScanSnapshot = {
@@ -8385,7 +8395,7 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={() => void runPMCCScan()}
+                onClick={() => setShowPmccScanModal(true)}
                 disabled={loading}
                 title="Scans short calls against eligible long calls already held in your portfolio. Selected tickers only narrow those holdings."
               >
@@ -9699,6 +9709,21 @@ export default function Home() {
           onRun={(request) => {
             setShowCspRunModal(false);
             void runCspScan(request);
+          }}
+        />
+      )}
+      {showPmccScanModal && (
+        <PmccScanModal
+          th={th}
+          selectedTickerCount={opportunityUniverse.length}
+          initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct }}
+          onClose={() => setShowPmccScanModal(false)}
+          onRun={(request: PmccScanRequest) => {
+            setPmccShortDteMin(request.shortDteMin); setPmccShortDteMax(request.shortDteMax);
+            setPmccShortDeltaMin(request.shortDeltaMin); setPmccShortDeltaMax(request.shortDeltaMax);
+            setPmccShortOiMin(request.shortOiMin); setPmccMaxSpreadPct(request.maxSpreadPct);
+            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct })); } catch {}
+            setShowPmccScanModal(false); void runPMCCScan(request);
           }}
         />
       )}

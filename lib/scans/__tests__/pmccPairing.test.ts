@@ -114,6 +114,17 @@ describe('pairPmccCandidates', () => {
     expect(result.qualifiedPairs[0].longLeg.occSymbol).toBe(held.occSymbol);
   });
 
+  it('ranks OTM short strikes in the requested DTE range instead of rejecting a held PMCC for delta preference', () => {
+    const held = longLeg();
+    const outsidePreferredDelta = shortLeg({ delta: 0.32, strike: 1080, occSymbol: occ('2026-09-18', 1080) });
+    const nearerPreferredDelta = shortLeg({ delta: 0.27, strike: 1090, occSymbol: occ('2026-09-18', 1090) });
+    const result = pairPmccCandidates({
+      symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [outsidePreferredDelta, nearerPreferredDelta],
+      criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+    });
+    expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([1090, 1080]);
+  });
+
   it('reports distinct leg rejections when no long or short is eligible', () => {
     const result = run(
       [longLeg({ delta: 0.60 })],
