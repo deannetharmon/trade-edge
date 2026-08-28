@@ -6356,11 +6356,11 @@ function TargetedScanResultsPanel({
 // ── Main App ───────────────────────────────────────────────────────────────
 export const dynamic = 'force-dynamic';
 
-function CcCapacityShadowSnapshotBridge({ onPortfolioData }: { onPortfolioData: (snapshot: PortfolioSnapshot | null, positions: Position[]) => void }) {
+function CcCapacityShadowSnapshotBridge({ onPortfolioData }: { onPortfolioData: (snapshot: PortfolioSnapshot | null, positions: Position[], refresh: (() => Promise<unknown>) | null) => void }) {
   const portfolioData = useOptionalPortfolioData();
   useEffect(
-    () => onPortfolioData(portfolioData?.snapshot ?? null, portfolioData?.positions ?? []),
-    [onPortfolioData, portfolioData?.positions, portfolioData?.snapshot],
+    () => onPortfolioData(portfolioData?.snapshot ?? null, portfolioData?.positions ?? [], portfolioData?.refresh ?? null),
+    [onPortfolioData, portfolioData?.positions, portfolioData?.refresh, portfolioData?.snapshot],
   );
   return null;
 }
@@ -6371,13 +6371,15 @@ export default function Home() {
   const th = THEMES[theme];
   const ccCapacityShadowEnabled = isCcCapacityShadowEnabled();
   const ccCapacityShadowSnapshotRef = useRef<PortfolioSnapshot | null>(null);
+  const refreshPortfolioRef = useRef<(() => Promise<unknown>) | null>(null);
   const [portfolioSnapshot, setPortfolioSnapshot] = useState<PortfolioSnapshot | null>(null);
   const pmccPortfolioPositionsRef = useRef<Position[]>([]);
   const [portfolioPositions, setPortfolioPositions] = useState<Position[]>([]);
   const ccCapacityShadowRequestRef = useRef(0);
-  const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null, positions: Position[]) => {
+  const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null, positions: Position[], refresh: (() => Promise<unknown>) | null) => {
     ccCapacityShadowSnapshotRef.current = snapshot;
     pmccPortfolioPositionsRef.current = positions;
+    refreshPortfolioRef.current = refresh;
     setPortfolioSnapshot(snapshot);
     setPortfolioPositions(positions);
   }, []);
@@ -7442,6 +7444,19 @@ export default function Home() {
     // snapshot rollout, the shared provider still supplies current legacy
     // positions; use those rather than treating an intentionally-null
     // optional snapshot as an empty portfolio.
+    // Screener is not guaranteed to visit Portfolio first. Refresh the one
+    // canonical account provider before discovering held long calls, so a
+    // valid broker LEAPS can never be mistaken for an empty portfolio.
+    try {
+      await refreshPortfolioRef.current?.();
+      // The provider publishes refreshed snapshot state through React before
+      // the bridge updates its refs. Yield one frame so discovery reads that
+      // exact current account snapshot, not the prior empty initial state.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    } catch (refreshError: any) {
+      setError(refreshError?.message ?? 'Unable to refresh active portfolio holdings for PMCC discovery.');
+      return;
+    }
     const heldSnapshot = ccCapacityShadowSnapshotRef.current;
     const discoveryRange = { shortMin: dte.shortMin, shortMax: dte.shortMax, longMin: 0, longMax: 10_000 };
     const discoveredSelection = heldSnapshot?.freshness === 'current' && heldSnapshot.dataQuality.status === 'ok'
