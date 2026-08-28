@@ -142,7 +142,11 @@ function filterLegs(
 
     const dte = pmccDte(leg.expiration, asOf);
     if (dte == null) reasons.push(reason('INSUFFICIENT_DATA', 'Expiration or scan date is invalid'));
-    else if (dte < dteMin || dte > dteMax) reasons.push(reason('DTE_OUT_OF_RANGE'));
+    // The long contract in a held-LEAPS PMCC has already passed exact OCC,
+    // underlying, expiry, and strike matching against the active account.
+    // Its broker-reported DTE can differ by a calendar day from this live
+    // chain calculation, so an entry-style DTE band must not reject it.
+    else if (!isHeldLong && (dte < dteMin || dte > dteMax)) reasons.push(reason('DTE_OUT_OF_RANGE'));
 
     const delta = leg.delta == null ? null : Math.abs(leg.delta);
     if (delta == null || !Number.isFinite(delta)) reasons.push(reason('INSUFFICIENT_DATA', 'Delta is missing or invalid'));

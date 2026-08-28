@@ -114,6 +114,17 @@ describe('pairPmccCandidates', () => {
     expect(result.qualifiedPairs[0].longLeg.occSymbol).toBe(held.occSymbol);
   });
 
+  it('does not reject an exactly matched held LEAPS when broker and live-chain DTE differ', () => {
+    const held = longLeg({ expiration: '2027-09-17', occSymbol: occ('2027-09-17', 720) });
+    const result = pairPmccCandidates({
+      symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg()],
+      criteria: { ...criteria, dte: { ...criteria.dte, longMax: 300 } },
+      asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+    });
+    expect(result.qualifiedPairs).toHaveLength(1);
+    expect(result.legRejections.flatMap(item => item.reasons.map(reason => reason.code))).not.toContain('DTE_OUT_OF_RANGE');
+  });
+
   it('ranks OTM short strikes in the requested DTE range instead of rejecting a held PMCC for delta preference', () => {
     const held = longLeg();
     const outsidePreferredDelta = shortLeg({ delta: 0.32, strike: 1080, occSymbol: occ('2026-09-18', 1080) });

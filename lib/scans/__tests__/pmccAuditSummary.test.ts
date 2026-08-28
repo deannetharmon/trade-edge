@@ -29,7 +29,19 @@ describe('summarizePmccLegRejections', () => {
       ] },
     ]);
 
-    expect(result).toEqual([{ code: 'INSUFFICIENT_DATA', message: 'Quote timestamp is unavailable', affectedLegs: 2 }]);
+    expect(result).toEqual([{ code: 'INSUFFICIENT_DATA', message: 'Required contract data is missing or invalid', affectedLegs: 2 }]);
+  });
+
+  it('uses a category label rather than a single contract spread percentage', () => {
+    const result = summarizePmccLegRejections([
+      { role: 'short', expiration: '2026-09-18', strike: 80, occSymbol: 'ACME260918C00080000', reasons: [
+        { code: 'BID_ASK_TOO_WIDE', message: 'Bid/ask spread 10.75% exceeds 10%' },
+      ] },
+      { role: 'short', expiration: '2026-10-16', strike: 85, occSymbol: 'ACME261016C00085000', reasons: [
+        { code: 'BID_ASK_TOO_WIDE', message: 'Bid/ask spread 28.75% exceeds 10%' },
+      ] },
+    ]);
+    expect(result).toEqual([{ code: 'BID_ASK_TOO_WIDE', message: 'Bid/ask spread exceeds the qualifying maximum', affectedLegs: 2 }]);
   });
 
   it('handles an empty audit trail', () => {
