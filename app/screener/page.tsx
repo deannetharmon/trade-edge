@@ -8940,7 +8940,7 @@ export default function Home() {
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
                     {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
                         rank (Diane's original score mockup); grouped is
                         Ian's per-ticker triage view (PmccTickerDisclosure).
