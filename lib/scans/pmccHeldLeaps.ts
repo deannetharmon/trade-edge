@@ -11,6 +11,7 @@ export interface HeldPmccLongCandidate {
   underlyingSymbol: string;
   occSymbol: string;
   expiration: string;
+  dte: number;
   strike: number;
   quantity: number;
 }
@@ -43,6 +44,7 @@ function exactOneLongCall(position: Position): HeldPmccLongCandidate | null {
     underlyingSymbol,
     occSymbol,
     expiration: position.expDate,
+    dte: position.dte,
     strike: leg.strikePrice,
     quantity: leg.quantity,
   };
@@ -69,6 +71,45 @@ export function selectHeldPmccLongCandidates(
   for (const position of snapshot.options) {
     const candidate = exactOneLongCall(position);
     if (candidate == null || candidate.accountNumber !== snapshot.accountNumber) {
+      exclusions.push({ positionKey: position.key, symbol: position.symbol, reason: 'Not an unambiguous single-leg long call in the active account' });
+      continue;
+    }
+    if (position.dte < dte.longMin || position.dte > dte.longMax) {
+      exclusions.push({ positionKey: position.key, symbol: position.symbol, reason: 'Held long call is outside the configured PMCC long DTE range' });
+      continue;
+    }
+    candidates.push(candidate);
+  }
+  return { candidates, exclusions };
+}
+
+/**
+ * Select broker positions supplied by the shared PortfolioDataProvider when
+ * the optional snapshot rollout is disabled. The provider's legacy position
+ * acquisition is already scoped to the active account, but we still require
+ * a single reported account rather than guessing across accounts.
+ */
+export function selectHeldPmccLongCandidatesFromPositions(
+  positions: readonly Position[],
+  dte: PmccDteRanges,
+): HeldPmccSelection {
+  const accounts = new Set(positions.map(position => position.accountNumber?.trim()).filter(Boolean));
+  if (accounts.size !== 1) {
+    return {
+      candidates: [],
+      exclusions: positions.map(position => ({
+        positionKey: position.key,
+        symbol: position.symbol,
+        reason: 'Portfolio positions do not resolve to one active account',
+      })),
+    };
+  }
+  const accountNumber = Array.from(accounts)[0];
+  const candidates: HeldPmccLongCandidate[] = [];
+  const exclusions: HeldPmccExclusion[] = [];
+  for (const position of positions) {
+    const candidate = exactOneLongCall(position);
+    if (candidate == null || candidate.accountNumber !== accountNumber) {
       exclusions.push({ positionKey: position.key, symbol: position.symbol, reason: 'Not an unambiguous single-leg long call in the active account' });
       continue;
     }

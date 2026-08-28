@@ -43,7 +43,7 @@ import {
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult } from '@/lib/scans/pmccTypes';
-import { selectHeldPmccLongCandidates } from '@/lib/scans/pmccHeldLeaps';
+import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
 import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
@@ -63,6 +63,7 @@ import {
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
+import type { Position } from '@/lib/portfolio-data/types';
 import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
@@ -6356,9 +6357,12 @@ function TargetedScanResultsPanel({
 // ── Main App ───────────────────────────────────────────────────────────────
 export const dynamic = 'force-dynamic';
 
-function CcCapacityShadowSnapshotBridge({ onSnapshot }: { onSnapshot: (snapshot: PortfolioSnapshot | null) => void }) {
+function CcCapacityShadowSnapshotBridge({ onPortfolioData }: { onPortfolioData: (snapshot: PortfolioSnapshot | null, positions: Position[]) => void }) {
   const portfolioData = useOptionalPortfolioData();
-  useEffect(() => onSnapshot(portfolioData?.snapshot ?? null), [onSnapshot, portfolioData?.snapshot]);
+  useEffect(
+    () => onPortfolioData(portfolioData?.snapshot ?? null, portfolioData?.positions ?? []),
+    [onPortfolioData, portfolioData?.positions, portfolioData?.snapshot],
+  );
   return null;
 }
 
@@ -6369,10 +6373,14 @@ export default function Home() {
   const ccCapacityShadowEnabled = isCcCapacityShadowEnabled();
   const ccCapacityShadowSnapshotRef = useRef<PortfolioSnapshot | null>(null);
   const [portfolioSnapshot, setPortfolioSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const pmccPortfolioPositionsRef = useRef<Position[]>([]);
+  const [portfolioPositions, setPortfolioPositions] = useState<Position[]>([]);
   const ccCapacityShadowRequestRef = useRef(0);
-  const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null) => {
+  const captureCcCapacityShadowSnapshot = useCallback((snapshot: PortfolioSnapshot | null, positions: Position[]) => {
     ccCapacityShadowSnapshotRef.current = snapshot;
+    pmccPortfolioPositionsRef.current = positions;
     setPortfolioSnapshot(snapshot);
+    setPortfolioPositions(positions);
   }, []);
   useEffect(() => { applyAccent(accent); }, [accent]);
   useEffect(() => { applyAccent(getSavedAccent()); }, []);
@@ -6443,12 +6451,27 @@ export default function Home() {
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
   const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
   const [pmccLongDteMax, setPmccLongDteMax] = useState(PMCC_LONG_DTE_MAX);
+  const selectHeldPmccCandidates = useCallback((dte: { shortMin: number; shortMax: number; longMin: number; longMax: number }) => {
+    if (portfolioSnapshot?.freshness === 'current' && portfolioSnapshot.dataQuality.status === 'ok') {
+      return selectHeldPmccLongCandidates(portfolioSnapshot, dte);
+    }
+    return selectHeldPmccLongCandidatesFromPositions(portfolioPositions, dte);
+  }, [portfolioPositions, portfolioSnapshot]);
   const heldPmccCandidates = useMemo(
-    () => selectHeldPmccLongCandidates(portfolioSnapshot, {
+    () => selectHeldPmccCandidates({
       shortMin: pmccShortDteMin, shortMax: pmccShortDteMax,
       longMin: pmccLongDteMin, longMax: pmccLongDteMax,
     }).candidates,
-    [portfolioSnapshot, pmccShortDteMin, pmccShortDteMax, pmccLongDteMin, pmccLongDteMax],
+    [selectHeldPmccCandidates, pmccShortDteMin, pmccShortDteMax, pmccLongDteMin, pmccLongDteMax],
+  );
+  // Discovery is deliberately broader than the active scan range so the
+  // launcher can explain why a held LEAPS is not currently in scope instead
+  // of misleadingly reporting that the portfolio contains none.
+  const discoveredHeldPmccCandidates = useMemo(
+    () => selectHeldPmccCandidates({
+      shortMin: 0, shortMax: 0, longMin: 0, longMax: 10_000,
+    }).candidates,
+    [selectHeldPmccCandidates],
   );
   useEffect(() => {
     try {
@@ -7436,10 +7459,14 @@ export default function Home() {
       setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
       return;
     }
-    // Portfolio-derived long calls are an additive scan source. The snapshot
-    // bridge is always mounted; an absent/stale snapshot safely contributes
-    // no candidates and leaves the existing universe scan unchanged.
-    const heldSelection = selectHeldPmccLongCandidates(ccCapacityShadowSnapshotRef.current, dte);
+    // Portfolio-derived long calls are an additive scan source. During the
+    // snapshot rollout, the shared provider still supplies current legacy
+    // positions; use those rather than treating an intentionally-null
+    // optional snapshot as an empty portfolio.
+    const heldSnapshot = ccCapacityShadowSnapshotRef.current;
+    const heldSelection = heldSnapshot?.freshness === 'current' && heldSnapshot.dataQuality.status === 'ok'
+      ? selectHeldPmccLongCandidates(heldSnapshot, dte)
+      : selectHeldPmccLongCandidatesFromPositions(pmccPortfolioPositionsRef.current, dte);
     const scanSymbols = Array.from(new Set([...pmcc, ...heldSelection.candidates.map(candidate => candidate.underlyingSymbol)]));
     if (!scanSymbols.length) {
       setError('No tickers in the Opportunity Universe or eligible held long calls in the active portfolio.');
@@ -8185,7 +8212,7 @@ export default function Home() {
 
   return (
     <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <CcCapacityShadowSnapshotBridge onSnapshot={captureCcCapacityShadowSnapshot} />
+      <CcCapacityShadowSnapshotBridge onPortfolioData={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 flex items-center justify-between sticky top-0 z-50 flex-col gap-0`}>
@@ -9669,7 +9696,7 @@ export default function Home() {
         <PmccScanModal
           th={th}
           selectedTickerCount={opportunityUniverse.length}
-          heldLongCandidateCount={heldPmccCandidates.length}
+          heldLongDtes={discoveredHeldPmccCandidates.map(candidate => candidate.dte)}
           initial={{
             dte: { shortMin: pmccShortDteMin, shortMax: pmccShortDteMax, longMin: pmccLongDteMin, longMax: pmccLongDteMax },
             longDelta: { ...DEFAULT_PMCC_LONG_DELTA_RANGE },
@@ -9693,4 +9720,3 @@ export default function Home() {
     </div>
   );
 }
-

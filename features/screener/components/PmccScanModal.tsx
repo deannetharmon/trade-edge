@@ -51,13 +51,13 @@ export interface PmccScanCriteria {
 interface Props {
   th: ScanModalTheme;
   selectedTickerCount: number;
-  heldLongCandidateCount: number;
+  heldLongDtes: number[];
   initial: PmccScanCriteria;
   onClose: () => void;
   onRun: (criteria: PmccScanCriteria) => void;
 }
 
-export function PmccScanModal({ th, selectedTickerCount, heldLongCandidateCount, initial, onClose, onRun }: Props) {
+export function PmccScanModal({ th, selectedTickerCount, heldLongDtes, initial, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<PmccScanCriteria>(initial);
   const [error, setError] = useState('');
 
@@ -75,13 +75,14 @@ export function PmccScanModal({ th, selectedTickerCount, heldLongCandidateCount,
     setDraft(prev => ({ ...prev, longDelta: { ...prev.longDelta, [key]: value } }));
   const setShortDelta = (key: keyof PmccDeltaRange, value: number) =>
     setDraft(prev => ({ ...prev, shortDelta: { ...prev.shortDelta, [key]: value } }));
+  const eligibleHeldLongCount = heldLongDtes.filter(dte => dte >= draft.dte.longMin && dte <= draft.dte.longMax).length;
 
   return (
     <ScanModalShell
       th={th}
       titleId="pmcc-scan-title"
       title="PMCC SCAN"
-      subtitle={`${selectedTickerCount} selected ticker${selectedTickerCount === 1 ? '' : 's'} · ${heldLongCandidateCount} held long call${heldLongCandidateCount === 1 ? '' : 's'} · configure before scanning`}
+      subtitle={`${selectedTickerCount} selected ticker${selectedTickerCount === 1 ? '' : 's'} · ${heldLongDtes.length} held long call${heldLongDtes.length === 1 ? '' : 's'} · ${eligibleHeldLongCount} in selected long-DTE range`}
       closeLabel="Close PMCC scan configuration"
       onClose={onClose}
     >
@@ -253,4 +254,3 @@ export function PmccScanModal({ th, selectedTickerCount, heldLongCandidateCount,
     </ScanModalShell>
   );
 }
-

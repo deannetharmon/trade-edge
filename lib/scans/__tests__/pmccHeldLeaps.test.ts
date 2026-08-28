@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchHeldPmccLongCandidate, selectHeldPmccLongCandidates } from '../pmccHeldLeaps';
+import { matchHeldPmccLongCandidate, selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '../pmccHeldLeaps';
 import { buildNewPmccEntryOrderLegs } from '../pmccOrderIntent';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
@@ -42,6 +42,20 @@ describe('held LEAPS PMCC candidates', () => {
   it('fails closed for stale or unavailable snapshots', () => {
     expect(selectHeldPmccLongCandidates(snapshot([heldPosition()], { freshness: 'last-known' }), dte).candidates).toEqual([]);
     expect(selectHeldPmccLongCandidates(snapshot([heldPosition()], { dataQuality: { status: 'unavailable', staleQuotes: true, warnings: [] } }), dte).candidates).toEqual([]);
+  });
+
+  it('uses current provider positions when the optional snapshot rollout is disabled', () => {
+    const result = selectHeldPmccLongCandidatesFromPositions([heldPosition()], dte);
+    expect(result.candidates).toEqual([expect.objectContaining({ positionKey: 'position-1', dte: 295 })]);
+  });
+
+  it('does not guess which account to use when provider positions span accounts', () => {
+    const result = selectHeldPmccLongCandidatesFromPositions([
+      heldPosition(),
+      heldPosition({ key: 'other-account', accountNumber: '5WT99999' }),
+    ], dte);
+    expect(result.candidates).toEqual([]);
+    expect(result.exclusions).toHaveLength(2);
   });
 
   it('requires exact OCC, underlying, call type, expiry, and strike identity', () => {

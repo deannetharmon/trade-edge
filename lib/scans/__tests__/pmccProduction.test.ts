@@ -153,7 +153,7 @@ describe('PMCC production integration', () => {
   it('uses an exact held long as the only long candidate and marks the result review-only', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'held-gs', underlyingSymbol: 'GS',
-      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', strike: 720, quantity: 2,
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 2,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -172,7 +172,7 @@ describe('PMCC production integration', () => {
   it('does not substitute a new long entry when the held contract is absent', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',
-      occSymbol: 'missing', expiration: '2027-06-18', strike: 720, quantity: 1,
+      occSymbol: 'missing', expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -187,7 +187,7 @@ describe('PMCC production integration', () => {
   it('persists held-long identity and rejects a corrupted held contract binding', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'persisted-held', underlyingSymbol: 'GS',
-      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', strike: 720, quantity: 1,
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
