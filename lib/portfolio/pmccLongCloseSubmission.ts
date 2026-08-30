@@ -2,6 +2,7 @@ import type { CanonicalCloseIdentity } from './closeOrderSafety';
 import type { PmccCampaign, PmccCoverageEvaluation } from './pmccCampaign';
 import { evaluatePmccCoverageAfterLongChange } from './pmccCampaign';
 import { fetchPmccCampaignLoadResult, type PmccCampaignLoadResult } from '@/lib/portfolio-data/pmccCampaignStore';
+import { fetchPmccBrokerCoverageState, type PmccBrokerCoverageState } from '@/lib/portfolio-data/pmccCoverageBrokerState';
 
 export interface PmccLongCloseSubmissionInput<T> {
   campaign: PmccCampaign;
@@ -61,24 +62,30 @@ function singleLongCallOcc(identity: CanonicalCloseIdentity): string | null {
 }
 
 /**
- * Submission-time campaign revalidation for a canonical single long call.
- * The campaign store is re-read immediately before broker transmission so a
- * relationship/allocation change after UI review cannot be bypassed.
+ * Submission-time campaign + broker revalidation for a canonical single long
+ * call. The durable campaign store is re-read first to resolve exact strategy
+ * intent. If an active campaign exists, the campaign's brokerage account is
+ * then re-read for the exact allocated long and short OCC quantities.
  *
- * Exact account identity is not carried by CanonicalCloseIdentity. Therefore
- * duplicate campaign matches for the same OCC contract fail closed rather
- * than guessing which account relationship applies. The authoritative
- * campaign allocation quantity is enforced here; live broker quantity
- * reconciliation remains a caller responsibility when available.
+ * This is intentionally two-source safety: campaign allocation defines which
+ * contracts belong to the PMCC; current broker positions define the quantities
+ * that actually exist at transmission time. No same-ticker substitute coverage
+ * is inferred. Any unavailable or ambiguous evidence fails closed.
  */
 export async function revalidatePersistedPmccLongClose(input: {
   identity: CanonicalCloseIdentity;
   currentLongQuantity: number;
   proposedLongQuantityAfterAction: number;
   loadCampaigns?: () => Promise<PmccCampaignLoadResult>;
+  loadBrokerCoverage?: (campaign: PmccCampaign) => Promise<PmccBrokerCoverageState>;
 }): Promise<PersistedPmccLongCloseGuardResult> {
   const longOccSymbol = singleLongCallOcc(input.identity);
   if (!longOccSymbol) return { required: false, safe: true, reason: null, coverage: null, campaignId: null };
+
+  const requestedQuantity = input.currentLongQuantity - input.proposedLongQuantityAfterAction;
+  if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+    return { required: true, safe: false, reason: 'Requested LEAPS close quantity is invalid for PMCC revalidation.', coverage: null, campaignId: null };
+  }
 
   const loadCampaigns = input.loadCampaigns ?? fetchPmccCampaignLoadResult;
   const loaded = await loadCampaigns();
@@ -108,11 +115,25 @@ export async function revalidatePersistedPmccLongClose(input: {
   }
 
   const campaign = matching[0];
+  const loadBrokerCoverage = input.loadBrokerCoverage ?? fetchPmccBrokerCoverageState;
+  const broker = await loadBrokerCoverage(campaign);
+  if (broker.status !== 'ok') {
+    return {
+      required: true,
+      safe: false,
+      reason: `Current PMCC brokerage coverage is unavailable — ${broker.reason}`,
+      coverage: null,
+      campaignId: campaign.id,
+    };
+  }
+
+  const proposedLongQuantityAfterAction = broker.currentLongQuantity - requestedQuantity;
   const coverage = evaluatePmccCoverageAfterLongChange({
     campaign,
     longOccSymbol: campaign.anchorLongOccSymbol,
-    currentLongQuantity: input.currentLongQuantity,
-    proposedLongQuantityAfterAction: input.proposedLongQuantityAfterAction,
+    currentLongQuantity: broker.currentLongQuantity,
+    proposedLongQuantityAfterAction,
+    activeShortQuantities: broker.activeShortQuantities,
   });
   return {
     required: true,
