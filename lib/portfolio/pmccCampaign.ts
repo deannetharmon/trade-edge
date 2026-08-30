@@ -159,8 +159,12 @@ export interface PmccCampaignEconomics {
 }
 
 function sumComplete(values: Array<number | null | undefined>): number | null {
-  if (values.some(value => typeof value !== 'number' || !Number.isFinite(value))) return null;
-  return values.reduce((sum, value) => sum + (value as number), 0);
+  let total = 0;
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    total += value;
+  }
+  return total;
 }
 
 export function computePmccCampaignEconomics(input: PmccCampaignEconomicsInput): PmccCampaignEconomics {
