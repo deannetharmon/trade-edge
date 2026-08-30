@@ -1,5 +1,6 @@
 import type { Position, PendingOrder } from '@/lib/portfolio-data/types';
 import type { EquityHolding, PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
+import type { LeapsEconomics } from '@/lib/portfolio/leapsPositionIntelligence';
 
 export type PositionsWorkspaceView = 'portfolio' | 'analysis';
 export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
@@ -46,6 +47,7 @@ export interface OptionInstrumentViewModel {
   roleLabel: string;
   midpointLabel: string;
   marketableLabel: string;
+  leapsEconomics: LeapsEconomics | null;
 }
 
 export interface SymbolGroupViewModel {
