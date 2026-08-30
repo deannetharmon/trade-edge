@@ -2,6 +2,7 @@ import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { ExistingIncomeOpportunity, PositionsWorkspaceInput, PositionsWorkspaceModel, SymbolGroupViewModel } from './types';
 import { aggregateFinancialValues, aggregatePnlPercentage, buildOptionInstrumentViewModel, classifySymbolComposition, compositionLabel, optionMidpointValue } from './valuation';
+import { buildPmccCampaignViewModels, pmccCampaignForLongPosition } from './pmccIntegration';
 
 function finiteSum(values: Array<number | null | undefined>): number | null {
   const known = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -68,6 +69,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
   const snapshot = input.snapshot;
   const equities = snapshot?.equities ?? [];
   const capacityReport = snapshot ? buildSnapshotCapacityReport(snapshot) : null;
+  const pmccCampaigns = buildPmccCampaignViewModels(input.positions, input.pmccCampaigns ?? []);
   const symbols = new Set([...equities.map(item => item.symbol), ...input.positions.map(item => item.symbol)]);
   const symbolGroups: SymbolGroupViewModel[] = Array.from(symbols).sort().map(symbol => {
     const symbolEquities = equities.filter(item => item.symbol === symbol);
@@ -76,7 +78,11 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     const capacity = capacityReport?.status === 'ok' ? capacityReport.bySymbol[symbol] : undefined;
     const availableContracts = capacity?.availableCoveredContracts ?? 0;
     const needsAttention = options.some(position => Boolean(position.needsClose || position.structureAmbiguous || position.recommendation && position.recommendation.kind !== 'hold'));
-    const optionInstruments = options.map(buildOptionInstrumentViewModel);
+    const optionInstruments = options.map(position => {
+      const instrument = buildOptionInstrumentViewModel(position);
+      return { ...instrument, pmccCampaign: pmccCampaignForLongPosition(position, pmccCampaigns) };
+    });
+    const groupPmccCampaigns = pmccCampaigns.filter(campaign => campaign.underlying.toUpperCase() === symbol.toUpperCase() || options.some(option => option.key === campaign.longPositionKey));
     const composition = classifySymbolComposition(symbolEquities, optionInstruments);
     const asOf = snapshot?.quoteAsOf ?? snapshot?.asOf ?? null;
     const equityMarketValueAggregate = aggregateFinancialValues(symbolEquities.map((item, index) => ({ key: `equity-${symbol}-${index}`, value: item.marketValue, reason: 'Equity quote unavailable' })), 'mark-mid', asOf);
@@ -121,6 +127,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
       unrealizedPnlMid, optionCloseNowPnl,
       unrealizedPnlPct: pnlPct.value, unrealizedPnlPctReason: pnlPct.reason,
       optionInstruments,
+      pmccCampaigns: groupPmccCampaigns,
     };
   });
   return {
@@ -131,5 +138,6 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     symbolGroups,
     analysisRows: input.positions.map(position => ({ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: Boolean(position.needsClose || position.structureAmbiguous || position.recommendation && position.recommendation.kind !== 'hold') })),
     incomeOpportunities: buildIncomeOpportunities(input),
+    pmccCampaigns,
   };
 }
