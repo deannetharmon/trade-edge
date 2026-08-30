@@ -1,5 +1,6 @@
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import type { Position } from '@/lib/portfolio-data/types';
+import { buildLeapsEconomics } from '@/lib/portfolio/leapsPositionIntelligence';
 import type { FinancialAggregate, InstrumentRole, OptionInstrumentViewModel, SymbolAssetComposition } from './types';
 
 export interface AggregateContributor { key: string; value: number | null | undefined; reason: string }
@@ -34,16 +35,25 @@ export function roleLabel(role: InstrumentRole, position?: Position): string {
     'short-call': 'Short call', 'short-put': 'Short put', 'multi-leg-option-structure': position?.strategy ?? 'Multi-leg option structure',
     'ambiguous-option-structure': 'Structure unresolved',
   };
+  if (role === 'long-call' && position && buildLeapsEconomics(position) != null) return 'LEAPS';
   return labels[role];
 }
 
 export function buildOptionInstrumentViewModel(position: Position): OptionInstrumentViewModel {
   const role = optionInstrumentRole(position);
   const isLong = role === 'long-call' || role === 'long-put' || (role === 'multi-leg-option-structure' && position.entryPriceEffect === 'Debit');
+  const leapsEconomics = role === 'long-call' ? buildLeapsEconomics(position) : null;
   return {
     key: position.key, position, role, roleLabel: roleLabel(role, position),
-    midpointLabel: role === 'ambiguous-option-structure' ? 'Option midpoint value unavailable' : isLong ? (role === 'multi-leg-option-structure' ? 'Net option value (mid)' : 'Liquidation value (mid)') : (role === 'multi-leg-option-structure' ? 'Net buyback obligation (mid)' : 'Buyback obligation (mid)'),
-    marketableLabel: isLong ? 'Marketable sell value' : 'Marketable buyback cost',
+    midpointLabel: role === 'ambiguous-option-structure'
+      ? 'Option midpoint value unavailable'
+      : leapsEconomics
+        ? 'Estimated Value Now — Mid'
+        : isLong
+          ? (role === 'multi-leg-option-structure' ? 'Net option value (mid)' : 'Liquidation value (mid)')
+          : (role === 'multi-leg-option-structure' ? 'Net buyback obligation (mid)' : 'Buyback obligation (mid)'),
+    marketableLabel: leapsEconomics ? 'Estimated Sell-Now Value' : isLong ? 'Marketable sell value' : 'Marketable buyback cost',
+    leapsEconomics,
   };
 }
 
