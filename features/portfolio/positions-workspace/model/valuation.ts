@@ -54,6 +54,7 @@ export function buildOptionInstrumentViewModel(position: Position): OptionInstru
           : (role === 'multi-leg-option-structure' ? 'Net buyback obligation (mid)' : 'Buyback obligation (mid)'),
     marketableLabel: leapsEconomics ? 'Estimated Sell-Now Value' : isLong ? 'Marketable sell value' : 'Marketable buyback cost',
     leapsEconomics,
+    pmccCampaign: null,
   };
 }
 
