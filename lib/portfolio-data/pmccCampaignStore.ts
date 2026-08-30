@@ -2,15 +2,42 @@ import type { PmccCampaign } from '@/lib/portfolio/pmccCampaign';
 
 export type PmccCampaignStore = Record<string, PmccCampaign>;
 
-export async function fetchPmccCampaigns(): Promise<PmccCampaignStore> {
+export type PmccCampaignLoadResult =
+  | { status: 'ok'; campaigns: PmccCampaignStore; reason: null }
+  | { status: 'unavailable'; campaigns: PmccCampaignStore; reason: string };
+
+/**
+ * Status-aware read used by safety-sensitive consumers. A failed read must
+ * never be indistinguishable from an authoritative empty campaign store.
+ */
+export async function fetchPmccCampaignLoadResult(): Promise<PmccCampaignLoadResult> {
   try {
     const res = await fetch('/api/pmcc-campaigns', { cache: 'no-store' });
-    if (!res.ok) return {};
+    if (!res.ok) {
+      return { status: 'unavailable', campaigns: {}, reason: `PMCC campaign store returned ${res.status}.` };
+    }
     const data = await res.json();
-    return data?.campaigns ?? {};
-  } catch {
-    return {};
+    const campaigns = data?.campaigns;
+    if (campaigns == null || typeof campaigns !== 'object' || Array.isArray(campaigns)) {
+      return { status: 'unavailable', campaigns: {}, reason: 'PMCC campaign store response was invalid.' };
+    }
+    return { status: 'ok', campaigns, reason: null };
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      campaigns: {},
+      reason: error instanceof Error ? error.message : 'PMCC campaign store is unavailable.',
+    };
   }
+}
+
+/**
+ * Legacy convenience read for non-safety-sensitive callers. New close/action
+ * gates should use fetchPmccCampaignLoadResult so a read failure fails closed.
+ */
+export async function fetchPmccCampaigns(): Promise<PmccCampaignStore> {
+  const result = await fetchPmccCampaignLoadResult();
+  return result.campaigns;
 }
 
 export async function upsertPmccCampaigns(campaigns: PmccCampaign[]): Promise<PmccCampaignStore | null> {
