@@ -152,7 +152,7 @@ describe('PositionsWorkspace', () => {
     const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
     expect(strikeGapCellText.indexOf('12.5% OTM')).toBeLessThan(strikeGapCellText.indexOf('chart'));
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
-    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested Action'));
+    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
   });
 
