@@ -196,6 +196,24 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
+  it('locks follow-ups to the analyzed position snapshot and exposes the retained context', async () => {
+    const user = userEvent.setup();
+    const generatedAt = '2026-08-25T14:30:00Z';
+    const analysis = { positionKey: position.key, symbol: position.symbol, recommendation: 'HOLD', confidence: 'HIGH', summary: 'Position summary', reasoning: 'Canonical evidence', risks: [], catalysts: [], generatedAt };
+    const onAnalyze = vi.fn(async () => analysis);
+    const renderAnalysisConversation = vi.fn((selected: Position) => <label>Follow-up for {selected.symbol}<textarea aria-label={`Ask a follow-up about ${selected.symbol}`} /></label>);
+    render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} />);
+
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+
+    expect(await screen.findByRole('textbox', { name: 'Ask a follow-up about AAPL' })).toBeInTheDocument();
+    await user.click(screen.getByText('Position context locked for this conversation'));
+    expect(screen.getByText(`Position ID: ${position.key}`)).toBeInTheDocument();
+    expect(screen.getByText(/Follow-ups retain this snapshot and conversation history/)).toBeInTheDocument();
+    expect(renderAnalysisConversation).toHaveBeenCalledWith(position, analysis);
+  });
+
   it('shows portfolio-first income eligibility and keeps its review explicitly non-actionable', async () => {
     const user = userEvent.setup();
     const next = {
