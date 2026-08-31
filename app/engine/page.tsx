@@ -2904,6 +2904,7 @@ export default function EnginePage() {
             className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} hover:border-blue-500 hover:text-blue-400 transition-colors`}>
             ⚙ Settings
           </button>
+          <div data-global-header-context className="shrink-0" />
           {/* Accent swatches */}
           <div className="flex items-center gap-1">
             {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (

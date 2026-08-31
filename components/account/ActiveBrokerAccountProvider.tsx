@@ -67,17 +67,25 @@ export function ActiveBrokerAccountIndicator() {
       ? 'Choose the account TradeEdge should use across the app.'
       : null;
   return (
-    <div className="fixed right-4 top-3 z-[90] text-[11px]" data-testid="active-broker-account">
+    <div className="relative shrink-0 text-[11px]" data-testid="active-broker-account">
       <button
         type="button"
         onClick={() => setOpen(value => !value)}
-        className={`rounded-full border px-3 py-1.5 font-semibold shadow-lg backdrop-blur ${needsChoice ? 'border-amber-400 bg-amber-950/95 text-amber-200' : 'border-neutral-700 bg-neutral-950/90 text-neutral-300'}`}
+        className={`flex max-w-56 items-center gap-1.5 rounded-full border px-2.5 py-1.5 font-semibold shadow-sm backdrop-blur ${needsChoice ? 'border-amber-400 bg-amber-950/95 text-amber-200' : 'border-neutral-700 bg-neutral-950/90 text-neutral-300'}`}
         aria-expanded={open}
+        aria-label={status === 'loading' ? 'Loading active broker account' : needsChoice ? 'Choose active broker account' : `Active broker account ${selected?.label ?? 'Account'}, ending ${accountId?.slice(-4) ?? ''}`}
       >
-        {status === 'loading' ? 'Account…' : needsChoice ? 'Choose account' : `${selected?.label ?? 'Account'} · ••••${accountId?.slice(-4) ?? ''}`}
+        {status === 'loading' || needsChoice ? (
+          status === 'loading' ? 'Account…' : 'Choose account'
+        ) : (
+          <>
+            <span className="hidden max-w-32 truncate xl:inline">{selected?.label ?? 'Account'}</span>
+            <span className="font-mono">••••{accountId?.slice(-4) ?? ''}</span>
+          </>
+        )}
       </button>
       {open && (
-        <div className="mt-2 w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 text-neutral-200 shadow-2xl" role="dialog" aria-label="Active broker account">
+        <div className="absolute right-0 top-full z-[70] mt-2 w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 text-neutral-200 shadow-2xl" role="dialog" aria-label="Active broker account">
           <div className="px-2 py-1 text-[10px] text-neutral-400">Active broker account</div>
           {choiceMessage && <p className="px-2 pb-2 text-[10px] text-amber-300">{choiceMessage}</p>}
           {accounts.map(account => (

@@ -1475,6 +1475,7 @@ export default function RinseRepeatPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div data-global-header-context className="shrink-0" />
             {/* Accent swatches */}
             <div className="flex items-center gap-1 mr-1">
               {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (

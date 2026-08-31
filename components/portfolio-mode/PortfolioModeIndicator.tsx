@@ -95,7 +95,41 @@ const DISABLED_PAPER_LABEL = 'PAPER — available after application integration'
 // Shared top-center placement for every non-blocking state. z-[60] sits
 // above the sticky page headers several routes use (those are z-50), so
 // the indicator is never visually buried underneath one.
-const CENTER_POSITION = 'fixed left-1/2 top-3 z-[60] -translate-x-1/2';
+const INLINE_POSITION = 'relative shrink-0';
+
+export function PortfolioModeSafetyOverlay() {
+  const { status, mode, setMode } = usePortfolioMode();
+  const pathname = usePathname();
+  const onPaperOnlyRoute = pathname?.startsWith(PAPER_ONLY_ROUTE_PREFIX) ?? false;
+
+  if (status !== 'ready' || mode !== 'PAPER' || onPaperOnlyRoute) return null;
+
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Portfolio mode requires attention"
+      data-testid="portfolio-mode-block"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+    >
+      <div className="max-w-md rounded-lg border border-rose-500 bg-rose-950 p-6 text-center shadow-2xl">
+        <p className="text-sm font-semibold text-rose-100">
+          Portfolio mode is set to PAPER, but PAPER is not yet supported application-wide.
+        </p>
+        <p className="mt-2 text-xs text-rose-200">
+          Live portfolio screens cannot be shown while an unsupported mode is selected. Return to LIVE to continue.
+        </p>
+        <button
+          type="button"
+          onClick={() => setMode('LIVE')}
+          className="mt-4 rounded border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/10"
+        >
+          Return to LIVE
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function PortfolioModeIndicator() {
   const { status, mode, rawInvalidValue, setMode } = usePortfolioMode();
@@ -106,7 +140,7 @@ export function PortfolioModeIndicator() {
     return (
       <div
         aria-hidden="true"
-        className={`${CENTER_POSITION} h-7 w-24 rounded-full border border-[#2c2c2c] bg-[#141414]/80`}
+        className={`${INLINE_POSITION} h-7 w-16 rounded-full border border-[#2c2c2c] bg-[#141414]/80`}
       />
     );
   }
@@ -115,7 +149,7 @@ export function PortfolioModeIndicator() {
     return (
       <div
         role="alert"
-        className={`${CENTER_POSITION} flex max-w-[92vw] items-center gap-2 whitespace-nowrap rounded-lg border border-rose-500 bg-rose-950/90 px-3 py-2 text-xs text-rose-100 shadow-lg`}
+        className={`${INLINE_POSITION} flex items-center gap-2 whitespace-nowrap rounded-lg border border-rose-500 bg-rose-950/90 px-2.5 py-1.5 text-[10px] text-rose-100 shadow-lg`}
       >
         <span className="font-semibold">
           Portfolio mode unknown{rawInvalidValue ? ` ("${rawInvalidValue}")` : ''} — LIVE is required to continue:
@@ -142,41 +176,7 @@ export function PortfolioModeIndicator() {
 
   // status === 'ready' from here on.
 
-  if (mode === 'PAPER' && !onPaperOnlyRoute) {
-    // A PAPER value was persisted before this corrective round -- never
-    // silently coerced to LIVE, but never presented as an active,
-    // supported application-wide mode either. Blocks the whole shell (a
-    // fixed, full-viewport, pointer-capturing overlay) rather than any one
-    // page, since no individual screen is mode-aware yet to gate itself.
-    // Deliberately NOT recentered like the states above -- a full-viewport
-    // safety overlay has no "position" to correct; it already covers
-    // everything, which is the point.
-    return (
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Portfolio mode requires attention"
-        data-testid="portfolio-mode-block"
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      >
-        <div className="max-w-md rounded-lg border border-rose-500 bg-rose-950 p-6 text-center shadow-2xl">
-          <p className="text-sm font-semibold text-rose-100">
-            Portfolio mode is set to PAPER, but PAPER is not yet supported application-wide.
-          </p>
-          <p className="mt-2 text-xs text-rose-200">
-            Live portfolio screens cannot be shown while an unsupported mode is selected. Return to LIVE to continue.
-          </p>
-          <button
-            type="button"
-            onClick={() => setMode('LIVE')}
-            className="mt-4 rounded border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/10"
-          >
-            Return to LIVE
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (mode === 'PAPER' && !onPaperOnlyRoute) return null;
 
   if (mode === 'PAPER' && onPaperOnlyRoute) {
     // The dedicated paper-only sandbox never reads this context and is
@@ -191,7 +191,8 @@ export function PortfolioModeIndicator() {
     <div
       role="status"
       aria-label="Portfolio mode: LIVE"
-      className={`${CENTER_POSITION} flex items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-400 bg-amber-950/90 px-2.5 py-1 text-xs font-semibold text-amber-300 shadow-lg sm:gap-2 sm:px-3 sm:py-1.5`}
+      title={DISABLED_PAPER_LABEL}
+      className={`${INLINE_POSITION} flex items-center whitespace-nowrap rounded-full border border-amber-400 bg-amber-950/90 px-2.5 py-1.5 text-[10px] font-semibold text-amber-300 shadow-sm`}
     >
       <span data-testid="portfolio-mode-label" className="tracking-wide">
         LIVE
@@ -213,31 +214,6 @@ export function PortfolioModeIndicator() {
           on color/opacity alone even at compact size. The full desktop
           label already disambiguates via its own explanatory text and is
           unchanged. */}
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        aria-label={DISABLED_PAPER_LABEL}
-        title={DISABLED_PAPER_LABEL}
-        data-testid="portfolio-mode-paper-disabled"
-        className="cursor-not-allowed rounded-full border border-current px-2 py-0.5 text-[10px] font-medium text-amber-300/40"
-      >
-        <span className="hidden sm:inline">{DISABLED_PAPER_LABEL}</span>
-        <span className="sm:hidden inline-flex items-center gap-0.5 line-through decoration-2">
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 12 12"
-            className="h-2.5 w-2.5 flex-shrink-0"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <circle cx="6" cy="6" r="5" />
-            <line x1="2.3" y1="2.3" x2="9.7" y2="9.7" />
-          </svg>
-          PAPER
-        </span>
-      </button>
     </div>
   );
 }

@@ -22,8 +22,8 @@ import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioData
 // PortfolioModeIndicator is the required global, unmistakable indicator/
 // selector, mounted once alongside the other global overlays below.
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
-import { PortfolioModeIndicator } from '@/components/portfolio-mode/PortfolioModeIndicator';
-import { ActiveBrokerAccountIndicator, ActiveBrokerAccountProvider } from '@/components/account/ActiveBrokerAccountProvider';
+import { ActiveBrokerAccountProvider } from '@/components/account/ActiveBrokerAccountProvider';
+import { GlobalHeaderContextControls } from '@/components/header/GlobalHeaderContextControls';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -37,8 +37,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
                 <RankedScanTaskMirror />
                 <ScreenerCardPolish />
                 <ScreenerJobStatus />
-                <PortfolioModeIndicator />
-                <ActiveBrokerAccountIndicator />
+                <GlobalHeaderContextControls />
               </PortfolioDataProvider>
             </PortfolioModeProvider>
           </ActiveBrokerAccountProvider>

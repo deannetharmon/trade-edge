@@ -24,12 +24,15 @@ describe('ActiveBrokerAccountProvider and indicator', () => {
     renderAccountControl();
     expect(await screen.findByRole('button', { name: /Individual.*1234/i })).toBeInTheDocument();
     expect(screen.queryByText('ACCT-SECRET-1234')).not.toBeInTheDocument();
+    expect(screen.getByTestId('active-broker-account').className).not.toMatch(/\bfixed\b/);
   });
 
   it('offers all accounts once and routes the choice through the full-reload switch boundary', async () => {
     account.resolve.mockResolvedValue({ status: 'selection_required', accountId: null, accounts: [{ id: 'ACCT-A', label: 'IRA' }, { id: 'ACCT-B', label: 'Individual' }] });
     renderAccountControl();
-    await userEvent.click(await screen.findByRole('button', { name: 'Choose account' }));
+    await userEvent.click(await screen.findByRole('button', { name: /choose active broker account/i }));
+    expect(screen.getByRole('dialog', { name: /active broker account/i }).className).toMatch(/\babsolute\b/);
+    expect(screen.getByRole('dialog', { name: /active broker account/i }).className).toMatch(/\btop-full\b/);
     await userEvent.click(screen.getByRole('button', { name: /IRA/i }));
     expect(account.switchAccount).toHaveBeenCalledWith('ACCT-A');
   });
@@ -37,7 +40,7 @@ describe('ActiveBrokerAccountProvider and indicator', () => {
   it('explains that a restored account disappeared and requires a replacement choice', async () => {
     account.resolve.mockResolvedValue({ status: 'selected_account_missing', accountId: null, accounts: [{ id: 'ACCT-B', label: 'Individual' }] });
     renderAccountControl();
-    await userEvent.click(await screen.findByRole('button', { name: 'Choose account' }));
+    await userEvent.click(await screen.findByRole('button', { name: /choose active broker account/i }));
     await waitFor(() => expect(screen.getByText(/saved account is no longer available/i)).toBeInTheDocument());
   });
 });

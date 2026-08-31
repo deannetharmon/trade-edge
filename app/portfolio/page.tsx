@@ -9876,6 +9876,7 @@ export default function PortfolioPage() {
             className="text-[10px] px-3 py-1.5 border border-white/10 text-white/30 rounded hover:border-white/30 hover:text-white/60 transition-colors tracking-wider">
             SIGN OUT
           </button>
+          <div data-global-header-context className="shrink-0" />
           <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
         </div>

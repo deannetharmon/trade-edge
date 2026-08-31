@@ -427,6 +427,7 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-3">
             {lastUpdated && <span className={`text-[9px] ${th.textFaint}`}>Updated {lastUpdated}</span>}
+            <div data-global-header-context className="shrink-0" />
             <div className="flex items-center gap-1 mr-1">
               {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (
                 <button key={key} onClick={() => { setAccent(key); applyAccent(key); try { localStorage.setItem(LS_ACCENT, key); } catch {} }}

@@ -8370,6 +8370,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-3">
             <a href="/help" target="_blank" className="text-white/50 hover:text-white/90 text-xs font-medium tracking-wider transition-colors" title="Help">?</a>
+            <div data-global-header-context className="shrink-0" />
             <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
         </div>

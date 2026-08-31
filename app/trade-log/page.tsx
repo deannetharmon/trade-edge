@@ -632,6 +632,7 @@ export default function TradeLogPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+          <div data-global-header-context className="shrink-0" />
 
           {/* Accent swatches */}
           <div className="flex items-center gap-1 mr-1">
