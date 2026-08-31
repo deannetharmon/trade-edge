@@ -199,6 +199,7 @@ import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
+import { ACTION_SUGGESTIONS, PositionAiConversation } from '@/features/portfolio/ai-conversation/PositionAiConversation';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
@@ -527,6 +528,46 @@ interface BatchOrderItem {
   rollLongStrike?: number;
   rollCredit?: number;
   openOrderBody?: OrderBody;
+}
+
+function buildActionChatContext(
+  item: BatchOrderItem,
+  effectiveLimit: number,
+  mode: string,
+  roll?: { expiry?: string; shortStrike?: string; longStrike?: string; credit?: string },
+): string {
+  const action = item.action === 'CLOSE_ROLL' ? (mode === 'roll' ? 'ROLL' : 'CLOSE') : item.action;
+  const expectedPnl = item.closeIdentity ? expectedClosePnl(item.closeIdentity, effectiveLimit) : item.estPnl;
+  return [
+    'POSITION SNAPSHOT AND ACTION PROPOSAL — USE ONLY THIS DATA',
+    `Position key: ${item.pos.key}`,
+    `Symbol / strategy: ${item.pos.symbol} ${item.pos.strategy}`,
+    `Expiration / DTE: ${item.pos.expDate} / ${item.pos.dte}`,
+    `Quantity: ${item.pos.quantity}`,
+    `Underlying: ${item.pos.stockPrice ?? 'unavailable'}`,
+    `Open P&L: ${item.pos.pnl ?? 'unavailable'}`,
+    `Current midpoint value: ${item.pos.currentValue ?? 'unavailable'}`,
+    `Legs: ${item.pos.legs.map(leg => `${leg.direction} ${leg.quantity}x ${leg.strikePrice}${leg.optionType}`).join(' / ') || 'unavailable'}`,
+    '',
+    'ACTION PROPOSAL',
+    `Action: ${action}`,
+    `Order legs: ${item.orderBody.legs.map(leg => `${leg.action} ${leg.quantity} ${leg.symbol}`).join(' / ') || 'unavailable'}`,
+    `Limit price: ${effectiveLimit.toFixed(2)} points per unit`,
+    `Price effect: ${item.orderBody['price-effect'] ?? 'unavailable'}`,
+    `Time in force: ${item.orderBody['time-in-force']}`,
+    `Estimated realized P&L: ${expectedPnl == null ? 'unavailable' : `$${expectedPnl.toFixed(2)}`}`,
+    `Quote bid / mid / ask: ${item.closeQuote ? `${item.closeQuote.netBid ?? 'unavailable'} / ${item.closeQuote.netMid ?? 'unavailable'} / ${item.closeQuote.netAsk ?? 'unavailable'}` : 'unavailable'}`,
+    `Quote captured: ${item.quoteFetchedAt ? new Date(item.quoteFetchedAt).toISOString() : 'unavailable'}`,
+    `Existing GTC replacement required: ${item.duplicateGtcWarning ? 'yes' : 'no'}`,
+    action === 'ROLL' ? `Roll to: ${roll?.expiry ?? 'unavailable'} · strikes ${roll?.shortStrike ?? 'unavailable'} / ${roll?.longStrike ?? 'unavailable'} · proposed credit ${roll?.credit ?? 'unavailable'}` : '',
+    '',
+    'DETERMINISTIC SAFETY EVIDENCE',
+    `Safety result: ${item.safetyCheck?.ok === true ? 'PASS' : item.safetyCheck?.ok === false ? 'BLOCKED' : 'unavailable'}`,
+    ...(item.safetyCheck?.issues.map(issue => `${issue.severity.toUpperCase()} [${issue.ruleId}] ${issue.message}`) ?? []),
+    item.priceError ? `Blocking price error: ${item.priceError}` : '',
+    '',
+    'AI is advisory only. It cannot change this proposal, clear a block, cancel an order, or submit an order.',
+  ].filter(Boolean).join('\n');
 }
 
 interface OrderResult {
@@ -4142,6 +4183,23 @@ function BatchConfirmModal({
                       </div>
                     )}
 
+                    {!isExcluded && (() => {
+                      const effectiveLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
+                      const mode = item.action === 'CLOSE_ROLL' ? (rollMode[item.pos.key] ?? 'close') : item.action;
+                      const actionKey = item.action === 'CLOSE_ROLL' ? (mode === 'roll' ? 'ROLL' : 'CLOSE') : item.action;
+                      const proposalKey = [item.pos.key, actionKey, effectiveLimit.toFixed(2), ri?.expiry, ri?.shortStrike, ri?.longStrike, ri?.credit, item.quoteFetchedAt].join(':');
+                      return <div className="mx-4 mb-3 overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/5">
+                        <PositionAiConversation
+                          contextKey={proposalKey}
+                          initialContext={buildActionChatContext(item, effectiveLimit, mode, ri)}
+                          suggestions={ACTION_SUGGESTIONS[actionKey] ?? ACTION_SUGGESTIONS.CLOSE}
+                          th={th}
+                          defaultOpen={false}
+                          label="Ask AI about this action"
+                        />
+                      </div>;
+                    })()}
+
                     {item.action === 'CLOSE_ROLL' && !isExcluded && item.closeIdentity!.entryPriceEffect === 'Debit' && (
                       <div className={`px-4 py-3 border-t ${th.borderLight}`}>
                         <p className="text-[10px] font-bold text-emerald-400">SELL TO CLOSE</p>
@@ -5184,16 +5242,11 @@ function AnalysisPanel({ analysis, pos, th }: { analysis: PositionAnalysis; pos:
           )}
         </div>
 
-        <div className={`flex items-center gap-2 pt-1`}>
-          <span className="text-[9px] text-indigo-400 font-bold tracking-widest uppercase">◈ Ask a follow-up</span>
-          <div className={`flex-1 h-px ${th.borderLight} border-t`} />
-        </div>
       </div>
 
-      <ChatThread
+      <PositionAiConversation
+        contextKey={`legacy-position:${pos.key}:${analysis.generatedAt}`}
         initialContext={chatContext}
-        systemPrompt={TRADING_CHAT_PROMPT}
-        placeholder={`Ask about ${analysis.symbol}... e.g. "Should I roll to next month?"`}
         th={th}
       />
     </div>
@@ -10074,7 +10127,10 @@ export default function PortfolioPage() {
               getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                 .filter(action => isActionRelevant(position, action))}
               onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
-              onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
+              onAnalyze={async (position, traderNote) => {
+                const result = await analyzePosition(position, null, traderNote);
+                return { ...result, chatContext: buildPositionChatContext(position, result) };
+              }}
               renderStopControl={position => position.stopLossClassification === 'NO_STOP'
                 ? <SetStopLossButton pos={position} th={th} />
                 : null}
