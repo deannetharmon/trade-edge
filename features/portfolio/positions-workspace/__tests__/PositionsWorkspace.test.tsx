@@ -191,6 +191,32 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
+  it('restores multi-turn AI follow-ups with position-grounded context', async () => {
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (String(input) === '/api/analyze') return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'The buffer is the key risk.' }] }) } as Response;
+      return { ok: true, json: async () => ({ notes: {} }) } as Response;
+    });
+    const user = userEvent.setup();
+    const onAnalyze = vi.fn(async () => ({
+      positionKey: position.key, symbol: position.symbol, recommendation: 'HOLD', confidence: 'HIGH',
+      summary: 'Hold the position.', reasoning: 'Canonical evidence', risks: [], catalysts: [],
+      generatedAt: '2026-08-25T00:00:00Z',
+      chatContext: 'POSITION SNAPSHOT — USE THIS DATA\nPosition key: AAPL-1\nBuffer: 12.9%',
+    }));
+    render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={onAnalyze} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    expect(await screen.findByRole('region', { name: 'Ask a follow-up' })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('Ask a follow-up question…'), 'What is the key risk?');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('The buffer is the key risk.')).toBeInTheDocument();
+    const analyzeCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/api/analyze');
+    const body = JSON.parse(String(analyzeCall?.[1]?.body));
+    expect(body.profile).toBe('chat');
+    expect(body.messages[0].content).toContain('Position key: AAPL-1');
+    expect(body.messages[1].content).toBe('What is the key risk?');
+  });
+
   it('shows portfolio-first income eligibility and keeps its review explicitly non-actionable', async () => {
     const user = userEvent.setup();
     const next = {
