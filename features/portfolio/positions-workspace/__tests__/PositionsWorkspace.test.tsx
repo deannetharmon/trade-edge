@@ -32,9 +32,11 @@ const model: PositionsWorkspaceModel = {
     optionBuybackMid: aggregate(910), optionMarketableClose: aggregate(900, 'marketable-close'),
     unrealizedPnlMid: aggregate(28), optionCloseNowPnl: aggregate(35, 'marketable-close'),
     unrealizedPnlPct: 3, unrealizedPnlPctReason: null,
-    optionInstruments: [{ key: position.key, position, role: 'short-put', roleLabel: 'Short put', midpointLabel: 'Buyback obligation (mid)', marketableLabel: 'Marketable buyback cost' }],
+    optionInstruments: [{ key: position.key, position, role: 'short-put', roleLabel: 'Short put', midpointLabel: 'Buyback obligation (mid)', marketableLabel: 'Marketable buyback cost', leapsEconomics: null, pmccCampaign: null }],
+    pmccCampaigns: [],
   }],
   analysisRows: [{ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: false }],
+  pmccCampaigns: [],
 };
 
 describe('PositionsWorkspace', () => {
