@@ -2,19 +2,19 @@ import type { AnalysisColumnId, AnalysisViewId } from './types';
 
 export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: string; group: string }> = [
   { id: 'identity', label: 'Position', group: 'Position' },
-  { id: 'dates', label: 'Entry / Expiry / DTE', group: 'Position' },
+  { id: 'dates', label: 'Dates', group: 'Position' },
   { id: 'underlying', label: 'Strike Gap', group: 'Position' },
-  { id: 'strike', label: 'Strike / Breakeven', group: 'Position' },
+  { id: 'strike', label: 'Strike / BE', group: 'Position' },
   { id: 'capital', label: 'Capital', group: 'Economics' },
-  { id: 'entry', label: 'Credit / Debit', group: 'Economics' },
-  { id: 'value', label: 'Buyback / Value', group: 'Economics' },
-  { id: 'pnl', label: 'Open P/L / Target', group: 'Economics' },
-  { id: 'evolution', label: 'Trade Evolution', group: 'Movement' },
+  { id: 'entry', label: 'Entry Credit / Debit', group: 'Economics' },
+  { id: 'value', label: 'Close Value', group: 'Economics' },
+  { id: 'pnl', label: 'P/L / Target', group: 'Economics' },
+  { id: 'evolution', label: 'Since Tracked', group: 'Movement' },
   { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
-  { id: 'orders', label: 'GTC / Stop', group: 'Orders' },
+  { id: 'orders', label: 'Orders / Stop', group: 'Orders' },
   { id: 'notes', label: 'Notes', group: 'Position' },
-  { id: 'recommendation', label: 'Suggested action', group: 'Recommendation' },
+  { id: 'recommendation', label: 'Suggested Action', group: 'Recommendation' },
 ] as const;
 
 const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'notes', 'recommendation'];

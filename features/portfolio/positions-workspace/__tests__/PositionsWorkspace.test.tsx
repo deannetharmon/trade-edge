@@ -76,7 +76,12 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     await user.selectOptions(screen.getByLabelText('View'), 'full');
     expect(screen.getAllByRole('columnheader')).toHaveLength(14);
+    expect(screen.getByRole('columnheader', { name: 'Since Tracked' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Greeks' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'IV / IVR' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Suggested Action' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'What Moved' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Trade Evolution' })).not.toBeInTheDocument();
   });
 
   it('exposes Cut Losses and routes it through the existing review flow', async () => {
