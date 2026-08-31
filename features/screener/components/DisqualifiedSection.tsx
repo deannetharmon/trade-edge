@@ -42,6 +42,34 @@ function essentialStructure(result: ScreenResult): string {
   return `${c.shortStrike}/${c.longStrike}`;
 }
 
+type BlockerSummary = { label: string; symbols: string[]; contractCount: number };
+
+function blockerLabel(result: ScreenResult): string {
+  const reason = result.failReasons[0] ?? 'Other qualification blocker';
+  if (/earnings/i.test(reason)) return 'Event-risk exclusion';
+  if (/IVR/i.test(reason)) return 'Volatility-risk exclusion';
+  if (/liquidity|bid\/ask|wide market/i.test(reason)) return 'Poor-liquidity exclusion';
+  if (/market-state|foundation/i.test(reason)) return 'Underlying eligibility blocker';
+  if (/capital|cash|account/i.test(reason)) return 'Account eligibility blocker';
+  return reason;
+}
+
+export function summarizeDisqualifiedCspResults(results: ScreenResult[]): BlockerSummary[] {
+  const groups = new Map<string, { symbols: Set<string>; contractCount: number }>();
+  results.forEach(result => {
+    const label = blockerLabel(result);
+    const group = groups.get(label) ?? { symbols: new Set<string>(), contractCount: 0 };
+    group.symbols.add(result.symbol);
+    group.contractCount += 1;
+    groups.set(label, group);
+  });
+  return Array.from(groups.entries()).map(([label, group]) => ({
+    label,
+    symbols: Array.from(group.symbols).sort(),
+    contractCount: group.contractCount,
+  }));
+}
+
 function DisqualifiedCard({
   result,
   th,
@@ -129,6 +157,9 @@ export function DisqualifiedSection({
   );
 
   if (results.length === 0) return null;
+  const isCspAudit = groupByExpiration && results.every(result => result.strategy === 'CSP');
+  const tickerCount = new Set(results.map(result => result.symbol)).size;
+  const blockerSummary = isCspAudit ? summarizeDisqualifiedCspResults(results) : [];
 
   return (
     <section aria-label="Disqualified candidates" data-testid="disqualified-section">
@@ -140,12 +171,29 @@ export function DisqualifiedSection({
         onClick={toggleSection}
         className={`w-full flex items-center justify-between text-[9px] tracking-widest uppercase font-bold ${th.textFaint} py-1`}
       >
-        <span>Disqualified ({results.length})</span>
+        <span>{isCspAudit ? `Disqualified audit (${results.length} contracts)` : `Disqualified (${results.length})`}</span>
         <span aria-hidden="true">{sectionOpen ? '▾' : '▸'}</span>
       </button>
       <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {sectionOpen && (
         <div id={panelId} className="space-y-2 mt-1">
+          {isCspAudit && (
+            <div className={`rounded-lg border ${th.border} p-3`} aria-label="CSP disqualification summary">
+              <p className="text-[10px] font-bold text-amber-300">Why contracts did not qualify</p>
+              <p className={`mt-0.5 text-[9px] ${th.textFaint}`}>{tickerCount} ticker{tickerCount === 1 ? '' : 's'} · {results.length} contracts excluded</p>
+              <div className="mt-2 space-y-1.5">
+                {blockerSummary.map(summary => (
+                  <div key={summary.label} className="text-[9px]">
+                    <span className="font-semibold text-amber-400">Eligibility blocker — {summary.label}:</span>{' '}
+                    <span className={th.textMuted}>{summary.symbols.join(', ')}</span>{' '}
+                    <span className={th.textFaint}>· {summary.contractCount} contract{summary.contractCount === 1 ? '' : 's'} affected</span>
+                  </div>
+                ))}
+              </div>
+              <p className={`mt-2 text-[9px] ${th.textFaint}`}>Expand an expiration and then a contract’s checks for the complete audit, including quality warnings that did not cause exclusion.</p>
+            </div>
+          )}
+          {isCspAudit && <p className={`pt-1 text-[9px] font-bold uppercase tracking-widest ${th.textFaint}`}>Contract audit</p>}
           {groupByExpiration ? Array.from(results.reduce((groups, result) => {
             const expiration = result.bestCandidate?.expiration ?? 'Unknown expiration';
             const group = groups.get(expiration) ?? [];

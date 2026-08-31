@@ -82,4 +82,21 @@ describe('DisqualifiedSection', () => {
     await new Promise(resolve => requestAnimationFrame(resolve));
     expect(screen.getByRole('button', { name: /show checks/i })).toHaveFocus();
   });
+
+  it('summarizes CSP blockers by root cause and ticker while preserving expiration and contract drill-down', async () => {
+    const csp = (symbol: string, strike: number): ScreenResult => result({
+      symbol,
+      strategy: 'CSP',
+      bestCandidate: { ...(result().bestCandidate as any), strategy: 'CSP', shortStrike: strike },
+      candidateId: `${symbol}-${strike}`,
+      failReasons: ['Earnings within expiry window — assignment risk into a binary event'],
+    });
+    render(<DisqualifiedSection results={[csp('MU', 800), csp('MU', 795)]} hasQualifiedCandidates={false} groupByExpiration />);
+    expect(screen.getByText('Disqualified audit (2 contracts)')).toBeInTheDocument();
+    expect(screen.getByLabelText('CSP disqualification summary')).toHaveTextContent('1 ticker · 2 contracts excluded');
+    expect(screen.getByLabelText('CSP disqualification summary')).toHaveTextContent('Eligibility blocker — Event-risk exclusion: MU · 2 contracts affected');
+    const expiration = screen.getByRole('button', { name: /30 DTE, 2 excluded contracts/i });
+    await fireEvent.click(expiration);
+    expect(screen.getAllByRole('button', { name: /Show checks for MU/i })).toHaveLength(2);
+  });
 });

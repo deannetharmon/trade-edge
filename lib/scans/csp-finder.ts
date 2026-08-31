@@ -49,8 +49,21 @@ export interface CspFindParams {
    * the ticket's "Discovery before classification" requirement: IVR/
    * earnings no longer prevent discovery, they classify what was
    * discovered. */
+  /** True only for the hard upper-IVR risk cap. IVR below the preferred
+   * minimum is advisory and is carried in advisoryWarnings instead. */
   ivrMarketDisqualified?: boolean;
+  /** @deprecated Candidate-specific earnings classification uses
+   * earningsDate. Retained temporarily for callers/tests that explicitly
+   * supply the legacy symbol-wide hard block. */
   earningsMarketDisqualified?: boolean;
+  /** Date-only earnings estimate (YYYY-MM-DD). Each discovered contract is
+   * compared with its own expiration; an event on expiration is blocking. */
+  earningsDate?: string | null;
+  /** Date-only deterministic scan date. Defaults to today's local calendar
+   * date. Primarily injected by tests and persisted scan replays. */
+  asOfDate?: string;
+  /** Current IVR, used only to produce a low-premium advisory warning. */
+  ivr?: number | null;
   /** CSP-WORKFLOW-RECONCILE-0002 — SQ-0001A foundation eligibility for this
    * underlying/horizon (from evaluateUnderlyingFoundation's CSP thesis +
    * evaluateStrategyEligibility, computed once per symbol upstream and
@@ -76,6 +89,10 @@ export interface CspCandidateResult {
   accountEligibility: CspAccountEligibility;
   advisoryWarnings: string[];
   liquidityClass: CspLiquidityClass;
+  /** Candidate-specific event result. false includes no known event, a past
+   * event, or an event after this contract expires; null means malformed
+   * date input prevented a determination. */
+  earningsWithinExpiration: boolean | null;
   /** True only when both market-qualified (no warning) AND account-eligible
    * — the Best-Opportunities-eligible / "account-actionable" boundary. */
   accountActionable: boolean;
@@ -103,8 +120,11 @@ function computeAvailableCspCapital(capital: CspFindParams['capital']): number |
   return Math.min(bp as number, cash as number);
 }
 
-function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number): string[] {
+function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number, ivr: number | null | undefined, ivrMin: number): string[] {
   const warnings: string[] = [];
+  if (typeof ivr === 'number' && Number.isFinite(ivr) && ivr < ivrMin) {
+    warnings.push(`Low IVR ${ivr.toFixed(1)}% — below the preferred ${ivrMin}% premium environment; ranked lower, not disqualified.`);
+  }
   if (!c.oiPassing) {
     warnings.push(`OI ${c.openInterest} is below the preferred minimum of ${oiMin}.`);
   }
@@ -114,9 +134,34 @@ function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number): string[] {
   return warnings;
 }
 
+function localDateOnly(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isDateOnly(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+}
+
+/** Candidate-specific, date-only event classification. */
+export function earningsWithinCspExpiration(
+  earningsDate: string | null | undefined,
+  expirationDate: string,
+  asOfDate = localDateOnly(),
+): boolean | null {
+  if (!earningsDate) return false;
+  if (!isDateOnly(earningsDate) || !isDateOnly(expirationDate) || !isDateOnly(asOfDate)) return null;
+  if (earningsDate < asOfDate) return false;
+  return earningsDate <= expirationDate;
+}
+
 function marketQualificationFor(
   c: CspRawCandidate,
   params: Pick<CspFindParams, 'ivrMarketDisqualified' | 'earningsMarketDisqualified' | 'foundationEligibility'>,
+  earningsWithinExpiration: boolean | null,
 ): CspMarketQualification {
   // SQ-0001A foundation gate is checked first — it is the most fundamental,
   // strategy-agnostic evidence (does the underlying's directional/regime
@@ -132,7 +177,7 @@ function marketQualificationFor(
   }
   // Earnings checked before IVR — an earnings-within-window disqualification
   // is a harder, more specific reason than a generic IVR-band miss.
-  if (params.earningsMarketDisqualified) return 'DISQUALIFIED_EARNINGS';
+  if (params.earningsMarketDisqualified || earningsWithinExpiration === true) return 'DISQUALIFIED_EARNINGS';
   if (params.ivrMarketDisqualified) return 'DISQUALIFIED_IVR';
   if (c.liquidityClass === 'POOR') return 'DISQUALIFIED_POOR_LIQUIDITY';
   if (c.liquidityClass === 'BORDERLINE') return 'QUALIFIED_WITH_LIQUIDITY_WARNING';
@@ -260,8 +305,13 @@ export function findAllCsp(
       accountSelected,
       strategyNotPermitted: params.capital?.strategyNotPermitted,
     });
-    const marketQualification = marketQualificationFor(c, params);
-    const advisoryWarnings = buildAdvisoryWarnings(c, searchRules.oiMin);
+    const earningsWithinExpiration = earningsWithinCspExpiration(
+      params.earningsDate,
+      c.expirationDate,
+      params.asOfDate,
+    );
+    const marketQualification = marketQualificationFor(c, params, earningsWithinExpiration);
+    const advisoryWarnings = buildAdvisoryWarnings(c, searchRules.oiMin, params.ivr, params.rules.IVR_MIN);
     const candidate = buildSpreadCandidate(
       c, contracts, requiredCash, availableCspCapital, accountEligibility,
       marketQualification, advisoryWarnings, search, searchRules,
@@ -273,6 +323,7 @@ export function findAllCsp(
       accountEligibility,
       advisoryWarnings,
       liquidityClass: c.liquidityClass,
+      earningsWithinExpiration,
       accountActionable: isMarketQualified(marketQualification) && marketQualification === 'QUALIFIED' && accountEligibility === 'ELIGIBLE',
     };
   });

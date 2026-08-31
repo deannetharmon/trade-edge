@@ -6,7 +6,7 @@
 // evaluated per-candidate, and there is no $100,000 or "unlimited" fallback
 // anywhere in the capital path).
 import { describe, it, expect } from 'vitest';
-import { findAllCsp } from '../csp-finder';
+import { earningsWithinCspExpiration, findAllCsp } from '../csp-finder';
 import { DEFAULT_CSP_RULES } from '../constants';
 
 function futureExpiration(daysOut = 35): string {
@@ -67,6 +67,46 @@ describe('findAllCsp — NKE required acceptance fixture (multi-candidate)', () 
     const put38 = result.results.find(r => r.candidate.shortStrike === 38)!;
     expect(put39.candidate.credit).not.toBe(put38.candidate.credit);
     expect(put39.candidate.pop).not.toBe(put38.candidate.pop);
+  });
+});
+
+describe('findAllCsp — candidate-specific earnings and low-IVR policy', () => {
+  it('qualifies an expiry before earnings and disqualifies an expiry on/after earnings for the same ticker', () => {
+    const earlier = futureExpiration(35);
+    const earnings = futureExpiration(38);
+    const later = futureExpiration(42);
+    const chain = {
+      expirations: [earlier, later],
+      chains: {
+        [earlier]: [{ strikePrice: 90, expirationDate: earlier, optionType: 'P' as const, delta: -0.20, bid: 1.00, ask: 1.10, mid: 1.05, openInterest: 1000, occSymbol: 'EARLY' }],
+        [later]: [{ strikePrice: 90, expirationDate: later, optionType: 'P' as const, delta: -0.20, bid: 1.10, ask: 1.20, mid: 1.15, openInterest: 1000, occSymbol: 'LATE' }],
+      },
+    };
+    const result = findAllCsp(chain, 100, { rules: DEFAULT_CSP_RULES, underlyingSymbol: 'TEST', earningsDate: earnings });
+    const earlyResult = result.results.find(item => item.candidate.expiration === earlier)!;
+    const lateResult = result.results.find(item => item.candidate.expiration === later)!;
+    expect(earlyResult.earningsWithinExpiration).toBe(false);
+    expect(earlyResult.marketQualification).toBe('QUALIFIED');
+    expect(lateResult.earningsWithinExpiration).toBe(true);
+    expect(lateResult.marketQualification).toBe('DISQUALIFIED_EARNINGS');
+  });
+
+  it('treats earnings on expiration as blocking and the day after expiration as clear', () => {
+    expect(earningsWithinCspExpiration('2026-10-02', '2026-10-02', '2026-08-28')).toBe(true);
+    expect(earningsWithinCspExpiration('2026-10-03', '2026-10-02', '2026-08-28')).toBe(false);
+    expect(earningsWithinCspExpiration('2026-08-27', '2026-10-02', '2026-08-28')).toBe(false);
+    expect(earningsWithinCspExpiration(null, '2026-10-02', '2026-08-28')).toBe(false);
+  });
+
+  it('keeps low IVR market-qualified while adding a lower-premium warning', () => {
+    const result = findAllCsp(nkeChain(), NKE_PRICE, {
+      rules: DEFAULT_CSP_RULES,
+      underlyingSymbol: 'NKE',
+      ivr: 29,
+      ivrMarketDisqualified: false,
+    });
+    expect(result.results.every(item => item.marketQualification === 'QUALIFIED' || item.marketQualification === 'QUALIFIED_WITH_LIQUIDITY_WARNING')).toBe(true);
+    expect(result.results.every(item => item.advisoryWarnings.some(warning => /Low IVR 29\.0%/.test(warning)))).toBe(true);
   });
 });
 

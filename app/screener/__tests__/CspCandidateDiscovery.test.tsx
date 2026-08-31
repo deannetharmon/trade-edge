@@ -205,9 +205,9 @@ describe('CSP-WORKFLOW-0001: AMD required acceptance fixture (multi-candidate)',
     // contracts, each a real, owned CSP result with visible fundamentals.
     const disqualifiedSection = await screen.findByTestId('disqualified-section');
     expect(disqualifiedSection).toBeInTheDocument();
-    expect(disqualifiedSection.textContent).toMatch(/Disqualified \(2\)/);
-    await userEvent.click(screen.getByRole('button', { name: /Disqualified \(2\)/ }));
-    await userEvent.click(screen.getByRole('button', { name: /DTE, 2 disqualified candidates/i }));
+    expect(disqualifiedSection.textContent).toMatch(/Disqualified audit \(2 contracts\)/);
+    await userEvent.click(screen.getByRole('button', { name: /Disqualified audit \(2 contracts\)/ }));
+    await userEvent.click(screen.getByRole('button', { name: /DTE, 2 excluded contracts/i }));
     const fundamentalsRows = screen.getAllByTestId('csp-disqualified-fundamentals');
     expect(fundamentalsRows.length).toBe(2);
     for (const fundamentals of fundamentalsRows) {

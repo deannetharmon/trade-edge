@@ -23,7 +23,7 @@ describe('ExpirationDisclosure', () => {
   it('starts disqualified groups collapsed and exposes the controlled panel when expanded', async () => {
     render(<ExpirationDisclosure expiration="2026-10-16" dte={35} candidateCount={1}
       kind="disqualified" defaultOpen={false} borderClassName="border-slate-700"><p>details</p></ExpirationDisclosure>);
-    const button = screen.getByRole('button', { name: '2026-10-16, 35 DTE, 1 disqualified candidate' });
+    const button = screen.getByRole('button', { name: '2026-10-16, 35 DTE, 1 excluded contract' });
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('details')).not.toBeInTheDocument();
     await userEvent.click(button);

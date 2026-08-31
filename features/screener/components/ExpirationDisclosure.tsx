@@ -11,7 +11,9 @@ export function ExpirationDisclosure({ expiration, dte, candidateCount, kind, de
   children: ReactNode;
 }) {
   const panelId = useId();
-  const countLabel = `${candidateCount} ${kind} candidate${candidateCount === 1 ? '' : 's'}`;
+  const countLabel = kind === 'disqualified'
+    ? `${candidateCount} excluded contract${candidateCount === 1 ? '' : 's'}`
+    : `${candidateCount} qualified candidate${candidateCount === 1 ? '' : 's'}`;
   const accessibleName = `${expiration}, ${dte ?? 'unknown'} DTE, ${countLabel}`;
   const { open, toggle, buttonRef, liveMessage } = useDisclosureA11y(
     `${accessibleName} expanded`, `${accessibleName} collapsed`, defaultOpen,

@@ -1287,11 +1287,11 @@ function runCspChecklist(
   const ivrCheck: CheckResult = ivrValue == null
     ? { status: 'warn', value: 'N/A', reason: 'Not available' }
     : ivrValue < cspRules.IVR_MIN
-      ? { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below ${cspRules.IVR_MIN}% minimum` }
+      ? { status: 'warn' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below the preferred ${cspRules.IVR_MIN}% premium environment — ranked lower` }
       : ivrValue > cspRules.IVR_MAX
         ? { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Above ${cspRules.IVR_MAX}% hard cap — undefined risk` }
         : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: `Within ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range` };
-  const ivrMarketDisqualified = ivrCheck.status === 'fail';
+  const ivrMarketDisqualified = ivrValue != null && ivrValue > cspRules.IVR_MAX;
 
   const earningsCheck: CheckResult = !earningsDate
     ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
@@ -1301,8 +1301,6 @@ function runCspChecklist(
         if (d <= cspRules.DTE_MAX) return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' };
         return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
       })();
-  const earningsMarketDisqualified = earningsCheck.status === 'fail';
-
   // CSP-WORKFLOW-0001 — the search ALWAYS runs now (discovery before
   // classification); IVR/earnings gates are passed in so every discovered
   // candidate is correctly classified DISQUALIFIED_IVR / DISQUALIFIED_EARNINGS
@@ -1316,7 +1314,7 @@ function runCspChecklist(
       cashBalance: capital.cashBalance,
     },
     underlyingSymbol: symbol,
-    ivrMarketDisqualified, earningsMarketDisqualified,
+    ivrMarketDisqualified, earningsDate, ivr: ivrValue,
   });
 
   if (cspFindAll.results.length === 0) {
@@ -1346,13 +1344,6 @@ function runCspChecklist(
     const otmPct = (price != null && Number.isFinite(price) && price > 0 && Number.isFinite(c.shortStrike))
       ? ((price - c.shortStrike) / price) * 100
       : null;
-    let earningsWithinExpiration: boolean | null = null;
-    if (!earningsDate) {
-      earningsWithinExpiration = false; // no known earnings at all
-    } else {
-      const d = daysUntil(earningsDate);
-      earningsWithinExpiration = d < 0 ? false : d <= c.dte;
-    }
     c.cspScore = calculateCspScore({
       pop: c.pop ?? null,
       otmPct,
@@ -1363,11 +1354,11 @@ function runCspChecklist(
       oiMin: cspRules.OI_MIN,
       technicalFit: trendResult?.scores?.total ?? null,
       ivr: ivrValue ?? null,
-      earningsWithinExpiration,
+      earningsWithinExpiration: r.earningsWithinExpiration,
     });
 
     const failReasons: string[] = [];
-    if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% outside the ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range`);
+    if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% exceeds the ${cspRules.IVR_MAX}% CSP risk cap`);
     if (r.marketQualification === 'DISQUALIFIED_EARNINGS') failReasons.push('Earnings within expiry window — assignment risk into a binary event');
     if (r.marketQualification === 'DISQUALIFIED_POOR_LIQUIDITY') failReasons.push(c.cspLiquidityReason ?? 'Poor liquidity');
     if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INELIGIBLE') failReasons.push('Underlying market-state evidence contradicts a cash-secured put thesis for this horizon.');
@@ -1399,6 +1390,11 @@ function runCspChecklist(
     // isBestOpportunitiesEligible() in lib/scans/cspQualification.ts and its
     // callers) — never by this field alone.
     const qualified = isMarketQualified(r.marketQualification);
+    const candidateEarningsCheck: CheckResult = r.earningsWithinExpiration === true
+      ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: 'Earnings on or before this contract expires' }
+      : r.earningsWithinExpiration === false
+        ? { status: 'pass', value: earningsDate ? `${earningsDate} · expires ${c.expiration}` : 'None found', reason: earningsDate ? 'Earnings after this contract expires' : 'Safe to trade' }
+        : { status: 'warn', value: earningsDate ?? '—', reason: 'Could not compare earnings and expiration dates' };
 
     return {
       symbol, strategy: 'CSP', price, ivr: ivrValue,
@@ -1407,7 +1403,7 @@ function runCspChecklist(
       earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
       underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
       candidateId: r.candidateId,
-      checks: { ivr: ivrCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
+      checks: { ivr: ivrCheck, earnings: candidateEarningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CSP' } },
     };
   });
 }
@@ -4434,6 +4430,11 @@ const strategyScores = useMemo(() => {
           disqualified CSP cards present identical fundamentals without
           requiring an expand click. */}
       {c && <CspFundamentalsRow candidate={c} price={result.price} textMutedClassName={th.textMuted} testId="csp-qualified-fundamentals" />}
+      {c?.strategy === 'CSP' && result.ivr != null && result.ivr < DEFAULT_CSP_RULES.IVR_MIN && (
+        <div className="border-t border-amber-700/30 bg-amber-500/5 px-4 py-1.5 text-[9px] text-amber-300" data-testid="csp-low-ivr-warning">
+          Quality warning — IVR {result.ivr.toFixed(1)}% is below the preferred {DEFAULT_CSP_RULES.IVR_MIN}% premium environment. This contract remains eligible but is ranked lower.
+        </div>
+      )}
 
       {/* Expanded Content */}
       {expanded && (
