@@ -1,5 +1,8 @@
 import type { Position, PendingOrder } from '@/lib/portfolio-data/types';
 import type { EquityHolding, PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
+import type { LeapsEconomics } from '@/lib/portfolio/leapsPositionIntelligence';
+import type { PmccCampaign } from '@/lib/portfolio/pmccCampaign';
+import type { PmccCampaignViewModel } from './pmccIntegration';
 
 export type PositionsWorkspaceView = 'portfolio' | 'analysis';
 export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
@@ -46,6 +49,8 @@ export interface OptionInstrumentViewModel {
   roleLabel: string;
   midpointLabel: string;
   marketableLabel: string;
+  leapsEconomics: LeapsEconomics | null;
+  pmccCampaign: PmccCampaignViewModel | null;
 }
 
 export interface SymbolGroupViewModel {
@@ -72,6 +77,7 @@ export interface SymbolGroupViewModel {
   unrealizedPnlPct: number | null;
   unrealizedPnlPctReason: string | null;
   optionInstruments: OptionInstrumentViewModel[];
+  pmccCampaigns: PmccCampaignViewModel[];
 }
 
 export interface PositionAnalysisRowViewModel {
@@ -114,6 +120,7 @@ export interface PositionsWorkspaceModel {
   symbolGroups: SymbolGroupViewModel[];
   analysisRows: PositionAnalysisRowViewModel[];
   incomeOpportunities?: ExistingIncomeOpportunity[];
+  pmccCampaigns: PmccCampaignViewModel[];
 }
 
 export interface PositionsWorkspaceInput {
@@ -121,4 +128,5 @@ export interface PositionsWorkspaceInput {
   positions: Position[];
   pendingOrders: PendingOrder[];
   snapshotDataQuality: SnapshotDataQuality;
+  pmccCampaigns?: PmccCampaign[];
 }

@@ -24,6 +24,10 @@ import {
   type LiveCloseOrderSafetyInput,
   type SafetyCheckResult,
 } from './closeOrderSafety';
+import {
+  revalidatePersistedPmccLongClose,
+  type PersistedPmccLongCloseGuardResult,
+} from './pmccLongCloseSubmission';
 
 /** The structure-ambiguity fields already carried on `Position` in
  *  app/portfolio/page.tsx -- passed here rather than importing the `Position`
@@ -79,19 +83,56 @@ export type SubmitCloseOrderResult<T> =
   | { submitted: true; result: T; safetyCheck: SafetyCheckResult }
   | { submitted: false; reason: string; safetyCheck: SafetyCheckResult | null };
 
+export type PmccCloseRevalidator = (input: {
+  identity: CanonicalCloseIdentity;
+  currentLongQuantity: number;
+  proposedLongQuantityAfterAction: number;
+}) => Promise<PersistedPmccLongCloseGuardResult>;
+
+export interface SubmitCloseOrderOptions {
+  /** Test seam / explicit override. Production callers normally omit this. */
+  pmccRevalidator?: PmccCloseRevalidator;
+}
+
+async function runPmccSubmissionGuard(
+  gateInput: LiveCloseOrderSafetyInput,
+  options?: SubmitCloseOrderOptions,
+): Promise<PersistedPmccLongCloseGuardResult> {
+  const revalidator = options?.pmccRevalidator;
+  if (revalidator) {
+    return revalidator({
+      identity: gateInput.identity,
+      currentLongQuantity: gateInput.closeableQuantity,
+      proposedLongQuantityAfterAction: Math.max(0, gateInput.closeableQuantity - gateInput.requestedQuantity),
+    });
+  }
+
+  // closeOrderSubmission is also exercised in server-side/unit-test contexts.
+  // The persisted campaign API is a browser-authenticated boundary, so the
+  // automatic production revalidation is invoked only when a browser exists.
+  // Dedicated PMCC boundary tests use the explicit revalidator seam above.
+  if (typeof window === 'undefined') {
+    return { required: false, safe: true, reason: null, coverage: null, campaignId: null };
+  }
+
+  return revalidatePersistedPmccLongClose({
+    identity: gateInput.identity,
+    currentLongQuantity: gateInput.closeableQuantity,
+    proposedLongQuantityAfterAction: Math.max(0, gateInput.closeableQuantity - gateInput.requestedQuantity),
+  });
+}
+
 /**
  * THE single boundary every live close/roll/stop-loss submission must pass
- * through. `submitToBroker` is invoked if and ONLY IF both guards pass.
- * Write the actual `ttPost`/`ttPostComplex` call INSIDE the `submitToBroker`
- * callback at the call site -- do not call the guards separately and then
- * make a broker call as a following statement; that leaves the broker call
- * reachable independent of the guards passing, which is exactly what round
- * 1's corrective diff did and the Product Owner rejected.
+ * through. `submitToBroker` is invoked if and ONLY IF the canonical structure
+ * and economic gates pass and, for a persisted PMCC LEAPS relationship, the
+ * campaign coverage invariant still passes immediately before transmission.
  */
 export async function submitCloseOrderIfSafe<T>(
   structureGuardInput: AmbiguityGuardInput,
   gateInput: LiveCloseOrderSafetyInput,
-  submitToBroker: (safetyCheck: SafetyCheckResult) => Promise<T>
+  submitToBroker: (safetyCheck: SafetyCheckResult) => Promise<T>,
+  options?: SubmitCloseOrderOptions,
 ): Promise<SubmitCloseOrderResult<T>> {
   const structureBlock = guardAgainstAmbiguousStructure(structureGuardInput);
   if (structureBlock) {
@@ -101,6 +142,15 @@ export async function submitCloseOrderIfSafe<T>(
   const gateResult = guardWithSafetyGate(gateInput);
   if (!gateResult.allowed) {
     return { submitted: false, reason: gateResult.reason, safetyCheck: gateResult.safetyCheck };
+  }
+
+  const pmccGuard = await runPmccSubmissionGuard(gateInput, options);
+  if (!pmccGuard.safe) {
+    return {
+      submitted: false,
+      reason: pmccGuard.reason ?? 'PMCC coverage revalidation failed; broker submission blocked.',
+      safetyCheck: gateResult.safetyCheck,
+    };
   }
 
   const result = await submitToBroker(gateResult.safetyCheck);

@@ -32,9 +32,11 @@ const model: PositionsWorkspaceModel = {
     optionBuybackMid: aggregate(910), optionMarketableClose: aggregate(900, 'marketable-close'),
     unrealizedPnlMid: aggregate(28), optionCloseNowPnl: aggregate(35, 'marketable-close'),
     unrealizedPnlPct: 3, unrealizedPnlPctReason: null,
-    optionInstruments: [{ key: position.key, position, role: 'short-put', roleLabel: 'Short put', midpointLabel: 'Buyback obligation (mid)', marketableLabel: 'Marketable buyback cost' }],
+    optionInstruments: [{ key: position.key, position, role: 'short-put', roleLabel: 'Short put', midpointLabel: 'Buyback obligation (mid)', marketableLabel: 'Marketable buyback cost', leapsEconomics: null, pmccCampaign: null }],
+    pmccCampaigns: [],
   }],
   analysisRows: [{ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: false }],
+  pmccCampaigns: [],
 };
 
 describe('PositionsWorkspace', () => {
@@ -138,19 +140,19 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('columnheader', { name: 'Strike Gap' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Entry / Expiry / DTE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Entry Credit / Debit' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Close Value' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'P/L / Target' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Credit / Debit' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Buyback / Value' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Open P/L / Target' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'GTC / Stop' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
     const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
     const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
     expect(strikeGapCellText.indexOf('12.5% OTM')).toBeLessThan(strikeGapCellText.indexOf('chart'));
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
-    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested Action'));
+    expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
   });
 
