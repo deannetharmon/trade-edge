@@ -48,6 +48,11 @@ jobs:
         run: npm test -- features/portfolio/positions-workspace/__tests__/PositionsWorkspace.test.tsx
         timeout-minutes: 5
 
+      - name: Run Portfolio page regression in isolation
+        if: always()
+        run: npm test -- app/portfolio/__tests__/PortfolioPage.test.tsx
+        timeout-minutes: 5
+
       - name: Run complete test suite
         if: always()
         run: npm test
