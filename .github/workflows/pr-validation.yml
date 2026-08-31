@@ -4,15 +4,12 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - feature/leaps-position-intelligence-v1
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-validation-${{ github.workflow }}-${{ github.ref }}
+  group: pr-validation-${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -47,17 +44,21 @@ jobs:
         timeout-minutes: 5
 
       - name: Run Positions Workspace regression
+        if: always()
         run: npm test -- features/portfolio/positions-workspace/__tests__/PositionsWorkspace.test.tsx
         timeout-minutes: 5
 
       - name: Run complete test suite
+        if: always()
         run: npm test
         timeout-minutes: 5
 
       - name: Run TypeScript check
+        if: always()
         run: npx tsc --noEmit
         timeout-minutes: 5
 
       - name: Run production build
+        if: always()
         run: npm run build
         timeout-minutes: 5
