@@ -44,35 +44,23 @@ jobs:
         timeout-minutes: 5
 
       - name: Run Positions Workspace regression
-        if: always()
         run: npm test -- features/portfolio/positions-workspace/__tests__/PositionsWorkspace.test.tsx
         timeout-minutes: 5
 
       - name: Run Portfolio page regression in isolation
-        if: always()
         run: npm test -- app/portfolio/__tests__/PortfolioPage.test.tsx
+        env:
+          DEBUG_PRINT_LIMIT: 50000
         timeout-minutes: 5
 
       - name: Run complete test suite
-        if: always()
         run: npm test
         timeout-minutes: 5
 
       - name: Run TypeScript check
-        if: always()
         run: npx tsc --noEmit
         timeout-minutes: 5
 
       - name: Run production build
-        if: always()
         run: npm run build
-        timeout-minutes: 5
-
-      - name: Diagnose Portfolio page tests on current main
-        if: always()
-        continue-on-error: true
-        run: |
-          git fetch origin main --depth=1
-          git switch --detach origin/main
-          npm test -- app/portfolio/__tests__/PortfolioPage.test.tsx
         timeout-minutes: 5
