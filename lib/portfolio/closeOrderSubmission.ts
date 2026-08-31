@@ -24,7 +24,10 @@ import {
   type LiveCloseOrderSafetyInput,
   type SafetyCheckResult,
 } from './closeOrderSafety';
-import type { PersistedPmccLongCloseGuardResult } from './pmccLongCloseSubmission';
+import {
+  revalidatePersistedPmccLongClose,
+  type PersistedPmccLongCloseGuardResult,
+} from './pmccLongCloseSubmission';
 
 /** The structure-ambiguity fields already carried on `Position` in
  *  app/portfolio/page.tsx -- passed here rather than importing the `Position`
@@ -112,7 +115,6 @@ async function runPmccSubmissionGuard(
     return { required: false, safe: true, reason: null, coverage: null, campaignId: null };
   }
 
-  const { revalidatePersistedPmccLongClose } = await import('./pmccLongCloseSubmission');
   return revalidatePersistedPmccLongClose({
     identity: gateInput.identity,
     currentLongQuantity: gateInput.closeableQuantity,
