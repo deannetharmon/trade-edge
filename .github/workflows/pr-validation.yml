@@ -62,3 +62,12 @@ jobs:
         if: always()
         run: npm run build
         timeout-minutes: 5
+
+      - name: Diagnose Portfolio page tests on current main
+        if: always()
+        continue-on-error: true
+        run: |
+          git fetch origin main --depth=1
+          git switch --detach origin/main
+          npm test -- app/portfolio/__tests__/PortfolioPage.test.tsx
+        timeout-minutes: 5
