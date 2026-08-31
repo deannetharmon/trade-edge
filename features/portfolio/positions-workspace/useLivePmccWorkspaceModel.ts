@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { fetchPmccCampaignLoadResult } from '@/lib/portfolio-data/pmccCampaignStore';
 import type { PmccCampaign } from '@/lib/portfolio/pmccCampaign';
 import type { PositionsWorkspaceModel } from './model/types';
 import { attachPmccCampaignsToWorkspaceModel } from './model/livePmccWorkspace';
@@ -25,26 +26,18 @@ export function useLivePmccWorkspaceModel(baseModel: PositionsWorkspaceModel): L
     let active = true;
     setLoadStatus('loading');
     setLoadReason(null);
-    void import('@/lib/portfolio-data/pmccCampaignStore')
-      .then(({ fetchPmccCampaignLoadResult }) => fetchPmccCampaignLoadResult())
-      .then(result => {
-        if (!active) return;
-        if (result.status === 'ok') {
-          setCampaigns(Object.values(result.campaigns));
-          setLoadStatus('ok');
-          setLoadReason(null);
-        } else {
-          setCampaigns([]);
-          setLoadStatus('unavailable');
-          setLoadReason(result.reason);
-        }
-      })
-      .catch(error => {
-        if (!active) return;
+    void fetchPmccCampaignLoadResult().then(result => {
+      if (!active) return;
+      if (result.status === 'ok') {
+        setCampaigns(Object.values(result.campaigns));
+        setLoadStatus('ok');
+        setLoadReason(null);
+      } else {
         setCampaigns([]);
         setLoadStatus('unavailable');
-        setLoadReason(error instanceof Error ? error.message : 'PMCC campaign state is unavailable.');
-      });
+        setLoadReason(result.reason);
+      }
+    });
     return () => { active = false; };
   }, [baseModel.accountNumber, baseModel.snapshotAsOf, baseModel.quoteAsOf]);
 
