@@ -23,21 +23,25 @@ import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioData
 // selector, mounted once alongside the other global overlays below.
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioModeIndicator } from '@/components/portfolio-mode/PortfolioModeIndicator';
+import { ActiveBrokerAccountIndicator, ActiveBrokerAccountProvider } from '@/components/account/ActiveBrokerAccountProvider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <TaskProvider>
         <CommandProvider>
-          <PortfolioModeProvider>
-            <PortfolioDataProvider>
-              {children}
-              <RankedScanTaskMirror />
-              <ScreenerCardPolish />
-              <ScreenerJobStatus />
-              <PortfolioModeIndicator />
-            </PortfolioDataProvider>
-          </PortfolioModeProvider>
+          <ActiveBrokerAccountProvider>
+            <PortfolioModeProvider>
+              <PortfolioDataProvider>
+                {children}
+                <RankedScanTaskMirror />
+                <ScreenerCardPolish />
+                <ScreenerJobStatus />
+                <PortfolioModeIndicator />
+                <ActiveBrokerAccountIndicator />
+              </PortfolioDataProvider>
+            </PortfolioModeProvider>
+          </ActiveBrokerAccountProvider>
         </CommandProvider>
       </TaskProvider>
     </SessionProvider>

@@ -24,6 +24,7 @@ describe('getCspCapitalContext — BLOCKER-02 fail-closed production capital bri
 
   beforeEach(() => {
     global.fetch = vi.fn();
+    try { localStorage.clear(); } catch {}
   });
 
   afterEach(() => {
@@ -37,14 +38,14 @@ describe('getCspCapitalContext — BLOCKER-02 fail-closed production capital bri
       .mockResolvedValueOnce(jsonResponse({ data: { 'derivative-buying-power': '12000', 'cash-available-to-withdraw': '4800' } }));
 
     const result = await getCspCapitalContext('token');
-    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-1', optionBuyingPower: 12000, cashBalance: 4800 });
+    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-1', optionBuyingPower: 12000, cashBalance: 4800, accountResolutionStatus: 'ready' });
   });
 
   it('zero accounts: fails closed to accountSelected: false with every capital figure null, never a fallback constant', async () => {
     (global.fetch as any).mockResolvedValueOnce(jsonResponse({ data: { items: [] } }));
 
     const result = await getCspCapitalContext('token');
-    expect(result).toEqual({ accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null });
+    expect(result).toEqual({ accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null, accountResolutionStatus: 'no_accounts' });
   });
 
   it('multiple accounts with no trader-driven selection mechanism: never guesses accounts[0] -- fails closed exactly like zero accounts', async () => {
@@ -74,16 +75,16 @@ describe('getCspCapitalContext — BLOCKER-02 fail-closed production capital bri
     (global.fetch as any).mockRejectedValueOnce(new Error('network unavailable'));
 
     const result = await getCspCapitalContext('token');
-    expect(result).toEqual({ accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null });
+    expect(result).toEqual({ accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null, accountResolutionStatus: 'account_fetch_failed' });
   });
 
-  it('balances fetch throws after a valid single-account resolution: still fails closed for capital, never partially trusts the account', async () => {
+  it('balances fetch throws after a valid account resolution: retains identity but fails closed for capital', async () => {
     (global.fetch as any)
       .mockResolvedValueOnce(jsonResponse({ data: { items: [{ account: { 'account-number': 'ACCT-1' } }] } }))
       .mockRejectedValueOnce(new Error('balances endpoint down'));
 
     const result = await getCspCapitalContext('token');
-    expect(result).toEqual({ accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null });
+    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-1', optionBuyingPower: null, cashBalance: null, accountResolutionStatus: 'balance_unavailable' });
   });
 
   it('missing/non-numeric buying-power or cash fields resolve to null for that figure, not zero or a fallback', async () => {

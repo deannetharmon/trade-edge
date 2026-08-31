@@ -87,6 +87,7 @@ import {
   sortItems, setPrimarySortField, setSecondarySortField, OI_PRESETS, MIN_OI_LABEL,
   MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
 } from '@/lib/screener/screenerResultOrdering';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
@@ -1098,8 +1099,7 @@ async function loadPortfolioTickers(): Promise<{ current: string[]; historical: 
   // ── Current positions ─────────────────────────────────────────────────
   const current: string[] = [];
   try {
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
     if (accountNumber) {
       const posData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
       for (const p of posData?.data?.items ?? []) {
@@ -1112,8 +1112,7 @@ async function loadPortfolioTickers(): Promise<{ current: string[]; historical: 
   // ── Historical positions (transactions) ───────────────────────────────
   const historical: string[] = [];
   try {
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
     if (accountNumber) {
       // Fetch last 2 years of transactions
       const startDate = new Date();
@@ -1143,8 +1142,7 @@ function parseOccForDisplay(occ: string): { optionType: 'P' | 'C' | null; strike
 async function loadExistingPositions(): Promise<ExistingPosition[]> {
   try {
     const token = await getAccessToken();
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
     if (!accountNumber) return [];
     const posData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
     const rawPositions: any[] = posData?.data?.items ?? [];
@@ -1364,8 +1362,22 @@ function runCspChecklist(
     if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INELIGIBLE') failReasons.push('Underlying market-state evidence contradicts a cash-secured put thesis for this horizon.');
     if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE') failReasons.push('Insufficient underlying market-state evidence to evaluate a cash-secured put thesis for this horizon.');
     if (r.accountEligibility === 'INSUFFICIENT_CAPITAL') failReasons.push(c.capitalWarning ?? 'Insufficient cash for this CSP');
-    if (r.accountEligibility === 'CAPITAL_UNVERIFIED') failReasons.push('Capital could not be verified for the selected account.');
-    if (r.accountEligibility === 'ACCOUNT_UNSELECTED') failReasons.push('No account selected — capital could not be verified.');
+    if (r.accountEligibility === 'CAPITAL_UNVERIFIED') {
+      failReasons.push(capital.accountResolutionStatus === 'balance_unavailable'
+        ? 'The active account is selected, but its balances are temporarily unavailable.'
+        : 'Capital could not be verified for the active account.');
+    }
+    if (r.accountEligibility === 'ACCOUNT_UNSELECTED') {
+      const reasonByStatus: Partial<Record<NonNullable<CspCapitalContext['accountResolutionStatus']>, string>> = {
+        selection_required: 'Choose an active broker account once using the app account control.',
+        selected_account_missing: 'The saved broker account is no longer available. Choose another account.',
+        authorization_required: 'Broker authorization expired. Sign in again.',
+        account_fetch_failed: 'Broker accounts are temporarily unavailable.',
+        no_accounts: 'No broker accounts were found.',
+      };
+      failReasons.push((capital.accountResolutionStatus && reasonByStatus[capital.accountResolutionStatus])
+        || 'No active account selected — capital could not be verified.');
+    }
     failReasons.push(...r.advisoryWarnings);
 
     const oiCheck: CheckResult = c.cspOiPassing
@@ -2593,10 +2605,7 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
 // ── Order Placement ────────────────────────────────────────────────────────
 async function getAccountNumber(): Promise<string> {
   const token = await getAccessToken();
-  const data = await ttFetch('/customers/me/accounts', token);
-  const acct = data?.data?.items?.[0]?.account?.['account-number'];
-  if (!acct) throw new Error('No account found');
-  return acct;
+  return requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 }
 
 function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
@@ -7791,21 +7800,20 @@ export default function Home() {
       const token = await getAccessToken();
 
       pushStatus('Checking available capital...');
-      // CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the manual cash
-      // override is an explicit trader assertion (typed in, not guessed
-      // from an unvalidated accounts[0]), so it is trusted as both sides of
-      // min(optionBuyingPower, cashBalance) and marked account-selected
-      // under a synthetic 'manual-override' identifier, preserving its
-      // prior always-wins behavior. Absent an override, capital is resolved
-      // from the real account via getCspCapitalContext(), which fails
-      // closed (accountSelected: false, every figure null) whenever there
-      // isn't exactly one verifiable Tastytrade account to attribute the
-      // balance to -- never accounts[0] guessed blindly, never a fallback
-      // constant.
+      // Resolve the persistent app-level account first. A manual cash
+      // override may replace affordability figures, but can never create or
+      // replace broker-account identity.
       const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
+      const brokerCapital = await getCspCapitalContext(token);
+      // A manual cash figure changes affordability only. It never invents
+      // broker-account identity: the shared active account must still resolve.
       const capital: CspCapitalContext = Number.isFinite(manualCash as number)
-        ? { accountSelected: true, accountId: 'manual-override', optionBuyingPower: manualCash as number, cashBalance: manualCash as number }
-        : await getCspCapitalContext(token);
+        ? {
+            ...brokerCapital,
+            optionBuyingPower: brokerCapital.accountSelected ? manualCash as number : null,
+            cashBalance: brokerCapital.accountSelected ? manualCash as number : null,
+          }
+        : brokerCapital;
 
       pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(loopSymbols, token);

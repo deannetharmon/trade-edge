@@ -9,6 +9,7 @@ export async function GET() {
     const accountsData = await ttFetch('/customers/me/accounts', token);
     const accounts = accountsData?.data?.items ?? [];
     if (accounts.length === 0) return NextResponse.json({ error: 'No accounts found' }, { status: 404 });
+    if (accounts.length !== 1) return NextResponse.json({ error: 'Explicit active account required' }, { status: 409 });
 
     const accountNumber = accounts[0]?.account?.['account-number'];
     if (!accountNumber) return NextResponse.json({ error: 'Could not read account number' }, { status: 500 });

@@ -26,6 +26,7 @@ import type {
   GtcOrderLeg, GtcOrder, PriceSupportAnalysis, TrendResult, EntrySnapshot,
 } from './types';
 import { BASE, CLIENT_ID, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import {
   analyzePositionStructure,
   strategyLabelForStructure,
@@ -1027,11 +1028,7 @@ export async function enrichEquityPositionMarks(rawPositions: any[], token: stri
 // snapshot data-quality logic can fail closed without inventing empty data.
 export async function acquirePortfolioBrokerSource(tokenOverride?: string): Promise<PortfolioBrokerSource> {
   const token = tokenOverride ?? await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const accounts = accountsData?.data?.items ?? [];
-  if (accounts.length === 0) throw new Error('No accounts found');
-  const accountNumber = accounts[0]?.account?.['account-number'];
-  if (!accountNumber) throw new Error('Could not read account number');
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
   const [positionsResult, liveOrdersResult, complexOrdersResult] = await Promise.allSettled([
     ttFetch(`/accounts/${accountNumber}/positions?include-marks=true`, token),
@@ -1811,11 +1808,7 @@ export async function loadPositions(
 // "fetch the raw payload, hand it to the parser."
 export async function loadAccountBalances(): Promise<PortfolioFinancialContext> {
   const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-    ?? accountsData?.data?.items?.[0];
-  const accountNumber = account?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
   const balData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
   return buildPortfolioFinancialContext(balData?.data ?? {});

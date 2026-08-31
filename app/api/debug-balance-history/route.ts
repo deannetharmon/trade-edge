@@ -10,8 +10,9 @@ export async function GET(req: NextRequest) {
   try {
     const token = await getSessionToken();
     const accountsData = await ttFetch('/customers/me/accounts', token);
-    const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-      ?? accountsData?.data?.items?.[0];
+    const accounts = accountsData?.data?.items ?? [];
+    if (accounts.length !== 1) throw new Error('Explicit active account required');
+    const account = accounts[0];
     const accountNumber = account?.account?.['account-number'];
     if (!accountNumber) throw new Error('No account found');
 

@@ -351,7 +351,7 @@ describe('CSP-WORKFLOW-0001 core-correction: BLOCKER-02 production capital wirin
     // selected" label -- proving the account-ineligible state is visible
     // on the card itself, not merely absent from Best Opportunities.
     await waitFor(() => {
-      expect(screen.getAllByText(/No account selected — capital could not be verified\./i).length).toBe(2);
+      expect(screen.getAllByText(/No active account selected — capital could not be verified\./i).length).toBe(2);
     });
   });
 });

@@ -33,7 +33,8 @@
 
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT } from '@/lib/tastytrade/accountSelection';
 import type { Position, PendingOrder, PositionSnapshot } from '@/lib/portfolio-data/types';
 import type { PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
 import { acquirePortfolioSnapshot, LCC_0001A_SNAPSHOT_ENABLED } from '@/lib/portfolio-snapshot/acquire';
@@ -122,6 +123,23 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       positionsRef.current = next;
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    const invalidateAccountScopedData = () => {
+      refreshGenerationRef.current += 1;
+      positionsRef.current = [];
+      setPositionsState([]);
+      setPendingOrders([]);
+      setBalances(null);
+      setSnapshot(null);
+      setSnapshotDataQuality({ status: 'unavailable', staleQuotes: false, warnings: [] });
+      setLastRefresh(null);
+      setError('');
+      setLoading(false);
+    };
+    window.addEventListener(ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT, invalidateAccountScopedData);
+    return () => window.removeEventListener(ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT, invalidateAccountScopedData);
   }, []);
 
   const refresh = useCallback(async (callbacks?: RefreshPositionsCallbacks): Promise<PortfolioRefreshResult> => {

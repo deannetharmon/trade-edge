@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -66,11 +67,7 @@ function fmtSignedMoney(value: number | null | undefined): string {
 
 async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string }> {
   const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-    ?? accountsData?.data?.items?.[0];
-  const accountNumber = account?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
   const balData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
   const b = balData?.data ?? {};

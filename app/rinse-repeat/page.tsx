@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 if (typeof document !== 'undefined') {
   if (!document.getElementById('hunter-font')) {
@@ -744,10 +745,7 @@ function EnterTradeModal({ result, th, onClose }: {
 
   // Fetch account number on mount
   useEffect(() => {
-    getAccessToken().then(token =>
-      ttFetch('/customers/me/accounts', token)
-        .then(d => setAccountNum(d?.data?.items?.[0]?.account?.['account-number'] ?? null))
-    ).catch(() => {});
+    getAccessToken().then(token => requireActiveBrokerAccount(token, ttFetch, { forceValidation: true }).then(setAccountNum)).catch(() => {});
   }, []);
 
   const creditNum = parseFloat(credit) || defaultCredit;
@@ -1339,8 +1337,7 @@ export default function RinseRepeatPage() {
     (async () => {
       try {
         const token = await getAccessToken();
-        const accountsData = await ttFetch('/customers/me/accounts', token);
-        const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+        const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
         if (!accountNumber) return;
         const posData = await ttFetch(`/accounts/${accountNumber}/positions`, token);
         const rawPositions: any[] = posData?.data?.items ?? [];

@@ -15,6 +15,7 @@
 // existing bug is corrected" case called out in the PI-0008E ticket.
 //
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 // PI-0008E also closes two silent-data-loss gaps identified in PI-0008D:
 //   - Partial closes: the old code required exact quantity equality between
 //     an opening and closing transaction, so a partial close (different
@@ -486,9 +487,7 @@ export function reconstructTrades(transactions: RawTransaction[]): Reconstructio
 // ── Public: network fetch + reconstruction ────────────────────────────────
 export async function fetchAndReconstructTrades(range: TimeRange): Promise<ReconstructionResult> {
   const token = await getAccessToken();
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
   const startDate = rangeStartDate(range);
   let allTx: RawTransaction[] = [];
   let page = 1;

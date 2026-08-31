@@ -13,6 +13,7 @@ import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from './covered-call-capacity';
 import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
+import { requireActiveBrokerAccount, resolveActiveBrokerAccount, type BrokerAccountResolutionStatus } from '@/lib/tastytrade/accountSelection';
 
 export const classificationCache = new Map<string, 'index' | 'etf' | 'stock'>();
 
@@ -250,8 +251,7 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
 // orders and delegates all math to the pure covered-call-capacity module.
 export async function getCoveredCallCapacityReport(token: string): Promise<CoveredCallCapacityReport> {
   try {
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
     if (!accountNumber) return { status: 'unavailable', bySymbol: {}, warnings: [] };
 
     let rawPositions: any[] | null = null;
@@ -286,8 +286,7 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
  * production callers. Kept only for any test/caller not yet migrated. */
 export async function getAvailableCash(token: string): Promise<number | null> {
   try {
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const accountNumber = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
     if (!accountNumber) return null;
 
     const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
@@ -305,28 +304,16 @@ export async function getAvailableCash(token: string): Promise<number | null> {
 }
 
 
-// CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the minimum safe
-// production bridge to the approved capital model, built BEFORE the full
-// account-selection modal exists. This app has no persisted/explicit
-// "selected account" concept anywhere yet (no selection UI, no stored
-// preference) — so `accounts[0]` can never be trusted as "the trader's
-// selected account" the way the old getAvailableCash() implicitly treated
-// it. The only case this function will affirmatively resolve an account is
-// when the Tastytrade customer has EXACTLY ONE account: with a single
-// account there is no ambiguity to guess through, so its identifier is
-// retained and surfaced (never silently dropped). Zero accounts, more than
-// one account, or any fetch failure all fail closed to
-// `accountSelected: false` with every capital figure null — never a
-// fallback constant, never treated as unlimited. Once a real
-// selection UI exists it replaces the "exactly one account" heuristic
-// with an explicit trader choice; this function's shape (accountId +
-// optionBuyingPower + cashBalance) does not need to change when that
-// happens.
+// CSP capital always belongs to the validated app-level active account.
+// A sole account is selected automatically; multi-account users choose once
+// through the global account control and that persisted choice is validated
+// against every fresh account-list response.
 export interface CspCapitalContext {
   accountSelected: boolean;
   accountId: string | null;
   optionBuyingPower: number | null;
   cashBalance: number | null;
+  accountResolutionStatus?: BrokerAccountResolutionStatus | 'balance_unavailable';
 }
 
 const UNRESOLVED_CSP_CAPITAL: CspCapitalContext = {
@@ -334,19 +321,13 @@ const UNRESOLVED_CSP_CAPITAL: CspCapitalContext = {
 };
 
 export async function getCspCapitalContext(token: string): Promise<CspCapitalContext> {
+  const resolution = await resolveActiveBrokerAccount(token, ttFetch);
+  if (resolution.status !== 'ready' || !resolution.accountId) {
+    return { ...UNRESOLVED_CSP_CAPITAL, accountResolutionStatus: resolution.status };
+  }
+  const accountNumber = resolution.accountId;
+
   try {
-    const accountsData = await ttFetch('/customers/me/accounts', token);
-    const items = accountsData?.data?.items;
-    if (!Array.isArray(items) || items.length !== 1) {
-      // Zero accounts, an API/parse failure shaped as an empty/missing
-      // list, or more than one account with no trader-driven selection
-      // mechanism yet -- never guess which one is "the" account.
-      return UNRESOLVED_CSP_CAPITAL;
-    }
-
-    const accountNumber = items[0]?.account?.['account-number'];
-    if (!accountNumber || typeof accountNumber !== 'string') return UNRESOLVED_CSP_CAPITAL;
-
     const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
     const balData = balanceData?.data ?? {};
 
@@ -366,8 +347,15 @@ export async function getCspCapitalContext(token: string): Promise<CspCapitalCon
       accountId: accountNumber,
       optionBuyingPower: Number.isFinite(bp) ? bp : null,
       cashBalance: Number.isFinite(cash) ? cash : null,
+      accountResolutionStatus: 'ready',
     };
   } catch {
-    return UNRESOLVED_CSP_CAPITAL;
+    return {
+      accountSelected: true,
+      accountId: accountNumber,
+      optionBuyingPower: null,
+      cashBalance: null,
+      accountResolutionStatus: 'balance_unavailable',
+    };
   }
 }

@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { getCustomerAccounts, placeOrder, buildBullPutSpread } from '@/lib/tastytrade';
+import { persistValidatedBrokerAccountId, readPersistedBrokerAccountId, resolveBrokerAccounts } from '@/lib/tastytrade/accountSelection';
 
 export default function TestTradePage() {
   const [token, setToken] = useState('');
@@ -27,9 +28,27 @@ export default function TestTradePage() {
     setStatus("Getting accounts...");
     try {
       const accounts = await getCustomerAccounts(token, isSandbox);
-      if (accounts.length > 0) {
-        setAccountNumber(accounts[0].account_number);
-        setStatus(`✅ Account found: ${accounts[0].account_number}`);
+      if (isSandbox) {
+        if (accounts.length === 1) {
+          setAccountNumber(accounts[0].account_number);
+          setStatus(`✅ Sandbox account found: ${accounts[0].account_number}`);
+        } else {
+          setStatus(accounts.length > 1 ? 'Sandbox account selection is not managed by the live app account control.' : 'No accounts found');
+        }
+        return;
+      }
+      const resolution = resolveBrokerAccounts(
+        accounts.map((account: { account_number: string }) => ({ id: account.account_number, label: 'Broker account' })),
+        readPersistedBrokerAccountId(),
+      );
+      if (resolution.status === 'ready' && resolution.accountId) {
+        persistValidatedBrokerAccountId(resolution.accountId);
+        setAccountNumber(resolution.accountId);
+        setStatus(`✅ Active account found: ${resolution.accountId}`);
+      } else if (resolution.status === 'selection_required') {
+        setStatus('Choose the active broker account in the app account control before testing a trade.');
+      } else if (resolution.status === 'selected_account_missing') {
+        setStatus('The active app account is not available in this environment. Switch accounts before testing a trade.');
       } else {
         setStatus("No accounts found");
       }

@@ -5,6 +5,7 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
@@ -220,11 +221,7 @@ async function loadEngineData(watchlist: string[], alloc: Allocation, esFuturesS
   const token = await getAccessToken();
 
   // ── Account + OBP ──────────────────────────────────────────────────────
-  const accountsData = await ttFetch('/customers/me/accounts', token);
-  const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-    ?? accountsData?.data?.items?.[0];
-  const accountNumber = account?.account?.['account-number'];
-  if (!accountNumber) throw new Error('No account found');
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
   const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
   const balData = balanceData?.data ?? {};
@@ -1898,11 +1895,7 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
     setError('');
     try {
       const token = await getAccessToken();
-      const accountsData = await ttFetch('/customers/me/accounts', token);
-      const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-        ?? accountsData?.data?.items?.[0];
-      const accountNumber = account?.account?.['account-number'];
-      if (!accountNumber) throw new Error('No account found');
+      const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
       const postOrder = async (body: unknown): Promise<any> => {
         const res = await fetch(`${BASE}/accounts/${accountNumber}/orders`, {

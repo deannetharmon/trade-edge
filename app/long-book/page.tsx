@@ -3,6 +3,7 @@
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
@@ -794,11 +795,7 @@ function NewLeapModal({
     setStep('placing'); setError('');
     try {
       const token = await getAccessToken();
-      const accountsData = await ttFetch('/customers/me/accounts', token);
-      const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392')
-        ?? accountsData?.data?.items?.[0];
-      const accountNumber = account?.account?.['account-number'];
-      if (!accountNumber) throw new Error('No account found');
+      const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
       const payload = buildLeapOpenOrder(null, selectedStrike.occSymbol, contracts, limitPrice);
       const res = await fetch(`${BASE}/accounts/${accountNumber}/complex-orders`, {
@@ -1082,10 +1079,7 @@ function SellShortCallModal({
     setStep('placing'); setError('');
     try {
       const token = await getAccessToken();
-      const accountsData = await ttFetch('/customers/me/accounts', token);
-      const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392') ?? accountsData?.data?.items?.[0];
-      const accountNumber = account?.account?.['account-number'];
-      if (!accountNumber) throw new Error('No account found');
+      const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
       const payload = buildShortCallOrder(selected.occSymbol, contracts, limitPrice);
       const res = await fetch(`${BASE}/accounts/${accountNumber}/complex-orders`, {
@@ -1568,9 +1562,7 @@ export default function LongBookPage() {
     (async () => {
       try {
         const token = await getAccessToken();
-        const accountsData = await ttFetch('/customers/me/accounts', token);
-        const account = accountsData?.data?.items?.find((a: any) => a.account['account-number'] === '5WI51392') ?? accountsData?.data?.items?.[0];
-        const accountNumber = account?.account?.['account-number'];
+        const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
         if (!accountNumber) return;
         const balData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
         const nlv = parseFloat(balData?.data?.['net-liquidating-value'] ?? balData?.data?.['net-liq'] ?? '0');
