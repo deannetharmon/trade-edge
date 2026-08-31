@@ -140,13 +140,13 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('columnheader', { name: 'Strike Gap' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Entry / Expiry / DTE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Entry Credit / Debit' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Close Value' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'P/L / Target' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Credit / Debit' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Buyback / Value' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Open P/L / Target' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'GTC / Stop' })).toBeInTheDocument();
     expect(screen.getByText('BE 165.65')).toBeInTheDocument();
     const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
     const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
