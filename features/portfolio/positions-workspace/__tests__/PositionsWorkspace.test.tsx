@@ -208,6 +208,7 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
 
     expect(await screen.findByRole('textbox', { name: 'Ask a follow-up about AAPL' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'AI follow-up conversation for AAPL' })).toHaveTextContent('Continue with AI');
     await user.click(screen.getByText('Position context locked for this conversation'));
     expect(screen.getByText(`Position ID: ${position.key}`)).toBeInTheDocument();
     expect(screen.getByText(/Follow-ups retain this snapshot and conversation history/)).toBeInTheDocument();
