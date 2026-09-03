@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { BASE, CLIENT_ID, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { findPairedShortCall } from './pmccPairDetection';
 import {
   analyzePositionStructure,
   strategyLabelForStructure,
@@ -1691,6 +1692,12 @@ export async function loadPositions(
       identity,
       structureAmbiguous,
       structureBlockMessage,
+      // PAIR-0001: default; the real value can only be known once the full
+      // Position[] array exists (a long call's paired short call lives in a
+      // separate Position record -- different underlying::expiration bucket
+      // -- never in this position's own legs). Overwritten in a second pass
+      // below, after this .map() completes and `positions` is fully built.
+      pairedShortCallKey: null,
       // PM-0001 corrective round: explicit, honest tag distinguishing a
       // genuine net-credit structure from a detected net-debit one --
       // `creditReceived` below is floored to $0.00 for the debit case and
@@ -1790,6 +1797,15 @@ export async function loadPositions(
   });
 
   positions = await attachEntrySnapshots(positions);
+
+  // PAIR-0001: run after the full Position[] array is fully built and
+  // finalized (not mid-loop) -- Quinn's note: a long call must not be
+  // matched against a short call that hasn't been constructed yet depending
+  // on iteration order. See pmccPairDetection.ts for the matching logic.
+  positions = positions.map(position => ({
+    ...position,
+    pairedShortCallKey: findPairedShortCall(position, positions)?.key ?? null,
+  }));
 
   positions.sort((a, b) => {
     if (a.needsClose && !b.needsClose) return -1;

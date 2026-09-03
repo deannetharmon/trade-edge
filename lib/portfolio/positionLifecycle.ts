@@ -108,8 +108,8 @@ export function isSpreadPosition(legs: LifecycleLeg[] = []): boolean {
 // PMCC even though it's really just a wide speculative call spread, not a
 // LEAPS-anchored diagonal. LifecycleLeg carries strikePrice but no delta,
 // so a moneyness-aware refinement isn't possible with today's data shape.
-const PMCC_SHORT_DTE_MAX = 60;
-const PMCC_LONG_DTE_MIN = 120;
+export const PMCC_SHORT_DTE_MAX = 60;
+export const PMCC_LONG_DTE_MIN = 120;
 
 // A standalone long call held with no paired short leg -- previously fell all the way through
 // classifyPositionLifecycle to UNKNOWN, since isCoveredCall/isPmccPosition/isSpreadPosition all

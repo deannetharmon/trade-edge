@@ -67,6 +67,21 @@ export interface Position {
   // for a hard block.
   structureAmbiguous: boolean;
   structureBlockMessage: string | null;
+  // PAIR-0001: set once during loadPositions() (the one place with the full
+  // Position[] array in scope after bucketing) -- the `key` of the held
+  // short-call Position paired against this long call as a PMCC, or null if
+  // this position is not a long call, doesn't clear the PMCC long-leg DTE
+  // bar, or no matching held short call exists. A long call's own legs can
+  // never contain its paired short leg (different underlying::expiration
+  // bucket -- see loadPositions), so this is the only place that relationship
+  // is knowable; consumers (Net Edge gating, existing-position income) read
+  // this field rather than re-scanning allPositions themselves. Present
+  // regardless of the matched short call's own structureAmbiguous state --
+  // callers decide separately whether an ambiguous paired short call is
+  // trustworthy enough to act on (Alan). Optional (not undefined-checked
+  // everywhere) so existing test fixtures/Position literals that predate
+  // this ticket keep compiling unchanged -- treat absent the same as null.
+  pairedShortCallKey?: string | null;
   // PM-0001 corrective round: `creditReceived` below floors a net debit to
   // $0.00 for backward-compatible display (calculateSpreadCredit) -- that
   // $0.00 must never be read as a genuine zero-credit entry.
