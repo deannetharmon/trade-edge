@@ -22,39 +22,55 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
   const snapshotReady = snapshot?.freshness === 'current' && snapshot.dataQuality.status === 'ok' && Boolean(snapshot.accountNumber);
   const freshness = snapshotFreshness(input);
   const options = snapshot?.options ?? input.positions;
-  const opportunities: ExistingIncomeOpportunity[] = options.map(position => {
+
+  // PW-0002: this used to map EVERY option position through the PMCC-base
+  // check and EVERY equity holding through the covered-call check, so a
+  // CSP, a vertical, a long put held for an unrelated strategy -- anything
+  // that was never a PMCC/CC candidate in the first place -- still got a
+  // card here, explaining in detail why it doesn't qualify. Per Ian/Dean:
+  // this section is a heads-up on genuine opportunities, not an audit of
+  // the whole portfolio. Filter to plausible candidates BEFORE building a
+  // card; structural non-candidates (multi-leg, wrong account, not a long
+  // call / not long shares) are skipped entirely rather than shown as
+  // "not eligible". `no-capacity` stays -- that's a real constraint on a
+  // genuine candidate (you do hold a qualifying long call / long shares),
+  // not a structural mismatch, so it's still worth surfacing.
+  const opportunities: ExistingIncomeOpportunity[] = [];
+
+  for (const position of options) {
     const legs = Array.isArray(position.legs) ? position.legs : [];
     const leg = legs.length === 1 ? legs[0] : null;
-    const exactContract = leg?.symbol?.trim() || null;
+    // Not a single-leg long call at all -- never a PMCC candidate. No card.
+    if (!leg || legs.length !== 1 || leg.direction !== 'Long' || leg.optionType !== 'C') continue;
+
+    const exactContract = leg.symbol?.trim() || null;
     const base = {
       id: `pmcc:${position.key}`, kind: 'pmcc-short-call' as const, symbol: position.symbol,
       positionKey: position.key, title: 'PMCC short call', freshness, exactContract,
       sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
     };
-    if (!snapshotReady) return { ...base, status: 'unavailable' as const, reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.' };
-    if (position.accountNumber !== snapshot!.accountNumber) return { ...base, status: 'not-eligible' as const, reason: 'Position account identity does not match the active broker account.' };
-    if (position.structureAmbiguous || legs.length !== 1) return { ...base, status: 'not-eligible' as const, reason: 'Position is multi-leg, structurally ambiguous, or missing leg evidence.' };
-    if (leg?.direction !== 'Long' || leg.optionType !== 'C' || !exactContract) {
-      return { ...base, status: 'not-eligible' as const, reason: leg?.optionType === 'P' ? 'A long put cannot serve as a PMCC long-call base.' : 'Position is not an exact single long call.' };
-    }
-    return { ...base, status: 'eligible' as const, reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.' };
-  });
+    if (!snapshotReady) { opportunities.push({ ...base, status: 'unavailable', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.' }); continue; }
+    if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position account identity does not match the active broker account.' }); continue; }
+    if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position is structurally ambiguous or missing leg evidence.' }); continue; }
+    opportunities.push({ ...base, status: 'eligible', reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.' });
+  }
 
   const capacityReport = snapshot ? buildSnapshotCapacityReport(snapshot) : null;
   for (const holding of snapshot?.equities ?? []) {
+    // Not long shares at all -- never a covered-call candidate. No card.
+    if (holding.direction !== 'Long' || holding.quantity <= 0) continue;
+
     const capacity = capacityReport?.status === 'ok' ? capacityReport.bySymbol[holding.symbol] : null;
     const base = {
       id: `covered-call:${holding.symbol}`, kind: 'covered-call' as const, symbol: holding.symbol,
       positionKey: null, title: 'Covered call', freshness, exactContract: null,
-      sharesOwned: holding.direction === 'Long' ? holding.quantity : 0,
+      sharesOwned: holding.quantity,
       allocatedContracts: capacity?.existingShortCallContracts ?? null,
       reservedContracts: capacity?.workingShortCallContracts ?? null,
       availableContracts: capacity?.availableCoveredContracts ?? null,
     };
     if (!snapshotReady || capacityReport?.status !== 'ok') {
       opportunities.push({ ...base, status: 'unavailable', reason: 'Current share and short-call commitment evidence is required to verify covered-call capacity.' });
-    } else if (holding.direction !== 'Long' || holding.quantity <= 0) {
-      opportunities.push({ ...base, status: 'not-eligible', reason: 'No long shares are available to cover a call.' });
     } else if (!capacity || capacity.availableCoveredContracts <= 0) {
       opportunities.push({ ...base, status: 'no-capacity', reason: 'Fully covered / no available capacity after existing and working short calls.' });
     } else {
