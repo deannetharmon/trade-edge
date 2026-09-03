@@ -9876,6 +9876,22 @@ export default function PortfolioPage() {
             className="text-[10px] px-3 py-1.5 border border-white/10 text-white/30 rounded hover:border-white/30 hover:text-white/60 transition-colors tracking-wider">
             SIGN OUT
           </button>
+          <button onClick={async () => {
+              // AUTH-0001: separate from SIGN OUT — only clears the stored
+              // TastyTrade connection (Redis refresh_token/client_secret),
+              // leaves the Google/NextAuth session intact. No global
+              // in-flight-order tracker exists across pages (engine/screener/
+              // long-book each track order placement as local component
+              // state only), so this confirm is the guard against clearing
+              // credentials mid-order per Ian's requirement.
+              if (!window.confirm('Reconnect TastyTrade? This clears your stored TastyTrade connection — you will need to re-enter your refresh token and client secret. Do not do this while an order is in progress.')) return;
+              try { await fetch('/api/auth/clear-credentials', { method: 'POST' }); } catch {}
+              sessionStorage.removeItem('tt_access_token');
+              window.location.href = '/login';
+            }}
+            className="text-[10px] px-3 py-1.5 border border-white/10 text-white/30 rounded hover:border-red-700 hover:text-red-400 transition-colors tracking-wider">
+            RECONNECT TASTYTRADE
+          </button>
           <div data-global-header-context className="shrink-0" />
           <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
