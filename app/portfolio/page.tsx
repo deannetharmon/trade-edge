@@ -240,6 +240,12 @@ import {
   netEdgeLive,
   netEdgeSeries,
   netEdgePeak,
+  todayLocalDateString,
+  netEdgePrior,
+  netEdgeDayChangePct,
+  netEdgeColor,
+  netEdgeDaysTracked,
+  netEdgeRolledOver,
 } from '@/lib/portfolio-data/acquisition';
 
 
@@ -302,14 +308,6 @@ function setDryRun(val: boolean) {
 
 
 
-
-function todayLocalDateString(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 // Builds today's snapshot payload for each position and POSTs any that
 // aren't already recorded for today. Fire-and-forget from the caller's
@@ -7288,46 +7286,6 @@ function netEdgeAtEntry(pos: Position): number | null {
 
 
 
-// Yesterday's (most recent snapshot strictly before today) net edge, for the
-// day-over-day delta. Excludes any snapshot dated today — if the page has
-// already captured today's snapshot before this render, that entry would
-// otherwise land last in the array and get compared against itself.
-function netEdgePrior(pos: Position): number | null {
-  const today = todayLocalDateString();
-  const series = netEdgeSeries(pos).filter(p => p.date < today);
-  if (series.length === 0) return null;
-  return series[series.length - 1].value;
-}
-
-// Percent change today vs prior snapshot. null if no prior or prior ~ 0.
-function netEdgeDayChangePct(pos: Position): number | null {
-  const live = netEdgeLive(pos);
-  const prior = netEdgePrior(pos);
-  if (live == null || prior == null || Math.abs(prior) < 0.01) return null;
-  return ((live - prior) / Math.abs(prior)) * 100;
-}
-
-// Net-edge color, keyed off this position's own peak (your approved bands):
-//  - green  : within 15% of peak (at/near peak efficiency)
-//  - amber  : fallen >15% off peak but still positive
-//  - red    : at or below $0 (gamma winning)
-function netEdgeColor(pos: Position, fallback: string): string {
-  const live = netEdgeLive(pos);
-  if (live == null) return fallback;
-  if (live <= 0) return 'text-red-400';
-  const peak = netEdgePeak(pos);
-  if (peak == null || peak <= 0) return 'text-emerald-400';
-  const offPeak = (live - peak) / peak; // <= 0
-  if (offPeak >= -0.15) return 'text-emerald-400';
-  return 'text-amber-400';
-}
-
-// Number of distinct days of snapshot history backing this position's peak.
-// Low counts mean the peak is not yet trustworthy.
-function netEdgeDaysTracked(pos: Position): number {
-  return netEdgeSeries(pos).length;
-}
-
 // ── IV / IVR day-over-day tracking ──────────────────────────────────────
 // Same pattern as netEdgeSeries/Prior above, applied to raw iv/ivr fields.
 function ivSeries(pos: Position): { date: string; value: number }[] {
@@ -7572,18 +7530,6 @@ function buildMovementSummary(pos: Position): MovementItem[] {
   }
 
   return items;
-}
-
-// True the first time today's live edge prints below the prior peak-of-history,
-// i.e. the position has rolled OVER from its peak — gamma starting to win.
-// Requires at least 2 tracked days so a brand-new position can't false-trigger.
-function netEdgeRolledOver(pos: Position): boolean {
-  const series = netEdgeSeries(pos);
-  if (series.length < 2) return false;
-  const histPeak = Math.max(...series.map(s => s.value));
-  const live = netEdgeLive(pos);
-  if (live == null) return false;
-  return live < histPeak;
 }
 
 function premiumEdgeColor(pos: Position, fallback: string): string {

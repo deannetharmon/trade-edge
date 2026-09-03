@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ActionType, Position } from '@/lib/portfolio-data/types';
+import { netEdgeLive, netEdgePeak, netEdgeColor, netEdgeDayChangePct, netEdgeDaysTracked, netEdgeRolledOver } from '@/lib/portfolio-data/acquisition';
 import type { THEMES, Theme } from '@/lib/theme';
 import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
@@ -164,7 +165,33 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       <div className="mt-3 grid gap-2 lg:grid-cols-2">{(model.incomeOpportunities ?? []).map(opportunity => <div key={opportunity.id} className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · {opportunity.title}</b><p className={`mt-1 ${opportunity.status === 'eligible' ? 'text-emerald-300' : opportunity.status === 'no-capacity' ? 'text-amber-300' : opportunity.status === 'unavailable' ? 'text-red-300' : th.textMuted}`}>{opportunity.status === 'eligible' ? 'Eligible — evaluate short call' : opportunity.status === 'no-capacity' ? 'Fully covered / no available capacity' : opportunity.status === 'unavailable' ? 'Broker data unavailable' : 'Not eligible'}</p></div>{opportunity.status === 'eligible' && <button type="button" onClick={() => setIncomeReview(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review</button>}</div><p className={`mt-2 ${th.textFaint}`}>{opportunity.reason}</p>{opportunity.kind === 'covered-call' && <p className={`mt-2 ${th.textFaint}`}>Shares {opportunity.sharesOwned ?? '—'} · Allocated {opportunity.allocatedContracts ?? '—'} · Reserved {opportunity.reservedContracts ?? '—'} · Available {opportunity.availableContracts ?? '—'}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {opportunity.freshness}</p></div>)}</div>
       {incomeReview && <div role="status" className="mt-3 rounded border border-blue-500/40 bg-blue-500/10 p-3 text-xs text-blue-100"><b>{incomeReview.symbol} · {incomeReview.title} review</b><p className="mt-1">Review-only. {incomeReview.exactContract ? `Held contract: ${incomeReview.exactContract}. ` : ''}Short-call timing policy is not yet approved; no recommendation, ticket, or order has been created.</p><button type="button" onClick={() => setIncomeReview(null)} className="mt-2 min-h-8 rounded border border-blue-400/50 px-2 text-[10px] text-blue-200 focus:ring-2 focus:ring-blue-400">Close review</button></div>}
     </section>
-    <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}><label className={`text-xs ${th.textMuted}`}>View <select value={preferences.analysisView} onChange={event => chooseView(event.target.value as AnalysisViewId)} className="ml-2 min-h-11 rounded border border-white/20 bg-slate-950 px-3 text-white focus:ring-2 focus:ring-teal-400"><option value="management">Management</option><option value="risk">Risk</option><option value="full">Full Detail</option><option value="custom">Custom</option></select></label><button type="button" onClick={() => { setDraftFilters(preferences.filters); setFilterOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Filter{activeFilterCount(preferences.filters) ? ` ${activeFilterCount(preferences.filters)}` : ''}</button><button type="button" onClick={() => { setDraftColumns(columns); setColumnsOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Customize Columns</button><span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span></div>
+    <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}>
+      {/* PW-0001: segmented buttons replace the View dropdown -- fixed 4-option
+          set, one click instead of open-then-pick. Styled to match the existing
+          Portfolio/Position Analysis role="tablist" toggle above this component.
+          Custom is only ever reached via "Customize Columns" -> Apply (never a
+          cold-start choice), so it's excluded from the button row until a
+          custom column set actually exists, then it becomes selectable. */}
+      <div role="tablist" aria-label="Column view" className="flex gap-1">
+        {(['management', 'risk', 'full'] as const).map(item => (
+          <button key={item} type="button" role="tab" aria-selected={preferences.analysisView === item}
+            onClick={() => chooseView(item)}
+            className={`min-h-11 rounded border px-3 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${preferences.analysisView === item ? 'border-teal-400 bg-teal-400/10 text-white' : `border-white/20 ${th.textFaint} hover:text-white`}`}>
+            {item === 'management' ? 'Management' : item === 'risk' ? 'Risk' : 'Full Detail'}
+          </button>
+        ))}
+        {preferences.analysisView === 'custom' && (
+          <button type="button" role="tab" aria-selected={true}
+            onClick={() => chooseView('custom')}
+            className="min-h-11 rounded border border-teal-400 bg-teal-400/10 px-3 text-xs font-bold tracking-wider text-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+            Custom
+          </button>
+        )}
+      </div>
+      <button type="button" onClick={() => { setDraftFilters(preferences.filters); setFilterOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Filter{activeFilterCount(preferences.filters) ? ` ${activeFilterCount(preferences.filters)}` : ''}</button>
+      <button type="button" onClick={() => { setDraftColumns(columns); setColumnsOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Customize Columns</button>
+      <span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span>
+    </div>
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
     <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' || column.id === 'underlying' ? 'w-32 max-w-32' : column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{column.id === 'strike' ? <><span className="block">Strike /</span><span className="block">BE</span></> : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
@@ -225,6 +252,22 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}</b><span className="block">{profitTargetPresentation(p)}</span></>,
     evolution: <><span className="block text-white">first tracked → now</span><SemanticComparison label="P/L" prior={firstPnl} current={pnl} tone={comparisonTone(firstPnl, pnl)} digits={0} /><SemanticComparison label="POP" prior={first?.pop ?? p.popAtEntry} current={p.pop} tone={comparisonTone(first?.pop ?? p.popAtEntry, p.pop)} /><SemanticComparison label="Δ" prior={first?.netDelta ?? p.deltaAtEntry} current={p.netDelta} tone={directionalMovementTone(first?.netDelta ?? p.deltaAtEntry, p.netDelta)} /><SemanticComparison label="Θ" prior={first?.theta ?? p.thetaAtEntry} current={p.theta} tone={directionalMovementTone(first?.theta ?? p.thetaAtEntry, p.theta)} /><SemanticComparison label="Γ" prior={first?.gamma ?? p.gammaAtEntry} current={p.gamma} tone={directionalMovementTone(first?.gamma ?? p.gammaAtEntry, p.gamma)} digits={3} /><SemanticComparison label="V" prior={first?.netVega ?? p.vegaAtEntry} current={p.netVega} tone={directionalMovementTone(first?.netVega ?? p.vegaAtEntry, p.netVega)} /><SemanticComparison label="IV" prior={first?.iv ?? p.ivAtEntry} current={p.iv} tone={directionalMovementTone(first?.iv ?? p.ivAtEntry, p.iv)} suffix="%" /><SemanticComparison label="IVR" prior={first?.ivr ?? p.ivrAtEntry} current={p.ivr} tone={directionalMovementTone(first?.ivr ?? p.ivrAtEntry, p.ivr)} /><SemanticComparison label="Strike distance" prior={firstBuffer} current={p.buffer} tone={bufferTone} suffix="%" /><span className="block"><span className="text-white/70">DTE </span><span className="text-white/40">{first?.dte ?? p.dteAtEntry ?? '—'}</span><span className="px-1 text-white/30">→</span><span className={p.dte <= 21 ? 'font-semibold text-red-400' : p.dte <= 35 ? 'font-semibold text-amber-300' : 'text-white/50'}>{p.dte}</span></span></>,
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
+    // PW-0001: theta - estimated gamma drag, peak-relative color, day-over-day
+    // change, rollover alarm. Standalone column, not folded into greeks/evolution
+    // -- derived composite with its own peak-tracking semantics per Ian/Diane.
+    netEdge: (() => {
+      const live = netEdgeLive(p);
+      const peak = netEdgePeak(p);
+      const chg = netEdgeDayChangePct(p);
+      const rolled = netEdgeRolledOver(p);
+      const days = netEdgeDaysTracked(p);
+      return <>
+        <b className={netEdgeColor(p, th.textFaint)}>{live == null ? '—' : `${live >= 0 ? '+' : ''}$${live.toFixed(0)}/d`}</b>
+        {chg != null && <span className={`block ${chg >= 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}`}>{chg >= 0 ? '+' : ''}{chg.toFixed(0)}% since yesterday</span>}
+        {peak != null && <span className={`block ${th.textFaint}`}>Peak ${peak.toFixed(0)}/d · tracked {days}d</span>}
+        {rolled && <span className="block text-amber-400">Rolled over from peak</span>}
+      </>;
+    })(),
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span>{p.entryPriceEffect === 'Debit' && <span className={`mt-1 block max-w-44 ${th.textFaint}`}>Debit stop submission remains blocked until the canonical sell-to-close stop path supports it.</span>}</>,
     notes: <PositionNoteEditor position={p} savedNote={savedNote} onSave={onSaveNote} />,
