@@ -408,7 +408,46 @@ export function calcPositionPop(
   return null;
 }
 
-// ── Side-specific buffer / breach evidence ──────────────────────────────────
+// POP-0001: same lognormal engine as calcPositionPop above, but the
+// threshold is the raw short strike instead of the credit-adjusted
+// breakeven -- "will price ever touch my strike" rather than "will I keep
+// my credit." Reuses popAboveBreakeven/popBelowBreakeven/clampPct
+// unchanged; no new probability math, just a different threshold input.
+// No credit/quantity/contractMultiplier needed -- the strike is already a
+// per-share price, unlike breakeven which had to be derived from
+// per-contract credit.
+export function calcPositionPopVsStrike(
+  strategy: string,
+  legs: readonly PopLeg[],
+  price: number | null,
+  dte: number,
+  ivPct: number | null
+): number | null {
+  if (price == null || price <= 0 || ivPct == null || ivPct <= 0 || !Number.isFinite(dte) || dte <= 0) return null;
+
+  const shortPut = legs.find(l => l.optionType === 'P' && l.direction === 'Short');
+  const shortCall = legs.find(l => l.optionType === 'C' && l.direction === 'Short');
+
+  if (strategy === 'PUT' || strategy === 'BPS') {
+    if (!shortPut) return null;
+    return popAboveBreakeven(price, shortPut.strikePrice, dte, ivPct);
+  }
+
+  if (strategy === 'CALL' || strategy === 'BCS') {
+    if (!shortCall) return null;
+    return popBelowBreakeven(price, shortCall.strikePrice, dte, ivPct);
+  }
+
+  if (strategy === 'IC') {
+    if (!shortPut || !shortCall) return null;
+    const popAbovePut = popAboveBreakeven(price, shortPut.strikePrice, dte, ivPct);
+    const popBelowCall = popBelowBreakeven(price, shortCall.strikePrice, dte, ivPct);
+    if (popAbovePut == null || popBelowCall == null) return null;
+    return clampPct(popAbovePut + popBelowCall - 100);
+  }
+
+  return null;
+}
 
 export interface ShortLegStrikes {
   shortPutStrike: number | null;

@@ -5,7 +5,7 @@ export type PositionsWorkspaceView = 'portfolio' | 'analysis';
 export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
 export type AnalysisColumnId =
   | 'identity' | 'dates' | 'underlying' | 'strike' | 'capital' | 'entry'
-  | 'value' | 'pnl' | 'evolution' | 'greeks' | 'netEdge' | 'volatility'
+  | 'value' | 'pnl' | 'evolution' | 'greeks' | 'netEdge' | 'pop' | 'volatility'
   | 'orders' | 'notes' | 'recommendation';
 
 export interface PositionAnalysisFilters {

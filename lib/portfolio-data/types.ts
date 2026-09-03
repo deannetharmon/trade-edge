@@ -143,6 +143,12 @@ export interface Position {
   netDelta: number | null;    // net position delta
   netVega: number | null;     // net position vega
   pop: number | null;         // current probability of profit (breakeven-based), % 0-100
+  // POP-0001: same lognormal engine as `pop`, threshold is the raw short
+  // strike instead of the credit-adjusted breakeven -- "will price ever
+  // touch my strike" rather than "will I keep my credit." Optional so
+  // existing test fixtures/Position literals that predate this ticket keep
+  // compiling unchanged -- treat absent the same as null.
+  popVsStrike?: number | null; // current probability of staying past the short strike, % 0-100
   hasGtc: boolean;
   gtcOrderId: string | null;       // ID of the working profit-target GTC order
   gtcOrderPrice: number | null;    // current limit price on that GTC order

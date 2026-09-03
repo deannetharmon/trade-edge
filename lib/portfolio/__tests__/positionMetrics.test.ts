@@ -9,6 +9,7 @@ import {
   computeSingleLegBreakeven,
   computeIcBreakevens,
   calcPositionPop,
+  calcPositionPopVsStrike,
   findShortLegStrikes,
   computeSideBuffers,
   computeCanonicalBuffer,
@@ -467,6 +468,74 @@ describe('calcPositionPop: IC', () => {
     expect(clampPct(-5)).toBe(0);
     expect(clampPct(105)).toBe(100);
     expect(clampPct(50)).toBe(50);
+  });
+});
+
+// ── POP-0001: strike-based POP ("will price ever touch my strike") ──────────
+// Same engine as calcPositionPop above (popAboveBreakeven/popBelowBreakeven),
+// just fed the raw strike instead of a credit-adjusted breakeven -- no
+// credit/quantity/contractMultiplier inputs needed.
+describe('calcPositionPopVsStrike: CSP', () => {
+  const shortPut: PopLeg = { optionType: 'P', strikePrice: 40.5, direction: 'Short' };
+
+  it('computes a valid strike-based POP, distinct from and lower than the breakeven-based POP', () => {
+    const popStrike = calcPositionPopVsStrike('PUT', [shortPut], 42.26, 8, 34);
+    const popBreakeven = calcPositionPop('PUT', [shortPut], 42.26, 225, 5, 8, 34);
+    expect(popStrike).not.toBeNull();
+    expect(popStrike as number).toBeGreaterThan(0);
+    expect(popStrike as number).toBeLessThanOrEqual(100);
+    // Strike sits above breakeven for a short put (strike - credit = breakeven),
+    // so the probability of staying above the (higher) strike is always <=
+    // the probability of staying above the (lower) breakeven.
+    expect(popStrike as number).toBeLessThanOrEqual(popBreakeven as number);
+  });
+
+  it('returns null when there is no short put leg', () => {
+    expect(calcPositionPopVsStrike('PUT', [], 42.26, 8, 34)).toBeNull();
+  });
+
+  it('returns null when IV/price/dte are missing or invalid', () => {
+    expect(calcPositionPopVsStrike('PUT', [shortPut], null, 8, 34)).toBeNull();
+    expect(calcPositionPopVsStrike('PUT', [shortPut], 42.26, 8, null)).toBeNull();
+    expect(calcPositionPopVsStrike('PUT', [shortPut], 42.26, 0, 34)).toBeNull();
+  });
+});
+
+describe('calcPositionPopVsStrike: BPS / BCS', () => {
+  const bpsLegs: PopLeg[] = [
+    { optionType: 'P', strikePrice: 800, direction: 'Short' },
+    { optionType: 'P', strikePrice: 790, direction: 'Long' },
+  ];
+
+  it('computes a valid BPS strike-based POP', () => {
+    const pop = calcPositionPopVsStrike('BPS', bpsLegs, 876.40, 29, 66);
+    expect(pop).not.toBeNull();
+    expect(pop as number).toBeGreaterThan(0);
+    expect(pop as number).toBeLessThanOrEqual(100);
+  });
+
+  it('BCS returns null when there is no short call leg', () => {
+    expect(calcPositionPopVsStrike('BCS', bpsLegs, 876.40, 29, 66)).toBeNull();
+  });
+});
+
+describe('calcPositionPopVsStrike: IC', () => {
+  it('computes a symmetric IC strike-based POP, clamped to [0, 100]', () => {
+    const legs: PopLeg[] = [
+      { optionType: 'P', strikePrice: 95, direction: 'Short' },
+      { optionType: 'P', strikePrice: 90, direction: 'Long' },
+      { optionType: 'C', strikePrice: 105, direction: 'Short' },
+      { optionType: 'C', strikePrice: 110, direction: 'Long' },
+    ];
+    const pop = calcPositionPopVsStrike('IC', legs, 100, 30, 25);
+    expect(pop).not.toBeNull();
+    expect(pop as number).toBeGreaterThanOrEqual(0);
+    expect(pop as number).toBeLessThanOrEqual(100);
+  });
+
+  it('returns null when either short leg is missing', () => {
+    const legs: PopLeg[] = [{ optionType: 'P', strikePrice: 95, direction: 'Short' }];
+    expect(calcPositionPopVsStrike('IC', legs, 100, 30, 25)).toBeNull();
   });
 });
 

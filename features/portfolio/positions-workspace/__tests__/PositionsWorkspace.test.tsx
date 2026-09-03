@@ -70,16 +70,17 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText('0 of 1 positions')).toBeInTheDocument();
   });
 
-  it('renders all fifteen headers in Full Detail without What Moved', async () => {
+  it('renders all sixteen headers in Full Detail without What Moved', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     // PW-0001: View dropdown replaced with segmented buttons.
     await user.click(screen.getByRole('tab', { name: 'Full Detail' }));
-    expect(screen.getAllByRole('columnheader')).toHaveLength(15);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(16);
     expect(screen.getByRole('columnheader', { name: 'Since Tracked' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Greeks' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Net Edge' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'POP' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'IV / IVR' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Suggested Action' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'What Moved' })).not.toBeInTheDocument();

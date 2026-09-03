@@ -71,6 +71,7 @@ import {
   computeSignedNetPremium,
   isNetDebitStructure,
   calcPositionPop,
+  calcPositionPopVsStrike,
   findShortLegStrikes,
   computeSideBuffers,
   computeCanonicalBuffer,
@@ -1736,6 +1737,13 @@ export async function loadPositions(
       // comment), and POP is never computed off a net-debit structure's
       // floored $0.00 "credit" (isNetDebit guard).
       pop: !entryEconomicsComplete || isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
+      // POP-0001: same lognormal engine as `pop` above, but the threshold is
+      // the raw short strike instead of the credit-adjusted breakeven --
+      // "will price ever touch my strike" rather than "will I keep my
+      // credit". Gated the same as `pop` (entry economics + not-a-debit) so
+      // the two numbers have identical availability -- no surprise case
+      // where one shows and the other doesn't.
+      popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       hasGtc: (() => {
         // Check both the position symbol and its weekly option variant
