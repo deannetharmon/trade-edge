@@ -4846,7 +4846,7 @@ const FILTER_PRESETS = [
   { key: 'intermediate',label: 'Intermediate', color: 'border-amber-500 text-amber-400',    desc: '15–29 DTE — active management' },
 ];
 
-function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedPreset, onRun, onClose }: {
+function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedIvrMin, lastTargetedPreset, onRun, onClose }: {
   th: typeof THEMES[Theme];
   lastMode: 'filter' | 'rank' | 'targeted';
   lastPreset: string;
