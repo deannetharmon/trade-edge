@@ -62,11 +62,16 @@ describe('positions workspace model', () => {
       legs: [{ symbol: 'AAPL  270618P00150000', optionType: 'P', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
     });
     const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall, longPut]), positions: [heldLongCall, longPut], pendingOrders: [], snapshotDataQuality: quality });
+    // PW-0002: a bare long put was never a PMCC candidate to begin with --
+    // it's filtered out entirely, not shown as a "not-eligible" card (that
+    // was the original bug PW-0002 fixed: ORCL/BE/MRNA-style long puts
+    // showing up as PMCC "not-eligible" clutter). This test predates that
+    // fix and previously asserted the old, incorrect behavior.
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'eligible', exactContract: 'AAPL  270618C00150000' }),
-      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-put', status: 'not-eligible', reason: expect.stringContaining('long put') }),
       expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 1, reservedContracts: 0, availableContracts: 1 }),
     ]));
+    expect((model.incomeOpportunities ?? []).some(o => o.positionKey === 'AAPL-long-put')).toBe(false);
   });
 
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
@@ -77,9 +82,12 @@ describe('positions workspace model', () => {
 });
 
 describe('analysis controls', () => {
-  it('defines fourteen columns without the obsolete movement column and protects identity', () => {
-    expect(ANALYSIS_COLUMNS).toHaveLength(14);
-    expect(columnsForView('full')).toHaveLength(14);
+  it('defines seventeen columns without the obsolete movement column and protects identity', () => {
+    // Grown from 14 across the session's tickets: netEdge, pop (POP-0001),
+    // priceAlert (PRICEALERT-0001) -- this test wasn't updated at the time
+    // each landed.
+    expect(ANALYSIS_COLUMNS).toHaveLength(17);
+    expect(columnsForView('full')).toHaveLength(17);
     expect(ANALYSIS_COLUMNS.map(column => column.id)).not.toContain('movement');
     expect(sanitizeColumns(['pnl'])).toEqual(['identity', 'pnl']);
   });
