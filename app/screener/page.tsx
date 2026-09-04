@@ -8229,6 +8229,8 @@ export default function Home() {
   const [filterPopMin, setFilterPopMin] = useState<number>(0);
   const [filterOtmMin, setFilterOtmMin] = useState<number>(0);
   const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
+  // IVR-0001: same post-scan narrowing pattern as the three filters above.
+  const [filterIvrMin, setFilterIvrMin] = useState<number>(0);
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -8249,6 +8251,11 @@ export default function Home() {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
     if (activeSession?.requestedStrategy === 'pmcc') return true;
     if (!filterStrategies.includes(r.strategy)) return false;
+    // IVR-0001: r.ivr is top-level on ScreenResult (not nested under
+    // bestCandidate), so this check applies before the bestCandidate guard
+    // below -- a result with no candidate still has an ivr reading and
+    // should still be filterable by it.
+    if (filterIvrMin > 0 && (r.ivr ?? -1) < filterIvrMin) return false;
     const c = r.bestCandidate;
     if (c) {
       if ((c.pop ?? 0) < filterPopMin) return false;
@@ -9044,6 +9051,8 @@ export default function Home() {
                       setPopMin={setFilterPopMin}
                       otmMin={filterOtmMin}
                       setOtmMin={setFilterOtmMin}
+                      ivrMin={filterIvrMin}
+                      setIvrMin={setFilterIvrMin}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
@@ -9075,6 +9084,8 @@ export default function Home() {
                       setPopMin={setFilterPopMin}
                       otmMin={filterOtmMin}
                       setOtmMin={setFilterOtmMin}
+                      ivrMin={filterIvrMin}
+                      setIvrMin={setFilterIvrMin}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
@@ -9166,6 +9177,8 @@ export default function Home() {
                   setPopMin={setFilterPopMin}
                   otmMin={filterOtmMin}
                   setOtmMin={setFilterOtmMin}
+                  ivrMin={filterIvrMin}
+                  setIvrMin={setFilterIvrMin}
                   creditRatioMin={filterCreditRatioMin}
                   setCreditRatioMin={setFilterCreditRatioMin}
                   strategies={filterStrategies as FilterStrategy[]}
