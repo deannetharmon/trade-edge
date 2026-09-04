@@ -201,6 +201,13 @@ export interface PositionObjectiveInput {
   // its own.
   netEdgeDeclinePct?: number | null;
   netEdgeNegative?: boolean | null;
+  // POP-0002: breakeven-based probability of profit (Position.pop), passed
+  // through to dampen (never zero) the gamma/DTE trigger below when
+  // meaningfully high. See breakevenPopDampeningFactor in
+  // decisionQualityMatrix.ts for the numbers/rationale. This module
+  // performs no POP math of its own -- same pattern as netEdgeDeclinePct
+  // above.
+  breakevenPop?: number | null;
   // Existing "trend vs. strategy" alignment (see TrendResult/trendAgainst/
   // trendAligns in app/portfolio/page.tsx). Not yet wired through from the
   // Portfolio page in this V1 (see PI-0006B implementation report) -- accepted
@@ -866,6 +873,7 @@ export function evaluatePositionObjective(
     positionStrategy: input.positionStrategy,
     netEdgeDeclinePct: input.netEdgeDeclinePct,
     netEdgeNegative: input.netEdgeNegative,
+    breakevenPop: input.breakevenPop,
     technicalAlignment: input.technicalAlignment,
     remainingOpportunityPct: input.remainingOpportunityPct,
   };

@@ -273,6 +273,12 @@ export function scorePortfolioPositionObjective(
     healthScore,
     netEdgeDeclinePct,
     netEdgeNegative,
+    // POP-0002: reuses decisionPosition.pop (already nulled above when this
+    // position doesn't have supported credit-entry economics, same as
+    // hitTarget/targetPrice on the same object) -- not pos.pop directly, so
+    // the existing debit-safety fallback this function already has covers
+    // this field too, without reimplementing that gate a second time.
+    breakevenPop: decisionPosition.pop,
     remainingOpportunityPct,
     marketablePnlPct,
     liquidityTier: valuation?.liquidityTier ?? null,

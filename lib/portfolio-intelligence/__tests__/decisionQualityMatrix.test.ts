@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
 import type { PositionObjectiveInput } from '@/lib/portfolio-intelligence';
 import { selectManagementIntent, type ManagementIntentResult } from '../managementIntent';
-import { gammaDteFraction, scaleWeight, DECISION_QUALITY_WEIGHTS as W } from '../decisionQualityMatrix';
+import { gammaDteFraction, scaleWeight, breakevenPopDampeningFactor, BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT, BREAKEVEN_POP_DAMPEN_FLOOR, DECISION_QUALITY_WEIGHTS as W } from '../decisionQualityMatrix';
 
 const NOW = new Date('2026-07-13T13:00:00.000Z');
 
@@ -87,6 +87,40 @@ describe('scaleWeight', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POP-0002: breakeven-POP dampening of the gamma/DTE trigger, in isolation.
+// Threshold (80%) and floor (0.5) validated against real held positions --
+// ORCL (87.1%) and BE (94.3%) dampened, MU (72.4%) correctly not (Ian).
+// ---------------------------------------------------------------------------
+describe('breakevenPopDampeningFactor', () => {
+  it('is 1 (no dampening) at or below the threshold', () => {
+    expect(breakevenPopDampeningFactor(BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT)).toBe(1);
+    expect(breakevenPopDampeningFactor(50)).toBe(1);
+    // MU's real reading (72.4%) -- meaningfully above entry floor (65%) but
+    // below the dampening threshold -- must stay fully undampened.
+    expect(breakevenPopDampeningFactor(72.4)).toBe(1);
+  });
+
+  it('is 1 (no dampening) when POP is null or undefined', () => {
+    expect(breakevenPopDampeningFactor(null)).toBe(1);
+    expect(breakevenPopDampeningFactor(undefined)).toBe(1);
+  });
+
+  it('scales down as POP rises above the threshold', () => {
+    // ORCL's real reading (87.1%) and BE's (94.3%) -- both above threshold,
+    // both should dampen, BE (higher POP) more than ORCL.
+    const orcl = breakevenPopDampeningFactor(87.1);
+    const be = breakevenPopDampeningFactor(94.3);
+    expect(orcl).toBeLessThan(1);
+    expect(be).toBeLessThan(orcl);
+  });
+
+  it('reaches exactly the floor at 100% POP, and never goes below it', () => {
+    expect(breakevenPopDampeningFactor(100)).toBe(BREAKEVEN_POP_DAMPEN_FLOOR);
+    expect(breakevenPopDampeningFactor(150)).toBe(BREAKEVEN_POP_DAMPEN_FLOOR); // out-of-range input still clamps
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Gamma/DTE risk contribution, in isolation
 // ---------------------------------------------------------------------------
 
@@ -114,6 +148,44 @@ describe('selectManagementIntent: gamma/DTE risk (new in PI-0008B)', () => {
     const farReduceRisk = far.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
     const nearReduceRisk = near.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
     expect(nearReduceRisk).toBeGreaterThan(farReduceRisk);
+  });
+
+  // POP-0002: breakeven-POP dampens this contribution, never zeroes it.
+  it('a high breakeven-POP dampens (but does not zero) the gamma/DTE contribution', () => {
+    const undamped = selectManagementIntent({ context: 'other-position', dte: 2 });
+    const damped = selectManagementIntent({ context: 'other-position', dte: 2, breakevenPop: 94.3 }); // BE's real reading
+    const undampedScore = undamped.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    const dampedScore = damped.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    expect(dampedScore).toBeLessThan(undampedScore);
+    expect(dampedScore).toBeGreaterThan(0); // floor -- never fully suppressed
+  });
+
+  it('a moderate breakeven-POP (below the dampening threshold) leaves the contribution untouched', () => {
+    const undamped = selectManagementIntent({ context: 'other-position', dte: 2 });
+    const mu = selectManagementIntent({ context: 'other-position', dte: 2, breakevenPop: 72.4 }); // MU's real reading
+    const undampedScore = undamped.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    const muScore = mu.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    expect(muScore).toBe(undampedScore);
+  });
+
+  it('a high breakeven-POP far from the DTE window has negligible effect (dampening multiplies an already-small base)', () => {
+    const undamped = selectManagementIntent({ context: 'other-position', dte: 18 });
+    const damped = selectManagementIntent({ context: 'other-position', dte: 18, breakevenPop: 94.3 });
+    const undampedScore = undamped.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    const dampedScore = damped.candidates.find((c) => c.intent === 'REDUCE_RISK')?.score ?? 0;
+    // Both small; dampening still applies proportionally but the absolute
+    // gap is tiny compared to the near-expiration case above.
+    expect(dampedScore).toBeLessThanOrEqual(undampedScore);
+  });
+
+  it('surfaces the dampening in the Reduce Risk reasons text only when actually active', () => {
+    const damped = selectManagementIntent({ context: 'other-position', dte: 2, breakevenPop: 94.3 });
+    const reduceRisk = damped.candidates.find((c) => c.intent === 'REDUCE_RISK');
+    expect(reduceRisk!.reasons.some((r) => r.includes('probability of profit'))).toBe(true);
+
+    const undamped = selectManagementIntent({ context: 'other-position', dte: 2, breakevenPop: 72.4 });
+    const reduceRiskUndamped = undamped.candidates.find((c) => c.intent === 'REDUCE_RISK');
+    expect(reduceRiskUndamped!.reasons.some((r) => r.includes('probability of profit'))).toBe(false);
   });
 });
 

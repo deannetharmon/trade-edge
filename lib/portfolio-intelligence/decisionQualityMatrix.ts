@@ -271,3 +271,40 @@ export function scaleWeight(fraction: number, max: number): number {
 export function gammaDteFraction(dte: number): number {
   return clampUnit((GAMMA_DTE_WINDOW_DAYS - dte) / GAMMA_DTE_WINDOW_DAYS);
 }
+
+// ---------------------------------------------------------------------------
+// POP-0002: breakeven-POP dampens (never zeroes) the gamma/DTE trigger above.
+// Rationale/numbers (Alan, validated against real held positions by Ian):
+//
+// Threshold anchored to the trader's own Prosper entry rule (POP > 65%
+// required just to open a trade) -- 80% sits meaningfully above that floor
+// so an ordinary trade doing what it's supposed to do doesn't immediately
+// soften its own management rule. Validated against ORCL (87.1%) and BE
+// (94.3%), both 21-DTE and already profitable -- both clear the threshold,
+// which is exactly the case this exists for. MU (72.4%) stays below it and
+// is correctly unaffected.
+//
+// Floor is the identical value and shape as REMAINING_OPPORTUNITY_DAMPEN_
+// FLOOR (0.5) elsewhere in this file's consuming module (managementIntent.ts)
+// -- not a new number invented for this ticket. Effect is naturally
+// self-limiting: this factor multiplies against gammaDteFraction above,
+// which is near-zero early in the window, so the floor's real impact only
+// shows up close to expiration -- exactly where "still fine vs. panicking"
+// tension is sharpest.
+//
+// Scoped ONLY to the gamma/DTE contribution (managementIntent.ts's gamma-DTE
+// block) -- never applied to stop-loss classification, the 2x credit-loss
+// trigger, remainingOpportunityPct's own dampening, or any other factor.
+// ---------------------------------------------------------------------------
+export const BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT = 80;
+export const BREAKEVEN_POP_DAMPEN_FLOOR = 0.5;
+
+// 1 (no dampening) at/below the threshold; scales linearly down to the floor
+// as POP rises to 100%. Same `1 - fraction * (1 - floor)` shape as
+// managementIntent.ts's remainingOpportunityDampeningFactor -- one dampening
+// formula, reused, not reinvented per factor.
+export function breakevenPopDampeningFactor(pop: number | null | undefined): number {
+  if (pop == null || pop <= BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT) return 1;
+  const fraction = clampUnit((pop - BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT) / (100 - BREAKEVEN_POP_DAMPEN_THRESHOLD_PCT));
+  return 1 - fraction * (1 - BREAKEVEN_POP_DAMPEN_FLOOR);
+}

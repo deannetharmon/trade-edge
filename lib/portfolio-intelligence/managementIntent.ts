@@ -69,6 +69,7 @@ import {
   DECISION_QUALITY_WEIGHTS as W,
   gammaDteFraction,
   scaleWeight,
+  breakevenPopDampeningFactor,
 } from './decisionQualityMatrix';
 
 export type ManagementIntent =
@@ -131,6 +132,13 @@ export interface ManagementIntentEvidence {
   // checks).
   dte?: number | null;
   pnlPct?: number | null;
+  // POP-0002: breakeven-based probability of profit (Position.pop) --
+  // dampens (never zeroes) the gamma/DTE trigger below when meaningfully
+  // above the trader's own Prosper entry floor (POP > 65%). See
+  // breakevenPopDampeningFactor in decisionQualityMatrix.ts for the numbers
+  // and rationale. Not used anywhere else in this file -- scoped to that
+  // one factor only.
+  breakevenPop?: number | null;
 
   // Existing policy checks, evaluated by the caller against its own
   // threshold set (DEFAULT_POSITION_MANAGEMENT_POLICY / PortfolioRiskPolicy)
@@ -475,15 +483,27 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // Reduce Risk gets the primary contribution; Cut Losses gets a smaller
   // nudge (half the max), matching every other de-risking signal in this
   // file (see decisionQualityMatrix.ts's "Reduce Risk vs. Cut Losses" note).
+  //
+  // POP-0002: breakevenPopDampeningFactor scales BOTH contributions down
+  // (never to zero -- floor of 0.5) when breakeven-POP is meaningfully high.
+  // Scoped to this block only -- no other factor in this file is affected.
+  // See decisionQualityMatrix.ts for the threshold/floor numbers and the
+  // validation against real positions (ORCL/BE dampened, MU correctly not).
   if (evidence.dte != null && evidence.dte <= W.gammaDteWindowDays) {
     const fraction = gammaDteFraction(evidence.dte);
-    const reduceRiskPoints = scaleWeight(fraction, W.gammaDteReduceRiskMax);
-    const cutLossesPoints = scaleWeight(fraction, W.gammaDteCutLossesMax);
+    const popDampening = breakevenPopDampeningFactor(evidence.breakevenPop);
+    const dampened = popDampening < 1;
+    // Appended to the explanation (not a separate zero-point bump) so the
+    // softened score is visible/explainable in the same reasons-bullet that
+    // already exists for this factor, per the ticket's "not silent" requirement.
+    const popNote = dampened ? ` Offset by a high probability of profit (${evidence.breakevenPop!.toFixed(0)}%).` : '';
+    const reduceRiskPoints = Math.round(scaleWeight(fraction, W.gammaDteReduceRiskMax) * popDampening);
+    const cutLossesPoints = Math.round(scaleWeight(fraction, W.gammaDteCutLossesMax) * popDampening);
     if (reduceRiskPoints > 0) {
       bump(scores, 'REDUCE_RISK', reduceRiskPoints, {
         id: 'gamma-dte-reduce-risk',
         label: 'Gamma risk rising as expiration nears',
-        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration.`,
+        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration.${popNote}`,
         evidenceField: 'dte',
       });
     }
@@ -491,7 +511,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
       bump(scores, 'CUT_LOSSES', cutLossesPoints, {
         id: 'gamma-dte-cut-losses',
         label: 'Gamma risk rising as expiration nears',
-        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration, which also elevates loss risk.`,
+        explanation: `Gamma risk increases as DTE (${evidence.dte}) approaches expiration, which also elevates loss risk.${popNote}`,
         evidenceField: 'dte',
         includeInReasons: false,
       });
@@ -677,4 +697,3 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
     confidenceTier: confidenceTierForMargin(margin),
   };
 }
-
