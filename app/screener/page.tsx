@@ -4855,8 +4855,9 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   lastTargetedDteMax: number;
   lastTargetedPopMin: number;
   lastTargetedOtmMin: number;
+  lastTargetedIvrMin: number;
   lastTargetedPreset: string;
-  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; preset: string }) => void;
+  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; preset: string }) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode);
@@ -4865,6 +4866,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
+  const [tIvrMin, setTIvrMin] = useState(lastTargetedIvrMin);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
   return (
@@ -5019,12 +5021,34 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               </div>
               <p className={`text-[8px] ${th.textFaint} mt-1`}>For Iron Condors, gates on the tighter of put/call side</p>
             </div>
+
+            {/* MIN IVR % -- IVR-0001: previously absent entirely; the floor
+                was silently whatever the (also-invisible) preset selection
+                happened to carry. Same explicit-field treatment as POP/OTM
+                above, and same 30% default the 'course' preset used to
+                supply silently. */}
+            <div>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN IVR %</p>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} max={100} value={tIvrMin} onChange={e => setTIvrMin(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                  className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
+                <span className={`text-[9px] ${th.textFaint}`}>%</span>
+                <div className="flex gap-1.5">
+                  {[0, 20, 30, 40, 50].map(v => (
+                    <button key={v} onClick={() => setTIvrMin(v)}
+                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                        tIvrMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
+                      }`}>{v === 0 ? 'Any' : `${v}%`}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
         <button onClick={() => {
           if (mode === 'targeted') {
-            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, preset: tPreset });
+            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, preset: tPreset });
           } else {
             onRun(mode, mode === 'filter' ? preset : undefined);
           }
@@ -5585,7 +5609,7 @@ function BestOpportunityFinder({
 // ── Targeted Scan Runner ──────────────────────────────────────────────────
 async function runTargetedScan(
   symbols: string[],
-  dteMin: number, dteMax: number, popMin: number, otmMin: number,
+  dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
@@ -5656,6 +5680,15 @@ async function runTargetedScan(
       }
       const symbol = loopSymbols[i];
       const primary: 'BPS' | 'BCS' | 'IC' = 'IC';
+      updateScreenerJob({ progressCurrent: i + 1 });
+      // IVR-0001: metricsMap is already fully fetched for every symbol
+      // before this loop starts (getMarketMetrics above) -- checked here,
+      // before classifyUnderlying/getChain/getQuote/getTrend all run for
+      // this symbol, so a symbol that fails the floor costs nothing beyond
+      // the metrics fetch already paid for every symbol regardless.
+      // Progress still advances (above) so the bar doesn't stall on
+      // filtered-out symbols.
+      if (ivrMin > 0 && (metricsMap[symbol]?.ivRank ?? -1) < ivrMin) continue;
       pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
       updateScreenerJob({ progressCurrent: i + 1 });
       const entriesBeforeThisSymbol = entries.length;
@@ -6155,6 +6188,10 @@ function TargetedScanResultsPanel({
   const [activePopMin, setActivePopMin]         = useState<number>(popMin);
   const [activeOtmMin, setActiveOtmMin]         = useState<number>(0);
   const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
+  // IVR-0001: same post-scan narrowing pattern as POP/OTM/Credit Ratio
+  // above -- TargetedScanEntry already carries `ivr` (unlike the other
+  // three, this floor was missing entirely, not just under-exposed).
+  const [activeIvrMin, setActiveIvrMin]         = useState<number>(0);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
   const [activeSort, setActiveSort]             = useState(sortBy);
@@ -6170,6 +6207,7 @@ function TargetedScanResultsPanel({
     setActivePopMin(popMin);
     setActiveOtmMin(0);
     setActiveCreditRatioMin(0);
+    setActiveIvrMin(0);
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
@@ -6202,6 +6240,8 @@ function TargetedScanResultsPanel({
   });
   // 2c. credit ratio floor
   if (activeCreditRatioMin > 0) pool = pool.filter(e => ((e.candidate.creditRatio ?? 0) * 100) >= activeCreditRatioMin);
+  // 2d. IVR floor
+  if (activeIvrMin > 0) pool = pool.filter(e => (e.ivr ?? -1) >= activeIvrMin);
   // 3. strategy filter
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
@@ -6317,6 +6357,20 @@ function TargetedScanResultsPanel({
               <button key={v} onClick={() => setActiveCreditRatioMin(v)}
                 className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                   activeCreditRatioMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : `${v}%`}
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>IVR ≥</span>
+            {[0, 20, 30, 40, 50].map(v => (
+              <button key={v} onClick={() => setActiveIvrMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeIvrMin === v
                     ? 'border-teal-500 text-teal-300 bg-teal-500/15'
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
@@ -6813,6 +6867,16 @@ export default function Home() {
   const [targetedDteMax, setTargetedDteMax] = useState<number>(45);
   const [targetedPopMin, setTargetedPopMin] = useState<number>(70);
   const [targetedOtmMin, setTargetedOtmMin] = useState<number>(6); // matches Income Engine OTM floor default
+  // IVR-0001: previously absent entirely -- the floor was silently whatever
+  // the (also-invisible) preset selection happened to carry in `rules`/
+  // `etfRules`, though nothing in runTargetedScan actually enforced
+  // rules.IVR_MIN as a hard reject; it was carried but unused. Defaults to
+  // 0 ("Any"), matching every other filter's default in this same modal --
+  // NOT the 'course' preset's 30%, specifically so exposing this control
+  // doesn't silently start rejecting symbols whose IVR is temporarily
+  // unavailable (metricsMap[symbol]?.ivRank ?? -1) the moment a user (or an
+  // existing scan) hits this code path without deliberately opting in.
+  const [targetedIvrMin, setTargetedIvrMin] = useState<number>(0);
   // SCREENER-OI-0001 corrective pass: Targeted mode explicitly keeps its
   // pre-existing, established single-field sort and does NOT get the new
   // canonical minimum-OI floor or secondary sort -- see the note above
@@ -8165,8 +8229,6 @@ export default function Home() {
   const [filterPopMin, setFilterPopMin] = useState<number>(0);
   const [filterOtmMin, setFilterOtmMin] = useState<number>(0);
   const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
-  // IVR-0001: same post-scan narrowing pattern as the three filters above.
-  const [filterIvrMin, setFilterIvrMin] = useState<number>(0);
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -8187,11 +8249,6 @@ export default function Home() {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
     if (activeSession?.requestedStrategy === 'pmcc') return true;
     if (!filterStrategies.includes(r.strategy)) return false;
-    // IVR-0001: r.ivr is top-level on ScreenResult (not nested under
-    // bestCandidate), so this check applies before the bestCandidate guard
-    // below -- a result with no candidate still has an ivr reading and
-    // should still be filterable by it.
-    if (filterIvrMin > 0 && (r.ivr ?? -1) < filterIvrMin) return false;
     const c = r.bestCandidate;
     if (c) {
       if ((c.pop ?? 0) < filterPopMin) return false;
@@ -8987,8 +9044,6 @@ export default function Home() {
                       setPopMin={setFilterPopMin}
                       otmMin={filterOtmMin}
                       setOtmMin={setFilterOtmMin}
-                      ivrMin={filterIvrMin}
-                      setIvrMin={setFilterIvrMin}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
@@ -9020,8 +9075,6 @@ export default function Home() {
                       setPopMin={setFilterPopMin}
                       otmMin={filterOtmMin}
                       setOtmMin={setFilterOtmMin}
-                      ivrMin={filterIvrMin}
-                      setIvrMin={setFilterIvrMin}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
@@ -9113,8 +9166,6 @@ export default function Home() {
                   setPopMin={setFilterPopMin}
                   otmMin={filterOtmMin}
                   setOtmMin={setFilterOtmMin}
-                  ivrMin={filterIvrMin}
-                  setIvrMin={setFilterIvrMin}
                   creditRatioMin={filterCreditRatioMin}
                   setCreditRatioMin={setFilterCreditRatioMin}
                   strategies={filterStrategies as FilterStrategy[]}
@@ -9782,6 +9833,7 @@ export default function Home() {
           lastTargetedDteMax={targetedDteMax}
           lastTargetedPopMin={targetedPopMin}
           lastTargetedOtmMin={targetedOtmMin}
+          lastTargetedIvrMin={targetedIvrMin}
           lastTargetedPreset={targetedPreset}
           onClose={() => setShowRunModal(false)}
           onRun={(mode, preset, targetedOpts) => {
@@ -9793,13 +9845,14 @@ export default function Home() {
               setTargetedDteMax(targetedOpts.dteMax);
               setTargetedPopMin(targetedOpts.popMin);
               setTargetedOtmMin(targetedOpts.otmMin);
+              setTargetedIvrMin(targetedOpts.ivrMin);
               setTargetedPreset(targetedOpts.preset);
               // Find rules for chosen preset
               const foundPreset = RULE_PRESETS.find(p => p.key === targetedOpts.preset);
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession, isScanCurrent);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession, isScanCurrent);
             } else if (mode === 'rank') {
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {
