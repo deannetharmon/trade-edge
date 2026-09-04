@@ -2106,6 +2106,17 @@ export function netEdgeDayChangePct(pos: Position): number | null {
   return ((live - prior) / Math.abs(prior)) * 100;
 }
 
+// PW-0003: shared trip line between netEdgeColor's amber threshold and
+// netEdgeRolledOver's hysteresis below -- one definition of "meaningfully
+// off peak," not two different hardcoded 0.15s that could drift apart.
+const NET_EDGE_OFF_PEAK_TRIP_PCT = 0.15;
+// Separate, looser recovery line for the rolled-over alarm's hysteresis
+// only (netEdgeColor is unaffected -- it stays a same-day, instantaneous
+// read of "where do you stand right now"). Deliberately different from the
+// trip line so a position oscillating right around 15% can't flicker the
+// alarm on and off -- see PW-0003 implementation notes below.
+const NET_EDGE_OFF_PEAK_CLEAR_PCT = 0.08;
+
 // Net-edge color, keyed off this position's own peak:
 //  - green  : within 15% of peak (at/near peak efficiency)
 //  - amber  : fallen >15% off peak but still positive
@@ -2117,7 +2128,7 @@ export function netEdgeColor(pos: Position, fallback: string): string {
   const peak = netEdgePeak(pos);
   if (peak == null || peak <= 0) return 'text-emerald-400';
   const offPeak = (live - peak) / peak; // <= 0
-  if (offPeak >= -0.15) return 'text-emerald-400';
+  if (offPeak >= -NET_EDGE_OFF_PEAK_TRIP_PCT) return 'text-emerald-400';
   return 'text-amber-400';
 }
 
@@ -2127,14 +2138,52 @@ export function netEdgeDaysTracked(pos: Position): number {
   return netEdgeSeries(pos).length;
 }
 
-// True the first time today's live edge prints below the prior peak-of-history,
-// i.e. the position has rolled OVER from its peak -- gamma starting to win.
-// Requires at least 2 tracked days so a brand-new position can't false-trigger.
+// PW-0003: replaces the original "any decline vs. all-time-past peak"
+// check, which fired on single-day noise (a $0.10 wiggle) and could
+// disagree with netEdgeColor -- a position could sit green (within 15% of
+// peak) while this alarm independently said "rolled over," because the two
+// used different, unrelated thresholds (color: 15%, this: "any decline").
+//
+// Fixed with hysteresis over the position's full tracked history, walked
+// chronologically with a RUNNING peak-to-date (not the final peak of the
+// whole series -- using the eventual peak would be look-ahead bias, since
+// on any given day in the walk the position didn't yet know its own
+// future). Trips at the same 15% line netEdgeColor uses; clears only once
+// recovered to within 8%, not back at 15% -- two different lines, so a
+// position oscillating right around one boundary can't flicker the flag on
+// and off the way a single shared threshold would.
+//
+// No new persisted field needed for this -- netEdgeSeries() already
+// returns the full chronological history, and hysteresis is a deterministic
+// function of a sequence, not independent state that needs storing
+// elsewhere. Turned out simpler than initially scoped (a new Position field,
+// PAIR-0001-style) once the existing data was actually walked end to end.
+//
+// Known, accepted tradeoff: because this is now deliberately "sticky," it
+// CAN still show alongside a green netEdgeColor -- e.g. a position tripped
+// yesterday at 20% off peak, recovers to 12% off peak today (green, above
+// the 15% trip line) but hasn't yet reached the 8% clear line, so the alarm
+// correctly stays on. This is intentional, not the same bug as before: the
+// color answers "where do you stand right now," the alarm now answers "has
+// this shown a sustained decline pattern" -- two different, complementary
+// questions that can legitimately disagree, unlike the old version where
+// disagreement was pure noise with no meaning behind it.
 export function netEdgeRolledOver(pos: Position): boolean {
   const series = netEdgeSeries(pos);
-  if (series.length < 2) return false;
-  const histPeak = Math.max(...series.map(s => s.value));
   const live = netEdgeLive(pos);
-  if (live == null) return false;
-  return live < histPeak;
+  const values = live != null ? [...series.map(s => s.value), live] : series.map(s => s.value);
+  if (values.length < 2) return false;
+
+  let runningPeak = values[0];
+  let rolledOver = false;
+  for (let i = 1; i < values.length; i++) {
+    const v = values[i];
+    if (runningPeak > 0) {
+      const decline = (runningPeak - v) / runningPeak;
+      if (!rolledOver && decline > NET_EDGE_OFF_PEAK_TRIP_PCT) rolledOver = true;
+      else if (rolledOver && decline <= NET_EDGE_OFF_PEAK_CLEAR_PCT) rolledOver = false;
+    }
+    runningPeak = Math.max(runningPeak, v);
+  }
+  return rolledOver;
 }
