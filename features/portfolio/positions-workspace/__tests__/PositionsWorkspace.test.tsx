@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '@/lib/theme';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
-import { PositionsWorkspace, profitTargetPresentation } from '../PositionsWorkspace';
+import { PositionsWorkspace, profitTargetPresentation, profitTargetPct } from '../PositionsWorkspace';
 
 const position = {
   key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
@@ -116,6 +116,23 @@ describe('PositionsWorkspace', () => {
     expect(profitTargetPresentation({ entryPriceEffect: 'Debit', entryEconomicsComplete: true, profitTarget: 0.5 })).toBe('Target unavailable');
     expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: false, profitTarget: 0.5 })).toBe('Target unavailable');
     expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 50 })).toBe('Target unavailable');
+  });
+
+  // PLTARGET-0001: signed % of target, never floored, gated identically to
+  // profitTargetPresentation so it only ever shows alongside a real target.
+  it('computes signed % of target, gated the same as profitTargetPresentation', () => {
+    const credit = { entryPriceEffect: 'Credit' as const, entryEconomicsComplete: true, targetPrice: 400 };
+    expect(profitTargetPct(credit, 248)).toBe(62); // $248 of a $400 target = 62%
+    // Signed, not floored: a loss against the target stays negative.
+    expect(profitTargetPct(credit, -120)).toBe(-30);
+    // Can exceed 100% -- target reached/exceeded is a real, expected state.
+    expect(profitTargetPct(credit, 500)).toBe(125);
+    // Same gates as profitTargetPresentation: debit, incomplete economics,
+    // invalid/zero target, and missing pnl all resolve to null (no stray %).
+    expect(profitTargetPct({ entryPriceEffect: 'Debit', entryEconomicsComplete: true, targetPrice: 400 }, 248)).toBeNull();
+    expect(profitTargetPct({ entryPriceEffect: 'Credit', entryEconomicsComplete: false, targetPrice: 400 }, 248)).toBeNull();
+    expect(profitTargetPct({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, targetPrice: 0 }, 248)).toBeNull();
+    expect(profitTargetPct(credit, null)).toBeNull();
   });
 
   it('explains the displayed management recommendation with its matching reason', async () => {
