@@ -45,6 +45,13 @@ export interface FilteredResultControlsProps {
   setOtmMin: (v: number) => void;
   creditRatioMin: number;
   setCreditRatioMin: (v: number) => void;
+  // IVR-0001 — IVR floor, same preset-chip pattern as POP/OTM/Credit Ratio.
+  // This narrows already-scanned RESULTS (Filter mode's post-scan chips),
+  // distinct from IVR_MIN on the scan-time rule presets (Course/Relaxed/
+  // etc.) which controls what gets scanned/qualified in the first place --
+  // two different, complementary knobs, not a duplicate of existing scope.
+  ivrMin: number;
+  setIvrMin: (v: number) => void;
   strategies: FilterStrategy[];
   toggleStrategy: (s: FilterStrategy) => void;
 
@@ -75,6 +82,12 @@ export interface FilteredResultControlsProps {
 const POP_PRESETS = [0, 50, 60, 70, 80];
 const OTM_PRESETS = [0, 4, 8, 12, 16];
 const CREDIT_RATIO_PRESETS = [0, 15, 20, 25, 33];
+// IVR-0001: anchored on Dean's own Prosper rule set floor (30% minimum,
+// "no exceptions" per the universal rules) plus the surrounding scan-rule
+// preset values (Low Vol 20 / Relaxed 25 / Course 30 / Strict 40) so these
+// buttons land on numbers that already mean something in this app, not
+// arbitrary round numbers.
+const IVR_PRESETS = [0, 20, 30, 40, 50];
 
 interface ActiveChip {
   key: string;
@@ -92,6 +105,8 @@ export function FilteredResultControls({
   setOtmMin,
   creditRatioMin,
   setCreditRatioMin,
+  ivrMin,
+  setIvrMin,
   strategies,
   toggleStrategy,
   hiddenSymbols,
@@ -107,6 +122,7 @@ export function FilteredResultControls({
   const activeChips: ActiveChip[] = [];
   if (popMin > 0) activeChips.push({ key: 'pop', label: `POP ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
   if (otmMin > 0) activeChips.push({ key: 'otm', label: `OTM ≥ ${otmMin}%`, onRemove: () => setOtmMin(0) });
+  if (ivrMin > 0) activeChips.push({ key: 'ivr', label: `IVR ≥ ${ivrMin}%`, onRemove: () => setIvrMin(0) });
   if (showCreditRatio && creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
   if (showStrategyToggle) {
     for (const s of strategies) {
@@ -122,6 +138,7 @@ export function FilteredResultControls({
   function resetAll() {
     setPopMin(0);
     setOtmMin(0);
+    setIvrMin(0);
     if (showCreditRatio) setCreditRatioMin(0);
     if (showStrategyToggle) for (const s of [...strategies]) toggleStrategy(s);
     setHiddenSymbols([]);
@@ -148,6 +165,18 @@ export function FilteredResultControls({
             <button key={v} onClick={() => setOtmMin(v)}
               className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                 otmMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+              }`}>
+              {v === 0 ? 'Any' : `${v}%`}
+            </button>
+          ))}
+        </div>
+        <div className={`w-px h-4 ${th.border} border-l`} />
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[9px] ${th.textFaint} shrink-0`}>IVR ≥</span>
+          {IVR_PRESETS.map(v => (
+            <button key={v} onClick={() => setIvrMin(v)}
+              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                ivrMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
               }`}>
               {v === 0 ? 'Any' : `${v}%`}
             </button>
@@ -247,4 +276,3 @@ export function FilteredResultControls({
     </section>
   );
 }
-

@@ -21,6 +21,7 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
   const setPopMin = vi.fn();
   const setOtmMin = vi.fn();
   const setCreditRatioMin = vi.fn();
+  const setIvrMin = vi.fn();
   const toggleStrategy = vi.fn();
   const toggleSymbol = vi.fn();
   const setHiddenSymbols = vi.fn();
@@ -35,6 +36,8 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
       setOtmMin={setOtmMin}
       creditRatioMin={0}
       setCreditRatioMin={setCreditRatioMin}
+      ivrMin={0}
+      setIvrMin={setIvrMin}
       strategies={['BPS']}
       toggleStrategy={toggleStrategy}
       hiddenSymbols={[]}
@@ -45,7 +48,7 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
       {...props}
     />
   );
-  return { ...utils, setPopMin, setOtmMin, setCreditRatioMin, toggleStrategy, toggleSymbol, setHiddenSymbols };
+  return { ...utils, setPopMin, setOtmMin, setCreditRatioMin, setIvrMin, toggleStrategy, toggleSymbol, setHiddenSymbols };
 }
 
 describe('FilteredResultControls', () => {
@@ -65,6 +68,21 @@ describe('FilteredResultControls', () => {
     expect(chip).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Remove filter: POP ≥ 60%/ }));
     expect(setPopMin).toHaveBeenCalledWith(0);
+  });
+
+  // IVR-0001: same preset-chip pattern as POP -- verifies the chip renders,
+  // is individually removable, and is included in the single reset action.
+  it('renders an IVR filter chip that is individually removable', () => {
+    const { setIvrMin } = renderControls({ ivrMin: 30 });
+    expect(screen.getByText('IVR ≥ 30%')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Remove filter: IVR ≥ 30%/ }));
+    expect(setIvrMin).toHaveBeenCalledWith(0);
+  });
+
+  it('includes IVR in the single reset action', () => {
+    const { setIvrMin } = renderControls({ ivrMin: 30 });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset result filters' }));
+    expect(setIvrMin).toHaveBeenCalledWith(0);
   });
 
   it('provides a single reset action that clears every active filter', () => {
