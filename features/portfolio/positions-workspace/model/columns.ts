@@ -16,10 +16,11 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
   { id: 'orders', label: 'Orders / Stop', group: 'Orders' },
   { id: 'notes', label: 'Notes', group: 'Position' },
+  { id: 'priceAlert', label: 'Price Alert', group: 'Position' },
   { id: 'recommendation', label: 'Suggested Action', group: 'Recommendation' },
 ] as const;
 
-const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'notes', 'recommendation'];
+const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'notes', 'priceAlert', 'recommendation'];
 const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'greeks', 'netEdge', 'pop', 'volatility', 'notes', 'recommendation'];
 const FULL = ANALYSIS_COLUMNS.map(column => column.id);
 

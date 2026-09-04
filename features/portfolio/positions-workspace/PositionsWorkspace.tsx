@@ -134,6 +134,9 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const [draftColumns, setDraftColumns] = useState<AnalysisColumnId[]>(preferences.customColumnIds);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [notesLoadError, setNotesLoadError] = useState<string | null>(null);
+  // PRICEALERT-0001: same store/fetch/save shape as notes above.
+  const [priceAlerts, setPriceAlerts] = useState<Record<string, { targetPrice: number; direction: 'above' | 'below' }>>({});
+  const [priceAlertsLoadError, setPriceAlertsLoadError] = useState<string | null>(null);
   const [analysisPosition, setAnalysisPosition] = useState<Position | null>(null);
   const [analysis, setAnalysis] = useState<WorkspaceAiAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -154,6 +157,16 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     }).catch(error => { if (active) setNotesLoadError(error instanceof Error ? error.message : 'Unable to load notes'); });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-price-alerts').then(async response => {
+      if (!response.ok) throw new Error((await response.json().catch(() => ({})))?.error ?? 'Unable to load price alerts');
+      const payload = await response.json();
+      if (active) setPriceAlerts(payload.alerts ?? {});
+    }).catch(error => { if (active) setPriceAlertsLoadError(error instanceof Error ? error.message : 'Unable to load price alerts'); });
+    return () => { active = false; };
+  }, []);
   const noteStorageKey = (position: Position) => `${encodeURIComponent(position.accountNumber || model.accountNumber || '')}::${encodeURIComponent(position.key)}`;
   const saveNote = async (position: Position, note: string) => {
     const accountNumber = position.accountNumber || model.accountNumber;
@@ -162,6 +175,22 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? 'Unable to save note');
     setNotes(current => ({ ...current, [noteStorageKey(position)]: note }));
+  };
+  // Same accountNumber::positionKey scheme as noteStorageKey -- one storage
+  // convention, two fields (Dane's consolidation principle).
+  const priceAlertStorageKey = (position: Position) => `${encodeURIComponent(position.accountNumber || model.accountNumber || '')}::${encodeURIComponent(position.key)}`;
+  const savePriceAlert = async (position: Position, targetPrice: number | null, direction: 'above' | 'below') => {
+    const accountNumber = position.accountNumber || model.accountNumber;
+    if (!accountNumber) throw new Error('Broker account identity is unavailable');
+    const response = await fetch('/api/position-price-alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: position.key, targetPrice, direction }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error ?? 'Unable to save price alert');
+    setPriceAlerts(current => {
+      const next = { ...current };
+      if (targetPrice == null) delete next[priceAlertStorageKey(position)];
+      else next[priceAlertStorageKey(position)] = { targetPrice, direction };
+      return next;
+    });
   };
   const analyze = async (position: Position) => {
     if (!onAnalyze || analysisLoading) return;
@@ -218,7 +247,8 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       <span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span>
     </div>
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
-    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-32 max-w-32' : column.id === 'underlying' ? 'w-24 max-w-24' : column.id === 'entry' ? 'w-20 max-w-20' : column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{column.id === 'strike' ? <><span className="block">Strike /</span><span className="block">BE</span></> : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.id === 'entry' ? <><span className="block">Entry</span><span className="block">Credit / Debit</span></> : column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
+    {priceAlertsLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Price alerts unavailable — {priceAlertsLoadError}</p>}
+    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-32 max-w-32' : column.id === 'underlying' ? 'w-24 max-w-24' : column.id === 'entry' ? 'w-20 max-w-20' : column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{column.id === 'strike' ? <><span className="block">Strike /</span><span className="block">BE</span></> : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.id === 'entry' ? <><span className="block">Entry</span><span className="block">Credit / Debit</span></> : column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
     {analysisPosition && <DialogShell title={`AI analysis — ${analysisPosition.symbol}`} onClose={() => { if (!analysisLoading) setAnalysisPosition(null); }}><div aria-live="polite">{analysisLoading ? <p>Analyzing {analysisPosition.symbol}…</p> : analysisError ? <div><p role="alert" className="text-red-400">{analysisError}</p><button type="button" onClick={() => analyze(analysisPosition)} className="mt-3 min-h-8 rounded border border-white/20 px-3 text-xs focus:ring-2 focus:ring-teal-400">Retry analysis</button></div> : analysis ? <div className="space-y-3 text-sm"><p className="text-[10px] uppercase tracking-wider text-white/50">AI interpretation · deterministic Suggested Action remains authoritative</p><p><b>{analysis.recommendation}</b> · {analysis.confidence} confidence</p><p>{analysis.summary}</p><details className="rounded border border-white/10 bg-white/[0.02] p-3 text-xs"><summary className="cursor-pointer font-semibold text-indigo-300">Position context locked for this conversation</summary><p className="mt-2 text-white/60">{analysisPosition.symbol} · {analysisPosition.strategy} · expires {analysisPosition.expDate} · {analysisPosition.dte} DTE</p><p className="mt-1 break-all font-mono text-[10px] text-white/40">Position ID: {analysisPosition.key}</p><p className="mt-1 text-white/40">Snapshot captured {new Date(analysis.generatedAt).toLocaleString()}. Follow-ups retain this snapshot and conversation history.</p></details>{renderAnalysisConversation && <section aria-label={`AI follow-up conversation for ${analysisPosition.symbol}`} className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/[0.04]"><div className="px-4 pt-3"><p className="text-xs font-semibold text-indigo-200">Continue with AI</p><p className="mt-1 text-[10px] text-white/50">Ask a follow-up or attach chart and option-chain images.</p></div>{renderAnalysisConversation(analysisPosition, analysis)}</section>}<details className="rounded border border-white/10 p-3 text-xs"><summary className="cursor-pointer font-semibold text-white/70">Show full AI reasoning and risks</summary><p className="mt-3 text-white/70">{analysis.reasoning}</p>{analysis.risks.length > 0 && <div className="mt-3"><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(risk => <li key={risk}>{risk}</li>)}</ul></div>}</details><p className="text-xs text-white/50">Advisory analysis only. No brokerage order is prepared or submitted.</p></div> : null}</div></DialogShell>}
@@ -254,7 +284,58 @@ function PositionNoteEditor({ position, savedNote, onSave }: { position: Positio
   return <label className="block"><span className="sr-only">Note for {position.symbol} {position.strategy} position</span><textarea aria-label={`Note for ${position.symbol} ${position.strategy} position`} value={draft} maxLength={POSITION_NOTE_MAX_LENGTH} rows={3} wrap="soft" onChange={event => { setDraft(event.target.value); setState('idle'); }} onBlur={() => void save()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void save(); } else if (event.key === 'Escape') { event.preventDefault(); setDraft(savedNote); setState('idle'); setError(null); } }} className="w-36 resize-y rounded border border-white/20 bg-transparent px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400" /><span className="mt-1 block text-[9px] text-white/40">{draft.length}/{POSITION_NOTE_MAX_LENGTH} · {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : 'Enter or blur to save'}</span></label>;
 }
 
-function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, savedNote, onSaveNote, chartOpen, setChartOpen, sparkData, setSparkData, sparkLoading, setSparkLoading }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void>; chartOpen: boolean; setChartOpen: (open: boolean) => void; sparkData: number[] | null; setSparkData: (data: number[] | null) => void; sparkLoading: boolean; setSparkLoading: (loading: boolean) => void }) {
+// PRICEALERT-0001: not auto-filled from Notes text -- parsing "$125" out of
+// free-form notes reliably is more error-prone than it's worth. Same
+// draft/save/status shape as PositionNoteEditor above. No auto-fill from
+// existing Notes text (Paul: re-entering the number once is simpler and
+// safer than fragile free-text parsing).
+function PriceAlertEditor({ position, savedAlert, onSave }: { position: Position; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSave: (position: Position, targetPrice: number | null, direction: 'above' | 'below') => Promise<void> }) {
+  const [draft, setDraft] = useState(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : '');
+  const [direction, setDirection] = useState<'above' | 'below'>(savedAlert?.direction ?? 'above');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : '');
+    setDirection(savedAlert?.direction ?? 'above');
+    setState('idle'); setError(null);
+  }, [savedAlert?.targetPrice, savedAlert?.direction, position.key]);
+  const save = async () => {
+    if (state === 'saving') return;
+    const trimmed = draft.trim();
+    if (trimmed === '') {
+      if (savedAlert == null) return; // nothing to clear
+      setState('saving'); setError(null);
+      try { await onSave(position, null, direction); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) { setError('Enter a positive price'); setState('error'); return; }
+    if (parsed === savedAlert?.targetPrice && direction === savedAlert?.direction) return;
+    setState('saving'); setError(null);
+    try { await onSave(position, parsed, direction); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+  };
+  const crossed = savedAlert != null && position.stockPrice != null
+    && (savedAlert.direction === 'above' ? position.stockPrice >= savedAlert.targetPrice : position.stockPrice <= savedAlert.targetPrice);
+  return <div>
+    <div className="flex items-center gap-1">
+      <label className="sr-only" htmlFor={`price-alert-direction-${position.key}`}>Alert direction for {position.symbol}</label>
+      <select id={`price-alert-direction-${position.key}`} value={direction} onChange={event => { setDirection(event.target.value as 'above' | 'below'); setState('idle'); }} className="rounded border border-white/20 bg-transparent px-1 py-1 text-[10px] text-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+        <option value="above" className="text-black">≥</option>
+        <option value="below" className="text-black">≤</option>
+      </select>
+      <label className="sr-only" htmlFor={`price-alert-target-${position.key}`}>Target price for {position.symbol}</label>
+      <input id={`price-alert-target-${position.key}`} type="text" inputMode="decimal" placeholder="Target $" value={draft}
+        onChange={event => { setDraft(event.target.value); setState('idle'); }}
+        onBlur={() => void save()}
+        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void save(); } else if (event.key === 'Escape') { event.preventDefault(); setDraft(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : ''); setDirection(savedAlert?.direction ?? 'above'); setState('idle'); setError(null); } }}
+        className="w-16 rounded border border-white/20 bg-transparent px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </div>
+    <span className="mt-1 block text-[9px] text-white/40">{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : 'Enter or blur to save'}</span>
+    {crossed && <span className="mt-1 block rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">Target reached</span>}
+  </div>;
+}
+
+function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, savedNote, onSaveNote, savedAlert, onSaveAlert, chartOpen, setChartOpen, sparkData, setSparkData, sparkLoading, setSparkLoading }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void>; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSaveAlert: (position: Position, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>; chartOpen: boolean; setChartOpen: (open: boolean) => void; sparkData: number[] | null; setSparkData: (data: number[] | null) => void; sparkLoading: boolean; setSparkLoading: (loading: boolean) => void }) {
   const first = p.snapshotHistory?.[0];
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
@@ -310,6 +391,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span>{p.entryPriceEffect === 'Debit' && <span className={`mt-1 block max-w-44 ${th.textFaint}`}>Debit stop submission remains blocked until the canonical sell-to-close stop path supports it.</span>}</>,
     notes: <PositionNoteEditor position={p} savedNote={savedNote} onSave={onSaveNote} />,
+    priceAlert: <PriceAlertEditor position={p} savedAlert={savedAlert} onSave={onSaveAlert} />,
     recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span><span className="mt-2 flex max-w-64 flex-wrap gap-1"><button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze with AI</button>{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span><span className={`mt-1 block ${th.textFaint}`}>Suggested Action is deterministic. Actions open review only; no order is submitted here.</span></>,
   };
   return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;

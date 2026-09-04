@@ -6,7 +6,7 @@ export type AnalysisViewId = 'management' | 'risk' | 'full' | 'custom';
 export type AnalysisColumnId =
   | 'identity' | 'dates' | 'underlying' | 'strike' | 'capital' | 'entry'
   | 'value' | 'pnl' | 'evolution' | 'greeks' | 'netEdge' | 'pop' | 'volatility'
-  | 'orders' | 'notes' | 'recommendation';
+  | 'orders' | 'notes' | 'priceAlert' | 'recommendation';
 
 export interface PositionAnalysisFilters {
   symbol: string;
