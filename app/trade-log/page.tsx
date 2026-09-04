@@ -485,6 +485,40 @@ function MultiSelect({ label, options, selected, onChange, th }: {
   );
 }
 
+// ── CSV export (TRADELOG-0001) ──────────────────────────────────────────────
+// Same Blob -> temp <a> -> revokeObjectURL pattern as exportAuditCsv() in
+// app/portfolio/page.tsx -- no new export mechanism invented. Exports the
+// full ClosedTrade record (Dean: "fuller data"), not just what's visible in
+// the table, since this feeds the same threshold-validation analysis as the
+// debug page above. Caller passes `sorted` -- the array already reflecting
+// current filters, the excluded-trades toggle, and the current sort order,
+// so the CSV always matches exactly what's on screen (Dean: "exactly what
+// is shown after filtering"), not a separately-filtered set.
+function exportTradeLogCsv(trades: ClosedTrade[], excludedIds: Set<string>) {
+  if (trades.length === 0) return;
+  const headers = [
+    'ID', 'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Open Time', 'Open Day of Week',
+    'Expiry', 'Hold Days', 'Strikes', 'Credit Received', 'Close Price', 'P/L', 'P/L %',
+    'Outcome', 'Quantity', 'Fees', 'Excluded', 'DTE at Close', 'DTE at Entry', 'Exit Type',
+    'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
+    'Remaining Quantity', 'Source Transaction IDs',
+  ];
+  const rows = trades.map(t => [
+    t.id, t.symbol, t.strategy, t.openDate, t.closeDate, t.openTime, t.openDow,
+    t.expiry, t.holdDays, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+    t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
+    excludedIds.has(t.id) ? 'Yes' : 'No', t.dteAtClose, t.dteAtEntry, t.exitType,
+    t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,
+    t.remainingQuantity, t.sourceTransactionIds.join('; '),
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `trade-log-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 export default function TradeLogPage() {
   const [theme, setTheme]       = useState<Theme>(getSavedTheme);
@@ -747,6 +781,10 @@ export default function TradeLogPage() {
             <button onClick={() => loadTrades(range, true)} disabled={loading}
               className={`text-[10px] px-3 py-1.5 border ${th.border} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-50 tracking-wider`}>
               {loading ? '↺ Loading...' : '↺ Refresh'}
+            </button>
+            <button onClick={() => exportTradeLogCsv(sorted, excludedIds)} disabled={sorted.length === 0}
+              className={`text-[10px] px-3 py-1.5 border ${th.border} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-50 tracking-wider`}>
+              ⬇ Export CSV
             </button>
           </div>
         </div>
