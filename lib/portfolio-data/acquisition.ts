@@ -753,8 +753,17 @@ export async function fetchGtcOrders(
       // Accept if any nested order has GTC tif, or if tif is empty (parent envelope)
       const isGtcTif = tif === 'GTC' || tif === '' || tif === 'PENDING';
       const isLimitOrStop = type.includes('limit') || type.includes('stop') || type === '';
-      if ((!isGtcTif || !isLimitOrStop) && order.legs.length === 0) return false;
+      // Bug fix: the prior version excluded on (!isGtcTif || !isLimitOrStop)
+      // ONLY when legs.length === 0 -- but the very next line unconditionally
+      // excludes every legs.length === 0 order anyway, making the TIF/type
+      // check dead code for every order that actually has legs (i.e. nearly
+      // every real order). That let ANY order -- a Day order, a Market
+      // order, anything with legs -- pass straight through as if it were a
+      // GTC close, which is what produced a false "GTC Live" badge on a
+      // position with zero real working orders. Both checks now apply
+      // unconditionally, in order.
       if (order.legs.length === 0) return false;
+      if (!isGtcTif || !isLimitOrStop) return false;
       const key = `${order.id}|${order.orderType}|${order.price}|${order.stopPrice ?? ''}|${order.legs.map(l => `${l.symbol}:${l.action}`).join(',')}`;
       if (seen.has(key)) return false;
       seen.add(key); return true;
@@ -1289,19 +1298,6 @@ export async function loadPositions(
     const parsed = parseOptionSymbol(leg.symbol);
     if (parsed.strikePrice > 0) gtcSymbols.add(leg.symbol.split(/\d{6}/)[0].trim());
   }
-
-  try {
-    const allOrders = source.rawLiveOrders ?? [];
-    for (const order of allOrders) {
-      const status = (order['status'] ?? '').toLowerCase();
-      if (['working', 'live', 'contingent', 'received', 'pending', 'queued'].includes(status)) {
-        for (const leg of order.legs ?? []) {
-          const sym = leg['underlying-symbol'] ?? leg.symbol ?? '';
-          if (sym) gtcSymbols.add(sym.split(' ')[0].trim());
-        }
-      }
-    }
-  } catch {}
 
   const pendingOrders: PendingOrder[] = [];
   try {

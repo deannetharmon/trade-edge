@@ -83,4 +83,18 @@ describe('acquirePortfolioBrokerSource', () => {
     });
     expect(orders.length).toBeGreaterThan(0);
   });
+
+  // Bug fix regression test: an order with legs but a non-GTC TIF and a
+  // non-limit/stop type (e.g. a same-day Market order) must NOT be treated
+  // as a GTC close order. Previously the TIF/type check was dead code for
+  // any order with legs.length > 0 -- ANY such order passed through
+  // regardless of its actual time-in-force or order type, which produced a
+  // false "GTC Live" badge on positions with zero real working GTC orders.
+  it('excludes a Day Market order with legs -- not a GTC close, even though it has legs', async () => {
+    const orders = await fetchGtcOrders('ACC1', 'token', {
+      rawLiveOrders: [{ id: 4, status: 'Filled', 'time-in-force': 'Day', 'order-type': 'Market', legs: [{ symbol: 'ORCL  261016P00135000', action: 'Buy to Close', quantity: 1 }] }],
+      rawComplexOrders: null,
+    });
+    expect(orders).toHaveLength(0);
+  });
 });
