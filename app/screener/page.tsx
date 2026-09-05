@@ -2642,6 +2642,143 @@ function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): a
   };
 }
 
+// LEAPS-0001: a genuinely new, purpose-built modal, not an adaptation of
+// TradeModal -- checked buildOrderLegs/buildOrderPayload first, and both
+// are hard-coded per multi-leg strategy (PMCC/BPS/BCS/IC), with no case
+// for a bare single long-call leg. A single Buy-to-Open leg is simpler
+// than any of those (no spread width, no OTM gate, no credit-based GTC
+// buyback) -- reuses the same dry-run/place-order endpoint pattern
+// (getAccountNumber, TastyTrade's own /orders/dry-run and order-submission
+// routes), just without the multi-leg complexity those don't need here.
+function LeapsTradeModal({ candidate, th, onClose }: {
+  candidate: { symbol: string; expiration: string; dte: number; strike: number; delta: number | null; bid: number | null; ask: number | null; occSymbol: string | null };
+  th: typeof THEMES[Theme];
+  onClose: () => void;
+}) {
+  const [quantity, setQuantity] = useState(1);
+  const mid = candidate.bid != null && candidate.ask != null ? (candidate.bid + candidate.ask) / 2 : candidate.ask ?? candidate.bid ?? 0;
+  const [entryLimit, setEntryLimit] = useState(parseFloat(mid.toFixed(2)));
+  const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
+  const [dryRunResult, setDryRunResult] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [orderId, setOrderId] = useState('');
+
+  const buildLeg = (qty: number) => ({
+    'instrument-type': 'Equity Option', symbol: candidate.occSymbol!, quantity: qty, action: 'Buy to Open',
+  });
+
+  const runDryRun = async () => {
+    setPhase('dryrun'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = {
+        'time-in-force': 'GTC', 'order-type': 'Limit', price: entryLimit.toFixed(2),
+        'price-effect': 'Debit', legs: [buildLeg(quantity)],
+      };
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.data);
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const placeOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = {
+        'time-in-force': 'GTC', 'order-type': 'Limit', price: entryLimit.toFixed(2),
+        'price-effect': 'Debit', legs: [buildLeg(quantity)],
+      };
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      setOrderId(data?.data?.order?.id ?? 'submitted');
+      setPhase('done');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const bpEffect = dryRunResult?.['buying-power-effect'];
+  const bpChange = bpEffect?.['change-in-buying-power'];
+  const cost = entryLimit * quantity * 100;
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4" onClick={onClose}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md`} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>BUY LEAPS — {candidate.symbol}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        {!candidate.occSymbol && (
+          <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
+            <p className="text-xs text-yellow-400">OCC symbol not available for this candidate — rescan to populate it.</p>
+          </div>
+        )}
+
+        <div className="space-y-2 text-xs mb-4">
+          <p><b>{candidate.strike.toFixed(2)}C</b> · {candidate.expiration} · {candidate.dte} DTE · Δ{candidate.delta?.toFixed(2) ?? '—'}</p>
+          <p className={th.textMuted}>Bid {candidate.bid?.toFixed(2) ?? '—'} · Ask {candidate.ask?.toFixed(2) ?? '—'}</p>
+        </div>
+
+        {phase !== 'done' && (
+          <>
+            <label className="block text-[10px] text-neutral-400 mb-1">Quantity (contracts)</label>
+            <input type="number" min={1} value={quantity} onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              className="w-full mb-3 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+            <label className="block text-[10px] text-neutral-400 mb-1">Limit price (debit per contract)</label>
+            <input type="number" step="0.01" value={entryLimit} onChange={e => setEntryLimit(parseFloat(e.target.value) || 0)}
+              className="w-full mb-3 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+            <p className={`text-xs mb-4 ${th.textMuted}`}>Est. cost: <b className={th.text}>${cost.toFixed(2)}</b></p>
+          </>
+        )}
+
+        {error && <p className="text-xs text-red-400 mb-3">Error: {error}</p>}
+
+        {dryRunResult && phase === 'confirm' && (
+          <div className="p-3 bg-neutral-900 rounded-lg mb-4 text-xs space-y-1">
+            <p className={th.textMuted}>Buying power effect: <b className={th.text}>{bpChange != null ? `$${bpChange}` : '—'}</b></p>
+          </div>
+        )}
+
+        {phase === 'done' ? (
+          <div className="text-center">
+            <p className="text-emerald-400 font-bold mb-2">Order submitted</p>
+            <p className={`text-xs ${th.textMuted} mb-4`}>Order ID: {orderId}</p>
+            <button onClick={onClose} className="w-full py-2 rounded-lg border border-neutral-700 text-xs font-bold">Close</button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-neutral-700 text-xs font-bold">Cancel</button>
+            {!dryRunResult ? (
+              <button onClick={runDryRun} disabled={!candidate.occSymbol || phase === 'dryrun'}
+                className="flex-1 py-2 rounded-lg border border-cyan-500 text-cyan-300 text-xs font-bold disabled:opacity-40">
+                {phase === 'dryrun' ? 'Checking...' : 'Review Order'}
+              </button>
+            ) : (
+              <button onClick={placeOrder} disabled={phase === 'placing'}
+                className="flex-1 py-2 rounded-lg border border-emerald-500 bg-emerald-500/10 text-emerald-300 text-xs font-bold disabled:opacity-40">
+                {phase === 'placing' ? 'Submitting...' : 'Submit Order'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TradeModal({ result, th, onClose }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
 }) {
@@ -6655,8 +6792,33 @@ export default function Home() {
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
+    underlyingPrice: number | null; spreadPct: number | null; extrinsicValue: number | null;
+    // LEAPS-0001: candidates missing delta/OI used to be silently dropped
+    // by the scan's own filter. Alan: that's inconsistent with PMCC's own
+    // near-miss/audit pattern -- a candidate that existed and got excluded
+    // for a data reason should say so, not disappear. Reuses the same
+    // 'insufficient' status pmccQuoteQuality.ts already defines for
+    // exactly this situation, rather than inventing a new one.
+    dataQuality: 'ok' | 'insufficient';
   }>>([]);
   const [showLeapsResults, setShowLeapsResults] = useState(false);
+  // LEAPS-0001 -- result filters, same preset-chip pattern as
+  // FilteredResultControls. Delta range default 0.70-0.85 per Ian's
+  // reasoning (below 0.70 too much of the price is time value, not real
+  // stock exposure; above 0.85 you're paying near-full price for little
+  // leverage benefit over just buying shares) -- same numbers as
+  // DEFAULT_PMCC_LONG_DELTA_RANGE, but for standalone-LEAPS reasoning, not
+  // borrowed from PMCC's pairing purpose. All adjustable, not fixed --
+  // someone deliberately hunting a cheaper, more speculative LEAPS is a
+  // legitimate different search.
+  const [leapsDeltaMin, setLeapsDeltaMin] = useState(DEFAULT_PMCC_LONG_DELTA_RANGE.min);
+  const [leapsDeltaMax, setLeapsDeltaMax] = useState(DEFAULT_PMCC_LONG_DELTA_RANGE.max);
+  const [leapsDteMin, setLeapsDteMin] = useState(PMCC_LONG_DTE_MIN);
+  const [leapsOiMin, setLeapsOiMin] = useState(DEFAULT_PMCC_LONG_OI_MIN);
+  const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
+  const [leapsSort, setLeapsSort] = useState<'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue'>('delta');
+  const [leapsSortDir, setLeapsSortDir] = useState<'asc' | 'desc'>('desc');
+  const [leapsTradeCandidate, setLeapsTradeCandidate] = useState<typeof leapsResults[number] | null>(null);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
@@ -7800,19 +7962,39 @@ export default function Home() {
     try {
       const token = await getAccessToken();
       const found = (await Promise.all(opportunityUniverse.map(async symbol => {
-        const chain = await getPMCCChain(symbol, token, {
-          shortMin: 0, shortMax: 0, longMin: PMCC_LONG_DTE_MIN, longMax: PMCC_LONG_DTE_MAX,
-        });
+        // LEAPS-0001: quote fetched concurrently with the chain (Quinn:
+        // confirmed this costs nothing extra in wall-clock time over the
+        // chain-only fetch already happening -- same Promise.all pattern
+        // the rank/targeted scans already use). Needed for spreadPct and
+        // extrinsicValue, which require the underlying price.
+        const [chain, quote] = await Promise.all([
+          getPMCCChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: PMCC_LONG_DTE_MIN, longMax: PMCC_LONG_DTE_MAX }),
+          getQuote(symbol, token).catch(() => null),
+        ]);
+        const underlyingPrice: number | null = quote;
         return adaptPmccChain(symbol, chain).longLegs
-          .filter(leg => leg.optionType === 'C'
-            && leg.delta != null
-            && leg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min
-            && leg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max
-            && (leg.openInterest ?? 0) >= DEFAULT_PMCC_LONG_OI_MIN)
-          .map(leg => ({
-            symbol, expiration: leg.expiration, dte: daysUntil(leg.expiration), strike: leg.strike,
-            delta: leg.delta, openInterest: leg.openInterest, bid: leg.bid, ask: leg.ask, occSymbol: leg.occSymbol,
-          }));
+          .filter(leg => leg.optionType === 'C')
+          .map(leg => {
+            const mid = leg.bid != null && leg.ask != null ? (leg.bid + leg.ask) / 2 : null;
+            const spreadPct = mid != null && mid > 0 && leg.bid != null && leg.ask != null
+              ? ((leg.ask - leg.bid) / mid) * 100
+              : null;
+            const intrinsic = underlyingPrice != null ? Math.max(underlyingPrice - leg.strike, 0) : null;
+            const extrinsicValue = mid != null && intrinsic != null ? mid - intrinsic : null;
+            // LEAPS-0001 (Alan): missing delta/OI no longer silently drops
+            // the candidate -- surfaced as 'insufficient' (same status
+            // pmccQuoteQuality.ts already uses) so it shows as a near-miss/
+            // audit entry instead of disappearing. Delta RANGE and OI
+            // FLOOR are no longer scan-time hard filters either (Ian:
+            // "adjustable, not fixed") -- narrowing now happens in the
+            // results filter UI, on the full fetched set.
+            const dataQuality: 'ok' | 'insufficient' = leg.delta != null && leg.openInterest != null ? 'ok' : 'insufficient';
+            return {
+              symbol, expiration: leg.expiration, dte: daysUntil(leg.expiration), strike: leg.strike,
+              delta: leg.delta, openInterest: leg.openInterest, bid: leg.bid, ask: leg.ask, occSymbol: leg.occSymbol,
+              underlyingPrice, spreadPct, extrinsicValue, dataQuality,
+            };
+          });
       }))).flat().sort((a, b) => a.symbol.localeCompare(b.symbol) || a.dte - b.dte || a.strike - b.strike);
       setLeapsResults(found);
       setShowLeapsResults(true);
@@ -9860,6 +10042,7 @@ export default function Home() {
 
       {tradeResult && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
       {tradeResult && !tradeResult.bestCandidate && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
         <RunModeModal
@@ -9951,14 +10134,131 @@ export default function Home() {
           }}
         />
       )}
-      {showLeapsResults && (
+      {showLeapsResults && (() => {
+        const allSymbols = Array.from(new Set(leapsResults.map(r => r.symbol))).sort();
+        const visible = leapsResults.filter(r => !leapsHiddenSymbols.includes(r.symbol));
+        // LEAPS-0001: split ok vs insufficient BEFORE applying delta/DTE/OI
+        // filters -- an insufficient-data candidate has nothing numeric to
+        // filter on anyway, and belongs in its own audit section (Alan),
+        // not silently swept up or down by whatever filter values happen
+        // to be set.
+        const okCandidates = visible.filter(r => r.dataQuality === 'ok');
+        const insufficientCandidates = visible.filter(r => r.dataQuality === 'insufficient');
+        const filtered = okCandidates.filter(r =>
+          (r.delta ?? -1) >= leapsDeltaMin && (r.delta ?? 2) <= leapsDeltaMax
+          && r.dte >= leapsDteMin
+          && (r.openInterest ?? 0) >= leapsOiMin
+        );
+        const sortValue = (r: typeof leapsResults[number]): number => {
+          switch (leapsSort) {
+            case 'delta': return r.delta ?? -1;
+            case 'dte': return r.dte;
+            case 'openInterest': return r.openInterest ?? -1;
+            case 'spreadPct': return r.spreadPct ?? Number.POSITIVE_INFINITY;
+            case 'extrinsicValue': return r.extrinsicValue ?? Number.POSITIVE_INFINITY;
+          }
+        };
+        const sorted = [...filtered].sort((a, b) => (sortValue(a) - sortValue(b)) * (leapsSortDir === 'asc' ? 1 : -1));
+        const chip = (active: boolean) => `text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+          active ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textMuted} hover:border-amber-500/50`
+        }`;
+        return (
         <div role="dialog" aria-label="LEAPS CANDIDATES" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
-          <div className={`max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl border ${th.border} ${th.card} p-5`}>
-            <div className="mb-4 flex items-start justify-between gap-4"><div><h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2><p className={`mt-1 text-[10px] ${th.textMuted}`}>{leapsResults.length ? 'New long-call candidates only; review before opening a trade.' : 'No candidates matched the current DTE, delta, and liquidity criteria.'}</p></div><button onClick={() => setShowLeapsResults(false)} aria-label="Close LEAPS candidates" className={`rounded border ${th.border} px-2 py-1 ${th.textMuted}`}>×</button></div>
-            {leapsResults.length > 0 && <div className="space-y-2">{leapsResults.map(candidate => <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`} className={`grid grid-cols-5 gap-2 rounded border ${th.border} p-2 text-[11px]`}><span className={`${th.text} font-bold`}>{candidate.symbol}</span><span>{candidate.expiration}<br /><span className={th.textMuted}>{candidate.dte} DTE</span></span><span>${candidate.strike.toFixed(2)} C</span><span>Δ {candidate.delta?.toFixed(2) ?? '—'}<br /><span className={th.textMuted}>OI {candidate.openInterest ?? '—'}</span></span><span>Bid {candidate.bid?.toFixed(2) ?? '—'}<br />Ask {candidate.ask?.toFixed(2) ?? '—'}</span></div>)}</div>}
+          <div className={`max-h-[85vh] w-full max-w-4xl overflow-auto rounded-xl border ${th.border} ${th.card} p-5`}>
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2>
+                <p className={`mt-1 text-[10px] ${th.textMuted}`}>New long-call candidates only; review before opening a trade.</p>
+              </div>
+              <button onClick={() => setShowLeapsResults(false)} aria-label="Close LEAPS candidates" className={`rounded border ${th.border} px-2 py-1 ${th.textMuted}`}>×</button>
+            </div>
+
+            {/* LEAPS-0001 result controls -- same preset-chip pattern as FilteredResultControls */}
+            <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≥</span>
+                  {[0.60, 0.65, 0.70, 0.75, 0.80].map(v => (
+                    <button key={v} onClick={() => setLeapsDeltaMin(v)} className={chip(leapsDeltaMin === v)}>{v.toFixed(2)}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≤</span>
+                  {[0.80, 0.85, 0.90, 0.95, 1.00].map(v => (
+                    <button key={v} onClick={() => setLeapsDeltaMax(v)} className={chip(leapsDeltaMax === v)}>{v.toFixed(2)}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≥</span>
+                  {[90, 120, 180, 270, 365].map(v => (
+                    <button key={v} onClick={() => setLeapsDteMin(v)} className={chip(leapsDteMin === v)}>{v}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>OI ≥</span>
+                  {[0, 50, 100, 250, 500].map(v => (
+                    <button key={v} onClick={() => setLeapsOiMin(v)} className={chip(leapsOiMin === v)}>{v === 0 ? 'Any' : v}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
+                  {([['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
+                    <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
+                  ))}
+                  <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
+                </div>
+                {allSymbols.length > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[9px] ${th.textMuted} shrink-0`}>Tickers</span>
+                    {allSymbols.map(sym => (
+                      <button key={sym} onClick={() => setLeapsHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym])}
+                        className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
+
+            {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
+              <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
+                className={`grid grid-cols-7 items-center gap-2 rounded border ${th.border} p-2 text-[11px]`}>
+                <span className={`${th.text} font-bold`}>{candidate.symbol}{candidate.underlyingPrice != null && <span className={`ml-1 font-normal ${th.textMuted}`}>${candidate.underlyingPrice.toFixed(2)}</span>}</span>
+                <span>{candidate.expiration}<br /><span className={th.textMuted}>{candidate.dte} DTE</span></span>
+                <span>${candidate.strike.toFixed(2)} C</span>
+                <span>Δ {candidate.delta?.toFixed(2) ?? '—'}<br /><span className={th.textMuted}>OI {candidate.openInterest ?? '—'}</span></span>
+                <span>Bid {candidate.bid?.toFixed(2) ?? '—'}<br />Ask {candidate.ask?.toFixed(2) ?? '—'}</span>
+                <span>{candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}<br /><span className={th.textMuted}>Extr {candidate.extrinsicValue != null ? `$${candidate.extrinsicValue.toFixed(2)}` : '—'}</span></span>
+                <button onClick={() => setLeapsTradeCandidate(candidate)} disabled={!candidate.occSymbol}
+                  className="rounded border border-cyan-600 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-40">
+                  Trade this
+                </button>
+              </div>
+            ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, and liquidity filters.</p>}
+
+            {insufficientCandidates.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
+                <div className="space-y-2">{insufficientCandidates.map(candidate => (
+                  <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
+                    className="rounded border border-amber-700/60 bg-amber-500/5 p-2 text-[11px]">
+                    <span className={`${th.text} font-bold`}>{candidate.symbol}</span> {candidate.expiration} · ${candidate.strike.toFixed(2)}C ·{' '}
+                    <span className="text-amber-300">
+                      {candidate.delta == null && candidate.openInterest == null ? 'delta and open interest unavailable'
+                        : candidate.delta == null ? 'delta unavailable'
+                        : 'open interest unavailable'}
+                    </span>
+                  </div>
+                ))}</div>
+              </div>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
