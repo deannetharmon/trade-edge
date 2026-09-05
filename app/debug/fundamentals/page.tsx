@@ -40,9 +40,11 @@ export default function FundamentalsDebugPage() {
     <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
       <h1 style={{ fontSize: 14, marginBottom: 12 }}>Fundamentals Debug (FMP)</h1>
       <p style={{ marginBottom: 12, opacity: 0.7, maxWidth: 720 }}>
-        Raw FMP response for a symbol -- price-target-consensus, price-target-summary, grades-summary, bundled together
-        (one cache entry, per symbol, per calendar day). No scoring math here -- this exists purely to see the real field
-        names before Ian/Alan's thresholds get built against them.
+        Raw FMP response for a symbol -- price-target-consensus, price-target-summary, grades-summary, balance-sheet-statement,
+        income-statement, cash-flow-statement, ratios (FUNDAMENTALS-0002), bundled together (one cache entry, per symbol, per
+        calendar day). Computed values (Z&quot;-Score, free cash flow, valuation compression) are shown separately below the raw
+        fields they're derived from -- check the raw field names actually match what the computation reads before trusting a
+        computed value that isn't null.
       </p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
@@ -60,7 +62,26 @@ export default function FundamentalsDebugPage() {
           <p style={{ marginBottom: 8, opacity: 0.7 }}>
             {bundle.symbol} · fetched {bundle.fetchedAt} · {cached ? 'served from cache (already pulled today)' : 'live FMP call just made'}
           </p>
-          {(['priceTargetConsensus', 'priceTargetSummary', 'gradesSummary'] as const).map(field => (
+
+          <div style={{ marginBottom: 20, padding: 12, background: '#0a1f0a', border: '1px solid #2a5', borderRadius: 4 }}>
+            <p style={{ color: '#8f8', marginBottom: 8, fontWeight: 'bold' }}>Computed (FUNDAMENTALS-0002) -- no threshold applied, review only</p>
+            <p>Z&quot;-Score: {bundle.zDoublePrimeScore ? bundle.zDoublePrimeScore.score.toFixed(2) : 'null (missing required raw field -- check balanceSheetStatement/incomeStatement below)'}</p>
+            {bundle.zDoublePrimeScore && (
+              <p style={{ opacity: 0.7, fontSize: 11 }}>
+                components: WC/TA {bundle.zDoublePrimeScore.components.workingCapitalToAssets.toFixed(3)} ·
+                RE/TA {bundle.zDoublePrimeScore.components.retainedEarningsToAssets.toFixed(3)} ·
+                EBIT/TA {bundle.zDoublePrimeScore.components.ebitToAssets.toFixed(3)} ·
+                Equity/Liab {bundle.zDoublePrimeScore.components.equityToLiabilities.toFixed(3)}
+              </p>
+            )}
+            <p>Free Cash Flow: {bundle.freeCashFlow != null ? `$${bundle.freeCashFlow.toLocaleString()}` : 'null (missing required raw field -- check cashFlowStatement below)'}</p>
+            <p>Valuation Compression: {bundle.valuationCompression
+              ? `${bundle.valuationCompression.compressionPct.toFixed(1)}% ${bundle.valuationCompression.compressionPct > 0 ? 'cheaper' : 'more expensive'} than its own ${bundle.valuationCompression.periodsUsed}-period P/E median (current ${bundle.valuationCompression.current.toFixed(1)} vs. median ${bundle.valuationCompression.historicalMedian.toFixed(1)})`
+              : 'null (fewer than 2 valid P/E periods -- check ratiosHistory below)'}
+            </p>
+          </div>
+
+          {(['priceTargetConsensus', 'priceTargetSummary', 'gradesSummary', 'balanceSheetStatement', 'incomeStatement', 'cashFlowStatement', 'ratiosHistory'] as const).map(field => (
             <div key={field} style={{ marginBottom: 16 }}>
               <p style={{ color: '#6cf', marginBottom: 4, fontWeight: 'bold' }}>{field}</p>
               <pre style={{ background: '#000', border: '1px solid #333', borderRadius: 4, padding: 12, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
