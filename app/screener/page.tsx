@@ -109,7 +109,7 @@ import type {
   ScreenerScanSession, ScreenerScanMode, ScreenerRequestedStrategy, ScreenerScanScope,
   ScreenerReasonCode, ScreenerSessionAccounting,
 } from '@/lib/screener/scanSession';
-import { persistScanSession, restoreScanSession, clearScanSessionCache } from '@/lib/screener/scanSessionCache';
+import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession } from '@/lib/screener/scanSessionCache';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
@@ -1511,6 +1511,18 @@ const statusColor = (s: string) => s === 'pass' ? 'text-emerald-500' : s === 'fa
 const statusIcon = (s: string) => s === 'pass' ? '✓' : s === 'fail' ? '✗' : s === 'warn' ? '⚠' : '—';
 const trendColor = (t: string) => t === 'uptrend' ? 'text-emerald-500' : t === 'downtrend' ? 'text-red-500' : t === 'sideways' ? 'text-blue-500' : 'text-slate-400';
 const trendIcon = (t: string) => t === 'uptrend' ? '↑' : t === 'downtrend' ? '↓' : t === 'sideways' ? '→' : '?';
+// LEAPS-0003 (Diane): drop the decimal only when it's exactly .00 --
+// $119,385.00 becomes $119,385 (nobody's deciding off a penny on a
+// six-figure cost), but $7,943.85 stays exactly as-is (real cents on a
+// smaller number matter). Comma separators always included -- $119385 is
+// genuinely hard to scan; $119,385 isn't. Not a general-purpose replacement
+// for the many other ad-hoc `$${x.toFixed(2)}` call sites in this file --
+// scoped to LEAPS-0003's rows specifically, per what was actually asked.
+function formatMoneyDropExactZeroCents(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  const hasCents = Math.abs(rounded - Math.round(rounded)) > 0.001;
+  return `$${rounded.toLocaleString('en-US', { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
 function dteBadgeColor(dte: number): string {
   if (dte < 7)  return 'text-red-500 border-red-700 bg-red-500/10';
   if (dte < 14) return 'text-orange-500 border-orange-700 bg-orange-500/10';
@@ -2664,7 +2676,14 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
   deltaMax: number;
   onTrade: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // LEAPS-0003: no expand/collapse -- Diane's finding was that LEAPS only
+  // needed hiding content behind a click because it was trapped in a
+  // ~900px modal; at full page width (this now renders inline, same
+  // container as Targeted Scan) there's room for every field on one row,
+  // same as Targeted's own cards already do. Chart stays a click-to-reveal
+  // popover (same ChartLinkButton component, same behavior as everywhere
+  // else it's used) since a sparkline genuinely can't live inline in a
+  // text row -- that's a different kind of disclosure than hiding numbers.
   const [showChart, setShowChart] = useState(false);
   const [sparkData, setSparkData] = useState<number[] | null>(null);
   const [sparkLoading, setSparkLoading] = useState(false);
@@ -2672,10 +2691,11 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
   const mid = candidate.bid != null && candidate.ask != null ? (candidate.bid + candidate.ask) / 2 : null;
   const totalCost = mid != null ? mid * 100 : null;
   const breakeven = mid != null ? candidate.strike + mid : null;
-  // Diane: decision numbers (cost, breakeven, extrinsic%) get top billing;
-  // confirmations (delta vs. range, DTE, spread%, OI) are muted below --
-  // not a pass/fail checklist like spreads (Ian: LEAPS isn't gate-based
-  // once it's already cleared the filter, it's a trade-off comparison).
+  // Ian: decision numbers (cost, breakeven, extrinsic%) get top billing --
+  // bigger, bolder; confirmations (delta vs. range, DTE, spread%, OI) are
+  // smaller and muted below. One row does not mean one visual weight --
+  // full width solves fitting everything, this is what keeps it readable
+  // once it fits.
   const breakevenPctFromPrice = breakeven != null && candidate.underlyingPrice != null && candidate.underlyingPrice > 0
     ? ((breakeven - candidate.underlyingPrice) / candidate.underlyingPrice) * 100
     : null;
@@ -2685,65 +2705,54 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
   const deltaInRange = candidate.delta != null && candidate.delta >= deltaMin && candidate.delta <= deltaMax;
 
   return (
-    <div className={`rounded-xl border-l-4 border ${th.border} overflow-hidden ${expanded ? 'border-l-emerald-500' : 'border-l-neutral-700'}`}>
-      <button onClick={() => setExpanded(v => !v)} className="w-full p-3 text-left" aria-label={`Expand ${candidate.symbol} LEAPS details`}>
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+    <div className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+        <div className="flex items-center gap-2 text-[11px] shrink-0">
           <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
           {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
           <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
-          <span className={th.text}>${candidate.strike.toFixed(2)}C · {candidate.expiration}</span>
-          <span className="ml-auto flex items-center gap-3">
-            <span className={th.text}>Cost {totalCost != null ? `$${totalCost.toFixed(2)}` : '—'}</span>
-            <span className={`text-[9px] ${expanded ? 'text-emerald-400' : th.textMuted}`}>{expanded ? '▲' : '▼'}</span>
+          {/* Alan: space restored between strike and option type -- "$6750.00C" read as one garbled token. */}
+          <span className={th.text}>{formatMoneyDropExactZeroCents(candidate.strike)} C · {candidate.expiration}</span>
+        </div>
+
+        {/* Decision numbers -- Ian's priority order, largest/boldest */}
+        <div className="flex flex-wrap items-baseline gap-x-5 text-[13px]">
+          <span>
+            <span className={`text-[9px] ${th.textMuted} mr-1`}>Cost</span>
+            <b className={th.text}>{totalCost != null ? formatMoneyDropExactZeroCents(totalCost) : 'unavailable'}</b>
+          </span>
+          <span>
+            <span className={`text-[9px] ${th.textMuted} mr-1`}>Breakeven</span>
+            <b className={th.text}>{breakeven != null ? formatMoneyDropExactZeroCents(breakeven) : 'unavailable'}</b>
+            {breakevenPctFromPrice != null && (
+              <span className={`ml-1 text-[10px] font-normal ${breakevenPctFromPrice > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                ({breakevenPctFromPrice > 0 ? '+' : ''}{breakevenPctFromPrice.toFixed(1)}% {breakevenPctFromPrice > 0 ? 'above' : 'below'} current)
+              </span>
+            )}
+            {breakeven != null && candidate.underlyingPrice == null && <span className="ml-1 text-[10px] font-normal text-amber-400">(% vs. current unavailable)</span>}
+          </span>
+          <span>
+            <span className={`text-[9px] ${th.textMuted} mr-1`}>Extrinsic</span>
+            <b className={th.text}>{candidate.extrinsicValue != null ? formatMoneyDropExactZeroCents(candidate.extrinsicValue) : 'unavailable'}</b>
+            {extrinsicPctOfCost != null && <span className="ml-1 text-[10px] font-normal text-cyan-300">({extrinsicPctOfCost.toFixed(1)}% of cost)</span>}
           </span>
         </div>
-      </button>
 
-      {expanded && (
-        <div className={`border-t ${th.border} p-3 space-y-3`}>
-          {/* Decision numbers -- what Ian actually looks at first */}
-          <div className="grid grid-cols-3 gap-3 text-[12px]">
-            <div>
-              <p className={`text-[9px] ${th.textMuted}`}>Cost</p>
-              <p className={`font-bold ${th.text}`}>{totalCost != null ? `$${totalCost.toFixed(2)}` : 'unavailable'}</p>
-            </div>
-            <div>
-              <p className={`text-[9px] ${th.textMuted}`}>Breakeven</p>
-              <p className={`font-bold ${th.text}`}>
-                {breakeven != null ? `$${breakeven.toFixed(2)}` : 'unavailable'}
-                {breakevenPctFromPrice != null && (
-                  <span className={`ml-1 text-[10px] font-normal ${breakevenPctFromPrice > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    ({breakevenPctFromPrice > 0 ? '+' : ''}{breakevenPctFromPrice.toFixed(1)}% {breakevenPctFromPrice > 0 ? 'above' : 'below'} current)
-                  </span>
-                )}
-                {breakeven != null && candidate.underlyingPrice == null && <span className="ml-1 text-[10px] font-normal text-amber-400">(% vs. current unavailable -- no underlying price)</span>}
-              </p>
-            </div>
-            <div>
-              <p className={`text-[9px] ${th.textMuted}`}>Extrinsic</p>
-              <p className={`font-bold ${th.text}`}>
-                {candidate.extrinsicValue != null ? `$${candidate.extrinsicValue.toFixed(2)}` : 'unavailable'}
-                {extrinsicPctOfCost != null && <span className="ml-1 text-[10px] font-normal text-cyan-300">({extrinsicPctOfCost.toFixed(1)}% of cost)</span>}
-              </p>
-            </div>
-          </div>
+        <button onClick={onTrade} disabled={!candidate.occSymbol}
+          className="ml-auto shrink-0 rounded-lg border border-cyan-500 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">
+          Trade this
+        </button>
+      </div>
 
-          {/* Confirmations -- already satisfied by the active filter, shown for reference not judgment */}
-          <div className={`flex flex-wrap gap-4 text-[10px] ${th.textMuted}`}>
-            <span>Δ {candidate.delta?.toFixed(2) ?? '—'} {candidate.delta != null && (deltaInRange ? <span className="text-emerald-400">✓ within {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span> : <span className="text-amber-400">outside {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span>)}</span>
-            <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
-            <span>OI {candidate.openInterest ?? '—'}</span>
-            <span>Bid {candidate.bid?.toFixed(2) ?? '—'} / Ask {candidate.ask?.toFixed(2) ?? '—'}</span>
-            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
-              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
-          </div>
-
-          <button onClick={onTrade} disabled={!candidate.occSymbol}
-            className="w-full py-2 rounded-lg border border-cyan-500 bg-cyan-500/10 text-cyan-300 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40">
-            Trade this
-          </button>
-        </div>
-      )}
+      {/* Confirmations -- already satisfied by the active filter, shown for reference not judgment */}
+      <div className={`mt-2 flex flex-wrap items-center gap-4 text-[10px] ${th.textMuted}`}>
+        <span>Δ {candidate.delta?.toFixed(2) ?? '—'} {candidate.delta != null && (deltaInRange ? <span className="text-emerald-400">✓ within {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span> : <span className="text-amber-400">outside {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span>)}</span>
+        <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
+        <span>OI {candidate.openInterest ?? '—'}</span>
+        <span>Bid {candidate.bid != null ? formatMoneyDropExactZeroCents(candidate.bid) : '—'} / Ask {candidate.ask != null ? formatMoneyDropExactZeroCents(candidate.ask) : '—'}</span>
+        <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+          sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+      </div>
     </div>
   );
 }
@@ -3652,7 +3661,18 @@ type ResultCardProps = {
   result: ScreenResult;
   th: typeof THEMES[Theme];
   rules: RulesType;
-  screenMode?: 'filter' | 'rank' | 'targeted';
+  // LEAPS-0003: widened to include 'leaps' -- this component only ever
+  // checks screenMode against specific values via === (e.g. isRankMode =
+  // screenMode === 'rank'), never assumes the union is exhaustive, so
+  // 'leaps' passing through inertly is safe. In practice ResultCard is
+  // never actually rendered while screenMode is 'leaps' (LEAPS has its own
+  // dedicated LeapsResultRow, not this component) -- the call sites that
+  // hit this type error are inside branches gated by
+  // `screenMode === 'filter' || activeSession?.requestedStrategy === 'csp'`
+  // style conditions, which TypeScript can't narrow screenMode by (the
+  // OR is on a different variable), even though 'leaps' can't actually
+  // reach them at runtime.
+  screenMode?: 'filter' | 'rank' | 'targeted' | 'leaps';
   rankConfig?: RankConfig;
   onTrade?: (result: ScreenResult) => void;
   cachedEntry?: RawScanEntry;
@@ -6899,7 +6919,6 @@ export default function Home() {
     // exactly this situation, rather than inventing a new one.
     dataQuality: 'ok' | 'insufficient';
   }>>([]);
-  const [showLeapsResults, setShowLeapsResults] = useState(false);
   // LEAPS-0001 -- result filters, same preset-chip pattern as
   // FilteredResultControls. Delta range default 0.70-0.85 per Ian's
   // reasoning (below 0.70 too much of the price is time value, not real
@@ -6913,6 +6932,13 @@ export default function Home() {
   const [leapsDeltaMax, setLeapsDeltaMax] = useState(DEFAULT_PMCC_LONG_DELTA_RANGE.max);
   const [leapsDteMin, setLeapsDteMin] = useState(PMCC_LONG_DTE_MIN);
   const [leapsOiMin, setLeapsOiMin] = useState(DEFAULT_PMCC_LONG_OI_MIN);
+  // LEAPS-0003: extrinsic-as-%-of-cost ceiling. No default threshold --
+  // Ian: needs real candidate spread across multiple tickers before a
+  // cutoff is trustworthy (the one real example seen so far, an 0.84-delta
+  // SPX index LEAPS at 18.9%, is a deep-ITM outlier, not representative of
+  // a typical single-stock candidate at 0.70-0.75 delta). 0 = "Any",
+  // matching the same convention every other un-set-yet filter uses.
+  const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(0);
   const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
   const [leapsSort, setLeapsSort] = useState<'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue'>('delta');
   const [leapsSortDir, setLeapsSortDir] = useState<'asc' | 'desc'>('desc');
@@ -6930,7 +6956,14 @@ export default function Home() {
   const [runtimeStockRules, setRuntimeStockRules] = useState<RulesType>(getSavedRules);
   const [runtimeEtfRules, setRuntimeEtfRules] = useState<RulesType>(getSavedEtfRules);
   const [rankConfig, setRankConfig] = useState<RankConfig>(getSavedRankConfig);
-  const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted'>('filter');
+  // LEAPS-0003: 'leaps' added as a genuine local screenMode value -- NOT
+  // added to lib/screener/scanSession.ts's ScreenerScanMode/
+  // ScreenerRequestedStrategy types, which are wired into
+  // createScanSession's STRATEGY_ALLOWED_MODES gate and the full
+  // scope/exclusion-reason model the other four strategies depend on.
+  // This value only routes which results section renders below --
+  // completely inert to that shared session machinery, zero risk to it.
+  const [screenMode, setScreenMode] = useState<'filter' | 'rank' | 'targeted' | 'leaps'>('filter');
   // SCREENER-OI-0001 -- Filtered mode's minimum relevant-leg OI floor and
   // two-level sort, applied to the qualified section after the existing
   // qualified/IVR eligibility split (see the Filtered-mode results render
@@ -7233,7 +7266,7 @@ export default function Home() {
     } catch {}
     try {
       const m = localStorage.getItem(LS_SCREEN_MODE);
-      if (m === 'filter' || m === 'rank' || m === 'targeted') setScreenMode(m);
+      if (m === 'filter' || m === 'rank' || m === 'targeted' || m === 'leaps') setScreenMode(m);
     } catch {}
   }, []);
 
@@ -7250,7 +7283,7 @@ export default function Home() {
     try {
       if (typeof window === 'undefined') return;
       const modeParam = new URLSearchParams(window.location.search).get('mode');
-      if (modeParam === 'filter' || modeParam === 'rank' || modeParam === 'targeted') {
+      if (modeParam === 'filter' || modeParam === 'rank' || modeParam === 'targeted' || modeParam === 'leaps') {
         setScreenMode(modeParam);
       }
     } catch {}
@@ -7338,6 +7371,21 @@ export default function Home() {
         setResults(session.results);
         if (session.cachedAt != null) setResultsCachedAt(session.cachedAt);
       }
+    });
+  }, []);
+
+  // LEAPS-0003: separate, simpler restoration -- see the doc comment on
+  // persistLeapsSession/restoreLeapsSession for why this deliberately
+  // isn't folded into the ScreenerScanSession restore above.
+  useEffect(() => {
+    restoreLeapsSession().then(session => {
+      if (!session) return;
+      setLeapsResults(session.results as typeof leapsResults);
+      setLeapsDeltaMin(session.filters.deltaMin);
+      setLeapsDeltaMax(session.filters.deltaMax);
+      setLeapsDteMin(session.filters.dteMin);
+      setLeapsOiMin(session.filters.oiMin);
+      setLeapsExtrinsicPctMax(session.filters.extrinsicPctMax);
     });
   }, []);
 
@@ -8095,7 +8143,16 @@ export default function Home() {
           });
       }))).flat().sort((a, b) => a.symbol.localeCompare(b.symbol) || a.dte - b.dte || a.strike - b.strike);
       setLeapsResults(found);
-      setShowLeapsResults(true);
+      setScreenMode('leaps');
+      try { localStorage.setItem(LS_SCREEN_MODE, 'leaps'); } catch {}
+      // LEAPS-0003: persists results + active filters so they survive a
+      // refresh, matching the other three modes' behavior -- via LEAPS'
+      // own separate cache key, not the shared ScreenerScanSession model
+      // (see persistLeapsSession's doc comment for why).
+      persistLeapsSession({
+        results: found,
+        filters: { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax },
+      });
     } catch (scanError: any) {
       setError(scanError?.message ?? 'Unable to load LEAPS candidates from broker market data.');
     } finally {
@@ -8870,7 +8927,7 @@ export default function Home() {
               <LauncherButton
                 strategy="spreads"
                 label="FIND LEAPS"
-                isSelected={false}
+                isSelected={screenMode === 'leaps'}
                 isRunning={false}
                 onClick={() => void runLeapsScan()}
                 disabled={loading || !opportunityUniverse.length}
@@ -10135,6 +10192,157 @@ export default function Home() {
               })()}
             </div>
           )}
+
+          {/* LEAPS-0003: inline, full-width, sibling to the Filter/Rank/
+              Targeted ternary above -- not nested inside it, to avoid
+              touching that already-complex, deeply-nested chain at all.
+              Replaces LEAPS-0001/0002's centered popup modal, which was
+              the root cause of both "why is this so cramped" and "why
+              doesn't this match the rest of the app" (Diane, confirmed by
+              checking the code directly: LEAPS was the only result type
+              rendered as a fixed-position overlay instead of page
+              content). */}
+          {screenMode === 'leaps' && (() => {
+            const allSymbols = Array.from(new Set(leapsResults.map(r => r.symbol))).sort();
+            const visible = leapsResults.filter(r => !leapsHiddenSymbols.includes(r.symbol));
+            // LEAPS-0001: split ok vs insufficient BEFORE applying
+            // delta/DTE/OI/extrinsic filters -- an insufficient-data
+            // candidate has nothing numeric to filter on anyway, and
+            // belongs in its own audit section (Alan), not silently swept
+            // up or down by whatever filter values happen to be set.
+            const okCandidates = visible.filter(r => r.dataQuality === 'ok');
+            const insufficientCandidates = visible.filter(r => r.dataQuality === 'insufficient');
+            const filtered = okCandidates.filter(r => {
+              if ((r.delta ?? -1) < leapsDeltaMin || (r.delta ?? 2) > leapsDeltaMax) return false;
+              if (r.dte < leapsDteMin) return false;
+              if ((r.openInterest ?? 0) < leapsOiMin) return false;
+              // LEAPS-0003: extrinsic% filter -- Alan's requirement, a
+              // candidate whose extrinsic%-of-cost can't be computed
+              // (missing bid/ask/underlying price) goes to the same
+              // insufficient-data bucket above, never silently excluded
+              // OR silently passed by this new filter. Reachable here
+              // only for candidates with dataQuality 'ok' (real delta/OI),
+              // where extrinsicValue can still independently be null if
+              // bid/ask/underlying price weren't available -- treated the
+              // same insufficient way rather than assumed to pass.
+              if (leapsExtrinsicPctMax > 0) {
+                const mid = r.bid != null && r.ask != null ? (r.bid + r.ask) / 2 : null;
+                const cost = mid != null ? mid * 100 : null;
+                const extrinsicPct = r.extrinsicValue != null && cost != null && cost > 0 ? (r.extrinsicValue * 100 / cost) * 100 : null;
+                if (extrinsicPct == null || extrinsicPct > leapsExtrinsicPctMax) return false;
+              }
+              return true;
+            });
+            const sortValue = (r: typeof leapsResults[number]): number => {
+              switch (leapsSort) {
+                case 'delta': return r.delta ?? -1;
+                case 'dte': return r.dte;
+                case 'openInterest': return r.openInterest ?? -1;
+                case 'spreadPct': return r.spreadPct ?? Number.POSITIVE_INFINITY;
+                case 'extrinsicValue': return r.extrinsicValue ?? Number.POSITIVE_INFINITY;
+              }
+            };
+            const sorted = [...filtered].sort((a, b) => (sortValue(a) - sortValue(b)) * (leapsSortDir === 'asc' ? 1 : -1));
+            // LEAPS-0002 (Diane): matches the Targeted Scan's own
+            // active-chip color exactly (border-emerald-500
+            // text-emerald-400 bg-emerald-500/10, confirmed directly from
+            // its "Trend aligned only" toggle) -- Dean's reference
+            // screenshots were specifically Targeted Scan, which uses
+            // this green convention, distinct from FilteredResultControls'
+            // separate amber one used for CSP/CC/Filter-mode results.
+            const chip = (active: boolean) => `text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+              active ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : `${th.border} ${th.textMuted} hover:border-emerald-500/50`
+            }`;
+            return (
+              <div>
+                <div className="mb-3">
+                  <h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2>
+                  <p className={`mt-1 text-[10px] ${th.textMuted}`}>New long-call candidates only; review before opening a trade.</p>
+                </div>
+
+                <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≥</span>
+                      {[0.60, 0.65, 0.70, 0.75, 0.80].map(v => (
+                        <button key={v} onClick={() => setLeapsDeltaMin(v)} className={chip(leapsDeltaMin === v)}>{v.toFixed(2)}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≤</span>
+                      {[0.80, 0.85, 0.90, 0.95, 1.00].map(v => (
+                        <button key={v} onClick={() => setLeapsDeltaMax(v)} className={chip(leapsDeltaMax === v)}>{v.toFixed(2)}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≥</span>
+                      {[90, 120, 180, 270, 365].map(v => (
+                        <button key={v} onClick={() => setLeapsDteMin(v)} className={chip(leapsDteMin === v)}>{v}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>OI ≥</span>
+                      {[0, 50, 100, 250, 500].map(v => (
+                        <button key={v} onClick={() => setLeapsOiMin(v)} className={chip(leapsOiMin === v)}>{v === 0 ? 'Any' : v}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {/* LEAPS-0003: extrinsic% ceiling. No default (0 =
+                          Any) -- Ian: needs real candidate spread across
+                          tickers before a cutoff is trustworthy. */}
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Extrinsic ≤</span>
+                      {[0, 10, 15, 20, 25, 30].map(v => (
+                        <button key={v} onClick={() => setLeapsExtrinsicPctMax(v)} className={chip(leapsExtrinsicPctMax === v)}>{v === 0 ? 'Any' : `${v}%`}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
+                      {([['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
+                        <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
+                      ))}
+                      <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
+                    </div>
+                    {allSymbols.length > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[9px] ${th.textMuted} shrink-0`}>Tickers</span>
+                        {allSymbols.map(sym => (
+                          <button key={sym} onClick={() => setLeapsHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym])}
+                            className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
+
+                {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
+                  <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
+                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax}
+                    onTrade={() => setLeapsTradeCandidate(candidate)} />
+                ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, liquidity, and extrinsic filters.</p>}
+
+                {insufficientCandidates.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
+                    <div className="space-y-2">{insufficientCandidates.map(candidate => (
+                      <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
+                        className="rounded border border-amber-700/60 bg-amber-500/5 p-2 text-[11px]">
+                        <span className={`${th.text} font-bold`}>{candidate.symbol}</span> {candidate.expiration} · {formatMoneyDropExactZeroCents(candidate.strike)} C ·{' '}
+                        <span className="text-amber-300">
+                          {candidate.delta == null && candidate.openInterest == null ? 'delta and open interest unavailable'
+                            : candidate.delta == null ? 'delta unavailable'
+                            : 'open interest unavailable'}
+                        </span>
+                      </div>
+                    ))}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -10145,7 +10353,13 @@ export default function Home() {
       {showRunModal && (
         <RunModeModal
           th={th}
-          lastMode={screenMode}
+          // LEAPS-0003: RunModeModal only knows Filter/Rank/Targeted --
+          // correctly so, since LEAPS has its own separate "FIND LEAPS"
+          // button/flow and never opens this modal. Falls back to
+          // 'filter' on the rare chance screenMode is 'leaps' when this
+          // opens, rather than widening a 3-way selector to a 4th option
+          // it has no UI for.
+          lastMode={screenMode === 'leaps' ? 'filter' : screenMode}
           lastPreset={stockPresetLabel}
           activeRankRules={runtimeStockRules}
           lastTargetedDteMin={targetedDteMin}
@@ -10232,127 +10446,6 @@ export default function Home() {
           }}
         />
       )}
-      {showLeapsResults && (() => {
-        const allSymbols = Array.from(new Set(leapsResults.map(r => r.symbol))).sort();
-        const visible = leapsResults.filter(r => !leapsHiddenSymbols.includes(r.symbol));
-        // LEAPS-0001: split ok vs insufficient BEFORE applying delta/DTE/OI
-        // filters -- an insufficient-data candidate has nothing numeric to
-        // filter on anyway, and belongs in its own audit section (Alan),
-        // not silently swept up or down by whatever filter values happen
-        // to be set.
-        const okCandidates = visible.filter(r => r.dataQuality === 'ok');
-        const insufficientCandidates = visible.filter(r => r.dataQuality === 'insufficient');
-        const filtered = okCandidates.filter(r =>
-          (r.delta ?? -1) >= leapsDeltaMin && (r.delta ?? 2) <= leapsDeltaMax
-          && r.dte >= leapsDteMin
-          && (r.openInterest ?? 0) >= leapsOiMin
-        );
-        const sortValue = (r: typeof leapsResults[number]): number => {
-          switch (leapsSort) {
-            case 'delta': return r.delta ?? -1;
-            case 'dte': return r.dte;
-            case 'openInterest': return r.openInterest ?? -1;
-            case 'spreadPct': return r.spreadPct ?? Number.POSITIVE_INFINITY;
-            case 'extrinsicValue': return r.extrinsicValue ?? Number.POSITIVE_INFINITY;
-          }
-        };
-        const sorted = [...filtered].sort((a, b) => (sortValue(a) - sortValue(b)) * (leapsSortDir === 'asc' ? 1 : -1));
-        // LEAPS-0002 (Diane): matches the Targeted Scan's own active-chip
-        // color exactly (border-emerald-500 text-emerald-400 bg-emerald-500/10,
-        // confirmed directly from its "Trend aligned only" toggle) -- Dean's
-        // reference screenshots were specifically Targeted Scan, which uses
-        // this green convention, distinct from FilteredResultControls'
-        // separate amber one used for CSP/CC/Filter-mode results.
-        const chip = (active: boolean) => `text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-          active ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : `${th.border} ${th.textMuted} hover:border-emerald-500/50`
-        }`;
-        return (
-        <div role="dialog" aria-label="LEAPS CANDIDATES" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
-          <div className={`max-h-[85vh] w-full max-w-4xl overflow-auto rounded-xl border ${th.border} ${th.card} p-5`}>
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2>
-                <p className={`mt-1 text-[10px] ${th.textMuted}`}>New long-call candidates only; review before opening a trade.</p>
-              </div>
-              <button onClick={() => setShowLeapsResults(false)} aria-label="Close LEAPS candidates" className={`rounded border ${th.border} px-2 py-1 ${th.textMuted}`}>×</button>
-            </div>
-
-            {/* LEAPS-0001 result controls -- same preset-chip pattern as FilteredResultControls */}
-            <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≥</span>
-                  {[0.60, 0.65, 0.70, 0.75, 0.80].map(v => (
-                    <button key={v} onClick={() => setLeapsDeltaMin(v)} className={chip(leapsDeltaMin === v)}>{v.toFixed(2)}</button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≤</span>
-                  {[0.80, 0.85, 0.90, 0.95, 1.00].map(v => (
-                    <button key={v} onClick={() => setLeapsDeltaMax(v)} className={chip(leapsDeltaMax === v)}>{v.toFixed(2)}</button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≥</span>
-                  {[90, 120, 180, 270, 365].map(v => (
-                    <button key={v} onClick={() => setLeapsDteMin(v)} className={chip(leapsDteMin === v)}>{v}</button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>OI ≥</span>
-                  {[0, 50, 100, 250, 500].map(v => (
-                    <button key={v} onClick={() => setLeapsOiMin(v)} className={chip(leapsOiMin === v)}>{v === 0 ? 'Any' : v}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
-                  {([['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
-                    <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
-                  ))}
-                  <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
-                </div>
-                {allSymbols.length > 1 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className={`text-[9px] ${th.textMuted} shrink-0`}>Tickers</span>
-                    {allSymbols.map(sym => (
-                      <button key={sym} onClick={() => setLeapsHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym])}
-                        className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
-
-            {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
-              <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax}
-                onTrade={() => setLeapsTradeCandidate(candidate)} />
-            ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, and liquidity filters.</p>}
-
-            {insufficientCandidates.length > 0 && (
-              <div className="mt-4">
-                <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
-                <div className="space-y-2">{insufficientCandidates.map(candidate => (
-                  <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
-                    className="rounded border border-amber-700/60 bg-amber-500/5 p-2 text-[11px]">
-                    <span className={`${th.text} font-bold`}>{candidate.symbol}</span> {candidate.expiration} · ${candidate.strike.toFixed(2)}C ·{' '}
-                    <span className="text-amber-300">
-                      {candidate.delta == null && candidate.openInterest == null ? 'delta and open interest unavailable'
-                        : candidate.delta == null ? 'delta unavailable'
-                        : 'open interest unavailable'}
-                    </span>
-                  </div>
-                ))}</div>
-              </div>
-            )}
-          </div>
-        </div>
-        );
-      })()}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );

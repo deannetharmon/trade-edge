@@ -20,7 +20,12 @@ export interface RankedScanTickerInput {
 
 export interface UseRankedScanParams {
   /** Only reconnects/mirrors task state while this is 'rank'. */
-  screenMode: 'filter' | 'rank' | 'targeted';
+  // LEAPS-0003: widened to include 'leaps' -- this hook only ever checks
+  // `screenMode !== 'rank'` (confirmed directly in useRankedScan.ts), never
+  // assumes anything about the other specific values, so passing 'leaps'
+  // through is inert. Narrower type wasn't wrong before, just incomplete
+  // once a fourth mode value exists at the call site.
+  screenMode: 'filter' | 'rank' | 'targeted' | 'leaps';
   tickers: RankedScanTickerInput[];
   rankConfig: RankConfig;
   // TE-0007D corrective — lets startRankedScan distinguish a refresh
@@ -51,4 +56,3 @@ export interface UseRankedScanResult {
     eLabel?: string
   ) => Promise<void>;
 }
-

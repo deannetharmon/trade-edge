@@ -118,3 +118,49 @@ export async function restoreScanSession(): Promise<ScreenerScanSession | null> 
 export async function clearScanSessionCache(): Promise<void> {
   await idbDel(SCAN_SESSION_CACHE_KEY);
 }
+
+// LEAPS-0003: LEAPS gets its own persistence, not the ScreenerScanSession
+// model above. That model is built around symbol-level qualify/disqualify
+// semantics with precise exclusion-reason attribution and capacity checks
+// (see createScanSession's STRATEGY_ALLOWED_MODES gate and CC's capacity-
+// aware scope construction in page.tsx) -- a materially different problem
+// than "cache an array of long-call candidates and the active filters".
+// Retrofitting LEAPS into that shared model to get persistence would mean
+// either fabricating exclusion reasons/capacity semantics that don't apply
+// here, or loosening validateSessionData()'s schema for everyone else.
+// This achieves the same real, user-visible goal (results survive a
+// refresh) with a separate, equally-real cache key instead -- same
+// idbSet/idbGet helpers, same store, no shared-state risk to the other
+// four strategies.
+export const LEAPS_CACHE_KEY = 'screenerLeapsSession_v1';
+
+export interface LeapsCachedSession {
+  results: unknown[];
+  filters: { deltaMin: number; deltaMax: number; dteMin: number; oiMin: number; extrinsicPctMax: number };
+  cachedAt: number;
+}
+
+function isValidLeapsCachedSession(value: unknown): value is LeapsCachedSession {
+  if (typeof value !== 'object' || value == null) return false;
+  const v = value as Record<string, unknown>;
+  return Array.isArray(v.results) && typeof v.filters === 'object' && v.filters != null && typeof v.cachedAt === 'number';
+}
+
+export async function persistLeapsSession(session: Omit<LeapsCachedSession, 'cachedAt'>): Promise<void> {
+  await idbSet(LEAPS_CACHE_KEY, { ...session, cachedAt: Date.now() });
+}
+
+export async function restoreLeapsSession(): Promise<LeapsCachedSession | null> {
+  const raw = await idbGet<unknown>(LEAPS_CACHE_KEY);
+  if (raw == null) return null;
+  if (!isValidLeapsCachedSession(raw)) {
+    console.warn('restoreLeapsSession: cached session failed validation, clearing.');
+    await idbDel(LEAPS_CACHE_KEY);
+    return null;
+  }
+  return raw;
+}
+
+export async function clearLeapsSessionCache(): Promise<void> {
+  await idbDel(LEAPS_CACHE_KEY);
+}
