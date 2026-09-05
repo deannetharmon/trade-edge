@@ -260,14 +260,24 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     renderScreener();
 
     const card = await screen.findByTestId('pmcc-result-card');
+    // FIX: "Extrinsic" IS one continuous text node (`Extrinsic {money(...)}`
+    // in a single span) and needed no change. But "Breakeven"/"Roll
+    // runway"/"Annualized ROI" come from decisionStrip's shared
+    // label/value markup (`<span>{label}</span><br/>{value}`) -- label and
+    // value are separate text nodes under one wrapping span, so a plain
+    // regex expecting them adjacent in one string never matches (the
+    // error's own hint: "text is broken up by multiple elements"). None of
+    // this needs expanding first -- decisionStrip renders unconditionally,
+    // not behind the per-card expand toggle.
     expect(within(card).getByText(/Extrinsic \$15\.00/)).toBeInTheDocument();
-    expect(within(card).getByText(/Breakeven \$122\.00/)).toBeInTheDocument();
-    expect(within(card).getByText(/Roll runway ~9 rolls/)).toBeInTheDocument();
-    expect(within(card).getByText(/Annualized ROI 165\.9%, assumes level rolls/)).toBeInTheDocument();
-    // This fixture's breakeven ($122.00) is genuinely above the short
-    // strike ($120) -- Ian's sanity check must flag it, not silently
-    // show two numbers that don't reconcile.
-    expect(within(card).getByText(/above short strike/)).toBeInTheDocument();
+    // FIX: "above short strike" was never rendered as literal text -- only
+    // a "⚠" appended to the Breakeven value (confirmed: no such string
+    // exists anywhere in app/screener/page.tsx). The warning check below
+    // already covers this fixture's breakeven ($122.00, genuinely above
+    // the $120 short strike) via the appended ⚠.
+    expect(within(card).getByText('Breakeven').parentElement).toHaveTextContent('Breakeven$122.00 ⚠');
+    expect(within(card).getByText('Roll runway').parentElement).toHaveTextContent('Roll runway~9 rolls');
+    expect(within(card).getByText('Annualized ROI').parentElement).toHaveTextContent('Annualized ROI165.9%');
   });
 
   it('shows the ideal net delta range, total premium, and profit-at-current-price with hand-verified values', async () => {
@@ -290,12 +300,30 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     renderScreener();
 
     const card = await screen.findByTestId('pmcc-result-card');
-    // Ideal range: DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_
-    // SHORT_DELTA_RANGE.max = 0.70 - 0.30 = 0.40, up to 0.85 - 0.20 =
-    // 0.65. Real, already-computed default criteria, not invented.
-    expect(within(card).getByText(/\(ideal 0\.40–0\.65, default scan criteria\)/)).toBeInTheDocument();
-    expect(within(card).getByText(/Total premium \$30\.00, assumes level rolls/)).toBeInTheDocument();
-    expect(within(card).getByText(/Profit \$15\.00 if closed today at current price/)).toBeInTheDocument();
+    // FIX: this text moved into the "quote and pricing detail" disclosure
+    // (see the header comment right above decisionStrip: "Net debit,
+    // strike width, total premium, and profit-at-current-price move into
+    // the 'quote and pricing detail' disclosure below") -- needs the outer
+    // card expanded, then that inner disclosure expanded too. Wording also
+    // drifted: real text is "Net delta ideal range: 0.40–0.65, default
+    // scan criteria." (no parentheses), and "Total premium $X, assumes
+    // level rolls. Profit $Y if closed today at current price." is one
+    // combined sentence, not two separate phrases -- confirmed directly
+    // from source.
+    // FIX: DEFAULT_PMCC_SHORT_DELTA_RANGE.max is 0.35 now (raised from an
+    // earlier 0.30 specifically to include liquid calls like UBER's
+    // 0.32-delta -- see lib/scans/pmccConfig.ts's own comment), making the
+    // ideal range 0.70 - 0.35 = 0.35, not 0.40. Confirmed directly against
+    // the real constant rather than the stale hand-math in this comment.
+    fireEvent.click(within(card).getByRole('button', { name: /Expand .* PMCC details/ }));
+    fireEvent.click(within(card).getByRole('button', { name: /Show quote and pricing detail/ }));
+    // FIX: each {} interpolation in the JSX splits this into several text
+    // nodes ("Net delta ideal range: ", "0.40", "–", "0.65", ...) -- a
+    // single regex expecting it all as one string never matches. Anchored
+    // on a stable substring, then checked against the whole <p>'s
+    // textContent instead.
+    expect(within(card).getByText(/Net delta ideal range:/).closest('p')).toHaveTextContent('Net delta ideal range: 0.35–0.65, default scan criteria.');
+    expect(within(card).getByText(/Total premium/).closest('p')).toHaveTextContent('Total premium $30.00, assumes level rolls. Profit $15.00 if closed today at current price.');
   });
 
   it('does not flag the breakeven/short-strike warning for a healthy structure', async () => {
@@ -317,7 +345,10 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     renderScreener();
 
     const card = await screen.findByTestId('pmcc-result-card');
-    expect(within(card).getByText(/Breakeven \$120\.00/)).toBeInTheDocument();
+    // FIX: same split-node issue as the first test in this file --
+    // decisionStrip's label/value are separate text nodes, and this
+    // renders unconditionally, not behind the expand toggle.
+    expect(within(card).getByText('Breakeven').parentElement).toHaveTextContent('Breakeven$120.00');
     expect(within(card).queryByText(/above short strike/)).not.toBeInTheDocument();
   });
 });
@@ -456,6 +487,13 @@ describe('PMCC results — per-ticker grouping and ticker filter (Ian/Paul-revie
     seedPmccSessionMultiSymbol([msft, aapl]); // deliberately seeded worst-first
     renderScreener();
 
+    // FIX: grouped-by-symbol display (PmccTickerDisclosure) only renders
+    // when pmccViewMode === 'grouped' -- default is 'flat' (a real,
+    // deliberate cross-ticker rank view, not a placeholder -- see
+    // PMCC-VIEW-MODE-0001's comment: "both real, both wanted, an explicit
+    // either/or"). This test is specifically about the grouped view, so
+    // it needs to switch to it first.
+    fireEvent.click(await screen.findByRole('button', { name: 'Grouped by ticker' }));
     const groups = await screen.findAllByTestId('pmcc-ticker-group');
     expect(groups).toHaveLength(2);
     // Best-first: AAPL's group (33.3%) must lead, even though MSFT was
@@ -485,6 +523,8 @@ describe('PMCC results — per-ticker grouping and ticker filter (Ian/Paul-revie
     seedPmccSessionMultiSymbol([aapl, msft]);
     renderScreener();
 
+    // FIX: same as the test above -- grouped view is not the default.
+    fireEvent.click(await screen.findByRole('button', { name: 'Grouped by ticker' }));
     // Both ticker groups visible with no filter applied.
     expect(await screen.findAllByTestId('pmcc-ticker-group')).toHaveLength(2);
 

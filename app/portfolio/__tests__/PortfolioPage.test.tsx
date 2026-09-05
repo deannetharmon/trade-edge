@@ -47,6 +47,39 @@ vi.mock('@/lib/portfolio-data/acquisition', async () => {
   };
 });
 
+// FIX: LCC_0001A_SNAPSHOT_ENABLED defaults to true now (deliberately --
+// "an unset variable must never silently hide stock holdings", per
+// lib/portfolio-snapshot/acquire.ts's own comment), so PortfolioDataProvider's
+// real refresh() always calls the real acquirePortfolioSnapshot() on mount,
+// independent of the loadPositions/loadAccountBalances mocks above -- this
+// file never mocked it, so it genuinely tried to resolve a real TastyTrade
+// account against this test's rejected-fetch stub and failed with "account
+// identity could not be resolved", setting a real error that (correctly)
+// suppresses the "NO OPEN POSITIONS FOUND" empty-state message.
+// Hoisted, per-test-overridable harness -- defaults to a clean, ok, empty
+// snapshot (what most tests here need); the one test genuinely testing an
+// unavailable-acquisition scenario overrides it to a snapshot with
+// dataQuality.status: 'unavailable' before rendering.
+const snapshotAcquisitionHarness = vi.hoisted(() => ({
+  result: {
+    pendingOrders: [] as unknown[],
+    snapshot: {
+      accountNumber: 'ACC1', asOf: '2026-08-22T18:00:00.000Z', quoteAsOf: null,
+      equities: [] as unknown[], options: [] as unknown[], workingOrders: [] as unknown[],
+      coverageEvidence: { existingShortCallsBySymbol: {}, workingShortCallsBySymbol: {}, unclassifiedSymbols: [], complete: true, warnings: [], hasAdjustedOrUnknownDeliverable: false },
+      dataQuality: { status: 'ok' as 'ok' | 'unavailable', staleQuotes: true, warnings: [] as string[] }, freshness: 'current' as const,
+      lastSuccessfulAsOf: '2026-08-22T18:00:00.000Z' as string | null,
+    },
+  },
+}));
+vi.mock('@/lib/portfolio-snapshot/acquire', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/portfolio-snapshot/acquire')>('@/lib/portfolio-snapshot/acquire');
+  return {
+    ...actual,
+    acquirePortfolioSnapshot: vi.fn(() => Promise.resolve(snapshotAcquisitionHarness.result)),
+  };
+});
+
 const emptySnapshot = (status: 'ok' | 'unavailable' = 'ok'): PortfolioSnapshot => ({
   accountNumber: 'ACC1', asOf: '2026-08-22T18:00:00.000Z', quoteAsOf: null,
   equities: [], options: [], workingOrders: [],
@@ -112,6 +145,9 @@ describe('WA-0002: Portfolio default tab', () => {
   beforeEach(() => {
     portfolioContextOverride.current = null;
     window.localStorage.clear();
+    // Reset per test -- see the acquirePortfolioSnapshot mock above.
+    snapshotAcquisitionHarness.result.snapshot.dataQuality = { status: 'ok', staleQuotes: true, warnings: [] };
+    snapshotAcquisitionHarness.result.snapshot.equities = [];
     // Anything still calling fetch directly (e.g. the decision-reviews
     // route) rejects quickly and non-blockingly rather than hanging.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
@@ -151,8 +187,20 @@ describe('WA-0002: Portfolio default tab', () => {
     expect(screen.queryByText('Immediate Action')).not.toBeInTheDocument();
   });
 
-  it('renders equity unavailable without claiming the portfolio is empty when display is on and acquisition is off', async () => {
+  it('renders equity unavailable without claiming the portfolio is empty when acquisition fails', async () => {
     process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED = 'true';
+    // FIX: acquirePortfolioSnapshot's own unavailableSnapshot() helper
+    // always returns a real, non-null PortfolioSnapshot object (just with
+    // dataQuality.status: 'unavailable') -- snapshot state is never
+    // actually null once a resolution attempt completes, success or
+    // failure. This means EquityHoldingsSection's `!snapshot` branch
+    // ("unified portfolio snapshot... enabled and refreshed") is
+    // unreachable via this path; the real, reachable "unavailable"
+    // messaging is the status-role banner shown once snapshot IS present
+    // but dataQuality.status is 'unavailable' (confirmed directly from
+    // EquityHoldingsSection.tsx). Reproducing that real scenario here
+    // instead of the unreachable null-snapshot one this test assumed.
+    snapshotAcquisitionHarness.result.snapshot.dataQuality = { status: 'unavailable', staleQuotes: false, warnings: [] };
     try {
       render(
         <PortfolioModeProvider>
@@ -161,7 +209,7 @@ describe('WA-0002: Portfolio default tab', () => {
           </PortfolioDataProvider>
         </PortfolioModeProvider>,
       );
-      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('unified portfolio snapshot'));
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Coverage-dependent data is unavailable'));
       expect(screen.queryByText('NO OPEN POSITIONS FOUND')).not.toBeInTheDocument();
     } finally {
       delete process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED;
@@ -209,6 +257,8 @@ describe('WA-0002: Portfolio default tab', () => {
 describe('WA-0003: explicit tab query-param deep links', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    snapshotAcquisitionHarness.result.snapshot.dataQuality = { status: 'ok', staleQuotes: true, warnings: [] };
+    snapshotAcquisitionHarness.result.snapshot.equities = [];
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
   });
 

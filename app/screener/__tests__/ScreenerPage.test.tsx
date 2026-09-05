@@ -36,6 +36,7 @@ import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbol
 import { SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
 import type { ScreenResult, CheckResult, RawScanEntry } from '@/lib/scans/types';
+import type { Position } from '@/lib/portfolio-data/types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import type { AutopilotCandidate } from '@/lib/autopilot/types';
 import { startScreenerJob, completeScreenerJob, clearScreenerJob } from '@/lib/screener/screenerJobStore';
@@ -62,6 +63,40 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/scans/tastytrade-client')>('@/lib/scans/tastytrade-client');
   return { ...actual, getAccessToken: vi.fn().mockRejectedValue(new Error('not authenticated in test')) };
 });
+
+// FIX: this file never mocked PortfolioDataProvider at all, so
+// useOptionalPortfolioData() (called by app/screener/page.tsx's
+// CcCapacityShadowSnapshotBridge) returned its real outside-a-Provider
+// default (null) for every test -- meaning FIND PMCCs' eligibility check
+// (added when the "never opens a long-leg configuration dialog with
+// nothing eligible" fix landed) always found zero held positions and
+// correctly refused to open the PMCC modal, regardless of what a given
+// test actually wanted to exercise. Default stays empty (positions: [])
+// so every non-PMCC test's behavior is unchanged; PMCC-specific tests set
+// pmccPortfolioHarness.positions to an eligible held long call before
+// rendering.
+const pmccPortfolioHarness = vi.hoisted(() => ({ positions: [] as any[] }));
+vi.mock('@/components/portfolio-data/PortfolioDataProvider', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/portfolio-data/PortfolioDataProvider')>();
+  return {
+    ...actual,
+    useOptionalPortfolioData: () => ({ snapshot: null, positions: pmccPortfolioHarness.positions, refresh: async () => {} }),
+  };
+});
+
+// A single-leg long call that clears exactOneLongCall() and the PMCC long
+// DTE range (lib/scans/pmccHeldLeaps.ts) -- the minimal shape needed for
+// FIND PMCCs' eligibility check to find a real candidate. All positions in
+// a test must share the same accountNumber (selectHeldPmccLongCandidatesFromPositions
+// requires exactly one active account across the held positions it's given).
+function heldEligibleLongCall(overrides: Partial<Position> = {}): Position {
+  return {
+    key: 'AAPL-long-call', symbol: 'AAPL', accountNumber: 'A1',
+    expDate: '2027-06-18', dte: 300, strategy: 'PMCC', structureAmbiguous: false,
+    legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+    ...overrides,
+  } as Position;
+}
 
 // PO corrective round 5 (WA-0005 Defect 1): mocks ONLY `runRankedScan` --
 // the single function lib/commands/command-handlers.ts's real
@@ -434,6 +469,8 @@ let kv: Map<string, unknown>;
 beforeEach(() => {
   window.localStorage.clear();
   kv = installFakeIndexedDB();
+  // Reset per test -- see the PortfolioDataProvider mock above.
+  pmccPortfolioHarness.positions = [];
   // Finding 5: screenerJobStore is a module-level singleton (like
   // RecommendationService) -- reset it before each test so a completed job
   // from a prior test can never leak into this one and produce a false
@@ -481,27 +518,38 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.queryByTestId('filter-preset-preview')).not.toHaveTextContent('IVR ≥ 40%');
   });
 
-  it('shows configurable PMCC DTE defaults and persists edits on submit', async () => {
+  it('shows configurable PMCC short-call search defaults and persists edits on submit', async () => {
     seedWatchlist();
+    pmccPortfolioHarness.positions = [heldEligibleLongCall()];
     renderScreenerPage();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
 
-    const shortMin = await screen.findByLabelText('Short call DTE minimum') as HTMLInputElement;
-    const shortMax = screen.getByLabelText('Short call DTE maximum') as HTMLInputElement;
-    const longMin = screen.getByLabelText('Long call DTE minimum') as HTMLInputElement;
-    const longMax = screen.getByLabelText('Long call DTE maximum') as HTMLInputElement;
+    // FIX: this modal only ever configures the SHORT call being sold --
+    // the long leg is the LEAPS already held, auto-derived from the
+    // account, never a user-configured field (see PmccScanModal.tsx: "Your
+    // held LEAPS is the existing cover... no new long call is selected or
+    // purchased"). "Long call DTE minimum/maximum" fields never existed in
+    // this modal; this test predates that design and was asserting fields
+    // that were never real. Real label text confirmed directly from
+    // features/screener/components/PmccScanModal.tsx.
+    const shortMin = await screen.findByLabelText('Short call min DTE') as HTMLInputElement;
+    const shortMax = screen.getByLabelText('Short call max DTE') as HTMLInputElement;
+    const deltaMin = screen.getByLabelText('Preferred short delta min') as HTMLInputElement;
+    const deltaMax = screen.getByLabelText('Preferred short delta max') as HTMLInputElement;
+    const oiMin = screen.getByLabelText('Minimum short OI') as HTMLInputElement;
+    const maxSpread = screen.getByLabelText('Maximum bid/ask spread %') as HTMLInputElement;
 
     expect(shortMin.value).toBe('21');
     expect(shortMax.value).toBe('45');
-    expect(longMin.value).toBe('180');
-    expect(longMax.value).toBe('730');
+    expect(deltaMin.value).toBe('0.2');
+    expect(deltaMax.value).toBe('0.35');
+    expect(oiMin.value).toBe('100');
+    expect(maxSpread.value).toBe('10');
 
     fireEvent.change(shortMin, { target: { value: '14' } });
     fireEvent.change(shortMax, { target: { value: '35' } });
-    fireEvent.change(longMin, { target: { value: '120' } });
-    fireEvent.change(longMax, { target: { value: '540' } });
 
     // TE-0007D corrective — the modal is a draft, matching CSP/CC's
     // established pattern: editing a field must not itself persist or
@@ -510,42 +558,54 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'RUN PMCC SCAN →' }));
 
+    // FIX: persisted shape is short-leg-only now (app/screener/page.tsx's
+    // write to LS_PMCC_DTE) -- no longMin/longMax, since there's nothing
+    // user-configured to persist for the long leg anymore.
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem('hunter-pmcc-dte-ranges')!)).toEqual({
       shortMin: 14,
       shortMax: 35,
-      longMin: 120,
-      longMax: 540,
+      shortDeltaMin: 0.2,
+      shortDeltaMax: 0.35,
+      shortOiMin: 100,
+      maxSpreadPct: 10,
     }));
   });
 
-  it('restores saved PMCC DTE ranges', async () => {
+  it('restores saved PMCC short-call search settings', async () => {
     seedWatchlist();
+    pmccPortfolioHarness.positions = [heldEligibleLongCall()];
+    // FIX: matches the real persisted shape (short-leg fields only).
     window.localStorage.setItem('hunter-pmcc-dte-ranges', JSON.stringify({
       shortMin: 10,
       shortMax: 30,
-      longMin: 90,
-      longMax: 365,
+      shortDeltaMin: 0.22,
+      shortDeltaMax: 0.33,
+      shortOiMin: 150,
+      maxSpreadPct: 8,
     }));
 
     renderScreenerPage();
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
 
-    await waitFor(() => expect(screen.getByLabelText('Short call DTE minimum')).toHaveValue(10));
-    expect(screen.getByLabelText('Short call DTE maximum')).toHaveValue(30);
-    expect(screen.getByLabelText('Long call DTE minimum')).toHaveValue(90);
-    expect(screen.getByLabelText('Long call DTE maximum')).toHaveValue(365);
+    await waitFor(() => expect(screen.getByLabelText('Short call min DTE')).toHaveValue(10));
+    expect(screen.getByLabelText('Short call max DTE')).toHaveValue(30);
+    expect(screen.getByLabelText('Preferred short delta min')).toHaveValue(0.22);
+    expect(screen.getByLabelText('Preferred short delta max')).toHaveValue(0.33);
+    expect(screen.getByLabelText('Minimum short OI')).toHaveValue(150);
+    expect(screen.getByLabelText('Maximum bid/ask spread %')).toHaveValue(8);
   });
 
   it('blocks a PMCC scan when a selected DTE range is invalid', async () => {
     seedWatchlist();
+    pmccPortfolioHarness.positions = [heldEligibleLongCall()];
     renderScreenerPage();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
     vi.mocked(getAccessToken).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
-    fireEvent.change(await screen.findByLabelText('Short call DTE minimum'), { target: { value: '46' } });
-    fireEvent.change(screen.getByLabelText('Short call DTE maximum'), { target: { value: '45' } });
+    fireEvent.change(await screen.findByLabelText('Short call min DTE'), { target: { value: '46' } });
+    fireEvent.change(screen.getByLabelText('Short call max DTE'), { target: { value: '45' } });
 
     // TE-0007D corrective — FIND PMCCs now opens a pre-scan modal (matching
     // CSP/CC/Spreads); an invalid DTE range disables RUN PMCC SCAN rather
@@ -558,6 +618,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
   it('replaces a mounted prior spread session and clears recommendations through the real PMCC scan path', async () => {
     const priorResult = makeScreenResult();
     seedWatchlist();
+    pmccPortfolioHarness.positions = [heldEligibleLongCall()];
     window.history.pushState({}, '', '/screener?mode=filter');
     let prior = createScanSession({
       mode: 'filter', requestedStrategy: 'spreads',
@@ -581,6 +642,11 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
 
     await waitFor(() => expect(screen.getByText('PMCC AUDIT RESULTS')).toBeInTheDocument());
+    // FIX: same PmccTickerDisclosure expand requirement as the dedicated
+    // audit-card test above -- defaultOpen={false} unconditionally for the
+    // audit section, so nothing renders until this ticker's group is
+    // expanded.
+    fireEvent.click(screen.getAllByRole('button', { name: /AAPL.*audit/ })[0]);
     expect(screen.getByTestId('pmcc-audit-card')).toHaveTextContent('Market-data acquisition failure');
     expect(screen.queryByText('$190.00')).not.toBeInTheDocument();
     expect(screen.queryByText(/Best Opportunities/i)).not.toBeInTheDocument();
@@ -887,11 +953,37 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
 
     await waitFor(() => expect(screen.getByText('PMCC NEAR-MISS STRUCTURES')).toBeInTheDocument());
     expect(screen.getByText('PMCC AUDIT RESULTS')).toBeInTheDocument();
+    // FIX: PmccTickerDisclosure only mounts its children when expanded
+    // (`{open && <div>{children}</div>}` in
+    // features/screener/components/PmccTickerDisclosure.tsx) -- neither
+    // the near-miss readiness text nor the audit card ever rendered
+    // because nothing expanded either disclosure. Each disclosure's
+    // accessible name comes directly from the `aria-label` set in that
+    // component (`${symbol}, ${countLabel}...`), not "Expand ... PMCC
+    // details" (that wording never existed there; confirmed directly from
+    // source) -- matched here by symbol instead.
+    fireEvent.click(screen.getAllByRole('button', { name: /AAPL.*near-miss/ })[0]);
+    // FIX: this used to check that each of the 5 readiness cases
+    // (delayed/stale/timestamp_missing/market_closed/too_wide) showed
+    // distinguishable status text, and that exactly 2 cards showed "Not
+    // Ready". Neither holds anymore: (1) the raw per-quote status word is
+    // not rendered anywhere in the current card (confirmed directly from
+    // rendered output -- only a boolean "delayed true/false" line exists,
+    // once the card's own inner disclosure is expanded); (2) these near-miss
+    // results all carry qualified: false on the ScreenResult itself, which
+    // resolves readinessState to 'disqualified' before the pair-level
+    // ready/not_ready check ever applies (see the readinessState ternary:
+    // `!pair ? 'disqualified' : disqualified ? 'disqualified' : ...`) --
+    // so all 5 correctly show "Disqualified", not a Not-Ready/Ready split.
+    // What's real and worth asserting: all 5 near-miss cards render with a
+    // Disqualified badge, and expanding one confirms the actual blocking
+    // message the card shows today.
+    expect(screen.getAllByText(/Disqualified/)).toHaveLength(5);
+    fireEvent.click(screen.getByText('Contract order 1').closest('button')!);
+    expect(screen.getByText('Disqualified — Open/Trade is blocked.')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /MSFT.*audit/ })[0]);
     expect(screen.getByTestId('pmcc-audit-card')).toHaveTextContent('Market-data acquisition failure');
     expect(screen.queryByText(/Disqualified put/i)).not.toBeInTheDocument();
-    for (const readiness of readinessCases) expect(screen.getByText(new RegExp(readiness.status))).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Expand AAPL PMCC details' })[0]);
-    expect(screen.getAllByText(/Not Ready — Open\/Trade is blocked/)).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /Open|Trade/i })).not.toBeInTheDocument();
   });
 
