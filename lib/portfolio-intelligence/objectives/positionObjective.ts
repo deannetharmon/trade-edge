@@ -1018,9 +1018,25 @@ export function evaluatePositionObjective(
   // its stated evidence alone. When marketable pricing actually changed the
   // outcome, say so explicitly and put it first, rather than letting the
   // divergence stay invisible inside a single reused pnlPct-style number.
+  //
+  // Team-agreed fix (Ian/Paul/Alan): this used to only prepend to
+  // supportingReasons -- primaryReason stayed whatever cohere had already
+  // set it to (often a generic managementIntent label like "Loss has
+  // reached the policy loss-stop threshold", which can't know about the
+  // mid/marketable divergence at all -- managementIntent's evidence is a
+  // plain boolean). Ian: the divergence itself is a real signal, not just
+  // detail -- two numbers this far apart on the same position matters more
+  // than which generic bucket it fell into. Alan: this is precisely the
+  // PI-0014 conflict case this block already exists to catch; losing the
+  // numbers hides the anomaly that made this position different. Paul:
+  // gated on the same checkable executionRealityPromoted flag already used
+  // above (equivalent to pricingDecisionEvidence.controllingBasis ===
+  // 'MARKETABLE'), not a text-content heuristic -- narrow and explicit,
+  // doesn't touch any other recommendation's reason text.
   if (executionRealityPromoted && marketablePnlPct != null && pnlPct != null) {
     legacy = {
       ...legacy,
+      primaryReason: `${legacy.primaryReason} Estimate diverges: midpoint ${pnlPct.toFixed(0)}% vs marketable ${marketablePnlPct.toFixed(0)}% of credit -- wide bid/ask changed this recommendation.`,
       supportingReasons: [
         `The marketable estimate is materially worse than mid: ${marketablePnlPct.toFixed(0)}% vs ${pnlPct.toFixed(0)}% of credit -- wide bid/ask changed this recommendation.`,
         ...legacy.supportingReasons,
