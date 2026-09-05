@@ -2650,6 +2650,104 @@ function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): a
 // buyback) -- reuses the same dry-run/place-order endpoint pattern
 // (getAccountNumber, TastyTrade's own /orders/dry-run and order-submission
 // routes), just without the multi-leg complexity those don't need here.
+// LEAPS-0002: extracted so each row can own its own expand/chart state,
+// matching how PmccResultCard/GenericResultCard already work -- a flat
+// array of candidates has nowhere to hang per-row local state otherwise.
+function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
+  candidate: {
+    symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
+    openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
+    underlyingPrice: number | null; spreadPct: number | null; extrinsicValue: number | null;
+  };
+  th: typeof THEMES[Theme];
+  deltaMin: number;
+  deltaMax: number;
+  onTrade: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [showChart, setShowChart] = useState(false);
+  const [sparkData, setSparkData] = useState<number[] | null>(null);
+  const [sparkLoading, setSparkLoading] = useState(false);
+
+  const mid = candidate.bid != null && candidate.ask != null ? (candidate.bid + candidate.ask) / 2 : null;
+  const totalCost = mid != null ? mid * 100 : null;
+  const breakeven = mid != null ? candidate.strike + mid : null;
+  // Diane: decision numbers (cost, breakeven, extrinsic%) get top billing;
+  // confirmations (delta vs. range, DTE, spread%, OI) are muted below --
+  // not a pass/fail checklist like spreads (Ian: LEAPS isn't gate-based
+  // once it's already cleared the filter, it's a trade-off comparison).
+  const breakevenPctFromPrice = breakeven != null && candidate.underlyingPrice != null && candidate.underlyingPrice > 0
+    ? ((breakeven - candidate.underlyingPrice) / candidate.underlyingPrice) * 100
+    : null;
+  const extrinsicPctOfCost = candidate.extrinsicValue != null && totalCost != null && totalCost > 0
+    ? (candidate.extrinsicValue * 100 / totalCost) * 100
+    : null;
+  const deltaInRange = candidate.delta != null && candidate.delta >= deltaMin && candidate.delta <= deltaMax;
+
+  return (
+    <div className={`rounded-xl border-l-4 border ${th.border} overflow-hidden ${expanded ? 'border-l-emerald-500' : 'border-l-neutral-700'}`}>
+      <button onClick={() => setExpanded(v => !v)} className="w-full p-3 text-left" aria-label={`Expand ${candidate.symbol} LEAPS details`}>
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
+          {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
+          <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
+          <span className={th.text}>${candidate.strike.toFixed(2)}C · {candidate.expiration}</span>
+          <span className="ml-auto flex items-center gap-3">
+            <span className={th.text}>Cost {totalCost != null ? `$${totalCost.toFixed(2)}` : '—'}</span>
+            <span className={`text-[9px] ${expanded ? 'text-emerald-400' : th.textMuted}`}>{expanded ? '▲' : '▼'}</span>
+          </span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className={`border-t ${th.border} p-3 space-y-3`}>
+          {/* Decision numbers -- what Ian actually looks at first */}
+          <div className="grid grid-cols-3 gap-3 text-[12px]">
+            <div>
+              <p className={`text-[9px] ${th.textMuted}`}>Cost</p>
+              <p className={`font-bold ${th.text}`}>{totalCost != null ? `$${totalCost.toFixed(2)}` : 'unavailable'}</p>
+            </div>
+            <div>
+              <p className={`text-[9px] ${th.textMuted}`}>Breakeven</p>
+              <p className={`font-bold ${th.text}`}>
+                {breakeven != null ? `$${breakeven.toFixed(2)}` : 'unavailable'}
+                {breakevenPctFromPrice != null && (
+                  <span className={`ml-1 text-[10px] font-normal ${breakevenPctFromPrice > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    ({breakevenPctFromPrice > 0 ? '+' : ''}{breakevenPctFromPrice.toFixed(1)}% {breakevenPctFromPrice > 0 ? 'above' : 'below'} current)
+                  </span>
+                )}
+                {breakeven != null && candidate.underlyingPrice == null && <span className="ml-1 text-[10px] font-normal text-amber-400">(% vs. current unavailable -- no underlying price)</span>}
+              </p>
+            </div>
+            <div>
+              <p className={`text-[9px] ${th.textMuted}`}>Extrinsic</p>
+              <p className={`font-bold ${th.text}`}>
+                {candidate.extrinsicValue != null ? `$${candidate.extrinsicValue.toFixed(2)}` : 'unavailable'}
+                {extrinsicPctOfCost != null && <span className="ml-1 text-[10px] font-normal text-cyan-300">({extrinsicPctOfCost.toFixed(1)}% of cost)</span>}
+              </p>
+            </div>
+          </div>
+
+          {/* Confirmations -- already satisfied by the active filter, shown for reference not judgment */}
+          <div className={`flex flex-wrap gap-4 text-[10px] ${th.textMuted}`}>
+            <span>Δ {candidate.delta?.toFixed(2) ?? '—'} {candidate.delta != null && (deltaInRange ? <span className="text-emerald-400">✓ within {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span> : <span className="text-amber-400">outside {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span>)}</span>
+            <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
+            <span>OI {candidate.openInterest ?? '—'}</span>
+            <span>Bid {candidate.bid?.toFixed(2) ?? '—'} / Ask {candidate.ask?.toFixed(2) ?? '—'}</span>
+            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+          </div>
+
+          <button onClick={onTrade} disabled={!candidate.occSymbol}
+            className="w-full py-2 rounded-lg border border-cyan-500 bg-cyan-500/10 text-cyan-300 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40">
+            Trade this
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeapsTradeModal({ candidate, th, onClose }: {
   candidate: { symbol: string; expiration: string; dte: number; strike: number; delta: number | null; bid: number | null; ask: number | null; occSymbol: string | null };
   th: typeof THEMES[Theme];
@@ -10159,8 +10257,14 @@ export default function Home() {
           }
         };
         const sorted = [...filtered].sort((a, b) => (sortValue(a) - sortValue(b)) * (leapsSortDir === 'asc' ? 1 : -1));
+        // LEAPS-0002 (Diane): matches the Targeted Scan's own active-chip
+        // color exactly (border-emerald-500 text-emerald-400 bg-emerald-500/10,
+        // confirmed directly from its "Trend aligned only" toggle) -- Dean's
+        // reference screenshots were specifically Targeted Scan, which uses
+        // this green convention, distinct from FilteredResultControls'
+        // separate amber one used for CSP/CC/Filter-mode results.
         const chip = (active: boolean) => `text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-          active ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textMuted} hover:border-amber-500/50`
+          active ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : `${th.border} ${th.textMuted} hover:border-emerald-500/50`
         }`;
         return (
         <div role="dialog" aria-label="LEAPS CANDIDATES" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
@@ -10224,19 +10328,9 @@ export default function Home() {
             <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
 
             {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
-              <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                className={`grid grid-cols-7 items-center gap-2 rounded border ${th.border} p-2 text-[11px]`}>
-                <span className={`${th.text} font-bold`}>{candidate.symbol}{candidate.underlyingPrice != null && <span className={`ml-1 font-normal ${th.textMuted}`}>${candidate.underlyingPrice.toFixed(2)}</span>}</span>
-                <span>{candidate.expiration}<br /><span className={th.textMuted}>{candidate.dte} DTE</span></span>
-                <span>${candidate.strike.toFixed(2)} C</span>
-                <span>Δ {candidate.delta?.toFixed(2) ?? '—'}<br /><span className={th.textMuted}>OI {candidate.openInterest ?? '—'}</span></span>
-                <span>Bid {candidate.bid?.toFixed(2) ?? '—'}<br />Ask {candidate.ask?.toFixed(2) ?? '—'}</span>
-                <span>{candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}<br /><span className={th.textMuted}>Extr {candidate.extrinsicValue != null ? `$${candidate.extrinsicValue.toFixed(2)}` : '—'}</span></span>
-                <button onClick={() => setLeapsTradeCandidate(candidate)} disabled={!candidate.occSymbol}
-                  className="rounded border border-cyan-600 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-40">
-                  Trade this
-                </button>
-              </div>
+              <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
+                candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax}
+                onTrade={() => setLeapsTradeCandidate(candidate)} />
             ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, and liquidity filters.</p>}
 
             {insufficientCandidates.length > 0 && (
