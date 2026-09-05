@@ -15,7 +15,15 @@ const RULES: CcRulesType = {
 type TestChain = { expirations: string[]; chains: Record<string, WheelChainLeg[]> };
 
 function makeChain(overrides: Partial<WheelChainResult> = {}): TestChain {
-  const expDate = '2026-09-18'; // ~well outside "today" in test harness time, DTE computed dynamically by daysUntil
+  // Was a hardcoded '2026-09-18' -- the finder filters by REAL daysUntil()
+  // (see chainWithDte's comment below, which already solves this correctly
+  // for other cases in this file), so a fixed date drifts out of the
+  // required 21-45 DTE window as real time passes. This test failed for
+  // exactly that reason: DTE had drifted to 14 days, below DTE_MIN.
+  // Computed dynamically now, comfortably mid-window, so it can't drift.
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  const expDate = d.toISOString().slice(0, 10);
   return {
     expirations: [expDate],
     chains: {

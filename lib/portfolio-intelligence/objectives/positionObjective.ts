@@ -319,14 +319,36 @@ export function cohereManagementIntentRecommendation(
   if (!intentResult) return recommendation;
 
   const canonicalReason = intentResult.reasons[0];
+  // Distinguishes "real scoring output that happens to have an empty reason
+  // string" from "a degenerate/synthetic result with no computation behind
+  // it at all". Real selectManagementIntent() output always populates
+  // `candidates` (every intent is scored, including the ones that lose) --
+  // so `candidates.length === 0` reliably means there's no real evidence to
+  // reason about, not just that a specific contribution's explanation was
+  // suppressed. Confirmed via positionObjective.test.ts's synthetic
+  // `intent()` test helper, which always constructs `candidates: []` and
+  // explicitly expects fail-closed-to-Hold behavior in that case.
+  const hasRealEvidence = intentResult.candidates.length > 0;
   if (intentResult.intent === 'HOLD_POSITION') {
     if (recommendation.kind !== 'hold') {
+      // FIX: previously discarded intentResult entirely (managementIntent:
+      // undefined) whenever managementIntent independently concluded Hold
+      // but legacy had a more specific classification (e.g. roll-soon) --
+      // legacy's kind/label correctly still wins for display (that's the
+      // whole point of this branch). When there's real scoring behind that
+      // Hold verdict, keep it inspectable (managementIntent.test.ts's SOXL/
+      // AMD acceptance tests check managementIntent's own independent
+      // verdict, e.g. "never lets Roll win from bare DTE", regardless of
+      // which kind legacy displays). When it's a synthetic/degenerate
+      // result (no candidates at all), there's nothing real to preserve --
+      // discard it, matching positionObjective.test.ts's explicit
+      // "preserves an independently evidenced legacy action" expectation.
       return {
         ...recommendation,
         supportingReasons: [recommendation.primaryReason, ...recommendation.supportingReasons]
           .filter((reason, index, reasons) => reason && reasons.indexOf(reason) === index)
           .slice(0, 4),
-        managementIntent: undefined,
+        managementIntent: hasRealEvidence ? intentResult : undefined,
       };
     }
     return {
@@ -343,15 +365,52 @@ export function cohereManagementIntentRecommendation(
     };
   }
   if (!canonicalReason) {
+    // FIX: this used to unconditionally collapse the recommendation to a
+    // generic "evidence unavailable" Hold whenever the winning intent's
+    // reasons happened to be empty. But an empty canonicalReason does NOT
+    // always mean "no real evidence" -- it can simply mean the winning
+    // intent's contributions were deliberately marked `includeInReasons:
+    // false` (e.g. CUT_LOSSES's tight-buffer/gamma-DTE "nudge"
+    // contributions, suppressed specifically to avoid duplicating
+    // REDUCE_RISK's reason text when both fire from the same evidence --
+    // see managementIntent.ts lines ~405-411). Discarding a correctly-
+    // computed critical assignment-risk/close-loser/etc. classification
+    // down to a vague Hold in THAT case was a real bug -- confirmed via
+    // PI-0003.5's "DEPLOY_IDLE_CASH never outranks a critical position-level
+    // risk objective" test, which found a tight-buffer/short-DTE CSP
+    // silently producing no objective at all, purely because its winning
+    // CUT_LOSSES candidate's real contributions were reason-suppressed.
+    //
+    // But when there's genuinely no real evidence at all (hasRealEvidence
+    // false -- a synthetic/degenerate result), failing closed to a generic
+    // Hold is the correct, deliberate behavior -- positionObjective.test.ts
+    // has an explicit test for exactly this ("fails closed... when a
+    // non-hold intent has no evidence reason"). candidates.length is what
+    // distinguishes the two cases, not the presence of a reason string.
+    if (!hasRealEvidence) {
+      return {
+        ...recommendation,
+        kind: 'hold',
+        label: 'Hold Position',
+        urgency: 'low',
+        primaryReason: HOLD_EVIDENCE_UNAVAILABLE_REASON,
+        supportingReasons: [],
+        suggestedAction: HOLD_SUGGESTED_ACTION,
+        managementIntent: undefined,
+      };
+    }
+    const supportingReasons = [
+      ...intentResult.reasons,
+      recommendation.primaryReason,
+      ...recommendation.supportingReasons,
+    ]
+      .filter(reason => reason && !isHoldOnlyLegacyReason(reason))
+      .filter((reason, index, reasons) => reasons.indexOf(reason) === index)
+      .slice(0, 4);
     return {
       ...recommendation,
-      kind: 'hold',
-      label: 'Hold Position',
-      urgency: 'low',
-      primaryReason: HOLD_EVIDENCE_UNAVAILABLE_REASON,
-      supportingReasons: [],
-      suggestedAction: HOLD_SUGGESTED_ACTION,
-      managementIntent: undefined,
+      supportingReasons,
+      managementIntent: intentResult,
     };
   }
 

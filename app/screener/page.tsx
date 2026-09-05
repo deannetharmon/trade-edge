@@ -7583,31 +7583,29 @@ export default function Home() {
   // prior strategy results. TE-0007: no longer reads a separate PMCC-only
   // ticker list; uses the same normalized array every other strategy
   // button reads.
-  const runPMCCScan = async (request?: PmccScanRequest) => {
-    // FIND PMCCs manages existing long calls. Selected tickers narrow the
-    // broker-discovered holdings; they never create a new long-leg search.
+  // TE-0007 fix: this discovery logic used to live only inside runPMCCScan,
+  // meaning it only ran AFTER the user opened the short-leg config modal
+  // and clicked "RUN PMCC SCAN ->" -- so a portfolio with zero eligible
+  // held long calls still showed a full config modal with nothing
+  // meaningful to configure, before finally reporting "no eligible calls".
+  // Extracted so the FIND PMCCs button itself can check eligibility FIRST
+  // and skip opening the modal entirely when there's nothing to scan --
+  // confirmed via LauncherSelectedState.test.tsx and
+  // UnifiedStrategyLauncher.test.tsx, both of which expect the "No eligible
+  // held long calls..." message to appear directly, with no
+  // "RUN PMCC SCAN ->" button ever rendered, when the portfolio has no
+  // PMCC-eligible long calls.
+  const discoverHeldPmccCandidates = async (shortDteMin: number, shortDteMax: number) => {
     const pmcc = opportunityUniverse;
-    const dte = { shortMin: request?.shortDteMin ?? pmccShortDteMin, shortMax: request?.shortDteMax ?? pmccShortDteMax, longMin: 0, longMax: 10_000 };
+    const dte = { shortMin: shortDteMin, shortMax: shortDteMax, longMin: 0, longMax: 10_000 };
     if (!isValidPmccDteRanges(dte)) {
-      setError('PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.');
-      return;
+      return { ok: false as const, error: 'PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.' };
     }
-    // Portfolio-derived long calls are an additive scan source. During the
-    // snapshot rollout, the shared provider still supplies current legacy
-    // positions; use those rather than treating an intentionally-null
-    // optional snapshot as an empty portfolio.
-    // Screener is not guaranteed to visit Portfolio first. Refresh the one
-    // canonical account provider before discovering held long calls, so a
-    // valid broker LEAPS can never be mistaken for an empty portfolio.
     try {
       await refreshPortfolioRef.current?.();
-      // The provider publishes refreshed snapshot state through React before
-      // the bridge updates its refs. Yield one frame so discovery reads that
-      // exact current account snapshot, not the prior empty initial state.
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     } catch (refreshError: any) {
-      setError(refreshError?.message ?? 'Unable to refresh active portfolio holdings for PMCC discovery.');
-      return;
+      return { ok: false as const, error: refreshError?.message ?? 'Unable to refresh active portfolio holdings for PMCC discovery.' };
     }
     const heldSnapshot = ccCapacityShadowSnapshotRef.current;
     const discoveryRange = { shortMin: dte.shortMin, shortMax: dte.shortMax, longMin: 0, longMax: 10_000 };
@@ -7620,11 +7618,27 @@ export default function Home() {
     const heldSelection = { ...discoveredSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(candidate => candidate.underlyingSymbol)));
     if (!scanSymbols.length) {
-      setError(pmcc.length
-        ? 'No eligible held long calls match the selected tickers in the active portfolio.'
-        : 'No eligible held long calls were found in the active portfolio.');
+      return {
+        ok: false as const,
+        error: pmcc.length
+          ? 'No eligible held long calls match the selected tickers in the active portfolio.'
+          : 'No eligible held long calls were found in the active portfolio.',
+      };
+    }
+    return { ok: true as const, dte, heldCandidates, heldSelection, scanSymbols };
+  };
+
+  const runPMCCScan = async (request?: PmccScanRequest) => {
+    // FIND PMCCs manages existing long calls. Selected tickers narrow the
+    // broker-discovered holdings; they never create a new long-leg search.
+    const shortDteMin = request?.shortDteMin ?? pmccShortDteMin;
+    const shortDteMax = request?.shortDteMax ?? pmccShortDteMax;
+    const discovery = await discoverHeldPmccCandidates(shortDteMin, shortDteMax);
+    if (!discovery.ok) {
+      setError(discovery.error);
       return;
     }
+    const { dte, heldCandidates, heldSelection, scanSymbols } = discovery;
     const heldLongDtes = heldCandidates.map(candidate => candidate.dte);
     const effectiveDte = { ...dte, longMin: Math.min(...heldLongDtes), longMax: Math.max(...heldLongDtes) };
     setError('');
@@ -8556,7 +8570,18 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={() => setShowPmccScanModal(true)}
+                onClick={async () => {
+                  // TE-0007 fix: check eligibility BEFORE opening the
+                  // short-leg config modal -- a portfolio with zero
+                  // eligible held long calls has nothing meaningful to
+                  // configure, and should show "No eligible held long
+                  // calls..." directly instead of a config dialog with a
+                  // "RUN PMCC SCAN ->" button that leads nowhere.
+                  const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
+                  if (!discovery.ok) { setError(discovery.error); return; }
+                  setError('');
+                  setShowPmccScanModal(true);
+                }}
                 disabled={loading}
                 title="Scans short calls against eligible long calls already held in your portfolio. Selected tickers only narrow those holdings."
               >

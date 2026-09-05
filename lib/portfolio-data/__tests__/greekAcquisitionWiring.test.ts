@@ -52,7 +52,7 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
   it('maps realistic broker leg Greeks through loadPositions and dollarizes exactly once for the row', async () => {
     broker.ttFetch.mockImplementation(async (path: string) => {
       if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
-      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Short', '2.52'), leg(LONG, 'Long', '0.00')] } };
+      if (path.startsWith('/accounts/A1/positions')) return { data: { items: [leg(SHORT, 'Short', '2.52'), leg(LONG, 'Long', '0.00')] } };
       if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
         { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.070', gamma: '0.001', delta: '-0.20', vega: '0.080', 'updated-at': '2026-08-11T15:59:30.000Z' },
         { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.050', 'updated-at': '2026-08-11T15:59:35.000Z' },
@@ -84,7 +84,7 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
   it('fails entry-dependent outputs closed when one broker leg omits average-open-price', async () => {
     broker.ttFetch.mockImplementation(async (path: string) => {
       if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
-      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Short', '2.52'), leg(LONG, 'Long', undefined as unknown as string)] } };
+      if (path.startsWith('/accounts/A1/positions')) return { data: { items: [leg(SHORT, 'Short', '2.52'), leg(LONG, 'Long', undefined as unknown as string)] } };
       if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
         { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.07', gamma: '0.001', delta: '-0.20', vega: '0.08', 'updated-at': '2026-08-11T15:59:30.000Z' },
         { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.05', 'updated-at': '2026-08-11T15:59:35.000Z' },
@@ -112,7 +112,7 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
       if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
       // Long the higher-strike 800P for $2 and short the lower-strike 790P
       // for $1: an economically coherent $1 debit put spread.
-      if (path === '/accounts/A1/positions') return { data: { items: [leg(SHORT, 'Long', '2.00'), leg(LONG, 'Short', '1.00')] } };
+      if (path.startsWith('/accounts/A1/positions')) return { data: { items: [leg(SHORT, 'Long', '2.00'), leg(LONG, 'Short', '1.00')] } };
       if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
         { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.07', gamma: '0.001', delta: '-0.20', vega: '0.08', 'updated-at': '2026-08-11T15:59:30.000Z' },
         { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.05', 'updated-at': '2026-08-11T15:59:35.000Z' },

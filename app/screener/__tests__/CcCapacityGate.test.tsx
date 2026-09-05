@@ -35,9 +35,23 @@ const emitCoveredCallCapacityShadowMock = vi.fn();
 const collectCoveredCallCapacityShadowMock = vi.fn();
 const shadowHarness = vi.hoisted(() => ({ snapshot: null as PortfolioSnapshot | null }));
 
-vi.mock('@/components/portfolio-data/PortfolioDataProvider', () => ({
-  usePortfolioData: () => ({ snapshot: shadowHarness.snapshot }),
-}));
+vi.mock('@/components/portfolio-data/PortfolioDataProvider', () => {
+  // Stable references -- a fresh [] on every call would make the real
+  // component's useEffect dependency array (which includes
+  // portfolioData?.positions) look "changed" every render, since [] !== []
+  // in JS, causing an infinite re-render loop rather than a clean mount.
+  const stablePositions: unknown[] = [];
+  return {
+    usePortfolioData: () => ({ snapshot: shadowHarness.snapshot }),
+    // FIX: CcCapacityShadowSnapshotBridge (app/screener/page.tsx) calls
+    // useOptionalPortfolioData -- this mock predates that dependency and
+    // was never updated, causing every test in this file to crash on
+    // render. positions/refresh default to safe no-ops since none of this
+    // file's assertions exercise them; only `snapshot` (shared with the
+    // existing usePortfolioData mock above) matters here.
+    useOptionalPortfolioData: () => ({ snapshot: shadowHarness.snapshot, positions: stablePositions, refresh: null }),
+  };
+});
 
 vi.mock('@/lib/portfolio-snapshot/shadowParity', () => ({
   isCcCapacityShadowEnabled: (value = process.env.NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED) => value === 'true',

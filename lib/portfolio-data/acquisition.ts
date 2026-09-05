@@ -624,7 +624,6 @@ export function mapGtcOrder(o: any, parentTif?: string, parentComplexId?: string
     : parentComplexId
     ? String(parentComplexId)
     : undefined;
-  console.log(`MAP_GTC_ORDER id=${o?.id} complex-order-id=${o?.['complex-order-id']} parentComplexId=${parentComplexId} resolved=${complexOrderId}`);
   return {
     id: String(o?.id ?? ''),
     price: String(o?.price ?? o?.['limit-price'] ?? ''),
@@ -1242,10 +1241,6 @@ export async function loadPositions(
       const rawHv = item['hv-30'] ?? item['historical-volatility-30'] ?? item['hv30'] ?? item['historical-volatility'] ?? null;
       const parsedHv = rawHv != null ? parseFloat(String(rawHv)) : NaN;
       if (!isNaN(parsedHv)) hv30Map[sym] = parsedHv < 1 ? Math.round(parsedHv * 100) : Math.round(parsedHv);
-      // Debug: log raw metrics for indexes so we can see what fields come back
-      if (['SPX','NDX','RUT','VIX'].includes(sym)) {
-        console.log(`METRICS ${sym}:`, JSON.stringify(item).slice(0, 500));
-      }
       // Beta
       const rawBeta = item['beta'] ?? item['beta-60-day'] ?? null;
       const parsedBeta = rawBeta != null ? parseFloat(String(rawBeta)) : NaN;
@@ -1311,7 +1306,6 @@ export async function loadPositions(
       });
       // Also accept if parent has no terminal-at (still open) and has nested orders
       const parentActive = !order['terminal-at'] && nestedOrders.length > 0;
-      console.log(`COMPLEX ORDER: id=${order.id} hasActiveNested=${hasActiveNested} parentActive=${parentActive} nestedStatuses=${nestedOrders.map((o:any) => o['status']).join(',')}`);
       if (hasActiveNested || parentActive) {
         for (const nestedOrder of nestedOrders) for (const leg of nestedOrder.legs ?? []) {
           // Prefer underlying-symbol; fall back to parsing the OCC option symbol
@@ -1322,7 +1316,6 @@ export async function loadPositions(
             // Also add SPX↔SPXW variants
             if (sym === 'SPXW') gtcSymbols.add('SPX');
             if (sym === 'SPX') gtcSymbols.add('SPXW');
-            console.log(`COMPLEX LEG underlying=${underlying} added=${sym}`);
           } else if (leg.symbol) {
             // OCC format: SPX   260726P07290000 — split on first digit sequence
             const fromOcc = leg.symbol.split(/\d{6}/)[0].trim();
@@ -1330,7 +1323,6 @@ export async function loadPositions(
               gtcSymbols.add(fromOcc);
               if (fromOcc === 'SPXW') gtcSymbols.add('SPX');
               if (fromOcc === 'SPX') gtcSymbols.add('SPXW');
-              console.log(`COMPLEX LEG occ=${leg.symbol} added=${fromOcc}`);
             }
           }
         }
@@ -1457,6 +1449,7 @@ export async function loadPositions(
   } catch {}
 
   const today = new Date();
+  if (process.env.ZZDEBUG) console.log('ZZGROUPS', Object.keys(groups));
   let positions: Position[] = Object.entries(groups).map(([key, group]) => {
     const { rawLegs: legs, ambiguous, blockMessage, structure } = group;
     const [symbol, expDate] = key.split('::');
@@ -1711,7 +1704,7 @@ export async function loadPositions(
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
-      closeNowPnl: entryEconomicsComplete && resolvedEntryCredit != null && hasCloseValue
+      closeNowPnl: supportedCreditEntry && entryEconomicsComplete && resolvedEntryCredit != null && hasCloseValue
         ? (isNetDebit ? Math.abs(closeValue) - resolvedEntryCredit : resolvedEntryCredit - Math.abs(closeValue))
         : null,
       pnl, pnlPct, pnlReliable, intent, targetPrice, profitTarget, hitTarget,
@@ -1750,14 +1743,12 @@ export async function loadPositions(
       hasGtc: (() => {
         // Check both the position symbol and its weekly option variant
         // SPX positions may have SPXW option legs; SPXW positions may have SPXW legs
-        if (gtcSymbols.has(symbol)) { console.log(`HASGТС ${symbol}: direct match`); return true; }
+        if (gtcSymbols.has(symbol)) return true;
         // Map underlying to possible OCC prefix variants
         const variants: Record<string, string> = { 'SPX': 'SPXW', 'NDX': 'NDXP', 'RUT': 'RUTW', 'VIX': 'VIXW' };
         const reverseVariants: Record<string, string> = { 'SPXW': 'SPX', 'NDXP': 'NDX', 'RUTW': 'RUT', 'VIXW': 'VIX' };
         const variant = variants[symbol] ?? reverseVariants[symbol];
-        const result = variant ? gtcSymbols.has(variant) : false;
-        console.log(`HASGTC ${symbol}: variant=${variant} result=${result} gtcSymbols=[${Array.from(gtcSymbols).join(',')}]`);
-        return result;
+        return variant ? gtcSymbols.has(variant) : false;
       })(),
       gtcOrderId: (() => {
         const match = findProfitGtcOrder(positionLegs, gtcOrders);
