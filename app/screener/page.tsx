@@ -6967,7 +6967,7 @@ export default function Home() {
   // matching the same convention every other un-set-yet filter uses.
   const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(0);
   const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
-  const [leapsSort, setLeapsSort] = useState<'score' | 'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue'>('score');
+  const [leapsSort, setLeapsSort] = useState<'score' | 'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue' | 'extrinsicPctOfCost'>('score');
   const [leapsSortDir, setLeapsSortDir] = useState<'asc' | 'desc'>('desc');
   const [leapsTradeCandidate, setLeapsTradeCandidate] = useState<typeof leapsResults[number] | null>(null);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
@@ -10279,9 +10279,27 @@ export default function Home() {
                 case 'openInterest': return r.openInterest ?? -1;
                 case 'spreadPct': return r.spreadPct ?? Number.POSITIVE_INFINITY;
                 case 'extrinsicValue': return r.extrinsicValue ?? Number.POSITIVE_INFINITY;
+                case 'extrinsicPctOfCost': {
+                  const mid = r.bid != null && r.ask != null ? (r.bid + r.ask) / 2 : null;
+                  const totalCost = mid != null ? mid * 100 : null;
+                  return r.extrinsicValue != null && totalCost != null && totalCost > 0
+                    ? (r.extrinsicValue * 100 / totalCost) * 100
+                    : Number.POSITIVE_INFINITY;
+                }
               }
             };
-            const sorted = [...filtered].sort((a, b) => (sortValue(a) - sortValue(b)) * (leapsSortDir === 'asc' ? 1 : -1));
+            const sorted = [...filtered].sort((a, b) => {
+              const aValue = sortValue(a);
+              const bValue = sortValue(b);
+              // A missing quote means this percentage cannot be calculated.
+              // Keep those rows after comparable candidates in either direction.
+              if (leapsSort === 'extrinsicPctOfCost') {
+                const aMissing = !Number.isFinite(aValue);
+                const bMissing = !Number.isFinite(bValue);
+                if (aMissing !== bMissing) return aMissing ? 1 : -1;
+              }
+              return (aValue - bValue) * (leapsSortDir === 'asc' ? 1 : -1);
+            });
             // LEAPS-0002 (Diane): matches the Targeted Scan's own
             // active-chip color exactly (border-emerald-500
             // text-emerald-400 bg-emerald-500/10, confirmed directly from
@@ -10338,7 +10356,7 @@ export default function Home() {
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
-                      {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
+                      {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $'], ['extrinsicPctOfCost', 'Extrinsic % Cost']] as const).map(([field, label]) => (
                         <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
                       ))}
                       <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
