@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { fetchEventCalendarBundle } from '@/lib/fundamentals/fmpClient';
+import { normalizeFmpEventCalendar } from '@/lib/scans/eventCalendar';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,7 +20,10 @@ export async function GET(request: NextRequest) {
   }
   try {
     const bundle = await fetchEventCalendarBundle(symbol, from, to);
-    return NextResponse.json({ bundle, verified: false });
+    // Keep raw data available for the one-time provider review, but only
+    // advertise normalized values when every calendar response is an array.
+    const events = normalizeFmpEventCalendar(bundle);
+    return NextResponse.json({ bundle, events, verified: events.complete });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to fetch event data', verified: false }, { status: 502 });
   }

@@ -51,6 +51,7 @@ import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
 import { computePmccScore } from '@/lib/scans/pmccScore';
 import { evaluatePmccReadiness } from '@/lib/scans/pmccReadiness';
+import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
@@ -3226,6 +3227,11 @@ function PmccTradeModal({ result, th, onClose }: {
   const [dryRunResult, setDryRunResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
+  const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
+    now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
+    quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
+    splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt: null,
+  }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
   const [reviewSnapshot] = useState(() => ({
     createdAt: new Date().toISOString(), policyVersion: 'pmcc-readiness-v1',
     longAsk: pair.longLeg.quote.ask, shortBid: pair.shortLeg.quote.bid,
@@ -3235,11 +3241,39 @@ function PmccTradeModal({ result, th, onClose }: {
   const netDebit = pair.metrics?.netDebitPerShare ?? 0;
   const [entryLimit, setEntryLimit] = useState(parseFloat(netDebit.toFixed(2)));
 
+  useEffect(() => {
+    let cancelled = false;
+    const from = new Date().toISOString().slice(0, 10);
+    const to = pair.longLeg.expiration;
+    fetch(`/api/event-risk?symbol=${encodeURIComponent(result.symbol)}&from=${from}&to=${to}`)
+      .then(async response => response.ok ? response.json() : Promise.reject(new Error('Event calendar unavailable')))
+      .then(data => {
+        if (cancelled || !data?.verified || !data?.events) return;
+        const events = data.events;
+        setEventRisk(evaluateEventRisk({
+          now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
+          quoteAgeSeconds: Math.max(pair.longLeg.quote.ageSeconds ?? Infinity, pair.shortLeg.quote.ageSeconds ?? Infinity),
+          tradingHalted: false, eventCheckedAt: events.checkedAt ?? null,
+          earningsDate: events.earningsDate ?? null, exDividendDate: events.exDividendDate ?? null,
+          splitOrSymbolChangeDate: events.splitOrSymbolChangeDate ?? null,
+          shortIsItmOrNearItm: result.price != null && result.price >= pair.shortLeg.strike * 0.99,
+          standardContract: null, occAcknowledgedAt: null,
+        }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
+      })
+      .catch(() => { if (!cancelled) setEventRisk(evaluateEventRisk({
+        now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
+        quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
+        splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt: null,
+      }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 })); });
+    return () => { cancelled = true; };
+  }, [pair.longLeg.expiration, pair.longLeg.quote.ageSeconds, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
+
   const hasOccSymbols = Boolean(pair.longLeg.occSymbol && pair.shortLeg.occSymbol);
   const readiness = evaluatePmccReadiness({
     pair,
     longContractQualified: pair.longLeg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min && pair.longLeg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max,
     earningsDate: result.earningsDate,
+    eventRisk,
     policy: { version: reviewSnapshot.policyVersion, earnings: 'warn' },
   });
   const canValidate = hasOccSymbols && readiness.status === 'PMCC_STRUCTURE_QUALIFIED';
