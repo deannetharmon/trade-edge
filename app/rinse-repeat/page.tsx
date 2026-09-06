@@ -832,7 +832,7 @@ function EnterTradeModal({ result, th, onClose }: {
       <div
         className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-md`}
         onClick={e => e.stopPropagation()}
-        style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
+        style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
       >
         {/* Header */}
         <div className={`flex items-center justify-between px-5 py-4 border-b ${th.border}`}>
@@ -1463,7 +1463,7 @@ export default function RinseRepeatPage() {
   const unqualified = results.filter(r => !r.qualified);
 
   return (
-    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>

@@ -245,7 +245,7 @@ function LoginContent() {
 export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] p-4"
-      style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');`}</style>
       <Suspense fallback={<div className="text-white/40 text-xs tracking-widest">LOADING...</div>}>
         <LoginContent />

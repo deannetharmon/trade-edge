@@ -408,7 +408,7 @@ export default function WheelPage() {
   }, [config, searchRow]);
 
   return (
-    <div className="min-h-screen bg-black text-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-black text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className="border-b border-white/10">
         <div className="flex items-center justify-between px-6 py-3">
           <span className="text-sm font-bold tracking-widest">TRADEEDGE</span>

@@ -310,7 +310,7 @@ function AIChatPanel({ trades, range, th, onClose }: {
 
   return (
     <div className={`fixed top-0 right-0 h-full w-[480px] max-w-[95vw] ${th.sidebar} border-l ${th.border} flex flex-col z-50 shadow-2xl`}
-         style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+         style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       {/* Header */}
       <div className={`flex items-center justify-between px-5 py-4 border-b ${th.border} shrink-0`}>
         <div>
@@ -643,7 +643,7 @@ export default function TradeLogPage() {
   const thCol = `text-[9px] text-[#808080] uppercase tracking-widest font-medium cursor-pointer hover:text-white select-none whitespace-nowrap`;
 
   return (
-    <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 sticky top-0 z-50 flex flex-col`}>
         <div className="flex items-center justify-between w-full pb-2">

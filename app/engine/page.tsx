@@ -2869,7 +2869,7 @@ export default function EnginePage() {
   };
 
   return (
-    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       {/* Order modal */}
       {orderEntry && <EngineOrderModal entry={orderEntry} th={th} onClose={() => setOrderEntry(null)} />}
       {/* ── Header ── */}

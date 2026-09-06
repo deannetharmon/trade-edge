@@ -1626,7 +1626,7 @@ export default function LongBookPage() {
   };
 
   return (
-    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       {/* Modals */}
       {(showNewLeap || chainPreFill) && (
         <NewLeapModal

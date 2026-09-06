@@ -3875,7 +3875,7 @@ function BatchConfirmModal({
   const rejectedCount = orderResults.filter(r => r.status === 'error' || r.status === 'rejected').length;
 
   return (
-    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col`}>
 
         {dryRun && (
@@ -4498,7 +4498,7 @@ function MemoryPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES[T
   const bp = mem.behaviorProfile;
 
   return (
-    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col`}>
         <div className={`flex items-center justify-between px-6 py-4 border-b ${th.border} shrink-0`}>
           <div>
@@ -5115,7 +5115,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
             rows={1}
             disabled={loading}
             className={`flex-1 resize-none text-[11px] px-3 py-2 rounded-xl border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-indigo-500 transition-colors placeholder:${th.textFaint} disabled:opacity-50`}
-            style={{ fontFamily: "'DM Sans', system-ui, sans-serif", minHeight: '36px', maxHeight: '120px' }}
+            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", minHeight: '36px', maxHeight: '120px' }}
             onInput={e => {
               const el = e.currentTarget;
               el.style.height = 'auto';
@@ -5234,7 +5234,7 @@ function PortfolioAnalysisPanel({ analysis, positions, onClose, th }: {
   ].filter(Boolean).join('\n');
 
   return (
-    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col`}>
         <div className={`flex items-center justify-between px-6 py-4 border-b ${th.border} shrink-0`}>
           <div>
@@ -9116,7 +9116,7 @@ function BulkActionBar({ selectedKeys, positions, onExecute, onClear, th }: {
   )));
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="fixed bottom-0 left-0 right-0 z-40" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className="mx-auto max-w-7xl px-6 pb-4">
         <div className={`${th.sidebar} border ${th.border} rounded-xl px-5 py-3 flex items-center gap-4 shadow-2xl`}>
           <div className="flex items-center gap-2 shrink-0">
@@ -9215,7 +9215,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col`}>
 
         {/* Header */}
@@ -9798,7 +9798,7 @@ export default function PortfolioPage() {
   }
 
   return (
-    <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 sticky top-0 z-50 flex flex-col`}>

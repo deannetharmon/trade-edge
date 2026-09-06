@@ -404,7 +404,7 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>
         <div className="flex items-center justify-between w-full pb-3">
           <div className="flex items-center gap-3">

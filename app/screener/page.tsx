@@ -8943,7 +8943,7 @@ export default function Home() {
     activeSession?.status === 'running' ? activeSession.requestedStrategy : null;
 
   return (
-    <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <CcCapacityShadowSnapshotBridge onPortfolioData={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
