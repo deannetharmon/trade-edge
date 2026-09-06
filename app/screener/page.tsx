@@ -3227,6 +3227,7 @@ function PmccTradeModal({ result, th, onClose }: {
   const [dryRunResult, setDryRunResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
+  const [auditStatus, setAuditStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
   const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
     now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
     quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
@@ -3291,6 +3292,20 @@ function PmccTradeModal({ result, th, onClose }: {
     };
   };
 
+  const persistReviewSnapshot = async (brokerOrderId: string) => {
+    const response = await fetch('/api/pmcc-review-snapshots', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol: result.symbol, submittedAt: new Date().toISOString(), brokerOrderId,
+        policyVersion: reviewSnapshot.policyVersion,
+        long: { occSymbol: pair.longLeg.occSymbol ?? null, ask: pair.longLeg.quote.ask, quoteAt: pair.longLeg.quote.quoteTimestamp ?? null },
+        short: { occSymbol: pair.shortLeg.occSymbol ?? null, bid: pair.shortLeg.quote.bid, quoteAt: pair.shortLeg.quote.quoteTimestamp ?? null },
+        eventRisk, occAcknowledgedAt,
+      }),
+    });
+    if (!response.ok) throw new Error('Order submitted, but its review snapshot could not be saved.');
+  };
+
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
@@ -3326,7 +3341,10 @@ function PmccTradeModal({ result, th, onClose }: {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
-      setOrderId(data?.data?.order?.id ?? 'submitted');
+      const submittedOrderId = data?.data?.order?.id ?? 'submitted';
+      setOrderId(submittedOrderId);
+      try { await persistReviewSnapshot(String(submittedOrderId)); setAuditStatus('saved'); }
+      catch { setAuditStatus('failed'); }
       setPhase('done');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -3361,6 +3379,8 @@ function PmccTradeModal({ result, th, onClose }: {
           <p className="mt-1">Captured {reviewSnapshot.createdAt} · Long ask ${reviewSnapshot.longAsk?.toFixed(2) ?? '—'} · Short bid ${reviewSnapshot.shortBid?.toFixed(2) ?? '—'}</p>
           <p>Long quote {reviewSnapshot.longQuoteAt ?? 'timestamp unavailable'} · Short quote {reviewSnapshot.shortQuoteAt ?? 'timestamp unavailable'}</p>
           <p>OCC review {occAcknowledgedAt ? `acknowledged ${occAcknowledgedAt}` : 'not acknowledged'}</p>
+          {auditStatus === 'saved' && <p className="text-emerald-300">Submitted review snapshot saved for 18 months.</p>}
+          {auditStatus === 'failed' && <p className="text-amber-300">Order submitted, but the review snapshot was not saved. Contact support before relying on this audit record.</p>}
           {readiness.status !== 'PMCC_STRUCTURE_QUALIFIED' && <p className="mt-1 text-amber-300">{readiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}</p>}
         </div>
 
