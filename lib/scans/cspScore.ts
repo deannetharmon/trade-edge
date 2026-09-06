@@ -36,18 +36,28 @@
 // constant lives in CSP_SCORE_CONFIG below, not scattered through
 // components.
 
-export const CSP_SCORE_VERSION = 'csp-score-v1';
+export const CSP_SCORE_VERSION = 'csp-score-v2';
 
+// OE-0003 reweighting, Ian's explicit call: IVR's penalty needed to be
+// *felt*, not just theoretically present, without letting it govern the
+// ranking outright -- a low-IVR CSP is less efficient, not dangerous, so
+// it should still be outrankable by a genuinely strong candidate on every
+// other dimension. Moved weight FROM liquidityOi (5->2, already the
+// smallest weight in the model) and eventRisk (10->5, a binary yes/no that
+// doesn't need as much room to express itself as a continuous banded
+// measure like IVR does) -- deliberately NOT from pop/otm/periodRoc/
+// annualizedRoc/liquidityWidth/technical, since those measure trade
+// soundness, which Ian was explicit should outweigh premium efficiency.
 export const CSP_SCORE_WEIGHTS = {
   pop: 10,
   otm: 10,
   periodRoc: 10,
   annualizedRoc: 15,
   liquidityWidth: 15,
-  liquidityOi: 5,
+  liquidityOi: 2,
   technical: 15,
-  ivr: 10,
-  eventRisk: 10,
+  ivr: 18,
+  eventRisk: 5,
 } as const;
 
 // Documented normalization caps -- values at/above the cap map to a 100

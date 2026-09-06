@@ -185,4 +185,18 @@ describe('calculateCspScore -- band-aware IVR scoring', () => {
     const withoutBand = calculateCspScore({ ...fullInputs(), ivr: 18.5 });
     expect(withoutBand.components.ivr).toBe(18.5);
   });
+
+  it('reweighting (Ian, OE-0003): IVR now carries enough weight to meaningfully separate two otherwise-similar candidates, real example from a live scan (HPE 39% IVR vs OXY 18.5% IVR)', () => {
+    // Both candidates identical on every other dimension -- isolates the
+    // effect of the reweighting + band-aware curve together, rather than
+    // real scan noise from unrelated fields.
+    const hpe = calculateCspScore({ ...fullInputs(), ivr: 39, ivrMin: 30, ivrMax: 70 });
+    const oxy = calculateCspScore({ ...fullInputs(), ivr: 18.5, ivrMin: 30, ivrMax: 70 });
+    expect(hpe.total).not.toBeNull();
+    expect(oxy.total).not.toBeNull();
+    // Real, felt gap -- not the ~2-point maximum the old 10pt weight and
+    // flat mapping could ever produce (confirmed by direct calculation
+    // before this fix shipped).
+    expect(hpe.total! - oxy.total!).toBeGreaterThan(4);
+  });
 });
