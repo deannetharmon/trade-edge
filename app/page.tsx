@@ -404,7 +404,7 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+    <div className={`home-dashboard min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>
         <div className="flex items-center justify-between w-full pb-3">
           <div className="flex items-center gap-3">
@@ -459,11 +459,11 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="px-6 py-6 max-w-5xl mx-auto space-y-6">
+      <main className="w-full max-w-[1400px] mx-auto px-6 py-6 space-y-6">
         <MarketConditionsPanel mc={mc} th={th} loading={mcLoading} />
         <div>
           <p className={`text-[9px] font-bold tracking-widest ${th.textFaint} uppercase mb-3`}>Quick Access</p>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
             <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} />
@@ -474,7 +474,7 @@ export default function HomePage() {
             <NavCard href="/wheel-simulator" label="WHEEL SIMULATOR" icon="🎯" desc="Project capital growth for the wheel strategy"    th={th} />
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

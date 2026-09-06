@@ -16,33 +16,33 @@
   font-family: var(--font-inter), system-ui, sans-serif !important;
 }
 
-/* The original interface used 8–10px type extensively. Keep its compact
-   hierarchy while raising the minimum readable UI scale. */
-.text-\[8px\] {
+/* The home dashboard was authored with 8–10px labels. Raise only that
+   page's minimum UI scale instead of changing every screen globally. */
+.home-dashboard .text-\[8px\] {
   font-size: 0.6875rem !important;
   line-height: 1rem !important;
 }
 
-.text-\[9px\] {
+.home-dashboard .text-\[9px\] {
   font-size: 0.75rem !important;
   line-height: 1rem !important;
 }
 
-.text-\[10px\] {
+.home-dashboard .text-\[10px\] {
   font-size: 0.8125rem !important;
   line-height: 1.125rem !important;
 }
 
-.text-\[11px\] {
+.home-dashboard .text-\[11px\] {
   font-size: 0.875rem !important;
   line-height: 1.25rem !important;
 }
 
-.tracking-widest {
+.home-dashboard .tracking-widest {
   letter-spacing: 0.075em !important;
 }
 
-.tracking-wider {
+.home-dashboard .tracking-wider {
   letter-spacing: 0.035em !important;
 }
 
