@@ -47,6 +47,7 @@ import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions
 import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
+import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { computePmccScore } from '@/lib/scans/pmccScore';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
@@ -2670,6 +2671,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
     underlyingPrice: number | null; spreadPct: number | null; extrinsicValue: number | null;
+    score: number | null; scoreIncomplete: boolean;
   };
   th: typeof THEMES[Theme];
   deltaMin: number;
@@ -2703,11 +2705,30 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
     ? (candidate.extrinsicValue * 100 / totalCost) * 100
     : null;
   const deltaInRange = candidate.delta != null && candidate.delta >= deltaMin && candidate.delta <= deltaMax;
+  // LEAPS-0004: score badge color -- same rough good/ok/weak banding
+  // language already used elsewhere in this app for a 0-100 score
+  // (nothing precise here, just "does this read as strong at a glance").
+  const scoreColor = candidate.score == null ? th.textMuted
+    : candidate.score >= 70 ? 'text-emerald-400 border-emerald-600 bg-emerald-500/10'
+    : candidate.score >= 45 ? 'text-yellow-400 border-yellow-600 bg-yellow-500/10'
+    : 'text-red-400 border-red-600 bg-red-500/10';
 
   return (
     <div className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <div className="flex items-center gap-2 text-[11px] shrink-0">
+          {/* LEAPS-0004: score comes first -- Ian's own composite ranking
+              number, the single "how good is this candidate overall"
+              signal, gets top billing ahead of even the symbol/price
+              identification, same prominence PMCC's own score already
+              gets on its cards. */}
+          {candidate.score != null ? (
+            <span className={`text-[12px] font-bold px-2 py-0.5 rounded border ${scoreColor}`} title={candidate.scoreIncomplete ? 'Score computed from partial data' : undefined}>
+              {candidate.score}{candidate.scoreIncomplete && '*'}
+            </span>
+          ) : (
+            <span className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textMuted}`} title="Score unavailable -- delta or open interest missing">—</span>
+          )}
           <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
           {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
           <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
@@ -6918,6 +6939,12 @@ export default function Home() {
     // 'insufficient' status pmccQuoteQuality.ts already defines for
     // exactly this situation, rather than inventing a new one.
     dataQuality: 'ok' | 'insufficient';
+    // LEAPS-0004: composite score per Ian's spec (Cost Efficiency 60pts +
+    // Liquidity 40pts). null when dataQuality is 'insufficient' -- a
+    // score computed from missing inputs would be meaningless, not just
+    // incomplete.
+    score: number | null;
+    scoreIncomplete: boolean;
   }>>([]);
   // LEAPS-0001 -- result filters, same preset-chip pattern as
   // FilteredResultControls. Delta range default 0.70-0.85 per Ian's
@@ -6940,7 +6967,7 @@ export default function Home() {
   // matching the same convention every other un-set-yet filter uses.
   const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(0);
   const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
-  const [leapsSort, setLeapsSort] = useState<'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue'>('delta');
+  const [leapsSort, setLeapsSort] = useState<'score' | 'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue'>('score');
   const [leapsSortDir, setLeapsSortDir] = useState<'asc' | 'desc'>('desc');
   const [leapsTradeCandidate, setLeapsTradeCandidate] = useState<typeof leapsResults[number] | null>(null);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
@@ -8135,10 +8162,21 @@ export default function Home() {
             // "adjustable, not fixed") -- narrowing now happens in the
             // results filter UI, on the full fetched set.
             const dataQuality: 'ok' | 'insufficient' = leg.delta != null && leg.openInterest != null ? 'ok' : 'insufficient';
+            const totalCost = mid != null ? mid * 100 : null;
+            const { total: score, incomplete: scoreIncomplete } = computeLeapsScore({
+              extrinsicValue, totalCost, spreadPct, openInterest: leg.openInterest,
+            });
             return {
               symbol, expiration: leg.expiration, dte: daysUntil(leg.expiration), strike: leg.strike,
               delta: leg.delta, openInterest: leg.openInterest, bid: leg.bid, ask: leg.ask, occSymbol: leg.occSymbol,
               underlyingPrice, spreadPct, extrinsicValue, dataQuality,
+              // LEAPS-0004: score is only meaningful for dataQuality 'ok'
+              // candidates -- an 'insufficient' one is missing the exact
+              // inputs the score needs, so it's forced to null here rather
+              // than showing a partial/misleading number for a candidate
+              // already flagged as data-incomplete elsewhere.
+              score: dataQuality === 'ok' ? score : null,
+              scoreIncomplete: dataQuality === 'ok' && scoreIncomplete,
             };
           });
       }))).flat().sort((a, b) => a.symbol.localeCompare(b.symbol) || a.dte - b.dte || a.strike - b.strike);
@@ -10235,6 +10273,7 @@ export default function Home() {
             });
             const sortValue = (r: typeof leapsResults[number]): number => {
               switch (leapsSort) {
+                case 'score': return r.score ?? -1;
                 case 'delta': return r.delta ?? -1;
                 case 'dte': return r.dte;
                 case 'openInterest': return r.openInterest ?? -1;
@@ -10299,7 +10338,7 @@ export default function Home() {
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
-                      {([['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
+                      {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $']] as const).map(([field, label]) => (
                         <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
                       ))}
                       <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
