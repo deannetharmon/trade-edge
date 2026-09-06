@@ -2938,7 +2938,6 @@ function TradeModal({ result, th, onClose }: {
   const [dryRunResult, setDryRunResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
-
   const isPMCC = c.strategy === 'PMCC';
 
   const defaultEntryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
@@ -3227,11 +3226,23 @@ function PmccTradeModal({ result, th, onClose }: {
   const [dryRunResult, setDryRunResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
+  const [reviewSnapshot] = useState(() => ({
+    createdAt: new Date().toISOString(), policyVersion: 'pmcc-readiness-v1',
+    longAsk: pair.longLeg.quote.ask, shortBid: pair.shortLeg.quote.bid,
+    longQuoteAt: pair.longLeg.quote.quoteTimestamp, shortQuoteAt: pair.shortLeg.quote.quoteTimestamp,
+  }));
 
   const netDebit = pair.metrics?.netDebitPerShare ?? 0;
   const [entryLimit, setEntryLimit] = useState(parseFloat(netDebit.toFixed(2)));
 
   const hasOccSymbols = Boolean(pair.longLeg.occSymbol && pair.shortLeg.occSymbol);
+  const readiness = evaluatePmccReadiness({
+    pair,
+    longContractQualified: pair.longLeg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min && pair.longLeg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max,
+    earningsDate: result.earningsDate,
+    policy: { version: reviewSnapshot.policyVersion, earnings: 'warn' },
+  });
+  const canValidate = hasOccSymbols && readiness.status === 'PMCC_STRUCTURE_QUALIFIED';
   const debit = entryLimit * quantity;
 
   const buildPayload = (qty: number) => {
@@ -3248,6 +3259,7 @@ function PmccTradeModal({ result, th, onClose }: {
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
+      if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; refresh and review its current gate results.');
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildPayload(quantity);
@@ -3268,6 +3280,7 @@ function PmccTradeModal({ result, th, onClose }: {
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
+      if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; order submission is blocked pending review.');
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildPayload(quantity);
@@ -3306,6 +3319,13 @@ function PmccTradeModal({ result, th, onClose }: {
 
         <div className="p-3 bg-cyan-500/10 border border-cyan-600 rounded-lg mb-4">
           <p className="text-[10px] text-cyan-300">Entry only. No profit-target or stop-loss is submitted with this order -- the short call is managed separately (its own GTC target), and the long LEAPS leg has no mechanical exit.</p>
+        </div>
+
+        <div className={`mb-4 rounded-lg border ${th.border} p-3 text-[10px] ${th.textMuted}`}>
+          <p className="font-bold text-cyan-300">REVIEW SNAPSHOT · {reviewSnapshot.policyVersion}</p>
+          <p className="mt-1">Captured {reviewSnapshot.createdAt} · Long ask ${reviewSnapshot.longAsk?.toFixed(2) ?? '—'} · Short bid ${reviewSnapshot.shortBid?.toFixed(2) ?? '—'}</p>
+          <p>Long quote {reviewSnapshot.longQuoteAt ?? 'timestamp unavailable'} · Short quote {reviewSnapshot.shortQuoteAt ?? 'timestamp unavailable'}</p>
+          {readiness.status !== 'PMCC_STRUCTURE_QUALIFIED' && <p className="mt-1 text-amber-300">{readiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}</p>}
         </div>
 
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
@@ -3372,7 +3392,7 @@ function PmccTradeModal({ result, th, onClose }: {
         {phase !== 'done' && (
           <div className="flex gap-2">
             {!dryRunResult ? (
-              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun'}
+              <button onClick={runDryRun} disabled={!canValidate || phase === 'dryrun'}
                 className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
                 {phase === 'dryrun' ? 'VALIDATING...' : 'VALIDATE ORDER'}
               </button>
