@@ -133,13 +133,13 @@ function DecisionScorecard({ managementIntent, th }: { managementIntent: Managem
                       {candidate.label}
                       {candidate.isWinner ? ' (winner)' : ''}
                     </span>
-                    <span className={`font-mono text-[10px] ${th.textFaint}`}>{candidate.score}</span>
+                    <span className={`font-sans text-[10px] ${th.textFaint}`}>{candidate.score}</span>
                   </div>
                   {candidate.contributions.length > 0 && (
                     <ul className="mt-1 space-y-0.5">
                       {candidate.contributions.map((contribution) => (
                         <li key={contribution.id} className={`text-[10px] ${th.textFaint}`}>
-                          <span className="font-mono">{contribution.points >= 0 ? `+${contribution.points}` : contribution.points}</span>
+                          <span className="font-sans">{contribution.points >= 0 ? `+${contribution.points}` : contribution.points}</span>
                           {' '}
                           {contribution.label}
                         </li>

@@ -37,7 +37,7 @@ export default function AuthCompletePage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]"
-      style={{ fontFamily: "'DM Mono', monospace" }}>
+      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <p className="text-white/40 text-xs tracking-widest">COMPLETING LOGIN...</p>
     </div>
   );

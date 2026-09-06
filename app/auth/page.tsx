@@ -56,7 +56,7 @@ export default function AuthComplete() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
-      <p className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
+      <p className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
         COMPLETING LOGIN...
       </p>
     </div>

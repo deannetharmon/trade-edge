@@ -52,7 +52,7 @@ export function DailyPriorityList({
 
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${urgencyDot[item.urgency]}`} />
 
-              <span className="w-16 shrink-0 font-mono text-xs font-bold text-white">
+              <span className="w-16 shrink-0 font-sans text-xs font-bold text-white">
                 {item.symbol}
               </span>
 
@@ -66,7 +66,7 @@ export function DailyPriorityList({
                 {item.reason}
               </span>
 
-              <span className="w-8 shrink-0 text-right font-mono text-[10px] text-white/40">
+              <span className="w-8 shrink-0 text-right font-sans text-[10px] text-white/40">
                 {item.score}
               </span>
             </button>

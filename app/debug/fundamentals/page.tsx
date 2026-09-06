@@ -37,7 +37,7 @@ export default function FundamentalsDebugPage() {
   };
 
   return (
-    <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
+    <div style={{ padding: 24, fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
       <h1 style={{ fontSize: 14, marginBottom: 12 }}>Fundamentals Debug (FMP)</h1>
       <p style={{ marginBottom: 12, opacity: 0.7, maxWidth: 720 }}>
         Raw FMP response for a symbol -- price-target-consensus, price-target-summary, grades-summary, balance-sheet-statement,

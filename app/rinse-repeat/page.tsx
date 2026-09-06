@@ -9,16 +9,6 @@ import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────
 const BASE       = 'https://api.tastytrade.com';
 const CLIENT_ID  = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -838,7 +828,7 @@ function EnterTradeModal({ result, th, onClose }: {
         <div className={`flex items-center justify-between px-5 py-4 border-b ${th.border}`}>
           <div>
             <div className="flex items-center gap-2">
-              <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{profile.symbol}</span>
+              <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{profile.symbol}</span>
               <span className={`text-[10px] px-2 py-0.5 border rounded font-bold ${c.strategy === 'BPS' ? 'border-emerald-600 text-emerald-400' : c.strategy === 'BCS' ? 'border-red-600 text-red-400' : 'border-purple-600 text-purple-400'}`}>{c.strategy}</span>
               <span className={`text-[10px] ${th.textFaint}`}>{c.expiration} · {c.dte}d</span>
             </div>
@@ -999,7 +989,7 @@ function RRCard({ result, th, existingPositions }: {
       <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
         {/* Symbol + price */}
         <div className="w-20 shrink-0">
-          <p className={`font-bold ${th.text} text-sm`} style={{ fontFamily: "'DM Mono', monospace" }}>{profile.symbol}</p>
+          <p className={`font-bold ${th.text} text-sm`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{profile.symbol}</p>
           {currentPrice && <p className={`text-[10px] ${th.textFaint}`}>${currentPrice.toFixed(2)}</p>}
           <div className="relative mt-0.5">
             <button
@@ -1056,7 +1046,7 @@ function RRCard({ result, th, existingPositions }: {
                     return (
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{profile.symbol}</span>
+                          <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{profile.symbol}</span>
                           <span className="text-[10px] font-bold" style={{ color }}>${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span></span>
                         </div>
                         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '56px' }}>
@@ -1095,7 +1085,7 @@ function RRCard({ result, th, existingPositions }: {
         {/* Your history on this symbol */}
         <div className="shrink-0">
           <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Your History</p>
-          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
             <span className="text-emerald-400">{profile.winCount}W</span>
             <span className={th.textFaint}>/</span>
             <span className="text-red-400">{losses.length}L</span>
@@ -1111,11 +1101,11 @@ function RRCard({ result, th, existingPositions }: {
           <>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Expiry</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{c.expiration} <span className={th.textFaint}>({c.dte}d)</span></p>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{c.expiration} <span className={th.textFaint}>({c.dte}d)</span></p>
             </div>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Strikes</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {c.strategy === 'IC'
                   ? `${c.shortStrike}P/${c.longStrike}P · ${c.shortCallStrike}C/${c.longCallStrike}C`
                   : `${c.shortStrike}/${c.longStrike}`}
@@ -1123,15 +1113,15 @@ function RRCard({ result, th, existingPositions }: {
             </div>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Credit</p>
-              <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${(c.totalCredit ?? c.credit).toFixed(2)}</p>
+              <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${(c.totalCredit ?? c.credit).toFixed(2)}</p>
             </div>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>ROC</p>
-              <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{c.roc.toFixed(0)}%</p>
+              <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{c.roc.toFixed(0)}%</p>
             </div>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>POP</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{c.pop?.toFixed(0) ?? '—'}%</p>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{c.pop?.toFixed(0) ?? '—'}%</p>
             </div>
             <div className="shrink-0">
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>OTM</p>
@@ -1145,7 +1135,7 @@ function RRCard({ result, th, existingPositions }: {
                   : null
                   : null;
                 return (
-                  <p className={`text-xs font-bold ${otmPct == null ? th.textFaint : otmPct >= 7 ? 'text-emerald-400' : otmPct >= 4 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <p className={`text-xs font-bold ${otmPct == null ? th.textFaint : otmPct >= 7 ? 'text-emerald-400' : otmPct >= 4 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     {otmPct != null ? `${otmPct.toFixed(1)}%` : '—'}
                   </p>
                 );
@@ -1157,7 +1147,7 @@ function RRCard({ result, th, existingPositions }: {
         {currentIvr != null && (
           <div className="shrink-0">
             <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>IVR</p>
-            <p className={`text-xs font-bold ${currentIvr >= 30 ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{currentIvr.toFixed(0)}%</p>
+            <p className={`text-xs font-bold ${currentIvr >= 30 ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{currentIvr.toFixed(0)}%</p>
           </div>
         )}
 
@@ -1241,14 +1231,14 @@ function RRCard({ result, th, existingPositions }: {
                     style={{ gridTemplateColumns: '14px 1fr 1fr 48px 48px 48px 52px 52px' }}>
                     <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isWin ? 'bg-emerald-500' : isLoss ? 'bg-red-500' : 'bg-yellow-500'}`} />
                     <span className={th.textFaint}>{fmtDate(t.openDate)} → {fmtDate(t.closeDate)}</span>
-                    <span className={`${th.textFaint} font-mono text-[9px]`}>{t.strikes}</span>
+                    <span className={`${th.textFaint} font-sans text-[9px]`}>{t.strikes}</span>
                     <span className={`${th.textFaint} text-right`}>{t.dteAtEntry}d</span>
                     <span className={`${th.textFaint} text-right`}>{t.holdDays}d</span>
-                    <span className="text-right font-mono text-emerald-400">${t.creditReceived.toFixed(2)}</span>
-                    <span className={`text-right font-bold font-mono ${isWin ? 'text-emerald-400' : isLoss ? 'text-red-400' : th.textFaint}`}>
+                    <span className="text-right font-sans text-emerald-400">${t.creditReceived.toFixed(2)}</span>
+                    <span className={`text-right font-bold font-sans ${isWin ? 'text-emerald-400' : isLoss ? 'text-red-400' : th.textFaint}`}>
                       {t.pnl >= 0 ? '+' : ''}{t.pnlPct.toFixed(0)}%
                     </span>
-                    <span className={`text-right font-mono ${isWin ? 'text-emerald-400' : isLoss ? 'text-red-400' : th.textFaint}`}>
+                    <span className={`text-right font-sans ${isWin ? 'text-emerald-400' : isLoss ? 'text-red-400' : th.textFaint}`}>
                       {t.pnl >= 0 ? '+' : ''}${Math.abs(t.pnl).toFixed(0)}
                     </span>
                   </div>
@@ -1470,8 +1460,8 @@ export default function RinseRepeatPage() {
         <div className="flex items-center justify-between w-full pb-2">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
-              <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "'DM Mono', monospace" }}>REPEAT STRATEGIES</p>
+              <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
+              <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>REPEAT STRATEGIES</p>
             </div>
           </div>
           <div className="flex items-center gap-2">

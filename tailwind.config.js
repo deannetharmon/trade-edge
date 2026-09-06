@@ -14,6 +14,12 @@ module.exports = {
     // plausible but incorrect theory and never touched the real cause.
     './features/**/*.{js,ts,jsx,tsx,mdx}',
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+      },
+    },
+  },
   plugins: [],
 };

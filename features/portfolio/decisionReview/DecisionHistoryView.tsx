@@ -177,7 +177,7 @@ export function DecisionHistoryView({ reviews, openPositionIds = [], closedTrade
                       </span>
                     )}
                   </td>
-                  <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <td className={`text-[12px] ${th.textMuted} px-3 py-2 whitespace-nowrap`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     {formatPnl(review.realizedPnl)}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">

@@ -32,7 +32,7 @@ export default function PositionSnapshotsDebugPage() {
     : [];
 
   return (
-    <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
+    <div style={{ padding: 24, fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
       <h1 style={{ fontSize: 14, marginBottom: 12 }}>Position Lifecycle Snapshots (debug)</h1>
       {error && <p style={{ color: '#f66' }}>Error: {error}</p>}
       {!store && !error && <p>Loading...</p>}

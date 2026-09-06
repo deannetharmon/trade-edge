@@ -80,7 +80,7 @@ export function ActiveBrokerAccountIndicator() {
         ) : (
           <>
             <span className="hidden max-w-32 truncate xl:inline">{selected?.label ?? 'Account'}</span>
-            <span className="font-mono">••••{accountId?.slice(-4) ?? ''}</span>
+            <span className="font-sans">••••{accountId?.slice(-4) ?? ''}</span>
           </>
         )}
       </button>
@@ -90,7 +90,7 @@ export function ActiveBrokerAccountIndicator() {
           {choiceMessage && <p className="px-2 pb-2 text-[10px] text-amber-300">{choiceMessage}</p>}
           {accounts.map(account => (
             <button key={account.id} type="button" onClick={() => { selectAccount(account.id); setOpen(false); }} className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-neutral-800">
-              <span>{account.label}</span><span className="font-mono text-neutral-400">••••{account.id.slice(-4)}{account.id === accountId ? ' ✓' : ''}</span>
+              <span>{account.label}</span><span className="font-sans text-neutral-400">••••{account.id.slice(-4)}{account.id === accountId ? ' ✓' : ''}</span>
             </button>
           ))}
           <button type="button" onClick={() => void refresh()} className="mt-1 w-full rounded-lg border border-neutral-800 px-2 py-1.5 text-neutral-400 hover:text-white">Refresh accounts</button>

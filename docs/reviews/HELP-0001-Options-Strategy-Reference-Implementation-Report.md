@@ -28,7 +28,7 @@ Nothing else was touched. No changes anywhere near `lib/decision-engine`, `lib/o
 ## 3. Reused components and styles
 
 - **Theme system**: `@/lib/theme` (`THEMES`, `getSavedTheme`, `Theme`) — the shared, canonical module already used by ~28 other pages/components. `app/help/page.tsx` itself still has an older, locally-duplicated `THEMES`/`getSavedTheme` (a pre-existing outlier, not touched by this ticket); the new `/help/strategies` route uses the shared module directly rather than copying that local duplicate, per the established convention.
-- **Visual language**: the same border/card/mono-font conventions as `app/help/page.tsx` and `app/screener/page.tsx` (`font-mono`, `text-[10-12px]` scale, `border`/`rounded-xl`/`rounded-lg` card treatment) — no new design system introduced.
+- **Visual language**: the same border/card/mono-font conventions as `app/help/page.tsx` and `app/screener/page.tsx` (`font-sans`, `text-[10-12px]` scale, `border`/`rounded-xl`/`rounded-lg` card treatment) — no new design system introduced.
 - Everything else (goal picker, cards, detail view, comparison tray, disclosure sections) is new — there was no existing accessible disclosure/accordion, radio-group, checkbox-group, or comparison-with-cap component anywhere in the repo to reuse (confirmed by search: zero existing uses of `aria-expanded`, `role="dialog"`, `role="radio"`, or any accessible UI library in `package.json`). These were hand-built using native, semantic HTML (`<fieldset>`/`<legend>`/`<input type="radio">`, `<input type="checkbox">`, `<details>`/`<summary>`) rather than hand-rolled ARIA widgets, which gets correct keyboard behavior and screen-reader semantics for free from the browser.
 
 ## 4. Canonical content-model location

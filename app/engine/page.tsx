@@ -8,16 +8,6 @@ import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 // ── Font injection ─────────────────────────────────────────────────────────
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -1532,7 +1522,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
           return (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{symbol}</span>
+                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{symbol}</span>
                 <span className="text-[10px] font-bold" style={{ color }}>
                   ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
                 </span>
@@ -1585,7 +1575,7 @@ function SpxPositionRow({ pos, th, spotPrice }: { pos: SpxPosition; th: typeof T
       <div className={`flex items-center gap-3 px-4 py-2.5`}>
         {/* Column 1: Strikes & Expiration Only */}
         <div className="w-32 shrink-0">
-          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol} {pos.shortStrike}/{pos.longStrike}P</p>
+          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{pos.symbol} {pos.shortStrike}/{pos.longStrike}P</p>
           <p className={`text-[9px] ${th.textFaint}`}>{pos.expiration} · {pos.dte}d DTE</p>
         </div>
         
@@ -2019,7 +2009,7 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
               </div>
               <div className="flex justify-between">
                 <span className={`text-[10px] ${th.textFaint}`}>Strikes</span>
-                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                   {isWheelEntry ? `${entry.shortStrike}${entry.strategy === 'CC' ? 'C' : 'P'}` : `${entry.shortStrike}/${entry.longStrike}${entry.strategy === 'BCS' ? 'C' : 'P'}`}
                 </span>
               </div>
@@ -2030,13 +2020,13 @@ function EngineOrderModal({ entry, th, onClose }: { entry: EngineOrderEntry; th:
               {isWheelEntry && (
                 <div className="flex justify-between gap-3">
                   <span className={`text-[10px] ${th.textFaint}`}>Resolved contract</span>
-                  <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "'DM Mono', monospace" }}>{resolvingOption ? 'Resolving...' : resolvedOcc || 'Not resolved'}</span>
+                  <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{resolvingOption ? 'Resolving...' : resolvedOcc || 'Not resolved'}</span>
                 </div>
               )}
               {!isWheelEntry && (
                 <div className="flex justify-between gap-3">
                   <span className={`text-[10px] ${th.textFaint}`}>Live OCC symbols</span>
-                  <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <span className={`text-[10px] ${th.text} text-right`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     {resolvingOption ? 'Fetching live price...' : resolvedOcc ? `${resolvedOcc.trim()} / ${resolvedLongOcc.trim()}` : 'Pending'}
                   </span>
                 </div>
@@ -2405,7 +2395,7 @@ function EngineAdvisor({ data, watchlist, th }: { data: EngineData; watchlist: s
             placeholder="Ask about your positions, entries, strikes, capital..."
             rows={2}
             className={`flex-1 resize-none ${th.input} border ${th.inputBorder} rounded-lg px-3 py-2 text-[11px] ${th.text} focus:outline-none focus:border-violet-500`}
-            style={{ fontFamily: "'DM Sans', sans-serif" }}
+            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
           />
           <button onClick={send} disabled={(!input.trim() && !pendingImage) || loading}
             className="shrink-0 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-bold rounded-lg transition-colors">
@@ -2889,8 +2879,8 @@ export default function EnginePage() {
               <circle r="2" fill="#00d4aa"/>
             </svg>
             <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "'DM Mono', monospace", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
+              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
+              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -3003,7 +2993,7 @@ export default function EnginePage() {
                   {includeMargin ? 'w/ Margin' : 'Cash Only'}
                 </button>
               </div>
-              <p className={`text-xl font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xl font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 ${(includeMargin ? d.capital.obp : d.capital.obpCash).toLocaleString()}
               </p>
             </div>
@@ -3210,12 +3200,12 @@ export default function EnginePage() {
                   <input type="number" min="0.05" max="0.30" step="0.01" value={deltaRange[0]}
                     onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(v, deltaRange[1]); runEngine(); } }}
                     className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
-                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} />
                   <span className={`text-[9px] ${th.textFaint}`}>–</span>
                   <input type="number" min="0.10" max="0.35" step="0.01" value={deltaRange[1]}
                     onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) { saveDeltaRange(deltaRange[0], v); runEngine(); } }}
                     className={`w-14 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-blue-500 text-center`}
-                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} />
                 </div>
                 {/* OTM floor control — hard reject below this %, on top of the delta filter above. */}
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -3257,7 +3247,7 @@ export default function EnginePage() {
                       }
                     }}
                     className={`w-12 text-[9px] px-1.5 py-1 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-amber-500 text-center`}
-                    style={{ fontFamily: '"DM Mono", monospace' }}
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                   />
                   <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 </div>
@@ -3281,7 +3271,7 @@ export default function EnginePage() {
                   {d.spxSuggestedEntry && (
                     <div className={`px-4 py-3 border-b border-emerald-600/20 ${d.spxSuggestedEntry.rationale.startsWith('★') ? 'bg-yellow-500/5' : 'bg-emerald-500/5'}`}>
                       <div className="flex items-center gap-3 mb-1.5">
-                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>SPX</span>
+                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>SPX</span>
                         <ChartButton symbol="SPX" th={th} isOpen={openChartSymbol === 'SPX'} onOpen={openChart} onClose={closeChart} />
                         <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold shrink-0 ${d.spxSuggestedEntry.rationale.startsWith('★') ? 'border-yellow-600 text-yellow-300 bg-yellow-500/10' : 'border-emerald-700 text-emerald-400 bg-emerald-500/10'}`}>
                           {d.spxSuggestedEntry.rationale.startsWith('★') ? '★ PRIME' : d.spxSuggestedEntry.strategy}
@@ -3295,14 +3285,14 @@ export default function EnginePage() {
                         </button>
                       </div><div className="flex items-center gap-6 px-1">
                       <div>
-                        <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                        <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                           {d.spxSuggestedEntry.shortStrike}/{d.spxSuggestedEntry.longStrike}P
                         </p>
                         <p className={`text-[9px] ${th.textFaint}`}>{d.spxSuggestedEntry.expiration} · {d.spxSuggestedEntry.dte}d DTE</p>
                       </div>
                       <div className="flex items-center gap-6 px-1">
                         <div>
-                          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                             {d.spxSuggestedEntry.shortStrike}/{d.spxSuggestedEntry.longStrike}P
                           </p>
                           <p className={`text-[9px] ${th.textFaint}`}>{d.spxSuggestedEntry.expiration} · {d.spxSuggestedEntry.dte}d DTE</p>
@@ -3384,7 +3374,7 @@ export default function EnginePage() {
                       <div className="space-y-1.5">
                         {d.spxSuggestedAlternates.map((alt, i) => (
                           <div key={i} className="flex items-center gap-4 px-2 py-1.5 rounded-lg bg-white/[0.02]">
-                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{alt.shortStrike}/{alt.longStrike}P</span>
+                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{alt.shortStrike}/{alt.longStrike}P</span>
                             <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
                             <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
                             <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
@@ -3407,7 +3397,7 @@ export default function EnginePage() {
                   {d.spySuggestedEntry && (
                     <div className="px-4 py-3 bg-emerald-500/5">
                       <div className="flex items-center gap-3 mb-1.5">
-                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>SPY</span>
+                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>SPY</span>
                         <ChartButton symbol="SPY" th={th} isOpen={openChartSymbol === 'SPY'} onOpen={openChart} onClose={closeChart} />
                         <span className="text-[8px] px-1.5 py-0.5 border border-emerald-700 text-emerald-400 bg-emerald-500/10 rounded font-bold shrink-0">{d.spySuggestedEntry.strategy}</span>
                         <span className="text-[8px] px-1.5 py-0.5 border border-cyan-700 text-cyan-400 bg-cyan-500/10 rounded font-bold shrink-0">{d.spySuggestedEntry.spreadWidth}-WIDE · ST TAX</span>
@@ -3420,7 +3410,7 @@ export default function EnginePage() {
                       </div>
                       <div className="flex items-center gap-6 px-1">
                         <div>
-                          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                          <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                             {d.spySuggestedEntry.shortStrike}/{d.spySuggestedEntry.longStrike}{d.spySuggestedEntry.strategy === 'BCS' ? 'C' : 'P'}
                           </p>
                           <p className={`text-[9px] ${th.textFaint}`}>{d.spySuggestedEntry.expiration} · {d.spySuggestedEntry.dte}d DTE · {d.spySuggestedEntry.strategy}</p>
@@ -3485,7 +3475,7 @@ export default function EnginePage() {
                       <div className="space-y-1.5">
                         {d.spySuggestedAlternates.map((alt, i) => (
                           <div key={i} className="flex items-center gap-4 px-2 py-1.5 rounded-lg bg-white/[0.02]">
-                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{alt.shortStrike}/{alt.longStrike}{alt.strategy === 'BCS' ? 'C' : 'P'}</span>
+                            <span className={`text-[10px] font-bold ${th.text} w-24 shrink-0`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{alt.shortStrike}/{alt.longStrike}{alt.strategy === 'BCS' ? 'C' : 'P'}</span>
                             <span className={`text-[9px] ${th.textFaint} w-28 shrink-0`}>{alt.expiration} · {alt.dte}d</span>
                             <span className="text-[9px] text-emerald-400 font-bold w-12 shrink-0">{alt.pop.toFixed(0)}% POP</span>
                             <span className={`text-[9px] ${th.textFaint} w-16 shrink-0`}>${alt.credit.toFixed(2)} cr</span>
@@ -3545,7 +3535,7 @@ export default function EnginePage() {
                           </span>
                           <div className="flex flex-col">
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{sug.symbol}</span>
+                              <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{sug.symbol}</span>
                               <ChartButton symbol={sug.symbol} th={th} isOpen={openChartSymbol === sug.symbol} onOpen={openChart} onClose={closeChart} />
                             </div>
                             {sug.strike && <span className={`text-[9px] ${th.textFaint}`}>{sug.strike}{sug.action === 'sell-put' ? 'P' : 'C'} · ~{sug.dte}d DTE</span>}
@@ -3556,7 +3546,7 @@ export default function EnginePage() {
                         </div>
                         {sug.capitalRequired && (
                           <div className="text-right shrink-0">
-                            <p className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>${sug.capitalRequired.toLocaleString()}</p>
+                            <p className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${sug.capitalRequired.toLocaleString()}</p>
                             <p className={`text-[9px] ${th.textFaint}`}>required</p>
                           </div>
                         )}

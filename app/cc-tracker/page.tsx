@@ -181,7 +181,7 @@ export default function CCTracker() {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: 20, background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", padding: 20, background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <h2 style={{ margin: 0 }}>Wheel Capital Model — CC + CSP</h2>
         <button onClick={fetchAll} style={{ padding: "6px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>

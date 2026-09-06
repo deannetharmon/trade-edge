@@ -381,7 +381,7 @@ export default function OptionsStrategyReferencePage() {
   const selectedStrategy = selectedStrategyId ? getStrategy(selectedStrategyId) : null;
 
   return (
-    <div className={`min-h-screen ${th.bg} font-mono transition-colors duration-200`}>
+    <div className={`min-h-screen ${th.bg} font-sans transition-colors duration-200`}>
       <div className={`${th.header} border-b ${th.border} px-4 sm:px-6 py-4`}>
         <a href="/help" className={`text-[10px] ${th.textFaint} hover:text-blue-400 transition-colors tracking-wider`}>← Back to Help</a>
         <h1 className="text-base font-bold tracking-widest text-white mt-1">OPTIONS STRATEGY REFERENCE</h1>

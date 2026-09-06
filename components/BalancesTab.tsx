@@ -209,15 +209,15 @@ export default function BalancesTab() {
           <div className="grid grid-cols-3 gap-4">
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Liquidating Value</p>
-              <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.netLiquidatingValue)}</p>
+              <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{fmtMoney(current.netLiquidatingValue)}</p>
             </div>
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Cash Balance</p>
-              <p className="text-2xl font-bold" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtMoney(current.cashBalance)}</p>
+              <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{fmtMoney(current.cashBalance)}</p>
             </div>
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Options Value</p>
-              <p className={`text-2xl font-bold ${current.netOptionsValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-2xl font-bold ${current.netOptionsValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {fmtSignedMoney(current.netOptionsValue)}
               </p>
             </div>

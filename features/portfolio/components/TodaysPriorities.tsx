@@ -156,7 +156,7 @@ export const PriorityCard = memo(function PriorityCard({
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className={`text-[9px] uppercase tracking-widest ${style.text} font-bold`}>{objective.priority}</span>
             <span className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>{URGENCY_LABEL[objective.urgency]}</span>
-            <span className={`font-mono text-[9px] ${th.textFaint}`}>{objective.ruleId}</span>
+            <span className={`font-sans text-[9px] ${th.textFaint}`}>{objective.ruleId}</span>
           </div>
         </div>
 

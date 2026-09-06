@@ -111,7 +111,7 @@ function LoginContent() {
   if (step === 'loading' || step === 'connecting') {
     return (
       <div className="flex flex-col items-center gap-4">
-        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
+        <div className="text-white/40 text-xs tracking-widest" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
           {step === 'connecting' ? 'CONNECTING...' : 'LOADING...'}
         </div>
       </div>
@@ -124,9 +124,9 @@ function LoginContent() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
           <h1 className="text-xl font-bold tracking-widest text-white"
-            style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
+            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
           <p className="text-[10px] text-white/40 mt-1 tracking-wider"
-            style={{ fontFamily: "'DM Mono', monospace" }}>BPS · BCS · IRON CONDOR</p>
+            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>BPS · BCS · IRON CONDOR</p>
         </div>
 
         <div className="bg-[#111] border border-[#222] rounded-2xl p-8">
@@ -157,9 +157,9 @@ function LoginContent() {
     <div className="w-full max-w-sm">
       <div className="text-center mb-10">
         <h1 className="text-xl font-bold tracking-widest text-white"
-          style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
+          style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
         <p className="text-[10px] text-white/40 mt-1 tracking-wider"
-          style={{ fontFamily: "'DM Mono', monospace" }}>BPS · BCS · IRON CONDOR</p>
+          style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>BPS · BCS · IRON CONDOR</p>
       </div>
 
       <div className="bg-[#111] border border-[#222] rounded-2xl p-8">
@@ -195,7 +195,7 @@ function LoginContent() {
               onChange={e => setRefreshToken(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleConnectTastyTrade()}
               autoFocus
-              className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-mono"
+              className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-sans"
               placeholder="paste refresh token"
             />
             <button type="button" onClick={() => setShowRefresh(v => !v)}
@@ -213,7 +213,7 @@ function LoginContent() {
               value={clientSecret}
               onChange={e => setClientSecret(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleConnectTastyTrade()}
-              className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-mono"
+              className="w-full px-4 py-3 pr-11 bg-[#0a0a0a] border border-[#2c2c2c] rounded-lg text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors font-sans"
               placeholder="paste client secret"
             />
             <button type="button" onClick={() => setShowSecret(v => !v)}
@@ -246,7 +246,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] p-4"
       style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');`}</style>
       <Suspense fallback={<div className="text-white/40 text-xs tracking-widest">LOADING...</div>}>
         <LoginContent />
       </Suspense>

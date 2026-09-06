@@ -18,16 +18,6 @@ if (typeof document !== 'undefined') {
     document.head.appendChild(style);
   }
 }
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 type Theme = 'dark' | 'medium' | 'light';
 const LS_THEME = 'hunter-theme';
 const LS_ACCENT = 'hunter-accent';
@@ -421,8 +411,8 @@ export default function HomePage() {
               <circle r="2" fill="#00d4aa"/>
             </svg>
             <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "'DM Mono', monospace", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
+              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
+              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -459,11 +449,11 @@ export default function HomePage() {
         </div>
       </div>
 
-      <main className="w-full max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+      <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
         <MarketConditionsPanel mc={mc} th={th} loading={mcLoading} />
         <div>
           <p className={`text-[9px] font-bold tracking-widest ${th.textFaint} uppercase mb-3`}>Quick Access</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
             <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} />

@@ -267,17 +267,6 @@ if (typeof document !== 'undefined') {
   }
 }
 
-// Inject DM Sans font
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 const LS_AUDIT_LOG = 'hunter-audit-log';
 const LS_MEMORY = 'hunter-trading-memory';
 const LS_DRY_RUN = 'hunter-dry-run';
@@ -3968,12 +3957,12 @@ function BatchConfirmModal({
                   <div key={i} className={`p-3 rounded-lg border ${r.status === 'error' || r.status === 'rejected' ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{r.symbol}</span>
+                        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{r.symbol}</span>
                         <span className={`text-[10px] ${ACTION_META[r.action].color}`}>{ACTION_META[r.action].label}</span>
                         {(r.status === 'error' || r.status === 'rejected') && <span className="text-[9px] text-red-400 font-bold">REJECTED</span>}
                       </div>
                       <div className="text-right">
-                        <p className={`text-[10px] ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>{r.orderId}</p>
+                        <p className={`text-[10px] ${th.textFaint}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{r.orderId}</p>
                         {r.estPnl != null && <p className={`text-[10px] font-bold ${r.estPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{r.estPnl >= 0 ? '+' : ''}${r.estPnl.toFixed(2)}</p>}
                       </div>
                     </div>
@@ -4002,7 +3991,7 @@ function BatchConfirmModal({
               <span className="text-2xl">✕</span>
               <p className="text-sm font-bold text-red-400">FAILED</p>
               <div className={`p-3 rounded-lg bg-red-500/10 border border-red-500/40 w-full`}>
-                <p className="text-xs text-red-300" style={{ fontFamily: "'DM Mono', monospace" }}>{errorMsg}</p>
+                <p className="text-xs text-red-300" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{errorMsg}</p>
               </div>
             </div>
           )}
@@ -4044,7 +4033,7 @@ function BatchConfirmModal({
                         className="w-4 h-4 accent-blue-500 cursor-pointer shrink-0" />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{item.pos.symbol}</span>
+                          <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{item.pos.symbol}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold ${stratColor(item.pos.strategy)}`}>{item.pos.strategy}</span>
                           <span className={`text-[10px] font-bold ${ACTION_META[item.action].color}`}>{ACTION_META[item.action].label}</span>
                           {verdict && <ActionVerdictBadge verdict={verdict} compact th={th} />}
@@ -4076,7 +4065,7 @@ function BatchConfirmModal({
                               else setLimitOverrides(prev => ({ ...prev, [item.pos.key]: v.toFixed(2) }));
                             }}
                             className={`w-20 text-xs font-bold text-right px-1.5 py-0.5 rounded border ${item.priceError != null ? 'border-red-500/60 text-red-400' : 'border-blue-500/40 text-blue-400'} bg-transparent outline-none focus:ac-border`}
-                            style={{ fontFamily: "'DM Mono', monospace" }}
+                            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                           />
                         </div>
                         {(() => {
@@ -4202,7 +4191,7 @@ function BatchConfirmModal({
                                         {ROLL_CATEGORY_LABELS[cat]}
                                       </span>
                                     ))}
-                                    <span className="text-[10px] ac-text" style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <span className="text-[10px] ac-text" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       {c.expiry} ({c.dte}d) · {c.shortStrike}/{c.longStrike} · δ{c.delta.toFixed(2)}
                                     </span>
                                   </div>
@@ -4219,28 +4208,28 @@ function BatchConfirmModal({
                                 <div className="grid grid-cols-4 gap-2">
                                   <div>
                                     <p className={`text-[9px} ${th.textFaint}`}>Credit (mid)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.creditMid.toFixed(2)}
                                     </p>
                                     <p className={`text-[9px} ${th.textFaint}`}>{(c.creditRatio * 100).toFixed(0)}% of width</p>
                                   </div>
                                   <div>
                                     <p className={`text-[9px} ${th.textFaint}`}>Limit order</p>
-                                    <p className={`text-[10px} font-bold text-blue-400`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <p className={`text-[10px} font-bold text-blue-400`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.credit.toFixed(2)}
                                     </p>
                                     <p className={`text-[9px} ${th.textFaint}`}>85% of mid</p>
                                   </div>
                                   <div>
                                     <p className={`text-[9px} ${th.textFaint}`}>OI (short/long)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <p className={`text-[10px} font-bold ${c.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       {c.shortOi ?? '?'} / {c.longOi ?? '?'}
                                     </p>
                                     <p className={`text-[9px} ${th.textFaint}`}>need ≥500</p>
                                   </div>
                                   <div>
                                     <p className={`text-[9px} ${th.textFaint}`}>Bid-ask (sh/lg)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <p className={`text-[10px} font-bold ${c.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.shortBidAsk?.toFixed(2) ?? '?'} / ${c.longBidAsk?.toFixed(2) ?? '?'}
                                     </p>
                                     <p className={`text-[9px} ${th.textFaint}`}>need ≤$0.10</p>
@@ -4249,7 +4238,7 @@ function BatchConfirmModal({
                                 <div className={`pt-2 border-t ${th.borderLight}`}>
                                   <div className="flex items-center justify-between flex-wrap gap-2">
                                     <span className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Net Roll P&amp;L</span>
-                                    <span className={`text-xs font-bold ${c.netRollPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                                    <span className={`text-xs font-bold ${c.netRollPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       {c.netRollPnl >= 0 ? '+' : ''}${c.netRollPnl.toFixed(2)}
                                     </span>
                                   </div>
@@ -4289,7 +4278,7 @@ function BatchConfirmModal({
                                   onChange={e => setRollInputs(prev => ({ ...prev, [item.pos.key]: { ...prev[item.pos.key], [f.key]: e.target.value } }))}
                                   placeholder={f.placeholder}
                                   className={`w-full text-[10px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} ${th.text} outline-none focus:border-purple-500`}
-                                  style={{ fontFamily: "'DM Mono', monospace" }}
+                                  style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                                 />
                               </div>
                             ))}
@@ -4337,11 +4326,11 @@ function BatchConfirmModal({
                   </div>
                   <div>
                     <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>{totalCloseCashFlow >= 0 ? 'Total Credit' : 'Total Debit'}</p>
-                    <p className="text-sm font-bold text-blue-400" style={{ fontFamily: "'DM Mono', monospace" }}>${Math.abs(totalCloseCashFlow).toFixed(2)}</p>
+                    <p className="text-sm font-bold text-blue-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${Math.abs(totalCloseCashFlow).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>Est. P&L</p>
-                    <p className={`text-sm font-bold ${totalEstPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    <p className={`text-sm font-bold ${totalEstPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                       {totalEstPnl >= 0 ? '+' : ''}${totalEstPnl.toFixed(2)}
                     </p>
                   </div>
@@ -4442,7 +4431,7 @@ function AuditLogPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className={`text-sm font-mono ${th.text}`}>${entry.limitPrice.toFixed(2)}</p>
+                      <p className={`text-sm font-sans ${th.text}`}>${entry.limitPrice.toFixed(2)}</p>
                       <p className={`text-xs ${th.textFaint}`}>Qty {entry.quantity}</p>
                     </div>
                   </div>
@@ -4582,7 +4571,7 @@ function MemoryPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES[T
                   <div key={profile.symbol} className={`p-4 rounded-lg border ${th.border}`}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
-                        <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{profile.symbol}</span>
+                        <span className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{profile.symbol}</span>
                         <span className={`text-[10px] ${th.textFaint}`}>{profile.tradeCount} trades</span>
                         <span className={`text-[10px] font-bold ${profile.winRate >= 0.6 ? 'text-emerald-400' : profile.winRate >= 0.4 ? 'text-yellow-400' : 'text-red-400'}`}>
                           {Math.round(profile.winRate * 100)}% win rate
@@ -4600,7 +4589,7 @@ function MemoryPanel({ onClose, th }: { onClose: () => void; th: typeof THEMES[T
                       return (
                         <div key={i} className={`flex items-center gap-3 text-[9px] py-1 border-t ${th.borderLight} first:border-t-0`}>
                           <span className={`${th.textFaint} w-12 shrink-0`}>{ago}d ago</span>
-                          <span className={`${th.text} w-16 shrink-0`} style={{ fontFamily: "'DM Mono', monospace" }}>{t.strategy}</span>
+                          <span className={`${th.text} w-16 shrink-0`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{t.strategy}</span>
                           <span className={`${th.textFaint} flex-1`}>{t.action} @ {t.dte}d DTE</span>
                           <span className={`font-bold ${t.outcome === 'WIN' ? 'text-emerald-400' : t.outcome === 'LOSS' ? 'text-red-400' : 'text-slate-400'}`}>
                             {t.pnlPct == null ? 'Unavailable' : `${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}
@@ -4645,7 +4634,7 @@ function SummaryBar({ positions, th }: { positions: Position[]; th: typeof THEME
       ].map((item, i, arr) => (
         <div key={item.label} className={`p-5 ${i < arr.length - 1 ? `border-r ${th.border}` : ''} flex flex-col items-center text-center`}>
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-2`}>{item.label}</p>
-          <p className={`text-3xl font-bold ${item.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>{item.value}</p>
+          <p className={`text-3xl font-bold ${item.color}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{item.value}</p>
           <p className={`text-[10px] ${th.textFaint} mt-1`}>{item.sub}</p>
         </div>
       ))}
@@ -4904,7 +4893,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
               <span className={`text-[10px] ${th.textFaint} font-bold uppercase tracking-wider`}>{card.label}</span>
               <span className={`text-[10px] ${th.textFaint} font-bold`}>{card.greek}</span>
             </div>
-            <div className={`text-xl font-bold ${card.color} mt-0.5`} style={{ fontFamily: "'DM Mono', monospace" }}>
+            <div className={`text-xl font-bold ${card.color} mt-0.5`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               {card.value}
             </div>
             <p className={`text-[11px] font-bold ${card.color} mt-1 truncate`}>
@@ -5460,7 +5449,7 @@ function TakeProfitScale({
             const isLoss = pnlPc < 0;
             return (
               <span className={`text-[10px] font-bold ${isLoss ? 'text-red-400' : (marketable ? 'text-emerald-400' : 'text-yellow-400')}`}
-                    style={{ fontFamily: "'DM Mono', monospace" }}>
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {capturedPct(limit)}% · ${limit.toFixed(2)} · {pnlPc >= 0 ? '+' : ''}${pnlPc.toFixed(2)}/ct
               </span>
             );
@@ -6871,7 +6860,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               <span className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Live spread value</span>
               {livePriceLoading && <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />}
               {!livePriceLoading && effectiveLiveDisplay != null && (
-                <span className="text-[11px] font-bold text-blue-400" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <span className="text-[11px] font-bold text-blue-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                   ${effectiveLiveDisplay.toFixed(2)}/contract
                 </span>
               )}
@@ -6934,7 +6923,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 <div className="grid grid-cols-2 gap-2">
                   <div className="p-2 rounded border border-emerald-700/40 bg-emerald-500/5">
                     <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mb-0.5">GTC Target</p>
-                    <p className="text-sm font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.gtcPrice.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-emerald-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${suggestion.gtcPrice.toFixed(2)}</p>
                     <p className={`text-[9px] ${th.textFaint}`}>{suggestion.gtcPct}% profit</p>
                     {suggGtcProfitDollars != null && (
                       <p className="text-[11px] font-bold text-emerald-300 mt-0.5">+${suggGtcProfitDollars.toFixed(2)}</p>
@@ -6942,7 +6931,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   </div>
                   <div className="p-2 rounded border border-orange-700/40 bg-orange-500/5">
                     <p className="text-[9px] text-orange-400 font-bold uppercase tracking-widest mb-0.5">Stop Trigger</p>
-                    <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>${suggestion.stopPrice.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-orange-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${suggestion.stopPrice.toFixed(2)}</p>
                     <p className={`text-[9px] ${th.textFaint}`}>
                       {(effectiveLiveDisplay != null
                         ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
@@ -6983,7 +6972,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
                       gtcError ? 'border-red-500' : th.inputBorder
                     } ${th.input} text-emerald-400 outline-none focus:border-emerald-500`}
-                    style={{ fontFamily: "'DM Mono', monospace" }}
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                   />
                   {gtcPctDisplay > 0 && <span className={`text-[9px] ${th.textFaint} w-12 shrink-0`}>{gtcPctDisplay}%</span>}
                   {!gtcError && gtcParsed > 0 && (
@@ -7018,7 +7007,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   className={`w-16 text-[11px] px-2 py-1.5 rounded border ${
                     stopError ? 'border-red-500' : th.inputBorder
                   } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
-                  style={{ fontFamily: "'DM Mono', monospace" }}
+                  style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                 />
                 <span className={`text-[10px] ${th.textFaint} shrink-0`}>× credit =</span>
                 <input
@@ -7035,7 +7024,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
                     stopError ? 'border-red-500' : th.inputBorder
                   } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
-                  style={{ fontFamily: "'DM Mono', monospace" }}
+                  style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                 />
               </div>
               {!stopError && stopParsed > 0 && (
@@ -7997,7 +7986,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             {/* ── POSITION ───────────────────────────── */}
             <div className="border-t-2 border-slate-600/60 pt-1">
-              <p className={`font-bold ${th.text} text-sm leading-tight`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol}</p>
+              <p className={`font-bold ${th.text} text-sm leading-tight`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{pos.symbol}</p>
               <span className={`text-[10px] px-1.5 py-0.5 border rounded font-bold ${stratColorForFilterKey(resolvePositionStrategyFilterKey(pos)) ?? stratColor(pos.strategy)}`}>{resolvePositionStrategyDisplayLabel(pos)}</span>
               {/* Chart button */}
               <div className="relative mt-1">
@@ -8073,7 +8062,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                         return (
                           <div>
                             <div className="flex items-center justify-between mb-1">
-                              <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.symbol}</span>
+                              <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{pos.symbol}</span>
                               <span className="text-[10px] font-bold" style={{ color }}>
                                 ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
                               </span>
@@ -8117,7 +8106,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             
               <p
                 className="text-xs leading-tight"
-                style={{ fontFamily: "'DM Mono', monospace" }}
+                style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
               >
                 {pos.entryDate && (
                   <span className={`block text-[10px] ${th.textFaint}`}>
@@ -8144,7 +8133,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                   return (
                     <span
                       className={`block font-bold ${th.text}`}
-                      style={{ fontFamily: "'DM Mono', monospace" }}
+                      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                     >
                       {qty} Contract{qty !== 1 ? 's' : ''}
                     </span>
@@ -8156,12 +8145,12 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             {/* ── MARKET ─────────────────────────────── */}
             <div className="border-t-2 border-sky-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Stock</p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{pos.stockPrice != null ? `$${pos.stockPrice.toFixed(2)}` : '—'}</p>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{pos.stockPrice != null ? `$${pos.stockPrice.toFixed(2)}` : '—'}</p>
             </div>
 
             <div className="relative group border-t-2 border-sky-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>OTM %</p>
-              <p className={`text-xs font-bold ${bufferColor(pos.buffer, pos.dte)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold ${bufferColor(pos.buffer, pos.dte)}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {pos.buffer != null ? `${pos.buffer.toFixed(1)}%` : '—'}
               </p>
               {/* Tooltip */}
@@ -8189,7 +8178,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                         { label: '< 2%',  cols: ['🔴','🔴','🟠','🟡','🟡'] },
                       ].map(row => (
                         <tr key={row.label} className={pos.buffer != null && isBufferRow(pos.buffer, row.label) ? 'bg-white/5 rounded' : ''}>
-                          <td className="text-[#aaa] pr-2 py-0.5 font-mono">{row.label}</td>
+                          <td className="text-[#aaa] pr-2 py-0.5 font-sans">{row.label}</td>
                           {row.cols.map((c, i) => (
                             <td key={i} className={`text-center px-1 py-0.5 ${pos.dte != null && isDteCol(pos.dte, i) ? 'bg-white/10 rounded' : ''}`}>{c}</td>
                           ))}
@@ -8206,7 +8195,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
               <p className={`text-[9px] ${th.textFaint}`}>
                 {lifecycle.type === 'CSP' ? 'Eff Buy / Strike' : 'Strikes'}
               </p>
-              <p className={`text-xs ${th.text}`} style={{ fontFamily: '"DM Mono", monospace' }}>
+              <p className={`text-xs ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {lifecycle.type === 'CSP'
                   ? cspEffectiveBuyPrice != null && cspStrike != null
                     ? `$${cspEffectiveBuyPrice.toFixed(2)} ← ${cspStrike}P`
@@ -8223,14 +8212,14 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             {lifecycle.type !== 'CSP' ? (
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Max Risk <span className="text-[7px]">(expiry est.)</span></p>
-                <p className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <p className="text-xs font-bold text-red-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                   {reliableSupportedMaxRisk(pos) != null ? `$${reliableSupportedMaxRisk(pos)!.toLocaleString()}` : 'Unavailable'}
                 </p>
               </div>
             ) : (
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Cash Req <span className="text-[7px]">(fully secured)</span></p>
-                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>
+                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                   {cspCashRequired != null ? `$${cspCashRequired.toLocaleString()}` : '—'}
                 </p>
               </div>
@@ -8238,13 +8227,13 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             <div className="border-t-2 border-emerald-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Buyback (derived mid)</p>
-              <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {pos.currentValue != null ? `$${pos.currentValue.toFixed(2)}` : '—'}
               </p>
               {pos.closeValue != null && (
                 <>
                   <p className={`text-[9px] ${th.textFaint} mt-1`}>Derived marketable estimate</p>
-                  <p className="text-xs font-bold text-orange-300" style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <p className="text-xs font-bold text-orange-300" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     ${pos.closeValue.toFixed(2)}
                   </p>
                 </>
@@ -8257,18 +8246,18 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                   creditReceived is a floored $0.00, not a genuine zero-credit
                   entry -- never render it as though it were. */}
               {!entryEconomicsComplete ? (
-                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "'DM Mono', monospace" }}>Unavailable</p>
+                <p className="text-xs font-bold text-amber-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>Unavailable</p>
               ) : pos.entryPriceEffect === 'Debit' ? (
-                <p className="text-xs font-bold text-orange-400" style={{ fontFamily: "'DM Mono', monospace" }}>Debit (unsupported)</p>
+                <p className="text-xs font-bold text-orange-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>Debit (unsupported)</p>
               ) : (
-                <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "'DM Mono', monospace" }}>{displayEntryCredit != null ? `$${displayEntryCredit.toFixed(2)}` : 'Unavailable'}</p>
+                <p className="text-xs font-bold text-emerald-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{displayEntryCredit != null ? `$${displayEntryCredit.toFixed(2)}` : 'Unavailable'}</p>
               )}
             </div>
 
             {creditEntryEconomicsComplete && pos.closeNowPnl != null && (
               <div className="border-t-2 border-emerald-600/50 pt-1">
                 <p className={`text-[9px] ${th.textFaint}`}>Derived marketable P/L</p>
-                <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                <p className={`text-xs font-bold ${pos.closeNowPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                   {pos.closeNowPnl >= 0 ? '+' : ''}${pos.closeNowPnl.toFixed(2)}
                 </p>
               </div>
@@ -8284,11 +8273,11 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 if (displayPnl == null) return <p className={`text-xs ${th.textFaint}`}>—</p>;
                 return (
                   <>
-                    <p className={`text-xs font-bold ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    <p className={`text-xs font-bold ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                       {displayPnl >= 0 ? '+' : ''}${displayPnl.toFixed(0)}{isStale && <span className="text-[8px] opacity-50 ml-0.5">~</span>}
                     </p>
                     {entryPnlPct({ ...pos, pnl: displayPnl }) != null && (
-                      <p className={`font-normal text-[10px] ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                      <p className={`font-normal text-[10px] ${displayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                         ({displayPnl >= 0 ? '+' : ''}{entryPnlPct({ ...pos, pnl: displayPnl })!.toFixed(1)}%)
                       </p>
                     )}
@@ -8308,13 +8297,13 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                     onBlur={handleTargetSave}
                     onKeyDown={e => { if (e.key === 'Enter') handleTargetSave(); if (e.key === 'Escape') setEditingTarget(false); }}
                     autoFocus className="text-xs w-12 bg-transparent border-b border-blue-500 outline-none text-blue-400"
-                    style={{ fontFamily: "'DM Mono', monospace" }} />
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} />
                   <span className="text-[9px] text-blue-400">%</span>
                 </div>
               ) : (
                 <div className="cursor-pointer" onClick={() => { setTargetInput(String(Math.round(pos.profitTarget * 100))); setEditingTarget(true); }}>
                   <p className={`text-xs ac-hover-text transition-colors ${pos.hitTarget ? 'text-emerald-400 font-bold' : th.textFaint}`}
-                    style={{ fontFamily: "'DM Mono', monospace" }}>
+                    style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     ${pos.targetPrice.toFixed(2)}{pos.hitTarget && ' ✓'}
                   </p>
                 </div>
@@ -8349,7 +8338,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 })()}
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {/* PM-0001: POP increasing is favorable (green); decreasing
                     is unfavorable (red) -- goodWhenDown=false, since a
                     higher probability of profit is the good direction. The
@@ -8360,7 +8349,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {/* PM-0001: colored by ABSOLUTE exposure magnitude, not raw
                     signed direction -- a universal "down is good" rule on
                     the signed delta doesn't distinguish shrinking exposure
@@ -8380,13 +8369,13 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(pos.thetaAtEntry, pos.theta, false, th.textFaint)}>
                   Θ {fmtEntryNowTheta(pos.thetaAtEntry, pos.theta)}
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(
                   pos.gammaAtEntry != null ? Math.abs(pos.gammaAtEntry) : null,
                   pos.gamma != null ? Math.abs(pos.gamma) : null,
@@ -8396,7 +8385,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(
                   pos.vegaAtEntry != null ? Math.abs(pos.vegaAtEntry) : null,
                   pos.netVega != null ? Math.abs(pos.netVega) : null,
@@ -8406,25 +8395,25 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(netEdgeAtEntry(pos), netEdgeLive(pos), false, th.textFaint)}>
                   Edge {fmtEntryNowNetEdge(netEdgeAtEntry(pos), netEdgeLive(pos))}
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={bufferColor(pos.buffer, pos.dte)}>
                   OTM {fmtEntryNowPct(pos.otmAtEntry, pos.buffer, 1)}
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(pos.ivAtEntry, pos.iv, true, th.textFaint)}>
                   IV {fmtEntryNowPct(pos.ivAtEntry, pos.iv, 0)}
                 </span>
               </p>
 
-              <p className="text-[9px] leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[9px] leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 <span className={entryChangeColor(pos.ivrAtEntry, pos.ivr, true, th.textFaint)}>
                   IVR {fmtEntryNowIvr(pos.ivrAtEntry, pos.ivr)}
                 </span>
@@ -8443,7 +8432,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
               <p className={`text-[9px] ${th.textFaint}`}>Theta−Gamma <span className="text-[7px] opacity-60">model</span></p>
 
               {/* 1. Net-edge dollar number, peak-relative color */}
-              <p className={`text-xs font-bold leading-tight ${netEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold leading-tight ${netEdgeColor(pos, th.textFaint)}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {(() => { const v = netEdgeLive(pos); return v == null ? '—' : `${v >= 0 ? '+' : ''}$${v.toFixed(0)}/d`; })()}
               </p>
 
@@ -8470,7 +8459,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 const days = netEdgeDaysTracked(pos);
                 if (peak == null) return null;
                 return (
-                  <p className={`text-[8px] leading-tight ${th.textFaint}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <p className={`text-[8px] leading-tight ${th.textFaint}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     peak ${peak.toFixed(0)} · {days}d
                   </p>
                 );
@@ -8492,7 +8481,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Theta</p>
-              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.theta != null ? `Broker theta aggregate before the standard 100-share multiplier: ${pos.theta.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} title={pos.theta != null ? `Broker theta aggregate before the standard 100-share multiplier: ${pos.theta.toFixed(4)}` : undefined}>
                 {fmtThetaDisplay(pos.theta)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>whole position · $/day</p>
@@ -8500,7 +8489,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Gamma</p>
-              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.gamma != null ? `Broker gamma aggregate before the standard 100-share multiplier: ${pos.gamma.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} title={pos.gamma != null ? `Broker gamma aggregate before the standard 100-share multiplier: ${pos.gamma.toFixed(4)}` : undefined}>
                 {fmtGammaDisplay(pos.gamma)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>share-equivalent Δ / $1 move</p>
@@ -8508,7 +8497,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             <div className="border-t-2 border-purple-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>Vega</p>
-              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }} title={pos.netVega != null ? `Broker vega aggregate before the standard 100-share multiplier: ${pos.netVega.toFixed(4)}` : undefined}>
+              <p className={`text-xs font-bold inline-block ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }} title={pos.netVega != null ? `Broker vega aggregate before the standard 100-share multiplier: ${pos.netVega.toFixed(4)}` : undefined}>
                 {fmtVegaDisplay(pos.netVega)}
               </p>
               <p className={`text-[8px] mt-0.5 ${th.textFaint}`}>whole position · $/IV point</p>
@@ -8516,11 +8505,11 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
 
             <div className="border-t-2 border-purple-600/50 pt-1" title={pos.hv30 != null ? `HV30: ${pos.hv30}%` : undefined}>
               <p className={`text-[9px] ${th.textFaint}`}>IV & IVR</p>
-              <p className={`text-xs font-bold ${ivTextColor(pos.iv, pos.hv30, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold ${ivTextColor(pos.iv, pos.hv30, th.textFaint)}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 IV {pos.iv != null ? `${pos.iv}%` : '—'}{' '}
                 <span className={dayChangeArrowColor(pos.iv, ivPrior(pos))}>{dayChangeArrow(pos.iv, ivPrior(pos))}</span>
               </p>
-              <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-xs font-bold ${ivrTextColor(pos.ivr, th.textFaint)}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 IVR {pos.ivr ?? '—'}{' '}
                 <span className={dayChangeArrowColor(pos.ivr, ivrPrior(pos))}>{dayChangeArrow(pos.ivr, ivrPrior(pos))}</span>
               </p>
@@ -8659,7 +8648,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             onChange={e => { e.stopPropagation(); onIntentChange(pos.key, e.target.value as PositionIntent); }}
             title="Trade intent — tells the AI whether assignment is the goal"
             className={`text-[9px] px-1.5 py-1 border rounded bg-transparent outline-none cursor-pointer shrink-0 ${th.borderLight} ${th.textFaint} ac-hover-text`}
-            style={{ fontFamily: "'DM Mono', monospace" }}>
+            style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
             <option value="income">Intent: Income</option>
             <option value="acquisition">Intent: Acquire</option>
             <option value="neutral">Intent: Neutral</option>
@@ -8713,7 +8702,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             {pos.legs.map((leg, i) => (
               <div key={i} className="flex items-center gap-4 flex-wrap">
                 <span className={`text-[10px] w-10 font-bold ${leg.direction === 'Short' ? 'text-red-400' : 'text-emerald-400'}`}>{leg.direction}</span>
-                <span className={`text-[10px] ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{leg.quantity}x {leg.strikePrice} {leg.optionType === 'P' ? 'Put' : 'Call'}</span>
+                <span className={`text-[10px] ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{leg.quantity}x {leg.strikePrice} {leg.optionType === 'P' ? 'Put' : 'Call'}</span>
                 <span className={`text-[10px] ${th.textFaint}`}>Avg open: <span className={th.text}>{leg.avgOpenPrice == null ? 'Unavailable' : `$${leg.avgOpenPrice.toFixed(2)}`}</span></span>
                 {leg.currentPrice != null && <span className={`text-[10px] ${th.textFaint}`}>Current: <span className={th.text}>${leg.currentPrice.toFixed(2)}</span></span>}
               </div>
@@ -8863,7 +8852,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
     <div className={`border border-yellow-700/60 ${th.card} rounded-lg p-4`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{order.symbol}</span>
+          <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{order.symbol}</span>
           <span className={`text-[10px] font-bold px-2 py-0.5 border rounded ${strategyColor}`}>{order.strategy}</span>
           <span className={`text-xs ${th.textMuted}`}>{strikesDisplay}</span>
           {order.expDate && <span className={`text-[10px] ${th.textFaint}`}>exp {order.expDate}</span>}
@@ -8908,7 +8897,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               onChange={e => setNewPrice(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') confirmReplace(); if (e.key === 'Escape') cancelEdit(); }}
               className={`w-24 text-[11px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} text-yellow-300 outline-none focus:border-yellow-500`}
-              style={{ fontFamily: "'DM Mono', monospace" }}
+              style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
             />
           </div>
           <p className={`text-[9px] ${th.textFaint}`}>
@@ -9241,7 +9230,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
                 {kpis.map(k => (
                   <div key={k.label} className={`${th.card} border ${th.border} rounded-xl p-4`}>
                     <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>{k.label}</p>
-                    <p className={`text-xl font-bold ${k.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>{k.value}</p>
+                    <p className={`text-xl font-bold ${k.color}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{k.value}</p>
                     <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{k.sub}</p>
                   </div>
                 ))}
@@ -9252,7 +9241,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
                 {periods.map(p => (
                   <div key={p.label} className={`${th.card} border ${th.border} rounded-xl p-4`}>
                     <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>{p.label}</p>
-                    <p className={`text-xl font-bold ${p.value >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                    <p className={`text-xl font-bold ${p.value >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                       {p.value >= 0 ? '+' : ''}${p.value.toFixed(0)}
                     </p>
                     <p className={`text-[9px] ${th.textFaint} mt-0.5`}>{p.sub}</p>
@@ -9303,7 +9292,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
                             style={{ width: `${Math.min(Math.abs(d.pnl) / maxSymbolPnl * 100, 100)}%` }}
                           />
                         </div>
-                        <span className={`text-[10px] font-bold w-16 text-right shrink-0 ${d.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                        <span className={`text-[10px] font-bold w-16 text-right shrink-0 ${d.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                           {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(0)}
                         </span>
                       </div>
@@ -9325,7 +9314,7 @@ function PerformancePanel({ onClose, th }: { onClose: () => void; th: typeof THE
                         e.action === 'TAKE_PROFIT' ? 'text-emerald-400' :
                         e.action === 'CUT_LOSSES'  ? 'text-red-400'     : 'text-blue-400'
                       }`}>{e.action.replace(/_/g, ' ')}</span>
-                      <span className={`text-[10px] font-bold ml-auto ${(e.estPnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                      <span className={`text-[10px] font-bold ml-auto ${(e.estPnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                         {(e.estPnl ?? 0) >= 0 ? '+' : ''}${(e.estPnl ?? 0).toFixed(0)}
                       </span>
                     </div>
@@ -9817,8 +9806,8 @@ export default function PortfolioPage() {
               <circle r="2" fill="#00d4aa"/>
             </svg>
             <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "'DM Mono', monospace", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
+              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
+              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
         <div className="flex items-center gap-3">

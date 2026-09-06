@@ -95,7 +95,7 @@ export default function TradeLogValidationDebugPage() {
   const matchedCount = rows.filter(r => r.closeSnapshot != null).length;
 
   return (
-    <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
+    <div style={{ padding: 24, fontFamily: "var(--font-inter), system-ui, sans-serif", fontSize: 12, color: '#ddd', background: '#111', minHeight: '100vh' }}>
       <h1 style={{ fontSize: 14, marginBottom: 12 }}>Trade Log Validation (debug)</h1>
       <p style={{ marginBottom: 12, opacity: 0.7, maxWidth: 720 }}>
         Joins closed trades to their POSITION_CLOSE lifecycle snapshot, so Net Edge / POP thresholds can be checked

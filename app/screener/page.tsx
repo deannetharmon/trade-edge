@@ -2592,13 +2592,13 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
       <div className="text-xs shrink-0">
         <span className={th.label}>Long </span>
         <span className={th.text}>{c.longStrike}C</span>
-        <span className="text-[10px] text-emerald-400 font-mono ml-0.5">
+        <span className="text-[10px] text-emerald-400 font-sans ml-0.5">
           (Δ{c.longDelta != null ? c.longDelta.toFixed(2) : '—'})
         </span>
         <span className={`${th.textFaint} mx-1`}>→</span>
         <span className={th.label}>Short </span>
         <span className={th.text}>{c.shortStrike}C</span>
-        <span className="text-[10px] text-amber-400 font-mono ml-0.5">
+        <span className="text-[10px] text-amber-400 font-sans ml-0.5">
           (Δ{c.shortDelta != null ? c.shortDelta.toFixed(2) : '—'})
         </span>
       </div>
@@ -3913,7 +3913,7 @@ function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSp
               return (
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{symbol}</span>
+                    <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{symbol}</span>
                     <span className={`text-[10px] font-bold`} style={{ color }}>
                       ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
                     </span>
@@ -4579,7 +4579,7 @@ const strategyScores = useMemo(() => {
                     return (
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{result.symbol}</span>
+                          <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{result.symbol}</span>
                           <span className={`text-[10px] font-bold`} style={{ color }}>
                             ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
                           </span>
@@ -5116,7 +5116,7 @@ const strategyScores = useMemo(() => {
           </span>
           <span className="text-[9px] font-bold text-amber-400 tracking-widest shrink-0 uppercase">▸ Open Position</span>
           {matchingPositions.map((p, i) => (
-            <div key={i} className="flex items-center gap-2 text-[10px]" style={{ fontFamily: "'DM Mono', monospace" }}>
+            <div key={i} className="flex items-center gap-2 text-[10px]" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               <span className={`px-1.5 py-0.5 border rounded text-[9px] font-bold ${
                 p.strategy === 'BPS' ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
                 : p.strategy === 'BCS' ? 'border-red-600 text-red-400 bg-red-500/10'
@@ -6943,10 +6943,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  // ensureHeadAssets — runs once after mount, strictly post-hydration.
-  // Replaces the old module-level document.head.appendChild() side effects
-  // (accent CSS vars + DM Sans font link) that used to fire at client
-  // bundle-evaluation time and could race React's hydration of this page.
+  // Ensure the shared accent variables exist after hydration.
   useEffect(() => {
     if (!document.getElementById('hunter-accent-style')) {
       const style = document.createElement('style');
@@ -6960,13 +6957,6 @@ export default function Home() {
         nav a.active-nav, nav span.active-nav { background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2); color: var(--accent); }
       `;
       document.head.appendChild(style);
-    }
-    if (!document.getElementById('hunter-font')) {
-      const link = document.createElement('link');
-      link.id = 'hunter-font';
-      link.rel = 'stylesheet';
-      link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-      document.head.appendChild(link);
     }
   }, []);
 
@@ -8964,8 +8954,8 @@ export default function Home() {
               <circle r="2" fill="#00d4aa"/>
             </svg>
             <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "'DM Mono', monospace", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
+              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
+              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
           <div className="flex items-center gap-3">

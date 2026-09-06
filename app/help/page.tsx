@@ -68,7 +68,7 @@ export default function HelpPage() {
   const th = THEMES[theme];
 
   return (
-    <div className={`min-h-screen ${th.bg} font-mono transition-colors duration-200`}>
+    <div className={`min-h-screen ${th.bg} font-sans transition-colors duration-200`}>
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 py-4 flex items-center justify-between`}>
         <div>

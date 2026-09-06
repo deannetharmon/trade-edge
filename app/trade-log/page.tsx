@@ -5,16 +5,6 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 // PI-0008E: reconstruction (fetch, transaction matching, partial-close and
 // assignment/exercise handling, caching) now lives in one shared module used
 // by both this page and app/performance/page.tsx. See
@@ -661,8 +651,8 @@ export default function TradeLogPage() {
               <circle r="2" fill="#00d4aa"/>
             </svg>
             <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "'DM Mono', monospace" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "'DM Mono', monospace", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
+              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
+              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -820,7 +810,7 @@ export default function TradeLogPage() {
             ].map((s, i) => (
               <div key={i} className="px-4 py-3 flex flex-col items-center text-center">
                 <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>{s.label}</p>
-                <p className={`text-lg font-bold ${s.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>{s.value}</p>
+                <p className={`text-lg font-bold ${s.color}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{s.value}</p>
               </div>
             ))}
           </div>
@@ -859,18 +849,18 @@ export default function TradeLogPage() {
                 <tbody>
                   {groupBy === 'none' ? sorted.map(trade => (
                     <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
-                      <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.symbol}</td>
+                      <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
                       <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span></td>
-                      <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.strikes}</td>
+                      <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                       <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
-                      <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.openTime || '—'}</td>
+                      <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>
                       <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.closeDate)}</td>
                       <td className={`px-3 py-2.5 ${th.textFaint} text-center`}>{trade.holdDays}d</td>
-                      <td className="px-3 py-2.5 text-emerald-400 font-medium" style={{ fontFamily: "'DM Mono', monospace" }}>${trade.creditReceived.toFixed(2)}</td>
-                      <td className="px-3 py-2.5 text-red-400/80" style={{ fontFamily: "'DM Mono', monospace" }}>${trade.closePrice.toFixed(2)}</td>
-                      <td className={`px-3 py-2.5 font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}</td>
-                      <td className={`px-3 py-2.5 font-bold ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%</td>
-                      <td className={`px-3 py-2.5 text-center ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.dteAtClose}d</td>
+                      <td className="px-3 py-2.5 text-emerald-400 font-medium" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${trade.creditReceived.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-red-400/80" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${trade.closePrice.toFixed(2)}</td>
+                      <td className={`px-3 py-2.5 font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}</td>
+                      <td className={`px-3 py-2.5 font-bold ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%</td>
+                      <td className={`px-3 py-2.5 text-center ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.dteAtClose}d</td>
                       <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${exitTypeColor(trade.exitType)}`}>{exitTypeLabel(trade.exitType)}</span></td>
                       <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${outcomeColor(trade.outcome)}`}>{trade.outcome}</span></td>
                       <td className="px-3 py-2.5">
@@ -908,7 +898,7 @@ export default function TradeLogPage() {
                         <tr key={`hdr-${key}`} style={{ background: 'rgba(255,255,255,0.04)' }}>
                           <td colSpan={15} className={`px-3 py-1.5 border-t border-b ${th.border}`}>
                             <div className="flex items-center gap-3">
-                              <span className={`text-[10px] font-bold tracking-widest ${hdrColor}`} style={{ fontFamily: "'DM Mono', monospace" }}>{key}</span>
+                              <span className={`text-[10px] font-bold tracking-widest ${hdrColor}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{key}</span>
                               <span className={`text-[9px] ${th.textFaint}`}>{group.length} trade{group.length !== 1 ? 's' : ''}</span>
                               {groupBy === 'symbol' && <span className={`text-[9px] ${groupWinRate >= 60 ? 'text-emerald-400' : groupWinRate >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>{groupWinRate}% win</span>}
                               <span className={`text-[9px] font-bold ${groupPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{groupPnl >= 0 ? '+' : ''}${groupPnl.toFixed(0)}</span>
@@ -919,18 +909,18 @@ export default function TradeLogPage() {
                       for (const trade of group) {
                         rows.push(
                           <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
-                            <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.symbol}</td>
+                            <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
                             <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span></td>
-                            <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.strikes}</td>
+                            <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                             <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
-                            <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.openTime || '—'}</td>
+                            <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>
                             <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.closeDate)}</td>
                             <td className={`px-3 py-2.5 ${th.textFaint} text-center`}>{trade.holdDays}d</td>
-                            <td className="px-3 py-2.5 text-emerald-400 font-medium" style={{ fontFamily: "'DM Mono', monospace" }}>${trade.creditReceived.toFixed(2)}</td>
-                            <td className="px-3 py-2.5 text-red-400/80" style={{ fontFamily: "'DM Mono', monospace" }}>${trade.closePrice.toFixed(2)}</td>
-                            <td className={`px-3 py-2.5 font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}</td>
-                            <td className={`px-3 py-2.5 font-bold ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%</td>
-                            <td className={`px-3 py-2.5 text-center ${th.textFaint} text-[10px]`} style={{ fontFamily: "'DM Mono', monospace" }}>{trade.dteAtClose}d</td>
+                            <td className="px-3 py-2.5 text-emerald-400 font-medium" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${trade.creditReceived.toFixed(2)}</td>
+                            <td className="px-3 py-2.5 text-red-400/80" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${trade.closePrice.toFixed(2)}</td>
+                            <td className={`px-3 py-2.5 font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}</td>
+                            <td className={`px-3 py-2.5 font-bold ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%</td>
+                            <td className={`px-3 py-2.5 text-center ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.dteAtClose}d</td>
                             <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${exitTypeColor(trade.exitType)}`}>{exitTypeLabel(trade.exitType)}</span></td>
                             <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${outcomeColor(trade.outcome)}`}>{trade.outcome}</span></td>
                             <td className="px-3 py-2.5">

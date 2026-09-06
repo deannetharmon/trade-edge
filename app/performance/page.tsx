@@ -5,16 +5,6 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-font')) {
-    const link = document.createElement('link');
-    link.id = 'hunter-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────
 const LS_PERF_WIDGETS = 'hunter-perf-widgets';
 const SCRATCH_PCT = 5;
@@ -360,17 +350,17 @@ function MonthlyPnlChart({ trades, th, range }: { trades: ClosedTrade[]; th: typ
       <div className={`flex items-center gap-6 p-4 rounded-xl border ${th.border}`}>
         <div>
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-1`}>{e.month} {e.year}</p>
-          <p className={`text-2xl font-bold ${e.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+          <p className={`text-2xl font-bold ${e.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
             {e.pnl >= 0 ? '+' : ''}${e.pnl.toFixed(0)}
           </p>
         </div>
         <div className={`text-center`}>
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-1`}>Win Rate</p>
-          <p className={`text-2xl font-bold ${e.winRate >= 60 ? 'text-emerald-400' : e.winRate >= 45 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{e.winRate}%</p>
+          <p className={`text-2xl font-bold ${e.winRate >= 60 ? 'text-emerald-400' : e.winRate >= 45 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{e.winRate}%</p>
         </div>
         <div className="text-center">
           <p className={`text-[10px] ${th.textFaint} uppercase tracking-widest mb-1`}>Trades</p>
-          <p className={`text-2xl font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{e.count}</p>
+          <p className={`text-2xl font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{e.count}</p>
         </div>
         <p className={`text-[10px] ${th.textFaint} ml-auto`}>Only 1 month of data — extend range for chart view</p>
       </div>
@@ -439,7 +429,7 @@ function MonthlyPnlChart({ trades, th, range }: { trades: ClosedTrade[]; th: typ
                   strokeDasharray={isZero ? '4,3' : undefined}
                 />
                 <text x={GUTTER - 4} y={y + 3.5} textAnchor="end"
-                  fontSize="9" fill="rgba(255,255,255,0.3)" fontFamily="DM Mono, monospace">
+                  fontSize="9" fill="rgba(255,255,255,0.3)" fontFamily="var(--font-inter), system-ui, sans-serif">
                   {tick >= 0 ? `$${tick >= 1000 ? (tick/1000).toFixed(1)+'k' : tick}` : `-$${Math.abs(tick) >= 1000 ? (Math.abs(tick)/1000).toFixed(1)+'k' : Math.abs(tick)}`}
                 </text>
               </g>
@@ -494,18 +484,18 @@ function MonthlyPnlChart({ trades, th, range }: { trades: ClosedTrade[]; th: typ
                 <line x1={cx} y1={0} x2={cx} y2={CHART_H} stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="3,2" />
                 <rect x={tipX} y={tipY} width={tipW} height={tipH} rx="6"
                   fill="rgba(15,15,20,0.96)" stroke="rgba(255,255,255,0.12)" strokeWidth="0.75" />
-                <text x={tipX + 10} y={tipY + 16} fontSize="9.5" fontWeight="600" fill="rgba(255,255,255,0.85)" fontFamily="DM Sans, sans-serif">
+                <text x={tipX + 10} y={tipY + 16} fontSize="9.5" fontWeight="600" fill="rgba(255,255,255,0.85)" fontFamily="var(--font-inter), system-ui, sans-serif">
                   {e.month} {e.year}
                 </text>
                 <text x={tipX + 10} y={tipY + 30} fontSize="9" fontWeight="700"
-                  fill={isPos ? '#34d399' : '#f87171'} fontFamily="DM Mono, monospace">
+                  fill={isPos ? '#34d399' : '#f87171'} fontFamily="var(--font-inter), system-ui, sans-serif">
                   {isPos ? '+' : ''}${e.pnl.toFixed(0)} this month
                 </text>
                 <text x={tipX + 10} y={tipY + 43} fontSize="9"
-                  fill={cumVal >= 0 ? '#34d399' : '#f87171'} fontFamily="DM Mono, monospace">
+                  fill={cumVal >= 0 ? '#34d399' : '#f87171'} fontFamily="var(--font-inter), system-ui, sans-serif">
                   {cumVal >= 0 ? '+' : ''}${cumVal.toFixed(0)} cumulative
                 </text>
-                <text x={tipX + 10} y={tipY + 56} fontSize="8.5" fill="rgba(255,255,255,0.35)" fontFamily="DM Sans, sans-serif">
+                <text x={tipX + 10} y={tipY + 56} fontSize="8.5" fill="rgba(255,255,255,0.35)" fontFamily="var(--font-inter), system-ui, sans-serif">
                   {e.count} trades · {e.wins}W/{e.count - e.wins}L · {e.winRate}% win
                 </text>
               </g>
@@ -557,7 +547,7 @@ function HorizBar({ label, value, max, color, suffix = '' }: { label: string; va
       <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className={`text-[10px] font-bold w-16 text-right ${value >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+      <span className={`text-[10px] font-bold w-16 text-right ${value >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
         {value >= 0 ? '+' : ''}{suffix === '%' ? value.toFixed(1) + '%' : '$' + value.toFixed(0)}
       </span>
     </div>
@@ -590,7 +580,7 @@ function OverviewWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEM
       {stats.map(s => (
         <div key={s.label} className={`px-4 py-3 flex flex-col items-center text-center ${th.borderLight}`}>
           <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>{s.label}</p>
-          <p className={`text-xl font-bold ${s.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>{s.value}</p>
+          <p className={`text-xl font-bold ${s.color}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{s.value}</p>
         </div>
       ))}
     </div>
@@ -625,7 +615,7 @@ function ByStrategyWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof TH
               }`}>{r.strategy}</span>
               <span className={`text-[10px] ${th.textFaint}`}>{r.total} trades · {Math.round(r.winRate * 100)}% win rate</span>
             </div>
-            <span className={`text-[10px] font-bold ${r.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+            <span className={`text-[10px] font-bold ${r.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               {r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(0)} avg {r.avgPct >= 0 ? '+' : ''}{r.avgPct.toFixed(1)}%
             </span>
           </div>
@@ -699,7 +689,7 @@ function HoldTimeWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEM
           <span className={`w-10 text-right font-bold ${r.winRate >= 0.6 ? 'text-emerald-400' : r.winRate >= 0.45 ? 'text-yellow-400' : 'text-red-400'}`}>
             {Math.round(r.winRate * 100)}%
           </span>
-          <span className={`w-16 text-right font-bold ${r.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+          <span className={`w-16 text-right font-bold ${r.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
             {r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(0)}
           </span>
         </div>
@@ -716,10 +706,10 @@ function BestWorstWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THE
   const TradeRow = ({ t, label }: { t: ClosedTrade; label: string }) => (
     <div className={`flex items-center justify-between p-2 rounded-lg border ${t.pnl >= 0 ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
       <div>
-        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{t.symbol}</span>
+        <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{t.symbol}</span>
         <span className={`ml-2 text-[9px] ${th.textFaint}`}>{t.strategy} · {t.closeDate}</span>
       </div>
-      <span className={`text-xs font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+      <span className={`text-xs font-bold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
         {t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)} ({t.pnlPct >= 0 ? '+' : ''}{t.pnlPct.toFixed(1)}%)
       </span>
     </div>
@@ -763,7 +753,7 @@ function StreakWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEMES
       ].map(s => (
         <div key={s.label} className={`p-4 rounded-xl border ${th.border}`}>
           <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-2`}>{s.label}</p>
-          <p className={`text-2xl font-bold ${s.color}`} style={{ fontFamily: "'DM Mono', monospace" }}>{s.value}</p>
+          <p className={`text-2xl font-bold ${s.color}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{s.value}</p>
         </div>
       ))}
     </div>
@@ -857,7 +847,7 @@ function ExitAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof 
         <div className="p-3 rounded-lg border border-red-500/40 bg-red-500/10">
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-[10px] font-bold text-red-400 tracking-wider uppercase">Biggest Leak — {worst.label}</span>
-            <span className="text-xs font-bold text-red-400" style={{ fontFamily: "'DM Mono', monospace" }}>${worst.pnl.toFixed(0)}</span>
+            <span className="text-xs font-bold text-red-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${worst.pnl.toFixed(0)}</span>
           </div>
           <p className={`text-[10px] ${th.textMuted}`}>
             {worst.count} trade{worst.count !== 1 ? 's' : ''} · {Math.round(worst.winRate * 100)}% win ·{' '}
@@ -882,7 +872,7 @@ function ExitAnalysisWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof 
               }`}>{r!.label}</span>
               <span className={`text-[10px] ${th.textFaint}`}>{r!.count} trade{r!.count !== 1 ? 's' : ''} · avg {r!.avgH}d hold</span>
             </div>
-            <span className={`text-[10px] font-bold ${r!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+            <span className={`text-[10px] font-bold ${r!.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               {r!.pnl >= 0 ? '+' : ''}${r!.pnl.toFixed(0)}
             </span>
           </div>
@@ -1034,8 +1024,8 @@ export default function PerformancePage() {
         <div className="flex items-center justify-between w-full pb-2">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
-              <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "'DM Mono', monospace" }}>PERFORMANCE</p>
+              <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
+              <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>PERFORMANCE</p>
             </div>
           </div>
           <div className="flex items-center gap-3">

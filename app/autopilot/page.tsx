@@ -100,12 +100,12 @@ export default function AutopilotPage() {
             <p className="mt-2 text-sm text-slate-400">These can be tested once network access allows preview or local requests.</p>
             <div className="mt-5 space-y-2">
               {endpoints.map((endpoint) => (
-                <div key={endpoint} className="rounded-lg bg-slate-950/70 px-3 py-2 font-mono text-xs text-cyan-200">
+                <div key={endpoint} className="rounded-lg bg-slate-950/70 px-3 py-2 font-sans text-xs text-cyan-200">
                   {endpoint}
                 </div>
               ))}
-              <div className="rounded-lg bg-slate-950/70 px-3 py-2 font-mono text-xs text-cyan-200">POST /api/autopilot/run</div>
-              <div className="rounded-lg bg-slate-950/70 px-3 py-2 font-mono text-xs text-cyan-200">GET /api/autopilot/cron</div>
+              <div className="rounded-lg bg-slate-950/70 px-3 py-2 font-sans text-xs text-cyan-200">POST /api/autopilot/run</div>
+              <div className="rounded-lg bg-slate-950/70 px-3 py-2 font-sans text-xs text-cyan-200">GET /api/autopilot/cron</div>
             </div>
           </div>
         </section>

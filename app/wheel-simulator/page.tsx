@@ -645,7 +645,7 @@ export default function WheelSimulator() {
   const totalWeeklyRealistic = tickers.filter((t) => t.included).reduce((sum, t) => sum + weeklyIncomeRealistic(t), 0);
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <h2 style={{ marginBottom: 4 }}>Wheel capital growth simulator</h2>
       <p style={{ color: "#9aa0a6", marginTop: 0, fontSize: 13 }}>
         Assumes 100% premium reinvestment, blended CC/CSP credit held constant from live fetch, greedy allocation by ROC subject to each ticker's own allocation cap (max 25%) and a correlated Mag 7 group cap (max 75%).

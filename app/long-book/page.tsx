@@ -6,16 +6,6 @@ import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 // ── Font injection ─────────────────────────────────────────────────────────
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('lb-font')) {
-    const link = document.createElement('link');
-    link.id = 'lb-font';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap';
-    document.head.appendChild(link);
-  }
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -568,13 +558,13 @@ function ScanResultCard({
       <div className={`flex items-center gap-4 px-4 py-3 ${th.card}`}>
         {/* Rank */}
         <div className="shrink-0 w-8 text-center">
-          <span className={`text-lg font-bold ${rankColor}`} style={{ fontFamily: "'DM Mono', monospace" }}>#{result.rank}</span>
+          <span className={`text-lg font-bold ${rankColor}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>#{result.rank}</span>
         </div>
 
         {/* Symbol + direction */}
         <div className="w-28 shrink-0">
           <div className="flex items-center gap-2">
-            <p className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{result.symbol}</p>
+            <p className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{result.symbol}</p>
             <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${result.direction === 'C' ? 'text-emerald-400 border-emerald-700 bg-emerald-500/10' : 'text-red-400 border-red-700 bg-red-500/10'}`}>
               {result.direction === 'C' ? '▲ CALL' : '▼ PUT'}
             </span>
@@ -586,7 +576,7 @@ function ScanResultCard({
         <div className="w-40 shrink-0">
           {result.recommendedStrike > 0 ? (
             <>
-              <p className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                 {result.recommendedStrike}{result.direction} {fmtDate(result.recommendedExpiration)}
               </p>
               <p className={`text-[9px] ${th.textFaint}`}>
@@ -737,7 +727,7 @@ function ChainPickerModal({
                     <tr key={i} className={`border-b ${th.border} hover:bg-white/5 cursor-pointer transition-colors ${isIdeal ? 'bg-[rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.06)]' : ''}`}
                       onClick={() => onSelect(s)}>
                       <td className={`px-4 py-2.5 ${th.textFaint}`}>{fmtDate(s.expiration)} <span className="opacity-60">({s.dte}d)</span></td>
-                      <td className={`px-4 py-2.5 text-right font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{s.strike.toFixed(0)}</td>
+                      <td className={`px-4 py-2.5 text-right font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{s.strike.toFixed(0)}</td>
                       <td className={`px-4 py-2.5 text-right font-bold ${absDelta != null && absDelta >= 0.70 ? 'text-emerald-400' : absDelta != null && absDelta >= 0.50 ? 'text-amber-400' : th.textMuted}`}>
                         {absDelta != null ? absDelta.toFixed(2) : '—'}
                         {isIdeal && <span className="ml-1 text-[8px] text-emerald-400/70">★</span>}
@@ -892,7 +882,7 @@ function NewLeapModal({
               <div className={`${th.card} border ${th.border} rounded-xl p-4 space-y-2`}>
                 <div className="flex justify-between">
                   <span className={`text-[10px] ${th.textFaint}`}>Position</span>
-                  <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+                  <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                     {symbol.toUpperCase()} {selectedStrike.strike}{optionType} {fmtDate(selectedStrike.expiration)}
                   </span>
                 </div>
@@ -1139,7 +1129,7 @@ function SellShortCallModal({
                   <button key={i} onClick={() => handleSelect(s)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border ${th.border} hover:border-[var(--accent)] transition-colors text-left`}>
                     <div>
-                      <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{s.strike}C</span>
+                      <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{s.strike}C</span>
                       <span className={`text-[9px] ${th.textFaint} ml-2`}>{fmtDate(s.expiration)} · {s.dte}d</span>
                     </div>
                     <div className="flex items-center gap-4 text-right">
@@ -1164,7 +1154,7 @@ function SellShortCallModal({
             <div className={`${th.card} border ${th.border} rounded-xl p-3 space-y-1.5`}>
               <div className="flex justify-between">
                 <span className={`text-[10px] ${th.textFaint}`}>Selling</span>
-                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{leapPos.symbol} {selected.strike}C {fmtDate(selected.expiration)}</span>
+                <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{leapPos.symbol} {selected.strike}C {fmtDate(selected.expiration)}</span>
               </div>
               <div className="flex justify-between">
                 <span className={`text-[10px] ${th.textFaint}`}>DTE</span>
@@ -1293,7 +1283,7 @@ function LeapCard({
         {/* Symbol + details */}
         <div className="w-44 shrink-0">
           <div className="flex items-center gap-2">
-            <p className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>
+            <p className={`text-sm font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               {pos.symbol} {pos.strike}{pos.optionType}
             </p>
             <span className={`text-[8px] px-1.5 py-0.5 rounded border font-bold ${pos.optionType === 'C' ? 'text-emerald-400 border-emerald-700 bg-emerald-500/10' : 'text-red-400 border-red-700 bg-red-500/10'}`}>
@@ -1395,7 +1385,7 @@ function LeapCard({
               <div className="space-y-1">
                 {pos.shortCalls.map((sc, i) => (
                   <div key={sc.id} className={`flex items-center gap-4 px-3 py-2 rounded-lg border ${th.border} text-[10px]`}>
-                    <span className={`font-bold ${th.text}`} style={{ fontFamily: "'DM Mono', monospace" }}>{sc.strike}C</span>
+                    <span className={`font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{sc.strike}C</span>
                     <span className={th.textFaint}>{fmtDate(sc.expiration)} · {sc.dte ?? daysUntil(sc.expiration)}d</span>
                     <span className={th.textFaint}>{sc.contracts}× · collected ${sc.creditReceived.toFixed(2)}/sh</span>
                     <span className={`ml-auto font-bold ${sc.pnl != null && sc.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -1651,8 +1641,8 @@ export default function LongBookPage() {
       <div className={`${th.header} border-b ${th.border} px-6 py-4 flex items-center justify-between sticky top-0 z-50`}>
         <div className="flex items-center gap-4">
           <div>
-            <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "'DM Mono', monospace" }}>OPTIONS HUNTER</h1>
-            <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "'DM Mono', monospace" }}>LONG BOOK</p>
+            <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
+            <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>LONG BOOK</p>
           </div>
           <nav className="flex items-center gap-1 bg-black/20 rounded-lg p-1">
             <a href="/" className="text-xs px-3 py-1.5 rounded text-white/50 hover:text-white/80 transition-colors tracking-wider">HUNTER</a>
@@ -1762,7 +1752,7 @@ export default function LongBookPage() {
         <div className="flex items-center gap-8">
           <div className="shrink-0">
             <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase`}>Long Book Allocation</p>
-            <p className={`text-xl font-bold text-emerald-400`} style={{ fontFamily: "'DM Mono', monospace" }}>
+            <p className={`text-xl font-bold text-emerald-400`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               {alloc.longBook}%{netLiq ? ` · $${Math.round(netLiq * alloc.longBook / 100).toLocaleString()}` : ''}
             </p>
           </div>
