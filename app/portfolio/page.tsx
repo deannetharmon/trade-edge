@@ -11,6 +11,7 @@ import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+import { evaluatePmccLifecycle } from '@/lib/scans/pmccLifecycle';
 import {
   resolvePositionStrategyFilterKey,
   POSITION_STRATEGY_FILTER_KEYS,
@@ -7686,8 +7687,36 @@ function isDteCol(dte: number, col: number): boolean {
   return false;
 }
 
-function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReview, onSaveDecisionReview, focusKey }: {
+function PmccLifecycleBanner({ longPosition, shortPosition }: { longPosition: Position; shortPosition: Position }) {
+  const [events, setEvents] = useState<{ earningsDate: string | null; exDividendDate: string | null } | null>(null);
+  const [eventError, setEventError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const from = new Date().toISOString().slice(0, 10);
+    fetch(`/api/event-risk?symbol=${encodeURIComponent(longPosition.symbol)}&from=${from}&to=${shortPosition.expDate}`)
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(data => {
+        if (cancelled) return;
+        if (data?.verified && data?.events) setEvents({ earningsDate: data.events.earningsDate ?? null, exDividendDate: data.events.exDividendDate ?? null });
+        else setEventError(true);
+      })
+      .catch(() => { if (!cancelled) setEventError(true); });
+    return () => { cancelled = true; };
+  }, [longPosition.symbol, shortPosition.expDate]);
+  const shortLeg = shortPosition.legs.find(leg => leg.direction === 'Short' && leg.optionType === 'C');
+  if (!shortLeg) return null;
+  if (!events && !eventError) return <div className="border-b border-amber-700/50 bg-amber-950/20 px-4 py-2 text-[10px] text-amber-200">PMCC lifecycle: checking event calendar…</div>;
+  if (eventError || !events) return <div className="border-b border-amber-700/50 bg-amber-950/20 px-4 py-2 text-[10px] text-amber-200">PMCC lifecycle: Monitor — event calendar unavailable. No automatic action is taken.</div>;
+  const quoteAgeSeconds = shortPosition.quoteCapturedAt ? Math.max(0, (Date.now() - Date.parse(shortPosition.quoteCapturedAt)) / 1000) : null;
+  const lifecycle = evaluatePmccLifecycle({ now: new Date().toISOString(), shortExpiration: shortPosition.expDate, shortStrike: shortLeg.strikePrice, underlyingPrice: shortPosition.stockPrice, quoteAgeSeconds, earningsDate: events.earningsDate ?? shortPosition.earningsDate, exDividendDate: events.exDividendDate });
+  const color = lifecycle.status === 'ACTION_REQUIRED' ? 'text-red-300 bg-red-950/20 border-red-700/50' : lifecycle.status === 'MONITOR' ? 'text-amber-200 bg-amber-950/20 border-amber-700/50' : 'text-emerald-300 bg-emerald-950/20 border-emerald-700/50';
+  const message = lifecycle.alerts.length ? lifecycle.alerts.map(alert => alert.message).join(' · ') : 'On track — no current lifecycle alert.';
+  return <div className={`border-b px-4 py-2 text-[10px] ${color}`}><b>PMCC lifecycle · {lifecycle.status.replace('_', ' ')}</b> — {message} No automatic action is taken.</div>;
+}
+
+function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitTargetChange, onIntentChange, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReview, onSaveDecisionReview, focusKey }: {
   pos: Position;
+  pmccShortPosition?: Position | null;
   th: typeof THEMES[Theme];
   checked: boolean;
   onToggle: (key: string) => void;
@@ -7875,6 +7904,7 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
   return (
     <div ref={cardRef} className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
+      {pmccShortPosition && <PmccLifecycleBanner longPosition={pos} shortPosition={pmccShortPosition} />}
       {pos.needsClose && (() => {
         // Net-edge-aware banner: past the 21-DTE rule, but if net edge is still
         // healthy and positive, this is a REVIEW (amber), not a CLOSE NOW (red).
@@ -8983,8 +9013,9 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
 }
 
 // ── Position Section with group-action header ──────────────────────────────
-function PositionSection({ title, titleColor, positions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReviews, onSaveDecisionReview, focusKey }: {
+function PositionSection({ title, titleColor, positions, allPositions, th, checked, onToggle, onToggleAll, onProfitTargetChange, onIntentChange, groupAction, onGroupAction, onExecute, onRefreshQuotes, portfolioRefreshing, onPricingRefreshOutcome, decisionReviews, onSaveDecisionReview, focusKey }: {
   title: string; titleColor: string; positions: Position[];
+  allPositions: Position[];
   th: typeof THEMES[Theme]; checked: Set<string>;
   onToggle: (key: string) => void; onToggleAll: (keys: string[], select: boolean) => void;
   onProfitTargetChange: (key: string, value: number) => void;
@@ -9045,6 +9076,7 @@ function PositionSection({ title, titleColor, positions, th, checked, onToggle, 
         {sortedPositions.map(p => (
           <PositionCard
             key={p.key} pos={p} th={th} checked={checked.has(p.key)} onToggle={onToggle}
+            pmccShortPosition={p.pairedShortCallKey ? allPositions.find(candidate => candidate.key === p.pairedShortCallKey) ?? null : null}
             onProfitTargetChange={onProfitTargetChange} onIntentChange={onIntentChange} onExecute={onExecute}
             onRefreshQuotes={onRefreshQuotes}
             portfolioRefreshing={portfolioRefreshing}
@@ -10092,7 +10124,7 @@ export default function PortfolioPage() {
                     {filteredPositions.length > 0 && (
                       <PositionSection
                         title="Positions" titleColor={th.textFaint}
-                        positions={filteredPositions} th={th} checked={checked}
+                        positions={filteredPositions} allPositions={positions} th={th} checked={checked}
                         onToggle={onToggle} onToggleAll={onToggleAll}
                         onProfitTargetChange={handleProfitTargetChange} onIntentChange={handleIntentChange}
                         groupAction="HOLD" onGroupAction={onGroupAction}
