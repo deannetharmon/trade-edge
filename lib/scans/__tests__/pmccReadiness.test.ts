@@ -18,4 +18,17 @@ describe('evaluatePmccReadiness', () => {
   it('does not qualify a structure when the long is unqualified', () => {
     expect(evaluatePmccReadiness({ pair, longContractQualified: false, earningsDate: null, policy }).status).toBe('NOT_QUALIFIED');
   });
+  // Regression test: a structural failure must win over an unavailable
+  // quote when both are present at once -- see the fix's own comment on
+  // the final status computation for the full explanation. Before the
+  // fix, this combined case incorrectly returned WAIT_MONITOR.
+  it('classifies a structurally disqualified pair as NOT_QUALIFIED even when its quote is also unavailable', () => {
+    const disqualifiedAndUnavailable = {
+      ...pair,
+      qualified: false,
+      failureReasons: [{ code: 'INSUFFICIENT_DATA', message: 'Short quote is delayed' }],
+      shortLeg: { ...pair.shortLeg, quote: { readyInput: false } },
+    };
+    expect(evaluatePmccReadiness({ pair: disqualifiedAndUnavailable, longContractQualified: true, earningsDate: null, policy }).status).toBe('NOT_QUALIFIED');
+  });
 });

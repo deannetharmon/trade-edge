@@ -980,7 +980,11 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
     // message the card shows today.
     expect(screen.getAllByText(/Disqualified/)).toHaveLength(5);
     fireEvent.click(screen.getByText('Contract order 1').closest('button')!);
-    expect(screen.getByText('Disqualified — Open/Trade is blocked.')).toBeInTheDocument();
+    // FIX: text updated alongside the new pmccReadiness vocabulary --
+    // confirmed directly from source (app/screener/page.tsx's readinessState
+    // === 'disqualified' branch): "Not Qualified — structure review is
+    // blocked.", not the older "Disqualified — Open/Trade is blocked."
+    expect(screen.getByText('Not Qualified — structure review is blocked.')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: /MSFT.*audit/ })[0]);
     expect(screen.getByTestId('pmcc-audit-card')).toHaveTextContent('Market-data acquisition failure');
     expect(screen.queryByText(/Disqualified put/i)).not.toBeInTheDocument();
