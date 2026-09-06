@@ -160,6 +160,37 @@ export async function getQuote(symbol: string, token: string): Promise<number | 
   } catch { return null; }
 }
 
+export interface ExecutableOptionQuote {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  updatedAt: string | null;
+  ageSeconds: number | null;
+}
+
+function quoteTimestamp(value: unknown): string | null {
+  if (typeof value === 'string' && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString();
+  return null;
+}
+
+/** Re-reads the exact option instruments at order time. Never fall back to
+ * scan-time values: callers must reject missing, crossed, or stale quotes. */
+export async function getExecutableOptionQuotes(symbols: string[], token: string): Promise<ExecutableOptionQuote[]> {
+  if (symbols.length === 0) return [];
+  const query = symbols.map(symbol => `equity-option=${encodeURIComponent(symbol)}`).join('&');
+  const data = await ttFetch(`/market-data/by-type?${query}`, token);
+  const bySymbol = new Map<string, any>((data?.data?.items ?? []).map((item: any): [string, any] => [String(item.symbol), item]));
+  return symbols.map(symbol => {
+    const item = bySymbol.get(symbol);
+    const bid = item?.bid != null ? Number(item.bid) : null;
+    const ask = item?.ask != null ? Number(item.ask) : null;
+    const updatedAt = quoteTimestamp(item?.['updated-at'] ?? item?.['summary-date']);
+    const ageSeconds = updatedAt == null ? null : Math.max(0, (Date.now() - Date.parse(updatedAt)) / 1000);
+    return { symbol, bid: Number.isFinite(bid) ? bid : null, ask: Number.isFinite(ask) ? ask : null, updatedAt, ageSeconds };
+  });
+}
+
 
 export async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   // dteWindow overrides the rule-set DTE gate when provided (rank mode passes a fixed wide window).

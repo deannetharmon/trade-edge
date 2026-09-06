@@ -24,7 +24,7 @@ import {
 } from '@/lib/scans/scan-utils';
 import {
   classificationCache, ttFetch, getAccessToken, classifyUnderlying,
-  getMarketMetrics, getQuote, getChain, getCspCapitalContext,
+  getMarketMetrics, getQuote, getChain, getCspCapitalContext, getExecutableOptionQuotes,
   getCoveredCallCapacityReport, type CspCapitalContext,
 } from '@/lib/scans/tastytrade-client';
 import {
@@ -3228,6 +3228,7 @@ function PmccTradeModal({ result, th, onClose }: {
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
   const [auditStatus, setAuditStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
+  const [executionCheck, setExecutionCheck] = useState<string>('Not yet rechecked for submission');
   const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
     now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
     quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
@@ -3306,10 +3307,28 @@ function PmccTradeModal({ result, th, onClose }: {
     if (!response.ok) throw new Error('Order submitted, but its review snapshot could not be saved.');
   };
 
+  const verifyExecutionQuotes = async () => {
+    if (!pair.longLeg.occSymbol || !pair.shortLeg.occSymbol) throw new Error('Exact option symbols are required for final quote verification.');
+    const token = await getAccessToken();
+    const [longQuote, shortQuote] = await getExecutableOptionQuotes([pair.longLeg.occSymbol, pair.shortLeg.occSymbol], token);
+    const invalid = [longQuote, shortQuote].some(quote => quote.bid == null || quote.ask == null || quote.bid <= 0 || quote.ask < quote.bid || quote.ageSeconds == null || quote.ageSeconds > 15);
+    if (invalid) {
+      setExecutionCheck('Blocked: a final Tastytrade quote is missing, crossed, or older than 15 seconds.');
+      throw new Error('Final executable quote check failed. Refresh the PMCC review.');
+    }
+    const changed = longQuote.ask !== reviewSnapshot.longAsk || shortQuote.bid !== reviewSnapshot.shortBid;
+    if (changed) {
+      setExecutionCheck(`Blocked: prices changed (long ask $${longQuote.ask!.toFixed(2)}, short bid $${shortQuote.bid!.toFixed(2)}). Reopen the review to capture a new snapshot.`);
+      throw new Error('Quotes changed since this review snapshot; reopen the PMCC review before continuing.');
+    }
+    setExecutionCheck(`Verified: both Tastytrade quotes are current (${Math.round(longQuote.ageSeconds!)}s / ${Math.round(shortQuote.ageSeconds!)}s old) and match this snapshot.`);
+  };
+
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
       if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; refresh and review its current gate results.');
+      await verifyExecutionQuotes();
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildPayload(quantity);
@@ -3331,6 +3350,7 @@ function PmccTradeModal({ result, th, onClose }: {
     setPhase('placing'); setError('');
     try {
       if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; order submission is blocked pending review.');
+      await verifyExecutionQuotes();
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildPayload(quantity);
@@ -3379,6 +3399,7 @@ function PmccTradeModal({ result, th, onClose }: {
           <p className="mt-1">Captured {reviewSnapshot.createdAt} · Long ask ${reviewSnapshot.longAsk?.toFixed(2) ?? '—'} · Short bid ${reviewSnapshot.shortBid?.toFixed(2) ?? '—'}</p>
           <p>Long quote {reviewSnapshot.longQuoteAt ?? 'timestamp unavailable'} · Short quote {reviewSnapshot.shortQuoteAt ?? 'timestamp unavailable'}</p>
           <p>OCC review {occAcknowledgedAt ? `acknowledged ${occAcknowledgedAt}` : 'not acknowledged'}</p>
+          <p>Execution check: {executionCheck}</p>
           {auditStatus === 'saved' && <p className="text-emerald-300">Submitted review snapshot saved for 18 months.</p>}
           {auditStatus === 'failed' && <p className="text-amber-300">Order submitted, but the review snapshot was not saved. Contact support before relying on this audit record.</p>}
           {readiness.status !== 'PMCC_STRUCTURE_QUALIFIED' && <p className="mt-1 text-amber-300">{readiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}</p>}
