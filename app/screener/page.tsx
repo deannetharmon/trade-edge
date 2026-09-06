@@ -3232,6 +3232,7 @@ function PmccTradeModal({ result, th, onClose }: {
     quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
     splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt: null,
   }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
+  const [occAcknowledgedAt, setOccAcknowledgedAt] = useState<string | null>(null);
   const [reviewSnapshot] = useState(() => ({
     createdAt: new Date().toISOString(), policyVersion: 'pmcc-readiness-v1',
     longAsk: pair.longLeg.quote.ask, shortBid: pair.shortLeg.quote.bid,
@@ -3257,16 +3258,16 @@ function PmccTradeModal({ result, th, onClose }: {
           earningsDate: events.earningsDate ?? null, exDividendDate: events.exDividendDate ?? null,
           splitOrSymbolChangeDate: events.splitOrSymbolChangeDate ?? null,
           shortIsItmOrNearItm: result.price != null && result.price >= pair.shortLeg.strike * 0.99,
-          standardContract: null, occAcknowledgedAt: null,
+          standardContract: null, occAcknowledgedAt,
         }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
       })
       .catch(() => { if (!cancelled) setEventRisk(evaluateEventRisk({
         now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
         quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
-        splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt: null,
+        splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt,
       }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 })); });
     return () => { cancelled = true; };
-  }, [pair.longLeg.expiration, pair.longLeg.quote.ageSeconds, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
+  }, [occAcknowledgedAt, pair.longLeg.expiration, pair.longLeg.quote.ageSeconds, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
 
   const hasOccSymbols = Boolean(pair.longLeg.occSymbol && pair.shortLeg.occSymbol);
   const readiness = evaluatePmccReadiness({
@@ -3359,7 +3360,18 @@ function PmccTradeModal({ result, th, onClose }: {
           <p className="font-bold text-cyan-300">REVIEW SNAPSHOT · {reviewSnapshot.policyVersion}</p>
           <p className="mt-1">Captured {reviewSnapshot.createdAt} · Long ask ${reviewSnapshot.longAsk?.toFixed(2) ?? '—'} · Short bid ${reviewSnapshot.shortBid?.toFixed(2) ?? '—'}</p>
           <p>Long quote {reviewSnapshot.longQuoteAt ?? 'timestamp unavailable'} · Short quote {reviewSnapshot.shortQuoteAt ?? 'timestamp unavailable'}</p>
+          <p>OCC review {occAcknowledgedAt ? `acknowledged ${occAcknowledgedAt}` : 'not acknowledged'}</p>
           {readiness.status !== 'PMCC_STRUCTURE_QUALIFIED' && <p className="mt-1 text-amber-300">{readiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}</p>}
+        </div>
+
+        <div className="mb-4 rounded-lg border border-amber-700/70 bg-amber-950/20 p-3 text-[10px] text-amber-100">
+          <p className="font-bold text-amber-300">OCC CONTRACT REVIEW</p>
+          <p className="mt-1">This provider path does not yet return a definitive standard-contract flag. Review OCC information memos before acknowledging this contract review.</p>
+          <a className="mt-1 inline-block text-cyan-300 underline" href="https://www.theocc.com/market-data/market-data-reports/infomemos" target="_blank" rel="noreferrer">Open OCC Information Memos</a>
+          <label className="mt-2 flex cursor-pointer items-start gap-2">
+            <input type="checkbox" checked={Boolean(occAcknowledgedAt)} onChange={event => setOccAcknowledgedAt(event.target.checked ? new Date().toISOString() : null)} />
+            <span>I reviewed the OCC contract information for {result.symbol}; no unhandled adjustment applies to these legs.</span>
+          </label>
         </div>
 
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>

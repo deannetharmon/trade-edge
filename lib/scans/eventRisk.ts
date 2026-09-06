@@ -19,7 +19,9 @@ export function evaluateEventRisk(input: EventRiskInput, policy: EventRiskPolicy
   if (!Number.isFinite(now.getTime()) || !checked || !Number.isFinite(checked.getTime()) || now.getTime() - checked.getTime() > policy.eventMaxAgeMinutes * 60_000) blockers.push('Event data is unavailable or stale');
   if (input.quoteAgeSeconds == null || input.quoteAgeSeconds > policy.quoteMaxAgeSeconds) blockers.push('Executable quote is unavailable or stale');
   if (input.tradingHalted !== false) blockers.push('Trading status is unavailable or halted');
-  if (input.standardContract !== true) blockers.push('Adjusted-contract verification required');
+  if (input.standardContract === false) blockers.push('This is an adjusted or non-standard contract');
+  if (input.standardContract == null && !input.occAcknowledgedAt) blockers.push('OCC contract review acknowledgment required');
+  if (input.standardContract == null && input.occAcknowledgedAt) cautions.push('OCC contract review acknowledged manually');
   if (isBeforeOrOn(date(input.earningsDate), input.shortExpiration)) blockers.push('Earnings fall on or before short-call expiration');
   if (isBeforeOrOn(date(input.exDividendDate), input.shortExpiration)) {
     (input.shortIsItmOrNearItm ? blockers : cautions).push(input.shortIsItmOrNearItm ? 'Ex-dividend assignment risk blocks this structure' : 'Ex-dividend date falls before short-call expiration');
