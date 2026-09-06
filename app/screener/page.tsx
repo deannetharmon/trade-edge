@@ -10357,9 +10357,21 @@ export default function Home() {
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
                       {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $'], ['extrinsicPctOfCost', 'Extrinsic % Cost']] as const).map(([field, label]) => (
-                        <button key={field} onClick={() => setLeapsSort(field)} className={chip(leapsSort === field)}>{label}</button>
+                        <button
+                          key={field}
+                          onClick={() => {
+                            if (leapsSort === field) {
+                              setLeapsSortDir(direction => direction === 'asc' ? 'desc' : 'asc');
+                            } else {
+                              setLeapsSort(field);
+                              setLeapsSortDir('asc');
+                            }
+                          }}
+                          className={chip(leapsSort === field)}
+                        >
+                          {label}{leapsSort === field && (leapsSortDir === 'asc' ? ' ↑' : ' ↓')}
+                        </button>
                       ))}
-                      <button onClick={() => setLeapsSortDir(d => d === 'asc' ? 'desc' : 'asc')} className={chip(false)}>{leapsSortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
                     </div>
                     {allSymbols.length > 1 && (
                       <div className="flex items-center gap-1.5">
