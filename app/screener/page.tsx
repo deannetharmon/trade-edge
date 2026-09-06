@@ -48,7 +48,9 @@ import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
+import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
 import { computePmccScore } from '@/lib/scans/pmccScore';
+import { evaluatePmccReadiness } from '@/lib/scans/pmccReadiness';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
@@ -2666,7 +2668,7 @@ function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): a
 // LEAPS-0002: extracted so each row can own its own expand/chart state,
 // matching how PmccResultCard/GenericResultCard already work -- a flat
 // array of candidates has nowhere to hang per-row local state otherwise.
-function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
+function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extrinsicPctMax, onTrade }: {
   candidate: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -2676,6 +2678,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
   th: typeof THEMES[Theme];
   deltaMin: number;
   deltaMax: number;
+  dteMin: number;
+  oiMin: number;
+  extrinsicPctMax: number;
   onTrade: () => void;
 }) {
   // LEAPS-0003: no expand/collapse -- Diane's finding was that LEAPS only
@@ -2704,6 +2709,20 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
   const extrinsicPctOfCost = candidate.extrinsicValue != null && totalCost != null && totalCost > 0
     ? (candidate.extrinsicValue * 100 / totalCost) * 100
     : null;
+  const qualification = evaluateLeapsEntry({
+    occSymbol: candidate.occSymbol, strike: candidate.strike, dte: candidate.dte,
+    delta: candidate.delta, openInterest: candidate.openInterest, bid: candidate.bid,
+    ask: candidate.ask, underlyingPrice: candidate.underlyingPrice,
+  }, {
+    deltaMin, deltaMax, dteMin, oiMin, extrinsicPctMax: extrinsicPctMax || null,
+    spreadPctMax: 10, policyVersion: 'leaps-entry-v1',
+  });
+  const qualificationMeta = {
+    CONTRACT_QUALIFIED: 'text-emerald-400 border-emerald-700/70',
+    REVIEW_REQUIRED: 'text-amber-300 border-amber-700/70',
+    NOT_QUALIFIED: 'text-red-400 border-red-700/70',
+    DATA_UNAVAILABLE: 'text-amber-300 border-amber-700/70',
+  }[qualification.status];
   const deltaInRange = candidate.delta != null && candidate.delta >= deltaMin && candidate.delta <= deltaMax;
   // LEAPS-0004: score badge color -- same rough good/ok/weak banding
   // language already used elsewhere in this app for a 0-100 score
@@ -2729,6 +2748,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
           ) : (
             <span className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textMuted}`} title="Score unavailable -- delta or open interest missing">—</span>
           )}
+          <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${qualificationMeta}`}>
+            {qualification.status.replaceAll('_', ' ')}
+          </span>
           <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
           {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
           <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
@@ -2759,9 +2781,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, onTrade }: {
           </span>
         </div>
 
-        <button onClick={onTrade} disabled={!candidate.occSymbol}
+        <button onClick={onTrade} disabled={!candidate.occSymbol || qualification.status !== 'CONTRACT_QUALIFIED'}
           className="ml-auto shrink-0 rounded-lg border border-cyan-500 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">
-          Trade this
+          Review trade
         </button>
       </div>
 
@@ -3869,6 +3891,12 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   // from the same readyInput fields the old `ready` boolean already used.
   const disqualified = Boolean(pair && (!pair.qualified || pair.failureReasons.length > 0));
   const dataNotReady = Boolean(pair && (!pair.longLeg.quote.readyInput || !pair.shortLeg.quote.readyInput));
+  const pmccReadiness = evaluatePmccReadiness({
+    pair: pair ?? null,
+    longContractQualified: Boolean(pair && pair.longLeg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min && pair.longLeg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max),
+    earningsDate: result.earningsDate,
+    policy: { version: 'pmcc-readiness-v1', earnings: 'warn' },
+  });
   // PMCC-TRADE-MARKET-CLOSED-0001 — Ian/Paul-signed-off distinction within
   // not_ready: market_closed is a timing fact, not a data-integrity problem
   // -- the quote is real, you're just choosing to submit an order that
@@ -3883,13 +3911,11 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
     (!pair.shortLeg.quote.readyInput && pair.shortLeg.quote.status !== 'market_closed')
   ));
   const marketClosedOnly = dataNotReady && !blockingNotReadyReason;
-  const readinessState: 'ready' | 'not_ready' | 'disqualified' = !pair
-    ? 'disqualified'
-    : disqualified
-      ? 'disqualified'
-      : dataNotReady
-        ? 'not_ready'
-        : 'ready';
+  const readinessState: 'ready' | 'not_ready' | 'disqualified' = pmccReadiness.status === 'PMCC_STRUCTURE_QUALIFIED'
+    ? 'ready'
+    : pmccReadiness.status === 'WAIT_MONITOR' || pmccReadiness.status === 'LONG_QUALIFIED_SHORT_NOT_READY'
+      ? 'not_ready'
+      : 'disqualified';
   const ready = readinessState === 'ready';
   // Trade is allowed when fully ready, OR when the only reason it isn't is
   // the market being closed -- per Ian's explicit sign-off: "market_closed
@@ -3899,7 +3925,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   // should still visibly flag it; only the Trade action itself unblocks.
   const tradeAllowed = ready || (readinessState === 'not_ready' && marketClosedOnly);
   const READINESS_META: Record<typeof readinessState, { label: string; dot: string; text: string; border: string; bg: string }> = {
-    ready:        { label: 'Ready',        dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
+    ready:        { label: 'PMCC Structure Qualified', dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
     not_ready:    { label: 'Not ready',    dot: 'bg-amber-400',   text: 'text-amber-400',   border: 'border-amber-700/70',   bg: 'bg-amber-500/5' },
     disqualified: { label: 'Disqualified', dot: 'bg-red-500',     text: 'text-red-400',     border: 'border-red-700/70',     bg: 'bg-red-500/5' },
   };
@@ -3972,7 +3998,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
       {rejectedLegCount > 0 && <PmccLegRejectionAudit rejections={result.pmccLegRejections!} summary={rejectionSummary} />}
-      <p className="mt-2 rounded border border-red-700 px-3 py-2 text-xs text-red-300">Disqualified — Open/Trade is blocked. No executable pair met criteria.</p>
+      <p className="mt-2 rounded border border-red-700 px-3 py-2 text-xs text-red-300">Not Qualified — structure review is blocked. No executable pair met criteria.</p>
     </article>;
   }
   // PMCC-CARD-0001 — decision-tier fields Ian/Paul signed off on: width
@@ -4006,7 +4032,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
     <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
       <div className="flex flex-wrap items-center gap-2">
-        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">Quality {score.total}</span>}
+        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">PMCC Structure Quality {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAPS PMCC' : 'PMCC'}</span>
@@ -4020,6 +4046,11 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}</span></div>
       </div>
+      {pmccReadiness.gates.some(gate => gate.status !== 'pass') && (
+        <p className="mt-2 text-[10px] text-amber-300">
+          Why this result: {pmccReadiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}
+        </p>
+      )}
       {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
         {decisionStrip.map(field => (
           <span key={field.label} className={field.warn ? 'text-amber-400' : ''}>
@@ -4043,10 +4074,10 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         {readinessState === 'ready'
           ? 'Analysis ready.'
           : readinessState === 'disqualified'
-            ? 'Disqualified — Open/Trade is blocked.'
+            ? 'Not Qualified — structure review is blocked.'
             : marketClosedOnly
               ? 'Market closed — quotes will refresh at open. You can still submit; the order will queue until the regular session opens.'
-              : 'Not Ready — Open/Trade is blocked.'}
+              : 'Wait / Monitor — structure review is blocked.'}
       </p>
 
       <button
@@ -4127,7 +4158,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
               : 'border-cyan-500 text-cyan-300 hover:bg-cyan-500/10'
           }`}
         >
-          {marketClosedOnly ? '⚡ TRADE THIS — MARKET CLOSED' : '⚡ TRADE THIS'}
+          {marketClosedOnly ? 'REVIEW PMCC — MARKET CLOSED' : 'REVIEW PMCC'}
         </button>
       )}
       {heldLong && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Review-only: this screen proposes a short call against the exact long call held in the active account. It cannot submit or construct an order.</p>}
@@ -10389,7 +10420,7 @@ export default function Home() {
 
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax}
+                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
                     onTrade={() => setLeapsTradeCandidate(candidate)} />
                 ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, liquidity, and extrinsic filters.</p>}
 
