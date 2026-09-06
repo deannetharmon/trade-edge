@@ -38,7 +38,11 @@ export async function POST(request: NextRequest) {
     const redis = new Redis(redisUrl);
     try {
       // One immutable record per submission. Never store broker tokens or account numbers.
-      await redis.set(`pmcc-review-snapshot:${userId}:${id}`, JSON.stringify({ id, ...snapshot }), 'EX', RETENTION_SECONDS);
+      const record = { id, kind: 'SUBMITTED_REVIEW_SNAPSHOT', ...snapshot, expiresAt: new Date(Date.now() + RETENTION_SECONDS * 1000).toISOString() };
+      await redis.set(`pmcc-review-snapshot:${userId}:${id}`, JSON.stringify(record), 'EX', RETENTION_SECONDS);
+      // Index contains IDs only; the immutable, expiring record remains authoritative.
+      await redis.lpush(`pmcc-review-snapshot-index:${userId}`, id);
+      await redis.expire(`pmcc-review-snapshot-index:${userId}`, RETENTION_SECONDS);
     } finally {
       redis.disconnect();
     }

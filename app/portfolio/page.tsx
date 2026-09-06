@@ -7704,11 +7704,17 @@ function PmccLifecycleBanner({ longPosition, shortPosition }: { longPosition: Po
     return () => { cancelled = true; };
   }, [longPosition.symbol, shortPosition.expDate]);
   const shortLeg = shortPosition.legs.find(leg => leg.direction === 'Short' && leg.optionType === 'C');
+  const lifecycle = events && shortLeg ? evaluatePmccLifecycle({ now: new Date().toISOString(), shortExpiration: shortPosition.expDate, shortStrike: shortLeg.strikePrice, underlyingPrice: shortPosition.stockPrice, quoteAgeSeconds: shortPosition.quoteCapturedAt ? Math.max(0, (Date.now() - Date.parse(shortPosition.quoteCapturedAt)) / 1000) : null, earningsDate: events.earningsDate ?? shortPosition.earningsDate, exDividendDate: events.exDividendDate }) : null;
+  const lifecycleFingerprint = lifecycle ? JSON.stringify({ status: lifecycle.status, alerts: lifecycle.alerts }) : null;
+  useEffect(() => {
+    if (!lifecycle) return;
+    void fetch('/api/pmcc-history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionKey: `${longPosition.key}:${shortPosition.key}`, symbol: longPosition.symbol, observedAt: new Date().toISOString(), status: lifecycle.status, alerts: lifecycle.alerts }) });
+  // The server performs de-duplication; this only records an actual lifecycle state.
+  }, [longPosition.key, longPosition.symbol, shortPosition.key, lifecycleFingerprint]);
   if (!shortLeg) return null;
   if (!events && !eventError) return <div className="border-b border-amber-700/50 bg-amber-950/20 px-4 py-2 text-[10px] text-amber-200">PMCC lifecycle: checking event calendar…</div>;
   if (eventError || !events) return <div className="border-b border-amber-700/50 bg-amber-950/20 px-4 py-2 text-[10px] text-amber-200">PMCC lifecycle: Monitor — event calendar unavailable. No automatic action is taken.</div>;
-  const quoteAgeSeconds = shortPosition.quoteCapturedAt ? Math.max(0, (Date.now() - Date.parse(shortPosition.quoteCapturedAt)) / 1000) : null;
-  const lifecycle = evaluatePmccLifecycle({ now: new Date().toISOString(), shortExpiration: shortPosition.expDate, shortStrike: shortLeg.strikePrice, underlyingPrice: shortPosition.stockPrice, quoteAgeSeconds, earningsDate: events.earningsDate ?? shortPosition.earningsDate, exDividendDate: events.exDividendDate });
+  if (!lifecycle) return null;
   const color = lifecycle.status === 'ACTION_REQUIRED' ? 'text-red-300 bg-red-950/20 border-red-700/50' : lifecycle.status === 'MONITOR' ? 'text-amber-200 bg-amber-950/20 border-amber-700/50' : 'text-emerald-300 bg-emerald-950/20 border-emerald-700/50';
   const message = lifecycle.alerts.length ? lifecycle.alerts.map(alert => alert.message).join(' · ') : 'On track — no current lifecycle alert.';
   return <div className={`border-b px-4 py-2 text-[10px] ${color}`}><b>PMCC lifecycle · {lifecycle.status.replace('_', ' ')}</b> — {message} No automatic action is taken.</div>;
@@ -9882,6 +9888,7 @@ export default function PortfolioPage() {
           <Link href="/wheel"         className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">WHEEL</Link>
           <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
           <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
+          <Link href="/pmcc-history"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PMCC HISTORY</Link>
           <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
           <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
         </div>
