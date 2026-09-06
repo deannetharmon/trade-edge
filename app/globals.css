@@ -13,7 +13,7 @@ html, body {
   margin: 0;
   background-color: #0a0e1a;
   color: #e2e8f0;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-family: var(--font-inter), system-ui, sans-serif !important;
   -webkit-font-smoothing: antialiased !important;
   -moz-osx-font-smoothing: grayscale !important;
   text-rendering: optimizeLegibility !important;
