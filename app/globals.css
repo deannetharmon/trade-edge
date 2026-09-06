@@ -36,6 +36,27 @@
   letter-spacing: 0.035em !important;
 }
 
+/* Chrome exposes reduced page zoom through resolution media queries. At 75%
+   zoom, legacy 8–10px labels land on fractional physical pixels (6–7.5px),
+   which makes Inter look thin and blurred. Keep the compact layout, but raise
+   only those smallest labels to 12px so they rasterize at a whole 9px. */
+@media (max-resolution: 0.8dppx) {
+  .text-\[8px\],
+  .text-\[9px\],
+  .text-\[10px\] {
+    font-size: 0.75rem !important;
+    line-height: 1rem !important;
+  }
+
+  .tracking-widest {
+    letter-spacing: 0.075em !important;
+  }
+
+  .tracking-wider {
+    letter-spacing: 0.035em !important;
+  }
+}
+
 html, body {
   margin: 0;
   background-color: #0a0e1a;
