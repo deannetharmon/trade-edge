@@ -1356,6 +1356,8 @@ function runCspChecklist(
       oiMin: cspRules.OI_MIN,
       technicalFit: trendResult?.scores?.total ?? null,
       ivr: ivrValue ?? null,
+      ivrMin: cspRules.IVR_MIN,
+      ivrMax: cspRules.IVR_MAX,
       earningsWithinExpiration: r.earningsWithinExpiration,
     });
 

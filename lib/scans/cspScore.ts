@@ -76,6 +76,12 @@ export interface CspScoreInputs {
   oiMin: number;                                 // the configured OI preference, for normalization
   technicalFit: number | null | undefined;       // 0-100, e.g. trendResult.scores.total
   ivr: number | null | undefined;                // 0-100 IV Rank percentile
+  /** Preferred IVR band -- see the ivr scoring comment below for why this
+   * is a band, not a floor-only comparison. Optional for backward
+   * compatibility with existing callers; omitting these falls back to the
+   * old flat identity mapping rather than failing the score closed. */
+  ivrMin?: number | null;
+  ivrMax?: number | null;
   /**
    * true  = a known earnings/event occurs before expiration (event risk)
    * false = no known earnings/event before expiration (safe)
@@ -149,9 +155,47 @@ export function calculateCspScore(inputs: CspScoreInputs): CspScoreResult {
   // fabricated neutral 50, per the ticket's explicit requirement.
   if (isFiniteNum(inputs.technicalFit)) components.technical = clamp(inputs.technicalFit, 0, 100);
 
-  // 5. Volatility context — IVR is already a 0-100 percentile; the
-  // "documented CSP normalization" is the identity mapping (clamped).
-  if (isFiniteNum(inputs.ivr)) components.ivr = clamp(inputs.ivr, 0, 100);
+  // 5. Volatility context — Fix: the previous version treated ivr as a
+  // flat 0-100 "more is always better" scale (clamp(ivr, 0, 100)), which
+  // is a category error: this app's own established CSP rule set treats
+  // IVR as a PREFERRED BAND [ivrMin, ivrMax], not a monotonic quality
+  // dial (confirmed by IVR_MAX already being a hard disqualifier
+  // elsewhere in the pipeline -- more IVR is not "better" past that
+  // ceiling, so it should not score as if it were). Band-aware: full
+  // marks anywhere inside the preferred band, scaled down outside it in
+  // either direction.
+  //
+  // IMPORTANT, told to Ian/Paul directly rather than silently accepted:
+  // this fixes the curve's *correctness*, not the underlying weight. At
+  // a 10/100 weight, this component can NEVER move the final score by
+  // more than 10 points regardless of curve shape -- confirmed by direct
+  // calculation against the real OXY/HPE example (OXY's total was
+  // already 12 points below HPE's under the OLD flat mapping, entirely
+  // from the other 8 components, and still ranked in the top slots). A
+  // curve fix alone cannot guarantee "never outranks an in-band
+  // candidate" -- only a weight change can, and CSP_SCORE_WEIGHTS is
+  // explicitly marked in this file's own header as reserved for Ian's
+  // review, not something to change unilaterally under time pressure.
+  if (isFiniteNum(inputs.ivr) && isFiniteNum(inputs.ivrMin) && isFiniteNum(inputs.ivrMax) && inputs.ivrMax > inputs.ivrMin) {
+    if (inputs.ivr >= inputs.ivrMin && inputs.ivr <= inputs.ivrMax) {
+      components.ivr = 100;
+    } else if (inputs.ivr < inputs.ivrMin) {
+      components.ivr = linearCap(inputs.ivr, inputs.ivrMin);
+    } else {
+      // Above ivrMax: in practice this candidate is usually already
+      // disqualified upstream (IVR_MAX hard cap), so this branch is
+      // rarely reached -- scored low rather than rewarded for excess,
+      // consistent with "more IVR past the ceiling is not better."
+      const excessAboveMax = inputs.ivr - inputs.ivrMax;
+      components.ivr = clamp(100 - linearCap(excessAboveMax, inputs.ivrMax), 0, 100);
+    }
+  } else if (isFiniteNum(inputs.ivr)) {
+    // ivrMin/ivrMax not supplied by this caller -- fall back to the prior
+    // identity mapping rather than fail closed on a component every
+    // existing caller already provides ivr for. New callers should pass
+    // ivrMin/ivrMax to get the band-aware behavior above.
+    components.ivr = clamp(inputs.ivr, 0, 100);
+  }
 
   // 6. Event risk — unknown is distinguished from "no event": only a
   // definite true/false produces a component score.

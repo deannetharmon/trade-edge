@@ -235,3 +235,26 @@ describe('safety', () => {
     expect(locking.releaseAutopilotRunLock).toHaveBeenCalled();
   });
 });
+
+describe('OE-0003: per_trade_max_loss pre-gate excluded for source: screener', () => {
+  // The Screener's Best Opportunities bridge calls this engine via
+  // /api/autopilot/recommendations with source: 'screener', defaulting to
+  // quantity 1 since the user hasn't chosen a size yet at discovery time.
+  // The default fixture candidate's theoreticalMaxLoss (14805) already
+  // exceeds a default account's per-trade budget (100000 * 2.5% = 2500),
+  // so every 'manual'/'engine' candidate at this size correctly gets
+  // blocked pre-gate -- that's real, intended Autopilot execution
+  // discipline. For 'screener', that same candidate must NOT be blocked
+  // by this specific gate, since no execution decision or chosen quantity
+  // exists yet at discovery time. drawdown/correlation pre-gates are
+  // unaffected by source and still block both.
+  it('blocks a manual candidate whose max loss exceeds the per-trade budget', async () => {
+    const result = await runRecommendationEngine('test-user', { candidates: [makeCandidate()], source: 'manual' });
+    expect(result.recommendations[0].recommendation.summary).toContain('Portfolio-level risk limits block');
+  });
+
+  it('does not block the identical candidate when source is screener', async () => {
+    const result = await runRecommendationEngine('test-user', { candidates: [makeCandidate()], source: 'screener' });
+    expect(result.recommendations[0].recommendation.summary).not.toContain('Portfolio-level risk limits block');
+  });
+});

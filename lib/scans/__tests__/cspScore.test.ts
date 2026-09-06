@@ -146,3 +146,43 @@ describe('calculateCspScore — independence and determinism', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('calculateCspScore -- band-aware IVR scoring', () => {
+  // OE-0003 fix: ivr used to be a flat clamp(ivr, 0, 100) identity mapping,
+  // treating "more IVR" as always better -- a category error, since this
+  // app's own rule set treats IVR as a preferred band, and IVR_MAX is
+  // already a hard disqualifier elsewhere (more IVR past that point is
+  // worse, not better). These tests lock in the corrected, band-aware
+  // behavior and its documented backward-compatible fallback.
+  it('scores full marks (100) anywhere inside the preferred band, not just at one point', () => {
+    const atFloor = calculateCspScore({ ...fullInputs(), ivr: 30, ivrMin: 30, ivrMax: 70 });
+    const middle = calculateCspScore({ ...fullInputs(), ivr: 50, ivrMin: 30, ivrMax: 70 });
+    const atCeiling = calculateCspScore({ ...fullInputs(), ivr: 70, ivrMin: 30, ivrMax: 70 });
+    expect(atFloor.components.ivr).toBe(100);
+    expect(middle.components.ivr).toBe(100);
+    expect(atCeiling.components.ivr).toBe(100);
+  });
+
+  it('scores meaningfully below 100 the farther IVR sits below the floor, real example from a live scan (OXY: 18.5% IVR vs a 30% floor)', () => {
+    const result = calculateCspScore({ ...fullInputs(), ivr: 18.5, ivrMin: 30, ivrMax: 70 });
+    expect(result.components.ivr).toBeCloseTo((18.5 / 30) * 100, 1);
+    expect(result.components.ivr).toBeLessThan(100);
+  });
+
+  it('the farther below the floor, the lower the score -- monotonic, not flat', () => {
+    const closeToFloor = calculateCspScore({ ...fullInputs(), ivr: 28, ivrMin: 30, ivrMax: 70 });
+    const farBelowFloor = calculateCspScore({ ...fullInputs(), ivr: 5, ivrMin: 30, ivrMax: 70 });
+    expect(farBelowFloor.components.ivr!).toBeLessThan(closeToFloor.components.ivr!);
+  });
+
+  it('does not reward IVR in excess of the ceiling -- scores it down, not up', () => {
+    const atCeiling = calculateCspScore({ ...fullInputs(), ivr: 70, ivrMin: 30, ivrMax: 70 });
+    const wellPastCeiling = calculateCspScore({ ...fullInputs(), ivr: 95, ivrMin: 30, ivrMax: 70 });
+    expect(wellPastCeiling.components.ivr!).toBeLessThan(atCeiling.components.ivr!);
+  });
+
+  it('falls back to the prior flat identity mapping when ivrMin/ivrMax are not supplied (backward compatibility)', () => {
+    const withoutBand = calculateCspScore({ ...fullInputs(), ivr: 18.5 });
+    expect(withoutBand.components.ivr).toBe(18.5);
+  });
+});

@@ -452,9 +452,29 @@ export async function runRecommendationEngine(
       // these block, we short-circuit before invoking the shared engine --
       // there's no candidate-level reasoning that can override a
       // portfolio-level circuit breaker or sizing-discipline rule.
+      //
+      // OE-0003 fix: per_trade_max_loss checks candidate.theoreticalMaxLoss
+      // against perTradeMaxLossPctEquity at whatever quantity the caller
+      // supplied -- for a real Autopilot execution decision that quantity
+      // is deliberate and the gate is exactly right. For source: 'screener'
+      // (the Best Opportunities discovery bridge), the caller hasn't chosen
+      // a size at all -- screenResultsToAutopilotCandidates defaults to
+      // quantity 1, so this gate was answering "does 1 contract at full
+      // notional fit a 2.5%-of-equity budget" before the user had decided
+      // to trade even one. On a real account, that fails for nearly every
+      // CSP regardless of quality, making the gate noise rather than
+      // signal in this specific context (Ian/Paul, LEAPS-adjacent CSP
+      // discovery session). drawdown and correlation are NOT quantity-
+      // dependent in the same way -- a portfolio-level circuit breaker or
+      // concentration concern is real information regardless of size not
+      // yet being chosen, so those stay blocking for every source,
+      // screener included.
       const riskGates = evaluateRiskGates(candidate, config, portfolioState);
+      const blockingPreGateRules = options.source === 'screener'
+        ? PORTFOLIO_PRE_GATE_RULES.filter(rule => rule !== 'per_trade_max_loss')
+        : PORTFOLIO_PRE_GATE_RULES;
       const blockingPreGates = riskGates.filter(
-        (gate) => !gate.passed && PORTFOLIO_PRE_GATE_RULES.includes(gate.rule),
+        (gate) => !gate.passed && blockingPreGateRules.includes(gate.rule),
       );
 
       let analysis: DecisionAnalysis;
