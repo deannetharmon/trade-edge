@@ -2903,9 +2903,27 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   );
 }
 
-function LeapsTradeModal({ candidate, th, onClose }: {
+// Dean: the dry-run/submit gate previously failed silently ("Dry run
+// failed (409)") even though the server always sends back exactly which
+// gate(s) failed and why in review.qualification.gates. This surfaces
+// that real reason instead of a generic status-code message.
+function describeQualificationFailure(review: any): string | null {
+  const gates = review?.qualification?.gates;
+  if (!Array.isArray(gates)) return null;
+  const problems = gates.filter((g: any) => g.status === 'fail' || g.status === 'unavailable');
+  if (!problems.length) return null;
+  return problems.map((g: any) => g.message).join(' · ');
+}
+
+function LeapsTradeModal({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onClose }: {
   candidate: { symbol: string; expiration: string; dte: number; strike: number; delta: number | null; bid: number | null; ask: number | null; occSymbol: string | null };
   th: typeof THEMES[Theme];
+  deltaMin: number;
+  deltaMax: number;
+  dteMin: number;
+  dteMax: number;
+  oiMin: number;
+  extrinsicPctMax: number;
   onClose: () => void;
 }) {
   const [quantity, setQuantity] = useState(1);
@@ -2924,9 +2942,14 @@ function LeapsTradeModal({ candidate, th, onClose }: {
     setPhase('dryrun'); setError('');
     try {
       const accountNumber = await getAccountNumber();
-      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit }) });
+      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      if (!res.ok) throw new Error(
+        typeof data?.error === 'string' ? data.error
+          : data?.error?.message ?? data?.errors?.[0]?.message
+          ?? describeQualificationFailure(data?.review)
+          ?? `Dry run failed (${res.status})`,
+      );
       setDryRunResult(data?.order);
       setPhase('confirm');
     } catch (e: any) {
@@ -2938,9 +2961,14 @@ function LeapsTradeModal({ candidate, th, onClose }: {
     setPhase('placing'); setError('');
     try {
       const accountNumber = await getAccountNumber();
-      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit }) });
+      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(
+        typeof data?.error === 'string' ? data.error
+          : data?.error?.message ?? data?.errors?.[0]?.message
+          ?? describeQualificationFailure(data?.review)
+          ?? `Order failed (${res.status})`,
+      );
       setOrderId(data?.order?.order?.id ?? data?.order?.id ?? 'submitted');
       setPhase('done');
     } catch (e: any) {
@@ -10754,7 +10782,7 @@ export default function Home() {
 
       {tradeResult?.strategy === 'PMCC' && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
       {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
-      {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} onClose={() => setLeapsTradeCandidate(null)} />}
+      {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
         <RunModeModal

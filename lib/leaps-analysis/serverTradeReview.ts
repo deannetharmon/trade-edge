@@ -32,7 +32,7 @@ async function brokerGet(path: string, accessToken: string) { const response = a
 async function brokerGetFirst(paths: string[], accessToken: string) { for (const path of paths) { try { const data = await brokerGet(path, accessToken); if ((data?.data?.items ?? []).length > 0) return data; } catch { /* try alternate classification */ } } throw new Error('Broker market data is unavailable'); }
 export async function validatedAccount(context: BrokerContext, locator: string | null): Promise<string> { const accounts = await brokerGet('/customers/me/accounts', context.accessToken); const owned = (accounts?.data?.items ?? []).map((item: any) => String(item?.account?.['account-number'] ?? '')).filter(Boolean); const requested = locator?.trim() || null; if (requested && owned.includes(requested)) return requested; if (!requested && owned.length === 1) return owned[0]; throw new Error(requested ? 'Selected broker account is unavailable.' : 'Choose an active broker account before continuing.'); }
 
-async function resolveWithContext(context: BrokerContext, input: { underlyingSymbol: string; occSymbol: string }): Promise<ServerLeapsReview> {
+async function resolveWithContext(context: BrokerContext, input: { underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria): Promise<ServerLeapsReview> {
   if (!/^[A-Z.\-]{1,12}$/.test(input.underlyingSymbol) || !/^[A-Z0-9 .]{6,40}$/.test(input.occSymbol)) throw new Error('Invalid contract locator');
   const chain = await brokerGet(`/option-chains/${encodeURIComponent(input.underlyingSymbol)}/nested`, context.accessToken);
   let contract: { strike: number; expiration: string; multiplier: number } | null = null;
@@ -47,7 +47,7 @@ async function resolveWithContext(context: BrokerContext, input: { underlyingSym
   const spot = finite(underlying?.last) ?? (underlyingBid != null && underlyingAsk != null ? (underlyingBid + underlyingAsk) / 2 : null);
   const optionQuoteTimestamp = iso(option?.['updated-at'] ?? option?.['quote-time']); const underlyingQuoteTimestamp = iso(underlying?.['updated-at'] ?? underlying?.['quote-time']); const quotesFresh = fresh(optionQuoteTimestamp) && fresh(underlyingQuoteTimestamp);
   const dte = Math.ceil((Date.parse(`${contract.expiration}T00:00:00Z`) - Date.now()) / 86_400_000);
-  const qualification = evaluateLeapsEntry({ occSymbol: input.occSymbol, strike: contract.strike, dte, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), bid, ask, underlyingPrice: spot, quoteTimestamp: quotesFresh ? optionQuoteTimestamp : null }, SERVER_LEAPS_POLICY);
+  const qualification = evaluateLeapsEntry({ occSymbol: input.occSymbol, strike: contract.strike, dte, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), bid, ask, underlyingPrice: spot, quoteTimestamp: quotesFresh ? optionQuoteTimestamp : null }, criteria);
   if (!quotesFresh) { const gate = qualification.gates.find(item => item.id === 'freshness'); if (gate) gate.message = 'Option and underlying quotes must both be no more than 60 seconds old'; }
   return { qualification, occSymbol: input.occSymbol, symbol: input.underlyingSymbol, strike: contract.strike, expiration: contract.expiration, dte, bid, ask, spot, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), impliedVolatility: finite(option?.volatility ?? option?.['implied-volatility'] ?? option?.iv), optionQuoteTimestamp, underlyingQuoteTimestamp, instrumentType: String(option?.['instrument-type'] ?? '').toLowerCase().includes('index') ? 'Index Option' : 'Equity Option', multiplier: contract.multiplier, provider: 'tastytrade', fetchedAt: new Date().toISOString() };
 }
@@ -95,8 +95,8 @@ export async function submitPmccOrder(userId: string, input: {
   try {
     const accountNumber = await validatedAccount(context, input.accountLocator);
     const [longReview, shortReview] = await Promise.all([
-      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.longOccSymbol }),
-      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.shortOccSymbol }),
+      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.longOccSymbol }, SERVER_LEAPS_POLICY),
+      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.shortOccSymbol }, SERVER_LEAPS_POLICY),
     ]);
     const now = new Date();
     const marketSession = derivePmccMarketSession(now);
@@ -136,14 +136,14 @@ export async function submitPmccOrder(userId: string, input: {
 }
 
 /** Analysis lookup intentionally has no brokerage-account input or output. */
-export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input); } finally { context.redis.disconnect(); } }
+export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input, SERVER_LEAPS_POLICY); } finally { context.redis.disconnect(); } }
 
 /** Account ownership and exact live contract evidence are revalidated on every call. */
-export async function reviewLeapsContract(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { const accountNumber = await validatedAccount(context, input.accountLocator); const review = await resolveWithContext(context, input); return { accountNumber, context, review }; } catch (error) { context.redis.disconnect(); throw error; } }
+export async function reviewLeapsContract(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria = SERVER_LEAPS_POLICY) { const context = await brokerContext(userId); try { const accountNumber = await validatedAccount(context, input.accountLocator); const review = await resolveWithContext(context, input, criteria); return { accountNumber, context, review }; } catch (error) { context.redis.disconnect(); throw error; } }
 
-export async function submitLeapsOrder(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string; quantity: number; limitPrice: number; mode: 'dry-run' | 'submit' }) {
+export async function submitLeapsOrder(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string; quantity: number; limitPrice: number; mode: 'dry-run' | 'submit' }, criteria: LeapsEntryCriteria = SERVER_LEAPS_POLICY) {
   if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
-  const reviewed = await reviewLeapsContract(userId, input);
+  const reviewed = await reviewLeapsContract(userId, input, criteria);
   try {
     if (reviewed.review.qualification.status !== 'CONTRACT_QUALIFIED') return { review: reviewed.review, order: null };
     const response = await fetch(`${API_BASE}/accounts/${reviewed.accountNumber}/orders${input.mode === 'dry-run' ? '/dry-run' : ''}`, { method: 'POST', headers: { Authorization: `Bearer ${reviewed.context.accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' }, body: JSON.stringify({ 'time-in-force': 'GTC', 'order-type': 'Limit', price: input.limitPrice.toFixed(2), 'price-effect': 'Debit', legs: [{ 'instrument-type': reviewed.review.instrumentType, symbol: reviewed.review.occSymbol, quantity: input.quantity, action: 'Buy to Open' }] }) });
