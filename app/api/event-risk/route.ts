@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { fetchEventCalendarBundle } from '@/lib/fundamentals/fmpClient';
+import { fetchEventCalendarBundle } from '@/lib/scans/eventCalendar';
 import { normalizeFmpEventCalendar } from '@/lib/scans/eventCalendar';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

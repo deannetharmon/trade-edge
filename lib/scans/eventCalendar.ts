@@ -6,6 +6,49 @@ export interface NormalizedEventCalendar {
   complete: boolean;
 }
 
+// Relocated from lib/fundamentals/fmpClient.ts when that file's
+// FUNDAMENTALS-0001/0002 fundamentals-scoring work was backed out (Ian/
+// Paul: analyst price targets are opinion not metric, and the Finviz
+// screen already covers the quality-filtering job the Z-Score/valuation-
+// compression work would have refined -- not worth the free-tier access
+// problems it ran into). fetchEventCalendarBundle is the one piece of that
+// file genuinely used by a live, wired-in feature (PMCC event-risk gating,
+// app/api/event-risk/route.ts) and doesn't belong grouped with dormant
+// debug-only code -- moved here, next to the calendar normalizer it feeds,
+// rather than deleted along with everything else in that file.
+const FMP_LEGACY_BASE = 'https://financialmodelingprep.com/api/v3';
+
+export interface FmpEventCalendarBundle {
+  symbol: string;
+  fetchedAt: string;
+  earnings: unknown;
+  dividends: unknown;
+  splits: unknown;
+}
+
+async function fetchFmpCalendar(path: string, from: string, to: string): Promise<unknown> {
+  const apiKey = process.env.FMP_API_KEY;
+  if (!apiKey) throw new Error('FMP_API_KEY is not configured');
+  const url = `${FMP_LEGACY_BASE}/${path}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&apikey=${apiKey}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  const body = await response.text();
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { parsed = body; }
+  if (!response.ok) throw new Error(`FMP ${path} failed (${response.status})`);
+  return parsed;
+}
+
+/** Raw calendar spike. Fields deliberately remain untrusted until a deployed
+ * response confirms the account's plan, schema, and date semantics. */
+export async function fetchEventCalendarBundle(symbol: string, from: string, to: string): Promise<FmpEventCalendarBundle> {
+  const [earnings, dividends, splits] = await Promise.all([
+    fetchFmpCalendar('earning_calendar', from, to),
+    fetchFmpCalendar('stock_dividend_calendar', from, to),
+    fetchFmpCalendar('stock_split_calendar', from, to),
+  ]);
+  return { symbol, fetchedAt: new Date().toISOString(), earnings, dividends, splits };
+}
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function records(value: unknown): Record<string, unknown>[] | null {
