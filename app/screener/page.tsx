@@ -2678,7 +2678,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
     underlyingPrice: number | null; spreadPct: number | null; extrinsicValue: number | null;
-    score: number | null; scoreIncomplete: boolean;
+    score: number | null; scoreIncomplete: boolean; ivRank: number | null; ivx: number | null;
   };
   th: typeof THEMES[Theme];
   deltaMin: number;
@@ -2855,6 +2855,17 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
         {reviewTradeDisabledReason && <span className="text-amber-300">Review trade unavailable: {reviewTradeDisabledReason}</span>}
         <span>Δ {candidate.delta?.toFixed(2) ?? '—'} {candidate.delta != null && (deltaInRange ? <span className="text-emerald-400">✓ within {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span> : <span className="text-amber-400">outside {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span>)}</span>
         <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
+        {/* LEAPS-IVR-0001: entry-timing signals, not ongoing monitors --
+            IVR/IVx matter at the moment you buy, not across a multi-year
+            hold. 40% IVx threshold is a first-draft line, not yet
+            Ian-reviewed against real candidate spread. */}
+        <span>
+          IVR {candidate.ivRank != null ? `${candidate.ivRank.toFixed(0)}%` : '—'}
+          {' '}·{' '}
+          IVx {candidate.ivx != null ? (
+            <span className={candidate.ivx >= 40 ? 'text-amber-400' : undefined}>{candidate.ivx.toFixed(1)}%</span>
+          ) : '—'}
+        </span>
         <span>OI {candidate.openInterest ?? '—'}</span>
         <span>Bid {candidate.bid != null ? formatMoneyDropExactZeroCents(candidate.bid) : '—'} / Ask {candidate.ask != null ? formatMoneyDropExactZeroCents(candidate.ask) : '—'}</span>
       </div>
@@ -7153,6 +7164,13 @@ export default function Home() {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
     underlyingPrice: number | null; spreadPct: number | null; extrinsicValue: number | null;
+    // LEAPS-IVR-0001: entry-timing signals, not position-monitoring ones
+    // (Ian: IVR/IVx matter at the moment you buy a LEAPS, not something
+    // to track across a 500+ day hold). ivRank is the underlying's own
+    // IV Rank; ivx is looked up for THIS candidate's specific expiration
+    // via getMarketMetrics' expirationIvxMap, not a generic 30-day
+    // number that wouldn't match a multi-year-out contract.
+    ivRank: number | null; ivx: number | null;
     // LEAPS-0001: candidates missing delta/OI used to be silently dropped
     // by the scan's own filter. Alan: that's inconsistent with PMCC's own
     // near-miss/audit pattern -- a candidate that existed and got excluded
@@ -8380,11 +8398,20 @@ export default function Home() {
         // chain-only fetch already happening -- same Promise.all pattern
         // the rank/targeted scans already use). Needed for spreadPct and
         // extrinsicValue, which require the underlying price.
-        const [chain, quote] = await Promise.all([
+        // LEAPS-IVR-0001: getMarketMetrics is the same function CSP/spread
+        // scans already call -- no new data dependency. Fetched concurrently,
+        // same reasoning as the existing quote fetch (Quinn: costs nothing
+        // extra in wall-clock time). A metrics failure never blocks the scan;
+        // candidates just show '--' for these two fields (Alan's honesty
+        // pattern -- no fabricated IVR/IVx).
+        const [chain, quote, metricsArray] = await Promise.all([
           getPMCCChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: PMCC_LONG_DTE_MIN, longMax: PMCC_LONG_DTE_MAX }),
           getQuote(symbol, token).catch(() => null),
+          getMarketMetrics([symbol], token).catch(() => []),
         ]);
         const underlyingPrice: number | null = quote;
+        const metrics = metricsArray?.[0] ?? null;
+        const ivRank: number | null = metrics?.ivRank ?? null;
         return adaptPmccChain(symbol, chain).longLegs
           .filter(leg => leg.optionType === 'C')
           .map(leg => {
@@ -8406,10 +8433,14 @@ export default function Home() {
             const { total: score, incomplete: scoreIncomplete } = computeLeapsScore({
               extrinsicValue, totalCost, spreadPct, openInterest: leg.openInterest,
             });
+            // LEAPS-IVR-0001: IVx looked up for THIS leg's own expiration --
+            // a multi-year LEAPS' relevant IV isn't the same as a generic
+            // 30-day figure, and expirationIvxMap already keys by exact date.
+            const ivx: number | null = metrics?.expirationIvxMap?.[leg.expiration] ?? null;
             return {
               symbol, expiration: leg.expiration, dte: daysUntil(leg.expiration), strike: leg.strike,
               delta: leg.delta, openInterest: leg.openInterest, bid: leg.bid, ask: leg.ask, occSymbol: leg.occSymbol,
-              underlyingPrice, spreadPct, extrinsicValue, dataQuality,
+              underlyingPrice, spreadPct, extrinsicValue, dataQuality, ivRank, ivx,
               // LEAPS-0004: score is only meaningful for dataQuality 'ok'
               // candidates -- an 'insufficient' one is missing the exact
               // inputs the score needs, so it's forced to null here rather
