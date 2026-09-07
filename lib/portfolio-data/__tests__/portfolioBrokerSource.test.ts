@@ -84,6 +84,31 @@ describe('acquirePortfolioBrokerSource', () => {
     expect(orders.length).toBeGreaterThan(0);
   });
 
+  it('surfaces a directly submitted live multi-leg spread as a pending order', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [{
+        id: 'spread-1', status: 'Working', 'time-in-force': 'Day', 'order-type': 'Limit',
+        price: '1.25', 'price-effect': 'Credit', 'underlying-symbol': 'AAPL',
+        legs: [
+          { symbol: 'AAPL  261016P00100000', 'underlying-symbol': 'AAPL', action: 'Sell to Open', quantity: 1 },
+          { symbol: 'AAPL  261016P00095000', 'underlying-symbol': 'AAPL', action: 'Buy to Open', quantity: 1 },
+        ],
+      }] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders).toEqual([expect.objectContaining({
+      id: 'spread-1', sourceKind: 'live', accountNumber: 'ACC1', symbol: 'AAPL',
+      strategy: 'BPS', status: 'Working', limitPrice: 1.25, priceEffect: 'Credit',
+    })]);
+    expect(result.pendingOrders[0].legs).toHaveLength(2);
+  });
+
   // Bug fix regression test: an order with legs but a non-GTC TIF and a
   // non-limit/stop type (e.g. a same-day Market order) must NOT be treated
   // as a GTC close order. Previously the TIF/type check was dead code for

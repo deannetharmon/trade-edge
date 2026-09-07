@@ -8987,7 +8987,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
     <div>
       <div className="flex items-center justify-between mb-3">
         <p className="text-[10px] text-yellow-400 tracking-widest font-bold uppercase">
-          ⏳ Pending Orders — {orders.length}
+          ⏳ Working / Pending Orders — {orders.length}
         </p>
       </div>
       <div className="space-y-2">
@@ -9601,10 +9601,10 @@ export default function PortfolioPage() {
     setDraggedSectionId(null);
   };
 
-  // Pending orders are always complex-order-sourced (Phase 1 extraction
-  // reads PendingOrder.id from the parent OTOCO/OCO complex order's own
-  // id, never the trigger/nested sub-order ids) -- so cancelling one
-  // only ever needs the complex-orders endpoint, no branching required.
+  // Pending entries can come from either the ordinary live-order feed
+  // (including a directly submitted multi-leg spread) or a complex OTOCO
+  // container. Use the matching broker endpoint; legacy persisted/test
+  // values without sourceKind retain the original complex-order behavior.
   const cancelPendingOrder = async (order: PendingOrder) => {
     try {
       assertLiveContextReady(
@@ -9624,7 +9624,8 @@ export default function PortfolioPage() {
     setError('');
     try {
       const token = await getAccessToken();
-      await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
+      const orderCollection = order.sourceKind === 'live' ? 'orders' : 'complex-orders';
+      await ttDelete(`/accounts/${order.accountNumber}/${orderCollection}/${order.id}`, token);
       await fetchPositions(); // refetch so pendingOrders/positions reflect the cancellation
     } catch (e: any) {
       setError(`Could not cancel order: ${e.message ?? 'unknown error'}`);
@@ -9673,7 +9674,8 @@ export default function PortfolioPage() {
     const result = await runPendingOrderReplacementWorkflow(evidence, newPrice, {
       cancelExistingOrder: async () => {
         const token = await getAccessToken();
-        await ttDelete(`/accounts/${order.accountNumber}/complex-orders/${order.id}`, token);
+        const orderCollection = order.sourceKind === 'live' ? 'orders' : 'complex-orders';
+        await ttDelete(`/accounts/${order.accountNumber}/${orderCollection}/${order.id}`, token);
       },
       waitBetweenCancelAndPost: () => new Promise(r => setTimeout(r, 500)),
       buildOrderBody: (limitPricePoints: number) => buildReplaceOrder(order, limitPricePoints),
@@ -10073,18 +10075,31 @@ export default function PortfolioPage() {
       {positionsWorkspaceState === 'workspace' && (
         <>
           {positionsWorkspaceV2Enabled ? (
-            <PositionsWorkspace
-              model={positionsWorkspaceModel}
-              th={th}
-              getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
-                .filter(action => isActionRelevant(position, action))}
-              onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
-              onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
-              renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
-              renderStopControl={position => position.stopLossClassification === 'NO_STOP'
-                ? <SetStopLossButton pos={position} th={th} />
-                : null}
-            />
+            <>
+              {pendingOrders.length > 0 && (
+                <div className="px-4 pt-4 sm:px-6 sm:pt-6">
+                  <PendingOrdersSection
+                    orders={pendingOrders} th={th}
+                    cancellingOrderIds={cancellingOrderIds}
+                    replacingOrderIds={replacingOrderIds}
+                    onCancel={cancelPendingOrder}
+                    onReplace={replacePendingOrder}
+                  />
+                </div>
+              )}
+              <PositionsWorkspace
+                model={positionsWorkspaceModel}
+                th={th}
+                getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
+                  .filter(action => isActionRelevant(position, action))}
+                onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
+                onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
+                renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
+                renderStopControl={position => position.stopLossClassification === 'NO_STOP'
+                  ? <SetStopLossButton pos={position} th={th} />
+                  : null}
+              />
+            </>
           ) : (
           <div className="overflow-x-auto">
             <div className="p-6 space-y-8" style={{ minWidth: '1600px' }}>

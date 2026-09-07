@@ -1295,6 +1295,75 @@ export async function loadPositions(
   }
 
   const pendingOrders: PendingOrder[] = [];
+  // A multi-leg spread submitted directly in TastyTrade is returned by
+  // /orders/live, not necessarily by /complex-orders. Keep the ids of
+  // complex-order children that we already surfaced so the two broker feeds
+  // can be merged without showing the same order twice.
+  const representedLiveOrderIds = new Set<string>();
+
+  const toPendingOrder = (
+    rawOrder: any,
+    id: string,
+    sourceKind: PendingOrder['sourceKind'],
+  ): PendingOrder | null => {
+    const status = String(rawOrder?.status ?? '').trim().toLowerCase();
+    if (['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(status)) return null;
+    const rawLegs: any[] = rawOrder?.legs ?? [];
+    if (rawLegs.length === 0) return null;
+
+    // Pending entries must open exposure. Closing/protective working orders
+    // remain attached to their existing Position and must not be duplicated
+    // in this section. A plain roll can contain both closing and opening legs;
+    // preserve the complete order whenever at least one leg opens exposure.
+    const hasOpeningLeg = rawLegs.some((leg: any) => {
+      const action = String(leg.action ?? '').trim().toLowerCase();
+      return action === 'sell to open' || action === 'buy to open';
+    });
+    if (!hasOpeningLeg) return null;
+
+    const parsedLegs: PendingOrderLeg[] = rawLegs.map((leg: any) => {
+      const occSymbol = String(leg.symbol ?? '');
+      const parsed = parseOptionSymbol(occSymbol);
+      return {
+        symbol: occSymbol,
+        action: String(leg.action ?? ''),
+        optionType: parsed.strikePrice > 0 ? parsed.optionType : null,
+        strikePrice: parsed.strikePrice,
+        quantity: Number(leg.quantity ?? 1),
+      };
+    });
+    const putLegs = parsedLegs.filter(leg => leg.optionType === 'P');
+    const callLegs = parsedLegs.filter(leg => leg.optionType === 'C');
+    const hasClosingLeg = rawLegs.some((leg: any) => String(leg.action ?? '').trim().toLowerCase().endsWith('to close'));
+    let strategy = hasClosingLeg ? 'ROLL' : 'UNKNOWN';
+    if (!hasClosingLeg && putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
+    else if (!hasClosingLeg && callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
+    else if (!hasClosingLeg && putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
+
+    const underlyingSymbol =
+      rawOrder?.['underlying-symbol'] ??
+      rawLegs.find((leg: any) => leg?.['underlying-symbol'])?.['underlying-symbol'] ??
+      (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
+    const expMatch = parsedLegs.find(leg => leg.symbol.match(/(\d{6})[CP]\d{8}/))?.symbol.match(/(\d{6})[CP]\d{8}/);
+    const expDate = expMatch
+      ? `20${expMatch[1].slice(0, 2)}-${expMatch[1].slice(2, 4)}-${expMatch[1].slice(4, 6)}`
+      : null;
+    return {
+      id,
+      sourceKind,
+      accountNumber,
+      symbol: underlyingSymbol ? String(underlyingSymbol).split(' ')[0].trim() : 'UNKNOWN',
+      strategy,
+      legs: parsedLegs,
+      expDate,
+      limitPrice: rawOrder?.price != null ? parseFloat(rawOrder.price) : null,
+      priceEffect: rawOrder?.['price-effect'] ?? null,
+      status: rawOrder?.status ?? 'unknown',
+      createdAt: rawOrder?.['received-at'] ?? rawOrder?.['updated-at'] ?? null,
+      orderType: rawOrder?.['order-type'] ?? null,
+      timeInForce: rawOrder?.['time-in-force'] ?? null,
+    };
+  };
   try {
     const complexItems = source.rawComplexOrders ?? [];
     for (const order of complexItems) {
@@ -1367,51 +1436,30 @@ export async function loadPositions(
           // pending entry. In an OTOCO the trigger can be Filled while the OCO
           // bracket legs are still Live, which keeps hasActiveNested true; without
           // this check the filled opening order leaks into Pending Orders.
-          const openingStatus = String(openingSource?.status ?? '').toLowerCase();
-          const openingIsTerminal = ['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(openingStatus);
-          const openingLegs: any[] = openingSource?.legs ?? [];
-          if (isOpeningOrder && !openingIsTerminal) {
-            const parsedLegs: PendingOrderLeg[] = openingLegs.map((l: any) => {
-              const occSymbol = String(l.symbol ?? '');
-              const parsed = parseOptionSymbol(occSymbol);
-              return {
-                symbol: occSymbol,
-                action: String(l.action ?? ''),
-                optionType: parsed.strikePrice > 0 ? parsed.optionType : null,
-                strikePrice: parsed.strikePrice,
-                quantity: Number(l.quantity ?? 1),
-              };
-            });
-            const putLegs = parsedLegs.filter(l => l.optionType === 'P');
-            const callLegs = parsedLegs.filter(l => l.optionType === 'C');
-            let strategy = 'UNKNOWN';
-            if (putLegs.length >= 2 && callLegs.length === 0) strategy = 'BPS';
-            else if (callLegs.length >= 2 && putLegs.length === 0) strategy = 'BCS';
-            else if (putLegs.length >= 2 && callLegs.length >= 2) strategy = 'IC';
-            const underlyingSymbol =
-              openingSource?.['underlying-symbol'] ??
-              (parsedLegs[0]?.symbol ? parsedLegs[0].symbol.split(/\d{6}/)[0].trim() : null);
-            const expMatch = parsedLegs[0]?.symbol?.match(/(\d{6})[CP]\d{8}/);
-            const expDate = expMatch
-              ? `20${expMatch[1].slice(0, 2)}-${expMatch[1].slice(2, 4)}-${expMatch[1].slice(4, 6)}`
-              : null;
-            pendingOrders.push({
-              id: String(order.id ?? ''),
-              accountNumber,
-              symbol: underlyingSymbol ?? 'UNKNOWN',
-              strategy,
-              legs: parsedLegs,
-              expDate,
-              limitPrice: openingSource?.price != null ? parseFloat(openingSource.price) : null,
-              priceEffect: openingSource?.['price-effect'] ?? null,
-              status: openingSource?.status ?? order['status'] ?? 'unknown',
-              createdAt: openingSource?.['received-at'] ?? openingSource?.['updated-at'] ?? null,
-              orderType: openingSource?.['order-type'] ?? null,
-              timeInForce: openingSource?.['time-in-force'] ?? null,
-            });
+          if (isOpeningOrder) {
+            const pending = toPendingOrder(openingSource, String(order.id ?? ''), 'complex');
+            if (pending) {
+              pendingOrders.push(pending);
+              for (const nested of nestedOrders) {
+                if (nested?.id != null) representedLiveOrderIds.add(String(nested.id));
+              }
+              if (openingSource?.id != null) representedLiveOrderIds.add(String(openingSource.id));
+            }
           }
         }
       }
+    }
+  } catch {}
+
+  // Direct TastyTrade spreads and other ordinary opening orders live here.
+  // Previously this feed was acquired and used for coverage reservations,
+  // but never promoted into the Portfolio pending-order UI.
+  try {
+    for (const order of source.rawLiveOrders ?? []) {
+      const id = String(order?.id ?? '');
+      if (!id || representedLiveOrderIds.has(id)) continue;
+      const pending = toPendingOrder(order, id, 'live');
+      if (pending) pendingOrders.push(pending);
     }
   } catch {}
 

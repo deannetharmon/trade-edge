@@ -268,13 +268,10 @@ export interface Position {
 
 
 // ── Pending Orders ───────────────────────────────────────────────────────
-// An unfilled OTOCO entry/opening order -- the trigger leg of a complex
-// order that hasn't filled yet, so it has no corresponding Position. These
-// come from the same /complex-orders fetch loadPositions already does for
-// gtcSymbols, filtered down to legs with Sell to Open / Buy to Open actions
-// (as opposed to Buy to Close / Sell to Close, which mark GTC/stop orders
-// protecting an already-open position -- those are tracked separately via
-// Position.hasGtc / gtcOrderId / stopLossStatus, not here).
+// An unfilled entry/opening order that has no corresponding Position yet.
+// These can be ordinary /orders/live orders (including direct multi-leg
+// spreads) or trigger/contingent orders inside /complex-orders. Pure closing
+// and protective orders stay associated with the existing Position instead.
 export interface PendingOrderLeg {
   symbol: string;       // OCC option symbol, space-padded as TastyTrade returns it
   action: string;       // 'Sell to Open' | 'Buy to Open' | etc.
@@ -285,10 +282,11 @@ export interface PendingOrderLeg {
 
 
 export interface PendingOrder {
-  id: string;                 // complex-order id -- pending orders are always complex-order-sourced
+  id: string;                 // broker id for the source order/container
+  sourceKind?: 'live' | 'complex'; // selects the correct broker cancel endpoint; absent legacy values are complex
   accountNumber: string;
   symbol: string;              // underlying symbol
-  strategy: string;             // inferred from legs: BPS / BCS / IC / UNKNOWN
+  strategy: string;             // inferred from legs: BPS / BCS / IC / ROLL / UNKNOWN
   legs: PendingOrderLeg[];
   expDate: string | null;       // expiration date of the option legs, if parseable
   limitPrice: number | null;    // trigger order's limit price
