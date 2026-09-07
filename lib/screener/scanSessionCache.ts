@@ -147,7 +147,7 @@ export const LEAPS_CACHE_KEY = 'screenerLeapsSession_v1';
 
 export interface LeapsCachedSession {
   results: unknown[];
-  filters: { deltaMin: number; deltaMax: number; dteMin: number; oiMin: number; extrinsicPctMax: number };
+  filters: { deltaMin: number; deltaMax: number; dteMin: number; dteMax: number; oiMin: number; extrinsicPctMax: number };
   cachedAt: number;
 }
 

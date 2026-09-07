@@ -9,6 +9,8 @@ export interface LeapsEntryCriteria {
   deltaMin: number;
   deltaMax: number;
   dteMin: number;
+  /** Optional -- omitted callers keep the pre-existing floor-only behavior. */
+  dteMax?: number;
   oiMin: number;
   /** null means discovery mode, never a fully-qualified entry. */
   extrinsicPctMax: number | null;
@@ -54,7 +56,13 @@ export function evaluateLeapsEntry(candidate: LeapsEntryCandidate, criteria: Lea
   const spreadPct = mid != null ? ((candidate.ask! - candidate.bid!) / mid) * 100 : null;
   const gates: LeapsEntryGate[] = [{ id: 'marketData', status: hasMarketData ? 'pass' : 'unavailable', message: hasMarketData ? 'Valid OCC identity and two-sided quote' : 'OCC identity, underlying price, and a valid two-sided quote are required' }];
   gates.push({ id: 'delta', status: finite(candidate.delta) ? (candidate.delta >= criteria.deltaMin && candidate.delta <= criteria.deltaMax ? 'pass' : 'fail') : 'unavailable', message: `Delta must be ${criteria.deltaMin.toFixed(2)}–${criteria.deltaMax.toFixed(2)}` });
-  gates.push({ id: 'dte', status: Number.isFinite(candidate.dte) ? (candidate.dte >= criteria.dteMin ? 'pass' : 'fail') : 'unavailable', message: `DTE must be at least ${criteria.dteMin}` });
+  gates.push({
+    id: 'dte',
+    status: !Number.isFinite(candidate.dte) ? 'unavailable'
+      : candidate.dte < criteria.dteMin || (criteria.dteMax != null && candidate.dte > criteria.dteMax) ? 'fail'
+      : 'pass',
+    message: criteria.dteMax != null ? `DTE must be ${criteria.dteMin}-${criteria.dteMax}` : `DTE must be at least ${criteria.dteMin}`,
+  });
   gates.push({ id: 'openInterest', status: finite(candidate.openInterest) ? (candidate.openInterest >= criteria.oiMin ? 'pass' : 'fail') : 'unavailable', message: `Open interest must be at least ${criteria.oiMin}` });
   gates.push({ id: 'spreadPct', status: spreadPct == null ? 'unavailable' : (spreadPct <= criteria.spreadPctMax ? 'pass' : 'fail'), message: `Spread must be at most ${criteria.spreadPctMax}%` });
   gates.push({ id: 'extrinsicPct', status: criteria.extrinsicPctMax == null ? 'not_applied' : extrinsicPctOfCost == null ? 'unavailable' : (extrinsicPctOfCost <= criteria.extrinsicPctMax ? 'pass' : 'fail'), message: criteria.extrinsicPctMax == null ? 'Extrinsic ceiling is in discovery mode' : `Extrinsic must be at most ${criteria.extrinsicPctMax}%` });

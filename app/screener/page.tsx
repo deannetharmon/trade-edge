@@ -2673,7 +2673,7 @@ function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): a
 // LEAPS-0002: extracted so each row can own its own expand/chart state,
 // matching how PmccResultCard/GenericResultCard already work -- a flat
 // array of candidates has nowhere to hang per-row local state otherwise.
-function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extrinsicPctMax, onTrade }: {
+function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade }: {
   candidate: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -2684,6 +2684,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
   deltaMin: number;
   deltaMax: number;
   dteMin: number;
+  dteMax: number;
   oiMin: number;
   extrinsicPctMax: number;
   onTrade: () => void;
@@ -2734,7 +2735,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
     delta: candidate.delta, openInterest: candidate.openInterest, bid: candidate.bid,
     ask: candidate.ask, underlyingPrice: candidate.underlyingPrice,
   }, {
-    deltaMin, deltaMax, dteMin, oiMin, extrinsicPctMax: extrinsicPctMax || null,
+    deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax: extrinsicPctMax || null,
     spreadPctMax: 10, policyVersion: 'leaps-entry-v1',
   });
   const qualificationMeta = {
@@ -7150,6 +7151,12 @@ export default function Home() {
   const [leapsDeltaMin, setLeapsDeltaMin] = useState(DEFAULT_PMCC_LONG_DELTA_RANGE.min);
   const [leapsDeltaMax, setLeapsDeltaMax] = useState(DEFAULT_PMCC_LONG_DELTA_RANGE.max);
   const [leapsDteMin, setLeapsDteMin] = useState(PMCC_LONG_DTE_MIN);
+  // Ian: min-only DTE let a 280-day and a 900+-day contract sit in the
+  // same bucket despite very different theta/roll characteristics.
+  // Default ceiling matches PMCC_LONG_DTE_MAX, the same bound the
+  // broker fetch itself already uses -- nothing previously visible
+  // disappears out of the box.
+  const [leapsDteMax, setLeapsDteMax] = useState(PMCC_LONG_DTE_MAX);
   const [leapsOiMin, setLeapsOiMin] = useState(DEFAULT_PMCC_LONG_OI_MIN);
   // LEAPS-0003: extrinsic-as-%-of-cost ceiling. No default threshold --
   // Ian: needs real candidate spread across multiple tickers before a
@@ -7609,6 +7616,7 @@ export default function Home() {
       setLeapsDeltaMin(session.filters.deltaMin);
       setLeapsDeltaMax(session.filters.deltaMax);
       setLeapsDteMin(session.filters.dteMin);
+      if (session.filters.dteMax != null) setLeapsDteMax(session.filters.dteMax);
       setLeapsOiMin(session.filters.oiMin);
       setLeapsExtrinsicPctMax(session.filters.extrinsicPctMax);
     });
@@ -8393,7 +8401,7 @@ export default function Home() {
       // (see persistLeapsSession's doc comment for why).
       persistLeapsSession({
         results: found,
-        filters: { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax },
+        filters: { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax },
       });
     } catch (scanError: any) {
       setError(scanError?.message ?? 'Unable to load LEAPS candidates from broker market data.');
@@ -10551,7 +10559,7 @@ export default function Home() {
             const insufficientCandidates = visible.filter(r => r.dataQuality === 'insufficient');
             const filtered = okCandidates.filter(r => {
               if ((r.delta ?? -1) < leapsDeltaMin || (r.delta ?? 2) > leapsDeltaMax) return false;
-              if (r.dte < leapsDteMin) return false;
+              if (r.dte < leapsDteMin || r.dte > leapsDteMax) return false;
               if ((r.openInterest ?? 0) < leapsOiMin) return false;
               // LEAPS-0003: extrinsic% filter -- Alan's requirement, a
               // candidate whose extrinsic%-of-cost can't be computed
@@ -10637,6 +10645,12 @@ export default function Home() {
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≤</span>
+                      {[365, 500, 650, 800, 1000].map(v => (
+                        <button key={v} onClick={() => setLeapsDteMax(v)} className={chip(leapsDteMax === v)}>{v}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>OI ≥</span>
                       {[0, 50, 100, 250, 500].map(v => (
                         <button key={v} onClick={() => setLeapsOiMin(v)} className={chip(leapsOiMin === v)}>{v === 0 ? 'Any' : v}</button>
@@ -10688,7 +10702,7 @@ export default function Home() {
 
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
+                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
                     onTrade={() => setLeapsTradeCandidate(candidate)} />
                 ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, liquidity, and extrinsic filters.</p>}
 
@@ -10697,7 +10711,7 @@ export default function Home() {
                     <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
                     <div className="space-y-2">{insufficientCandidates.map(candidate => (
                       <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
-                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
+                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
                         onTrade={() => setLeapsTradeCandidate(candidate)} />
                     ))}</div>
                   </div>
