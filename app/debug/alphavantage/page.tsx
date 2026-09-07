@@ -16,6 +16,7 @@ import type { AlphaVantageBundle } from '@/lib/fundamentals/alphaVantageClient';
 
 export default function AlphaVantageDebugPage() {
   const [symbol, setSymbol] = useState('AAPL');
+  const [forceRefresh, setForceRefresh] = useState(false);
   const [bundle, setBundle] = useState<AlphaVantageBundle | null>(null);
   const [cached, setCached] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function AlphaVantageDebugPage() {
     if (!symbol.trim()) return;
     setLoading(true); setError(''); setBundle(null); setCached(null);
     try {
-      const response = await fetch(`/api/alphavantage-debug?symbol=${encodeURIComponent(symbol.trim())}`);
+      const response = await fetch(`/api/alphavantage-debug?symbol=${encodeURIComponent(symbol.trim())}${forceRefresh ? '&refresh=true' : ''}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? `Request failed (${response.status})`);
       setBundle(payload.bundle);
@@ -51,16 +52,21 @@ export default function AlphaVantageDebugPage() {
         (one per data type). Cached for 7 days per symbol so re-checking the same symbol doesn&apos;t cost more calls --
         but a fresh symbol always does. Spend these deliberately.
       </p>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
         <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
           onKeyDown={e => { if (e.key === 'Enter') void lookup(); }}
           placeholder="Symbol"
           style={{ background: '#000', border: '1px solid #444', borderRadius: 4, padding: '6px 10px', color: '#fff', width: 120 }} />
         <button onClick={() => void lookup()} disabled={loading}
           style={{ background: '#222', border: '1px solid #444', borderRadius: 4, padding: '6px 14px', color: '#fff', cursor: 'pointer', opacity: loading ? 0.5 : 1 }}>
-          {loading ? 'Loading…' : 'Look up (costs 4 calls if not cached)'}
+          {loading ? 'Loading…' : `Look up (costs 4 calls if not cached${forceRefresh ? ' -- forced' : ''})`}
         </button>
       </div>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 16, opacity: 0.8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={forceRefresh} onChange={e => setForceRefresh(e.target.checked)} />
+        Force refresh (bypass cache, always spends 4 calls) -- use this once if you're re-checking a symbol you looked up
+        before the API key was added, since that attempt's failure got cached for 7 days otherwise.
+      </label>
       {error && <p style={{ color: '#f66', marginBottom: 12 }}>Error: {error}</p>}
       {bundle && (
         <div>

@@ -23,13 +23,32 @@ export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get('symbol')?.trim().toUpperCase();
   if (!symbol) return NextResponse.json({ error: 'symbol is required' }, { status: 400 });
 
+  // FIX: a real bug found live -- the route used to always cache whatever
+  // fetchAlphaVantageBundle returned, including a bundle where every field
+  // failed with "ALPHA_VANTAGE_API_KEY is not configured" (a setup
+  // problem, not real API data). That got stuck in the cache for the full
+  // 7-day TTL, so once the key was actually added, lookups kept silently
+  // replaying the pre-key failure instead of ever reaching Alpha Vantage.
+  // Checking for the missing key upfront avoids caching a configuration
+  // error as if it were a real, symbol-specific API response.
+  if (!process.env.ALPHA_VANTAGE_API_KEY) {
+    return NextResponse.json({ error: 'ALPHA_VANTAGE_API_KEY is not configured' }, { status: 500 });
+  }
+
   const key = cacheKey(symbol);
+  const forceRefresh = req.nextUrl.searchParams.get('refresh') === 'true';
+
+  if (forceRefresh) {
+    try { await redis.del(key); } catch {}
+  }
 
   try {
-    const cached = await redis.get(key);
-    if (cached) {
-      const bundle: AlphaVantageBundle = JSON.parse(cached);
-      return NextResponse.json({ bundle, cached: true });
+    if (!forceRefresh) {
+      const cached = await redis.get(key);
+      if (cached) {
+        const bundle: AlphaVantageBundle = JSON.parse(cached);
+        return NextResponse.json({ bundle, cached: true });
+      }
     }
   } catch {
     // Cache read failure falls through to a live fetch, same as the FMP
