@@ -762,6 +762,10 @@ const PMCC_FAILURE_CODES = new Set([
   'LONG_STRIKE_NOT_BELOW_SHORT', 'NET_DEBIT_NOT_POSITIVE', 'NET_DEBIT_NOT_BELOW_WIDTH',
   'INVALID_EXTRINSIC', 'INSUFFICIENT_DATA',
 ]);
+const PMCC_QUALIFICATIONS = new Set(['QUALIFIED', 'DISQUALIFIED']);
+const PMCC_READINESS_STATES = new Set(['READY', 'MARKET_CLOSED', 'WAIT_MONITOR']);
+const PMCC_ACTION_STATES = new Set(['NEW_PMCC_REVIEW_ALLOWED', 'HELD_PMCC_REVIEW_ONLY', 'BLOCKED']);
+const PMCC_GATE_STATES = new Set(['pass', 'warning', 'unavailable', 'fail']);
 const finiteOrNull = (value: unknown): boolean => value === null || (typeof value === 'number' && Number.isFinite(value));
 
 function isValidPmccReason(value: unknown): boolean {
@@ -842,12 +846,42 @@ function isValidPmccMetrics(value: unknown): boolean {
     && finiteOrNull(metrics.shortCreditToLongExtrinsicPct);
 }
 
+function isValidPmccDecision(value: unknown, snapshot: PmccScanSnapshot, expectedEntryMode?: string): boolean {
+  if (value == null || typeof value !== 'object') return false;
+  const decision = value as Record<string, unknown>;
+  if (decision.policyVersion !== snapshot.decisionPolicyVersion
+    || typeof decision.qualification !== 'string' || !PMCC_QUALIFICATIONS.has(decision.qualification)
+    || typeof decision.readiness !== 'string' || !PMCC_READINESS_STATES.has(decision.readiness)
+    || typeof decision.action !== 'string' || !PMCC_ACTION_STATES.has(decision.action)
+    || (decision.entryMode !== 'new-pmcc' && decision.entryMode !== 'covered-short-call-against-held-leaps')
+    || (expectedEntryMode != null && decision.entryMode !== expectedEntryMode)
+    || !Array.isArray(decision.gates) || decision.gates.length === 0) return false;
+  const gatesValid = decision.gates.every(item => {
+    if (item == null || typeof item !== 'object') return false;
+    const gate = item as Record<string, unknown>;
+    return typeof gate.code === 'string' && gate.code.length > 0
+      && typeof gate.status === 'string' && PMCC_GATE_STATES.has(gate.status)
+      && typeof gate.explanation === 'string' && gate.explanation.length > 0
+      && (gate.observedValue === null || typeof gate.observedValue === 'string' || typeof gate.observedValue === 'number')
+      && (gate.threshold === null || typeof gate.threshold === 'string' || typeof gate.threshold === 'number')
+      && typeof gate.policySource === 'string' && gate.policySource.length > 0;
+  });
+  if (!gatesValid) return false;
+  const hasFailure = decision.gates.some(item => (item as Record<string, unknown>).status === 'fail');
+  if ((decision.qualification === 'DISQUALIFIED') !== hasFailure) return false;
+  if (decision.qualification === 'DISQUALIFIED' && decision.action !== 'BLOCKED') return false;
+  if (decision.readiness === 'WAIT_MONITOR' && decision.action !== 'BLOCKED') return false;
+  if (decision.entryMode === 'covered-short-call-against-held-leaps' && decision.action === 'NEW_PMCC_REVIEW_ALLOWED') return false;
+  return true;
+}
+
 function isValidPmccResult(value: Record<string, unknown>, snapshot: PmccScanSnapshot): boolean {
   if (value.strategy !== 'PMCC' || typeof value.symbol !== 'string' || value.pmccAsOf !== snapshot.asOf) return false;
   if (typeof value.candidateId !== 'string' || value.qualified === true && value.pmccPair == null) return false;
   if (value.pmccPair == null) {
     const productionAudit = value.pmccAuditKind != null;
     return value.qualified === false
+      && isValidPmccDecision(value.pmccDecision, snapshot)
       && value.candidateId === (productionAudit
         ? `pmcc-audit:${value.symbol}:${snapshot.asOf}:${value.pmccAuditKind}`
         : `pmcc-audit:${value.symbol}:${snapshot.asOf}`)
@@ -863,7 +897,10 @@ function isValidPmccResult(value: Record<string, unknown>, snapshot: PmccScanSna
     || !isValidPmccLegRejections(value.pmccLegRejections)) return false;
   const pair = value.pmccPair as Record<string, unknown>;
   if (pair.pairId !== value.candidateId || pair.symbol !== value.symbol || pair.orderingLabel !== 'Contract order') return false;
-  if (pair.qualified !== value.qualified || !Array.isArray(pair.failureReasons)
+  const effectiveEntryMode = typeof pair.entryMode === 'string' ? pair.entryMode : 'new-pmcc';
+  if (!isValidPmccDecision(value.pmccDecision, snapshot, effectiveEntryMode)
+    || value.qualified !== ((value.pmccDecision as Record<string, unknown>).qualification === 'QUALIFIED')
+    || !Array.isArray(pair.failureReasons)
     || !pair.failureReasons.every(isValidPmccReason) || typeof pair.insufficientData !== 'boolean') return false;
   if (!(pair.primaryFailureReason === null || isValidPmccReason(pair.primaryFailureReason))) return false;
   if ((pair.failureReasons.length === 0) !== (pair.primaryFailureReason === null)) return false;

@@ -1,5 +1,6 @@
 import type { PmccDeltaRange, PmccPairingLimits, PmccQuotePolicy, PmccScanSnapshot } from './pmccTypes';
 import { isValidPmccDteRanges } from './pmccDteRanges';
+import { PMCC_DECISION_POLICY_VERSION } from './pmccDecision';
 
 export const DEFAULT_PMCC_LONG_DELTA_RANGE: PmccDeltaRange = {
   min: 0.70,
@@ -78,6 +79,7 @@ export function isValidPmccScanSnapshot(value: unknown): value is PmccScanSnapsh
   return typeof snapshot.asOf === 'string'
     && Number.isFinite(Date.parse(snapshot.asOf))
     && sessions.has(snapshot.marketSession)
+    && snapshot.decisionPolicyVersion === PMCC_DECISION_POLICY_VERSION
     && criteria != null
     && isValidPmccDteRanges(criteria.dte)
     && isValidPmccDeltaRange(criteria.longDelta, PMCC_LONG_DELTA_BOUNDS)

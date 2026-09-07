@@ -5,6 +5,7 @@ import { pairPmccCandidates } from '../pmccPairing';
 import { buildPmccFailureAuditResult, buildPmccScreenResults, derivePmccMarketSession, pmccAuditReasons, PmccProductionError, runPmccProduction, runPmccSymbolProduction } from '../pmccProduction';
 import type { PmccChainLeg, PmccPairingCriteria, PmccSessionResult } from '../pmccTypes';
 import type { HeldPmccLongCandidate } from '../pmccHeldLeaps';
+import { PMCC_DECISION_POLICY_VERSION } from '../pmccDecision';
 
 const asOf = new Date('2026-08-14T15:00:00.000Z');
 const criteria: PmccPairingCriteria = {
@@ -13,7 +14,7 @@ const criteria: PmccPairingCriteria = {
   longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
-const snapshot = { asOf: asOf.toISOString(), marketSession: 'open' as const, criteria };
+const snapshot = { asOf: asOf.toISOString(), marketSession: 'open' as const, criteria, decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION };
 const occ = (expiration: string, strike: number) => `GS${expiration.slice(2).replace(/-/g, '')}C${String(strike * 1000).padStart(8, '0')}`;
 const leg = (role: 'long' | 'short', strike: number, overrides: Partial<PmccChainLeg> = {}): PmccChainLeg => {
   const expiration = role === 'long' ? '2027-06-18' : '2026-09-18';
@@ -96,6 +97,8 @@ describe('PMCC production integration', () => {
       value => { value.results[0].pmccPair.shortLeg.quote.bid = 'bad'; },
       value => { value.results[0].pmccPair.metrics.netDelta = Number.POSITIVE_INFINITY; },
       value => { value.results[0].qualified = !value.results[0].pmccPair.qualified; },
+      value => { delete value.results[0].pmccDecision; },
+      value => { value.results[0].pmccDecision.action = 'NEW_PMCC_REVIEW_ALLOWED'; value.results[0].pmccDecision.qualification = 'DISQUALIFIED'; },
     ];
     for (const corrupt of corruptions) {
       const value = JSON.parse(JSON.stringify(session));
@@ -111,6 +114,11 @@ describe('PMCC production integration', () => {
     const validation = validateSessionData(malformedPolicy);
     expect(validation.valid).toBe(false);
     if (!validation.valid) expect(validation.errors).toContain('INVALID_PMCC_SNAPSHOT');
+
+    const olderPmccPolicy = JSON.parse(JSON.stringify(session));
+    olderPmccPolicy.pmccSnapshot.decisionPolicyVersion = 'pmcc-decision-v0';
+    const olderValidation = validateSessionData(olderPmccPolicy);
+    expect(olderValidation).toMatchObject({ valid: false, errors: expect.arrayContaining(['INVALID_PMCC_SNAPSHOT']) });
   });
   it('rejects audit-only sessions whose retained counts claim nonexistent pairs', () => {
     const audit = buildPmccScreenResults(run([], []), context)[0];

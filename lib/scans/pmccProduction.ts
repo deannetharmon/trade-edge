@@ -10,6 +10,7 @@ import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHe
 // technicalAlignment input" -- this is that function's second, previously
 // unbuilt consumer, not a new mechanism.
 import { technicalAlignmentForStrategy } from '@/lib/portfolio/trendClassification';
+import { evaluatePmccDecision, PMCC_DECISION_POLICY_VERSION, unavailablePmccDecision } from './pmccDecision';
 
 export interface PmccProductionContext {
   symbol: string; price: number; ivr: number | null; earningsDate?: string | null;
@@ -126,10 +127,11 @@ export function pmccAuditReasons(session: PmccSessionResult): string[] {
 }
 
 function checksFor(pair: PmccPairResult | null): ScreenResult['checks'] {
+  const held = pair?.entryMode === 'covered-short-call-against-held-leaps';
   return {
     ivr: pending('Context only; not used by the PMCC pairing engine'), earnings: pending('Event/readiness context'),
-    oi: pair ? { status: 'pass', value: `${pair.shortLeg.openInterest}/${pair.longLeg.openInterest}`, reason: 'Submitted OI floors satisfied' } : pending('No retained pair'),
-    delta: pair ? { status: 'pass', value: `Long Δ${pair.longLeg.delta.toFixed(2)} / Short Δ${pair.shortLeg.delta.toFixed(2)}`, reason: 'Submitted delta ranges satisfied' } : pending('No retained pair'),
+    oi: pair ? { status: held ? 'warn' : 'pass', value: `${pair.shortLeg.openInterest}/${pair.longLeg.openInterest}`, reason: held ? 'Held-long OI is informational; short-call entry rules still apply' : 'Submitted OI floors satisfied' } : pending('No retained pair'),
+    delta: pair ? { status: held ? 'warn' : 'pass', value: `Long Δ${pair.longLeg.delta.toFixed(2)} / Short Δ${pair.shortLeg.delta.toFixed(2)}`, reason: held ? 'Held-long delta is a preference; short-call entry rules still apply' : 'Submitted delta ranges satisfied' } : pending('No retained pair'),
     credit: pair ? { status: 'pass', value: `$${pair.shortLeg.executablePrice.toFixed(2)} credit`, reason: 'Executable short bid' } : pending('No retained pair'),
     roc: pending('Generic spread scoring is not used for PMCC'), pop: pending('No whole-strategy POP is asserted for PMCC'),
     iv: pending('Not a PMCC pairing input'), emClearance: pending('Not a PMCC pairing input'),
@@ -147,12 +149,28 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
   const requireTrendAlignment = context.requireTrendAlignmentForPmcc ?? true;
   const trendAgainst = requireTrendAlignment
     && technicalAlignmentForStrategy(context.trendResult?.trend ?? 'unknown', 'PMCC') === 'against';
-  const readinessReasons = [
-    ...pair.failureReasons.map(item => item.message),
-    ...(!pair.longLeg.quote.readyInput ? [`Long quote not ready: ${pair.longLeg.quote.reason}`] : []),
-    ...(!pair.shortLeg.quote.readyInput ? [`Short quote not ready: ${pair.shortLeg.quote.reason}`] : []),
-    ...(trendAgainst ? [`Trend against PMCC's bullish thesis`] : []),
-  ];
+  const pmccDecision = evaluatePmccDecision({
+    pair,
+    criteria: session.criteria,
+    marketSession: session.marketSession,
+    trendAgainst,
+    earningsDate: context.earningsDate,
+  });
+  if (process.env.NODE_ENV !== 'production') {
+    const legacyQualified = pair.qualified && !trendAgainst;
+    const canonicalQualified = pmccDecision.qualification === 'QUALIFIED';
+    if (legacyQualified !== canonicalQualified) {
+      console.warn('PMCC decision invariant mismatch', {
+        candidateId: pair.pairId,
+        legacyQualified,
+        canonicalQualified,
+        gateCodes: pmccDecision.gates.filter(item => item.status === 'fail').map(item => item.code),
+      });
+    }
+  }
+  const readinessReasons = pmccDecision.gates
+    .filter(item => item.status !== 'pass')
+    .map(item => item.explanation);
   return {
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr,
     // Trend gate demotes qualified -> false here, at the ScreenResult
@@ -161,11 +179,11 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
     // economic truth (same layering already used for the quote-readiness
     // reasons above, which also never touch pair.qualified/
     // pair.failureReasons).
-    qualified: pair.qualified && !trendAgainst,
+    qualified: pmccDecision.qualification === 'QUALIFIED',
     bestCandidate: compatibilityCandidate(pair), candidateId: pair.pairId, failReasons: readinessReasons,
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock',
     underlyingType: context.underlyingType, ruleSetApplied: 'PMCC pairing engine v2', publishedOrder: order, checks: checksFor(pair),
-    pmccPair: pair, pmccPairingCounts: session.counts, pmccIncompleteAnalysis: session.incompleteAnalysis,
+    pmccPair: pair, pmccDecision, pmccPairingCounts: session.counts, pmccIncompleteAnalysis: session.incompleteAnalysis,
     pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
   };
 }
@@ -174,11 +192,12 @@ export function buildPmccScreenResults(session: PmccSessionResult, context: Pmcc
   const retained = [...session.qualifiedPairs, ...session.nearMissPairs];
   if (retained.length) return retained.map((pair, index) => resultForPair(pair, session, context, index + 1));
   const failReasons = pmccAuditReasons(session);
+  const pmccDecision = evaluatePmccDecision({ pair: null, criteria: session.criteria, marketSession: session.marketSession });
   return [{
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr, qualified: false, bestCandidate: null,
     candidateId: `pmcc-audit:${context.symbol}:${session.asOf}`, failReasons: failReasons.length ? failReasons : ['No valid combinations'],
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock', underlyingType: context.underlyingType,
-    ruleSetApplied: 'PMCC pairing engine v2', checks: checksFor(null), pmccPairingCounts: session.counts,
+    ruleSetApplied: `PMCC pairing engine v2 / ${PMCC_DECISION_POLICY_VERSION}`, checks: checksFor(null), pmccDecision, pmccPairingCounts: session.counts,
     pmccIncompleteAnalysis: session.incompleteAnalysis, pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
   }];
 }
@@ -276,7 +295,8 @@ export function buildPmccFailureAuditResult(
     qualified: false, bestCandidate: null, candidateId: `pmcc-audit:${context.symbol}:${asOf}:${kind}`,
     failReasons: [labels[kind], detail].filter(Boolean), earningsDate: context.earningsDate,
     trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock', underlyingType: context.underlyingType,
-    ruleSetApplied: 'PMCC pairing engine v2', checks: checksFor(null), pmccAsOf: asOf, pmccAuditKind: kind,
+    ruleSetApplied: `PMCC pairing engine v2 / ${PMCC_DECISION_POLICY_VERSION}`, checks: checksFor(null),
+    pmccDecision: unavailablePmccDecision(`${labels[kind]}: ${detail}`), pmccAsOf: asOf, pmccAuditKind: kind,
   };
 }
 export type PmccSymbolProductionOutcome =

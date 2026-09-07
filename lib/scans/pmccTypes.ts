@@ -75,6 +75,31 @@ export interface PmccScanSnapshot {
   asOf: string;
   marketSession: PmccMarketSession;
   criteria: PmccPairingCriteria;
+  /** Invalidates only PMCC restores when decision semantics change. */
+  decisionPolicyVersion: string;
+}
+
+export type PmccQualification = 'QUALIFIED' | 'DISQUALIFIED';
+export type PmccReadiness = 'READY' | 'MARKET_CLOSED' | 'WAIT_MONITOR';
+export type PmccAction = 'NEW_PMCC_REVIEW_ALLOWED' | 'HELD_PMCC_REVIEW_ONLY' | 'BLOCKED';
+export type PmccDecisionGateStatus = 'pass' | 'warning' | 'unavailable' | 'fail';
+
+export interface PmccDecisionGate {
+  code: string;
+  status: PmccDecisionGateStatus;
+  explanation: string;
+  observedValue: string | number | null;
+  threshold: string | number | null;
+  policySource: string;
+}
+
+export interface PmccDecision {
+  policyVersion: string;
+  qualification: PmccQualification;
+  readiness: PmccReadiness;
+  action: PmccAction;
+  entryMode: 'new-pmcc' | 'covered-short-call-against-held-leaps';
+  gates: PmccDecisionGate[];
 }
 
 export type PmccFailureCode =

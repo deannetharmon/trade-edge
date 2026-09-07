@@ -43,6 +43,7 @@ import { pairPmccCandidates } from '@/lib/scans/pmccPairing';
 import { buildPmccScreenResults } from '@/lib/scans/pmccProduction';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
 import type { PmccChainLeg, PmccPairingCriteria } from '@/lib/scans/pmccTypes';
+import { PMCC_DECISION_POLICY_VERSION } from '@/lib/scans/pmccDecision';
 import type { ScreenResult } from '@/lib/scans/types';
 
 vi.mock('@/lib/scans/tastytrade-client', async () => {
@@ -178,7 +179,7 @@ function seedPmccSession(results: ScreenResult[]) {
     // Required for a valid PMCC session -- restoreScanSession's own
     // validation (INVALID_PMCC_SNAPSHOT) rejects a PMCC session without
     // one, confirmed by a real, direct failure when this was omitted.
-    pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria },
+    pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria, decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION },
   });
   session = recordSymbolEvaluated(session, 'ACME', results);
   session = completeSession(session);
@@ -202,7 +203,7 @@ function seedPmccSessionMultiSymbol(results: ScreenResult[]) {
   let session = createScanSession({
     mode: 'filter', requestedStrategy: 'pmcc',
     scope: { universeSymbols: symbols, eligibleSymbols: symbols },
-    pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria },
+    pmccSnapshot: { asOf: asOf.toISOString(), marketSession: 'open', criteria, decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION },
   });
   for (const [symbol, group] of Array.from(bySymbol.entries())) {
     session = recordSymbolEvaluated(session, symbol, group);

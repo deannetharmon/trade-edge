@@ -51,7 +51,7 @@ import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
 import { leapsReviewTradeDisabledReason } from '@/lib/leaps-analysis/tradeQualification';
 import { computePmccScore } from '@/lib/scans/pmccScore';
-import { evaluatePmccReadiness } from '@/lib/scans/pmccReadiness';
+import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmccDecision } from '@/lib/scans/pmccDecision';
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
@@ -115,7 +115,7 @@ import type {
   ScreenerScanSession, ScreenerScanMode, ScreenerRequestedStrategy, ScreenerScanScope,
   ScreenerReasonCode, ScreenerSessionAccounting,
 } from '@/lib/screener/scanSession';
-import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession } from '@/lib/screener/scanSessionCache';
+import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
@@ -3303,7 +3303,7 @@ function PmccTradeModal({ result, th, onClose }: {
   }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
   const [occAcknowledgedAt, setOccAcknowledgedAt] = useState<string | null>(null);
   const [reviewSnapshot] = useState(() => ({
-    createdAt: new Date().toISOString(), policyVersion: 'pmcc-readiness-v1',
+    createdAt: new Date().toISOString(), policyVersion: PMCC_DECISION_POLICY_VERSION,
     longAsk: pair.longLeg.quote.ask, shortBid: pair.shortLeg.quote.bid,
     longQuoteAt: pair.longLeg.quote.quoteTimestamp, shortQuoteAt: pair.shortLeg.quote.quoteTimestamp,
   }));
@@ -3339,14 +3339,10 @@ function PmccTradeModal({ result, th, onClose }: {
   }, [occAcknowledgedAt, pair.longLeg.expiration, pair.longLeg.quote.ageSeconds, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
 
   const hasOccSymbols = Boolean(pair.longLeg.occSymbol && pair.shortLeg.occSymbol);
-  const readiness = evaluatePmccReadiness({
-    pair,
-    longContractQualified: pair.longLeg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min && pair.longLeg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max,
-    earningsDate: result.earningsDate,
-    eventRisk,
-    policy: { version: reviewSnapshot.policyVersion, earnings: 'warn' },
-  });
-  const canValidate = hasOccSymbols && readiness.status === 'PMCC_STRUCTURE_QUALIFIED';
+  const canValidate = hasOccSymbols
+    && result.pmccDecision?.action === 'NEW_PMCC_REVIEW_ALLOWED'
+    && eventRisk.status !== 'NOT_QUALIFIED'
+    && eventRisk.status !== 'WAIT_MONITOR';
   const debit = entryLimit * quantity;
 
   const buildPayload = (qty: number) => {
@@ -3394,19 +3390,17 @@ function PmccTradeModal({ result, th, onClose }: {
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
-      if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; refresh and review its current gate results.');
+      if (result.pmccDecision?.action !== 'NEW_PMCC_REVIEW_ALLOWED') throw new Error('PMCC structure is no longer eligible for review; refresh and review its current gate results.');
       await verifyExecutionQuotes();
-      const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildPayload(quantity);
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
+      const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
-      setDryRunResult(data?.data);
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.order);
       setPhase('confirm');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -3416,19 +3410,17 @@ function PmccTradeModal({ result, th, onClose }: {
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
-      if (readiness.status !== 'PMCC_STRUCTURE_QUALIFIED') throw new Error('PMCC structure is no longer qualified; order submission is blocked pending review.');
+      if (result.pmccDecision?.action !== 'NEW_PMCC_REVIEW_ALLOWED') throw new Error('PMCC structure is no longer eligible for review; order submission is blocked pending review.');
       await verifyExecutionQuotes();
-      const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildPayload(quantity);
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders`, {
+      const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
-      const submittedOrderId = data?.data?.order?.id ?? 'submitted';
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Order failed (${res.status})`);
+      const submittedOrderId = data?.order?.order?.id ?? data?.order?.id ?? 'submitted';
       setOrderId(submittedOrderId);
       try { await persistReviewSnapshot(String(submittedOrderId)); setAuditStatus('saved'); }
       catch { setAuditStatus('failed'); }
@@ -3469,7 +3461,7 @@ function PmccTradeModal({ result, th, onClose }: {
           <p>Execution check: {executionCheck}</p>
           {auditStatus === 'saved' && <p className="text-emerald-300">Submitted review snapshot saved for 18 months.</p>}
           {auditStatus === 'failed' && <p className="text-amber-300">Order submitted, but the review snapshot was not saved. Contact support before relying on this audit record.</p>}
-          {readiness.status !== 'PMCC_STRUCTURE_QUALIFIED' && <p className="mt-1 text-amber-300">{readiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}</p>}
+          {result.pmccDecision?.gates.some(gate => gate.status !== 'pass') && <p className="mt-1 text-amber-300">{result.pmccDecision.gates.filter(gate => gate.status !== 'pass').map(gate => gate.explanation).join(' · ')}</p>}
         </div>
 
         <div className="mb-4 rounded-lg border border-amber-700/70 bg-amber-950/20 p-3 text-[10px] text-amber-100">
@@ -4056,51 +4048,19 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   const pair = result.pmccPair;
   const heldLong = pair?.entryMode === 'covered-short-call-against-held-leaps';
   const metrics = pair?.metrics;
-  // PMCC-CARD-0001 — Ian/Paul-signed-off three-state readiness, replacing the
-  // old binary ready/not-ready text. Disqualified (failed real criteria) is
-  // visually distinct from not-ready (market/data gate): the former won't
-  // clear without different strikes, the latter clears on its own once the
-  // regular market session opens. No new logic -- disqualified derives from
-  // pair.qualified/failureReasons, which already exist; not-ready derives
-  // from the same readyInput fields the old `ready` boolean already used.
-  const disqualified = Boolean(pair && (!pair.qualified || pair.failureReasons.length > 0));
-  const dataNotReady = Boolean(pair && (!pair.longLeg.quote.readyInput || !pair.shortLeg.quote.readyInput));
-  const pmccReadiness = evaluatePmccReadiness({
-    pair: pair ?? null,
-    longContractQualified: Boolean(pair && pair.longLeg.delta >= DEFAULT_PMCC_LONG_DELTA_RANGE.min && pair.longLeg.delta <= DEFAULT_PMCC_LONG_DELTA_RANGE.max),
-    earningsDate: result.earningsDate,
-    policy: { version: 'pmcc-readiness-v1', earnings: 'warn' },
-  });
-  // PMCC-TRADE-MARKET-CLOSED-0001 — Ian/Paul-signed-off distinction within
-  // not_ready: market_closed is a timing fact, not a data-integrity problem
-  // -- the quote is real, you're just choosing to submit an order that
-  // sits until the session opens. Every other not-ready cause (stale,
-  // too_wide, delayed, timestamp_missing -- see pmccQuoteQuality.ts's
-  // evaluatePmccQuoteQuality) reflects a genuinely unreliable quote and
-  // must keep blocking. A leg only ever contributes to this if it isn't
-  // ready in the first place (readyInput false) -- a ready leg's status
-  // is irrelevant here.
-  const blockingNotReadyReason = Boolean(pair && (
-    (!pair.longLeg.quote.readyInput && pair.longLeg.quote.status !== 'market_closed') ||
-    (!pair.shortLeg.quote.readyInput && pair.shortLeg.quote.status !== 'market_closed')
-  ));
-  const marketClosedOnly = dataNotReady && !blockingNotReadyReason;
-  const readinessState: 'ready' | 'not_ready' | 'disqualified' = pmccReadiness.status === 'PMCC_STRUCTURE_QUALIFIED'
-    ? 'ready'
-    : pmccReadiness.status === 'WAIT_MONITOR' || pmccReadiness.status === 'LONG_QUALIFIED_SHORT_NOT_READY'
-      ? 'not_ready'
-      : 'disqualified';
-  const ready = readinessState === 'ready';
-  // Trade is allowed when fully ready, OR when the only reason it isn't is
-  // the market being closed -- per Ian's explicit sign-off: "market_closed
-  // should warn, not block. The other not-ready causes should keep
-  // blocking." readinessState/READINESS_META (the dot/label) are
-  // unchanged -- still shows amber "Not ready" either way, since the card
-  // should still visibly flag it; only the Trade action itself unblocks.
-  const tradeAllowed = ready || (readinessState === 'not_ready' && marketClosedOnly);
+  const pmccDecision = result.pmccDecision ?? unavailablePmccDecision('PMCC decision is unavailable — rescan required.');
+  const disqualified = pmccDecision.qualification === 'DISQUALIFIED';
+  const marketClosedOnly = pmccDecision.readiness === 'MARKET_CLOSED';
+  const readinessState: 'ready' | 'market_closed' | 'not_ready' | 'disqualified' = disqualified
+    ? 'disqualified'
+    : pmccDecision.readiness === 'READY'
+      ? 'ready'
+      : pmccDecision.readiness === 'MARKET_CLOSED' ? 'market_closed' : 'not_ready';
+  const tradeAllowed = pmccDecision.action === 'NEW_PMCC_REVIEW_ALLOWED';
   const READINESS_META: Record<typeof readinessState, { label: string; dot: string; text: string; border: string; bg: string }> = {
     ready:        { label: 'PMCC Structure Qualified', dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
-    not_ready:    { label: 'Not ready',    dot: 'bg-amber-400',   text: 'text-amber-400',   border: 'border-amber-700/70',   bg: 'bg-amber-500/5' },
+    market_closed:{ label: 'Qualified — market closed', dot: 'bg-amber-400', text: 'text-amber-400', border: 'border-amber-700/70', bg: 'bg-amber-500/5' },
+    not_ready:    { label: 'Wait / Monitor', dot: 'bg-amber-400', text: 'text-amber-400', border: 'border-amber-700/70', bg: 'bg-amber-500/5' },
     disqualified: { label: 'Disqualified', dot: 'bg-red-500',     text: 'text-red-400',     border: 'border-red-700/70',     bg: 'bg-red-500/5' },
   };
   const readiness = READINESS_META[readinessState];
@@ -4220,9 +4180,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
         <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}</span></div>
       </div>
-      {pmccReadiness.gates.some(gate => gate.status !== 'pass') && (
+      {pmccDecision.gates.some(gate => gate.status !== 'pass') && (
         <p className="mt-2 text-[10px] text-amber-300">
-          Why this result: {pmccReadiness.gates.filter(gate => gate.status !== 'pass').map(gate => gate.message).join(' · ')}
+          Why this result: {pmccDecision.gates.filter(gate => gate.status !== 'pass').map(gate => gate.explanation).join(' · ')}
         </p>
       )}
       {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
@@ -4250,7 +4210,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
           : readinessState === 'disqualified'
             ? 'Not Qualified — structure review is blocked.'
             : marketClosedOnly
-              ? 'Market closed — quotes will refresh at open. You can still submit; the order will queue until the regular session opens.'
+              ? 'Market closed — quotes are from the prior session. Recheck pricing after the market opens.'
               : 'Wait / Monitor — structure review is blocked.'}
       </p>
 
@@ -7122,6 +7082,7 @@ export default function Home() {
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [rawScanCache, setRawScanCache] = useState<RawScanEntry[]>([]);
   const [resultsCachedAt, setResultsCachedAt] = useState<number | null>(null);
+  const [pmccRestoreNotice, setPmccRestoreNotice] = useState<string | null>(null);
   const [targetedResultsCachedAt, setTargetedResultsCachedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -7557,7 +7518,10 @@ export default function Home() {
     // still-current session's own sessionId — nothing is restored
     // independently of, or merely "compatible with," the canonical session.
     restoreScanSession().then(session => {
-      if (!session) return;
+      if (!session) {
+        setPmccRestoreNotice(consumeScanSessionRestoreNotice());
+        return;
+      }
       // A scan may have already started (and begun superseding) before
       // this async restore resolves; never let a restored session clobber
       // an already-active one.
@@ -7842,8 +7806,13 @@ export default function Home() {
     // is unambiguously traceable back to it even when other columns alone
     // wouldn't disambiguate (e.g. two rows with the same strike text but
     // different expirations after manual sorting/filtering downstream).
-    const headers = ['Candidate ID','Symbol','Strategy','Trend','Trend Subtype','Trend Confidence','Qualified','Price','IVR','Expiration','DTE','Short Put Strike','Long Put Strike','Put Width','Short Call Strike','Long Call Strike','Call Width','Short Delta','Credit','ROC%','POP%','Short OI','Long OI','Total Credit','Earnings Date','Fail Reasons'];
-    const rows = results.map(r => { const c = r.bestCandidate; return [r.candidateId||'',r.symbol,r.strategy,r.trendResult?.trend||'',r.trendResult?.subtype||'',r.trendResult?.confidence!=null?r.trendResult.confidence.toFixed(0)+'%':'',r.qualified?'YES':'NO',r.price?.toFixed(2)||'',r.ivr?.toFixed(1)||'',c?.expiration||'',c?.dte||'',c?.shortStrike||'',c?.longStrike||'',c?.spreadWidth||'',c?.shortCallStrike||'',c?.longCallStrike||'',c?.callWidth||'',c?.shortDelta?.toFixed(2)||'',c?.credit?.toFixed(2)||'',c?.roc?.toFixed(0)||'',c?.pop?.toFixed(0)||'',c?.shortOI||'',c?.longOI||'',c?.totalCredit?.toFixed(2)||'',r.earningsDate||'',r.failReasons.join('; ')].map(csv).join(','); });
+    const headers = ['Candidate ID','Symbol','Strategy','Trend','Trend Subtype','Trend Confidence','Qualified','Price','IVR','Expiration','DTE','Short Put Strike','Long Put Strike','Put Width','Short Call Strike','Long Call Strike','Call Width','Short Delta','Credit','ROC%','POP%','Short OI','Long OI','Total Credit','Earnings Date','Fail Reasons','PMCC Qualification','PMCC Readiness','PMCC Action','PMCC Decision Version','PMCC Entry Mode','PMCC Failed Gates','PMCC Warning Gates','PMCC Long Quote Status','PMCC Long Quote At','PMCC Short Quote Status','PMCC Short Quote At'];
+    const rows = results.map(r => {
+      const c = r.bestCandidate;
+      const d = r.pmccDecision;
+      const pair = r.pmccPair;
+      return [r.candidateId||'',r.symbol,r.strategy,r.trendResult?.trend||'',r.trendResult?.subtype||'',r.trendResult?.confidence!=null?r.trendResult.confidence.toFixed(0)+'%':'',r.qualified?'YES':'NO',r.price?.toFixed(2)||'',r.ivr?.toFixed(1)||'',c?.expiration||'',c?.dte||'',c?.shortStrike||'',c?.longStrike||'',c?.spreadWidth||'',c?.shortCallStrike||'',c?.longCallStrike||'',c?.callWidth||'',c?.shortDelta?.toFixed(2)||'',c?.credit?.toFixed(2)||'',c?.roc?.toFixed(0)||'',c?.pop?.toFixed(0)||'',c?.shortOI||'',c?.longOI||'',c?.totalCredit?.toFixed(2)||'',r.earningsDate||'',r.failReasons.join('; '),d?.qualification||'',d?.readiness||'',d?.action||'',d?.policyVersion||'',d?.entryMode||'',d?.gates.filter(g=>g.status==='fail').map(g=>g.code).join('; ')||'',d?.gates.filter(g=>g.status==='warning').map(g=>g.code).join('; ')||'',pair?.longLeg.quote.status||'',pair?.longLeg.quote.quoteTimestamp||'',pair?.shortLeg.quote.status||'',pair?.shortLeg.quote.quoteTimestamp||''].map(csv).join(',');
+    });
     const blob = new Blob([[headers.join(','),...rows].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `hunter-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
   };
@@ -8217,6 +8186,7 @@ export default function Home() {
     };
     const pmccSnapshot: PmccScanSnapshot = {
       asOf: pmccAsOf.toISOString(), marketSession: pmccMarketSession, criteria: pmccCriteria,
+      decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION,
     };
     let session = beginScanSession({
       mode: 'filter',
@@ -8877,8 +8847,18 @@ export default function Home() {
     return true;
   });
 
-  const qualified = results.filter(r => r.qualified);
-  const disqualified = results.filter(r => !r.qualified);
+  const qualified = results.filter(r => r.strategy === 'PMCC'
+    ? r.pmccDecision?.qualification === 'QUALIFIED'
+    : r.qualified);
+  const disqualified = results.filter(r => r.strategy === 'PMCC'
+    ? r.pmccDecision?.qualification !== 'QUALIFIED'
+    : !r.qualified);
+  const pmccWaitMonitor = results.filter(r => r.strategy === 'PMCC'
+    && r.pmccDecision?.qualification === 'QUALIFIED'
+    && r.pmccDecision.readiness === 'WAIT_MONITOR');
+  const qualificationDisplayPool = activeSession?.requestedStrategy === 'pmcc'
+    ? qualified.filter(r => r.pmccDecision?.readiness !== 'WAIT_MONITOR')
+    : qualified;
   // SCREENER-UX-0001 corrective pass: a scan that completed (or was
   // stopped/errored) with zero ScreenResults is a real, distinct outcome
   // from "no scan has run yet" -- it must still render the results panel
@@ -8897,8 +8877,9 @@ export default function Home() {
   // still applies the symbol-hide filter first). The outer bypass meant
   // filterHiddenSymbols/toggleFilterSymbol -- real, working, already
   // used by every other strategy -- silently did nothing for PMCC.
-  const filteredQualifiedChips = cspNonFilterSession ? qualified : applyFilterModeChips(qualified);
+  const filteredQualifiedChips = cspNonFilterSession ? qualificationDisplayPool : applyFilterModeChips(qualificationDisplayPool);
   const filteredDisqualified = cspNonFilterSession ? disqualified : applyFilterModeChips(disqualified);
+  const filteredPmccWaitMonitor = applyFilterModeChips(pmccWaitMonitor);
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
   // sort, applied to the QUALIFIED section only. Eligibility filters
@@ -9367,6 +9348,13 @@ export default function Home() {
         {/* Main content */}
         <div className="flex-1 overflow-auto p-5">
 
+          {pmccRestoreNotice && (
+            <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-600/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              <span>{pmccRestoreNotice}</span>
+              <button onClick={() => setPmccRestoreNotice(null)} className="text-amber-300 hover:text-white" aria-label="Dismiss PMCC rescan notice">Dismiss</button>
+            </div>
+          )}
+
           {/* Real-time Interactive Preset Filter Bar */}
           {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
             <div className={`mb-4 p-3 ${th.card} border ${th.border} rounded-xl flex items-center justify-between gap-4 flex-wrap`}>
@@ -9514,7 +9502,13 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (
-                    <>
+                    activePmccSession ? <>
+                      <span className="text-emerald-500">{qualified.length} QUALIFIED</span>
+                      <span className="text-emerald-400">{filteredQualified.filter(r => r.pmccDecision?.readiness === 'READY').length} READY NOW</span>
+                      <span className="text-amber-400">{filteredQualified.filter(r => r.pmccDecision?.readiness === 'MARKET_CLOSED').length} MARKET CLOSED</span>
+                      <span className="text-amber-500">{filteredPmccWaitMonitor.length} WAIT/MONITOR</span>
+                      <span className={th.textFaint}>{filteredDisqualified.length} DISQUALIFIED</span>
+                    </> : <>
                       <span className="text-emerald-500">{filteredQualified.length} of {qualified.length} QUALIFIED</span>
                       <span className={th.textFaint}>{filteredDisqualified.length} of {disqualified.length} DISQUALIFIED</span>
                     </>
@@ -9925,7 +9919,7 @@ export default function Home() {
                     }, new Map<string, ScreenResult[]>()).entries()).sort(([a], [b]) => a.localeCompare(b))
                   : [];
                 const pmccBestFitRanked = activePmccSession
-                  ? filteredQualified.map(result => ({ result, score: pmccBestFitScore(result, pmccBestFitProfile) }))
+                  ? filteredQualified.filter(result => pmccDecisionRankEligible(result.pmccDecision)).map(result => ({ result, score: pmccBestFitScore(result, pmccBestFitProfile) }))
                     .filter((item): item is { result: ScreenResult; score: number } => item.score != null)
                     .sort((a, b) => b.score - a.score || (a.result.pmccPair?.shortLeg.quote.spreadPct ?? Infinity) - (b.result.pmccPair?.shortLeg.quote.spreadPct ?? Infinity) || (b.result.pmccPair?.shortLeg.openInterest ?? -Infinity) - (a.result.pmccPair?.shortLeg.openInterest ?? -Infinity))
                   : [];
@@ -9988,11 +9982,49 @@ export default function Home() {
                 // field, not always score). Keeps the callout correct
                 // regardless of display order.
                 const pmccBestInScan = pmccTickerGroups.length > 1 ? pmccBestFitWinner : null;
+                const renderPmccQualifiedBucket = (readiness: 'READY' | 'MARKET_CLOSED', label: string, labelClass: string) => {
+                  const bucket = filteredQualified.filter(result => result.pmccDecision?.readiness === readiness);
+                  if (bucket.length === 0) return null;
+                  const grouped = pmccTickerGroups
+                    .map(([symbol, group]) => {
+                      const matching = group.filter(result => result.pmccDecision?.readiness === readiness);
+                      const widths = matching.map(result => result.pmccPair?.metrics?.widthMinusDebitPctOfDebit).filter((value): value is number => value != null);
+                      const rois = matching.map(pmccAnnualizedRoi).filter((value): value is number => value != null);
+                      const scores = matching.map(result => pmccBestFitScore(result, pmccBestFitProfile)).filter((value): value is number => value != null);
+                      return [symbol, matching, widths.length ? Math.max(...widths) : null, rois.length ? Math.max(...rois) : null, scores.length ? Math.max(...scores) : null] as const;
+                    })
+                    .filter(([, group]) => group.length > 0);
+                  return <div>
+                    <p className={`mb-2 text-[9px] font-medium tracking-widest ${labelClass}`}>{label}</p>
+                    <div className="space-y-2">
+                      {pmccViewMode === 'grouped' ? grouped.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
+                        <PmccTickerDisclosure key={`${readiness}-${symbol}`} symbol={symbol} price={group[0]?.price ?? null} candidateCount={group.length}
+                          bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore} bestScoreLabel="Best Fit"
+                          defaultOpen={grouped.length === 1} borderClassName={th.border}>
+                          {group.map(renderQualifiedCandidate)}
+                        </PmccTickerDisclosure>
+                      )) : bucket.map(renderQualifiedCandidate)}
+                    </div>
+                  </div>;
+                };
                 return (
                 <>
-                  {filteredQualified.length > 0 && (
+                  {activePmccSession && (
+                    <>
+                      {pmccBestInScan && (
+                        <div className="mb-2 flex items-center gap-2 rounded-lg border border-cyan-600/60 bg-cyan-500/5 px-3 py-2 text-xs">
+                          <span className={th.textFaint}>{pmccEarningsBlocksBestFit(pmccBestInScan.result) ? 'Best Fit (informational)' : pmccBestInScan.result.pmccDecision?.readiness === 'MARKET_CLOSED' ? 'Top ranked at market-closed snapshot' : 'Best in this scan'}</span>
+                          <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] font-bold text-cyan-300">Best {pmccBestFitProfile[0].toUpperCase() + pmccBestFitProfile.slice(1)} {pmccBestInScan.score}</span>
+                          <span className="font-bold">{pmccBestInScan.result.symbol} {pmccBestInScan.result.pmccPair?.shortLeg.strike}C</span>
+                        </div>
+                      )}
+                      {renderPmccQualifiedBucket('READY', 'PMCC QUALIFIED AND READY', 'text-emerald-500')}
+                      {renderPmccQualifiedBucket('MARKET_CLOSED', 'PMCC QUALIFIED — MARKET CLOSED', 'text-amber-400')}
+                    </>
+                  )}
+                  {!activePmccSession && filteredQualified.length > 0 && (
                     <div>
-                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">{activePmccSession ? 'QUALIFIED PMCC STRUCTURES' : 'QUALIFIED'}</p>
+                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">{activePmccSession ? 'QUALIFIED PMCC STRUCTURES — READY / MARKET CLOSED' : 'QUALIFIED'}</p>
                       {/* PMCC-CARD-SCORE-HEADER-0001 -- one-line best-in-scan
                           callout, per Diane's approved mockup. Only shown
                           when there's more than one ticker group to pick
@@ -10006,7 +10038,7 @@ export default function Home() {
                           documented scope"). */}
                       {pmccBestInScan && (
                         <div className="mb-2 flex items-center gap-2 rounded-lg border border-cyan-600/60 bg-cyan-500/5 px-3 py-2 text-xs">
-                          <span className={th.textFaint}>{pmccEarningsBlocksBestFit(pmccBestInScan.result) ? 'Best Fit (informational)' : 'Best in this scan'}</span>
+                          <span className={th.textFaint}>{pmccEarningsBlocksBestFit(pmccBestInScan.result) ? 'Best Fit (informational)' : pmccBestInScan.result.pmccDecision?.readiness === 'MARKET_CLOSED' ? 'Top ranked at market-closed snapshot' : 'Best in this scan'}</span>
                           <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] font-bold text-cyan-300">Best {pmccBestFitProfile[0].toUpperCase() + pmccBestFitProfile.slice(1)} {pmccBestInScan.score}</span>
                           <span className="font-bold">{pmccBestInScan.result.symbol} {pmccBestInScan.result.pmccPair?.shortLeg.strike}C</span>
                           {pmccBestInScan.result.price != null && <span className={th.textFaint}>${pmccBestInScan.result.price.toFixed(2)}</span>}
@@ -10092,6 +10124,16 @@ export default function Home() {
                   )}
                   {activePmccSession ? (
                     <>
+                      {filteredPmccWaitMonitor.length > 0 && (
+                        <div>
+                          <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC WAIT / MONITOR</p>
+                          <div className="space-y-2">
+                            {filteredPmccWaitMonitor.map(result => (
+                              <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {/* SCREENER-PMCC-DISQUALIFIED-GROUPING-0001 -- Dean's
                           explicit direction: "It should behave just like
                           the qualified list." Near-miss and audit results
@@ -10636,8 +10678,8 @@ export default function Home() {
         </div>
       </div>
 
-      {tradeResult && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
-      {tradeResult && !tradeResult.bestCandidate && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {tradeResult?.strategy === 'PMCC' && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (

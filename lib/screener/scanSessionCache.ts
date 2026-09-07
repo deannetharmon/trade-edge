@@ -23,6 +23,13 @@ import {
 const IDB_DB_NAME = 'hunter-db';
 const IDB_STORE_NAME = 'kv';
 export const SCAN_SESSION_CACHE_KEY = 'screenerActiveSession_v1';
+let lastRestoreNotice: string | null = null;
+
+export function consumeScanSessionRestoreNotice(): string | null {
+  const notice = lastRestoreNotice;
+  lastRestoreNotice = null;
+  return notice;
+}
 
 function idbOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -108,6 +115,10 @@ export async function restoreScanSession(): Promise<ScreenerScanSession | null> 
   if (raw == null) return null;
   const result = validateSessionData(raw);
   if (!result.valid) {
+    const record = raw as Record<string, unknown>;
+    if (record?.requestedStrategy === 'pmcc' && result.errors.includes('INVALID_PMCC_SNAPSHOT')) {
+      lastRestoreNotice = 'PMCC results use an older qualification policy — rescan required.';
+    }
     console.warn('restoreScanSession: cached session failed validation, clearing.', result.errors);
     await idbDel(SCAN_SESSION_CACHE_KEY);
     return null;

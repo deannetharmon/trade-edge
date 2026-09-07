@@ -6,8 +6,9 @@ export interface PmccReadinessGate { id: string; status: 'pass' | 'fail' | 'unav
 export interface PmccReadinessPolicy { version: string; earnings: 'block' | 'warn' | 'ignore'; }
 export interface PmccReadinessResult { status: PmccReadinessStatus; gates: PmccReadinessGate[]; policyVersion: string; }
 
-/** Pure, fail-closed readiness boundary. Pair scoring may rank this result,
- * but can never upgrade a missing or failed structural gate. */
+/** @deprecated Legacy compatibility evaluator retained for older isolated
+ * tests. Production and UI code must consume pmccDecision.ts exclusively;
+ * this module is not an eligibility authority. */
 export function evaluatePmccReadiness(input: {
   pair: PmccPairResult | null;
   longContractQualified: boolean;

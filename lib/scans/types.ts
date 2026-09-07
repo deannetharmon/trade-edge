@@ -198,6 +198,8 @@ export interface ScreenResult {
    * must use this structure rather than re-deriving diagonal semantics from
    * the legacy spread-shaped bestCandidate compatibility adapter. */
   pmccPair?: import('./pmccTypes').PmccPairResult;
+  /** Canonical, versioned PMCC qualification/readiness/action decision. */
+  pmccDecision?: import('./pmccTypes').PmccDecision;
   pmccPairingCounts?: import('./pmccTypes').PmccPairingCounts;
   pmccIncompleteAnalysis?: boolean;
   pmccLegRejections?: import('./pmccTypes').PmccLegRejection[];
