@@ -49,6 +49,7 @@ import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
+import { leapsReviewTradeDisabledReason } from '@/lib/leaps-analysis/tradeQualification';
 import { computePmccScore } from '@/lib/scans/pmccScore';
 import { evaluatePmccReadiness } from '@/lib/scans/pmccReadiness';
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
@@ -2698,6 +2699,14 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
   const [showChart, setShowChart] = useState(false);
   const [sparkData, setSparkData] = useState<number[] | null>(null);
   const [sparkLoading, setSparkLoading] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  const [analysis, setAnalysis] = useState<any>(null);
+  const [analysisIntent, setAnalysisIntent] = useState<'not_specified' | 'standalone' | 'stock_replacement' | 'future_pmcc'>('not_specified');
+  const [analysisQuantity, setAnalysisQuantity] = useState(1);
+  const [analysisObjective, setAnalysisObjective] = useState('');
+  const analysisEnabled = process.env.NEXT_PUBLIC_LEAPS_ANALYSIS_ENABLED !== 'false';
 
   const mid = candidate.bid != null && candidate.ask != null ? (candidate.bid + candidate.ask) / 2 : null;
   const totalCost = mid != null ? mid * 100 : null;
@@ -2727,6 +2736,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
     NOT_QUALIFIED: 'text-red-400 border-red-700/70',
     DATA_UNAVAILABLE: 'text-amber-300 border-amber-700/70',
   }[qualification.status];
+  const reviewTradeDisabledReason = leapsReviewTradeDisabledReason(qualification);
   const deltaInRange = candidate.delta != null && candidate.delta >= deltaMin && candidate.delta <= deltaMax;
   // LEAPS-0004: score badge color -- same rough good/ok/weak banding
   // language already used elsewhere in this app for a 0-100 score
@@ -2735,6 +2745,21 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
     : candidate.score >= 70 ? 'text-emerald-400 border-emerald-600 bg-emerald-500/10'
     : candidate.score >= 45 ? 'text-yellow-400 border-yellow-600 bg-yellow-500/10'
     : 'text-red-400 border-red-600 bg-red-500/10';
+
+  const runAnalysis = async () => {
+    if (!candidate.occSymbol || analysisLoading) return;
+    setAnalysisOpen(true); setAnalysisLoading(true); setAnalysisError('');
+    try {
+      const response = await fetch('/api/leaps-analysis', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: analysisObjective, idempotencyKey: crypto.randomUUID() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : body?.error?.message ?? `Analysis failed (${response.status})`);
+      setAnalysis(body);
+    } catch (error) { setAnalysisError(error instanceof Error ? error.message : 'Analysis is unavailable.'); }
+    finally { setAnalysisLoading(false); }
+  };
 
   return (
     <div className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
@@ -2785,14 +2810,26 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
           </span>
         </div>
 
-        <button onClick={onTrade} disabled={!candidate.occSymbol || qualification.status !== 'CONTRACT_QUALIFIED'}
-          className="ml-auto shrink-0 rounded-lg border border-cyan-500 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">
-          Review trade
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => { setAnalysisOpen(open => !open); }}
+            disabled={!analysisEnabled || !candidate.occSymbol}
+            title={!analysisEnabled ? 'LEAPS AI analysis is disabled.' : !candidate.occSymbol ? 'A valid OCC identity is required for a current provider lookup.' : 'Review this contract using a new server-side evidence snapshot.'}
+            className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
+            Analyze with AI
+          </button>
+          <button onClick={onTrade} disabled={!candidate.occSymbol || reviewTradeDisabledReason != null}
+            title={!candidate.occSymbol ? 'A valid OCC identity is required.' : reviewTradeDisabledReason ?? undefined}
+            aria-label={reviewTradeDisabledReason ? `Review trade unavailable: ${reviewTradeDisabledReason}` : 'Review trade'}
+            className="rounded-lg border border-cyan-500 bg-cyan-500/10 px-4 py-1.5 text-[11px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">
+            Review trade
+          </button>
+        </div>
       </div>
 
       {/* Confirmations -- already satisfied by the active filter, shown for reference not judgment */}
       <div className={`mt-2 flex flex-wrap items-center gap-4 text-[10px] ${th.textMuted}`}>
+        {reviewTradeDisabledReason && <span className="text-amber-300">Review trade unavailable: {reviewTradeDisabledReason}</span>}
         <span>Δ {candidate.delta?.toFixed(2) ?? '—'} {candidate.delta != null && (deltaInRange ? <span className="text-emerald-400">✓ within {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span> : <span className="text-amber-400">outside {deltaMin.toFixed(2)}–{deltaMax.toFixed(2)}</span>)}</span>
         <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
         <span>OI {candidate.openInterest ?? '—'}</span>
@@ -2800,6 +2837,47 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
         <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
           sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
       </div>
+
+      {analysisOpen && (
+        <div className="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3" data-testid="leaps-ai-analysis-panel">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className={`text-[9px] ${th.textMuted}`}>Intended use
+              <select value={analysisIntent} onChange={event => setAnalysisIntent(event.target.value as typeof analysisIntent)} className={`mt-1 block rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`}>
+                <option value="not_specified">Not specified</option><option value="standalone">Standalone long call</option><option value="stock_replacement">Stock replacement</option><option value="future_pmcc">Future PMCC long leg</option>
+              </select>
+            </label>
+            <label className={`text-[9px] ${th.textMuted}`}>Contracts
+              <input type="number" min={1} max={100} value={analysisQuantity} onChange={event => setAnalysisQuantity(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} className={`mt-1 block w-20 rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`} />
+            </label>
+            <label className={`min-w-[220px] flex-1 text-[9px] ${th.textMuted}`}>Objective (optional)
+              <input maxLength={240} value={analysisObjective} onChange={event => setAnalysisObjective(event.target.value)} placeholder="What mechanics should this review focus on?" className={`mt-1 block w-full rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`} />
+            </label>
+            <button onClick={runAnalysis} disabled={analysisLoading} className="rounded border border-violet-500 px-3 py-1.5 text-[10px] font-bold text-violet-300 disabled:opacity-40">{analysisLoading ? 'Analyzing…' : analysis ? 'Refresh analysis' : 'Run analysis'}</button>
+            <button onClick={() => setAnalysisOpen(false)} className={`px-2 py-1.5 text-[10px] ${th.textMuted}`}>Close</button>
+          </div>
+          {analysisError && <p className="mt-3 text-[10px] text-red-400">{analysisError}</p>}
+          {analysis && (
+            <div className="mt-3 space-y-2 text-[10px]">
+              <div className="flex flex-wrap gap-3">
+                <span className={analysis.snapshot?.qualification?.status === 'CONTRACT_QUALIFIED' ? 'text-emerald-400' : 'text-amber-300'}>Contract status: <b>{String(analysis.snapshot?.qualification?.status ?? 'DATA UNAVAILABLE').replaceAll('_', ' ')}</b></span>
+                <span className="text-violet-300">AI review: <b>{String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</b></span>
+                <span className={analysis.current === false ? 'text-amber-300' : th.textMuted}>{analysis.current === false ? 'Older saved snapshot' : `Snapshot ${new Date(analysis.snapshot?.createdAt).toLocaleString()}`}</span>
+              </div>
+              {analysis.snapshot?.qualification?.gates?.some((gate: any) => gate.status !== 'pass') && (
+                <div className="rounded border border-amber-700/50 p-2"><b className="text-amber-300">Deterministic gates</b><ul className="mt-1 space-y-0.5">{analysis.snapshot.qualification.gates.filter((gate: any) => gate.status !== 'pass').map((gate: any) => <li key={gate.id} className={th.textMuted}>{gate.message} ({String(gate.status).replaceAll('_', ' ')})</li>)}</ul></div>
+              )}
+              {analysis.output && <>
+                <p className={th.text}><b>Mechanics:</b> {analysis.output.mechanics}</p>
+                <p className={th.text}><b>Tradeoffs:</b> {analysis.output.tradeoffs}</p>
+                {analysis.output.evidence?.length > 0 && <div><b className={th.text}>Evidence</b><ul className={`ml-4 list-disc ${th.textMuted}`}>{analysis.output.evidence.map((item: any, index: number) => <li key={index}>{item.field}: {item.fact}</li>)}</ul></div>}
+                {analysis.output.inferences?.length > 0 && <div><b className={th.text}>Bounded inferences</b><ul className={`ml-4 list-disc ${th.textMuted}`}>{analysis.output.inferences.map((item: any, index: number) => <li key={index}>{item.statement} <span className="text-amber-300">({item.uncertainty})</span></li>)}</ul></div>}
+                {analysis.output.cautions?.length > 0 && <p className="text-amber-300"><b>Cautions:</b> {analysis.output.cautions.join(' · ')}</p>}
+                {analysis.output.missing?.length > 0 && <p className={th.textMuted}><b>Missing:</b> {analysis.output.missing.join(' · ')}</p>}
+              </>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2824,18 +2902,11 @@ function LeapsTradeModal({ candidate, th, onClose }: {
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
-      const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = {
-        'time-in-force': 'GTC', 'order-type': 'Limit', price: entryLimit.toFixed(2),
-        'price-effect': 'Debit', legs: [buildLeg(quantity)],
-      };
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      });
+      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
-      setDryRunResult(data?.data);
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.order);
       setPhase('confirm');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -2845,18 +2916,11 @@ function LeapsTradeModal({ candidate, th, onClose }: {
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
-      const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = {
-        'time-in-force': 'GTC', 'order-type': 'Limit', price: entryLimit.toFixed(2),
-        'price-effect': 'Debit', legs: [buildLeg(quantity)],
-      };
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      });
+      const res = await fetch('/api/leaps-analysis/trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, quantity, limitPrice: entryLimit }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
-      setOrderId(data?.data?.order?.id ?? 'submitted');
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      setOrderId(data?.order?.order?.id ?? data?.order?.id ?? 'submitted');
       setPhase('done');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -10560,15 +10624,9 @@ export default function Home() {
                   <div className="mt-4">
                     <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
                     <div className="space-y-2">{insufficientCandidates.map(candidate => (
-                      <div key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
-                        className="rounded border border-amber-700/60 bg-amber-500/5 p-2 text-[11px]">
-                        <span className={`${th.text} font-bold`}>{candidate.symbol}</span> {candidate.expiration} · {formatMoneyDropExactZeroCents(candidate.strike)} C ·{' '}
-                        <span className="text-amber-300">
-                          {candidate.delta == null && candidate.openInterest == null ? 'delta and open interest unavailable'
-                            : candidate.delta == null ? 'delta unavailable'
-                            : 'open interest unavailable'}
-                        </span>
-                      </div>
+                      <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
+                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
+                        onTrade={() => setLeapsTradeCandidate(candidate)} />
                     ))}</div>
                   </div>
                 )}
