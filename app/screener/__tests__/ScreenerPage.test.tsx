@@ -35,6 +35,8 @@ import type { TaskManager } from '@/lib/tasks/task-manager';
 import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbolFailed } from '@/lib/screener/scanSession';
 import { LEAPS_CACHE_KEY, SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
+import { PMCC_DECISION_POLICY_VERSION, evaluatePmccDecision } from '@/lib/scans/pmccDecision';
+import type { PmccPairResult } from '@/lib/scans/pmccTypes';
 import type { ScreenResult, CheckResult, RawScanEntry } from '@/lib/scans/types';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
@@ -301,6 +303,21 @@ function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): Decisi
   };
 }
 
+// FIX (Unify PMCC qualification and readiness decisions, d2b2a14):
+// isValidPmccResult now requires every PMCC ScreenResult to carry a valid,
+// internally-consistent pmccDecision (computed via the real
+// evaluatePmccDecision -- hand-constructing one risks silently violating a
+// cross-field check like `qualified !== (pmccDecision.qualification ===
+// 'QUALIFIED')`). Matches the criteria already used by this file's own
+// pmccSnapshot fixtures (dte/longDelta/shortDelta/longOiMin/shortOiMin) so
+// the two stay consistent.
+const TEST_PMCC_CRITERIA = {
+  dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
+  longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
+  longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+  quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
+};
+
 function makePmccScreenResult(): ScreenResult {
   const base = makeScreenResult({
     strategy: 'PMCC',
@@ -335,6 +352,13 @@ function makePmccScreenResult(): ScreenResult {
     structurallyUsable: true, withinQualifyingWidth: true, readyInput: true,
     status: 'acceptable' as const, reason: 'Quote is current and within the acceptable spread',
   });
+  const pmccPair: PmccPairResult = {
+    pairId: 'occ:AAPL270115C00150000::occ:AAPL260918C00205000', symbol: 'AAPL', qualified: true,
+    insufficientData: false, failureReasons: [], primaryFailureReason: null, orderingLabel: 'Contract order',
+    longLeg: { candidateId: 'occ:AAPL270115C00150000', role: 'long', underlyingSymbol: 'AAPL', expiration: '2027-01-15', dte: 174, strike: 150, delta: 0.8, openInterest: 1200, occSymbol: 'AAPL270115C00150000', quote: quote(31, 31.35), executablePrice: 31.35, intrinsic: 40, extrinsic: 0.35 },
+    shortLeg: { candidateId: 'occ:AAPL260918C00205000', role: 'short', underlyingSymbol: 'AAPL', expiration: '2026-09-18', dte: 35, strike: 205, delta: 0.25, openInterest: 900, occSymbol: 'AAPL260918C00205000', quote: quote(1.35, 1.45), executablePrice: 1.35, intrinsic: null, extrinsic: null },
+    metrics: { netDebitPerShare: 30, strikeWidth: 55, widthMinusDebitPerShare: 25, widthMinusDebitPctOfDebit: 83.333, longIntrinsicPerShare: 40, longExtrinsicPerShare: 0.35, shortCreditToNetDebitPct: 4.5, shortCreditToLongExtrinsicPct: 385.714, netDelta: 0.55 },
+  };
   return {
     ...base,
     candidateId: 'occ:AAPL270115C00150000::occ:AAPL260918C00205000',
@@ -348,13 +372,8 @@ function makePmccScreenResult(): ScreenResult {
       nearMissPairsBeforeRetention: 0, qualifiedPairsRetained: 1, nearMissPairsRetained: 0,
       qualifiedPairsOmittedByRetention: 0, nearMissPairsOmittedByRetention: 0,
     },
-    pmccPair: {
-      pairId: 'occ:AAPL270115C00150000::occ:AAPL260918C00205000', symbol: 'AAPL', qualified: true,
-      insufficientData: false, failureReasons: [], primaryFailureReason: null, orderingLabel: 'Contract order',
-      longLeg: { candidateId: 'occ:AAPL270115C00150000', role: 'long', underlyingSymbol: 'AAPL', expiration: '2027-01-15', dte: 174, strike: 150, delta: 0.8, openInterest: 1200, occSymbol: 'AAPL270115C00150000', quote: quote(31, 31.35), executablePrice: 31.35, intrinsic: 40, extrinsic: 0.35 },
-      shortLeg: { candidateId: 'occ:AAPL260918C00205000', role: 'short', underlyingSymbol: 'AAPL', expiration: '2026-09-18', dte: 35, strike: 205, delta: 0.25, openInterest: 900, occSymbol: 'AAPL260918C00205000', quote: quote(1.35, 1.45), executablePrice: 1.35, intrinsic: null, extrinsic: null },
-      metrics: { netDebitPerShare: 30, strikeWidth: 55, widthMinusDebitPerShare: 25, widthMinusDebitPctOfDebit: 83.333, longIntrinsicPerShare: 40, longExtrinsicPerShare: 0.35, shortCreditToNetDebitPct: 4.5, shortCreditToLongExtrinsicPct: 385.714, netDelta: 0.55 },
-    },
+    pmccPair,
+    pmccDecision: evaluatePmccDecision({ pair: pmccPair, criteria: TEST_PMCC_CRITERIA, marketSession: 'open' }),
   };
 }
 
@@ -868,6 +887,11 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
         },
       },
     };
+    // FIX: pmccDecision must be recomputed after overriding pmccPair --
+    // inheriting secondBase's via spread would leave it referencing the
+    // pre-override pairId/strike, failing isValidPmccResult's
+    // pair.pairId === value.candidateId cross-check.
+    second.pmccDecision = evaluatePmccDecision({ pair: second.pmccPair, criteria: TEST_PMCC_CRITERIA, marketSession: 'open' });
     const pairCounts = {
       ...first.pmccPairingCounts!, eligibleShortLegs: 2, potentialCombinations: 2,
       combinationsEvaluated: 2, structurallyValidPairs: 2,
@@ -877,6 +901,16 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
     second.pmccPairingCounts = pairCounts;
     const pmccSnapshot = {
       asOf: '2026-08-14T20:00:00.000Z', marketSession: 'open' as const,
+      // FIX (Unify PMCC qualification and readiness decisions,
+      // d2b2a14): isValidPmccScanSnapshot now requires decisionPolicyVersion
+      // to match PMCC_DECISION_POLICY_VERSION -- a genuinely new, deliberate
+      // check (a cached PMCC session built under an older qualification
+      // policy is correctly treated as stale and forces a rescan, per that
+      // commit's own restoreScanSession notice: "PMCC results use an older
+      // qualification policy -- rescan required."). This fixture predates
+      // that field; without it, restoreScanSession silently rejects the
+      // whole session as invalid, and nothing PMCC-related renders at all.
+      decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION,
       criteria: {
         dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
         longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
@@ -894,7 +928,14 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
 
     renderScreenerPage();
 
-    await waitFor(() => expect(screen.getByText('QUALIFIED PMCC STRUCTURES')).toBeInTheDocument());
+    // FIX: found a real dead-code bug while tracing this -- the
+    // 'QUALIFIED PMCC STRUCTURES — READY / MARKET CLOSED' ternary lives
+    // inside a block gated on `!activePmccSession`, so that branch can
+    // never actually render when activePmccSession is true (this test's
+    // exact scenario). The real, reachable header for an active PMCC
+    // session comes from renderPmccQualifiedBucket instead -- flagging the
+    // dead code separately rather than fixing page.tsx unilaterally here.
+    await waitFor(() => expect(screen.getByText('PMCC QUALIFIED AND READY')).toBeInTheDocument());
     expect(screen.getByText('Contract order 1')).toBeInTheDocument();
     expect(screen.getByText('Contract order 2')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Expand AAPL PMCC details/ })).toHaveLength(2);
@@ -923,22 +964,28 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
   it('renders PMCC near-miss and failed-symbol audit cards through the PMCC-only path and blocks Not Ready execution', async () => {
     const base = makePmccScreenResult();
     const reason = { code: 'INSUFFICIENT_DATA' as const, message: 'Short quote is delayed' };
+    const nearMissPair: PmccPairResult = {
+      ...base.pmccPair!, qualified: false, failureReasons: [reason], primaryFailureReason: reason,
+      shortLeg: {
+        ...base.pmccPair!.shortLeg,
+        quote: {
+          ...base.pmccPair!.shortLeg.quote, delayed: true, readyInput: false,
+          status: 'delayed', reason: 'Delayed quote is not a readiness input',
+        },
+      },
+    };
     const nearMiss: ScreenResult = {
       ...base, qualified: false, failReasons: [reason.message],
       pmccPairingCounts: {
         ...base.pmccPairingCounts!, qualifiedPairsBeforeRetention: 0, qualifiedPairsRetained: 0,
         nearMissPairsBeforeRetention: 1, nearMissPairsRetained: 1,
       },
-      pmccPair: {
-        ...base.pmccPair!, qualified: false, failureReasons: [reason], primaryFailureReason: reason,
-        shortLeg: {
-          ...base.pmccPair!.shortLeg,
-          quote: {
-            ...base.pmccPair!.shortLeg.quote, delayed: true, readyInput: false,
-            status: 'delayed', reason: 'Delayed quote is not a readiness input',
-          },
-        },
-      },
+      pmccPair: nearMissPair,
+      // FIX (Unify PMCC qualification and readiness decisions, d2b2a14):
+      // isValidPmccResult now requires a real, consistent pmccDecision on
+      // every PMCC result -- computed via the real evaluatePmccDecision,
+      // same reasoning as makePmccScreenResult's own fix.
+      pmccDecision: evaluatePmccDecision({ pair: nearMissPair, criteria: TEST_PMCC_CRITERIA, marketSession: 'open' }),
     };
     const readinessCases = [
       { status: 'delayed', reason: 'Delayed quote is not a readiness input', delayed: true, quoteTimestamp: '2026-08-14T19:59:30.000Z' },
@@ -951,6 +998,13 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
       const shortOcc = `AAPL260918C${String(20500000 + index * 50000).padStart(8, '0')}`;
       const shortCandidateId = `occ:${shortOcc}`;
       const pairId = `${nearMiss.pmccPair!.longLeg.candidateId}::${shortCandidateId}`;
+      const variantPair: PmccPairResult = {
+        ...nearMiss.pmccPair!, pairId,
+        shortLeg: {
+          ...nearMiss.pmccPair!.shortLeg, candidateId: shortCandidateId, occSymbol: shortOcc,
+          quote: { ...nearMiss.pmccPair!.shortLeg.quote, ...readiness, readyInput: false },
+        },
+      };
       return {
         ...nearMiss, candidateId: pairId, publishedOrder: index + 1,
         pmccPairingCounts: {
@@ -958,13 +1012,11 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
           combinationsEvaluated: readinessCases.length, structurallyValidPairs: readinessCases.length,
           nearMissPairsBeforeRetention: readinessCases.length, nearMissPairsRetained: readinessCases.length,
         },
-        pmccPair: {
-          ...nearMiss.pmccPair!, pairId,
-          shortLeg: {
-            ...nearMiss.pmccPair!.shortLeg, candidateId: shortCandidateId, occSymbol: shortOcc,
-            quote: { ...nearMiss.pmccPair!.shortLeg.quote, ...readiness, readyInput: false },
-          },
-        },
+        pmccPair: variantPair,
+        // FIX: recomputed per-variant, since each overrides pmccPair --
+        // inheriting nearMiss's pmccDecision via spread would reference the
+        // pre-override pairId, failing isValidPmccResult's own cross-check.
+        pmccDecision: evaluatePmccDecision({ pair: variantPair, criteria: TEST_PMCC_CRITERIA, marketSession: 'open' }),
       };
     });
     const audit: ScreenResult = {
@@ -973,9 +1025,24 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
       failReasons: ['Market-data acquisition failure', 'quote unavailable'],
       pmccPair: undefined, pmccPairingCounts: undefined, pmccLegRejections: undefined, pmccIncompleteAnalysis: undefined,
       pmccAuditKind: 'MARKET_DATA_FAILURE', publishedOrder: undefined,
+      // FIX: audit-only results (pmccPair == null) still require a valid
+      // pmccDecision -- evaluatePmccDecision's own pair: null branch
+      // produces exactly the DISQUALIFIED/WAIT_MONITOR/BLOCKED shape
+      // isValidPmccResult expects for this case.
+      pmccDecision: evaluatePmccDecision({ pair: null, criteria: TEST_PMCC_CRITERIA, marketSession: 'open' }),
     };
     const pmccSnapshot = {
       asOf: '2026-08-14T20:00:00.000Z', marketSession: 'open' as const,
+      // FIX (Unify PMCC qualification and readiness decisions,
+      // d2b2a14): isValidPmccScanSnapshot now requires decisionPolicyVersion
+      // to match PMCC_DECISION_POLICY_VERSION -- a genuinely new, deliberate
+      // check (a cached PMCC session built under an older qualification
+      // policy is correctly treated as stale and forces a rescan, per that
+      // commit's own restoreScanSession notice: "PMCC results use an older
+      // qualification policy -- rescan required."). This fixture predates
+      // that field; without it, restoreScanSession silently rejects the
+      // whole session as invalid, and nothing PMCC-related renders at all.
+      decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION,
       criteria: {
         dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
         longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
