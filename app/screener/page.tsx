@@ -56,6 +56,7 @@ import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProf
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { calculateCspScore } from '@/lib/scans/cspScore';
+import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
@@ -4322,6 +4323,17 @@ function ResultCard(props: ResultCardProps) {
   return props.result.strategy === 'PMCC' ? <PmccResultCard {...props} /> : <GenericResultCard {...props} />;
 }
 
+function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
+  const metric = calculateCspReturnThisCycle(candidate);
+  if (!metric.available) return <div className="min-w-[295px] shrink-0 text-[10px] text-slate-400" aria-label="CSP bid-based return is unavailable: a valid bid, strike, whole-number DTE, and contract multiplier are required">Return this cycle — · 30-day equivalent Unavailable · Bid-based annualized return —</div>;
+  const meta = CSP_RETURN_STATUS_META[metric.status!];
+  return <div className="min-w-[385px] shrink-0 text-[10px] text-slate-300" title="Bid-based estimate: premium uses the executable bid divided by cash secured at the strike. The 30-day equivalent normalizes this cycle's return; it is not a forecast or risk rating. Bid-based annualization is mathematical and differs from the existing midpoint-based ROC.">
+    <span aria-label="Return this cycle: executable bid premium divided by cash secured at the strike">Return this cycle {metric.cycleReturnPct!.toFixed(2)}%</span>
+    <span> · </span><span aria-label="30-day equivalent: cycle return normalized to 30 days; not a forecast or risk rating">30-day equivalent <span className={meta.className}>{metric.thirtyDayEquivalentPct!.toFixed(2)}% — {meta.label}</span></span>
+    <span> · </span><span aria-label="Bid-based annualized return: mathematical annualization, distinct from existing midpoint-based ROC">Bid-based annualized return {metric.bidBasedAnnualizedReturnPct!.toFixed(1)}%</span>
+  </div>;
+}
+
 function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cachedEntry, existingPositions }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
@@ -4700,6 +4712,7 @@ const strategyScores = useMemo(() => {
           {c && <>
             <div className="text-xs shrink-0 w-36"><span className={th.label}>Exp </span><span className={`${th.text} font-medium`}>{c.expiration}</span><span className={`ml-1 font-medium ${c.dte <= dteCloseTarget ? 'text-red-500' : c.dte <= dteAlertThreshold ? 'text-yellow-500' : th.textFaint}`}>({c.dte}d)</span></div>
             <div className={`${c.strategy === 'IC' ? 'w-44' : 'w-28'} shrink-0`}><StrikesDisplay c={c} th={th} /></div>
+            {c.strategy === 'CSP' && <CspReturnThisCycleRow candidate={c} />}
             {c.strategy === 'PMCC' ? <>
               <div className="text-xs shrink-0 w-24"><span className={th.label}>Net Debit </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2) ?? '—'}</span></div>
               <div className="text-xs shrink-0 w-24"><span className={th.label}>Short Credit </span><span className="text-emerald-500 font-bold">${c.credit.toFixed(2)}</span></div>
@@ -7332,6 +7345,9 @@ export default function Home() {
   // canonical minimum-OI floor or secondary sort -- see the note above
   // TargetedScanResultsPanel.
   const [targetedSortBy, setTargetedSortBy] = useState<TargetedSortField>('score');
+  // Targeted CSP-only display ordering. It is intentionally separate from
+  // canonical score/ranking and never changes the scan request or filters.
+  const [cspTargetedReturnSort, setCspTargetedReturnSort] = useState<'desc' | 'asc' | null>(null);
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
@@ -8916,6 +8932,10 @@ export default function Home() {
       return (b.pmccPair?.shortLeg.openInterest ?? -Infinity) - (a.pmccPair?.shortLeg.openInterest ?? -Infinity);
     });
   }
+  if (cspTargetedSession && cspTargetedReturnSort) {
+    const sortable = filteredQualified.flatMap(result => result.bestCandidate?.strategy === 'CSP' ? [{ ...result.bestCandidate, result }] : []);
+    filteredQualified = sortCspByThirtyDayEquivalent(sortable, cspTargetedReturnSort).map(item => item.result);
+  }
 
   // SCREENER-LAUNCHER-0001 corrective pass — identifies the ONE launcher
   // whose own scan invocation is currently in flight, replacing the
@@ -9596,6 +9616,15 @@ export default function Home() {
                         <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
                       }
                     />
+                    {cspTargetedSession && <div className="mt-2 flex items-center gap-2">
+                      <span className={`text-[9px] ${th.textFaint}`}>Targeted CSP order</span>
+                      <button onClick={() => setCspTargetedReturnSort(previous => previous === 'desc' ? 'asc' : 'desc')}
+                        title="Sort only targeted CSP results by bid-based 30-day equivalent return. First click descending; repeat click ascending. Unavailable values always remain last."
+                        className={`text-[9px] px-2 py-0.5 rounded border font-bold ${cspTargetedReturnSort ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint}`}`}>
+                        30-day Eq. Return {cspTargetedReturnSort === 'asc' ? '↑' : '↓'}
+                      </button>
+                      <span className={`text-[9px] ${th.textFaint}`}>Bid-based estimate; legacy midpoint ROC is unchanged.</span>
+                    </div>}
                     <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
@@ -9916,13 +9945,13 @@ export default function Home() {
                         </div>
                       )}
                       <div className="space-y-2">
-                        {activeSession?.requestedStrategy === 'csp' ? cspExpirationGroups.map(([expiration, group]) => (
+                        {activeSession?.requestedStrategy === 'csp' && !cspTargetedReturnSort ? cspExpirationGroups.map(([expiration, group]) => (
                           <ExpirationDisclosure key={expiration} expiration={expiration}
                             dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
                             kind="qualified" defaultOpen borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </ExpirationDisclosure>
-                        )) : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
+                        )) : activeSession?.requestedStrategy === 'csp' ? filteredQualified.map(renderQualifiedCandidate) : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                           <PmccTickerDisclosure key={symbol} symbol={symbol}
                             price={group[0]?.price ?? null} candidateCount={group.length}
                             bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore} bestScoreLabel="Best Fit"
