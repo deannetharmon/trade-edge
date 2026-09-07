@@ -2795,9 +2795,8 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
           </span>
           <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
           {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
-          <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
-          {/* Alan: space restored between strike and option type -- "$6750.00C" read as one garbled token. */}
-          <span className={th.text}>{formatMoneyDropExactZeroCents(candidate.strike)} C · {candidate.expiration}</span>
+          {/* Dean: moved next to current price, not strike/expiration -- it's
+              a price-vs-strike relationship, reads more naturally here. */}
           {itmOtmPct != null ? (
             <span className={`text-[10px] font-bold ${itmOtmPct >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
               {Math.abs(itmOtmPct).toFixed(1)}% {itmOtmPct >= 0 ? 'ITM' : 'OTM'}
@@ -2805,6 +2804,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
           ) : (
             <span className={`text-[10px] ${th.textMuted}`} title="Underlying price unavailable">ITM/OTM —</span>
           )}
+          <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
+          {/* Alan: space restored between strike and option type -- "$6750.00C" read as one garbled token. */}
+          <span className={th.text}>{formatMoneyDropExactZeroCents(candidate.strike)} C · {candidate.expiration}</span>
         </div>
 
         {/* Decision numbers -- Ian's priority order, largest/boldest */}
