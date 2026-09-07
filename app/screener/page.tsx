@@ -4325,12 +4325,16 @@ function ResultCard(props: ResultCardProps) {
 
 function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
   const metric = calculateCspReturnThisCycle(candidate);
-  if (!metric.available) return <div className="min-w-[295px] shrink-0 text-[10px] text-slate-400" aria-label="CSP bid-based return is unavailable: a valid bid, strike, whole-number DTE, and contract multiplier are required">Return this cycle — · 30-day equivalent Unavailable · Bid-based annualized return —</div>;
+  if (!metric.available) return <div className="w-40 shrink-0 text-[10px] leading-tight text-slate-400" aria-label="CSP bid-based return is unavailable: a valid bid, strike, whole-number DTE, and contract multiplier are required">
+    <div><span className="text-slate-500">Cycle </span>—</div>
+    <div><span className="text-slate-500">30-day </span>Unavailable</div>
+    <div><span className="text-slate-500">Annualized </span>—</div>
+  </div>;
   const meta = CSP_RETURN_STATUS_META[metric.status!];
-  return <div className="min-w-[385px] shrink-0 text-[10px] text-slate-300" title="Bid-based estimate: premium uses the executable bid divided by cash secured at the strike. The 30-day equivalent normalizes this cycle's return; it is not a forecast or risk rating. Bid-based annualization is mathematical and differs from the existing midpoint-based ROC.">
-    <span aria-label="Return this cycle: executable bid premium divided by cash secured at the strike">Return this cycle {metric.cycleReturnPct!.toFixed(2)}%</span>
-    <span> · </span><span aria-label="30-day equivalent: cycle return normalized to 30 days; not a forecast or risk rating">30-day equivalent <span className={meta.className}>{metric.thirtyDayEquivalentPct!.toFixed(2)}% — {meta.label}</span></span>
-    <span> · </span><span aria-label="Bid-based annualized return: mathematical annualization, distinct from existing midpoint-based ROC">Bid-based annualized return {metric.bidBasedAnnualizedReturnPct!.toFixed(1)}%</span>
+  return <div className="w-40 shrink-0 text-[10px] leading-tight text-slate-300" title="Bid-based estimate: premium uses the executable bid divided by cash secured at the strike. The 30-day equivalent normalizes this cycle's return; it is not a forecast or risk rating. Bid-based annualization is mathematical and differs from the existing midpoint-based ROC.">
+    <div aria-label="Return this cycle: executable bid premium divided by cash secured at the strike"><span className="text-slate-500">Cycle </span>{metric.cycleReturnPct!.toFixed(2)}%</div>
+    <div aria-label={`30-day equivalent: ${metric.thirtyDayEquivalentPct!.toFixed(2)} percent. ${meta.label}. Not a forecast or risk rating.`}><span className="text-slate-500">30-day </span><span className={`${meta.className} font-semibold`}>{metric.thirtyDayEquivalentPct!.toFixed(2)}% — {meta.label}</span></div>
+    <div aria-label="Bid-based annualized return: mathematical annualization, distinct from existing midpoint-based ROC"><span className="text-slate-500">Annualized </span>{metric.bidBasedAnnualizedReturnPct!.toFixed(1)}%</div>
   </div>;
 }
 
