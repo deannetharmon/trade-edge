@@ -2722,6 +2722,13 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
   const extrinsicPctOfCost = candidate.extrinsicValue != null && totalCost != null && totalCost > 0
     ? (candidate.extrinsicValue * 100 / totalCost) * 100
     : null;
+  // Ian: %ITM/%OTM belongs in the identity line, not the confirmations
+  // row -- it changes what the candidate *is* (stock-replacement vs.
+  // speculative leverage), not a pass/fail range check like delta/spread.
+  // Long call: positive = in-the-money, negative = out-of-the-money.
+  const itmOtmPct = candidate.underlyingPrice != null && candidate.underlyingPrice > 0
+    ? ((candidate.underlyingPrice - candidate.strike) / candidate.strike) * 100
+    : null;
   const qualification = evaluateLeapsEntry({
     occSymbol: candidate.occSymbol, strike: candidate.strike, dte: candidate.dte,
     delta: candidate.delta, openInterest: candidate.openInterest, bid: candidate.bid,
@@ -2785,6 +2792,13 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
           <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${th.border} ${th.textMuted}`}>{candidate.dte}d</span>
           {/* Alan: space restored between strike and option type -- "$6750.00C" read as one garbled token. */}
           <span className={th.text}>{formatMoneyDropExactZeroCents(candidate.strike)} C · {candidate.expiration}</span>
+          {itmOtmPct != null ? (
+            <span className={`text-[10px] font-bold ${itmOtmPct >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {Math.abs(itmOtmPct).toFixed(1)}% {itmOtmPct >= 0 ? 'ITM' : 'OTM'}
+            </span>
+          ) : (
+            <span className={`text-[10px] ${th.textMuted}`} title="Underlying price unavailable">ITM/OTM —</span>
+          )}
         </div>
 
         {/* Decision numbers -- Ian's priority order, largest/boldest */}
