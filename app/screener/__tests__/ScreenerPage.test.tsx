@@ -33,7 +33,7 @@ import { TaskProvider, useTaskManagerContext } from '@/components/tasks/TaskProv
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import type { TaskManager } from '@/lib/tasks/task-manager';
 import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbolFailed } from '@/lib/screener/scanSession';
-import { SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
+import { LEAPS_CACHE_KEY, SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
 import type { ScreenResult, CheckResult, RawScanEntry } from '@/lib/scans/types';
 import type { Position } from '@/lib/portfolio-data/types';
@@ -493,6 +493,27 @@ afterEach(() => {
 });
 
 describe('WA-0005 /screener: Initial/not-yet-run state', () => {
+  it('replaces the Hunter instructions with restored LEAPS results', async () => {
+    window.localStorage.setItem('hunter-screen-mode', 'leaps');
+    kv.set(LEAPS_CACHE_KEY, {
+      results: [{
+        symbol: 'GS', expiration: '2027-06-17', dte: 284, strike: 800,
+        delta: 0.82, openInterest: 246, bid: 279.35, ask: 285.70,
+        occSymbol: 'GS270617C00800000', underlyingPrice: 1037.94,
+        spreadPct: 2.2, extrinsicValue: 44.58, dataQuality: 'ok',
+        score: 53, scoreIncomplete: false,
+      }],
+      filters: { deltaMin: 0.70, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 0 },
+      cachedAt: Date.now(),
+    });
+
+    renderScreenerPage();
+
+    await waitFor(() => expect(screen.getByText('LEAPS CANDIDATES')).toBeInTheDocument());
+    expect(screen.getByText(/1 of 1 candidates match current filters/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ADD TICKERS AND RUN HUNTER/)).not.toBeInTheDocument();
+  });
+
   it('Spreads Filter mode preview box shows the selected preset\'s real values', async () => {
     // Closes the gap Quinn flagged: nothing previously confirmed the
     // Filter-mode preview box shows the *correct* numbers for a given

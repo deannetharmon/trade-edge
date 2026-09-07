@@ -9353,7 +9353,7 @@ export default function Home() {
               opportunities" empty state -- rather than looking identical
               to "never ran a scan." hasCompletedScanForCurrentMode makes
               that distinction explicit. */}
-          {results.length === 0 && targetedResults.length === 0 && !loading && !hasCompletedScanForCurrentMode && (
+          {screenMode !== 'leaps' && results.length === 0 && targetedResults.length === 0 && !loading && !hasCompletedScanForCurrentMode && (
             <div className={`h-full flex flex-col items-center justify-center ${th.textFaint}`}>
               <div className="text-4xl mb-3 opacity-20">◈</div>
               <p className={`text-[10px] tracking-widest ${th.textMuted}`}>ADD TICKERS AND RUN HUNTER</p>
@@ -9372,9 +9372,9 @@ export default function Home() {
               shown for a genuine first scan (nothing to show yet); a
               refresh gets its own smaller indicator inside the still-
               visible panel below instead. */}
-          {loading && results.length === 0 && targetedResults.length === 0 && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
+          {screenMode !== 'leaps' && loading && results.length === 0 && targetedResults.length === 0 && <div className="h-full flex flex-col items-center justify-center gap-2"><div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium`}>{status || 'SCANNING...'}</div></div>}
 
-          {(results.length > 0 || targetedResults.length > 0 || hasCompletedScanForCurrentMode) && (!loading || results.length > 0 || targetedResults.length > 0) && (
+          {screenMode !== 'leaps' && (results.length > 0 || targetedResults.length > 0 || hasCompletedScanForCurrentMode) && (!loading || results.length > 0 || targetedResults.length > 0) && (
             <div className="space-y-4">
               {loading && (results.length > 0 || targetedResults.length > 0) && (
                 <div className={`text-[10px] tracking-widest ${th.textMuted} animate-pulse font-medium px-1`}>
