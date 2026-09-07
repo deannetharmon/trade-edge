@@ -1992,21 +1992,21 @@ function SessionsPanel({ tickers, onLoadAll, onLoadPrompt, th }: {
             </div>
           )}
         </div>
-        <div className="relative flex-1">
+        <div className="flex-1">
           <button onClick={() => { setShowLoad(!showLoad); setShowSave(false); if (!showLoad) refreshWatchlists(); }} className={`w-full text-[9px] px-2 py-1.5 border ${th.inputBorder} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium flex items-center justify-center gap-1`}>▼ Load List</button>
-          {showLoad && (
-            <div className={`absolute top-8 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg overflow-hidden w-56 shadow-xl`}>
-              {sessionNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved sessions yet</p>
-                : sessionNames.map(name => (
-                  <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
-                    <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} hover:${th.text} text-left flex-1 font-medium`}>{name}</button>
-                    <button onClick={() => handleDelete(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                  </div>
-                ))}
-            </div>
-          )}
         </div>
       </div>
+      {showLoad && (
+        <div data-testid="saved-list-menu" className={`mt-2 w-full ${th.sidebar} border ${th.border} rounded-lg overflow-hidden shadow-xl`}>
+          {sessionNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved sessions yet</p>
+            : sessionNames.map(name => (
+              <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
+                <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} hover:${th.text} text-left flex-1 font-medium`}>{name}</button>
+                <button onClick={() => handleDelete(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -493,6 +493,17 @@ afterEach(() => {
 });
 
 describe('WA-0005 /screener: Initial/not-yet-run state', () => {
+  it('keeps the saved-list menu aligned to the full sidebar panel', async () => {
+    renderScreenerPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Load List/i }));
+
+    const menu = await screen.findByTestId('saved-list-menu');
+    expect(menu).toHaveClass('w-full');
+    expect(menu).not.toHaveClass('absolute');
+    expect(menu).not.toHaveClass('right-0');
+  });
+
   it('replaces the Hunter instructions with restored LEAPS results', async () => {
     window.localStorage.setItem('hunter-screen-mode', 'leaps');
     kv.set(LEAPS_CACHE_KEY, {
