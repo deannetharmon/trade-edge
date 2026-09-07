@@ -10,7 +10,7 @@
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioPricingDecisionEvidence } from '@/lib/portfolio-intelligence';
 import type { PositionValuation } from '@/lib/positionValuation';
 import type { CanonicalCloseIdentity } from '@/lib/portfolio/closeOrderSafety';
-import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence } from '@/lib/portfolio/stopLossPolicy';
+import type { StopLossPolicy, StopClassification, StopBreachState, QuoteWidthEvidence, StopAssessment } from '@/lib/portfolio/stopLossPolicy';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type ActionType = 'HOLD' | 'WATCH' | 'MANAGE' | 'TAKE_PROFIT' | 'CUT_LOSSES' | 'CLOSE_ROLL' | 'PLACE_GTC';
@@ -202,6 +202,9 @@ export interface Position {
   // stopLossPolicy is non-null.
   stopLossDisplayPolicy: StopLossPolicy | null;
   stopLossClassification: StopClassification;
+  /** Canonical raw-broker-versus-derived stop assessment. Populated by the
+   * acquisition adapter for both Portfolio experiences. */
+  stopAssessment?: StopAssessment;
   // Raw broker status string for the currently-matched stop order (e.g.
   // 'Live', 'Filled') -- feeds mapBrokerStopStatus() so getRecommendation()
   // can treat a broker-confirmed trigger/fill as authoritative. Null when
@@ -340,18 +343,21 @@ export interface PositionSnapshot {
 export type StopStatus = 'live' | 'loose' | 'none' | 'unknown';
 
 
-export interface GtcOrderLeg { symbol: string; action: string; }
+export interface GtcOrderLeg { symbol: string; action: string; quantity?: number | null; ratio?: number | null; }
 
 
 export interface GtcOrder {
   id: string; price: string; stopPrice: string | null;
   orderType: string; timeInForce: string; legs: GtcOrderLeg[];
-  complexOrderId?: string; // set when this order is part of a complex/OCO order
+  complexOrderId?: string | null; // set when this order is part of a complex/OCO order
   // TE-0002: raw broker status string (e.g. 'Live', 'Filled', 'Cancelled'),
   // used to detect an authoritative broker-confirmed stop trigger/fill --
   // see lib/portfolio/stopLossPolicy.ts's BrokerStopStatus. Null when the
   // raw order payload didn't carry a status field.
   status?: string | null;
+  accountNumber?: string | null;
+  priceEffect?: string | null;
+  sourceEndpoint?: '/orders/live' | '/complex-orders' | 'unknown';
 }
 
 
@@ -368,6 +374,7 @@ export interface StopLossInfo {
   classification: StopClassification;
   orderId: string | null;
   orderStatus: string | null;
+  assessment: StopAssessment;
 }
 
 

@@ -62,6 +62,8 @@ export function stopPresentation(classification: Position['stopLossClassificatio
     case 'TOO_TIGHT': return { label: 'Too tight', tone: 'warning', action: 'Verify/Adjust' };
     case 'UNKNOWN_PROVENANCE': return { label: 'Unverified', tone: 'warning', action: 'Verify' };
     case 'INVALID': return { label: 'Invalid', tone: 'negative', action: 'Repair Stop' };
-    default: return { label: 'No stop', tone: 'warning', action: 'Add Stop' };
+    case 'NO_STOP': return { label: 'No stop', tone: 'warning', action: 'Add Stop' };
+    case 'NOT_EVALUATED': return { label: 'Not evaluated', tone: 'neutral', action: 'Retry Stop Check' };
+    case 'UNSUPPORTED': return { label: 'Unsupported', tone: 'neutral', action: 'Stop Workflow Unavailable' };
   }
 }

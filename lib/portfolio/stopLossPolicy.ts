@@ -68,12 +68,107 @@ export interface StopLossPolicy {
 // policy-aligned; materially too tight; materially too loose; unknown
 // basis/provenance; invalid/unparseable.
 export type StopClassification =
+  | 'NOT_EVALUATED'
+  | 'UNSUPPORTED'
   | 'NO_STOP'
   | 'ALIGNED'
   | 'TOO_TIGHT'
   | 'TOO_LOOSE'
   | 'UNKNOWN_PROVENANCE'
   | 'INVALID';
+
+export type StopApplicability = 'CREDIT' | 'SINGLE_LONG_DEBIT' | 'UNSUPPORTED' | 'NOT_EVALUATED';
+
+export interface StopEvidenceSource {
+  endpoint: '/orders/live' | '/complex-orders';
+  available: boolean;
+}
+
+export interface StopEvidenceLeg {
+  symbol: string;
+  action: string;
+  quantity: number | null;
+  ratio: number | null;
+}
+
+export interface StopOrderEvidence {
+  accountNumber: string | null;
+  orderId: string;
+  complexOrderId: string | null;
+  sourceEndpoint: '/orders/live' | '/complex-orders' | 'unknown';
+  status: string | null;
+  orderType: string;
+  timeInForce: string;
+  priceEffect: string | null;
+  triggerPrice: number | null;
+  limitPrice: number | null;
+  legs: StopEvidenceLeg[];
+}
+
+export interface StopAssessment {
+  classification: StopClassification;
+  applicability: StopApplicability;
+  reasonCode: string;
+  explanation: string;
+  evidenceComplete: boolean;
+  matchedOrderId: string | null;
+  ambiguousOrderIds: string[];
+  rawEvidence: {
+    position: {
+      accountNumber: string;
+      occSymbol: string | null;
+      side: 'Long' | 'Short' | 'Mixed' | 'Unknown';
+      optionType: 'C' | 'P' | null;
+      quantity: number | null;
+    };
+    sources: StopEvidenceSource[];
+    orders: StopOrderEvidence[];
+    executableBid: number | null;
+    quoteTime: string | null;
+    quoteFresh: boolean | null;
+  };
+  derivedAssessment: {
+    matchResult: 'MATCHED' | 'NO_MATCH' | 'AMBIGUOUS' | 'NOT_APPLICABLE' | 'INVALID';
+    policySource: StopSource | 'DEBIT_POLICY' | 'NONE';
+    policyAnchor: string | null;
+    expectedTrigger: number | null;
+    actualTrigger: number | null;
+    variance: number | null;
+    blockingExplanation: string | null;
+  };
+}
+
+export interface DebitStopPolicy {
+  originalDebitPerContract: number;
+  maximumLossPct: number;
+  triggerPrice: number;
+  source: 'DEBIT_POLICY';
+  createdAt: string;
+  brokerOrderId: string | null;
+  complexOrderId: string | null;
+}
+
+/** Debit policies are explicit only. Callers must supply the trader-selected
+ * maximum-loss percentage; this function intentionally has no default. */
+export function buildDebitStopPolicy(input: {
+  originalDebitPerContract: number;
+  maximumLossPct: number;
+  createdAt: string;
+  brokerOrderId?: string | null;
+  complexOrderId?: string | null;
+}): DebitStopPolicy {
+  if (!Number.isFinite(input.originalDebitPerContract) || input.originalDebitPerContract <= 0) throw new Error('Original debit must be positive.');
+  if (!Number.isFinite(input.maximumLossPct) || input.maximumLossPct <= 0 || input.maximumLossPct >= 1) throw new Error('Maximum-loss percentage must be explicitly selected between 0 and 100%.');
+  return {
+    originalDebitPerContract: input.originalDebitPerContract,
+    maximumLossPct: input.maximumLossPct,
+    triggerPrice: Number((input.originalDebitPerContract * (1 - input.maximumLossPct)).toFixed(2)),
+    source: 'DEBIT_POLICY',
+    createdAt: input.createdAt,
+    brokerOrderId: input.brokerOrderId ?? null,
+    complexOrderId: input.complexOrderId ?? null,
+  };
+}
 
 // Deterministic entry default: 2x original credit. This is the ONLY
 // silent default allowed for a newly opened defined-risk credit spread --

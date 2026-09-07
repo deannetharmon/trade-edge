@@ -202,6 +202,7 @@ import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
+import { DebitStopObservation, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
@@ -6155,6 +6156,18 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
   return <SetStopLossButtonInner pos={pos} th={th} />;
 }
 
+function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof THEMES[Theme]; onRetry: () => void }) {
+  const [reviewing, setReviewing] = useState(false);
+  if (pos.entryPriceEffect === 'Debit') return <DebitStopObservation position={pos} />;
+  const classification = pos.stopLossClassification;
+  if (classification === 'NOT_EVALUATED') return <div><button type="button" onClick={onRetry} className="rounded border border-slate-500 px-2.5 py-1 text-[9px] font-bold text-slate-300">{STOP_CONTROL_LABELS.NOT_EVALUATED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+  if (classification === 'UNSUPPORTED') return <div><button type="button" disabled className="cursor-not-allowed rounded border border-slate-700 px-2.5 py-1 text-[9px] font-bold text-slate-500">{STOP_CONTROL_LABELS.UNSUPPORTED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+  if (classification === 'INVALID' || classification === 'UNKNOWN_PROVENANCE' || classification === 'TOO_TIGHT') {
+    return <div><button type="button" onClick={() => setReviewing(value => !value)} className="rounded border border-amber-600 px-2.5 py-1 text-[9px] font-bold text-amber-300">{STOP_CONTROL_LABELS[classification]}</button>{reviewing && <div className="mt-2"><StopEvidencePanel assessment={pos.stopAssessment} expanded /><div className="mt-2"><SetStopLossButton pos={pos} th={th} /></div></div>}</div>;
+  }
+  return <div><SetStopLossButton pos={pos} th={th} /><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+}
+
 function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const portfolioMode = usePortfolioMode();
   const entryCredit = canonicalEntryCredit(pos)!;
@@ -6787,9 +6800,10 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const btnLabel =
     result === 'success' ? '✓ Stop Set'       :
     result === 'error'   ? '✕ Failed'          :
-    pos.stopLossClassification === 'NO_STOP'    ? '+ Set Stop'      :
-    pos.stopLossClassification === 'TOO_LOOSE'  ? '⚠ Update Stop'   :
-    pos.stopLossClassification === 'TOO_TIGHT'  ? '⚠ Verify Stop'   :
+    pos.stopLossClassification === 'NO_STOP'    ? 'Add Stop'      :
+    pos.stopLossClassification === 'ALIGNED'    ? 'Edit Stop'      :
+    pos.stopLossClassification === 'TOO_LOOSE'  ? 'Adjust Stop'   :
+    pos.stopLossClassification === 'TOO_TIGHT'  ? 'Verify/Adjust Stop'   :
     pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? '⚠ Verify Stop' :
     pos.stopLossClassification === 'INVALID' ? '⚠ Repair Stop' :
     '✎ Stop';
@@ -8538,7 +8552,9 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                   pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? { icon: '?', label: 'Unverified',    cls: 'text-yellow-400'  } :
                   pos.stopLossClassification === 'INVALID'            ? { icon: '✕', label: 'Invalid',       cls: 'text-red-400'     } :
                   pos.stopLossClassification === 'NO_STOP'            ? { icon: '✕', label: 'None',          cls: 'text-red-400'     } :
-                                                                          { icon: '—', label: '?',            cls: th.textFaint        };
+                  pos.stopLossClassification === 'NOT_EVALUATED'      ? { icon: '—', label: 'Not evaluated', cls: th.textFaint        } :
+                  pos.stopLossClassification === 'UNSUPPORTED'        ? { icon: '—', label: 'Unsupported',   cls: th.textFaint        } :
+                                                                          { icon: '—', label: 'Unknown',       cls: th.textFaint        };
                 // Renders the RECORDED policy -- never a "×credit" label
                 // fabricated by dividing price by credit for an
                 // unknown-provenance order (see describeStopLossPolicy).
@@ -8632,7 +8648,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             const canExtend = pnlPct != null && pnlPct >= 50 && pos.dte >= 14;
             return canExtend ? <ExtendProfitButton pos={pos} th={th} /> : null;
           })()}
-          <SetStopLossButton pos={pos} th={th} />
+          <PortfolioStopControl pos={pos} th={th} onRetry={onRefreshQuotes} />
           <VerifyPricingRefreshButton
             recommendation={pos.recommendation}
             positionKey={pos.key}
@@ -10095,9 +10111,7 @@ export default function PortfolioPage() {
                 onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
                 onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
-                renderStopControl={position => position.stopLossClassification === 'NO_STOP'
-                  ? <SetStopLossButton pos={position} th={th} />
-                  : null}
+                renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}
               />
             </>
           ) : (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit, computeMarketablePnlPct } from '../acquisition';
+import { classifyPositionStopLoss, getRecommendation, mapBrokerStopStatus, derivePositionQuoteQuality, buildStopBreachObservations, resolveOcoStopOrderId, collectRawOrders, mapGtcOrder, calculateSpreadCredit, computeMarketablePnlPct, scorePortfolioPositionHealth } from '../acquisition';
 import type { Position, PositionLeg, GtcOrder, PositionSnapshot } from '../types';
 import { buildOriginalCreditDefaultPolicy, buildCurrentValueAnchoredPolicy, buildUnknownProvenancePolicy } from '@/lib/portfolio/stopLossPolicy';
 import { computeSignedNetPremium, isNetDebitStructure, computePositionPnl } from '@/lib/portfolio/positionMetrics';
@@ -101,9 +101,9 @@ describe('classifyPositionStopLoss (wiring)', () => {
     creditReceived: 1260, entryCredit: 1260, entryEconomicsComplete: true, entryPriceEffect: 'Credit' as const, quantity: 5,
   };
 
-  it('fails stop classification closed for debit and missing canonical provenance', () => {
-    expect(classifyPositionStopLoss({ ...positionInput, entryPriceEffect: 'Debit' }, [gtcOrder()], null).classification).toBe('INVALID');
-    expect(classifyPositionStopLoss({ ...positionInput, entryCredit: null }, [gtcOrder()], null).classification).toBe('INVALID');
+  it('keeps unsupported debit neutral and missing credit economics unevaluated', () => {
+    expect(classifyPositionStopLoss({ ...positionInput, entryPriceEffect: 'Debit' }, [gtcOrder()], null).classification).toBe('UNSUPPORTED');
+    expect(classifyPositionStopLoss({ ...positionInput, entryCredit: null }, [gtcOrder()], null).classification).toBe('NOT_EVALUATED');
   });
 
   // 1. MU-style 5-lot BPS: credit $2.52/contract, working stop $3.15, no
@@ -128,6 +128,23 @@ describe('classifyPositionStopLoss (wiring)', () => {
     const result = classifyPositionStopLoss(positionInput, [], null);
     expect(result.classification).toBe('NO_STOP');
     expect(result.status).toBe('none');
+  });
+
+  it('reports NOT_EVALUATED, legacy unknown, and source completeness when a required feed failed', () => {
+    const result = classifyPositionStopLoss(positionInput, [], null, { completeness: { liveOrdersAvailable: false, complexOrdersAvailable: true } });
+    expect(result.classification).toBe('NOT_EVALUATED');
+    expect(result.status).toBe('unknown');
+    expect(result.assessment.rawEvidence.sources).toEqual([
+      { endpoint: '/orders/live', available: false },
+      { endpoint: '/complex-orders', available: true },
+    ]);
+  });
+
+  it('does not choose between multiple plausible credit stops', () => {
+    const result = classifyPositionStopLoss(positionInput, [gtcOrder(), gtcOrder({ id: 'ord-2' })], null);
+    expect(result.classification).toBe('NOT_EVALUATED');
+    expect(result.status).toBe('unknown');
+    expect(result.assessment.ambiguousOrderIds).toEqual(['ord-1', 'ord-2']);
   });
 
   // 9. Externally created broker stop with no metadata: basis stays
@@ -167,6 +184,20 @@ describe('classifyPositionStopLoss (wiring)', () => {
     expect(result.policy?.anchorBasis).toBe('CURRENT_SPREAD_VALUE');
     expect(result.policy?.source).toBe('AI_SUGGESTION');
     expect(result.classification).toBe('ALIGNED');
+  });
+});
+
+describe('neutral stop classifications', () => {
+  it.each(['NOT_EVALUATED', 'UNSUPPORTED'] as const)('%s neither penalizes health nor independently produces CUT_LOSSES', classification => {
+    const pos = makePosition({
+      stopLossClassification: classification,
+      stopLossStatus: 'unknown',
+      stopLossPolicy: null,
+      stopLossDisplayPolicy: null,
+    });
+    const health = scorePortfolioPositionHealth(pos);
+    expect(health.factors.some(factor => factor.key === 'no-stop-loss')).toBe(false);
+    expect(getRecommendation(pos, null).action).not.toBe('CUT_LOSSES');
   });
 });
 

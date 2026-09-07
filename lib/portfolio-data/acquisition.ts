@@ -63,7 +63,9 @@ import {
   type BrokerStopStatus,
   type QuoteQuality,
   type QuoteWidthEvidence,
+  type StopAssessment,
 } from '@/lib/portfolio/stopLossPolicy';
+import { DEBIT_STOP_OBSERVE_ENABLED, evaluateDebitStop, type StopAcquisitionCompleteness } from '@/lib/portfolio/debitStopEvaluation';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
 import {
   CONTRACT_MULTIPLIER,
@@ -610,10 +612,10 @@ export function pickOrderField(o: any, keys: string[]): string | null {
 
 export function mapGtcOrder(o: any, parentTif?: string, parentComplexId?: string): GtcOrder {
   // Collect legs from direct legs array OR from nested orders' legs (automation/complex orders)
-  let legs = (o?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? '') }));
+  let legs = (o?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? ''), quantity: finitePositiveWhole(l?.quantity), ratio: finitePositiveWhole(l?.['quantity-ratio'] ?? l?.ratio ?? 1) }));
   if (legs.length === 0) {
     for (const nested of o?.orders ?? []) {
-      const nestedLegs = (nested?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? '') }));
+      const nestedLegs = (nested?.legs ?? []).map((l: any) => ({ symbol: normalizeOccSymbol(String(l?.symbol ?? '')), action: String(l?.action ?? ''), quantity: finitePositiveWhole(l?.quantity), ratio: finitePositiveWhole(l?.['quantity-ratio'] ?? l?.ratio ?? 1) }));
       legs = legs.concat(nestedLegs);
     }
   }
@@ -635,7 +637,15 @@ export function mapGtcOrder(o: any, parentTif?: string, parentComplexId?: string
     // TE-0002: raw broker status, used to detect an authoritative
     // triggered/filled stop -- see mapBrokerStopStatus.
     status: o?.status != null ? String(o.status) : null,
+    accountNumber: pickOrderField(o, ['account-number', 'accountNumber']),
+    priceEffect: pickOrderField(o, ['price-effect', 'priceEffect']),
+    sourceEndpoint: o?._sourceEndpoint === '/orders/live' || o?._sourceEndpoint === '/complex-orders' ? o._sourceEndpoint : 'unknown',
   };
+}
+
+function finitePositiveWhole(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 
@@ -737,7 +747,10 @@ export async function fetchGtcOrders(
     }
 
     const requests = [liveResult, complexResult];
-    const rawOrders = requests.flatMap(r => r.status === 'fulfilled' ? collectRawOrders(r.value) : []);
+    const endpoints = ['/orders/live', '/complex-orders'] as const;
+    const rawOrders = requests.flatMap((r, index) => r.status === 'fulfilled'
+      ? collectRawOrders(r.value).map(order => ({ ...order, _sourceEndpoint: endpoints[index] }))
+      : []);
     // Inject complexOrderId for orders that came from /orders/live
     rawOrders.forEach(o => {
       if (!o['complex-order-id'] && individualToComplexId[String(o.id)]) {
@@ -768,6 +781,31 @@ export async function fetchGtcOrders(
       seen.add(key); return true;
     });
   } catch { return []; }
+}
+
+/** Lossless stop-evaluation projection. Unlike fetchGtcOrders this does not
+ * discard orders because of TIF, status, type, or malformed fields: those
+ * facts are classification evidence and must remain visible to the assessor. */
+export function collectStopOrderEvidence(evidence: { rawLiveOrders: any[] | null; rawComplexOrders: any[] | null }): GtcOrder[] {
+  const inputs = [
+    { endpoint: '/orders/live' as const, items: evidence.rawLiveOrders },
+    { endpoint: '/complex-orders' as const, items: evidence.rawComplexOrders },
+  ];
+  const seen = new Set<string>();
+  const orders: GtcOrder[] = [];
+  for (const input of inputs) {
+    if (input.items === null) continue;
+    const raw = collectRawOrders({ data: { items: input.items } });
+    for (const item of raw) {
+      const order = mapGtcOrder({ ...item, _sourceEndpoint: input.endpoint }, item._inheritedTif, item._parentComplexId);
+      if (order.legs.length === 0) continue;
+      const key = `${order.id}|${order.complexOrderId ?? ''}|${order.orderType}|${order.stopPrice ?? ''}|${order.legs.map(leg => `${leg.symbol}:${leg.action}:${leg.quantity ?? ''}:${leg.ratio ?? ''}`).join(',')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      orders.push(order);
+    }
+  }
+  return orders;
 }
 
 
@@ -833,26 +871,102 @@ export function resolveOcoStopOrderId(complexOrderSubmissionResult: any): { comp
 //   UNKNOWN_PROVENANCE     -> 'unknown'
 //   INVALID                -> 'unknown'
 export function classifyPositionStopLoss(
-  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity' | 'entryCredit' | 'entryEconomicsComplete' | 'entryPriceEffect'>,
+  position: Pick<Position, 'legs' | 'creditReceived' | 'quantity' | 'entryCredit' | 'entryEconomicsComplete' | 'entryPriceEffect'> & Partial<Pick<Position, 'accountNumber' | 'identity' | 'structureAmbiguous'>>,
   gtcOrders: GtcOrder[],
   recordedPolicy: StopLossPolicy | null = null,
+  options: {
+    completeness?: StopAcquisitionCompleteness;
+    debitObservationEnabled?: boolean;
+    debitQuote?: { executableBid: number | null; ask: number | null; quoteTime: string | null; now?: Date };
+  } = {},
 ): StopLossInfo {
+  const completeness = options.completeness ?? { liveOrdersAvailable: true, complexOrdersAvailable: true };
+  const evidenceComplete = completeness.liveOrdersAvailable && completeness.complexOrdersAvailable;
+  const positionEvidence = {
+    accountNumber: position.accountNumber ?? '',
+    occSymbol: position.legs.length === 1 ? position.legs[0].symbol : null,
+    side: position.legs.length === 1 ? position.legs[0].direction : position.legs.length > 1 ? 'Mixed' as const : 'Unknown' as const,
+    optionType: position.legs.length === 1 ? position.legs[0].optionType : null,
+    quantity: Number.isInteger(position.quantity) && position.quantity > 0 ? position.quantity : null,
+  };
+  const rawOrders = gtcOrders.map(order => ({
+    accountNumber: order.accountNumber ?? null, orderId: order.id,
+    complexOrderId: order.complexOrderId ?? null, sourceEndpoint: order.sourceEndpoint ?? 'unknown' as const,
+    status: order.status ?? null, orderType: order.orderType, timeInForce: order.timeInForce,
+    priceEffect: order.priceEffect ?? null,
+    triggerPrice: Number.isFinite(Number(order.stopPrice)) ? Number(order.stopPrice) : null,
+    limitPrice: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+    legs: order.legs.map(leg => ({ symbol: leg.symbol, action: leg.action, quantity: leg.quantity ?? null, ratio: leg.ratio ?? null })),
+  }));
+  const buildAssessment = (args: {
+    classification: StopAssessment['classification']; reasonCode: string; explanation: string;
+    matchedOrder?: GtcOrder | null; ambiguousOrderIds?: string[]; displayPolicy?: StopLossPolicy | null;
+  }): StopAssessment => ({
+    classification: args.classification,
+    applicability: args.classification === 'NOT_EVALUATED' ? 'NOT_EVALUATED' : 'CREDIT',
+    reasonCode: args.reasonCode, explanation: args.explanation, evidenceComplete,
+    matchedOrderId: args.matchedOrder?.id ?? null,
+    ambiguousOrderIds: args.ambiguousOrderIds ?? [],
+    rawEvidence: {
+      position: positionEvidence,
+      sources: [
+        { endpoint: '/orders/live', available: completeness.liveOrdersAvailable },
+        { endpoint: '/complex-orders', available: completeness.complexOrdersAvailable },
+      ],
+      orders: rawOrders,
+      executableBid: null, quoteTime: null, quoteFresh: null,
+    },
+    derivedAssessment: {
+      matchResult: (args.ambiguousOrderIds?.length ?? 0) > 0 ? 'AMBIGUOUS' : args.matchedOrder ? (args.classification === 'INVALID' ? 'INVALID' : 'MATCHED') : 'NO_MATCH',
+      policySource: args.displayPolicy?.source ?? 'NONE',
+      policyAnchor: args.displayPolicy ? args.displayPolicy.anchorBasis : null,
+      expectedTrigger: args.displayPolicy?.triggerPrice ?? null,
+      actualTrigger: args.matchedOrder ? (Number.isFinite(Number(args.matchedOrder.stopPrice)) ? Number(args.matchedOrder.stopPrice) : null) : null,
+      variance: args.displayPolicy && args.matchedOrder && Number.isFinite(Number(args.matchedOrder.stopPrice)) ? Number(args.matchedOrder.stopPrice) - args.displayPolicy.triggerPrice : null,
+      blockingExplanation: ['NOT_EVALUATED', 'UNSUPPORTED', 'INVALID'].includes(args.classification) ? args.explanation : null,
+    },
+  });
+
+  if (position.entryPriceEffect === 'Debit') {
+    const assessment = evaluateDebitStop({
+      position: { ...position, accountNumber: position.accountNumber ?? '', identity: position.identity ?? null, structureAmbiguous: position.structureAmbiguous ?? false },
+      orders: gtcOrders,
+      completeness,
+      quote: options.debitQuote ?? { executableBid: null, ask: null, quoteTime: null },
+      policy: null,
+      enabled: options.debitObservationEnabled === true,
+    });
+    return { status: assessment.classification === 'NO_STOP' ? 'none' : 'unknown', price: assessment.derivedAssessment.actualTrigger, policy: null, displayPolicy: assessment.derivedAssessment.actualTrigger != null ? buildUnknownProvenancePolicy(assessment.derivedAssessment.actualTrigger, assessment.matchedOrderId) : null, classification: assessment.classification, orderId: assessment.matchedOrderId, orderStatus: assessment.matchedOrderId ? gtcOrders.find(order => order.id === assessment.matchedOrderId)?.status ?? null : null, assessment };
+  }
   if (!hasSupportedCreditEntryEconomics(position)) {
-    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+    const assessment = buildAssessment({ classification: 'NOT_EVALUATED', reasonCode: 'CREDIT_ENTRY_ECONOMICS_UNAVAILABLE', explanation: 'Stop not evaluated — required broker evidence is unavailable or ambiguous.' });
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'NOT_EVALUATED', orderId: null, orderStatus: null, assessment };
   }
   const shortLeg = position.legs.find(l => l.direction === 'Short');
   if (!shortLeg?.symbol) {
-    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'INVALID', orderId: null, orderStatus: null };
+    const assessment = buildAssessment({ classification: 'UNSUPPORTED', reasonCode: 'CREDIT_STRUCTURE_UNSUPPORTED', explanation: 'Stop evaluation is not supported for this position structure.' });
+    assessment.applicability = 'UNSUPPORTED';
+    assessment.derivedAssessment.matchResult = 'NOT_APPLICABLE';
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'UNSUPPORTED', orderId: null, orderStatus: null, assessment };
   }
   // ES-0001: canonical quantity, not this one arbitrary leg's own quantity.
   const creditPerContract = position.quantity > 0 ? position.entryCredit! / (position.quantity * 100) : position.entryCredit! / 100;
   const shortSymbol = normalizeOccSymbol(shortLeg.symbol);
-  const match = gtcOrders.find(order =>
+  const matches = gtcOrders.filter(order =>
     isStopOrder(order) && order.legs.some(leg => normalizeOccSymbol(leg.symbol) === shortSymbol && isBuyToCloseAction(leg.action))
   );
 
+  if (matches.length > 1) {
+    const assessment = buildAssessment({ classification: 'NOT_EVALUATED', reasonCode: 'AMBIGUOUS_PROTECTIVE_STOPS', explanation: 'Stop not evaluated — required broker evidence is unavailable or ambiguous.', ambiguousOrderIds: matches.map(order => order.id) });
+    return { status: 'unknown', price: null, policy: null, displayPolicy: null, classification: 'NOT_EVALUATED', orderId: null, orderStatus: null, assessment };
+  }
+  const match = matches[0];
+
   if (!match) {
-    return { status: 'none', price: null, policy: null, displayPolicy: null, classification: 'NO_STOP', orderId: null, orderStatus: null };
+    const classification = evidenceComplete ? 'NO_STOP' : 'NOT_EVALUATED';
+    const explanation = evidenceComplete ? 'No matching protective stop found.' : 'Stop not evaluated — required broker evidence is unavailable or ambiguous.';
+    const assessment = buildAssessment({ classification, reasonCode: evidenceComplete ? 'NO_MATCHING_PROTECTIVE_STOP' : 'ORDER_FEED_INCOMPLETE', explanation });
+    return { status: classification === 'NO_STOP' ? 'none' : 'unknown', price: null, policy: null, displayPolicy: null, classification, orderId: null, orderStatus: null, assessment };
   }
 
   const orderPrice = parseFloat(match.stopPrice ?? match.price);
@@ -922,6 +1036,17 @@ export function classifyPositionStopLoss(
     classification,
     orderId: match.id || null,
     orderStatus: match.status ?? null,
+    assessment: buildAssessment({
+      classification,
+      reasonCode: `CREDIT_STOP_${classification}`,
+      explanation: classification === 'INVALID'
+        ? 'A candidate stop was found, but its fields are malformed, contradictory, or unsafe.'
+        : classification === 'UNKNOWN_PROVENANCE'
+          ? 'A working stop exists, but its policy provenance is not verified.'
+          : classification === 'NO_STOP' ? 'No matching protective stop found.' : `Credit stop is ${classification.toLowerCase().replace('_', ' ')}.`,
+      matchedOrder: match,
+      displayPolicy,
+    }),
   };
 }
 
@@ -1280,6 +1405,10 @@ export async function loadPositions(
   // fail-closed snapshot quality by acquirePortfolioSnapshot; mature option-management evidence
   // from the independently successful source must not be discarded and must not be re-fetched.
   const gtcOrders = await fetchGtcOrders(accountNumber, token, {
+    rawLiveOrders: source.rawLiveOrders,
+    rawComplexOrders: source.rawComplexOrders,
+  });
+  const stopOrderEvidence = collectStopOrderEvidence({
     rawLiveOrders: source.rawLiveOrders,
     rawComplexOrders: source.rawComplexOrders,
   });
@@ -1696,15 +1825,30 @@ export async function loadPositions(
       : null;
     const stopLoss = classifyPositionStopLoss(
       {
+        accountNumber,
         legs: positionLegs,
         creditReceived: Math.abs(creditReceived),
         entryCredit,
         entryEconomicsComplete,
         entryPriceEffect,
         quantity: canonicalQuantity,
+        identity,
+        structureAmbiguous,
       },
-      gtcOrders,
+      stopOrderEvidence,
       recordedStopPolicy,
+      {
+        completeness: {
+          liveOrdersAvailable: source.rawLiveOrders !== null,
+          complexOrdersAvailable: source.rawComplexOrders !== null,
+        },
+        debitObservationEnabled: DEBIT_STOP_OBSERVE_ENABLED,
+        debitQuote: positionLegs.length === 1 ? {
+          executableBid: oneSidedSymbols.has(positionLegs[0].symbol.replace(/\s+/g, '')) ? null : currentBids[positionLegs[0].symbol.replace(/\s+/g, '')] ?? null,
+          ask: oneSidedSymbols.has(positionLegs[0].symbol.replace(/\s+/g, '')) ? null : currentAsks[positionLegs[0].symbol.replace(/\s+/g, '')] ?? null,
+          quoteTime: quoteCapturedAtBySymbol[positionLegs[0].symbol.replace(/\s+/g, '')] ?? null,
+        } : { executableBid: null, ask: null, quoteTime: null },
+      },
     );
 
     // Only treat earnings as relevant if it occurs on or before this position's expiration.
@@ -1813,6 +1957,7 @@ export async function loadPositions(
       stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
       stopLossPolicy: stopLoss.policy, stopLossDisplayPolicy: stopLoss.displayPolicy,
       stopLossClassification: stopLoss.classification,
+      stopAssessment: stopLoss.assessment,
       stopLossOrderStatus: stopLoss.orderStatus,
       quoteWidthEvidence,
       quoteCapturedAt,
