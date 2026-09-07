@@ -10024,7 +10024,17 @@ export default function Home() {
                   )}
                   {!activePmccSession && filteredQualified.length > 0 && (
                     <div>
-                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">{activePmccSession ? 'QUALIFIED PMCC STRUCTURES — READY / MARKET CLOSED' : 'QUALIFIED'}</p>
+                      {/* FIX: this ternary's true-branch was dead code --
+                          the surrounding condition already requires
+                          !activePmccSession, so `activePmccSession ? ... :`
+                          could never take the first branch. Found while
+                          tracing a test failure; simplified to the only
+                          value this could ever actually produce. The real,
+                          reachable header for an active PMCC session is
+                          renderPmccQualifiedBucket's own label
+                          ("PMCC QUALIFIED AND READY" / "PMCC QUALIFIED —
+                          MARKET CLOSED"), a few lines above this block. */}
+                      <p className="text-[9px] text-emerald-500 tracking-widest mb-2 font-medium">QUALIFIED</p>
                       {/* PMCC-CARD-SCORE-HEADER-0001 -- one-line best-in-scan
                           callout, per Diane's approved mockup. Only shown
                           when there's more than one ticker group to pick
