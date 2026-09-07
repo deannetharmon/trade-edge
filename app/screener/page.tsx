@@ -2777,13 +2777,19 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
               signal, gets top billing ahead of even the symbol/price
               identification, same prominence PMCC's own score already
               gets on its cards. */}
-          {candidate.score != null ? (
-            <span className={`text-[12px] font-bold px-2 py-0.5 rounded border ${scoreColor}`} title={candidate.scoreIncomplete ? 'Score computed from partial data' : undefined}>
-              {candidate.score}{candidate.scoreIncomplete && '*'}
-            </span>
-          ) : (
-            <span className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textMuted}`} title="Score unavailable -- delta or open interest missing">—</span>
-          )}
+          <div className="flex flex-col items-start gap-1">
+            {candidate.score != null ? (
+              <span className={`text-[12px] font-bold px-2 py-0.5 rounded border ${scoreColor}`} title={candidate.scoreIncomplete ? 'Score computed from partial data' : undefined}>
+                {candidate.score}{candidate.scoreIncomplete && '*'}
+              </span>
+            ) : (
+              <span className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textMuted}`} title="Score unavailable -- delta or open interest missing">—</span>
+            )}
+            {/* Dean: chart moved here, left side directly under the score --
+                was previously in the confirmations row on the right. */}
+            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+          </div>
           <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${qualificationMeta}`}>
             {qualification.status.replaceAll('_', ' ')}
           </span>
@@ -2848,8 +2854,6 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, oiMin, extr
         <span>Spread {candidate.spreadPct != null ? `${candidate.spreadPct.toFixed(1)}%` : '—'}</span>
         <span>OI {candidate.openInterest ?? '—'}</span>
         <span>Bid {candidate.bid != null ? formatMoneyDropExactZeroCents(candidate.bid) : '—'} / Ask {candidate.ask != null ? formatMoneyDropExactZeroCents(candidate.ask) : '—'}</span>
-        <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
-          sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
       </div>
 
       {analysisOpen && (
