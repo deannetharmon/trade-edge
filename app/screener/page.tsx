@@ -10646,7 +10646,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≤</span>
-                      {[365, 500, 650, 800, 1000].map(v => (
+                      {[365, 455, 545, 640, 730].map(v => (
                         <button key={v} onClick={() => setLeapsDteMax(v)} className={chip(leapsDteMax === v)}>{v}</button>
                       ))}
                     </div>
