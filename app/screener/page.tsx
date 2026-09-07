@@ -9104,6 +9104,36 @@ export default function Home() {
               Enter the companies you are willing to evaluate, then choose a strategy. Covered Calls use verified owned shares; the list can narrow them but cannot create coverage.
             </p>
 
+            {/* FINVIZ-REF-0001: static reference only, no live pull -- Quinn:
+                Finviz has no official free API, and any automated pull would
+                mean scraping their screener page (fragile, likely against
+                terms). Ian: static also keeps Dean actually running the
+                screen and eyeballing results, rather than trusting an
+                unauditable automated feed -- deliberate choice, not a
+                shortcut. */}
+            <details className={`rounded-lg border ${th.border} p-2`}>
+              <summary className={`text-[9px] ${th.textMuted} tracking-widest font-medium cursor-pointer select-none`}>
+                FINVIZ PRE-SCREEN CRITERIA
+              </summary>
+              <ul className={`mt-2 space-y-1 text-[9px] ${th.textFaint} leading-relaxed list-disc list-inside`}>
+                <li>Market Cap: <span className={th.text}>+Mid (and above)</span></li>
+                <li>Price: <span className={th.text}>$50 – $100</span></li>
+                <li>Average Volume: <span className={th.text}>Over 2M</span></li>
+                <li>P/E: <span className={th.text}>filter applied</span> — set to your current preferred range</li>
+              </ul>
+              <a
+                href="https://finviz.com/screener.ashx"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block text-[9px] text-cyan-400 hover:underline"
+              >
+                Open Finviz screener ↗
+              </a>
+              <p className={`mt-2 text-[9px] ${th.textFaint} leading-relaxed`}>
+                Run this screen on Finviz, then paste the resulting tickers into the Opportunity Universe above. This is the same pre-screen LEAPS Advisor assumes has already run — it does not verify fundamentals itself.
+              </p>
+            </details>
+
             <div className="grid grid-cols-2 gap-1.5">
               {/* SCREENER-RESULTS-0001 / SCREENER-LAUNCHER-0001 — the
                   selected launcher is derived from
