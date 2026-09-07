@@ -2469,22 +2469,22 @@ function WatchlistBox({
               </div>
             )}
           </div>
-          <div className="relative">
+          <div>
             <button onClick={() => { setShowLoad(!showLoad); setShowSaveInput(false); if (!showLoad) refreshPresets(); }} disabled={disabled} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>▼</button>
-            {showLoad && (
-              <div className={`absolute top-6 right-0 z-40 ${th.sidebar} border ${th.border} rounded-lg overflow-hidden w-44 shadow-xl`}>
-                {loadingPresets ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>Loading...</p>
-                  : presetNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved watchlists yet</p>
-                  : presetNames.map(name => (
-                    <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
-                      <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} text-left flex-1 font-medium`}>{name}</button>
-                      <button onClick={() => handleDeletePreset(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                    </div>
-                  ))}
-              </div>
-            )}
           </div>
         </div>
+        {showLoad && (
+          <div data-testid="watchlist-preset-menu" className={`mt-2 w-full ${th.sidebar} border ${th.border} rounded-lg overflow-hidden shadow-xl`}>
+            {loadingPresets ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>Loading...</p>
+              : presetNames.length === 0 ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>No saved watchlists yet</p>
+              : presetNames.map(name => (
+                <div key={name} className={`flex items-center justify-between px-3 py-2 hover:ac-bg-10 group cursor-pointer`}>
+                  <button onClick={() => handleLoadSelect(name)} className={`text-[10px] ${th.textMuted} text-left flex-1 font-medium`}>{name}</button>
+                  <button onClick={() => handleDeletePreset(name)} className="text-[9px] text-slate-500 hover:text-red-500 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-1 mb-2">

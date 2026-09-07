@@ -493,6 +493,17 @@ afterEach(() => {
 });
 
 describe('WA-0005 /screener: Initial/not-yet-run state', () => {
+  it('keeps the watchlist preset dropdown inside the import panel', async () => {
+    renderScreenerPage();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: '▼' }))[0]);
+
+    const menu = await screen.findByTestId('watchlist-preset-menu');
+    expect(menu).toHaveClass('w-full');
+    expect(menu).not.toHaveClass('absolute');
+    expect(menu).not.toHaveClass('right-0');
+  });
+
   it('keeps the saved-list menu aligned to the full sidebar panel', async () => {
     renderScreenerPage();
 
