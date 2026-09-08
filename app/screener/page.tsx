@@ -7117,6 +7117,15 @@ export default function Home() {
     [tickers]
   );
   const [cspCashOverride, setCspCashOverride] = useState('');
+  // PMCC-SELECT-0001: real held-LEAPS symbols discovered for the current
+  // scan attempt (from discoverHeldPmccCandidates, run when FIND PMCCs is
+  // clicked), plus which of those the trader has deselected. Defaults to
+  // all selected (hiddenSymbols starts empty).
+  const [pmccHeldCandidates, setPmccHeldCandidates] = useState<Array<{ underlyingSymbol: string; dte: number }>>([]);
+  const [pmccHiddenLeapsSymbols, setPmccHiddenLeapsSymbols] = useState<string[]>([]);
+  const togglePmccLeapsSymbol = (symbol: string) => {
+    setPmccHiddenLeapsSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
+  };
   const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
   const [pmccShortDeltaMin, setPmccShortDeltaMin] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.min);
@@ -8269,7 +8278,19 @@ export default function Home() {
       setError(discovery.error);
       return;
     }
-    const { dte, heldCandidates, heldSelection, scanSymbols } = discovery;
+    // PMCC-SELECT-0001: narrow to only the symbols the trader left
+    // selected in the modal -- defaults to all when nothing was
+    // deselected, same convention as CC's ccHiddenSymbols.
+    const selectedHeldCandidates = discovery.heldCandidates.filter(
+      c => !pmccHiddenLeapsSymbols.includes(c.underlyingSymbol),
+    );
+    if (!selectedHeldCandidates.length) {
+      setError('Select at least one held LEAPS position before running the PMCC scan.');
+      return;
+    }
+    const { dte, heldSelection } = discovery;
+    const heldCandidates = selectedHeldCandidates;
+    const scanSymbols = Array.from(new Set(heldCandidates.map(c => c.underlyingSymbol)));
     const heldLongDtes = heldCandidates.map(candidate => candidate.dte);
     const effectiveDte = { ...dte, longMin: Math.min(...heldLongDtes), longMax: Math.max(...heldLongDtes) };
     setError('');
@@ -9322,6 +9343,7 @@ export default function Home() {
                   const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
                   if (!discovery.ok) { setError(discovery.error); return; }
                   setError('');
+                  setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
                   setShowPmccScanModal(true);
                 }}
                 disabled={loading}
@@ -10943,7 +10965,9 @@ export default function Home() {
       {showPmccScanModal && (
         <PmccScanModal
           th={th}
-          selectedTickerCount={opportunityUniverse.length}
+          heldCandidates={pmccHeldCandidates}
+          hiddenSymbols={pmccHiddenLeapsSymbols}
+          onToggleSymbol={togglePmccLeapsSymbol}
           initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct }}
           onClose={() => setShowPmccScanModal(false)}
           onRun={(request: PmccScanRequest) => {
@@ -10959,6 +10983,9 @@ export default function Home() {
         <CcScanModal
           th={th}
           selectedTickerCount={ccEligibleHoldings.length}
+          holdings={ccEligibleHoldings}
+          hiddenSymbols={ccHiddenSymbols}
+          onToggleSymbol={toggleCcSymbol}
           initial={{ rules: ccRules }}
           onClose={() => {
             setShowCcScanModal(false);

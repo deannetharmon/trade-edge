@@ -24,6 +24,11 @@
 // the eligible universe (see runCcScan's capacity report, which stays
 // upstream of this modal and is not duplicated here), so there is no
 // second "mode" for this modal to offer.
+//
+// CC-SELECT-0001 addition: the modal now also shows the same eligible-
+// holdings selection chips as the existing sidebar panel (Dean: keep
+// both -- the sidebar stays, the modal reads/writes the exact same
+// ccEligibleHoldings/ccHiddenSymbols state, not an independent copy).
 
 import { useMemo, useState } from 'react';
 import type { CcRulesType } from '@/lib/scans/constants';
@@ -33,9 +38,17 @@ export interface CcScanRequest {
   rules: CcRulesType;
 }
 
+export interface CcEligibleHoldingSummary {
+  symbol: string;
+  availableCoveredContracts: number;
+}
+
 interface Props {
   th: ScanModalTheme;
   selectedTickerCount: number;
+  holdings: CcEligibleHoldingSummary[];
+  hiddenSymbols: string[];
+  onToggleSymbol: (symbol: string) => void;
   initial: CcScanRequest;
   onClose: () => void;
   onRun: (request: CcScanRequest) => void;
@@ -50,17 +63,23 @@ const CC_FIELDS: Array<[keyof CcRulesType, string, string]> = [
   ['BID_ASK_MAX', 'Max bid/ask width', '0.01'],
 ];
 
-export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }: Props) {
+export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, initial, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<CcScanRequest>(initial);
   const [error, setError] = useState('');
+
+  const selectedCount = useMemo(
+    () => holdings.filter(h => h.availableCoveredContracts > 0 && !hiddenSymbols.includes(h.symbol)).length,
+    [holdings, hiddenSymbols],
+  );
 
   const valid = useMemo(() => {
     const r = draft.rules;
     return Object.values(r).every(Number.isFinite)
       && r.DTE_MIN >= 0 && r.DTE_MAX > r.DTE_MIN
       && r.DELTA_MIN >= 0 && r.DELTA_MAX <= 1 && r.DELTA_MAX > r.DELTA_MIN
-      && r.OI_MIN >= 0 && r.BID_ASK_MAX >= 0;
-  }, [draft]);
+      && r.OI_MIN >= 0 && r.BID_ASK_MAX >= 0
+      && selectedCount > 0;
+  }, [draft, selectedCount]);
 
   const setRule = (key: keyof CcRulesType, value: number) =>
     setDraft(prev => ({ rules: { ...prev.rules, [key]: value } }));
@@ -81,6 +100,33 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
           but it cannot create coverage that doesn&rsquo;t exist. The fields below only affect
           which calls qualify against your already-eligible lots.
         </p>
+
+        {holdings.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1" data-testid="cc-holdings-selection">
+            {holdings.map(h => {
+              const hidden = hiddenSymbols.includes(h.symbol);
+              const blocked = h.availableCoveredContracts === 0;
+              return (
+                <button
+                  key={h.symbol}
+                  type="button"
+                  onClick={() => !blocked && onToggleSymbol(h.symbol)}
+                  disabled={blocked}
+                  title={blocked ? 'Fully covered — no available capacity' : undefined}
+                  className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${
+                    blocked
+                      ? 'border-neutral-700 text-neutral-600 line-through opacity-40 cursor-not-allowed'
+                      : hidden
+                      ? 'border-neutral-700 text-neutral-500 line-through opacity-40'
+                      : 'border-amber-500 text-amber-300 bg-amber-500/10'
+                  }`}
+                >
+                  {h.symbol} <span className="opacity-60">({h.availableCoveredContracts})</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {CC_FIELDS.map(([key, label, step]) => (
@@ -126,6 +172,8 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
           disqualify
         </div>
 
+        {selectedCount === 0 && <p role="alert" className="mt-2 text-xs text-red-400">Select at least one eligible holding before running.</p>}
+
         {error && (
           <p role="alert" className="mt-2 text-xs text-red-400">
             {error}
@@ -157,4 +205,3 @@ export function CcScanModal({ th, selectedTickerCount, initial, onClose, onRun }
     </ScanModalShell>
   );
 }
-
