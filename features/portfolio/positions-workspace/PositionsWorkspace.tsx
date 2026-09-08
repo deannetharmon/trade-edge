@@ -342,6 +342,22 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
   // GTC/Stop opens the EXISTING renderStopControl output inline (no new
   // stop UI, per Dane); this local toggle just shows/hides it.
   const [stopControlOpen, setStopControlOpen] = useState(false);
+
+  // ACTIONS-ROW-RESPONSIVE-0001 (Quinn approved) -- width-driven, not a
+  // viewport media query, since this table's column width varies with how
+  // many columns Dean has toggled via "Customize Columns," not just device
+  // size. ResizeObserver on the actions row itself, not the whole cell.
+  const actionsRef = useRef<HTMLSpanElement>(null);
+  const [actionsNarrow, setActionsNarrow] = useState(false);
+  useEffect(() => {
+    const el = actionsRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) setActionsNarrow(entry.contentRect.width < 300);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const first = p.snapshotHistory?.[0];
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
@@ -410,15 +426,15 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
           recommendation gets the "suggested" tag (never more than one, per
           Ian). Cut Losses / Roll Position keep distinct color even here. */}
       <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Actions</p>
-      <span className="mt-1 flex max-w-64 flex-wrap items-center gap-1">
-        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze with AI</button>
+      <span ref={actionsRef} className="mt-1 flex max-w-64 flex-wrap items-center gap-1">
+        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">{actionsNarrow ? 'Analyze' : 'Analyze with AI'}</button>
         {renderStopControl && (
-          <button type="button" onClick={() => setStopControlOpen(v => !v)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Adjust GTC/Stop</button>
+          <button type="button" onClick={() => setStopControlOpen(v => !v)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{actionsNarrow ? 'Adjust stop' : 'Adjust GTC/Stop'}</button>
         )}
         {actions.map(action => action === 'CLOSE_ROLL' ? (
           <span key={action} className="contents">
             <span className="flex items-center gap-1">
-              <button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button>
+              <button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{actionsNarrow ? 'Close' : 'Close Position'}</button>
               {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
             </span>
             <span className="flex items-center gap-1">
