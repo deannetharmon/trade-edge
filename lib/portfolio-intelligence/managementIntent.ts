@@ -70,6 +70,7 @@ import {
   gammaDteFraction,
   scaleWeight,
   breakevenPopDampeningFactor,
+  netEdgeNegativeDteFactor,
 } from './decisionQualityMatrix';
 
 export type ManagementIntent =
@@ -421,7 +422,15 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
     });
   }
   if (evidence.netEdgeNegative) {
-    const reduceRiskPoints = dampenedPoints(W.netEdgeNegativeReduceRisk, evidence.remainingOpportunityPct, 'toward_close');
+    // Ian/Alan/Paul approved -- net-edge-negative now also scales with DTE
+    // (see netEdgeNegativeDteFactor's doc comment in decisionQualityMatrix.ts
+    // for the worked examples this was validated against). Multiplies
+    // against the existing remaining-opportunity dampening rather than
+    // replacing it -- the two dampeners are gated on different conditions
+    // (far-from-expiration vs. high-remaining-opportunity) so they don't
+    // both suppress a real near-expiration signal at once.
+    const dteFactor = netEdgeNegativeDteFactor(evidence.dte);
+    const reduceRiskPoints = Math.round(dampenedPoints(W.netEdgeNegativeReduceRisk, evidence.remainingOpportunityPct, 'toward_close') * dteFactor);
     if (reduceRiskPoints > 0) {
       bump(scores, 'REDUCE_RISK', reduceRiskPoints, {
         id: 'net-edge-negative-reduce-risk',
@@ -430,7 +439,7 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
         evidenceField: 'netEdgeNegative',
       });
     }
-    const cutLossesPoints = dampenedPoints(W.netEdgeNegativeCutLossesNudge, evidence.remainingOpportunityPct, 'toward_close');
+    const cutLossesPoints = Math.round(dampenedPoints(W.netEdgeNegativeCutLossesNudge, evidence.remainingOpportunityPct, 'toward_close') * dteFactor);
     if (cutLossesPoints > 0) {
       bump(scores, 'CUT_LOSSES', cutLossesPoints, {
         id: 'net-edge-negative-cut-losses',

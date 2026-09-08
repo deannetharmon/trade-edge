@@ -273,6 +273,37 @@ export function gammaDteFraction(dte: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Net-edge-negative DTE dampening (Ian/Alan/Paul approved) -- the
+// net-edge-negative signal in managementIntent.ts measures the same
+// underlying phenomenon as the gamma/DTE signal above (remaining premium
+// vs. gamma risk) but, unlike that signal, previously fired at flat
+// strength regardless of DTE -- including on a position opened the same
+// day, far outside the 21-day management window. This reuses the exact
+// same gammaDteFraction/21-day-window convention so the two signals agree:
+// weak far from expiration, full strength approaching it.
+//
+// Floor of 0.5 (not 0), same convention as REMAINING_OPPORTUNITY_DAMPEN_
+// FLOOR and BREAKEVEN_POP_DAMPEN_FLOOR elsewhere in this file -- net edge
+// going negative is never fully meaningless, only less urgent far from
+// expiration. Worked combinations validated with Alan before shipping:
+//   37 DTE, 100% opportunity remaining -> 11 pts (was 21) -- no longer an
+//     outright override of HOLD_BASELINE (10) on a fresh position.
+//   10 DTE, 100% opportunity remaining -> 16 pts (was 21).
+//    5 DTE,  20% opportunity remaining -> 37 pts (was 21) -- confirms this
+//     dampener does NOT stack with remainingOpportunityDampeningFactor to
+//     over-suppress a real near-expiration signal: that dampener only
+//     activates when remaining opportunity is HIGH (>=70%), which is
+//     structurally the opposite condition from this low-opportunity case.
+// ---------------------------------------------------------------------------
+export const NET_EDGE_NEGATIVE_DTE_DAMPEN_FLOOR = 0.5;
+
+export function netEdgeNegativeDteFactor(dte: number | null | undefined): number {
+  if (dte == null) return 1;
+  const fraction = gammaDteFraction(dte);
+  return NET_EDGE_NEGATIVE_DTE_DAMPEN_FLOOR + fraction * (1 - NET_EDGE_NEGATIVE_DTE_DAMPEN_FLOOR);
+}
+
+// ---------------------------------------------------------------------------
 // POP-0002: breakeven-POP dampens (never zeroes) the gamma/DTE trigger above.
 // Rationale/numbers (Alan, validated against real held positions by Ian):
 //
