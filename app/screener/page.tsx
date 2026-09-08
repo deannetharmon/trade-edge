@@ -1464,20 +1464,40 @@ function runCcChecklist(
         return { status: 'fail' as const, value: '0', reason: 'No available capacity' };
       })();
 
-  const earningsCheck: CheckResult = !earningsDate
+  // CC-EARNINGS-DTE-0001 (Ian/Paul approved) — this pre-candidate check no
+  // longer feeds findBestCoveredCall at all (CC-EARNINGS-SEARCH-0002 moved
+  // that to a per-candidate filter inside the finder itself, against each
+  // candidate's own dte). It also no longer pushes a failReason here —
+  // the real, corrected failReason (if any) is pushed below once the
+  // actual selected contract's DTE is known.
+  let earningsCheck: CheckResult = !earningsDate
     ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
     : (() => {
         const d = daysUntil(earningsDate);
         if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-        if (d <= ccRules.DTE_MAX) { failReasons.push(`Earnings in ${d}d — within expiry window`); return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' }; }
+        if (d <= ccRules.DTE_MAX) return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' };
         return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
       })();
-  const earningsWithinExpiry = earningsCheck.status === 'fail';
 
   const bestCandidate = capacityCheck.status !== 'fail'
-    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, earningsWithinExpiry })
+    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
     : null;
+
+  // Re-check earnings against the ACTUAL selected contract's DTE rather
+  // than the ccRules.DTE_MAX ceiling used above — that pre-check ran
+  // before a candidate existed, so it could flag earnings falling safely
+  // AFTER this contract's own expiry as a false positive. Mirrors the
+  // pattern already used in runChecklist (spreads) and runCspChecklist.
+  if (bestCandidate && earningsDate) {
+    const d = daysUntil(earningsDate);
+    earningsCheck = d < 0
+      ? { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` }
+      : d <= bestCandidate.dte
+        ? { status: 'fail', value: `${d}d (${earningsDate})`, reason: `Falls before this contract's ${bestCandidate.dte}d expiry` }
+        : { status: 'pass', value: `${d}d (${earningsDate})`, reason: `Outside this contract's ${bestCandidate.dte}d expiry` };
+  }
   if (!bestCandidate && !failReasons.length) failReasons.push(`No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
+  if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }

@@ -189,10 +189,24 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     expect(cand!.shortStrike).toBe(115);
   });
 
-  it('earnings within expiry window -> no candidate', () => {
+  // CC-EARNINGS-SEARCH-0002: earnings safety is now checked per-candidate
+  // against that candidate's own dte, not a pre-candidate estimate that
+  // blanket-blocked the whole search.
+  it('earnings before this candidate\'s own expiry -> excluded (only candidate in chain -> no candidate)', () => {
     const chain = chainWithDte(30, { strike: 105 });
-    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100, earningsWithinExpiry: true });
+    const d = new Date(); d.setDate(d.getDate() + 10);
+    const earningsDate = d.toISOString().slice(0, 10); // earnings at 10d, candidate expires at 30d -- unsafe
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100, earningsDate });
     expect(cand).toBeNull();
+  });
+
+  it('earnings safely after this candidate\'s own expiry -> candidate still found (search is no longer blanket-blocked)', () => {
+    const chain = chainWithDte(30, { strike: 105 });
+    const d = new Date(); d.setDate(d.getDate() + 45);
+    const earningsDate = d.toISOString().slice(0, 10); // earnings at 45d, candidate expires at 30d -- safe
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100, earningsDate });
+    expect(cand).not.toBeNull();
+    expect(cand!.shortStrike).toBe(105);
   });
 });
 

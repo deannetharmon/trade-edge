@@ -159,7 +159,21 @@ export interface CcFindParams {
   capacity: CoveredCallCapacity; // availableCoveredContracts caps quantity; never exceeded
   stockPrice: number | null;
   earningsDate?: string | null;
-  earningsWithinExpiry?: boolean; // caller-computed, same convention as CSP's earnings check
+}
+
+// CC-EARNINGS-SEARCH-0002 (Ian/Paul approved) — earnings safety is now
+// checked per-candidate, against THAT candidate's own DTE, not a
+// pre-candidate estimate against the rule's DTE_MAX ceiling. The old
+// caller-computed `earningsWithinExpiry` boolean hard-blocked the ENTIRE
+// search (zero candidates, full stop) whenever earnings fell anywhere
+// inside the rule's DTE range — even when a specific, safe expiration
+// existed before earnings. Mirrors the pattern already used by CSP/spread
+// checklists and the CC checklist's own post-selection re-check.
+function isEarningsSafeForDte(earningsDate: string | null | undefined, dte: number): boolean {
+  if (!earningsDate) return true;
+  const d = daysUntil(earningsDate);
+  if (d < 0) return true; // already reported
+  return d > dte; // safe only if earnings falls strictly after THIS candidate's own expiry
 }
 
 // Returns the single best CC candidate across the DTE window in
@@ -272,10 +286,9 @@ export function findBestCoveredCall(
   // No capacity -> no candidate, full stop. This function must never search
   // for or return a strike that would exceed available coverage.
   if (params.capacity.availableCoveredContracts <= 0) return null;
-  if (params.earningsWithinExpiry) return null;
 
   // Never select ITM, never below cost basis -- enforced by filtering the
-  // FULL SEARCH SPACE up front (see selectBestEligibleCcContract), not by
+  // FULL SEARCH SPACE up front (see selectAllEligibleCcContracts), not by
   // validating a single already-chosen pick after the fact. This is what
   // lets a second, less delta-perfect but fully eligible contract be found
   // when the single delta-closest strike would otherwise fail a liquidity/
@@ -285,13 +298,19 @@ export function findBestCoveredCall(
   const candidateMins = [price, costBasis].filter((v): v is number => v != null);
   const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
 
-  const best = selectBestEligibleCcContract(chain, {
+  // CC-EARNINGS-SEARCH-0002 — filter by each candidate's OWN dte before
+  // selecting the best, not a pre-candidate estimate. selectAllEligibleCc-
+  // Contracts already returns results sorted best-first (delta-distance,
+  // then OI, then bid/ask width, then earlier expiration), so [0] after
+  // filtering is still the correct best-among-earnings-safe pick.
+  const eligible = selectAllEligibleCcContracts(chain, {
     deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
     bidAskMax: params.rules.BID_ASK_MAX,
   });
+  const best = eligible.find(c => isEarningsSafeForDte(params.earningsDate, c.dte)) ?? null;
   if (!best) return null;
 
   return buildCcSpreadCandidate(best, params, price, costBasis);
@@ -344,32 +363,32 @@ export interface CcCandidateResult {
 // findBestCoveredCall. Retains EVERY contract that survives the existing
 // hard eligibility gates for this symbol, not just the single best — the
 // same "discovery before classification" shape CSP-WORKFLOW-0001
-// established for CSP. Capacity/earnings behavior deliberately matches
-// findBestCoveredCall's existing, already-approved short-circuit (zero
-// capacity or earnings-in-window means no candidate at all is returned,
-// not a disqualified-but-visible one) — changing that product behavior is
-// out of this work item's scope; see the reconciliation report's Remaining
-// Concerns for the question of whether CC should adopt CSP's
-// visible-but-disqualified-on-capacity presentation in a future ticket.
+// established for CSP. Capacity still short-circuits to zero candidates
+// (never search for/return a strike exceeding available coverage).
+// Earnings no longer short-circuits the whole search — CC-EARNINGS-
+// SEARCH-0002 (Ian/Paul approved) moved it to a per-candidate filter, see
+// isEarningsSafeForDte above.
 export function findAllCoveredCalls(
   chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
   params: CcFindAllParams,
 ): { results: CcCandidateResult[] } {
   if (params.capacity.availableCoveredContracts <= 0) return { results: [] };
-  if (params.earningsWithinExpiry) return { results: [] };
 
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
   const candidateMins = [price, costBasis].filter((v): v is number => v != null);
   const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
 
+  // CC-EARNINGS-SEARCH-0002 — same per-candidate filter as
+  // findBestCoveredCall: a candidate expiring before earnings is excluded
+  // individually, not used to blank out every candidate for this symbol.
   const eligible = selectAllEligibleCcContracts(chain, {
     deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
     bidAskMax: params.rules.BID_ASK_MAX,
-  });
+  }).filter(c => isEarningsSafeForDte(params.earningsDate, c.dte));
 
   // Computed once per symbol (per the params contract), applied uniformly
   // to every candidate discovered for that symbol — mirrors csp-finder.ts's
