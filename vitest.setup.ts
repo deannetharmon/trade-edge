@@ -14,3 +14,15 @@ import '@testing-library/jest-dom/vitest';
 afterEach(() => {
   cleanup();
 });
+
+// jsdom does not implement ResizeObserver. Stub it so components that use
+// it (e.g. ACTIONS-ROW-RESPONSIVE-0001's width-driven label shortening)
+// don't crash test renders. Callback is never invoked -- tests exercising
+// the narrow/wide behavior itself should call it directly or mock further.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

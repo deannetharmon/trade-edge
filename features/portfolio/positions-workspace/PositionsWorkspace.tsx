@@ -351,7 +351,10 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
   const [actionsNarrow, setActionsNarrow] = useState(false);
   useEffect(() => {
     const el = actionsRef.current;
-    if (!el) return;
+    // Guard: ResizeObserver isn't implemented in jsdom (test environment)
+    // and, defensively, may not exist in every real runtime either -- skip
+    // the width-responsive behavior rather than crash the whole component.
+    if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) setActionsNarrow(entry.contentRect.width < 300);
     });
