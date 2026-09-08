@@ -7123,6 +7123,13 @@ export default function Home() {
   // all selected (hiddenSymbols starts empty).
   const [pmccHeldCandidates, setPmccHeldCandidates] = useState<Array<{ underlyingSymbol: string; dte: number }>>([]);
   const [pmccHiddenLeapsSymbols, setPmccHiddenLeapsSymbols] = useState<string[]>([]);
+  // PMCC-DISCOVERY-ASYNC-0001: discoverHeldPmccCandidates does a full
+  // broker portfolio refresh, which was previously awaited BEFORE the
+  // modal opened at all -- a real 5-10 second stall with no feedback.
+  // Same fix already applied to CC's own modal: open immediately, run
+  // discovery in the background, show a loading state inside the modal
+  // meanwhile.
+  const [pmccDiscoveryLoading, setPmccDiscoveryLoading] = useState(false);
   const togglePmccLeapsSymbol = (symbol: string) => {
     setPmccHiddenLeapsSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
   };
@@ -9341,29 +9348,36 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={async () => {
-                  // TE-0007 fix: check eligibility BEFORE opening the
-                  // short-leg config modal -- a portfolio with zero
-                  // eligible held long calls has nothing meaningful to
-                  // configure, and should show "No eligible held long
-                  // calls..." directly instead of a config dialog with a
-                  // "RUN PMCC SCAN ->" button that leads nowhere.
-                  const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
-                  if (!discovery.ok) {
-                    if (discovery.reason === 'technical') { setError(discovery.error); return; }
-                    // reason === 'empty': a genuinely verified zero-eligible
-                    // result -- open the modal anyway, same as CC's own
-                    // 0-eligible-holdings case, so the empty state and the
-                    // 'select at least one' guard both live inside the modal
-                    // rather than as a page-level error banner.
-                    setError('');
-                    setPmccHeldCandidates([]);
-                    setShowPmccScanModal(true);
-                    return;
-                  }
+                onClick={() => {
+                  // PMCC-DISCOVERY-ASYNC-0001: open immediately, discover
+                  // in the background -- see the state comment above for
+                  // why this was previously a 5-10 second blocking wait.
                   setError('');
-                  setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
+                  setPmccHeldCandidates([]);
+                  setPmccDiscoveryLoading(true);
                   setShowPmccScanModal(true);
+                  void (async () => {
+                    const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
+                    setPmccDiscoveryLoading(false);
+                    if (!discovery.ok) {
+                      if (discovery.reason === 'technical') {
+                        // A real technical failure (bad DTE input, broker
+                        // refresh error) still closes the modal and shows
+                        // the page-level error -- Ian: this isn't a scan
+                        // outcome, it's a reason not to trust the data at
+                        // all, so it shouldn't sit inside a modal that
+                        // implies a normal, verified result.
+                        setShowPmccScanModal(false);
+                        setError(discovery.error);
+                        return;
+                      }
+                      // reason === 'empty': genuinely verified zero-eligible
+                      // -- stays open, modal's own empty-state banner shows.
+                      setPmccHeldCandidates([]);
+                      return;
+                    }
+                    setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
+                  })();
                 }}
                 disabled={loading}
                 title="Scans short calls against eligible long calls already held in your portfolio. Selected tickers only narrow those holdings."
@@ -10987,6 +11001,7 @@ export default function Home() {
           heldCandidates={pmccHeldCandidates}
           hiddenSymbols={pmccHiddenLeapsSymbols}
           onToggleSymbol={togglePmccLeapsSymbol}
+          discoveryLoading={pmccDiscoveryLoading}
           initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct }}
           onClose={() => setShowPmccScanModal(false)}
           onRun={(request: PmccScanRequest) => {
