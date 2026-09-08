@@ -337,6 +337,10 @@ function PriceAlertEditor({ position, savedAlert, onSave }: { position: Position
 }
 
 function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, savedNote, onSaveNote, savedAlert, onSaveAlert, chartOpen, setChartOpen, sparkData, setSparkData, sparkLoading, setSparkLoading }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void>; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSaveAlert: (position: Position, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>; chartOpen: boolean; setChartOpen: (open: boolean) => void; sparkData: number[] | null; setSparkData: (data: number[] | null) => void; sparkLoading: boolean; setSparkLoading: (loading: boolean) => void }) {
+  // Recommendation/Actions split (Ian/Paul/Diane/Quinn approved) -- Adjust
+  // GTC/Stop opens the EXISTING renderStopControl output inline (no new
+  // stop UI, per Dane); this local toggle just shows/hides it.
+  const [stopControlOpen, setStopControlOpen] = useState(false);
   const first = p.snapshotHistory?.[0];
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
@@ -393,7 +397,45 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span></>,
     notes: <PositionNoteEditor position={p} savedNote={savedNote} onSave={onSaveNote} />,
     priceAlert: <PriceAlertEditor position={p} savedAlert={savedAlert} onSave={onSaveAlert} />,
-    recommendation: <><b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span><span className="mt-2 flex max-w-64 flex-wrap gap-1"><button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze with AI</button>{actions.map(action => action === 'CLOSE_ROLL' ? <span key={action} className="contents"><button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button><button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button></span> : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span><span className={`mt-1 block ${th.textFaint}`}>Suggested Action is deterministic. Actions open review only; no order is submitted here.</span></>,
+    recommendation: <>
+      {/* Recommendation zone -- pure explanation, never clickable (Ian). */}
+      <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Recommendation</p>
+      <b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b>
+      <span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>
+
+      <div className="my-2 max-w-64 border-t border-white/10" />
+
+      {/* Actions zone -- equal visual weight; only the action matching the
+          recommendation gets the "suggested" tag (never more than one, per
+          Ian). Cut Losses / Roll Position keep distinct color even here. */}
+      <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Actions</p>
+      <span className="mt-1 flex max-w-64 flex-wrap items-center gap-1">
+        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze with AI</button>
+        {renderStopControl && (
+          <button type="button" onClick={() => setStopControlOpen(v => !v)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Adjust GTC/Stop</button>
+        )}
+        {actions.map(action => action === 'CLOSE_ROLL' ? (
+          <span key={action} className="contents">
+            <span className="flex items-center gap-1">
+              <button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button>
+              {p.recommendation?.action === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
+            </span>
+            <span className="flex items-center gap-1">
+              <button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button>
+            </span>
+          </span>
+        ) : (
+          <span key={action} className="flex items-center gap-1">
+            <button type="button" onClick={() => onExecute?.(p, action)} className={`min-h-8 rounded border px-2 text-[10px] focus:ring-2 focus:ring-teal-400 ${action === 'CUT_LOSSES' ? 'border-red-500/50 text-red-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>
+            {p.recommendation?.action === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
+          </span>
+        ))}
+      </span>
+      {stopControlOpen && renderStopControl && (
+        <span className="mt-2 block max-w-64">{renderStopControl(p)}</span>
+      )}
+      <span className={`mt-1 block ${th.textFaint}`}>Suggested Action is deterministic. Actions open review only; no order is submitted here.</span>
+    </>,
   };
   return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
 }
