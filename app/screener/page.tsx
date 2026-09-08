@@ -8274,6 +8274,20 @@ export default function Home() {
     const heldCandidates = pmcc.length
       ? discoveredSelection.candidates.filter(candidate => pmcc.includes(candidate.underlyingSymbol))
       : discoveredSelection.candidates;
+    // Anything dropped by the Opportunity-Universe narrowing above is a
+    // REAL exclusion, not silence -- an eligible held call that simply
+    // isn't in the current ticker list is a different fact than "you
+    // don't own this," and the trader needs to be able to tell them
+    // apart.
+    const universeNarrowedOutExclusions = pmcc.length
+      ? discoveredSelection.candidates
+          .filter(candidate => !pmcc.includes(candidate.underlyingSymbol))
+          .map(candidate => ({
+            positionKey: candidate.positionKey,
+            symbol: candidate.underlyingSymbol,
+            reason: 'Held long call is eligible but not in the current Opportunity Universe ticker list',
+          }))
+      : [];
     const heldSelection = { ...discoveredSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(candidate => candidate.underlyingSymbol)));
     if (!scanSymbols.length) {
@@ -8281,7 +8295,9 @@ export default function Home() {
       // repeat the same reason across several positions of the same
       // symbol; the trader needs the distinct reasons, not every row.
       const distinctExclusions = Array.from(
-        new Map(discoveredSelection.exclusions.map(e => [`${e.symbol}::${e.reason}`, e])).values(),
+        new Map(
+          [...discoveredSelection.exclusions, ...universeNarrowedOutExclusions].map(e => [`${e.symbol}::${e.reason}`, e]),
+        ).values(),
       );
       return {
         ok: false as const,
