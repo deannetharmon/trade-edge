@@ -110,7 +110,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
         {holdingsLoading ? (
           <p className="mt-3 text-[10px] text-neutral-400">Loading eligible holdings…</p>
         ) : holdings.length === 0 ? (
-          <p className="mt-3 text-[10px] font-bold text-amber-400">No eligible covered-call holdings found in your connected broker account.</p>
+          <p className="mt-3 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+            ⚠ No eligible covered-call holdings found in your connected broker account.
+          </p>
         ) : (
         <div className="mt-3 flex flex-wrap gap-1" data-testid="cc-holdings-selection">
             {holdings.map(h => {
@@ -183,7 +185,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
         </div>
 
         {!holdingsLoading && holdings.length > 0 && selectedCount === 0 && (
-          <p role="alert" className="mt-2 text-xs text-red-400">Select at least one eligible holding before running.</p>
+          <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+            ⚠ Select at least one eligible holding before running.
+          </p>
         )}
 
         {error && (
