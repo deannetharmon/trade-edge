@@ -40,7 +40,7 @@ export async function POST() {
   });
 
   const body = await response.text();
-  let data: { access_token?: string; refresh_token?: string; error?: string; error_description?: string } = {};
+  let data: { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string } = {};
   try { data = JSON.parse(body); } catch { /* handled below */ }
   if (!response.ok || !data.access_token) {
     const detail = data.error_description ?? data.error ?? body.slice(0, 300) ?? 'Unknown error';
@@ -51,5 +51,11 @@ export async function POST() {
   }
 
   if (data.refresh_token) await redis.hset(key, { refresh_token: encrypt(data.refresh_token) });
-  return NextResponse.json({ accessToken: data.access_token }, { headers: { 'Cache-Control': 'no-store' } });
+  // TT-TOKEN-EXPIRY-FIX-0001 — pass through TastyTrade's real expires_in
+  // (typically 900s / 15min) so the browser cache stops guessing 23h.
+  // Fall back to 900 if TastyTrade omits it for some reason.
+  return NextResponse.json(
+    { accessToken: data.access_token, expiresIn: data.expires_in ?? 900 },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }

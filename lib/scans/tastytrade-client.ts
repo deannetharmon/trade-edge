@@ -50,7 +50,12 @@ export async function getAccessToken(): Promise<string> {
   if (sessionCached) return sessionCached;
 
   // 2. Check localStorage cache — survives rebuilds/page reloads
-  // Access tokens are valid for ~24h; we cache for 23h to be safe
+  // TT-TOKEN-EXPIRY-FIX-0001: was hardcoded to a fake 23h window, but
+  // TastyTrade access tokens actually expire in ~15min. That mismatch let
+  // the browser keep serving a dead token, causing "invalid or expired"
+  // errors on order placement. Expiry is now the real TastyTrade
+  // expires_in value (stored below), with a 60s safety buffer already
+  // baked into the stored timestamp.
   try {
     const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
     const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
@@ -62,8 +67,11 @@ export async function getAccessToken(): Promise<string> {
 
   // 3. Use refresh token to get a new access token
   let token: string;
+  let expiresIn: number;
   try {
-    token = await refreshBrowserAccessToken();
+    const result = await refreshBrowserAccessToken();
+    token = result.accessToken;
+    expiresIn = result.expiresIn;
   } catch {
     sessionStorage.removeItem('tt_access_token');
     try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
@@ -71,11 +79,12 @@ export async function getAccessToken(): Promise<string> {
     throw new Error('Session expired');
   }
 
-  // Store in both sessionStorage and localStorage
+  // Store in both sessionStorage and localStorage — real expiry minus a
+  // 60s safety buffer, not the old fake 23h window.
   sessionStorage.setItem('tt_access_token', token);
   try {
     localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
+    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + Math.max(60, expiresIn - 60) * 1000));
   } catch {}
 
   return token;
