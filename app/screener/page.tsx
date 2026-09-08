@@ -7447,6 +7447,17 @@ export default function Home() {
   const [showCcScanModal, setShowCcScanModal] = useState(false);
   const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
   const [showLeapsAdvisorPanel, setShowLeapsAdvisorPanel] = useState(false);
+  // BEST-OPP-JUMP-LINK-0001: ref registry (keyed by the same resultKey
+  // already used to match a Qualified card to its Best Opportunities
+  // row) so "Jump to full card" can scroll to the exact card, plus a
+  // brief highlight so it's obvious which card the click landed on.
+  const qualifiedCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [highlightedResultKey, setHighlightedResultKey] = useState<string | null>(null);
+  const jumpToQualifiedCard = (resultKey: string) => {
+    qualifiedCardRefs.current[resultKey]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedResultKey(resultKey);
+    setTimeout(() => setHighlightedResultKey(prev => (prev === resultKey ? null : prev)), 1500);
+  };
   // LEAPS-ADVISOR-VERIFY-LINK-0001: the occSymbol whose row should
   // auto-open its Analyze with AI panel, plus a ref registry so the
   // Advisor's "Verify before trading" button can scroll that row into
@@ -10339,6 +10350,7 @@ export default function Home() {
                   borderClassName={th.border}
                   textFaintClassName={th.textFaint}
                   textMutedClassName={th.textMuted}
+                  onJumpToCard={jumpToQualifiedCard}
                 />
               )}
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && (
@@ -10395,8 +10407,13 @@ export default function Home() {
                 const renderQualifiedCandidate = (r: ScreenResult) => {
                   const resultKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
                   const isTopOpportunity = topOpportunityResultKeys.has(resultKey);
+                  const isJumpHighlighted = highlightedResultKey === resultKey;
                   return (
-                    <div key={resultKey}>
+                    <div
+                      key={resultKey}
+                      ref={el => { qualifiedCardRefs.current[resultKey] = el; }}
+                      className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
+                    >
                       {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
                       <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />

@@ -17,6 +17,11 @@ export interface BestOpportunitiesShortlistProps {
   borderClassName?: string;
   textFaintClassName?: string;
   textMutedClassName?: string;
+  // BEST-OPP-JUMP-LINK-0001: scrolls to and briefly highlights the exact
+  // matching Qualified card, keyed on resultKey (never symbol alone --
+  // the same symbol can appear multiple times with different
+  // strikes/DTE, as PLTR does in Dean's original screenshot).
+  onJumpToCard?: (resultKey: string) => void;
 }
 
 const REQUIRED_EMPTY_STATE_TEXT =
@@ -29,9 +34,11 @@ function formatPct(v: number | null): string {
 function ShortlistRow({
   row,
   th,
+  onJumpToCard,
 }: {
   row: BestOpportunityRow;
   th: { border: string; textFaint: string; textMuted: string };
+  onJumpToCard?: (resultKey: string) => void;
 }) {
   const panelId = useId();
   const { open: expanded, toggle, buttonRef, liveMessage } = useDisclosureA11y(
@@ -65,6 +72,20 @@ function ShortlistRow({
         >
           {expanded ? 'Hide details' : 'View details'}
         </button>
+        {/* BEST-OPP-JUMP-LINK-0001: separate action from "View details" --
+            reasoning stays inline for comparing picks; this navigates to
+            the actual tradable card for acting on one. Keyed on the exact
+            resultKey, not symbol, since the same symbol can appear
+            multiple times here with different strikes/DTE. */}
+        {onJumpToCard && (
+          <button
+            type="button"
+            onClick={() => onJumpToCard(row.resultKey)}
+            className={`shrink-0 text-[9px] px-2 py-1 border ${th.border} rounded ${th.textMuted} hover:border-slate-400`}
+          >
+            Jump to full card ↓
+          </button>
+        )}
       </div>
       <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {expanded && (
@@ -115,6 +136,7 @@ export function BestOpportunitiesShortlist({
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
   textMutedClassName = 'text-slate-300',
+  onJumpToCard,
 }: BestOpportunitiesShortlistProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
   const visible = rows.slice(0, maxVisible);
@@ -132,7 +154,7 @@ export function BestOpportunitiesShortlist({
               row.resultKey (the canonical ScreenResult.candidateId for CSP,
               never re-derived), not row.candidateId (the recommendation
               pipeline's own internal AutopilotCandidate id). */}
-          {visible.map(row => <ShortlistRow key={row.resultKey} row={row} th={th} />)}
+          {visible.map(row => <ShortlistRow key={row.resultKey} row={row} th={th} onJumpToCard={onJumpToCard} />)}
         </div>
       )}
     </section>
