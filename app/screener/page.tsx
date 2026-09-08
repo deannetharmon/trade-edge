@@ -10986,6 +10986,7 @@ export default function Home() {
           holdings={ccEligibleHoldings}
           hiddenSymbols={ccHiddenSymbols}
           onToggleSymbol={toggleCcSymbol}
+          holdingsLoading={ccHoldingsLoading}
           initial={{ rules: ccRules }}
           onClose={() => {
             setShowCcScanModal(false);

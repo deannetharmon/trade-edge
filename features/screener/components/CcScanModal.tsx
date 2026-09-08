@@ -49,6 +49,12 @@ interface Props {
   holdings: CcEligibleHoldingSummary[];
   hiddenSymbols: string[];
   onToggleSymbol: (symbol: string) => void;
+  // CC-SELECT-0001 corrective: the broker holdings fetch (loadCcCapacity)
+  // runs async, started the same click that opens this modal -- without
+  // this flag the modal briefly renders '0 eligible positions' and the
+  // 'select at least one' error before real data arrives, which reads as
+  // 'you own nothing' when the truth is just 'still loading'.
+  holdingsLoading: boolean;
   initial: CcScanRequest;
   onClose: () => void;
   onRun: (request: CcScanRequest) => void;
@@ -63,7 +69,7 @@ const CC_FIELDS: Array<[keyof CcRulesType, string, string]> = [
   ['BID_ASK_MAX', 'Max bid/ask width', '0.01'],
 ];
 
-export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, initial, onClose, onRun }: Props) {
+export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, holdingsLoading, initial, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<CcScanRequest>(initial);
   const [error, setError] = useState('');
 
@@ -78,8 +84,8 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
       && r.DTE_MIN >= 0 && r.DTE_MAX > r.DTE_MIN
       && r.DELTA_MIN >= 0 && r.DELTA_MAX <= 1 && r.DELTA_MAX > r.DELTA_MIN
       && r.OI_MIN >= 0 && r.BID_ASK_MAX >= 0
-      && selectedCount > 0;
-  }, [draft, selectedCount]);
+      && !holdingsLoading && selectedCount > 0;
+  }, [draft, selectedCount, holdingsLoading]);
 
   const setRule = (key: keyof CcRulesType, value: number) =>
     setDraft(prev => ({ rules: { ...prev.rules, [key]: value } }));
@@ -101,8 +107,12 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
           which calls qualify against your already-eligible lots.
         </p>
 
-        {holdings.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1" data-testid="cc-holdings-selection">
+        {holdingsLoading ? (
+          <p className="mt-3 text-[10px] text-neutral-400">Loading eligible holdings…</p>
+        ) : holdings.length === 0 ? (
+          <p className="mt-3 text-[10px] text-neutral-400">No eligible covered-call holdings found in your connected broker account.</p>
+        ) : (
+        <div className="mt-3 flex flex-wrap gap-1" data-testid="cc-holdings-selection">
             {holdings.map(h => {
               const hidden = hiddenSymbols.includes(h.symbol);
               const blocked = h.availableCoveredContracts === 0;
@@ -125,7 +135,7 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
                 </button>
               );
             })}
-          </div>
+        </div>
         )}
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -172,7 +182,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
           disqualify
         </div>
 
-        {selectedCount === 0 && <p role="alert" className="mt-2 text-xs text-red-400">Select at least one eligible holding before running.</p>}
+        {!holdingsLoading && holdings.length > 0 && selectedCount === 0 && (
+          <p role="alert" className="mt-2 text-xs text-red-400">Select at least one eligible holding before running.</p>
+        )}
 
         {error && (
           <p role="alert" className="mt-2 text-xs text-red-400">
