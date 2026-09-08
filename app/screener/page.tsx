@@ -117,6 +117,7 @@ import type {
 } from '@/lib/screener/scanSession';
 import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
 import { computeLeapsAdvisorResultSetHash, persistLeapsAdvisorSession, restoreLeapsAdvisorSession, clearLeapsAdvisorSession, type LeapsAdvisorSession, type LeapsAdvisorMessage } from '@/lib/screener/leapsAdvisorCache';
+import { computeAdvisorResultSetHash, persistAdvisorSession, restoreAdvisorSession, clearAdvisorSession, type AdvisorSession, type AdvisorMessage, type AdvisorStrategy } from '@/lib/screener/advisorCache';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
@@ -2878,6 +2879,150 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
+
+          <div className="space-y-1.5 border-t border-neutral-800 pt-2">
+            {session.messages.map((m, i) => (
+              <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
+                <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
+              </p>
+            ))}
+          </div>
+
+          <div className="flex items-end gap-2">
+            <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask a follow-up..."
+              onKeyDown={e => { if (e.key === 'Enter' && chatInput.trim() && !loading) { void send(chatInput.trim()); setChatInput(''); } }}
+              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+            <button
+              onClick={() => { if (chatInput.trim() && !loading) { void send(chatInput.trim()); setChatInput(''); } }}
+              disabled={loading || !chatInput.trim()}
+              className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
+              {loading ? '...' : 'Send'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ADVISOR-PARITY-0001: shared panel shell for PMCC and CC Advisor --
+// same UI structure as LeapsAdvisorPanel, generalized so it isn't
+// duplicated a third time. `summarize` is supplied per-caller since
+// PMCC's pmccPair shape and CC's bestCandidate shape are genuinely
+// different data, not something worth forcing into one shape.
+function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onClose }: {
+  th: typeof THEMES[Theme];
+  strategy: AdvisorStrategy;
+  resultIdentifiers: string[];
+  filters: Record<string, unknown>;
+  summarize: () => unknown[];
+  onClose: () => void;
+}) {
+  const [session, setSession] = useState<AdvisorSession | null>(null);
+  const [stale, setStale] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [objective, setObjective] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const currentHash = useMemo(() => computeAdvisorResultSetHash(resultIdentifiers, filters), [resultIdentifiers, filters]);
+
+  useEffect(() => {
+    restoreAdvisorSession(strategy).then(restored => {
+      if (!restored) return;
+      if (restored.resultSetHash !== currentHash) { setStale(true); return; }
+      setSession(restored);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const send = async (userMessage: string | null) => {
+    setLoading(true); setError('');
+    const priorMessages: AdvisorMessage[] = session?.messages ?? [];
+    const outgoing = userMessage != null
+      ? [...priorMessages, { role: 'user' as const, content: userMessage, ts: Date.now() }]
+      : priorMessages;
+    try {
+      const res = await fetch('/api/advisor', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy, candidates: summarize(), objective, scanFilters: filters,
+          messages: outgoing.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : `${strategy.toUpperCase()} Advisor is unavailable.`);
+      const nextMessages: AdvisorMessage[] = [...outgoing, { role: 'assistant', content: data.reply, ts: Date.now() }];
+      const nextSession: AdvisorSession = {
+        resultSetHash: currentHash, disclosure: data.disclosure, gatedOut: data.gatedOut ?? [],
+        recommendation: data.recommendation ?? null, sizingNote: data.sizingNote ?? null,
+        messages: nextMessages, cachedAt: Date.now(),
+      };
+      setSession(nextSession); setStale(false);
+      void persistAdvisorSession(strategy, nextSession);
+    } catch (e: any) {
+      setError(e.message ?? `${strategy.toUpperCase()} Advisor is unavailable.`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startFresh = () => { void clearAdvisorSession(strategy); setSession(null); setStale(false); setError(''); };
+
+  return (
+    <div className="mb-4 rounded-xl border border-violet-500/30 bg-violet-500/5 p-3" data-testid={`${strategy}-advisor-panel`}>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-bold text-violet-300">{strategy.toUpperCase()} ADVISOR</p>
+        <button onClick={onClose} className="text-[10px] text-neutral-400 hover:text-white">Close</button>
+      </div>
+
+      {stale && (
+        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
+          ⚠ Your saved conversation is from a different candidate set or filter selection and has been archived.
+          <button onClick={startFresh} className="ml-2 underline">Discard and start fresh</button>
+        </div>
+      )}
+
+      {!session && !stale && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
+            Objective (optional)
+            <input value={objective} onChange={e => setObjective(e.target.value)} placeholder="What are you trying to accomplish?"
+              className="w-72 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+          </label>
+          <button onClick={() => void send(null)} disabled={loading}
+            className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
+            {loading ? `Reviewing ${resultIdentifiers.length} candidates...` : 'Get Recommendation'}
+          </button>
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-[10px] text-red-400">{error}</p>}
+
+      {session && (
+        <div className="mt-3 space-y-2 text-[11px]">
+          <p className="text-neutral-400 italic">{session.disclosure}</p>
+
+          {session.gatedOut.length > 0 && (
+            <details className="rounded border border-neutral-800 bg-neutral-900/40 p-2">
+              <summary className="cursor-pointer text-[10px] font-bold text-neutral-400">Gated out ({session.gatedOut.length})</summary>
+              <ul className="mt-1 list-disc list-inside text-[10px] text-neutral-400">
+                {session.gatedOut.map((g, i) => <li key={i}>{g.symbol}: {g.reason}</li>)}
+              </ul>
+            </details>
+          )}
+
+          {session.recommendation && session.recommendation.length > 0 && (
+            <div className="space-y-2">
+              {session.recommendation.map((r, i) => (
+                <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
+                  <p className="font-bold text-violet-200">{r.symbol} · {r.identifier}</p>
+                  <p className="mt-1 text-neutral-200">{r.reasoning}</p>
+                </div>
+              ))}
             </div>
           )}
 
@@ -7462,6 +7607,8 @@ export default function Home() {
   const [showCcScanModal, setShowCcScanModal] = useState(false);
   const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
   const [showLeapsAdvisorPanel, setShowLeapsAdvisorPanel] = useState(false);
+  const [showPmccAdvisorPanel, setShowPmccAdvisorPanel] = useState(false);
+  const [showCcAdvisorPanel, setShowCcAdvisorPanel] = useState(false);
   // BEST-OPP-JUMP-LINK-0001: ref registry (keyed by the same resultKey
   // already used to match a Qualified card to its Best Opportunities
   // row) so "Jump to full card" can scroll to the exact card, plus a
@@ -10210,7 +10357,35 @@ export default function Home() {
                   </section>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
-                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
+                      <button
+                        onClick={() => setShowCcAdvisorPanel(v => !v)}
+                        disabled={filteredQualified.length < 1}
+                        className="text-[9px] px-2 py-0.5 rounded border font-bold transition-colors border-violet-500 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {showCcAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
+                      </button>
+                    </div>
+                    {showCcAdvisorPanel && (
+                      <AdvisorPanel
+                        th={th}
+                        strategy="cc"
+                        resultIdentifiers={filteredQualified.filter(r => r.bestCandidate).map(r => `${r.symbol}-${r.bestCandidate!.shortStrike}-${r.bestCandidate!.expiration}`)}
+                        filters={{ minOi: filteredMinOi }}
+                        onClose={() => setShowCcAdvisorPanel(false)}
+                        summarize={() => filteredQualified.filter(r => r.bestCandidate).map(r => {
+                          const c = r.bestCandidate!;
+                          return {
+                            symbol: r.symbol, strike: c.shortStrike, expiration: c.expiration, dte: c.dte,
+                            delta: c.shortDelta, underlyingPrice: r.price, costBasis: c.ccCostBasis,
+                            premiumPerContract: c.ccPremiumPerContract, strikeVsStockPct: c.ccStrikeVsStockPct,
+                            strikeVsCostBasisPct: c.ccStrikeVsCostBasisPct, sharesOwned: c.ccSharesOwned,
+                            annualizedYieldPct: c.ccAnnualizedYieldOnShares,
+                          };
+                        })}
+                      />
+                    )}
                     {/* SCREENER-CSP-CC-FILTER-PARITY-0001 -- same gap and
                         same fix as CSP above. Credit-ratio also hidden
                         here per Ian's explicit call: covered-call yield
@@ -10244,7 +10419,35 @@ export default function Home() {
                   </section>
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
-                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
+                      <button
+                        onClick={() => setShowPmccAdvisorPanel(v => !v)}
+                        disabled={filteredQualified.length < 1}
+                        className="text-[9px] px-2 py-0.5 rounded border font-bold transition-colors border-violet-500 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {showPmccAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
+                      </button>
+                    </div>
+                    {showPmccAdvisorPanel && (
+                      <AdvisorPanel
+                        th={th}
+                        strategy="pmcc"
+                        resultIdentifiers={filteredQualified.filter(r => r.pmccPair).map(r => `${r.pmccPair!.longLeg.occSymbol}-${r.pmccPair!.shortLeg.occSymbol}`)}
+                        filters={{ bestFitProfile: pmccBestFitProfile, minOi: filteredMinOi }}
+                        onClose={() => setShowPmccAdvisorPanel(false)}
+                        summarize={() => filteredQualified.filter(r => r.pmccPair).map(r => {
+                          const pair = r.pmccPair!;
+                          return {
+                            symbol: r.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol,
+                            longStrike: pair.longLeg.strike, longExpiration: pair.longLeg.expiration, longDte: pair.longLeg.dte,
+                            shortStrike: pair.shortLeg.strike, shortExpiration: pair.shortLeg.expiration, shortDte: pair.shortLeg.dte,
+                            shortDelta: pair.shortLeg.delta, shortCredit: pair.shortLeg.executablePrice,
+                            shortOpenInterest: pair.shortLeg.openInterest, shortSpreadPct: pair.shortLeg.quote.spreadPct,
+                          };
+                        })}
+                      />
+                    )}
                     <div className="mb-2 flex items-center gap-1.5 flex-wrap">
                       <span className={`text-[9px] ${th.textFaint} shrink-0`}>Best fit</span>
                       {(['balanced', 'income', 'upside'] as const).map(profile => (
