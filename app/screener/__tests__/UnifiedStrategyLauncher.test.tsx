@@ -92,12 +92,17 @@ describe('TE-0007: launcher routing', () => {
     expect(getMarketMetricsMock.mock.calls[0][0]).toEqual(expect.arrayContaining(['NKE', 'MU']));
   });
 
-  it('3. Find PMCCs starts directly from held long calls and never opens a long-leg configuration dialog', async () => {
+  it('3. Find PMCCs opens the modal directly from held long calls, showing an in-modal empty state when none are eligible', async () => {
+    // PMCC-MODAL-ALWAYS-OPEN-0001: the modal now opens for a genuinely
+    // verified zero-eligible result (Ian's distinction: this is a real,
+    // trustworthy scan outcome, not a technical failure) -- the "no
+    // eligible" message now lives inside the modal as its own banner,
+    // not as a page-level error that blocks the modal from opening.
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
-    expect(await screen.findByText(/No eligible held long calls match the selected tickers/i)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' })).toBeDisabled();
+    expect(await screen.findByText(/No eligible held long calls were found in your connected broker account/i)).toBeInTheDocument();
   });
 
   it('4. CSP and PMCC no longer maintain independent ticker states — no separate LIST cards remain', async () => {

@@ -59,7 +59,11 @@ export function PmccScanModal({
   const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><input aria-label={label} type="number" step={step} value={draft[key]} onChange={event => setDraft(value => ({ ...value, [key]: Number(event.target.value) }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose}>
     <p className="text-[10px] text-neutral-400">Your held LEAPS is the existing cover. These filters search and rank only the short calls to sell against it; no new long call is selected or purchased.</p>
-    {symbols.length > 0 && (
+    {symbols.length === 0 ? (
+      <p className="mt-3 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+        ⚠ No eligible held long calls were found in your connected broker account.
+      </p>
+    ) : (
       <div className="mt-3 flex flex-wrap gap-1" data-testid="pmcc-held-leaps-selection">
         {symbols.map(symbol => {
           const hidden = hiddenSymbols.includes(symbol);
@@ -89,7 +93,7 @@ export function PmccScanModal({
       {field('maxSpreadPct', 'Maximum bid/ask spread %', '1')}
     </div>
     <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">DTE {draft.shortDteMin}–{draft.shortDteMax} · preferred Δ {draft.shortDeltaMin.toFixed(2)}–{draft.shortDeltaMax.toFixed(2)} · min OI {draft.shortOiMin} · max spread {draft.maxSpreadPct.toFixed(0)}%. Delta ranks candidates; it does not hide an otherwise tradable short call.</p>
-    {selectedCount === 0 && (
+    {symbols.length > 0 && selectedCount === 0 && (
       <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
         ⚠ Select at least one held LEAPS position before running.
       </p>

@@ -8238,14 +8238,21 @@ export default function Home() {
   const discoverHeldPmccCandidates = async (shortDteMin: number, shortDteMax: number) => {
     const pmcc = opportunityUniverse;
     const dte = { shortMin: shortDteMin, shortMax: shortDteMax, longMin: 0, longMax: 10_000 };
+    // PMCC-MODAL-ALWAYS-OPEN-0001 (Ian): 'zero eligible positions' and
+    // 'we couldn't verify your account' are different KINDS of problem,
+    // not different severities of the same one. A validation/technical
+    // failure means the data itself is unverified -- that still blocks
+    // the modal from opening at all, same as before. Only a genuine,
+    // verified zero-eligible result gets the 'reason: empty' tag that
+    // lets the modal open and show its own empty-state banner.
     if (!isValidPmccDteRanges(dte)) {
-      return { ok: false as const, error: 'PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.' };
+      return { ok: false as const, reason: 'technical' as const, error: 'PMCC DTE ranges are invalid. Each minimum must be zero or greater and no larger than its maximum.' };
     }
     try {
       await refreshPortfolioRef.current?.();
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     } catch (refreshError: any) {
-      return { ok: false as const, error: refreshError?.message ?? 'Unable to refresh active portfolio holdings for PMCC discovery.' };
+      return { ok: false as const, reason: 'technical' as const, error: refreshError?.message ?? 'Unable to refresh active portfolio holdings for PMCC discovery.' };
     }
     const heldSnapshot = ccCapacityShadowSnapshotRef.current;
     const discoveryRange = { shortMin: dte.shortMin, shortMax: dte.shortMax, longMin: 0, longMax: 10_000 };
@@ -8260,6 +8267,7 @@ export default function Home() {
     if (!scanSymbols.length) {
       return {
         ok: false as const,
+        reason: 'empty' as const,
         error: pmcc.length
           ? 'No eligible held long calls match the selected tickers in the active portfolio.'
           : 'No eligible held long calls were found in the active portfolio.',
@@ -9341,7 +9349,18 @@ export default function Home() {
                   // calls..." directly instead of a config dialog with a
                   // "RUN PMCC SCAN ->" button that leads nowhere.
                   const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
-                  if (!discovery.ok) { setError(discovery.error); return; }
+                  if (!discovery.ok) {
+                    if (discovery.reason === 'technical') { setError(discovery.error); return; }
+                    // reason === 'empty': a genuinely verified zero-eligible
+                    // result -- open the modal anyway, same as CC's own
+                    // 0-eligible-holdings case, so the empty state and the
+                    // 'select at least one' guard both live inside the modal
+                    // rather than as a page-level error banner.
+                    setError('');
+                    setPmccHeldCandidates([]);
+                    setShowPmccScanModal(true);
+                    return;
+                  }
                   setError('');
                   setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
                   setShowPmccScanModal(true);

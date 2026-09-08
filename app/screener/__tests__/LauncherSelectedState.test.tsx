@@ -201,11 +201,15 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     await waitFor(() => expectOnlyPressed('cc'));
   });
 
-  it('5. FIND PMCCs does not open the obsolete long-leg configuration dialog', async () => {
+  it('5. FIND PMCCs opens the modal with a disabled run button when zero positions are eligible', async () => {
+    // PMCC-MODAL-ALWAYS-OPEN-0001: a genuinely verified zero-eligible
+    // result now opens the modal (matching CC's own 0-eligible-holdings
+    // behavior) instead of blocking with a page-level error -- the run
+    // button is present but disabled until something is eligible/selected.
     renderScreener();
     await addToUniverse('NVDA,AAPL');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
-    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' })).toBeDisabled();
   });
 
   it('6. a restored CSP session selects FIND CSPs, not FIND SPREADS', async () => {
@@ -303,16 +307,23 @@ describe('SCREENER-LAUNCHER-0001: launcher selected-state', () => {
     // *selection state* survives an unrelated modal open/cancel) -- this
     // checks the actual *result content* survives too, not just which
     // launcher button is highlighted.
+    //
+    // PMCC-MODAL-ALWAYS-OPEN-0001: FIND PMCCs now opens its own modal even
+    // for a verified zero-eligible result (disabled RUN PMCC SCAN button),
+    // rather than never opening at all -- so "does not interfere" now means
+    // that modal/button survives an unrelated CC modal being opened and
+    // canceled, not that it stays permanently absent.
     renderScreener();
     await addToUniverse('NVDA');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    expect(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' })).toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'FIND CCs' }));
     const ccModal = await screen.findByRole('dialog', { name: /COVERED CALL SCAN/i });
     await userEvent.click(within(ccModal).getByRole('button', { name: /cancel/i }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /COVERED CALL SCAN/i })).not.toBeInTheDocument());
 
-    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'RUN PMCC SCAN →' })).toBeDisabled();
   });
 
   it('9. exactly one enabled launcher can be selected at a time', async () => {
