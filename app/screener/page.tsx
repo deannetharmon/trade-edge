@@ -2708,7 +2708,7 @@ function leapsIvCombinedClass(ivRankSignal: LeapsIvSignal, ivxSignal: LeapsIvSig
 // state (session/loading/chat input) since nothing outside this panel
 // needs to read it -- same reasoning LeapsResultRow's own header comment
 // gives for owning its per-row state locally.
-function LeapsAdvisorPanel({ th, candidates, filters, onClose }: {
+function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
   th: typeof THEMES[Theme];
   candidates: Array<{
     symbol: string; occSymbol: string | null; strike: number; expiration: string; dte: number;
@@ -2717,6 +2717,10 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose }: {
   }>;
   filters: { deltaMin: number; deltaMax: number; dteMin: number; dteMax: number; oiMin: number; extrinsicPctMax: number };
   onClose: () => void;
+  // LEAPS-ADVISOR-VERIFY-LINK-0001: scrolls to and opens the matching
+  // row's own Analyze with AI panel -- see the state comment near
+  // leapsVerifyTarget for the full mechanism.
+  onVerify: (occSymbol: string) => void;
 }) {
   const [session, setSession] = useState<LeapsAdvisorSession | null>(null);
   const [stale, setStale] = useState(false);
@@ -2836,12 +2840,30 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose }: {
 
           {session.recommendation && session.recommendation.length > 0 && (
             <div className="space-y-2">
-              {session.recommendation.map((r, i) => (
-                <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
-                  <p className="font-bold text-violet-200">{r.symbol} · {r.occSymbol}</p>
-                  <p className="mt-1 text-neutral-200">{r.reasoning}</p>
-                </div>
-              ))}
+              {/* Ian: Advisor compares scan-time data; Analyze with AI
+                  re-verifies live quotes right before a trade. Always
+                  visible, not just on hover/click, so the distinction is
+                  explained even if nobody uses the button below. */}
+              <p className="text-[10px] italic text-neutral-400">Advisor compares scan-time data. Run Analyze with AI on your final pick to re-verify live quotes before trading.</p>
+              {session.recommendation.map((r, i) => {
+                const stillVisible = candidates.some(c => c.occSymbol === r.occSymbol);
+                return (
+                  <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-bold text-violet-200">{r.symbol} · {r.occSymbol}</p>
+                      <button
+                        onClick={() => stillVisible && onVerify(r.occSymbol)}
+                        disabled={!stillVisible}
+                        title={stillVisible ? undefined : 'This candidate is no longer in your filtered results.'}
+                        className="shrink-0 rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Verify before trading →
+                      </button>
+                    </div>
+                    <p className="mt-1 text-neutral-200">{r.reasoning}</p>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -2872,7 +2894,7 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose }: {
   );
 }
 
-function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade }: {
+function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade, autoOpenAnalysis, onAutoOpenConsumed, rowRef }: {
   candidate: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -2887,6 +2909,15 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   oiMin: number;
   extrinsicPctMax: number;
   onTrade: () => void;
+  // LEAPS-ADVISOR-VERIFY-LINK-0001: set true (by a parent, keyed on
+  // occSymbol) to programmatically open this row's own Analyze with AI
+  // panel from outside -- e.g. the Advisor panel's "Verify before
+  // trading" button. Not a new analysis path; this just triggers the
+  // exact same local analysisOpen state the row's own button already
+  // sets.
+  autoOpenAnalysis?: boolean;
+  onAutoOpenConsumed?: () => void;
+  rowRef?: (el: HTMLDivElement | null) => void;
 }) {
   // LEAPS-0003: no expand/collapse -- Diane's finding was that LEAPS only
   // needed hiding content behind a click because it was trapped in a
@@ -2907,6 +2938,14 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   const [analysisQuantity, setAnalysisQuantity] = useState(1);
   const [analysisObjective, setAnalysisObjective] = useState('');
   const analysisEnabled = process.env.NEXT_PUBLIC_LEAPS_ANALYSIS_ENABLED !== 'false';
+
+  useEffect(() => {
+    if (autoOpenAnalysis) {
+      setAnalysisOpen(true);
+      onAutoOpenConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenAnalysis]);
 
   const mid = candidate.bid != null && candidate.ask != null ? (candidate.bid + candidate.ask) / 2 : null;
   const totalCost = mid != null ? mid * 100 : null;
@@ -2969,7 +3008,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   };
 
   return (
-    <div className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
+    <div ref={rowRef} className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <div className="flex items-center gap-2 text-[11px] shrink-0">
           {/* LEAPS-0004: score comes first -- Ian's own composite ranking
@@ -7400,6 +7439,13 @@ export default function Home() {
   const [showCcScanModal, setShowCcScanModal] = useState(false);
   const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
   const [showLeapsAdvisorPanel, setShowLeapsAdvisorPanel] = useState(false);
+  // LEAPS-ADVISOR-VERIFY-LINK-0001: the occSymbol whose row should
+  // auto-open its Analyze with AI panel, plus a ref registry so the
+  // Advisor's "Verify before trading" button can scroll that row into
+  // view before opening it -- same row, same existing panel, no new
+  // analysis path.
+  const [leapsVerifyTarget, setLeapsVerifyTarget] = useState<string | null>(null);
+  const leapsRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // LEAPS-SCAN-MODAL-0001: the DTE range actually used for the last scan's
   // broker fetch. Only DTE gates the fetch (Delta/OI/Extrinsic never have
   // -- see LeapsScanModal's header comment) -- so this is the one thing
@@ -11132,6 +11178,10 @@ export default function Home() {
                     candidates={sorted}
                     filters={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
                     onClose={() => setShowLeapsAdvisorPanel(false)}
+                    onVerify={(occSymbol) => {
+                      leapsRowRefs.current[occSymbol]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      setLeapsVerifyTarget(occSymbol);
+                    }}
                   />
                 )}
 
@@ -11140,7 +11190,11 @@ export default function Home() {
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
                     candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
-                    onTrade={() => setLeapsTradeCandidate(candidate)} />
+                    onTrade={() => setLeapsTradeCandidate(candidate)}
+                    rowRef={candidate.occSymbol ? (el => { leapsRowRefs.current[candidate.occSymbol!] = el; }) : undefined}
+                    autoOpenAnalysis={candidate.occSymbol != null && leapsVerifyTarget === candidate.occSymbol}
+                    onAutoOpenConsumed={() => setLeapsVerifyTarget(null)}
+                  />
                 ))}</div> : <p className={`rounded border ${th.border} p-3 text-[11px] ${th.textMuted}`}>No candidates matched the current delta, DTE, liquidity, and extrinsic filters.</p>}
 
                 {insufficientCandidates.length > 0 && (
