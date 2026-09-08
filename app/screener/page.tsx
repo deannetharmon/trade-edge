@@ -116,6 +116,7 @@ import type {
   ScreenerReasonCode, ScreenerSessionAccounting,
 } from '@/lib/screener/scanSession';
 import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
+import { computeLeapsAdvisorResultSetHash, persistLeapsAdvisorSession, restoreLeapsAdvisorSession, clearLeapsAdvisorSession, type LeapsAdvisorSession, type LeapsAdvisorMessage } from '@/lib/screener/leapsAdvisorCache';
 
 // ── OE-0002A: Opportunity Engine Activation ─────────────────────────────────
 // Wires this page's already-real, in-memory ScreenResult[] through the
@@ -2700,6 +2701,175 @@ function leapsIvCombinedClass(ivRankSignal: LeapsIvSignal, ivxSignal: LeapsIvSig
   if (ivRankSignal === 'low' && ivxSignal === 'low') return 'text-emerald-400 font-bold';
   if (ivRankSignal === 'elevated' && ivxSignal === 'elevated') return 'text-amber-400 font-bold';
   return undefined;
+}
+
+// LEAPS-ADVISOR-0001B: cross-ticker recommendation + persistent chat,
+// scoped to the currently-filtered LEAPS candidate set. Self-contained
+// state (session/loading/chat input) since nothing outside this panel
+// needs to read it -- same reasoning LeapsResultRow's own header comment
+// gives for owning its per-row state locally.
+function LeapsAdvisorPanel({ th, candidates, filters, onClose }: {
+  th: typeof THEMES[Theme];
+  candidates: Array<{
+    symbol: string; occSymbol: string | null; strike: number; expiration: string; dte: number;
+    delta: number | null; underlyingPrice: number | null; extrinsicValue: number | null;
+    bid: number | null; ask: number | null; score: number | null;
+  }>;
+  filters: { deltaMin: number; deltaMax: number; dteMin: number; dteMax: number; oiMin: number; extrinsicPctMax: number };
+  onClose: () => void;
+}) {
+  const [session, setSession] = useState<LeapsAdvisorSession | null>(null);
+  const [stale, setStale] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [objective, setObjective] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const currentHash = useMemo(() => computeLeapsAdvisorResultSetHash(candidates, filters), [candidates, filters]);
+
+  useEffect(() => {
+    restoreLeapsAdvisorSession().then(restored => {
+      if (!restored) return;
+      if (restored.resultSetHash !== currentHash) {
+        // Quinn: a mismatched hash means the candidate set OR the active
+        // filters changed since this chat was saved -- never silently
+        // reattach a stale conversation to a different result set.
+        setStale(true);
+        return;
+      }
+      setSession(restored);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const summarize = () => candidates.map(c => {
+    const mid = c.bid != null && c.ask != null ? (c.bid + c.ask) / 2 : null;
+    const totalCost = mid != null ? mid * 100 : null;
+    const intrinsic = c.underlyingPrice != null ? Math.max(c.underlyingPrice - c.strike, 0) : null;
+    const breakeven = mid != null ? c.strike + mid : null;
+    return {
+      symbol: c.symbol, occSymbol: c.occSymbol, strike: c.strike, expiration: c.expiration, dte: c.dte,
+      delta: c.delta, underlyingPrice: c.underlyingPrice, extrinsicValue: c.extrinsicValue,
+      totalCost, breakeven, score: c.score,
+    };
+  });
+
+  const send = async (userMessage: string | null) => {
+    setLoading(true); setError('');
+    const priorMessages: LeapsAdvisorMessage[] = session?.messages ?? [];
+    const outgoing = userMessage != null
+      ? [...priorMessages, { role: 'user' as const, content: userMessage, ts: Date.now() }]
+      : priorMessages;
+    try {
+      const res = await fetch('/api/leaps-advisor', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidates: summarize(), objective,
+          messages: outgoing.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'LEAPS Advisor is unavailable.');
+      const nextMessages: LeapsAdvisorMessage[] = [...outgoing, { role: 'assistant', content: data.reply, ts: Date.now() }];
+      const nextSession: LeapsAdvisorSession = {
+        resultSetHash: currentHash, disclosure: data.disclosure, gatedOut: data.gatedOut ?? [],
+        recommendation: data.recommendation ?? null, sizingNote: data.sizingNote ?? null,
+        messages: nextMessages, cachedAt: Date.now(),
+      };
+      setSession(nextSession); setStale(false);
+      void persistLeapsAdvisorSession(nextSession);
+    } catch (e: any) {
+      setError(e.message ?? 'LEAPS Advisor is unavailable.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startFresh = () => {
+    void clearLeapsAdvisorSession();
+    setSession(null); setStale(false); setError('');
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-violet-500/30 bg-violet-500/5 p-3" data-testid="leaps-advisor-panel">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-bold text-violet-300">LEAPS ADVISOR</p>
+        <button onClick={onClose} className="text-[10px] text-neutral-400 hover:text-white">Close</button>
+      </div>
+
+      {stale && (
+        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
+          ⚠ Your saved conversation is from a different candidate set or filter selection and has been archived. Starting a new recommendation will begin a fresh conversation.
+          <button onClick={startFresh} className="ml-2 underline">Discard and start fresh</button>
+        </div>
+      )}
+
+      {!session && !stale && (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
+            Objective (optional)
+            <input value={objective} onChange={e => setObjective(e.target.value)} placeholder="What are you trying to accomplish?"
+              className="w-72 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+          </label>
+          <button onClick={() => void send(null)} disabled={loading}
+            className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
+            {loading ? `Reviewing ${candidates.length} candidates...` : 'Get Recommendation'}
+          </button>
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-[10px] text-red-400">{error}</p>}
+
+      {session && (
+        <div className="mt-3 space-y-2 text-[11px]">
+          <p className="text-neutral-400 italic">{session.disclosure}</p>
+
+          {session.gatedOut.length > 0 && (
+            <details className="rounded border border-neutral-800 bg-neutral-900/40 p-2">
+              <summary className="cursor-pointer text-[10px] font-bold text-neutral-400">
+                Gated out ({session.gatedOut.length})
+              </summary>
+              <ul className="mt-1 list-disc list-inside text-[10px] text-neutral-400">
+                {session.gatedOut.map((g, i) => <li key={i}>{g.symbol}: {g.reason}</li>)}
+              </ul>
+            </details>
+          )}
+
+          {session.recommendation && session.recommendation.length > 0 && (
+            <div className="space-y-2">
+              {session.recommendation.map((r, i) => (
+                <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
+                  <p className="font-bold text-violet-200">{r.symbol} · {r.occSymbol}</p>
+                  <p className="mt-1 text-neutral-200">{r.reasoning}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
+
+          <div className="space-y-1.5 border-t border-neutral-800 pt-2">
+            {session.messages.map((m, i) => (
+              <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
+                <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
+              </p>
+            ))}
+          </div>
+
+          <div className="flex items-end gap-2">
+            <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask a follow-up..."
+              onKeyDown={e => { if (e.key === 'Enter' && chatInput.trim() && !loading) { void send(chatInput.trim()); setChatInput(''); } }}
+              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" />
+            <button
+              onClick={() => { if (chatInput.trim() && !loading) { void send(chatInput.trim()); setChatInput(''); } }}
+              disabled={loading || !chatInput.trim()}
+              className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
+              {loading ? '...' : 'Send'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade }: {
@@ -7229,6 +7399,7 @@ export default function Home() {
   const [showPmccScanModal, setShowPmccScanModal] = useState(false);
   const [showCcScanModal, setShowCcScanModal] = useState(false);
   const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
+  const [showLeapsAdvisorPanel, setShowLeapsAdvisorPanel] = useState(false);
   // LEAPS-SCAN-MODAL-0001: the DTE range actually used for the last scan's
   // broker fetch. Only DTE gates the fetch (Delta/OI/Extrinsic never have
   // -- see LeapsScanModal's header comment) -- so this is the one thing
@@ -10916,6 +11087,14 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => setShowLeapsAdvisorPanel(v => !v)}
+                      disabled={opportunityUniverse.length < 2}
+                      title={opportunityUniverse.length < 2 ? 'Add at least 2 tickers to your Opportunity Universe first.' : undefined}
+                      className="text-[9px] px-2 py-0.5 rounded border font-bold transition-colors border-violet-500 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {showLeapsAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
+                    </button>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
                       {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $'], ['extrinsicPctOfCost', 'Extrinsic % Cost']] as const).map(([field, label]) => (
@@ -10946,6 +11125,15 @@ export default function Home() {
                     )}
                   </div>
                 </div>
+
+                {showLeapsAdvisorPanel && (
+                  <LeapsAdvisorPanel
+                    th={th}
+                    candidates={sorted}
+                    filters={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
+                    onClose={() => setShowLeapsAdvisorPanel(false)}
+                  />
+                )}
 
                 <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
 
