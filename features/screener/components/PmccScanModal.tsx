@@ -30,7 +30,7 @@ export interface PmccHeldCandidateSummary {
 }
 
 export function PmccScanModal({
-  th, heldCandidates, hiddenSymbols, onToggleSymbol, discoveryLoading, initial, onClose, onRun,
+  th, heldCandidates, hiddenSymbols, onToggleSymbol, discoveryLoading, exclusions, initial, onClose, onRun,
 }: {
   th: ScanModalTheme;
   heldCandidates: PmccHeldCandidateSummary[];
@@ -41,6 +41,10 @@ export function PmccScanModal({
   // already open, same as CC's holdingsLoading -- without this flag the
   // modal would flash an empty-state banner before real data arrives.
   discoveryLoading: boolean;
+  // PMCC-EXCLUSIONS-0001: real per-position reasons a held call didn't
+  // qualify, shown when symbols.length === 0 so "no eligible" is never a
+  // dead end.
+  exclusions: Array<{ symbol: string; reason: string }>;
   initial: PmccScanRequest;
   onClose: () => void;
   onRun: (request: PmccScanRequest) => void;
@@ -67,9 +71,16 @@ export function PmccScanModal({
     {discoveryLoading ? (
       <p className="mt-3 text-[10px] text-neutral-400">Loading held LEAPS positions…</p>
     ) : symbols.length === 0 ? (
-      <p className="mt-3 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
-        ⚠ No eligible held long calls were found in your connected broker account.
-      </p>
+      <div className="mt-3 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+        <p>⚠ No eligible held long calls were found in your connected broker account.</p>
+        {exclusions.length > 0 && (
+          <ul className="mt-1.5 list-disc list-inside font-normal">
+            {exclusions.map((e, i) => (
+              <li key={i}>{e.symbol}: {e.reason}</li>
+            ))}
+          </ul>
+        )}
+      </div>
     ) : (
       <div className="mt-3 flex flex-wrap gap-1" data-testid="pmcc-held-leaps-selection">
         {symbols.map(symbol => {

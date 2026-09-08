@@ -7130,6 +7130,11 @@ export default function Home() {
   // discovery in the background, show a loading state inside the modal
   // meanwhile.
   const [pmccDiscoveryLoading, setPmccDiscoveryLoading] = useState(false);
+  // PMCC-EXCLUSIONS-0001: the real, per-position reason each held call
+  // was excluded, surfaced so "0 eligible" is never a dead end when the
+  // trader can see actual positions in Portfolio -- see Alan's near-miss
+  // pattern used elsewhere in LEAPS/PMCC.
+  const [pmccDiscoveryExclusions, setPmccDiscoveryExclusions] = useState<Array<{ symbol: string; reason: string }>>([]);
   const togglePmccLeapsSymbol = (symbol: string) => {
     setPmccHiddenLeapsSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
   };
@@ -8272,12 +8277,19 @@ export default function Home() {
     const heldSelection = { ...discoveredSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(candidate => candidate.underlyingSymbol)));
     if (!scanSymbols.length) {
+      // Dedupe by symbol+reason -- a position-level exclusion list can
+      // repeat the same reason across several positions of the same
+      // symbol; the trader needs the distinct reasons, not every row.
+      const distinctExclusions = Array.from(
+        new Map(discoveredSelection.exclusions.map(e => [`${e.symbol}::${e.reason}`, e])).values(),
+      );
       return {
         ok: false as const,
         reason: 'empty' as const,
         error: pmcc.length
           ? 'No eligible held long calls match the selected tickers in the active portfolio.'
           : 'No eligible held long calls were found in the active portfolio.',
+        exclusions: distinctExclusions,
       };
     }
     return { ok: true as const, dte, heldCandidates, heldSelection, scanSymbols };
@@ -9372,10 +9384,13 @@ export default function Home() {
                         return;
                       }
                       // reason === 'empty': genuinely verified zero-eligible
-                      // -- stays open, modal's own empty-state banner shows.
+                      // -- stays open, modal's own empty-state banner shows
+                      // the real per-position reasons.
                       setPmccHeldCandidates([]);
+                      setPmccDiscoveryExclusions(discovery.exclusions ?? []);
                       return;
                     }
+                    setPmccDiscoveryExclusions([]);
                     setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
                   })();
                 }}
@@ -11002,6 +11017,7 @@ export default function Home() {
           hiddenSymbols={pmccHiddenLeapsSymbols}
           onToggleSymbol={togglePmccLeapsSymbol}
           discoveryLoading={pmccDiscoveryLoading}
+          exclusions={pmccDiscoveryExclusions}
           initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct }}
           onClose={() => setShowPmccScanModal(false)}
           onRun={(request: PmccScanRequest) => {
