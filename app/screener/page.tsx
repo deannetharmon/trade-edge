@@ -4127,6 +4127,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   const [showQuoteDetail, setShowQuoteDetail] = useState(false);
   const [showAuditDetail, setShowAuditDetail] = useState(false);
   const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
+  const [showBestFitInfo, setShowBestFitInfo] = useState(false);
   // PMCC-RANK-0001 — opt-in-disableable earnings deduction, per Ian's
   // explicit requirement that it never be a silent penalty. Defaults on
   // (the deduction reflects a real risk), operator can turn it off
@@ -4250,7 +4251,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
     { label: 'Width minus debit', value: `${money(metrics.widthMinusDebitPerShare)} · ${metrics.widthMinusDebitPctOfDebit.toFixed(1)}%` },
     { label: 'Annualized ROI', value: annualizedRoi == null ? '—' : `${annualizedRoi.toFixed(1)}%` },
     { label: 'Breakeven', value: `${money(breakeven)}${breakevenAboveShortStrike ? ' ⚠' : ''}`, warn: breakevenAboveShortStrike },
-    { label: 'Roll runway', value: rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'}` },
+    { label: 'Roll runway', value: rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'} (at this cycle's DTE)` },
     { label: 'Net delta', value: metrics.netDelta.toFixed(2), warn: disqualified },
   ] : [];
   return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
@@ -4267,8 +4268,14 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         </span>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}</span></>}</div>
-        <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}</span></div>
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
+  <span> ({((metrics.longExtrinsicPerShare / pair.longLeg.executablePrice) * 100).toFixed(1)}% of cost)</span>
+)}</span></>}</div>
+        <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}{(result.ivr != null || result.ivx != null) && (
+  <span className="text-neutral-400">
+    {' '}· IVR {result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} · IVx {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}
+  </span>
+)}</span></div>
       </div>
       {pmccDecision.gates.some(gate => gate.status !== 'pass') && (
         <p className="mt-2 text-[10px] text-amber-300">
@@ -4287,7 +4294,24 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         <p className="mt-2 rounded border border-amber-700 bg-amber-950/30 px-2 py-1.5 text-[10px] font-semibold text-amber-200">Earnings before short expiry — Best Fit is informational, not a recommendation.</p>
       ) : (
         <div className="mt-2 rounded border border-cyan-800 bg-cyan-950/20 px-2 py-1.5 text-[10px] text-cyan-100" aria-label={`Why this is Best ${pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)}`}>
-          <b>Why this is Best {pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)} ({pmccBestFit.score}):</b> {pmccBestFitReason(pmccBestFit.profile)}
+          <b>Why this is Best {pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)} ({pmccBestFit.score})</b>
+          {/* PMCC-CARD-CLARITY-0001: tappable, not hover-only (Ian's mobile
+              requirement) -- this and PMCC Structure Quality above are two
+              genuinely different scores, and nothing on screen said so
+              until now. */}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowBestFitInfo(v => !v); }}
+            aria-label="What is Best Fit?"
+            aria-expanded={showBestFitInfo}
+            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-cyan-600 text-cyan-300 text-[9px] font-bold align-middle"
+          >
+            ?
+          </button>
+          : {pmccBestFitReason(pmccBestFit.profile)}
+          {showBestFitInfo && (
+            <p className="mt-1 text-cyan-300">Ranks short-call candidates against each other for this held long leg — a different measure than Structure Quality above.</p>
+          )}
           {runnerUpPair && <span className="block mt-1 text-cyan-200">Versus runner-up {pmccBestFit.runnerUp!.symbol} {runnerUpPair.shortLeg.strike}C{runnerUpComparison ? `: ${runnerUpComparison}` : '.'}</span>}
         </div>
       ))}
@@ -8402,8 +8426,14 @@ export default function Home() {
           },
           heldLongCandidates: heldSelection.candidates.filter(candidate => candidate.underlyingSymbol === symbol),
         });
+        // PMCC-CARD-CLARITY-0001: ivx looked up for the SPECIFIC short
+        // leg's own expiration, not a generic 30-day figure -- same
+        // reasoning as LEAPS' own expirationIvxMap use. Only possible
+        // here, after pairing has actually chosen a short leg.
         session = outcome.status === 'evaluated'
-          ? recordSymbolEvaluated(session, symbol, outcome.results)
+          ? recordSymbolEvaluated(session, symbol, outcome.results.map(r => r.pmccPair
+              ? { ...r, ivx: metrics.expirationIvxMap?.[r.pmccPair.shortLeg.expiration] ?? null }
+              : r))
           : recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED', outcome.audit);
       }
 
