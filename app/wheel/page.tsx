@@ -35,8 +35,11 @@ async function getAccessToken(): Promise<string> {
   } catch {}
 
   let token: string;
+  let expiresIn: number;
   try {
-    token = await refreshBrowserAccessToken();
+    const result = await refreshBrowserAccessToken();
+    token = result.accessToken;
+    expiresIn = result.expiresIn;
   } catch {
     sessionStorage.removeItem('tt_access_token');
     try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
@@ -47,7 +50,7 @@ async function getAccessToken(): Promise<string> {
   sessionStorage.setItem('tt_access_token', token);
   try {
     localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
+    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + Math.max(60, expiresIn - 60) * 1000));
   } catch {}
   return token;
 }

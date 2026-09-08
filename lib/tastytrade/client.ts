@@ -24,9 +24,9 @@ export const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 export async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
   if (cached) return cached;
-  const token = await refreshBrowserAccessToken();
-  sessionStorage.setItem('tt_access_token', token);
-  return token;
+  const result = await refreshBrowserAccessToken();
+  sessionStorage.setItem('tt_access_token', result.accessToken);
+  return result.accessToken;
 }
 
 export async function ttFetch(path: string, token: string) {

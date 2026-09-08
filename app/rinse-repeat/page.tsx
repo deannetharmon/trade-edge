@@ -226,7 +226,10 @@ async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
   if (cached) return cached;
   let token: string;
-  try { token = await refreshBrowserAccessToken(); }
+  try {
+    const result = await refreshBrowserAccessToken();
+    token = result.accessToken;
+  }
   catch { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
   sessionStorage.setItem('tt_access_token', token);
   return token;

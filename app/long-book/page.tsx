@@ -146,12 +146,17 @@ async function getAccessToken(): Promise<string> {
     }
   } catch {}
   let token: string;
-  try { token = await refreshBrowserAccessToken(); }
+  let expiresIn: number;
+  try {
+    const result = await refreshBrowserAccessToken();
+    token = result.accessToken;
+    expiresIn = result.expiresIn;
+  }
   catch { window.location.href = '/login'; throw new Error('Session expired'); }
   sessionStorage.setItem('tt_access_token', token);
   try {
     localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + 23 * 60 * 60 * 1000));
+    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + Math.max(60, expiresIn - 60) * 1000));
   } catch {}
   return token;
 }
