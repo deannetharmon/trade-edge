@@ -889,15 +889,30 @@ export function classifyPositionStopLoss(
     optionType: position.legs.length === 1 ? position.legs[0].optionType : null,
     quantity: Number.isInteger(position.quantity) && position.quantity > 0 ? position.quantity : null,
   };
-  const rawOrders = gtcOrders.map(order => ({
-    accountNumber: order.accountNumber ?? null, orderId: order.id,
-    complexOrderId: order.complexOrderId ?? null, sourceEndpoint: order.sourceEndpoint ?? 'unknown' as const,
-    status: order.status ?? null, orderType: order.orderType, timeInForce: order.timeInForce,
-    priceEffect: order.priceEffect ?? null,
-    triggerPrice: Number.isFinite(Number(order.stopPrice)) ? Number(order.stopPrice) : null,
-    limitPrice: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
-    legs: order.legs.map(leg => ({ symbol: leg.symbol, action: leg.action, quantity: leg.quantity ?? null, ratio: leg.ratio ?? null })),
-  }));
+  // RAW-EVIDENCE-SCOPE-0001 -- gtcOrders is the account-wide order feed
+  // (collected once per page load, shared across every position's
+  // classifyPositionStopLoss call -- see the caller). Displaying it
+  // unfiltered here dumped hundreds of orders across dozens of unrelated
+  // tickers into every single position's "Stop Evidence" panel. This is
+  // DISPLAY-ONLY scoping: the actual protective-stop MATCH further below
+  // in this function already searches the full, unfiltered gtcOrders by
+  // shortSymbol -- untouched by this filter, so matching/classification
+  // behavior is unaffected. Scoped to any leg of THIS position (not just
+  // the short leg used for matching), since a trader reviewing raw
+  // evidence for a spread reasonably expects to see orders touching
+  // either leg, not only the one used for stop-matching.
+  const positionSymbols = new Set(position.legs.map(l => normalizeOccSymbol(l.symbol)));
+  const rawOrders = gtcOrders
+    .filter(order => order.legs.some(leg => positionSymbols.has(normalizeOccSymbol(leg.symbol))))
+    .map(order => ({
+      accountNumber: order.accountNumber ?? null, orderId: order.id,
+      complexOrderId: order.complexOrderId ?? null, sourceEndpoint: order.sourceEndpoint ?? 'unknown' as const,
+      status: order.status ?? null, orderType: order.orderType, timeInForce: order.timeInForce,
+      priceEffect: order.priceEffect ?? null,
+      triggerPrice: Number.isFinite(Number(order.stopPrice)) ? Number(order.stopPrice) : null,
+      limitPrice: Number.isFinite(Number(order.price)) ? Number(order.price) : null,
+      legs: order.legs.map(leg => ({ symbol: leg.symbol, action: leg.action, quantity: leg.quantity ?? null, ratio: leg.ratio ?? null })),
+    }));
   const buildAssessment = (args: {
     classification: StopAssessment['classification']; reasonCode: string; explanation: string;
     matchedOrder?: GtcOrder | null; ambiguousOrderIds?: string[]; displayPolicy?: StopLossPolicy | null;
