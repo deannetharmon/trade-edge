@@ -55,7 +55,18 @@ export function buildCapitalViewModel(position: Position): CapitalViewModel {
   return { label: 'Unavailable', value: null, reason: 'Reliable capital requirement unavailable' };
 }
 
-export function stopPresentation(classification: Position['stopLossClassification']): { label: string; tone: SemanticTone; action: string } {
+// TE-0003: `cspOptedOut` defaults to false so every existing caller is
+// unaffected -- only CSP call sites that have checked
+// CSP_LOSS_STOP_OPT_OUT_KEY (app/portfolio/page.tsx) pass true, and only
+// when classification is NO_STOP. BPS/BCS/IC never pass true; their
+// loss-side rule stays mandatory-default.
+export function stopPresentation(
+  classification: Position['stopLossClassification'],
+  cspOptedOut = false
+): { label: string; tone: SemanticTone; action: string } {
+  if (classification === 'NO_STOP' && cspOptedOut) {
+    return { label: 'No stop (by design)', tone: 'neutral', action: 'Change' };
+  }
   switch (classification) {
     case 'ALIGNED': return { label: 'Aligned', tone: 'positive', action: 'Adjust' };
     case 'TOO_LOOSE': return { label: 'Too loose', tone: 'warning', action: 'Adjust' };

@@ -6151,6 +6151,35 @@ function saveLastStopMultiple(strategy: string, multiple: number) {
   } catch { /* non-blocking */ }
 }
 
+// TE-0003: CSP-only loss-stop opt-out. Per the wheel-CSP user story, a
+// trader may deliberately choose to run a CSP with no loss-side stop and
+// simply accept assignment -- this flag records that as an EXPLICIT choice
+// (persisted per position key) so the UI can distinguish "no stop, by
+// design" from "no stop, forgot to set one." BPS/BCS/IC never read this key
+// -- the loss-side rule stays mandatory-default for those per the story's
+// explicit exception. Purely local UX state: it never substitutes for or
+// gates the broker-side StopLossPolicy/classification machinery in
+// lib/portfolio/stopLossPolicy.ts, and it is never consulted by
+// evaluateStopBreach or any safety gate -- opting out only means TradeEdge
+// itself doesn't prompt/require a stop order for this position.
+const CSP_LOSS_STOP_OPT_OUT_KEY = 'oh_csp_loss_stop_opt_out';
+function isCspLossStopOptedOut(positionKey: string): boolean {
+  try {
+    const raw = localStorage.getItem(CSP_LOSS_STOP_OPT_OUT_KEY);
+    if (!raw) return false;
+    const map = JSON.parse(raw);
+    return map?.[positionKey] === true;
+  } catch { return false; }
+}
+function setCspLossStopOptedOut(positionKey: string, optedOut: boolean) {
+  try {
+    const raw = localStorage.getItem(CSP_LOSS_STOP_OPT_OUT_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    if (optedOut) map[positionKey] = true; else delete map[positionKey];
+    localStorage.setItem(CSP_LOSS_STOP_OPT_OUT_KEY, JSON.stringify(map));
+  } catch { /* non-blocking */ }
+}
+
 function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   if (!hasSupportedCreditEntryEconomics(pos)) return null;
   return <SetStopLossButtonInner pos={pos} th={th} />;
@@ -6238,6 +6267,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // credit-anchored) or typed a raw dollar trigger (no anchor at all).
   const [stopBasisOverride, setStopBasisOverride] = useState<'ORIGINAL_CREDIT' | 'CURRENT_SPREAD_VALUE' | 'MANUAL_ABSOLUTE'>('ORIGINAL_CREDIT');
   const [gtcPrice,  setGtcPrice]  = useState('');
+  // TE-0003: CSP-only. Mirrors the persisted opt-out flag into local state so
+  // the checkbox is controlled; isCsp gates the checkbox's very existence --
+  // BPS/BCS/IC positions never see it and their loss-stop stays mandatory.
+  const isCsp = resolvePositionStrategyFilterKey(pos) === 'CSP';
+  const [cspOptOut, setCspOptOutState] = useState(() => isCsp && isCspLossStopOptedOut(pos.key));
 
   // Modal position — fixed + viewport-aware, computed from the trigger
   // button's rect. Fixes the modal rendering off-screen above the viewport
@@ -6824,6 +6858,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const btnLabel =
     result === 'success' ? '✓ Stop Set'       :
     result === 'error'   ? '✕ Failed'          :
+    pos.stopLossClassification === 'NO_STOP' && cspOptOut ? 'No Stop (By Design)' :
     pos.stopLossClassification === 'NO_STOP'    ? 'Add Stop'      :
     pos.stopLossClassification === 'ALIGNED'    ? 'Edit Stop'      :
     pos.stopLossClassification === 'TOO_LOOSE'  ? 'Adjust Stop'   :
@@ -6864,6 +6899,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           result === 'success' ? 'border-emerald-600 text-emerald-400' :
           result === 'error'   ? 'border-red-600 text-red-400' :
           open ? 'border-orange-500 text-orange-400 bg-orange-500/10' :
+          pos.stopLossClassification === 'NO_STOP' && cspOptOut ? 'border-slate-600 text-slate-400 hover:border-orange-500 hover:text-orange-400' :
           pos.stopLossClassification === 'NO_STOP'   ? 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400' :
           pos.stopLossClassification === 'TOO_LOOSE' ? 'border-yellow-700 text-yellow-400 hover:border-orange-500 hover:text-orange-400' :
           pos.stopLossClassification === 'TOO_TIGHT' ? 'border-orange-700 text-orange-400 hover:border-orange-500 hover:text-orange-400' :
@@ -6892,6 +6928,39 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
           </div>
 
+          {/* TE-0003: CSP-only loss-stop opt-out. Not shown for BPS/BCS/IC --
+              the loss-side rule stays mandatory-default for those. */}
+          {isCsp && (
+            <label className={`flex items-start gap-2 px-3 py-2 rounded-lg border ${th.borderLight} mb-3 cursor-pointer`}>
+              <input
+                type="checkbox"
+                checked={cspOptOut}
+                onChange={e => setCspOptOutState(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-[10px] leading-snug">
+                <span className={`font-bold ${cspOptOut ? 'text-slate-300' : th.textFaint}`}>Skip loss stop — I'm happy to take assignment</span>
+                <br />
+                <span className={th.textFaint}>Only sell puts on stocks you are happy to own at the strike. Many wheel traders skip the loss stop and accept assignment instead of stopping out early.</span>
+              </span>
+            </label>
+          )}
+
+          {isCsp && cspOptOut ? (
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setOpen(false)}
+                className={`text-[10px] px-3 py-1.5 rounded border ${th.borderLight} ${th.textFaint}`}>
+                Cancel
+              </button>
+              <button
+                onClick={() => { setCspLossStopOptedOut(pos.key, true); setOpen(false); }}
+                className="text-[10px] px-3 py-1.5 rounded border border-slate-500 text-slate-300 font-bold">
+                Confirm — No Loss Stop
+              </button>
+            </div>
+          ) : (
+          <>
           {/* Live price bar */}
           <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
             <div className="flex items-center gap-2">
@@ -7152,6 +7221,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           <button onClick={() => { setOpen(false); setConfirming(false); }} className={`w-full mt-2 text-[9px] ${th.textFaint} hover:${th.text} text-center`}>
             Cancel
           </button>
+          </>
+          )}
         </div>
       )}
 
@@ -8580,6 +8651,12 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                   pos.stopLossClassification === 'TOO_LOOSE'          ? { icon: '⚠', label: 'Too loose',     cls: 'text-yellow-400'  } :
                   pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? { icon: '?', label: 'Unverified',    cls: 'text-yellow-400'  } :
                   pos.stopLossClassification === 'INVALID'            ? { icon: '✕', label: 'Invalid',       cls: 'text-red-400'     } :
+                  // TE-0003: CSP-only opt-out -- distinguishes "no stop, by
+                  // design" (trader deliberately accepting assignment) from
+                  // "no stop, forgot to set one" so it doesn't read as an
+                  // oversight. See CSP_LOSS_STOP_OPT_OUT_KEY.
+                  pos.stopLossClassification === 'NO_STOP' && resolvePositionStrategyFilterKey(pos) === 'CSP' && isCspLossStopOptedOut(pos.key)
+                    ? { icon: '○', label: 'No stop (by design)', cls: th.textFaint } :
                   pos.stopLossClassification === 'NO_STOP'            ? { icon: '✕', label: 'None',          cls: 'text-red-400'     } :
                   pos.stopLossClassification === 'NOT_EVALUATED'      ? { icon: '—', label: 'Not evaluated', cls: th.textFaint        } :
                   pos.stopLossClassification === 'UNSUPPORTED'        ? { icon: '—', label: 'Unsupported',   cls: th.textFaint        } :
