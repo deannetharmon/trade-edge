@@ -89,7 +89,7 @@ export function PmccScanModal({
       {field('maxSpreadPct', 'Maximum bid/ask spread %', '1')}
     </div>
     <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">DTE {draft.shortDteMin}–{draft.shortDteMax} · preferred Δ {draft.shortDeltaMin.toFixed(2)}–{draft.shortDeltaMax.toFixed(2)} · min OI {draft.shortOiMin} · max spread {draft.maxSpreadPct.toFixed(0)}%. Delta ranks candidates; it does not hide an otherwise tradable short call.</p>
-    {selectedCount === 0 && <p role="alert" className="mt-2 text-xs text-red-400">Select at least one held LEAPS position before running.</p>}
+    {selectedCount === 0 && <p role="alert" className="mt-2 text-xs font-bold text-amber-400">Select at least one held LEAPS position before running.</p>}
     <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-neutral-700 px-4 py-2 text-xs">Cancel</button><button disabled={!valid} onClick={() => onRun(draft)} className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">RUN PMCC SCAN →</button></div>
   </ScanModalShell>;
 }
