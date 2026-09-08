@@ -89,7 +89,7 @@ export async function submitPmccOrder(userId: string, input: {
   quantity: number;
   limitPrice: number;
   mode: 'dry-run' | 'submit';
-}) {
+}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number }) {
   if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
   const context = await brokerContext(userId);
   try {
@@ -101,17 +101,35 @@ export async function submitPmccOrder(userId: string, input: {
     const now = new Date();
     const marketSession = derivePmccMarketSession(now);
     const underlyingFresh = fresh(longReview.underlyingQuoteTimestamp, now.getTime()) && fresh(shortReview.underlyingQuoteTimestamp, now.getTime());
+    // PMCC-ORDER-GATE-LIVE-FILTERS-0001: the same bug LEAPS had --
+    // orders were re-checked against a fixed SERVER_PMCC_CRITERIA
+    // constant, invisible and disconnected from the short-call filters
+    // the trader actually configured in PmccScanModal. Only the SHORT
+    // leg's criteria are overridable -- the long leg is an
+    // already-held position (not user-configured per order), matching
+    // PmccScanModal's own scope (it only ever exposed short-call
+    // filters). Falls back to SERVER_PMCC_CRITERIA's value for anything
+    // not supplied -- fail-closed, never fail-open.
+    const effectiveCriteria: PmccPairingCriteria = {
+      ...SERVER_PMCC_CRITERIA,
+      shortDelta: shortCriteriaOverride?.shortDelta ?? SERVER_PMCC_CRITERIA.shortDelta,
+      shortOiMin: shortCriteriaOverride?.shortOiMin ?? SERVER_PMCC_CRITERIA.shortOiMin,
+      quotePolicy: {
+        ...SERVER_PMCC_CRITERIA.quotePolicy,
+        qualifyingSpreadPctMax: shortCriteriaOverride?.qualifyingSpreadPctMax ?? SERVER_PMCC_CRITERIA.quotePolicy.qualifyingSpreadPctMax,
+      },
+    };
     const pairing = pairPmccCandidates({
       symbol: input.underlyingSymbol,
       underlyingPrice: longReview.spot ?? NaN,
       longLegs: [pmccLeg(longReview)],
       shortLegs: [pmccLeg(shortReview)],
-      criteria: SERVER_PMCC_CRITERIA,
+      criteria: effectiveCriteria,
       asOf: now,
       marketSession,
     });
     const pair = pairing.qualifiedPairs[0] ?? pairing.nearMissPairs[0] ?? null;
-    const decision = evaluatePmccDecision({ pair, criteria: SERVER_PMCC_CRITERIA, marketSession });
+    const decision = evaluatePmccDecision({ pair, criteria: effectiveCriteria, marketSession });
     if (!underlyingFresh && decision.qualification === 'QUALIFIED') {
       decision.readiness = 'WAIT_MONITOR';
       decision.action = 'BLOCKED';

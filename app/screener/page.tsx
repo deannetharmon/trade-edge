@@ -3583,8 +3583,12 @@ function buildPmccOrderLegs(pair: PmccPairResult): any[] {
 // LEAPS is thesis-driven and never gets a mechanical stop, and there is no
 // single "close the whole diagonal" automation since that's a manual,
 // two-leg decision when the trader decides it's time.
-function PmccTradeModal({ result, th, onClose }: {
+function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  // PMCC-ORDER-GATE-LIVE-FILTERS-0001: the live short-call filters from
+  // the PMCC scan modal, sent with the order review so the gate that
+  // can block an order matches what's actually shown on screen.
+  shortDeltaMin: number; shortDeltaMax: number; shortOiMin: number; maxSpreadPct: number;
 }) {
   const pair = result.pmccPair!;
   if (pair.entryMode === 'covered-short-call-against-held-leaps') {
@@ -3703,7 +3707,7 @@ function PmccTradeModal({ result, th, onClose }: {
       const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit }),
+        body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Dry run failed (${res.status})`);
@@ -3723,7 +3727,7 @@ function PmccTradeModal({ result, th, onClose }: {
       const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit }),
+        body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Order failed (${res.status})`);
@@ -11238,7 +11242,13 @@ export default function Home() {
         </div>
       </div>
 
-      {tradeResult?.strategy === 'PMCC' && tradeResult.pmccPair && <PmccTradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {tradeResult?.strategy === 'PMCC' && tradeResult.pmccPair && (
+        <PmccTradeModal
+          result={tradeResult} th={th} onClose={() => setTradeResult(null)}
+          shortDeltaMin={pmccShortDeltaMin} shortDeltaMax={pmccShortDeltaMax}
+          shortOiMin={pmccShortOiMin} maxSpreadPct={pmccMaxSpreadPct}
+        />
+      )}
       {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
