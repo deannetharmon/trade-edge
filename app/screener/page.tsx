@@ -2673,6 +2673,34 @@ function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): a
 // LEAPS-0002: extracted so each row can own its own expand/chart state,
 // matching how PmccResultCard/GenericResultCard already work -- a flat
 // array of candidates has nowhere to hang per-row local state otherwise.
+// LEAPS-IVR-COLOR-0001 -- FIRST-PASS THRESHOLDS, NOT YET VALIDATED.
+// Drawn from one afternoon's real candidates across MSFT/QQQ/SPY/AAPL/
+// GOOGL/JPM (IVR observed 10-43%, IVx observed 19.6-36.8%), the same
+// provisional status the Extrinsic% ceiling had before real data across
+// more tickers confirmed 20% as the actual line. Revisit both once more
+// symbols have been run through FIND LEAPS.
+const LEAPS_IVR_LOW_MAX = 25;
+const LEAPS_IVR_ELEVATED_MIN = 40;
+const LEAPS_IVX_LOW_MAX = 25;
+const LEAPS_IVX_ELEVATED_MIN = 30;
+
+type LeapsIvSignal = 'low' | 'elevated' | 'mid';
+function leapsIvSignal(value: number | null, lowMax: number, elevatedMin: number): LeapsIvSignal {
+  if (value == null) return 'mid';
+  if (value <= lowMax) return 'low';
+  if (value >= elevatedMin) return 'elevated';
+  return 'mid';
+}
+
+// Ian: the color only fires when IVR and IVx AGREE -- that's what makes
+// it a real combined signal rather than two numbers separately painted.
+// One low + one mid/elevated stays plain; it isn't a clean read either way.
+function leapsIvCombinedClass(ivRankSignal: LeapsIvSignal, ivxSignal: LeapsIvSignal): string | undefined {
+  if (ivRankSignal === 'low' && ivxSignal === 'low') return 'text-emerald-400 font-bold';
+  if (ivRankSignal === 'elevated' && ivxSignal === 'elevated') return 'text-amber-400 font-bold';
+  return undefined;
+}
+
 function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade }: {
   candidate: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
@@ -2859,12 +2887,13 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
             IVR/IVx matter at the moment you buy, not across a multi-year
             hold. 40% IVx threshold is a first-draft line, not yet
             Ian-reviewed against real candidate spread. */}
-        <span>
+        <span className={leapsIvCombinedClass(
+          leapsIvSignal(candidate.ivRank, LEAPS_IVR_LOW_MAX, LEAPS_IVR_ELEVATED_MIN),
+          leapsIvSignal(candidate.ivx, LEAPS_IVX_LOW_MAX, LEAPS_IVX_ELEVATED_MIN),
+        )}>
           IVR {candidate.ivRank != null ? `${candidate.ivRank.toFixed(0)}%` : '—'}
           {' '}·{' '}
-          IVx {candidate.ivx != null ? (
-            <span className={candidate.ivx >= 40 ? 'text-amber-400' : undefined}>{candidate.ivx.toFixed(1)}%</span>
-          ) : '—'}
+          IVx {candidate.ivx != null ? `${candidate.ivx.toFixed(1)}%` : '—'}
         </span>
         <span>OI {candidate.openInterest ?? '—'}</span>
         <span>Bid {candidate.bid != null ? formatMoneyDropExactZeroCents(candidate.bid) : '—'} / Ask {candidate.ask != null ? formatMoneyDropExactZeroCents(candidate.ask) : '—'}</span>
