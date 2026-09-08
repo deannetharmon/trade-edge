@@ -11092,13 +11092,13 @@ export default function Home() {
                 <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≥</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Delta ≥</span>
                       {[0.60, 0.65, 0.70, 0.75, 0.80].map(v => (
                         <button key={v} onClick={() => setLeapsDeltaMin(v)} className={chip(leapsDeltaMin === v)}>{v.toFixed(2)}</button>
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Delta ≤</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Delta ≤</span>
                       {[0.80, 0.85, 0.90, 0.95, 1.00].map(v => (
                         <button key={v} onClick={() => setLeapsDeltaMax(v)} className={chip(leapsDeltaMax === v)}>{v.toFixed(2)}</button>
                       ))}
@@ -11109,7 +11109,7 @@ export default function Home() {
                         (leapsScanBounds is null), show the full preset list
                         since there's no dataset yet to constrain against. */}
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≥</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>DTE ≥</span>
                       {[90, 120, 180, 270, 365]
                         .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
                         .map(v => (
@@ -11117,7 +11117,7 @@ export default function Home() {
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≤</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>DTE ≤</span>
                       {[365, 455, 545, 640, 730]
                         .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
                         .map(v => (
@@ -11125,7 +11125,7 @@ export default function Home() {
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>OI ≥</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>OI ≥</span>
                       {[0, 50, 100, 250, 500].map(v => (
                         <button key={v} onClick={() => setLeapsOiMin(v)} className={chip(leapsOiMin === v)}>{v === 0 ? 'Any' : v}</button>
                       ))}
@@ -11134,7 +11134,7 @@ export default function Home() {
                       {/* LEAPS-0003: extrinsic% ceiling. No default (0 =
                           Any) -- Ian: needs real candidate spread across
                           tickers before a cutoff is trustworthy. */}
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Extrinsic ≤</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Extrinsic ≤</span>
                       {[0, 10, 15, 20, 25, 30].map(v => (
                         <button key={v} onClick={() => setLeapsExtrinsicPctMax(v)} className={chip(leapsExtrinsicPctMax === v)}>{v === 0 ? 'Any' : `${v}%`}</button>
                       ))}
@@ -11150,7 +11150,7 @@ export default function Home() {
                       {showLeapsAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
                     </button>
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textMuted} shrink-0`}>Sort</span>
+                      <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Sort</span>
                       {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $'], ['extrinsicPctOfCost', 'Extrinsic % Cost']] as const).map(([field, label]) => (
                         <button
                           key={field}
@@ -11170,7 +11170,7 @@ export default function Home() {
                     </div>
                     {allSymbols.length > 1 && (
                       <div className="flex items-center gap-1.5">
-                        <span className={`text-[9px] ${th.textMuted} shrink-0`}>Tickers</span>
+                        <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Tickers</span>
                         {allSymbols.map(sym => (
                           <button key={sym} onClick={() => setLeapsHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym])}
                             className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
