@@ -8271,23 +8271,11 @@ export default function Home() {
     const discoveredSelection = heldSnapshot?.freshness === 'current' && heldSnapshot.dataQuality.status === 'ok'
       ? selectHeldPmccLongCandidates(heldSnapshot, discoveryRange)
       : selectHeldPmccLongCandidatesFromPositions(pmccPortfolioPositionsRef.current, discoveryRange);
-    const heldCandidates = pmcc.length
-      ? discoveredSelection.candidates.filter(candidate => pmcc.includes(candidate.underlyingSymbol))
-      : discoveredSelection.candidates;
-    // Anything dropped by the Opportunity-Universe narrowing above is a
-    // REAL exclusion, not silence -- an eligible held call that simply
-    // isn't in the current ticker list is a different fact than "you
-    // don't own this," and the trader needs to be able to tell them
-    // apart.
-    const universeNarrowedOutExclusions = pmcc.length
-      ? discoveredSelection.candidates
-          .filter(candidate => !pmcc.includes(candidate.underlyingSymbol))
-          .map(candidate => ({
-            positionKey: candidate.positionKey,
-            symbol: candidate.underlyingSymbol,
-            reason: 'Held long call is eligible but not in the current Opportunity Universe ticker list',
-          }))
-      : [];
+    // PMCC-NO-UNIVERSE-0001 (Dean/Ian): PMCC scans what you already hold,
+    // not a research candidate list -- the Opportunity Universe doesn't
+    // apply here. Every eligible held long call is always shown; the
+    // Opportunity Universe never narrows this.
+    const heldCandidates = discoveredSelection.candidates;
     const heldSelection = { ...discoveredSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(candidate => candidate.underlyingSymbol)));
     if (!scanSymbols.length) {
@@ -8295,16 +8283,12 @@ export default function Home() {
       // repeat the same reason across several positions of the same
       // symbol; the trader needs the distinct reasons, not every row.
       const distinctExclusions = Array.from(
-        new Map(
-          [...discoveredSelection.exclusions, ...universeNarrowedOutExclusions].map(e => [`${e.symbol}::${e.reason}`, e]),
-        ).values(),
+        new Map(discoveredSelection.exclusions.map(e => [`${e.symbol}::${e.reason}`, e])).values(),
       );
       return {
         ok: false as const,
         reason: 'empty' as const,
-        error: pmcc.length
-          ? 'No eligible held long calls match the selected tickers in the active portfolio.'
-          : 'No eligible held long calls were found in the active portfolio.',
+        error: 'No eligible held long calls were found in the active portfolio.',
         exclusions: distinctExclusions,
       };
     }

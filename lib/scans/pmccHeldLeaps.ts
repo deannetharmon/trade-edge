@@ -27,6 +27,19 @@ export interface HeldPmccSelection {
   exclusions: HeldPmccExclusion[];
 }
 
+// Dean: a put (or a short call, or anything else that isn't a single-leg
+// long call) sitting in the portfolio is routine, not a PMCC anomaly --
+// PMCC simply never looks at those positions, same as CC doesn't
+// complain about puts either. This is checked separately from the real
+// structural-anomaly cases below so the caller can skip it SILENTLY
+// (no exclusion entry) instead of surfacing generic noise for the most
+// common, totally expected case.
+function isRoutinelyNotAPmccLongCall(position: Position): boolean {
+  if (position.legs.length !== 1) return false; // multi-leg is a real anomaly, not routine
+  const leg = position.legs[0];
+  return leg.direction !== 'Long' || leg.optionType !== 'C';
+}
+
 function exactOneLongCall(position: Position): HeldPmccLongCandidate | null {
   // Discovery is review-only: a close-order identity is not relevant to
   // whether the broker reports one exact long call. Structural ambiguity is
@@ -69,6 +82,7 @@ export function selectHeldPmccLongCandidates(
   const candidates: HeldPmccLongCandidate[] = [];
   const exclusions: HeldPmccExclusion[] = [];
   for (const position of snapshot.options) {
+    if (isRoutinelyNotAPmccLongCall(position)) continue; // e.g. a put -- routine, not worth flagging
     const candidate = exactOneLongCall(position);
     if (candidate == null || candidate.accountNumber !== snapshot.accountNumber) {
       exclusions.push({ positionKey: position.key, symbol: position.symbol, reason: 'Not an unambiguous single-leg long call in the active account' });
@@ -108,6 +122,7 @@ export function selectHeldPmccLongCandidatesFromPositions(
   const candidates: HeldPmccLongCandidate[] = [];
   const exclusions: HeldPmccExclusion[] = [];
   for (const position of positions) {
+    if (isRoutinelyNotAPmccLongCall(position)) continue; // e.g. a put -- routine, not worth flagging
     const candidate = exactOneLongCall(position);
     if (candidate == null || candidate.accountNumber !== accountNumber) {
       exclusions.push({ positionKey: position.key, symbol: position.symbol, reason: 'Not an unambiguous single-leg long call in the active account' });
