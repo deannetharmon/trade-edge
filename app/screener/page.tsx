@@ -5417,6 +5417,11 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>Assignment proceeds: </span><span className={th.text}>${c.ccAssignmentProceeds?.toLocaleString() ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract, strike × 100)</span></div>
                 <div><span className={th.label}>Max upside if called away: </span><span className={th.text}>{c.ccMaxUpsideIfCalledAway != null ? `$${c.ccMaxUpsideIfCalledAway.toFixed(2)}/share` : 'Unavailable'}</span></div>
                 <div><span className={th.label}>Period / annualized yield: </span><span className={th.text}>{c.ccPeriodYieldOnShares?.toFixed(2) ?? '—'}% / {c.ccAnnualizedYieldOnShares?.toFixed(0) ?? '—'}%</span></div>
+                {/* CC-IVR-IVX-PARITY-0001: same entry-timing signals CSP/
+                    LEAPS/PMCC already show -- CC was the one strategy
+                    missing them. Plain text, same tier as the other
+                    context fields on this card, not a decision number. */}
+                <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
