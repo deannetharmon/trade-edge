@@ -13,6 +13,7 @@ import { buildCapitalViewModel, buildMoneynessViewModel, comparisonTone, directi
 import { buildBreakevenViewModel } from './model/breakeven';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
+import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
   return value === 'true';
@@ -418,7 +419,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
           <span key={action} className="contents">
             <span className="flex items-center gap-1">
               <button type="button" onClick={() => onExecute?.(p, action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">Close Position</button>
-              {p.recommendation?.action === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
+              {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
             </span>
             <span className="flex items-center gap-1">
               <button type="button" onClick={() => onExecute?.(p, action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-[10px] text-purple-300 focus:ring-2 focus:ring-purple-400">Roll Position</button>
@@ -427,7 +428,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
         ) : (
           <span key={action} className="flex items-center gap-1">
             <button type="button" onClick={() => onExecute?.(p, action)} className={`min-h-8 rounded border px-2 text-[10px] focus:ring-2 focus:ring-teal-400 ${action === 'CUT_LOSSES' ? 'border-red-500/50 text-red-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>
-            {p.recommendation?.action === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
+            {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
           </span>
         ))}
       </span>
