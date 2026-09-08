@@ -1505,9 +1505,15 @@ function runCcChecklist(
     && oiCheck.status !== 'fail'
     && bestCandidate !== null;
 
+  // CC-IVR-IVX-PARITY-0001: CC already had ivr (metrics.ivRank), but ivx
+  // was hardcoded to null even though the same getMarketMetrics call that
+  // supplies ivrValue also carries expirationIvxMap -- CSP/LEAPS/PMCC all
+  // already look this up for their own candidate's specific expiration;
+  // CC was the one place still missing it.
+  const ivxValue: number | null = bestCandidate ? (metrics.expirationIvxMap?.[bestCandidate.expiration] ?? null) : null;
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
-    ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+    ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
     qualified, bestCandidate, failReasons,
     earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
     underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CC',
