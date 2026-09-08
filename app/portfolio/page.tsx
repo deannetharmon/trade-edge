@@ -6168,6 +6168,19 @@ function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof 
   return <div><SetStopLossButton pos={pos} th={th} /><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
 }
 
+// STOP-DIALOG-LABELING-0001 follow-up — deterministic, testable string
+// substitution only (Alan's explicit constraint: no second model call).
+// Replaces the numeric value in the FIRST "<number> times|x|×" match with
+// the deterministic multiplier, preserving the unit word and all
+// surrounding text exactly as the AI wrote it (Ian's explicit constraint:
+// don't mangle phrasing like "just over 1x" into nonsense). If no such
+// pattern is found in the text, returns it unchanged rather than guessing
+// where to inject a number.
+function alignRationaleMultiplier(text: string, deterministicMultiple: number): string {
+  if (!text) return text;
+  return text.replace(/(\d+(?:\.\d+)?)(\s*)(times|x|×)/i, (_match, _num, space, unit) => `${deterministicMultiple.toFixed(2)}${space}${unit}`);
+}
+
 function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const portfolioMode = usePortfolioMode();
   const entryCredit = canonicalEntryCredit(pos)!;
@@ -6355,6 +6368,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       const live = livePrice ?? liveValuePerContract;
       const safeGtc  = live != null ? Math.min(clampedGtc,  live - 0.01) : clampedGtc;
       const safeStop = live != null ? Math.max(clampedStop, live + 0.01) : clampedStop;
+      const deterministicStopMultiple = live != null
+        ? parseFloat((safeStop / live).toFixed(2))
+        : parseFloat((safeStop / creditPerContract).toFixed(2));
 
       if (!mountedRef.current) return;
       setSuggestion({
@@ -6370,9 +6386,17 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         // deterministically here (don't trust the model's arithmetic), but
         // relative to the correct anchor: current spread value when known,
         // falling back to credit only when no live price is available.
-        stopMultiple: live != null
-          ? parseFloat((safeStop / live).toFixed(2))
-          : parseFloat((safeStop / creditPerContract).toFixed(2)),
+        stopMultiple: deterministicStopMultiple,
+        // STOP-DIALOG-LABELING-0001 follow-up (Ian/Alan approved) — the
+        // badge above shows deterministicStopMultiple, never the model's
+        // own arithmetic, but the AI's prose rationale could still state a
+        // DIFFERENT number for the same multiplier (model math can drift
+        // from ours). Align the prose to the deterministic number with a
+        // plain string substitution — no second model call, no risk of a
+        // new drift source (Alan's constraint) — replacing only the FIRST
+        // "<number> times/x/×" match so surrounding phrasing the AI wrote
+        // is preserved untouched (Ian's constraint), not blindly rewritten.
+        stopRationale: alignRationaleMultiplier(s.stopRationale, deterministicStopMultiple),
       });
       setGtcPrice(safeGtc.toFixed(2));
       setStopPrice(safeStop.toFixed(2));
