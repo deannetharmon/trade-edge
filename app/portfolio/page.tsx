@@ -6006,7 +6006,7 @@ OUTPUT FORMAT — JSON only, nothing else:
   "stopMultiple": <number: how many times the CURRENT spread value this represents — NOT original credit>,
   "rationale": "<2-3 sentence overall rationale — reference actual numbers from the position>",
   "gtcRationale": "<1-2 sentences specifically about the GTC choice>",
-  "stopRationale": "<1-2 sentences specifically about the stop — reference current spread value, not original credit>",
+  "stopRationale": "<1-2 sentences that explicitly name the basis and consequence, e.g. 'The stop is set at Xx the current spread value ($Y.YY), leaving Z room for further adverse movement before stopping.' Always state the multiplier AND that it's relative to current spread value (never original credit) AND what that means for room to move — all three, not just the number>",
   "confidence": "HIGH|MEDIUM|LOW",
   "deviatesFromRules": true|false,
   "deviationNote": null or "<explanation if deviating from standard rules>"
@@ -6949,7 +6949,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     <p className={`text-[9px] ${th.textFaint}`}>
                       {(effectiveLiveDisplay != null
                         ? (suggestion.stopPrice / effectiveLiveDisplay).toFixed(2)
-                        : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current value' : 'credit'}
+                        : suggestion.stopMultiple)}× {effectiveLiveDisplay != null ? 'current spread value' : 'original credit'}
                     </p>
                     {suggStopOutcomePnlDollars != null && (
                       <p className={`text-[11px] font-bold mt-0.5 ${suggStopOutcomePnlDollars >= 0 ? 'text-emerald-300' : 'text-orange-300'}`}>{signedDollar(suggStopOutcomePnlDollars)}</p>
@@ -7023,7 +7023,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
                   style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                 />
-                <span className={`text-[10px] ${th.textFaint} shrink-0`}>× credit =</span>
+                <span className={`text-[10px] ${th.textFaint} shrink-0`}>× original credit (${creditPerContract.toFixed(2)}) =</span>
                 <input
                   type="number" min={stopMin} max={stopMax} step="0.01" value={stopPrice}
                   onChange={e => {
@@ -7050,6 +7050,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               {!stopError && effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint} mt-0.5 ml-28`}>
                   valid range: ${Math.max(stopMin, effectiveLiveDisplay + 0.01).toFixed(2)} – ${stopMax.toFixed(2)}
+                </p>
+              )}
+              {!stopError && creditPerContract > 0 && stopParsed > 0 && (
+                <p className={`text-[9px] ${th.textFaint} ml-28`}>
+                  {Math.round((stopParsed / creditPerContract) * 100)}% from entry credit
                 </p>
               )}
               {!stopError && stopPctOfMaxRisk != null && (
