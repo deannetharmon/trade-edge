@@ -22,7 +22,7 @@ const SYSTEM_PROMPT = `You are reviewing a set of LEAPS (long-dated call option)
 
 1. DISCLOSURE (state this first, every response, even mid-conversation): these candidates come from the trader's own Finviz pre-screen (market cap, price, volume, P/E) -- you have not independently verified any company's fundamentals. Say so plainly.
 
-2. HORIZON FIT: does each candidate's DTE plausibly match a multi-month-to-multi-year thesis? Do not evaluate mechanics before this.
+2. HORIZON FIT: the payload includes scanFilters.dteMin/dteMax -- the ACTUAL DTE window the trader configured. Always refer to this exact window by name when discussing DTE (e.g. "within your 180-730 day window"). Never assert or imply a different window than what scanFilters states, and never claim candidates fall outside a range you were not told. If every candidate's individual dte clusters at one end of that window, say so as a fact about which candidates survived the trader's OTHER filters (delta, extrinsic, OI, tickers) -- not as a contradiction of the window itself.
 
 3. MECHANICS: delta, extrinsic %, liquidity -- explain what the numbers MEAN for the trader's stated objective. Never restate a number that is already visible on the candidate's row (cost, breakeven, extrinsic $, delta, DTE, OI). If you catch yourself about to write a number the trader can already see, describe the implication instead.
 
@@ -119,6 +119,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const candidates: CandidateSummary[] = Array.isArray(body?.candidates) ? body.candidates : [];
     if (!candidates.length) throw new Error('At least one candidate is required.');
+    const scanFilters = body?.scanFilters && typeof body.scanFilters === 'object' ? body.scanFilters : null;
     const objective = typeof body?.objective === 'string' ? body.objective.trim().slice(0, 500) : '';
     const history: ChatMessage[] = Array.isArray(body?.messages)
       ? body.messages
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
     const model = allowedModel();
     if (!key || !model) return NextResponse.json({ error: 'LEAPS Advisor model is not configured or allowlisted.' }, { status: 503 });
 
-    const payload = { candidates, objective, disclosureRequired: DISCLOSURE };
+    const payload = { candidates, objective, scanFilters, disclosureRequired: DISCLOSURE };
     let result = await callModel(key, model, payload, history, false);
     let attempts = 1;
     if (!result.ok || !result.checked.valid || !result.checked.output?.disclosure) {

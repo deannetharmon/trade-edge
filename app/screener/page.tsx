@@ -2768,6 +2768,14 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           candidates: summarize(), objective,
+          // Alan: the model was never told the actual configured DTE
+          // window (e.g. 180-730), only individual candidates' raw dte
+          // values -- it had to guess what "your selected window" even
+          // was, and guessed wrong. Sending it explicitly lets the model
+          // correctly say "of your 180-730 day window, what passed your
+          // other filters clusters under 365 days" instead of just
+          // asserting something that contradicts the trader's own chips.
+          scanFilters: filters,
           messages: outgoing.map(m => ({ role: m.role, content: m.content })),
         }),
       });
