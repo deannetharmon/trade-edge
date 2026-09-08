@@ -148,6 +148,11 @@ export const LEAPS_CACHE_KEY = 'screenerLeapsSession_v1';
 export interface LeapsCachedSession {
   results: unknown[];
   filters: { deltaMin: number; deltaMax: number; dteMin: number; dteMax: number; oiMin: number; extrinsicPctMax: number };
+  // LEAPS-SCAN-MODAL-0001: the DTE range actually used for this scan's
+  // broker fetch -- optional so an older cached session (from before this
+  // field existed) still restores fine, just without DTE chip clamping
+  // until the next scan runs.
+  scanBounds?: { dteMin: number; dteMax: number };
   cachedAt: number;
 }
 

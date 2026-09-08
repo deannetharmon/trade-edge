@@ -157,6 +157,7 @@ import { LauncherButton, type LauncherStrategyId } from '@/features/screener/com
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
+import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -7182,6 +7183,14 @@ export default function Home() {
   const [showCspRunModal, setShowCspRunModal] = useState(false);
   const [showPmccScanModal, setShowPmccScanModal] = useState(false);
   const [showCcScanModal, setShowCcScanModal] = useState(false);
+  const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
+  // LEAPS-SCAN-MODAL-0001: the DTE range actually used for the last scan's
+  // broker fetch. Only DTE gates the fetch (Delta/OI/Extrinsic never have
+  // -- see LeapsScanModal's header comment) -- so this is the one thing
+  // that genuinely bounds "what's in the dataset", and it's what the DTE
+  // chip rows below get clamped to. null before any scan has run, meaning
+  // no dataset exists yet to constrain the chips against.
+  const [leapsScanBounds, setLeapsScanBounds] = useState<{ dteMin: number; dteMax: number } | null>(null);
   // DEFAULT_CC_RULES until a modal run overrides it -- matches the "opening
   // the modal copies saved defaults into a draft, only a submitted run
   // changes what the scan actually uses" pattern from CspScanModal, minus
@@ -7694,6 +7703,7 @@ export default function Home() {
       if (session.filters.dteMax != null) setLeapsDteMax(session.filters.dteMax);
       setLeapsOiMin(session.filters.oiMin);
       setLeapsExtrinsicPctMax(session.filters.extrinsicPctMax);
+      if (session.scanBounds) setLeapsScanBounds(session.scanBounds);
     });
   }, []);
 
@@ -8411,7 +8421,7 @@ export default function Home() {
   // Find LEAPS is deliberately independent from PMCC. It discovers possible
   // new long calls only for trader-supplied tickers; it never reads holdings
   // and never pairs a short call.
-  const runLeapsScan = async () => {
+  const runLeapsScan = async (request: LeapsScanRequest) => {
     if (!opportunityUniverse.length) {
       setError('Add at least one ticker to the Opportunity Universe before finding new LEAPS candidates.');
       return;
@@ -8433,8 +8443,11 @@ export default function Home() {
         // extra in wall-clock time). A metrics failure never blocks the scan;
         // candidates just show '--' for these two fields (Alan's honesty
         // pattern -- no fabricated IVR/IVx).
+        // LEAPS-SCAN-MODAL-0001: the fetch window is now the modal's own
+        // DTE range, not the fixed PMCC_LONG_DTE_MIN/MAX constants -- the
+        // dataset genuinely only contains what was asked for.
         const [chain, quote, metricsArray] = await Promise.all([
-          getPMCCChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: PMCC_LONG_DTE_MIN, longMax: PMCC_LONG_DTE_MAX }),
+          getPMCCChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: request.dteMin, longMax: request.dteMax }),
           getQuote(symbol, token).catch(() => null),
           getMarketMetrics([symbol], token).catch(() => []),
         ]);
@@ -8483,13 +8496,22 @@ export default function Home() {
       setLeapsResults(found);
       setScreenMode('leaps');
       try { localStorage.setItem(LS_SCREEN_MODE, 'leaps'); } catch {}
+      // LEAPS-SCAN-MODAL-0001: the modal's chosen values become the new
+      // results-page chip starting point (continuity, not reset -- Ian),
+      // and the DTE range specifically is recorded as this scan's real
+      // fetch bounds so the DTE chips below can be clamped to it.
+      setLeapsDeltaMin(request.deltaMin); setLeapsDeltaMax(request.deltaMax);
+      setLeapsDteMin(request.dteMin); setLeapsDteMax(request.dteMax);
+      setLeapsOiMin(request.oiMin); setLeapsExtrinsicPctMax(request.extrinsicPctMax);
+      setLeapsScanBounds({ dteMin: request.dteMin, dteMax: request.dteMax });
       // LEAPS-0003: persists results + active filters so they survive a
       // refresh, matching the other three modes' behavior -- via LEAPS'
       // own separate cache key, not the shared ScreenerScanSession model
       // (see persistLeapsSession's doc comment for why).
       persistLeapsSession({
         results: found,
-        filters: { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax },
+        filters: { deltaMin: request.deltaMin, deltaMax: request.deltaMax, dteMin: request.dteMin, dteMax: request.dteMax, oiMin: request.oiMin, extrinsicPctMax: request.extrinsicPctMax },
+        scanBounds: { dteMin: request.dteMin, dteMax: request.dteMax },
       });
     } catch (scanError: any) {
       setError(scanError?.message ?? 'Unable to load LEAPS candidates from broker market data.');
@@ -9312,7 +9334,7 @@ export default function Home() {
                 label="FIND LEAPS"
                 isSelected={screenMode === 'leaps'}
                 isRunning={false}
-                onClick={() => void runLeapsScan()}
+                onClick={() => setShowLeapsScanModal(true)}
                 disabled={loading || !opportunityUniverse.length}
                 title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : 'Finds new long-call candidates for the selected tickers.'}
               >
@@ -10756,15 +10778,24 @@ export default function Home() {
                         <button key={v} onClick={() => setLeapsDeltaMax(v)} className={chip(leapsDeltaMax === v)}>{v.toFixed(2)}</button>
                       ))}
                     </div>
+                    {/* LEAPS-SCAN-MODAL-0001: only options that narrow the
+                        actually-scanned DTE range are offered -- nothing
+                        wider than what was fetched. Before any scan has run
+                        (leapsScanBounds is null), show the full preset list
+                        since there's no dataset yet to constrain against. */}
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≥</span>
-                      {[90, 120, 180, 270, 365].map(v => (
+                      {[90, 120, 180, 270, 365]
+                        .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
+                        .map(v => (
                         <button key={v} onClick={() => setLeapsDteMin(v)} className={chip(leapsDteMin === v)}>{v}</button>
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textMuted} shrink-0`}>DTE ≤</span>
-                      {[365, 455, 545, 640, 730].map(v => (
+                      {[365, 455, 545, 640, 730]
+                        .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
+                        .map(v => (
                         <button key={v} onClick={() => setLeapsDteMax(v)} className={chip(leapsDteMax === v)}>{v}</button>
                       ))}
                     </div>
@@ -10937,6 +10968,18 @@ export default function Home() {
             setShowCcScanModal(false);
             setCcRules(request.rules);
             void runCcScan(ccBypassUniverse, request.rules);
+          }}
+        />
+      )}
+      {showLeapsScanModal && (
+        <LeapsScanModal
+          th={th}
+          selectedTickerCount={opportunityUniverse.length}
+          initial={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
+          onClose={() => setShowLeapsScanModal(false)}
+          onRun={(request: LeapsScanRequest) => {
+            setShowLeapsScanModal(false);
+            void runLeapsScan(request);
           }}
         />
       )}
