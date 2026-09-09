@@ -96,6 +96,7 @@ import {
   MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
 } from '@/lib/screener/screenerResultOrdering';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
@@ -2679,20 +2680,6 @@ function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
   }
   return legs;
 }
-function buildOrderPayload(c: SpreadCandidate, quantity: number, legs: any[]): any {
-  const isPMCC = c.strategy === 'PMCC';
-  const entryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
-  const val = (entryPrice * quantity).toFixed(2);
-  
-  return {
-    'time-in-force': 'GTC',
-    'order-type': 'Limit',
-    price: val,
-    'price-effect': isPMCC ? 'Debit' : 'Credit',
-    legs: legs.map(l => ({ ...l, quantity })),
-  };
-}
-
 // LEAPS-0001: a genuinely new, purpose-built modal, not an adaptation of
 // TradeModal -- checked buildOrderLegs/buildOrderPayload first, and both
 // are hard-coded per multi-leg strategy (PMCC/BPS/BCS/IC), with no case
@@ -3493,8 +3480,16 @@ function TradeModal({ result, th, onClose }: {
   const [entryLimit, setEntryLimit] = useState(parseFloat(defaultEntryPrice.toFixed(2)));
 
   const [gtcPct, setGtcPct] = useState(50);
-  const creditPerContract = isPMCC ? c.credit : (c.totalCredit ?? c.credit);
-  const gtcBuyback = parseFloat((creditPerContract * (1 - gtcPct / 100)).toFixed(2));
+  const [stopMultiple, setStopMultiple] = useState(2);
+  // Exits must be based on the order's actual entry limit, not the scan's
+  // original quote. If the trader adjusts the entry price, the bracket stays
+  // aligned with the credit they are asking the broker to fill.
+  const exitCredit = entryLimit;
+  const gtcBuyback = parseFloat((exitCredit * (1 - gtcPct / 100)).toFixed(2));
+  const stopTrigger = parseFloat((exitCredit * stopMultiple).toFixed(2));
+  const stopLimit = parseFloat((stopTrigger * 1.10).toFixed(2));
+  const stopCreditPct = Math.round(stopMultiple * 100);
+  const stopPnlPct = Math.round((1 - stopMultiple) * 100);
 
   const otmPct = (() => {
     if (result.price == null) return null;
@@ -3530,32 +3525,15 @@ function TradeModal({ result, th, onClose }: {
     ? tradeCostOrCredit * 100 
     : (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
 
-  const buildOtoPayload = (qty: number) => {
-    const legs = buildOrderLegs(result, c);
-    const closingLegs = legs.map((l: any) => ({
-      ...l,
+  const buildOtocoPayload = (qty: number) => {
+    return buildCreditEntryOtoco({
+      entryCredit: entryLimit,
+      profitBuyback: gtcBuyback,
+      stopTrigger,
+      stopLimit,
       quantity: qty,
-      action: l.action === 'Sell to Open' ? 'Buy to Close' : 'Sell to Close',
-    }));
-    return {
-      type: 'OTO',
-      'trigger-order': {
-        'time-in-force': 'GTC',
-        'order-type': 'Limit',
-        price: entryLimit.toFixed(2),
-        'price-effect': 'Credit',
-        legs: legs.map((l: any) => ({ ...l, quantity: qty })),
-      },
-      orders: [
-        {
-          'time-in-force': 'GTC',
-          'order-type': 'Limit',
-          price: gtcBuyback.toFixed(2),
-          'price-effect': 'Debit',
-          legs: closingLegs,
-        },
-      ],
-    };
+      legs: buildOrderLegs(result, c),
+    });
   };
 
   const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
@@ -3589,10 +3567,8 @@ function TradeModal({ result, th, onClose }: {
     try {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const legs = buildOrderLegs(result, c);
-      const payload = buildOrderPayload(c, quantity, legs);
-      payload.price = entryLimit.toFixed(2);
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/orders/dry-run`, {
+      const payload = buildOtocoPayload(quantity);
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -3611,7 +3587,7 @@ function TradeModal({ result, th, onClose }: {
     try {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildOtoPayload(quantity);
+      const payload = buildOtocoPayload(quantity);
       const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -3717,9 +3693,11 @@ function TradeModal({ result, th, onClose }: {
         {/* GTC Profit Target */}
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold tracking-widest text-emerald-400">GTC PROFIT TARGET</p>
+            <p className="text-[10px] font-bold tracking-widest text-emerald-400">OCO EXIT ORDERS</p>
             <span className={`text-[9px] ${th.textFaint}`}>closes at ${gtcBuyback.toFixed(2)} debit</span>
           </div>
+          <p className={`mb-2 text-[9px] ${th.textFaint}`}>Both exits are contingent on the entry filling; when either exit fills, the other cancels.</p>
+          <p className="text-[10px] font-bold tracking-widest text-emerald-400">PROFIT TARGET</p>
           <div className="flex items-center gap-2">
             {[25, 50, 65, 75].map(pct => (
               <button key={pct} onClick={() => setGtcPct(pct)}
@@ -3728,7 +3706,25 @@ function TradeModal({ result, th, onClose }: {
               </button>
             ))}
           </div>
-          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close at ${gtcBuyback.toFixed(2)} when {gtcPct}% of ${creditPerContract.toFixed(2)} credit is captured</p>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Buy to close at ${gtcBuyback.toFixed(2)} · {gtcPct}% profit captured from ${exitCredit.toFixed(2)} entry credit</p>
+          <div className={`my-3 border-t ${th.border}`} />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-bold tracking-widest text-orange-400">STOP LOSS</p>
+            <span className={`text-[9px] ${th.textFaint}`}>trigger ${stopTrigger.toFixed(2)} · {stopCreditPct}% credit</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {[1.5, 2, 2.5].map(multiple => (
+              <button key={multiple} onClick={() => setStopMultiple(multiple)}
+                className={`flex-1 py-1.5 rounded text-[10px] font-bold border transition-colors ${stopMultiple === multiple ? 'bg-orange-600 border-orange-500 text-white' : `${th.border} ${th.textFaint} hover:border-orange-600`}`}>
+                {multiple.toFixed(1)}×
+              </button>
+            ))}
+            <label className="sr-only" htmlFor="entry-stop-multiple">Stop multiple of entry credit</label>
+            <input id="entry-stop-multiple" type="number" min="1.5" max="3" step="0.1" value={stopMultiple}
+              onChange={event => setStopMultiple(Math.min(3, Math.max(1.5, Number(event.target.value) || 2)))}
+              className={`w-16 rounded border ${th.border} ${th.input} px-2 py-1.5 text-[10px] text-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-400`} aria-label="Stop multiple of entry credit" />
+          </div>
+          <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop-limit buy to close: triggers at ${stopTrigger.toFixed(2)} debit ({stopCreditPct}% of credit / {stopPnlPct}% P/L), then permits a limit up to ${stopLimit.toFixed(2)} debit.</p>
         </div>
 
         {/* Dry run result */}
@@ -3742,8 +3738,8 @@ function TradeModal({ result, th, onClose }: {
 
         {phase === 'done' && (
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
-            <p className="text-xs text-emerald-400 font-bold">✓ OTO order submitted — ID {orderId}</p>
-            <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) submitted as a single bracket order.</p>
+            <p className="text-xs text-emerald-400 font-bold">✓ OTOCO order submitted — ID {orderId}</p>
+            <p className="text-[10px] text-emerald-400/70">Entry + {gtcPct}% profit target + {stopMultiple.toFixed(1)}×-credit stop ({stopPnlPct}% P/L) submitted as one OCO bracket.</p>
             {entryContextWarning && <p className="text-[10px] text-amber-300 pt-1">{entryContextWarning}</p>}
           </div>
         )}
