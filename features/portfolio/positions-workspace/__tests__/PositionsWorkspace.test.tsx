@@ -109,6 +109,21 @@ describe('PositionsWorkspace', () => {
     expect(onExecute).toHaveBeenLastCalledWith(position, 'CLOSE_ROLL', 'roll');
   });
 
+  it('labels the stop action from the actual stop state', async () => {
+    const user = userEvent.setup();
+    const stopControl = () => <div>Stop editor</div>;
+    const first = render(<PositionsWorkspace model={model} th={THEMES.dark} renderStopControl={stopControl} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('button', { name: 'Add Stop' })).toBeInTheDocument();
+    first.unmount();
+
+    const protectedPosition = { ...position, stopLossClassification: 'ALIGNED' } as Position;
+    const protectedModel = { ...model, analysisRows: [{ id: protectedPosition.key, position: protectedPosition, symbol: protectedPosition.symbol, strategy: protectedPosition.strategy, needsAttention: false }] } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={protectedModel} th={THEMES.dark} renderStopControl={stopControl} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('button', { name: 'Adjust Stop' })).toBeInTheDocument();
+  });
+
   it('formats canonical credit targets and hides targets for unsupported economics', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);

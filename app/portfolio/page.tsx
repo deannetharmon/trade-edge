@@ -1651,12 +1651,12 @@ function isActionRelevant(pos: Position, action: ActionType, canonicalAction?: A
   if (pos.structureAmbiguous || !pos.identity) return false;
   const entryComplete = hasSupportedCreditEntryEconomics(pos);
   if (action === 'TAKE_PROFIT') {
-    // Take Profit is a valid manual choice on ANY position currently in the
-    // green — not only when the formal target is hit or the engine recommends
-    // it. pnl > 0 is the gate; hitTarget / recommendation are kept so the
-    // button still shows for at-target positions even if pnl rounds to 0.
-    const inProfit = pos.pnl != null && pos.pnl > 0;
-    return entryComplete && (inProfit || pos.hitTarget || canonicalAction === 'TAKE_PROFIT');
+    // The workspace shows the marketable close-now P/L when it is available.
+    // A trader may choose to take any real profit, but the button must use
+    // that same displayed value so a positive midpoint never produces a
+    // Take Profit action beside a negative close-now P/L.
+    const displayedPnl = pos.closeNowPnl ?? pos.pnl;
+    return entryComplete && displayedPnl != null && displayedPnl > 0;
   }
   if (action === 'CUT_LOSSES') {
     // TE-0002 Round 4: Cut Losses is a MANUAL action, independent of the
