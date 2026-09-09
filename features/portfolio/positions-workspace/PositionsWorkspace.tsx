@@ -139,6 +139,9 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   // PRICEALERT-0001: same store/fetch/save shape as notes above.
   const [priceAlerts, setPriceAlerts] = useState<Record<string, { targetPrice: number; direction: 'above' | 'below' }>>({});
   const [priceAlertsLoadError, setPriceAlertsLoadError] = useState<string | null>(null);
+  // GET and a trader's first blur-save can race on initial mount.  Once a
+  // local mutation starts, an older GET payload must never overwrite it.
+  const priceAlertsLocallyMutated = useRef(false);
   const [analysisPosition, setAnalysisPosition] = useState<Position | null>(null);
   const [analysis, setAnalysis] = useState<WorkspaceAiAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -166,7 +169,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     fetch('/api/position-price-alerts').then(async response => {
       if (!response.ok) throw new Error((await response.json().catch(() => ({})))?.error ?? 'Unable to load price alerts');
       const payload = await response.json();
-      if (active) setPriceAlerts(payload.alerts ?? {});
+      if (active && !priceAlertsLocallyMutated.current) setPriceAlerts(payload.alerts ?? {});
     }).catch(error => { if (active) setPriceAlertsLoadError(error instanceof Error ? error.message : 'Unable to load price alerts'); });
     return () => { active = false; };
   }, []);
@@ -185,6 +188,9 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const savePriceAlert = async (position: Position, targetPrice: number | null, direction: 'above' | 'below') => {
     const accountNumber = position.accountNumber || model.accountNumber;
     if (!accountNumber) throw new Error('Broker account identity is unavailable');
+    // Mark before the request, rather than after it resolves: the initial GET
+    // may resolve while this POST is in flight with a pre-save empty store.
+    priceAlertsLocallyMutated.current = true;
     const response = await fetch('/api/position-price-alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: position.key, targetPrice, direction }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? 'Unable to save price alert');
