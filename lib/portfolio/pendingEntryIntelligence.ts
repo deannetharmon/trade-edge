@@ -36,10 +36,22 @@ export function assessPendingEntry(order: PendingOrder): PendingEntryAssessment 
     };
   }
   if (['working', 'live', 'routed'].includes(status)) {
+    const hasQuote = order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null;
+    const requestedIsOutsideMarket = hasQuote && order.limitPrice != null && (
+      order.priceEffect === 'Credit'
+        ? order.limitPrice > order.currentExecutablePrice!
+        : order.priceEffect === 'Debit'
+          ? order.limitPrice < order.currentExecutablePrice!
+          : false
+    );
     return {
-      state: 'LIVE_AT_EXCHANGE', recommendation: 'REVIEW_PRICE',
-      stateLabel: 'Live at Exchange', recommendationLabel: 'Review Price',
-      explanation: 'The broker reports this entry as live. A fresh executable quote is required before deciding whether to reprice it.',
+      state: 'LIVE_AT_EXCHANGE', recommendation: requestedIsOutsideMarket ? 'REVIEW_PRICE' : hasQuote ? 'KEEP_WORKING' : 'REVIEW_MANUALLY',
+      stateLabel: 'Live at Exchange', recommendationLabel: requestedIsOutsideMarket ? 'Review Price' : hasQuote ? 'Keep Working' : 'Review Manually',
+      explanation: requestedIsOutsideMarket
+        ? 'Your requested limit is outside the current executable price. Review it before choosing a manual same-trade reprice.'
+        : hasQuote
+          ? 'The requested limit remains within the current executable range; keep it working unless your entry thesis changed.'
+          : 'A fresh two-sided quote is required before evaluating a price change.',
     };
   }
   if (['contingent', 'pending'].includes(status)) {

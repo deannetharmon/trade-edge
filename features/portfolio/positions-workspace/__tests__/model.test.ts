@@ -82,12 +82,12 @@ describe('positions workspace model', () => {
 });
 
 describe('analysis controls', () => {
-  it('defines seventeen columns without the obsolete movement column and protects identity', () => {
+  it('defines sixteen columns without the obsolete Greeks column and protects identity', () => {
     // Grown from 14 across the session's tickets: netEdge, pop (POP-0001),
     // priceAlert (PRICEALERT-0001) -- this test wasn't updated at the time
     // each landed.
-    expect(ANALYSIS_COLUMNS).toHaveLength(17);
-    expect(columnsForView('full')).toHaveLength(17);
+    expect(ANALYSIS_COLUMNS).toHaveLength(16);
+    expect(columnsForView('full')).toHaveLength(16);
     expect(ANALYSIS_COLUMNS.map(column => column.id)).not.toContain('movement');
     expect(sanitizeColumns(['pnl'])).toEqual(['identity', 'pnl']);
   });

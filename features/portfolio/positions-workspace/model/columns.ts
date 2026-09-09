@@ -9,8 +9,7 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'entry', label: 'Entry Credit / Debit', group: 'Economics' },
   { id: 'value', label: 'Close Value', group: 'Economics' },
   { id: 'pnl', label: 'P/L / Target', group: 'Economics' },
-  { id: 'evolution', label: 'Since Tracked', group: 'Movement' },
-  { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
+  { id: 'evolution', label: 'Metric Movement', group: 'Movement' },
   { id: 'netEdge', label: 'Net Edge', group: 'Risk & Greeks' },
   { id: 'pop', label: 'POP', group: 'Risk & Greeks' },
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
@@ -21,7 +20,7 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
 ] as const;
 
 const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'capital', 'entry', 'value', 'pnl', 'orders', 'notes', 'priceAlert', 'recommendation'];
-const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'greeks', 'netEdge', 'pop', 'volatility', 'notes', 'recommendation'];
+const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'netEdge', 'pop', 'volatility', 'notes', 'recommendation'];
 const FULL = ANALYSIS_COLUMNS.map(column => column.id);
 
 export function columnsForView(view: Exclude<AnalysisViewId, 'custom'>): AnalysisColumnId[] {

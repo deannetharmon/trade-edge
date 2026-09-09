@@ -307,6 +307,15 @@ export interface PendingOrder {
   /** Broker-reported filled quantity when present.  Absence means unknown,
    * never zero inferred by the client. */
   filledQuantity?: number | null;
+  /** Fresh per-contract entry quote, derived from every order leg.  Null when
+   * any leg lacks a valid two-sided broker quote. */
+  currentMidPrice?: number | null;
+  currentExecutablePrice?: number | null;
+  quoteCapturedAt?: string | null;
+  quoteQuality?: 'RELIABLE' | 'UNAVAILABLE';
+  currentIvr?: number | null;
+  currentUnderlyingPrice?: number | null;
+  shortStrikeOtmPct?: number | null;
 }
 
 

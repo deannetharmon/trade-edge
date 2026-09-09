@@ -10,8 +10,14 @@ const order = (status: string, extra: Partial<PendingOrder> = {}): PendingOrder 
 
 describe('pending entry intelligence', () => {
   it('does not equate a working broker order with a fill', () => {
-    expect(assessPendingEntry(order('Working'))).toMatchObject({
+    expect(assessPendingEntry(order('Working', { quoteQuality: 'RELIABLE', currentExecutablePrice: 1.1 }))).toMatchObject({
       state: 'LIVE_AT_EXCHANGE', recommendation: 'REVIEW_PRICE',
+    });
+  });
+
+  it('keeps a live credit order working when its requested credit is executable', () => {
+    expect(assessPendingEntry(order('Live', { quoteQuality: 'RELIABLE', currentExecutablePrice: 1.3 }))).toMatchObject({
+      recommendation: 'KEEP_WORKING',
     });
   });
 

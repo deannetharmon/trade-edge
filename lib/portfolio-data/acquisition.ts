@@ -1622,6 +1622,74 @@ export async function loadPositions(
     }
   } catch {}
 
+  // Pending entries are not positions, so they are absent from the position
+  // quote pass above. Fetch their exact option legs independently and derive
+  // the same two reference prices a trader needs at entry: midpoint and the
+  // executable/natural-side net. A missing, one-sided, or crossed leg fails
+  // the whole entry quote closed; no replacement price is fabricated.
+  if (pendingOrders.length > 0) {
+    try {
+      const symbols = Array.from(new Set(pendingOrders.flatMap(order => order.legs.map(leg => leg.symbol))));
+      const items: any[] = [];
+      for (let index = 0; index < symbols.length; index += 50) {
+        const query = symbols.slice(index, index + 50).map(symbol => `equity-option=${encodeURIComponent(symbol)}`).join('&');
+        const response = await ttFetch(`/market-data/by-type?${query}`, token);
+        items.push(...(response?.data?.items ?? []));
+      }
+      const bySymbol = new Map(items.map(item => [String(item?.symbol ?? '').replace(/\s+/g, ''), item]));
+      for (const order of pendingOrders) {
+        let mid = 0;
+        let executable = 0;
+        let latestQuoteAt: string | null = null;
+        let reliable = true;
+        for (const leg of order.legs) {
+          const item = bySymbol.get(leg.symbol.replace(/\s+/g, ''));
+          const bid = Number(item?.bid);
+          const ask = Number(item?.ask);
+          if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) {
+            reliable = false;
+            break;
+          }
+          const sign = String(leg.action).toLowerCase().startsWith('sell') ? 1 : -1;
+          mid += sign * ((bid + ask) / 2) * leg.quantity;
+          executable += sign * (sign > 0 ? bid : ask) * leg.quantity;
+          const timestamp = extractBrokerQuoteTimestamp(item);
+          if (timestamp && (!latestQuoteAt || timestamp > latestQuoteAt)) latestQuoteAt = timestamp;
+        }
+        order.quoteQuality = reliable ? 'RELIABLE' : 'UNAVAILABLE';
+        order.currentMidPrice = reliable ? Number(Math.abs(mid).toFixed(2)) : null;
+        order.currentExecutablePrice = reliable ? Number(Math.abs(executable).toFixed(2)) : null;
+        order.quoteCapturedAt = reliable ? latestQuoteAt : null;
+      }
+
+      const underlyings = Array.from(new Set(pendingOrders.map(order => order.symbol).filter(Boolean)));
+      if (underlyings.length > 0) {
+        const metricResponse = await ttFetch(`/market-metrics?symbols=${encodeURIComponent(underlyings.join(','))}`, token);
+        const metricBySymbol = new Map<string, any>((metricResponse?.data?.items ?? []).map((item: any) => [String(item.symbol), item]));
+        const quoteResponse = await ttFetch(`/market-data/by-type?${underlyings.map(symbol => `equity=${encodeURIComponent(symbol)}`).join('&')}`, token);
+        const underlyingBySymbol = new Map<string, any>((quoteResponse?.data?.items ?? []).map((item: any) => [String(item.symbol), item]));
+        for (const order of pendingOrders) {
+          const metric = metricBySymbol.get(order.symbol);
+          const rawIvr = metric?.['implied-volatility-index-rank'] ?? metric?.['iv-rank'];
+          const parsedIvr = Number(rawIvr);
+          order.currentIvr = Number.isFinite(parsedIvr) ? (parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr)) : null;
+          const underlying = underlyingBySymbol.get(order.symbol);
+          const bid = Number(underlying?.bid), ask = Number(underlying?.ask), mark = Number(underlying?.mark ?? underlying?.['mark-price']);
+          const spot = resolveUnderlyingPrice(bid, ask, mark);
+          order.currentUnderlyingPrice = spot;
+          const shortLeg = order.legs.find(leg => String(leg.action).toLowerCase().startsWith('sell'));
+          order.shortStrikeOtmPct = spot != null && shortLeg?.strikePrice
+            ? Number((Math.abs(spot - shortLeg.strikePrice) / spot * 100).toFixed(1))
+            : null;
+        }
+      }
+    } catch {
+      // Pending entry records remain useful broker evidence if quote/metrics
+      // acquisition fails; their quote fields stay unavailable rather than
+      // becoming stale estimates.
+    }
+  }
+
   const plBySymbol: Record<string, number> = {};
   try {
     for (const item of rawPositions) {

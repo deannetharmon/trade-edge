@@ -9141,7 +9141,12 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           <span>Broker: {order.status}</span>
           <span>Age: {ageDisplay}</span>
           <span>ID: {order.parentOrderId ?? order.id}</span>
-          <span>Quote: unavailable</span>
+          <span>Requested: {order.limitPrice != null ? `$${order.limitPrice.toFixed(2)}` : '—'}</span>
+          <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
+          <span>Executable: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+          <span>Quote: {order.quoteQuality === 'RELIABLE' ? 'fresh two-sided' : 'unavailable'}</span>
+          {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
+          {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
           {order.contingentExitCount ? <span>{order.contingentExitCount} contingent exit{order.contingentExitCount === 1 ? '' : 's'}</span> : null}
           <Link href={`/screener?symbol=${encodeURIComponent(order.symbol)}`} className="ml-auto text-center text-[9px] px-2 py-1 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 font-bold">
             FIND NEW CANDIDATE
