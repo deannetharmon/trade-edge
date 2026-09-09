@@ -254,6 +254,10 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('region', { name: 'Existing-position income eligibility' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Fully covered / no available capacity')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Fully covered / no available capacity')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Review' }));
     expect(screen.getByRole('status')).toHaveTextContent('no recommendation, ticket, or order has been created');
