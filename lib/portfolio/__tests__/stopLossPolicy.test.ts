@@ -54,7 +54,7 @@ describe('classifyStopLossPolicy', () => {
     })).toBe('INVALID');
   });
 
-  it('flags a recorded ORIGINAL_CREDIT policy far below 2x as too tight, not aligned', () => {
+  it('flags a recorded ORIGINAL_CREDIT policy below the approved 1.5x floor as too tight, not aligned', () => {
     const policy: StopLossPolicy = {
       triggerPrice: 3.15, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 1.25,
       source: 'MANUAL', createdAt: '2026-01-01T00:00:00.000Z', brokerOrderId: 'ord-1',
@@ -66,14 +66,19 @@ describe('classifyStopLossPolicy', () => {
     expect(result).toBe('TOO_TIGHT');
   });
 
-  it('flags a recorded ORIGINAL_CREDIT policy far above 2x as too loose', () => {
+  it('treats an explicitly recorded 1.5x credit stop as aligned', () => {
+    const policy = buildOriginalCreditDefaultPolicy(2.52, { source: 'MANUAL', multiple: 1.5 });
+    expect(classifyStopLossPolicy({ hasStopOrder: true, orderTriggerPrice: policy.triggerPrice, policy, creditPerContract: 2.52 })).toBe('ALIGNED');
+  });
+
+  it('flags a recorded ORIGINAL_CREDIT policy above the approved 3x ceiling as too loose', () => {
     const policy: StopLossPolicy = {
-      triggerPrice: 7.56, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 3,
+      triggerPrice: 8.06, anchorBasis: 'ORIGINAL_CREDIT', anchorValue: 2.52, multiple: 3.2,
       source: 'MANUAL', createdAt: '2026-01-01T00:00:00.000Z', brokerOrderId: 'ord-1',
       complexOrderId: null,
     };
     const result = classifyStopLossPolicy({
-      hasStopOrder: true, orderTriggerPrice: 7.56, policy, creditPerContract: 2.52,
+      hasStopOrder: true, orderTriggerPrice: 8.06, policy, creditPerContract: 2.52,
     });
     expect(result).toBe('TOO_LOOSE');
   });

@@ -182,6 +182,11 @@ export function buildDebitStopPolicy(input: {
 // whatever the trader last typed) must never substitute for this without
 // an explicit, recorded policy decision.
 export const DEFAULT_ENTRY_STOP_MULTIPLE = 2;
+// An explicitly recorded trader selection may be tighter or looser than the
+// entry default. These are valid original-credit stop bounds, not automatic
+// recommendations; the 2x value above remains only the initial prefill.
+export const MIN_EXPLICIT_CREDIT_STOP_MULTIPLE = 1.5;
+export const MAX_EXPLICIT_CREDIT_STOP_MULTIPLE = 3;
 
 // Tolerance bands. EPS absorbs float/rounding noise (cents); the
 // materiality band is the "materially too tight/loose" threshold.
@@ -341,11 +346,12 @@ export function classifyStopLossPolicy(input: ClassifyStopInput): StopClassifica
   }
 
   if (policy.anchorBasis === 'ORIGINAL_CREDIT') {
-    if (!Number.isFinite(reference) || reference <= 0) return 'INVALID';
-    const lower = reference * (1 - MATERIALITY_BAND);
-    const upper = reference * (1 + MATERIALITY_BAND);
-    if (policy.triggerPrice < lower - PRICE_EPS) return 'TOO_TIGHT';
-    if (policy.triggerPrice > upper + PRICE_EPS) return 'TOO_LOOSE';
+    const multiple = policy.multiple ?? (policy.anchorValue && policy.anchorValue > 0 ? policy.triggerPrice / policy.anchorValue : null);
+    if (multiple == null || !Number.isFinite(multiple)) return 'INVALID';
+    // 2x is a default, not a validity threshold. A recorded selection in the
+    // approved 1.5x–3x range is aligned with the trader's own policy.
+    if (multiple < MIN_EXPLICIT_CREDIT_STOP_MULTIPLE - PRICE_EPS) return 'TOO_TIGHT';
+    if (multiple > MAX_EXPLICIT_CREDIT_STOP_MULTIPLE + PRICE_EPS) return 'TOO_LOOSE';
     return 'ALIGNED';
   }
 
