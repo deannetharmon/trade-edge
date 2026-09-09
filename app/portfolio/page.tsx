@@ -10125,17 +10125,14 @@ export default function PortfolioPage() {
             SIGN OUT
           </button>
           <button onClick={async () => {
-              // AUTH-0001: separate from SIGN OUT — only clears the stored
-              // TastyTrade connection (Redis refresh_token/client_secret),
-              // leaves the Google/NextAuth session intact. No global
-              // in-flight-order tracker exists across pages (engine/screener/
-              // long-book each track order placement as local component
-              // state only), so this confirm is the guard against clearing
-              // credentials mid-order per Ian's requirement.
-              if (!window.confirm('Reconnect TastyTrade? This clears your stored TastyTrade connection — you will need to re-enter your refresh token and client secret. Do not do this while an order is in progress.')) return;
-              try { await fetch('/api/auth/clear-credentials', { method: 'POST' }); } catch {}
+              // Reconnect is an OAuth renewal, not a credential deletion.
+              // The user remains signed into TradeEdge through Google; their
+              // existing Tastytrade browser session can approve and return
+              // without asking them to paste a refresh token/client secret.
+              // Deliberate removal of the broker connection stays a separate,
+              // explicit account-management action.
               sessionStorage.removeItem('tt_access_token');
-              window.location.href = '/login';
+              window.location.href = `/api/tastytrade/authorize?return_to=${encodeURIComponent('/portfolio')}`;
             }}
             className="text-[10px] px-3 py-1.5 border border-white/10 text-white/30 rounded hover:border-red-700 hover:text-red-400 transition-colors tracking-wider">
             RECONNECT TASTYTRADE
