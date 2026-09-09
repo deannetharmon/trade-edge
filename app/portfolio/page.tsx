@@ -78,8 +78,14 @@ import {
   buildOriginalCreditDefaultPolicy,
   buildCurrentValueAnchoredPolicy,
   buildManualAbsolutePolicy,
+  classifyQuoteQuality,
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
+import {
+  evaluateProfitProtectingStop,
+  PROFIT_PROTECTING_STOP_POLICY_VERSION,
+  type ProfitProtectingStopStage,
+} from '@/lib/portfolio/profitProtectingStop';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
 import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
@@ -6261,6 +6267,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // trader applies the AI's current-value-anchored suggestion verbatim, or
   // MANUAL the moment they type into the stop price input themselves.
   const [stopPriceSource, setStopPriceSource] = useState<StopSource>('DEFAULT');
+  const [profitProtectionStage, setProfitProtectionStage] = useState<ProfitProtectingStopStage | null>(null);
   // TE-0002: which anchor the current stopPrice is expressed relative to --
   // needed alongside stopPriceSource because "MANUAL" alone doesn't say
   // whether the trader edited the ×credit multiplier field (still
@@ -6331,6 +6338,16 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const needsOco = pos.hasGtc && !!pos.gtcOrderId;
   const existingGtcPrice = pos.gtcOrderPrice
     ?? parseFloat((creditPerContract * (1 - pos.profitTarget)).toFixed(2));
+  const positionStrategyKey = resolvePositionStrategyFilterKey(pos);
+  const isProfitProtectingCreditSpread = positionStrategyKey != null && ['BPS', 'BCS', 'IC'].includes(positionStrategyKey);
+  const marketableClosePerContract = pos.closeValue != null ? pos.closeValue / (qty * 100) : null;
+  const profitProtection = evaluateProfitProtectingStop({
+    creditPerContract,
+    marketableClosePerContract,
+    currentStopTrigger: pos.stopLossPrice,
+    hasWorkingStop: isProfitProtectingCreditSpread && (pos.stopLossClassification === 'ALIGNED' || pos.stopLossClassification === 'TOO_LOOSE'),
+    quoteQuality: classifyQuoteQuality(pos.quoteWidthEvidence),
+  });
 
   // ── Validation helpers ────────────────────────────────────────────────────
   const effectiveLive = livePrice ?? liveValuePerContract;  // prefer freshly fetched
@@ -6361,6 +6378,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     if (!mountedRef.current) return;
     setLivePriceLoading(true);
     setLivePriceError(null);
+    setProfitProtectionStage(null);
     try {
       const token = await getAccessToken();
       const fresh = await fetchFreshPositionPrice(pos, token);
@@ -6532,7 +6550,13 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       return buildCurrentValueAnchoredPolicy(anchor, multiple ?? 1, { source: stopPriceSource, createdAt: nowIso, ...idOpts });
     }
     if (stopBasisOverride === 'MANUAL_ABSOLUTE') {
-      return buildManualAbsolutePolicy(triggerPrice, { createdAt: nowIso, ...idOpts });
+      return buildManualAbsolutePolicy(triggerPrice, {
+        source: stopPriceSource,
+        createdAt: nowIso,
+        policyVersion: profitProtectionStage ? PROFIT_PROTECTING_STOP_POLICY_VERSION : null,
+        profitProtectionStage,
+        ...idOpts,
+      });
     }
     const multiple = creditPerContract > 0 ? parseFloat((triggerPrice / creditPerContract).toFixed(2)) : DEFAULT_ENTRY_STOP_MULTIPLE;
     return buildOriginalCreditDefaultPolicy(creditPerContract, { source: stopPriceSource, createdAt: nowIso, multiple, ...idOpts });
@@ -6562,6 +6586,15 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     // STOP_GTC_SYSTEM_PROMPT) -- record that basis, not original credit.
     setStopPriceSource('AI_SUGGESTION');
     setStopBasisOverride('CURRENT_SPREAD_VALUE');
+    setProfitProtectionStage(null);
+  };
+
+  const applyProfitProtection = () => {
+    if (profitProtection.status !== 'TIGHTEN_AVAILABLE' || profitProtection.proposedStopTrigger == null || profitProtection.stage == null) return;
+    setStopPrice(profitProtection.proposedStopTrigger.toFixed(2));
+    setStopPriceSource('PROFIT_PROTECTION');
+    setStopBasisOverride('MANUAL_ABSOLUTE');
+    setProfitProtectionStage(profitProtection.stage);
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────
@@ -6760,7 +6793,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           const displayOrderId = stopOrderId ?? parentOrderId;
           setResult('success');
           setResultMsg(`OCO placed — profit @ $${gtcLimit.toFixed(2)} / stop @ $${stopTrigger.toFixed(2)} (ID #${displayOrderId})`);
-          if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+          if (creditPerContract > 0 && !profitProtectionStage) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
           // Never fabricate `orderId` as the parent id when the nested stop
           // leg couldn't be resolved -- complexOrderId (always available)
           // remains a real, non-fabricated fallback identity match on its
@@ -6837,7 +6870,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         const orderId = String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
         setResult('success');
         setResultMsg(`Stop Limit placed @ trigger $${stopTrigger.toFixed(2)} (ID #${orderId})`);
-        if (creditPerContract > 0) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
+        if (creditPerContract > 0 && !profitProtectionStage) saveLastStopMultiple(pos.strategy, stopTrigger / creditPerContract);
         // Plain (non-complex) order -- orderId IS the individual stop
         // order's own id, no complex-order envelope involved.
         await persistStopPolicy({ orderId, complexOrderId: null }, stopTrigger);
@@ -6987,6 +7020,25 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             <p className="text-[9px] text-yellow-400 mb-2">⚠ {livePriceError}</p>
           )}
 
+          {/* POSITIONS-0004: advisory only. Applying it merely fills the
+              reviewed OCO/stop form below; the existing confirmation and
+              broker safety gate remain mandatory. */}
+          {profitProtection.status === 'TIGHTEN_AVAILABLE' && profitProtection.proposedStopTrigger != null && (
+            <div className="mb-3 p-2.5 rounded-lg border border-emerald-700/50 bg-emerald-500/5">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest">Profit protection available</p>
+                  <p className="text-[10px] text-slate-200 mt-1">Current stop ${pos.stopLossPrice?.toFixed(2)} → proposed ${profitProtection.proposedStopTrigger.toFixed(2)} · {profitProtection.protectedPnlPct}% P/L</p>
+                  <p className={`text-[9px] ${th.textFaint} mt-1`}>{profitProtection.reason}</p>
+                </div>
+                <button onClick={applyProfitProtection} className="shrink-0 text-[9px] px-2 py-1 border border-emerald-600 text-emerald-400 rounded hover:bg-emerald-500/10 font-bold">Use proposal</button>
+              </div>
+            </div>
+          )}
+          {profitProtection.status === 'ALREADY_PROTECTED' && (
+            <p className="text-[9px] text-emerald-400 mb-3">✓ {profitProtection.reason}</p>
+          )}
+
           {/* OCO info */}
           {needsOco && (
             <div className="mb-3 p-2.5 rounded-lg border border-yellow-600/40 bg-yellow-500/5">
@@ -7108,6 +7160,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     // absolute price.
                     setStopPriceSource('MANUAL');
                     setStopBasisOverride('ORIGINAL_CREDIT');
+                    setProfitProtectionStage(null);
                   }}
                   onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
                   autoFocus={!needsOco}
@@ -7126,6 +7179,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     // absolute stop, never re-labeled "×credit" later.
                     setStopPriceSource('MANUAL');
                     setStopBasisOverride('MANUAL_ABSOLUTE');
+                    setProfitProtectionStage(null);
                   }}
                   onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
                   className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
@@ -7172,6 +7226,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 {needsOco && ` profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`}
                 {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} ({protectiveStopOutcomeLabel(stopOutcomePnlDollars)})
               </p>
+              {profitProtectionStage && (
+                <p className="text-[9px] text-emerald-300">
+                  Proposed protection: ${stopParsed.toFixed(2)} · {Math.round((1 - stopParsed / creditPerContract) * 100)}% of original credit locked. This tightens protection; it does not widen your stop.
+                </p>
+              )}
               {effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint}`}>
                   Live spread: ${effectiveLiveDisplay.toFixed(2)} | Credit: ${creditPerContract.toFixed(2)} | Qty: {qty}

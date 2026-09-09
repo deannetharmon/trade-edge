@@ -36,6 +36,7 @@ export type StopAnchorBasis =
 export type StopSource =
   | 'DEFAULT'
   | 'AI_SUGGESTION'
+  | 'PROFIT_PROTECTION'
   | 'MANUAL'
   | 'BROKER_EXTERNAL'
   | 'UNKNOWN';
@@ -62,6 +63,11 @@ export interface StopLossPolicy {
   // replacement made outside TradeEdge gets an entirely new complex-order
   // id) -- never "accept any id."
   complexOrderId: string | null;
+  // POSITIONS-0004: optional, explicit provenance for an approved
+  // profit-protection ratchet. Kept on the existing canonical policy record
+  // so broker identity, replacement history, and policy basis stay together.
+  policyVersion?: string | null;
+  profitProtectionStage?: 'BREAK_EVEN_50' | 'LOCK_25_65' | 'LOCK_50_75' | null;
 }
 
 // The six states the corrective mandate requires: no stop; working and
@@ -227,17 +233,19 @@ export function buildCurrentValueAnchoredPolicy(
 
 export function buildManualAbsolutePolicy(
   triggerPrice: number,
-  opts: { createdAt?: string | null } & StopPolicyIdentityOpts = {}
+  opts: { createdAt?: string | null; source?: StopSource; policyVersion?: string | null; profitProtectionStage?: StopLossPolicy['profitProtectionStage'] } & StopPolicyIdentityOpts = {}
 ): StopLossPolicy {
   return {
     triggerPrice: parseFloat(triggerPrice.toFixed(2)),
     anchorBasis: 'MANUAL_ABSOLUTE',
     anchorValue: null,
     multiple: null,
-    source: 'MANUAL',
+    source: opts.source ?? 'MANUAL',
     createdAt: opts.createdAt ?? null,
     brokerOrderId: opts.brokerOrderId ?? null,
     complexOrderId: opts.complexOrderId ?? null,
+    policyVersion: opts.policyVersion ?? null,
+    profitProtectionStage: opts.profitProtectionStage ?? null,
   };
 }
 
