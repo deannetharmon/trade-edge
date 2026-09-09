@@ -45,11 +45,16 @@ export async function ttFetch(path: string, token: string): Promise<any> {
 
 
 export async function getAccessToken(): Promise<string> {
-  // 1. Check sessionStorage first (fastest, in-memory)
+  // Check both caches against the broker's real expiry. A sessionStorage
+  // token must not bypass this check: it otherwise survives past TT's
+  // ~15-minute lifetime and causes order validation to fail with 401.
   const sessionCached = sessionStorage.getItem('tt_access_token');
-  if (sessionCached) return sessionCached;
+  let expiry: string | null = null;
+  try { expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
+  if (sessionCached && expiry && Date.now() < parseInt(expiry, 10)) return sessionCached;
+  if (sessionCached) sessionStorage.removeItem('tt_access_token');
 
-  // 2. Check localStorage cache — survives rebuilds/page reloads
+  // Check localStorage cache — survives rebuilds/page reloads
   // TT-TOKEN-EXPIRY-FIX-0001: was hardcoded to a fake 23h window, but
   // TastyTrade access tokens actually expire in ~15min. That mismatch let
   // the browser keep serving a dead token, causing "invalid or expired"
@@ -58,7 +63,7 @@ export async function getAccessToken(): Promise<string> {
   // baked into the stored timestamp.
   try {
     const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
-    const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
+    expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
     if (lsCached && expiry && Date.now() < parseInt(expiry)) {
       sessionStorage.setItem('tt_access_token', lsCached);
       return lsCached;
