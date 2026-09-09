@@ -7,8 +7,8 @@ import type { StopClassification } from '@/lib/portfolio/stopLossPolicy';
 describe('stop presentation contract', () => {
   it('has an explicit control for every classification', () => {
     const expected: Record<StopClassification, string> = {
-      NO_STOP: 'Add Stop', ALIGNED: 'Edit Stop', TOO_TIGHT: 'Verify/Adjust Stop', TOO_LOOSE: 'Adjust Stop',
-      UNKNOWN_PROVENANCE: 'Verify Stop', INVALID: 'Repair Stop', NOT_EVALUATED: 'Retry Stop Check', UNSUPPORTED: 'Stop Workflow Unavailable',
+      NO_STOP: 'Add Stop', ALIGNED: 'Edit Stop', TOO_TIGHT: 'Review Stop', TOO_LOOSE: 'Adjust Stop',
+      UNKNOWN_PROVENANCE: 'Review Stop', INVALID: 'Review Stop', NOT_EVALUATED: 'Retry Stop Check', UNSUPPORTED: 'Stop Workflow Unavailable',
     };
     expect(STOP_CONTROL_LABELS).toEqual(expected);
   });
@@ -26,4 +26,3 @@ describe('stop presentation contract', () => {
     expect(screen.getByText(/Stop not evaluated/)).toBeInTheDocument();
   });
 });
-

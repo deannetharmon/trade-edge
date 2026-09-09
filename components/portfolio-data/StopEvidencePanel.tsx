@@ -17,10 +17,10 @@ export const STOP_CLASSIFICATION_COPY: Record<StopClassification, string> = {
 export const STOP_CONTROL_LABELS: Record<StopClassification, string> = {
   NO_STOP: 'Add Stop',
   ALIGNED: 'Edit Stop',
-  TOO_TIGHT: 'Verify/Adjust Stop',
+  TOO_TIGHT: 'Review Stop',
   TOO_LOOSE: 'Adjust Stop',
-  UNKNOWN_PROVENANCE: 'Verify Stop',
-  INVALID: 'Repair Stop',
+  UNKNOWN_PROVENANCE: 'Review Stop',
+  INVALID: 'Review Stop',
   NOT_EVALUATED: 'Retry Stop Check',
   UNSUPPORTED: 'Stop Workflow Unavailable',
 };

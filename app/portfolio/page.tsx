@@ -6937,9 +6937,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     pos.stopLossClassification === 'NO_STOP'    ? 'Add Stop'      :
     pos.stopLossClassification === 'ALIGNED'    ? 'Edit Stop'      :
     pos.stopLossClassification === 'TOO_LOOSE'  ? 'Adjust Stop'   :
-    pos.stopLossClassification === 'TOO_TIGHT'  ? 'Verify/Adjust Stop'   :
-    pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? '⚠ Verify Stop' :
-    pos.stopLossClassification === 'INVALID' ? '⚠ Repair Stop' :
+    pos.stopLossClassification === 'TOO_TIGHT'  ? 'Review Stop'   :
+    pos.stopLossClassification === 'UNKNOWN_PROVENANCE' ? 'Review Stop' :
+    pos.stopLossClassification === 'INVALID' ? 'Review Stop' :
     '✎ Stop';
 
   const stopParsed  = parseFloat(stopPrice || '0');
