@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
-import { buildCapitalViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, stopPresentation } from '../model/presentation';
+import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, stopPresentation } from '../model/presentation';
 
 const leg = (optionType: 'P' | 'C', strikePrice: number, direction: 'Long' | 'Short'): PositionLeg => ({ symbol: 'X', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 });
 
@@ -23,6 +23,11 @@ describe('position analysis presentation', () => {
     const short = leg('P', 100, 'Short'); const long = leg('P', 95, 'Long');
     expect(buildMoneynessViewModel(110, [long, short])?.leg).toBe(short);
     expect(buildMoneynessViewModel(110, [short, long])?.leg).toBe(short);
+  });
+
+  it('colors moneyness movement by the position risk direction', () => {
+    expect(buildMoneynessMovementViewModel(112.4, 108.2, [leg('C', 100, 'Long')])?.tone).toBe('negative');
+    expect(buildMoneynessMovementViewModel(87.6, 91.8, [leg('P', 100, 'Short')])?.tone).toBe('positive');
   });
 
   it('classifies interpreted comparisons rather than current signs', () => {
