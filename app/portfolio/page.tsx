@@ -6502,6 +6502,19 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     }
   };
 
+  // A Protect Profit click still goes through the normal reviewed workflow.
+  // This helper only preloads the evaluator's proposal after confirming it
+  // remains safely above the freshly fetched live spread value.
+  const preloadProfitProtection = (freshPerContract: number | null): boolean => {
+    if (profitProtection.status !== 'TIGHTEN_AVAILABLE' || profitProtection.proposedStopTrigger == null || profitProtection.stage == null) return false;
+    if (freshPerContract == null || profitProtection.proposedStopTrigger <= freshPerContract) return false;
+    setStopPrice(profitProtection.proposedStopTrigger.toFixed(2));
+    setStopPriceSource('PROFIT_PROTECTION');
+    setStopBasisOverride('MANUAL_ABSOLUTE');
+    setProfitProtectionStage(profitProtection.stage);
+    return true;
+  };
+
   // ── Open handler ──────────────────────────────────────────────────────────
   const handleOpen = async () => {
     setOpen(true);
@@ -6512,6 +6525,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     setConfirming(false);
     setLivePrice(null);
     setLivePriceError(null);
+    setProfitProtectionStage(null);
 
     // Step 1: fetch live price first so bounds are accurate
     setLivePriceLoading(true);
@@ -6529,23 +6543,29 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       // when ADJUSTING an already-working stop.
       const isNewStop = pos.stopLossClassification === 'NO_STOP';
       const defaultMultiple = isNewStop ? DEFAULT_ENTRY_STOP_MULTIPLE : getLastStopMultiple(pos.strategy);
-      setStopPriceSource('DEFAULT');
-      setStopBasisOverride('ORIGINAL_CREDIT');
       if (fresh != null) {
         const perContract = fresh / (qty * 100);
         setLivePrice(perContract);
         console.log(`LIVE PRICE FETCH ${pos.symbol}: $${perContract.toFixed(4)}/contract`);
+        if (preloadProfitProtection(perContract)) {
+          setGtcPrice(Math.max(Math.min(existingGtcPrice, perContract - 0.01), gtcMin).toFixed(2));
+        } else {
+          setStopPriceSource('DEFAULT');
+          setStopBasisOverride('ORIGINAL_CREDIT');
         // Set initial input defaults using live price. Anchored to credit
         // so the default is a consistent "Nx what I collected" — still
         // respects the hard floor of live value + $0.01.
         const initGtc  = Math.min(existingGtcPrice, perContract - 0.01);
         const initStop = Math.max(creditPerContract * defaultMultiple, perContract + 0.01);
-        setGtcPrice(Math.max(initGtc, gtcMin).toFixed(2));
-        setStopPrice(Math.min(initStop, stopMax).toFixed(2));
+          setGtcPrice(Math.max(initGtc, gtcMin).toFixed(2));
+          setStopPrice(Math.min(initStop, stopMax).toFixed(2));
+        }
       } else {
         setLivePriceError('Could not fetch live price — using estimates');
         setGtcPrice(Math.max(existingGtcPrice, gtcMin).toFixed(2));
         const naiveStop = Math.max(creditPerContract * defaultMultiple, stopMin);
+        setStopPriceSource('DEFAULT');
+        setStopBasisOverride('ORIGINAL_CREDIT');
         setStopPrice(Math.min(naiveStop, stopMax).toFixed(2));
       }
     } catch (e: any) {
@@ -6933,6 +6953,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const btnLabel =
     result === 'success' ? '✓ Stop Set'       :
     result === 'error'   ? '✕ Failed'          :
+    profitProtection.status === 'TIGHTEN_AVAILABLE' ? 'Protect Profit' :
     pos.stopLossClassification === 'NO_STOP' && cspOptOut ? 'No Stop (By Design)' :
     pos.stopLossClassification === 'NO_STOP'    ? 'Add Stop'      :
     pos.stopLossClassification === 'ALIGNED'    ? 'Edit Stop'      :
@@ -6973,6 +6994,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           pos.structureAmbiguous ? 'border-red-900 text-red-500/50 cursor-not-allowed opacity-60' :
           result === 'success' ? 'border-emerald-600 text-emerald-400' :
           result === 'error'   ? 'border-red-600 text-red-400' :
+          profitProtection.status === 'TIGHTEN_AVAILABLE' ? 'border-emerald-600 text-emerald-300 hover:bg-emerald-500/10' :
           open ? 'border-orange-500 text-orange-400 bg-orange-500/10' :
           pos.stopLossClassification === 'NO_STOP' && cspOptOut ? 'border-slate-600 text-slate-400 hover:border-orange-500 hover:text-orange-400' :
           pos.stopLossClassification === 'NO_STOP'   ? 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400' :
