@@ -9076,6 +9076,10 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       })
     : null;
   const assessment = assessPendingEntry(order);
+  const ageMinutes = order.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000)) : null;
+  const ageDisplay = ageMinutes == null || !Number.isFinite(ageMinutes)
+    ? 'time unavailable'
+    : ageMinutes < 60 ? `${ageMinutes}m ago` : `${Math.floor(ageMinutes / 60)}h ${ageMinutes % 60}m ago`;
 
   // ── Replace (edit price + resubmit) ────────────────────────────────────────
   // TastyTrade has no atomic order-replace, so this is cancel-then-place under
@@ -9096,8 +9100,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   };
 
   return (
-    <div className={`border border-yellow-700/60 ${th.card} rounded-lg p-4`}>
-      <div className="flex items-center justify-between flex-wrap gap-2">
+    <div className={`border border-yellow-700/60 ${th.card} rounded-lg px-3 py-2.5`}>
+      <div className="flex items-center justify-between flex-wrap gap-x-4 gap-y-2">
         <div className="flex items-center gap-3 flex-wrap">
           <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{order.symbol}</span>
           <span className={`text-[10px] font-bold px-2 py-0.5 border rounded ${strategyColor}`}>{order.strategy}</span>
@@ -9108,7 +9112,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           </span>
         </div>
         {!editing && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {order.limitPrice != null && (
               <span className={`text-xs font-bold ${order.priceEffect === 'Credit' ? 'text-emerald-400' : 'text-red-400'}`}>
                 ${order.limitPrice.toFixed(2)} {order.priceEffect ?? ''}
@@ -9117,42 +9121,37 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
             <button
               onClick={startEdit}
               disabled={cancelling || replacing}
-              className="text-[10px] px-3 py-1.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
+              className="text-[10px] px-2.5 py-1 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
             >
               {replacing ? 'REPLACING...' : 'REVIEW / REPRICE'}
             </button>
             <button
               onClick={() => onCancel(order)}
               disabled={cancelling || replacing}
-              className="text-[10px] px-3 py-1.5 border border-red-700 text-red-400 rounded hover:bg-red-600/20 transition-colors font-bold disabled:opacity-40"
+              className="text-[10px] px-2.5 py-1 border border-red-700 text-red-400 rounded hover:bg-red-600/20 transition-colors font-bold disabled:opacity-40"
             >
               {cancelling ? 'CANCELLING...' : 'CANCEL'}
             </button>
           </div>
         )}
       </div>
-      {submittedDisplay && !editing && (
-        <p className={`text-[9px] ${th.textFaint} mt-1.5`}>Submitted {submittedDisplay}</p>
-      )}
       {!editing && (
-        <div className={`mt-3 pt-3 border-t border-yellow-700/30 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] items-center`}>
-          <div>
-            <p className="text-[10px] font-bold text-yellow-300 uppercase tracking-wide">{assessment.recommendationLabel}</p>
-            <p className={`text-[10px] ${th.textFaint} mt-0.5`}>{assessment.explanation}</p>
-            <p className={`text-[9px] ${th.textFaint} mt-1`}>
-              Requested limit {order.limitPrice != null ? `$${order.limitPrice.toFixed(2)} ${order.priceEffect ?? ''}` : 'unavailable'} · executable quote and original entry snapshot unavailable in this broker response.
-            </p>
-            {order.contingentExitCount ? <p className={`text-[9px] ${th.textFaint} mt-1`}>{order.contingentExitCount} attached exit{order.contingentExitCount === 1 ? '' : 's'} contingent after entry fills.</p> : null}
-          </div>
-          <Link href={`/screener?symbol=${encodeURIComponent(order.symbol)}`} className="text-center text-[10px] px-3 py-1.5 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 font-bold">
+        <div className={`mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] ${th.textFaint}`}>
+          <span><span className="text-yellow-300 font-bold">NEXT:</span> {assessment.recommendationLabel}</span>
+          <span>Broker: {order.status}</span>
+          <span>Age: {ageDisplay}</span>
+          <span>ID: {order.parentOrderId ?? order.id}</span>
+          <span>Quote: unavailable</span>
+          {order.contingentExitCount ? <span>{order.contingentExitCount} contingent exit{order.contingentExitCount === 1 ? '' : 's'}</span> : null}
+          <Link href={`/screener?symbol=${encodeURIComponent(order.symbol)}`} className="ml-auto text-center text-[9px] px-2 py-1 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 font-bold">
             FIND NEW CANDIDATE
           </Link>
         </div>
       )}
       {editing && (
-        <div className="mt-3 pt-3 border-t border-yellow-700/30 space-y-2">
+        <div className="mt-2 pt-2 border-t border-yellow-700/30 space-y-2">
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] ${th.textFaint}`}>New {(order.priceEffect ?? 'limit').toLowerCase()} price</span>
+            <span className={`text-[10px] ${th.textFaint}`}>Requested ${order.limitPrice?.toFixed(2) ?? '—'} → new {(order.priceEffect ?? 'limit').toLowerCase()} price</span>
             <input
               type="number" min="0.01" step="0.01" autoFocus
               value={newPrice}
@@ -9163,7 +9162,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
             />
           </div>
           <p className={`text-[9px] ${th.textFaint}`}>
-            This preserves the same legs, quantity, expiry, and price effect. It cancels then resubmits only after the replacement safety gate passes. Any attached profit-target/stop bracket is <span className="text-yellow-400 font-bold">not</span> recreated — re-add protection after it fills.
+            No executable quote is available here. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.
           </p>
           <div className="flex gap-2">
             <button
@@ -9253,8 +9252,8 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
           ⏳ Pending Entries — {groups.length}
         </p>
       </div>
-      <p className={`text-[10px] ${th.textFaint} mb-3`}>Only unfilled opening orders appear here. Attached exits remain contingent until an entry fills; no action below automatically cancels or reprices an order.</p>
-      <div className="space-y-3">
+      <p className={`text-[10px] ${th.textFaint} mb-2`}>Unfilled opening orders only. “Live at Exchange” is not a fill. Reprice and cancel always require your confirmation.</p>
+      <div className="space-y-2">
         {groups.map(group => (
           <div key={group[0]?.parentOrderId ?? group[0]?.id} className="space-y-2">
             {group.length > 1 && <p className={`text-[9px] ${th.textFaint} pl-1`}>Broker entry group {group[0]?.parentOrderId ?? group[0]?.id}</p>}
