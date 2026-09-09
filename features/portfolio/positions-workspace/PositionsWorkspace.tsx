@@ -20,6 +20,7 @@ export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_PO
 }
 
 const money = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+const moneyExact = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 const number = (value: number | null | undefined, digits = 1) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
 const POSITION_NOTE_MAX_LENGTH = 150;
 const INDEX_CHART_SYMBOLS: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
@@ -374,15 +375,23 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
   const stop = stopPresentation(p.stopLossClassification);
   const stopControl = renderStopControl?.(p) ?? null;
   const breakeven = buildBreakevenViewModel(p);
+  const standaloneLeap = p.strategy === 'CALL' && p.legs.length === 1 && p.legs[0]?.direction === 'Long' && p.dte >= 365;
+  const priceMovement = p.stockPriceAtEntry != null && p.stockPrice != null && p.stockPriceAtEntry > 0
+    ? (p.stockPrice - p.stockPriceAtEntry) / p.stockPriceAtEntry * 100
+    : null;
+  const priceBuffer = breakeven.values.length === 1 && p.stockPrice != null
+    ? p.stockPrice - breakeven.values[0]
+    : null;
+  const priceBufferPct = priceBuffer != null && p.stockPrice != null && p.stockPrice > 0 ? priceBuffer / p.stockPrice * 100 : null;
   const entryTone = p.entryPriceEffect === 'Credit' ? 'positive' : p.entryPriceEffect === 'Debit' ? 'warning' : 'neutral';
   const firstPnl = first?.pnl;
   const firstBuffer = first?.buffer ?? p.otmAtEntry;
   const bufferTone: SemanticTone = firstBuffer == null || p.buffer == null ? 'neutral' : firstBuffer > 0 && p.buffer <= 0 ? 'negative' : p.buffer < firstBuffer ? 'warning' : p.buffer > firstBuffer ? 'positive' : 'neutral';
   const cell: Record<AnalysisColumnId, ReactNode> = {
-    identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{p.strategy}</span><span className={th.textFaint}>{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span></>,
+    identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{standaloneLeap ? 'LEAPS CALL' : p.strategy}</span><span className={th.textFaint}>{standaloneLeap ? 'Standalone · ' : ''}{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span></>,
     dates: <>{p.entryDate ?? 'Entry unavailable'}<b className="block text-white">{p.expDate}</b><span>{p.dte} DTE</span></>,
-    underlying: <><b className="block text-white">{money(p.stockPrice)}</b>{moneyness ? <span className={`block ${SEMANTIC_TONE_CLASS[moneyness.tone]}`}>{moneyness.state === 'ATM' ? 'ATM' : `${moneyness.distancePct.toFixed(1)}% ${moneyness.state}`}</span> : <span className={`block ${th.textFaint}`} title="No unambiguous canonical management leg">Strike distance unavailable</span>}<ChartLinkButton symbol={p.symbol} chartSymbol={INDEX_CHART_SYMBOLS[p.symbol.toUpperCase()] ?? p.symbol} instanceKey={p.key} th={th} showChart={chartOpen} setShowChart={setChartOpen} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} /></>,
-    strike: <><span className="block">{p.legs.map(leg => `${leg.strikePrice}${leg.optionType}`).join(' / ') || '—'}</span><span className={`block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `BE ${breakeven.values.map(value => value.toFixed(2)).join(' / ')}` : 'BE —'}</span></>,
+    underlying: <><b className="block text-white">{money(p.stockPrice)}</b>{moneyness ? <span className={`block ${SEMANTIC_TONE_CLASS[moneyness.tone]}`}>{moneyness.state === 'ATM' ? 'ATM' : `${moneyness.distancePct.toFixed(1)}% ${moneyness.state}`}</span> : <span className={`block ${th.textFaint}`} title="No unambiguous canonical management leg">Strike distance unavailable</span>}{priceMovement != null && <span className={`mt-1 block ${SEMANTIC_TONE_CLASS[priceMovement >= 0 ? 'positive' : 'negative']}`}>{money(p.stockPriceAtEntry ?? null)} → {money(p.stockPrice)} · {priceMovement >= 0 ? '+' : ''}{priceMovement.toFixed(1)}%</span>}<ChartLinkButton symbol={p.symbol} chartSymbol={INDEX_CHART_SYMBOLS[p.symbol.toUpperCase()] ?? p.symbol} instanceKey={p.key} th={th} showChart={chartOpen} setShowChart={setChartOpen} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} /></>,
+    strike: <><span className="block">{p.legs.map(leg => `${leg.direction === 'Short' ? 'Short ' : 'Long '}${leg.strikePrice}${leg.optionType}`).join(' · ') || '—'}</span><span className={`mt-1 block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `AT-EXP B/E ${breakeven.values.map(value => moneyExact(value)).join(' / ')}` : 'AT-EXP B/E —'}</span>{priceBuffer != null && <span className={`block ${SEMANTIC_TONE_CLASS[priceBuffer >= 0 ? 'positive' : 'negative']}`}>Price Buffer {priceBuffer >= 0 ? '' : '−'}{money(Math.abs(priceBuffer))}{priceBufferPct != null ? ` · ${priceBufferPct.toFixed(1)}%` : ''}</span>}</>,
     capital: <><b className="text-white">{capital.label}</b>{capital.value == null ? <span className={`block max-w-40 ${th.textFaint}`} title={capital.reason}>{capital.reason}</span> : <span className="block">{capital.suffix ? `${capital.value}${capital.suffix}` : money(capital.value)}</span>}</>,
     entry: <><b className={SEMANTIC_TONE_CLASS[entryTone]}>{p.entryPriceEffect}</b><span className={`block ${SEMANTIC_TONE_CLASS[entryTone]}`}>{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
     value: <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,

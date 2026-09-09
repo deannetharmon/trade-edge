@@ -34,5 +34,12 @@ export function buildBreakevenViewModel(position: Position): BreakevenViewModel 
     const value = computeSingleLegBreakeven(shortCall.strikePrice, creditPerShare, 'C');
     return value == null ? { values: [], unavailableReason: 'Call breakeven is unavailable' } : { values: [value], unavailableReason: null };
   }
+  // A standalone long call's at-expiration breakeven is strike plus the
+  // verified debit per share. This is distinct from current P/L and makes
+  // the LEAPS call's Price Buffer intelligible in the table.
+  const longCall = position.legs.find(leg => leg.direction === 'Long' && leg.optionType === 'C');
+  if (position.entryPriceEffect === 'Debit' && position.legs.length === 1 && longCall) {
+    return { values: [longCall.strikePrice + creditPerShare], unavailableReason: null };
+  }
   return { values: [], unavailableReason: 'No canonical breakeven policy exists for this structure' };
 }
