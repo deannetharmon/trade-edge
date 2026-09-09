@@ -1449,6 +1449,7 @@ export async function loadPositions(
     rawOrder: any,
     id: string,
     sourceKind: PendingOrder['sourceKind'],
+    grouping?: { parentOrderId?: string | null; contingentExitCount?: number },
   ): PendingOrder | null => {
     const status = String(rawOrder?.status ?? '').trim().toLowerCase();
     if (['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(status)) return null;
@@ -1506,6 +1507,11 @@ export async function loadPositions(
       createdAt: rawOrder?.['received-at'] ?? rawOrder?.['updated-at'] ?? null,
       orderType: rawOrder?.['order-type'] ?? null,
       timeInForce: rawOrder?.['time-in-force'] ?? null,
+      parentOrderId: grouping?.parentOrderId ?? rawOrder?.['complex-order-tag'] ?? null,
+      contingentExitCount: grouping?.contingentExitCount ?? 0,
+      filledQuantity: rawOrder?.['filled-quantity'] != null
+        ? Number(rawOrder['filled-quantity'])
+        : null,
     };
   };
   try {
@@ -1581,7 +1587,16 @@ export async function loadPositions(
           // bracket legs are still Live, which keeps hasActiveNested true; without
           // this check the filled opening order leaks into Pending Orders.
           if (isOpeningOrder) {
-            const pending = toPendingOrder(openingSource, String(order.id ?? ''), 'complex');
+            const contingentExitCount = nestedOrders.filter((nested: any) => {
+              if (nested === openingSource) return false;
+              return (nested.legs ?? []).some((leg: any) =>
+                ['buy to close', 'sell to close'].includes(String(leg.action ?? '').trim().toLowerCase())
+              );
+            }).length;
+            const pending = toPendingOrder(openingSource, String(order.id ?? ''), 'complex', {
+              parentOrderId: String(order.id ?? ''),
+              contingentExitCount,
+            });
             if (pending) {
               pendingOrders.push(pending);
               for (const nested of nestedOrders) {

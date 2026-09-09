@@ -298,6 +298,15 @@ export interface PendingOrder {
   createdAt: string | null;
   orderType: string | null;     // 'Limit' etc. — preserved on Replace
   timeInForce: string | null;   // 'GTC' | 'Day' — preserved on Replace
+  /** Broker complex order/container identity when available.  This groups an
+   * entry and its contingent exits without treating those exits as positions. */
+  parentOrderId?: string | null;
+  /** Number of broker child orders waiting on the opening fill (for example,
+   * a profit target and stop in an OTOCO bracket). */
+  contingentExitCount?: number;
+  /** Broker-reported filled quantity when present.  Absence means unknown,
+   * never zero inferred by the client. */
+  filledQuantity?: number | null;
 }
 
 

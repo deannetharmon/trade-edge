@@ -131,6 +131,7 @@ import { canonicalRecommendationForCard, canonicalRecommendationToAction, projec
 // docs/design/ES-0002-Pending-Order-Replacement-Safety.md.
 import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
 import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
+import { assessPendingEntry, groupPendingEntries } from '@/lib/portfolio/pendingEntryIntelligence';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
 // TC-0001: canonicalPriorities/todaysPrioritiesDashboard/topPriority/
@@ -9074,6 +9075,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
       })
     : null;
+  const assessment = assessPendingEntry(order);
 
   // ── Replace (edit price + resubmit) ────────────────────────────────────────
   // TastyTrade has no atomic order-replace, so this is cancel-then-place under
@@ -9101,8 +9103,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           <span className={`text-[10px] font-bold px-2 py-0.5 border rounded ${strategyColor}`}>{order.strategy}</span>
           <span className={`text-xs ${th.textMuted}`}>{strikesDisplay}</span>
           {order.expDate && <span className={`text-[10px] ${th.textFaint}`}>exp {order.expDate}</span>}
-          <span className={`text-[10px] font-bold px-2 py-0.5 border rounded border-yellow-600 text-yellow-400 bg-yellow-500/10`}>
-            {order.status}
+          <span className={`text-[10px] font-bold px-2 py-0.5 border rounded border-yellow-600 text-yellow-400 bg-yellow-500/10`} title={`Broker status: ${order.status}`}>
+            {assessment.stateLabel}
           </span>
         </div>
         {!editing && (
@@ -9117,7 +9119,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               disabled={cancelling || replacing}
               className="text-[10px] px-3 py-1.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
             >
-              {replacing ? 'REPLACING...' : 'REPLACE'}
+              {replacing ? 'REPLACING...' : 'REVIEW / REPRICE'}
             </button>
             <button
               onClick={() => onCancel(order)}
@@ -9131,6 +9133,21 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       </div>
       {submittedDisplay && !editing && (
         <p className={`text-[9px] ${th.textFaint} mt-1.5`}>Submitted {submittedDisplay}</p>
+      )}
+      {!editing && (
+        <div className={`mt-3 pt-3 border-t border-yellow-700/30 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] items-center`}>
+          <div>
+            <p className="text-[10px] font-bold text-yellow-300 uppercase tracking-wide">{assessment.recommendationLabel}</p>
+            <p className={`text-[10px] ${th.textFaint} mt-0.5`}>{assessment.explanation}</p>
+            <p className={`text-[9px] ${th.textFaint} mt-1`}>
+              Requested limit {order.limitPrice != null ? `$${order.limitPrice.toFixed(2)} ${order.priceEffect ?? ''}` : 'unavailable'} · executable quote and original entry snapshot unavailable in this broker response.
+            </p>
+            {order.contingentExitCount ? <p className={`text-[9px] ${th.textFaint} mt-1`}>{order.contingentExitCount} attached exit{order.contingentExitCount === 1 ? '' : 's'} contingent after entry fills.</p> : null}
+          </div>
+          <Link href={`/screener?symbol=${encodeURIComponent(order.symbol)}`} className="text-center text-[10px] px-3 py-1.5 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 font-bold">
+            FIND NEW CANDIDATE
+          </Link>
+        </div>
       )}
       {editing && (
         <div className="mt-3 pt-3 border-t border-yellow-700/30 space-y-2">
@@ -9146,7 +9163,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
             />
           </div>
           <p className={`text-[9px] ${th.textFaint}`}>
-            Cancels this order and resubmits the same legs at the new price. Any attached profit-target/stop bracket is <span className="text-yellow-400 font-bold">not</span> recreated — re-add protection with Set Stop after it fills.
+            This preserves the same legs, quantity, expiry, and price effect. It cancels then resubmits only after the replacement safety gate passes. Any attached profit-target/stop bracket is <span className="text-yellow-400 font-bold">not</span> recreated — re-add protection after it fills.
           </p>
           <div className="flex gap-2">
             <button
@@ -9228,24 +9245,31 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
   onReplace: (order: PendingOrder, newPrice: number) => void;
 }) {
   if (orders.length === 0) return null;
+  const groups = groupPendingEntries(orders);
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <p className="text-[10px] text-yellow-400 tracking-widest font-bold uppercase">
-          ⏳ Working / Pending Orders — {orders.length}
+          ⏳ Pending Entries — {groups.length}
         </p>
       </div>
-      <div className="space-y-2">
-        {orders.map(order => (
-          <PendingOrderCard
-            key={order.id}
-            order={order}
-            th={th}
-            cancelling={cancellingOrderIds.has(order.id)}
-            replacing={replacingOrderIds.has(order.id)}
-            onCancel={onCancel}
-            onReplace={onReplace}
-          />
+      <p className={`text-[10px] ${th.textFaint} mb-3`}>Only unfilled opening orders appear here. Attached exits remain contingent until an entry fills; no action below automatically cancels or reprices an order.</p>
+      <div className="space-y-3">
+        {groups.map(group => (
+          <div key={group[0]?.parentOrderId ?? group[0]?.id} className="space-y-2">
+            {group.length > 1 && <p className={`text-[9px] ${th.textFaint} pl-1`}>Broker entry group {group[0]?.parentOrderId ?? group[0]?.id}</p>}
+            {group.map(order => (
+              <PendingOrderCard
+                key={order.id}
+                order={order}
+                th={th}
+                cancelling={cancellingOrderIds.has(order.id)}
+                replacing={replacingOrderIds.has(order.id)}
+                onCancel={onCancel}
+                onReplace={onReplace}
+              />
+            ))}
+          </div>
         ))}
       </div>
     </div>
