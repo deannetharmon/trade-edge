@@ -5842,8 +5842,8 @@ function ExtendProfitButton({ pos, th }: { pos: Position; th: typeof THEMES[Them
       )}
 
       {result === 'success' && resultMsg && (
-        <p className={`absolute bottom-full mb-1 left-0 text-[9px] text-emerald-400 whitespace-nowrap bg-black/80 px-2 py-1 rounded border border-emerald-700`}>
-          {resultMsg}
+        <p aria-live="polite" title={resultMsg} className="mt-1 max-w-[92px] truncate text-[8px] font-semibold text-emerald-400">
+          ✓ Updated
         </p>
       )}
     </div>
@@ -7286,8 +7286,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       )}
 
       {result === 'success' && resultMsg && (
-        <p className="absolute bottom-full mb-1 left-0 text-[9px] text-emerald-400 whitespace-nowrap bg-black/80 px-2 py-1 rounded border border-emerald-700 max-w-xs truncate" title={resultMsg}>
-          {resultMsg}
+        <p aria-live="polite" title={resultMsg} className="mt-1 max-w-[92px] truncate text-[8px] font-semibold text-emerald-400">
+          ✓ Stop updated
         </p>
       )}
     </div>
