@@ -78,9 +78,11 @@ import {
   buildOriginalCreditDefaultPolicy,
   buildCurrentValueAnchoredPolicy,
   buildManualAbsolutePolicy,
+  buildDebitStopPolicy,
   classifyQuoteQuality,
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
+import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, STANDALONE_LEAPS_STOP_LOSS_CHOICES, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -6193,7 +6195,7 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 
 function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof THEMES[Theme]; onRetry: () => void }) {
   const [reviewing, setReviewing] = useState(false);
-  if (pos.entryPriceEffect === 'Debit') return <DebitStopObservation position={pos} />;
+  if (pos.entryPriceEffect === 'Debit') return <StandaloneLeapsStopControl pos={pos} th={th} />;
   const classification = pos.stopLossClassification;
   if (classification === 'NOT_EVALUATED') return <div><button type="button" onClick={onRetry} className="rounded border border-slate-500 px-2.5 py-1 text-[9px] font-bold text-slate-300">{STOP_CONTROL_LABELS.NOT_EVALUATED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
   if (classification === 'UNSUPPORTED') return <div><button type="button" disabled className="cursor-not-allowed rounded border border-slate-700 px-2.5 py-1 text-[9px] font-bold text-slate-500">{STOP_CONTROL_LABELS.UNSUPPORTED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
@@ -6201,6 +6203,46 @@ function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof 
     return <div><button type="button" onClick={() => setReviewing(value => !value)} className="rounded border border-amber-600 px-2.5 py-1 text-[9px] font-bold text-amber-300">{STOP_CONTROL_LABELS[classification]}</button>{reviewing && <div className="mt-2"><StopEvidencePanel assessment={pos.stopAssessment} expanded /><div className="mt-2"><SetStopLossButton pos={pos} th={th} /></div></div>}</div>;
   }
   return <div><SetStopLossButton pos={pos} th={th} /><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+}
+
+function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
+  const eligibility = evaluateStandaloneLeapsStopEligibility(pos);
+  const [choice, setChoice] = useState<StandaloneLeapsStopLossPct | null>(null);
+  const [review, setReview] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const portfolioMode = usePortfolioMode();
+  const debit = pos.entryCredit != null && pos.quantity > 0 ? pos.entryCredit / (pos.quantity * 100) : null;
+  if (eligibility === 'PMCC_MANAGED') return <span className="text-[10px] text-amber-300">PMCC-managed — this LEAPS supports a short call and is not stopped on its own.</span>;
+  if (eligibility !== 'ELIGIBLE' || debit == null) return <DebitStopObservation position={pos} />;
+  const proposal = choice == null ? null : standaloneLeapsStopProposal(debit, choice);
+  const submit = async () => {
+    if (!proposal || !pos.identity) return;
+    try { assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'set standalone LEAPS stop'); }
+    catch (e: any) { setResult(e.message ?? 'Portfolio mode does not allow LIVE stop-order submission.'); return; }
+    setLoading(true); setResult(null);
+    try {
+      const token = await getAccessToken();
+      const quote = await fetchCloseQuote(pos, token);
+      if (!quote || quote.netBid == null || quote.netAsk == null || quote.netAsk < quote.netBid || proposal.triggerPrice >= quote.netBid) throw new Error('A fresh executable quote above the proposed stop is required before submission.');
+      const leg = pos.legs[0];
+      const body = { 'order-type': 'Stop Limit', 'time-in-force': 'GTC', 'stop-trigger': proposal.triggerPrice.toFixed(2), price: Math.max(0.01, Number((proposal.triggerPrice * .9).toFixed(2))).toFixed(2), 'price-effect': 'Credit', legs: [{ symbol: leg.symbol, quantity: pos.quantity, action: 'Sell to Close', 'instrument-type': instrType(pos.symbol) }] };
+      const submission = await submitCloseOrderIfSafe({ identity: pos.identity, structureAmbiguous: pos.structureAmbiguous, structureBlockMessage: pos.structureBlockMessage }, { identity: pos.identity, requestedQuantity: pos.quantity, closeableQuantity: pos.quantity, pricingIntent: 'STOP_LOSS', requestedClosePriceEffect: 'Credit', closePricePointsPerUnit: proposal.triggerPrice, quote: { netBid: quote.netBid, netAsk: quote.netAsk, netMid: quote.netMid, fetchedAtMs: Date.now() }, actualOrder: { legs: [{ symbol: leg.symbol, quantity: pos.quantity, direction: 'Long' }], limitPricePointsPerUnit: proposal.triggerPrice, priceEffect: 'Credit', orderType: 'Stop Limit', timeInForce: 'GTC' }, displayedExpectedPnlDollars: -debit * (choice! / 100) * pos.quantity * 100 }, async () => ttPost(`/accounts/${pos.accountNumber}/orders`, token, body));
+      if (!submission.submitted) throw new Error(`Blocked by safety gate: ${submission.reason}`);
+      const orderId = String((submission.result as any)?.data?.order?.id ?? (submission.result as any)?.data?.id ?? 'submitted');
+      const policy = buildDebitStopPolicy({ originalDebitPerContract: debit, maximumLossPct: choice! / 100, createdAt: new Date().toISOString(), brokerOrderId: orderId });
+      await postStopPolicies([{ positionKey: positionStopPolicyKey(pos.accountNumber, leg.symbol), policy: policy as any }]);
+      setResult('✓ Stop submitted'); setReview(false);
+    } catch (e: any) { setResult(e.message ?? 'Stop submission failed.'); }
+    finally { setLoading(false); }
+  };
+  return <div className="max-w-[190px]">
+    <p className="text-[10px] text-slate-300">No stop set — choose your maximum loss.</p>
+    <div className="mt-1 flex gap-1">{STANDALONE_LEAPS_STOP_LOSS_CHOICES.map(loss => <button key={loss} onClick={() => { setChoice(loss); setReview(false); }} className={`rounded border px-1.5 py-0.5 text-[9px] ${choice === loss ? 'border-teal-500 text-teal-300' : `${th.borderLight} ${th.textFaint}`}`}>{loss}%</button>)}</div>
+    {proposal && <><p className="mt-1 text-[9px] text-teal-300">Stop ${proposal.triggerPrice.toFixed(2)} · {proposal.expectedPnlPct}% from entry debit</p><button onClick={() => setReview(true)} className="mt-1 rounded border border-teal-600 px-2 py-1 text-[9px] font-bold text-teal-300">Review Stop</button></>}
+    {review && proposal && <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4"><div className={`${th.sidebar} w-80 rounded-xl border ${th.border} p-4`}><p className="text-xs font-bold">Review LEAPS Stop — {pos.symbol}</p><p className={`mt-3 text-[10px] ${th.textFaint}`}>Entry debit ${debit.toFixed(2)} · maximum loss {choice!}%</p><p className="mt-1 text-sm font-bold text-teal-300">Stop ${proposal.triggerPrice.toFixed(2)} · {proposal.expectedPnlPct}%</p><p className={`mt-2 text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p><div className="mt-4 flex gap-2"><button disabled={loading} onClick={submit} className="flex-1 rounded bg-teal-700 py-2 text-[10px] font-bold text-white disabled:opacity-50">{loading ? 'Submitting…' : 'Confirm & Submit'}</button><button onClick={() => setReview(false)} className={`rounded border ${th.border} px-3 text-[10px] ${th.textFaint}`}>Back</button></div></div></div>}
+    {result && <p title={result} className={`mt-1 text-[9px] ${result.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{result}</p>}
+  </div>;
 }
 
 // STOP-DIALOG-LABELING-0001 follow-up — deterministic, testable string

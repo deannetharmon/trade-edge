@@ -46,6 +46,7 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [TE-0006A Portfolio Health Scoring Framework](./TE-0006A-portfolio-health-scoring-framework.md)
 - [TE-0006B Portfolio Recommendation Rules](./TE-0006B-portfolio-recommendation-rules.md)
 - [POSITIONS-0004 Profit-Protecting Credit-Spread Stop Adjustments](./POSITIONS-0004-profit-protecting-credit-spread-stops.md)
+- [POSITIONS-0005 Standalone LEAPS Reviewed Stop](./POSITIONS-0005-standalone-leaps-reviewed-stop.md)
 
 ## Proposed entry-quality sequence
 
