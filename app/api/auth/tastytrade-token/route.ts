@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth';
 import { decrypt, encrypt } from '@/lib/crypto';
 
 const redis = new Redis(process.env.REDIS_URL!);
-const TOKEN_URL = 'https://api.tastytrade.com/oauth/token';
+const TOKEN_URL = 'https://api.tastyworks.com/oauth/token';
 
 /** Exchanges stored credentials without exposing them to the browser. */
 export async function POST() {
@@ -25,12 +25,12 @@ export async function POST() {
   const response = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
       Accept: 'application/json',
       // Tastytrade requires a product/version User-Agent for API requests.
       'User-Agent': 'trade-edge/1.0',
     },
-    body: new URLSearchParams({
+    body: JSON.stringify({
       grant_type: 'refresh_token',
       refresh_token: decrypt(credentials.refresh_token),
       client_id: clientId,

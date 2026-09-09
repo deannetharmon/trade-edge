@@ -1,15 +1,21 @@
 // app/api/callback/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import Redis from 'ioredis';
+import { authOptions } from '@/lib/auth';
+import { encrypt } from '@/lib/crypto';
 
-const BASE = 'https://api.tastytrade.com';
-const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
+const BASE = 'https://api.tastyworks.com';
+const CLIENT_ID = process.env.TASTYTRADE_CLIENT_ID ?? '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 const REDIRECT_URI = 'https://options-screener-dun.vercel.app/api/callback';
+const redis = new Redis(process.env.REDIS_URL!);
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
   const errorDesc = searchParams.get('error_description');
+  const state = searchParams.get('state');
 
   if (error) {
     return NextResponse.redirect(
@@ -21,17 +27,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=No+authorization+code+received', req.url));
   }
 
-  // Read client secret from cookie (set by login page before redirect)
-  const clientSecret = req.cookies.get('tt_client_secret_temp')?.value;
+  if (!state || state !== req.cookies.get('tt_oauth_state')?.value) {
+    return NextResponse.redirect(new URL('/login?error=Invalid+OAuth+state.+Please+try+again.', req.url));
+  }
+
+  const clientSecret = process.env.TASTYTRADE_CLIENT_SECRET;
   if (!clientSecret) {
-    return NextResponse.redirect(new URL('/login?error=Session+lost+during+OAuth+flow.+Please+try+again.', req.url));
+    return NextResponse.redirect(new URL('/login?error=Tastytrade+OAuth+is+not+configured.', req.url));
   }
 
   try {
     const res = await fetch(`${BASE}/oauth/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: new URLSearchParams({
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' },
+      body: JSON.stringify({
         grant_type: 'authorization_code',
         code,
         client_id: CLIENT_ID,
@@ -55,7 +64,20 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Pass tokens to the client via a redirect to /auth/complete
+    const session = await getServerSession(authOptions);
+    const userId = (session?.user as { id?: string } | undefined)?.id;
+    if (!userId) {
+      return NextResponse.redirect(new URL('/login?error=Please+sign+in+to+TradeEdge+before+connecting+Tastytrade.', req.url));
+    }
+
+    // Persist the broker refresh token against the already signed-in TradeEdge
+    // user, so future Reconnect clicks only refresh server-side credentials.
+    await redis.hset(`user:${userId}:tastytrade`, {
+      refresh_token: encrypt(data.refresh_token),
+      client_secret: encrypt(clientSecret),
+    });
+
+    // Pass the short-lived access token to the client via a redirect to /auth/complete.
     // We can't write to localStorage from a server route, so we pass via
     // a short-lived cookie and let the client page pick them up.
     const response = NextResponse.redirect(new URL('/auth/complete', req.url));
@@ -69,8 +91,7 @@ export async function GET(req: NextRequest) {
     };
 
     response.cookies.set('tt_access_token_temp', data.access_token, cookieOpts);
-    // Clear the client secret temp cookie
-    response.cookies.set('tt_client_secret_temp', '', { ...cookieOpts, maxAge: 0 });
+    response.cookies.set('tt_oauth_state', '', { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 0 });
 
     return response;
   } catch (e: any) {

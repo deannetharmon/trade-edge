@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth';
 import { decrypt, encrypt } from '@/lib/crypto';
 
 const redis = new Redis(process.env.REDIS_URL!);
-const API_BASE = 'https://api.tastytrade.com';
+const API_BASE = 'https://api.tastyworks.com';
 const allowed = ['/customers/', '/accounts/', '/market-', '/instruments/', '/option-', '/transactions'];
 
 /** Same-origin read proxy: keeps broker calls out of the browser, avoiding CORS. */
@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
 
   const tokenResponse = await fetch(`${API_BASE}/oauth/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: decrypt(credentials.refresh_token), client_id: clientId, client_secret: decrypt(credentials.client_secret) }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' },
+    body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: decrypt(credentials.refresh_token), client_id: clientId, client_secret: decrypt(credentials.client_secret) }),
     cache: 'no-store',
   });
   const tokenData = await tokenResponse.json().catch(() => ({}));
