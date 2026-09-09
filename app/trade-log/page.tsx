@@ -570,7 +570,16 @@ export default function TradeLogPage() {
     } else { setStatus('Refreshing from TastyTrade...'); }
     setLoading(true); setError('');
     try {
-      const { trades: fetched, unmatchedClosures } = await fetchAndReconstructTrades(r);
+      const { trades: fetched, unmatchedClosures, transactions } = await fetchAndReconstructTrades(r);
+      const accountId = transactions.find(tx => typeof tx['account-number'] === 'string')?.['account-number'];
+      if (accountId) {
+        const pendingResponse = await fetch(`/api/entry-context/pending?accountId=${encodeURIComponent(accountId)}`);
+        const pendingBody = pendingResponse.ok ? await pendingResponse.json() : null;
+        await Promise.all((pendingBody?.pending ?? []).map((pending: { brokerOrderId?: string }) => fetch('/api/entry-context/promote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId, brokerOrderId: pending.brokerOrderId }),
+        })));
+      }
       if (unmatchedClosures.length > 0) {
         // PI-0008E: closing/assignment/exercise transactions that couldn't be
         // matched to any open lot within this window (most likely opened

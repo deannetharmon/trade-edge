@@ -488,7 +488,7 @@ export function reconstructTrades(transactions: RawTransaction[]): Reconstructio
 }
 
 // ── Public: network fetch + reconstruction ────────────────────────────────
-export async function fetchAndReconstructTrades(range: TimeRange): Promise<ReconstructionResult> {
+export async function fetchAndReconstructTrades(range: TimeRange): Promise<ReconstructionResult & { transactions: RawTransaction[] }> {
   const token = await getAccessToken();
   const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
   const startDate = rangeStartDate(range);
@@ -501,5 +501,5 @@ export async function fetchAndReconstructTrades(range: TimeRange): Promise<Recon
     if (!data?.pagination || items.length < 250 || allTx.length >= data.pagination['total-items']) break;
     page++;
   }
-  return reconstructTrades(allTx);
+  return { ...reconstructTrades(allTx), transactions: allTx };
 }

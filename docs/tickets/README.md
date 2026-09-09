@@ -46,6 +46,21 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [TE-0006A Portfolio Health Scoring Framework](./TE-0006A-portfolio-health-scoring-framework.md)
 - [TE-0006B Portfolio Recommendation Rules](./TE-0006B-portfolio-recommendation-rules.md)
 
+## Proposed entry-quality sequence
+
+- [ENTRY-0001A Credit-Spread Entry Snapshot Foundation](./ENTRY-0001A-credit-spread-entry-snapshot-foundation.md)
+- [ENTRY-0001 Credit-Spread Entry Context and Advisory Risk Signals](./ENTRY-0001-credit-spread-entry-context.md)
+- [ENTRY-0002 Credit-Spread Entry Snapshot Performance Analysis](./ENTRY-0002-credit-spread-entry-performance-analysis.md)
+- [Quinn’s live filled-OTO verification](../reviews/ENTRY-0001A-live-filled-oto-verification.md)
+
+Execution order:
+
+```text
+ENTRY-0001A → ENTRY-0001 → collect complete closed-trade cohort → ENTRY-0002
+```
+
+Current gate: Quinn verifies one already-filled OTO through a read-only Trade Log refresh. No additional order action is required.
+
 ## Current roadmap order
 
 1. Stabilize current build.

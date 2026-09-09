@@ -33,6 +33,8 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { buildCreditSpreadEntryFacts } from '@/lib/entry-context/analysis';
+import { availableEvidence, unavailableEvidence } from '@/lib/entry-context/types';
 import { buildPmccFailureAuditResult, derivePmccMarketSession, runPmccSymbolProduction } from '@/lib/scans/pmccProduction';
 import {
   DEFAULT_PMCC_LONG_DELTA_RANGE,
@@ -409,13 +411,13 @@ function getEmClearanceColor(clearancePct: number | null): string {
 
 function calcEmClearancePct(result: { price: number | null; bestCandidate: SpreadCandidate | null }): number | null {
   const c = result.bestCandidate;
-  if (!c || c.expectedMove == null || result.price == null || result.price <= 0) return null;
-  const em = c.expectedMove;
-  const price = result.price;
-  const emBoundary = c.strategy === 'BPS' ? price - em : price + em;
-  return c.strategy === 'BPS'
-    ? (emBoundary - c.shortStrike) / price * 100
-    : (c.shortStrike - emBoundary) / price * 100;
+  if (!c || (c.strategy !== 'BPS' && c.strategy !== 'BCS')) return null;
+  return buildCreditSpreadEntryFacts({
+    strategy: c.strategy,
+    underlyingPrice: result.price,
+    shortStrike: c.shortStrike,
+    expectedMove: c.expectedMove ?? null,
+  }).expectedMoveClearancePct;
 }
 
 
@@ -3484,6 +3486,7 @@ function TradeModal({ result, th, onClose }: {
   const [dryRunResult, setDryRunResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
+  const [entryContextWarning, setEntryContextWarning] = useState('');
   const isPMCC = c.strategy === 'PMCC';
 
   const defaultEntryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
@@ -3506,10 +3509,17 @@ function TradeModal({ result, th, onClose }: {
     }
     return null;
   })();
-  const otmWarnThreshold = getOtmWarningThreshold(c.dte, result.underlyingType ?? 'stock');
-  const otmTooTight = otmPct != null && otmPct < otmWarnThreshold;
-  const [otmOverrideChecked, setOtmOverrideChecked] = useState(false);
-  const otmGateBlocking = otmTooTight && !otmOverrideChecked;
+  // ENTRY-0001: no standalone OTM percentage threshold is approved for entry
+  // advice. Show the raw cushion with delta/DTE instead of deriving a pass/fail.
+  const otmGateBlocking = false;
+  const emClearancePct = calcEmClearancePct(result);
+  const earningsWithinExpiry = (() => {
+    if (!result.earningsDate || !c.expiration) return false;
+    const earnings = new Date(`${result.earningsDate}T00:00:00`);
+    const expiry = new Date(`${c.expiration}T23:59:59`);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Number.isFinite(earnings.getTime()) && Number.isFinite(expiry.getTime()) && earnings >= today && earnings <= expiry;
+  })();
 
   const hasOccSymbols = isPMCC 
     ? !!((c.shortOccSymbolPMCC || c.shortOccSymbol) && (c.longOccSymbolPMCC || c.longOccSymbol))
@@ -3548,6 +3558,32 @@ function TradeModal({ result, th, onClose }: {
     };
   };
 
+  const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
+    if (c.strategy !== 'BPS' && c.strategy !== 'BCS') return;
+    const at = new Date().toISOString();
+    const quoteAt = typeof c.quoteFetchedAt === 'number' && Number.isFinite(c.quoteFetchedAt)
+      ? new Date(c.quoteFetchedAt).toISOString()
+      : null;
+    const evidence = (value: number | null | undefined, source: string, asOf: string | null = quoteAt) => value == null || !asOf ? unavailableEvidence<number>('Entry quote timestamp unavailable') : availableEvidence(value, source, asOf);
+    const response = await fetch('/api/entry-context/pending', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId, brokerOrderId, openingOrderIds, submittedAt: at, strategy: c.strategy, symbol: result.symbol, expiration: c.expiration,
+        shortStrike: c.shortStrike, longStrike: c.longStrike, quantity,
+        // A submitted limit is planning evidence, not a broker-confirmed fill.
+        // Do not relabel it during later snapshot promotion.
+        fillPrice: unavailableEvidence('Aggregate spread fill is unavailable until broker execution evidence is captured'), underlyingPrice: evidence(result.price, 'scan underlying quote'),
+        shortDelta: evidence(c.shortDelta, 'scan option chain'), shortLegIv: evidence(c.shortIv, 'scan option chain'),
+        ivr: evidence(result.ivr, 'market metrics'), underlyingIv: unavailableEvidence('Underlying IV was not supplied by the scan result'),
+        expectedMove: evidence(c.expectedMove, 'scan expected-move formula'),
+        earningsDate: result.earningsDate && quoteAt ? availableEvidence(result.earningsDate, 'market metrics', quoteAt) : unavailableEvidence('Earnings date or timestamp unavailable'),
+        quoteBid: evidence(c.shortBid, 'scan option chain'), quoteAsk: evidence(c.shortAsk, 'scan option chain'),
+        quoteMid: c.shortBid != null && c.shortAsk != null ? availableEvidence((c.shortBid + c.shortAsk) / 2, 'scan option chain', at) : unavailableEvidence('Short-leg quote unavailable'),
+      }),
+    });
+    if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
+  };
+
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
@@ -3583,7 +3619,21 @@ function TradeModal({ result, th, onClose }: {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
-      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
+      const submittedOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted';
+      const acknowledgedComplexOrder = data?.data?.['complex-order'];
+      // OTO's trigger order is the entry; `orders` are contingent exits and
+      // must never be treated as opening-fill evidence.
+      const openingOrderIds = [acknowledgedComplexOrder?.['trigger-order']]
+        .map((order: { id?: string | number }) => order?.id == null ? null : String(order.id))
+        .filter((id: string | null): id is string => Boolean(id));
+      setOrderId(submittedOrderId);
+      // ENTRY-0001A: this records planning/quote evidence only. The immutable
+      // trade snapshot is still created later, only after broker fills confirm.
+      try { await persistPendingEntry(accountNumber, String(submittedOrderId), openingOrderIds); }
+      catch (entryContextError) {
+        console.warn(entryContextError);
+        setEntryContextWarning('Order submitted, but entry context could not be saved. No snapshot will be claimed unless broker evidence is later captured.');
+      }
       setPhase('done');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -3606,18 +3656,6 @@ function TradeModal({ result, th, onClose }: {
         {!hasOccSymbols && (
           <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
             <p className="text-xs text-yellow-400">OCC symbols not available for this setup — rescan to populate them.</p>
-          </div>
-        )}
-
-        {otmTooTight && (
-          <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4 space-y-2">
-            <p className="text-xs text-red-400 font-bold">
-              ⚠ OTM buffer {otmPct!.toFixed(1)}% is below the {otmWarnThreshold}% threshold for this {result.underlyingType ?? 'stock'} / {c.dte}DTE setup — too close to the short strike.
-            </p>
-            <label className="flex items-center gap-2 text-[11px] text-red-300 cursor-pointer">
-              <input type="checkbox" checked={otmOverrideChecked} onChange={e => setOtmOverrideChecked(e.target.checked)} className="accent-red-500" />
-              I understand this is chasing premium on a tight strike and want to proceed anyway
-            </label>
           </div>
         )}
 
@@ -3647,6 +3685,21 @@ function TradeModal({ result, th, onClose }: {
             <span className={th.text}>{isPMCC ? 'Net Debit' : 'Net Credit'} Limit · GTC</span>
           </div>
         </div>
+
+        {!isPMCC && (c.strategy === 'BPS' || c.strategy === 'BCS') && (
+          <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
+            <p className="text-[10px] font-bold tracking-widest text-cyan-300">ENTRY CONTEXT · ADVISORY</p>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Short-strike cushion</span><span className={otmPct == null ? th.textFaint : getOtmColor(otmPct, result.ivr, result.underlyingType === 'etf' || result.underlyingType === 'index')}>{otmPct == null ? 'Unavailable' : `${otmPct.toFixed(1)}% OTM`}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Expected-move clearance</span><span className={getEmClearanceColor(emClearancePct)}>{emClearancePct == null ? 'Unavailable' : `${emClearancePct >= 0 ? '+' : ''}${emClearancePct.toFixed(1)}% vs EM`}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Short delta / DTE</span><span className={th.text}>{c.shortDelta != null ? `${Math.abs(c.shortDelta).toFixed(2)} / ${c.dte}d` : `Unavailable / ${c.dte}d`}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>IVR</span><span className={result.ivr == null ? th.textFaint : th.text}>{result.ivr == null ? 'Unavailable' : `${result.ivr.toFixed(0)}%`}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Earnings</span><span className={result.earningsDate ? 'text-amber-300' : th.textFaint}>{result.earningsDate ?? 'Unavailable'}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Quote evidence</span><span className={c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? th.text : th.textFaint}>{c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? 'Both legs quoted' : 'Unavailable'}</span></div>
+            {emClearancePct != null && emClearancePct < 0 && <p className="text-[9px] text-red-300">Advisory: the short strike sits inside the modelled expected move.</p>}
+            {earningsWithinExpiry && <p className="text-[9px] text-amber-300">Advisory: earnings falls within this position’s expiration window.</p>}
+            <p className={`text-[9px] ${th.textFaint}`}>Context informs the entry; it does not predict outcome or block the order.</p>
+          </div>
+        )}
 
         <div className="flex items-center gap-3 mb-4">
           <span className={`text-xs ${th.textFaint}`}>Contracts</span>
@@ -3691,6 +3744,7 @@ function TradeModal({ result, th, onClose }: {
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
             <p className="text-xs text-emerald-400 font-bold">✓ OTO order submitted — ID {orderId}</p>
             <p className="text-[10px] text-emerald-400/70">Entry + GTC profit target ({gtcPct}%) submitted as a single bracket order.</p>
+            {entryContextWarning && <p className="text-[10px] text-amber-300 pt-1">{entryContextWarning}</p>}
           </div>
         )}
 

@@ -19,8 +19,11 @@ const SCRATCH_PCT = 5;
 import type { ExitType } from '@/lib/classifyExit';
 import type { TimeRange, ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 import {
-  fetchAndReconstructTrades, readCache, writeCache, getDeviceId,
+  fetchAndReconstructTrades, readCache, writeCache, getDeviceId, getAccessToken, ttFetch,
 } from '@/lib/tradeLog/reconstructTrades';
+import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { buildEntryPerformanceRollup, type EntryPerformanceRollup } from '@/lib/entry-context/performance';
+import type { CreditSpreadEntrySnapshot } from '@/lib/entry-context/types';
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
@@ -957,6 +960,7 @@ export default function PerformancePage() {
   const [widgets, setWidgets]     = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
   const [showConfig, setShowConfig] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [entryPerformance, setEntryPerformance] = useState<EntryPerformanceRollup | null>(null);
 
   // Load widget config from localStorage on mount
   useEffect(() => { setWidgets(getSavedWidgets()); }, []);
@@ -966,6 +970,17 @@ export default function PerformancePage() {
     try { localStorage.setItem(LS_PERF_WIDGETS, JSON.stringify(w)); } catch {}
   };
 
+  const loadEntryPerformance = useCallback(async (closedTrades: ClosedTrade[]) => {
+    try {
+      const token = await getAccessToken();
+      const accountId = await requireActiveBrokerAccount(token, ttFetch);
+      const response = await fetch(`/api/entry-context/snapshots?accountId=${encodeURIComponent(accountId)}`);
+      if (!response.ok) throw new Error('Entry snapshots are unavailable');
+      const data = await response.json();
+      setEntryPerformance(buildEntryPerformanceRollup(closedTrades, Array.isArray(data?.snapshots) ? data.snapshots as CreditSpreadEntrySnapshot[] : []));
+    } catch { setEntryPerformance(null); }
+  }, []);
+
   const loadTrades = useCallback(async (r: TimeRange, forceRefresh = false) => {
     const deviceId = getDeviceId();
     if (!forceRefresh) {
@@ -973,7 +988,7 @@ export default function PerformancePage() {
       if (cached) {
         const sameDevice = cached.deviceId === deviceId;
         const fresh = Date.now() - cached.fetchedAt < 4 * 60 * 60 * 1000;
-        if (sameDevice && fresh) { setTrades(cached.trades); setCachedAt(cached.fetchedAt); return; }
+        if (sameDevice && fresh) { setTrades(cached.trades); setCachedAt(cached.fetchedAt); void loadEntryPerformance(cached.trades); return; }
         setStatus(sameDevice ? 'Refreshing from TastyTrade...' : 'New device — loading from TastyTrade...');
       } else {
         setStatus('Loading trade history from TastyTrade...');
@@ -990,10 +1005,10 @@ export default function PerformancePage() {
         // to an open lot within this window, not fabricated into rows.
         console.warn(`Performance: ${unmatchedClosures.length} closing transaction(s) could not be matched to an open lot`, unmatchedClosures);
       }
-      setTrades(fetched); writeCache(r, fetched); setCachedAt(Date.now());
+      setTrades(fetched); writeCache(r, fetched); setCachedAt(Date.now()); void loadEntryPerformance(fetched);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); setStatus(''); }
-  }, []);
+  }, [loadEntryPerformance]);
 
   useEffect(() => { loadTrades('3m'); }, [loadTrades]);
 
@@ -1132,6 +1147,19 @@ export default function PerformancePage() {
         {error && (
           <div className="p-3 rounded-lg border border-red-500/40 bg-red-500/8">
             <p className="text-xs text-red-400 font-medium">{error}</p>
+          </div>
+        )}
+
+        {entryPerformance && (
+          <div className={`${th.card} border ${th.border} rounded-xl p-4`}>
+            <p className="text-[10px] font-bold tracking-widest text-cyan-300 mb-2">ENTRY CONTEXT OUTCOMES</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div><p className={th.textFaint}>Eligible snapshots</p><p className={th.text}>{entryPerformance.eligibleTrades}</p></div>
+              <div><p className={th.textFaint}>Missing / incomplete</p><p className={th.text}>{entryPerformance.missingSnapshotTrades} / {entryPerformance.incompleteReconstructionTrades}</p></div>
+              <div><p className={th.textFaint}>Snapshot P/L</p><p className={entryPerformance.realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>${entryPerformance.realizedPnl.toFixed(0)}</p></div>
+              <div><p className={th.textFaint}>Win rate</p><p className={th.text}>{entryPerformance.winRate == null ? 'Insufficient data' : `${(entryPerformance.winRate * 100).toFixed(0)}%`}</p></div>
+            </div>
+            <p className={`text-[9px] ${th.textFaint} mt-3`}>Window: {range}. Descriptive only. Inside expected move: {entryPerformance.insideExpectedMove.count} trades · ${entryPerformance.insideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Outside expected move: {entryPerformance.outsideExpectedMove.count} trades · ${entryPerformance.outsideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Missing or incomplete evidence is excluded.</p>
           </div>
         )}
 

@@ -373,3 +373,9 @@ It is defined by the principles that guide every decision.
 These governance documents exist to ensure that, regardless of how the product grows, TradeEdge remains a calm, disciplined, trustworthy operating system for managing an options portfolio.
 
 Every implementation should strengthen that identity.
+
+---
+
+# Collaboration protocols
+
+- [ChatGPT Codex Multi Persona Interaction Protocol](./ChatGPT%20Codex%20Multi%20Persona%20Interaction%20Protocol.md)
