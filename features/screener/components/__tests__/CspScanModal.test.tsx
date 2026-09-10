@@ -46,10 +46,12 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     const user = userEvent.setup();
     render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
     expect(screen.getByLabelText(/Only show CSPs affordable/i)).toBeChecked();
-    await user.clear(screen.getByLabelText('Maximum cash reserved per CSP'));
-    await user.type(screen.getByLabelText('Maximum cash reserved per CSP'), '8000');
+    await user.clear(screen.getByLabelText('Cash limit per CSP'));
+    await user.type(screen.getByLabelText('Cash limit per CSP'), '8000');
     await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ affordableOnly: true, capitalLimit: 8000 }));
+    expect(screen.getByText(/Leave this blank to use available cash in your selected account/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Capital is verified against/i)).not.toBeInTheDocument();
   });
 
   it('closes on Escape and traps Tab focus inside the dialog', async () => {
