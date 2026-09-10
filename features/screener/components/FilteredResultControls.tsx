@@ -52,6 +52,9 @@ export interface FilteredResultControlsProps {
   // two different, complementary knobs, not a duplicate of existing scope.
   ivrMin: number;
   setIvrMin: (v: number) => void;
+  /** Exact-expiration IVX; CSP opts in because each result is one contract. */
+  ivxMin?: number;
+  setIvxMin?: (v: number) => void;
   strategies: FilterStrategy[];
   toggleStrategy: (s: FilterStrategy) => void;
 
@@ -77,6 +80,7 @@ export interface FilteredResultControlsProps {
   // the same credit-ratio threshold CSP/BPS/BCS use.
   showStrategyToggle?: boolean;
   showCreditRatio?: boolean;
+  showIvx?: boolean;
 }
 
 const POP_PRESETS = [0, 50, 60, 70, 80];
@@ -88,6 +92,7 @@ const CREDIT_RATIO_PRESETS = [0, 15, 20, 25, 33];
 // buttons land on numbers that already mean something in this app, not
 // arbitrary round numbers.
 const IVR_PRESETS = [0, 20, 30, 40, 50];
+const IVX_PRESETS = [0, 20, 30, 40, 50];
 
 interface ActiveChip {
   key: string;
@@ -107,6 +112,8 @@ export function FilteredResultControls({
   setCreditRatioMin,
   ivrMin,
   setIvrMin,
+  ivxMin = 0,
+  setIvxMin,
   strategies,
   toggleStrategy,
   hiddenSymbols,
@@ -116,6 +123,7 @@ export function FilteredResultControls({
   th,
   showStrategyToggle = true,
   showCreditRatio = true,
+  showIvx = false,
 }: FilteredResultControlsProps) {
   const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
 
@@ -123,6 +131,7 @@ export function FilteredResultControls({
   if (popMin > 0) activeChips.push({ key: 'pop', label: `POP ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
   if (otmMin > 0) activeChips.push({ key: 'otm', label: `OTM ≥ ${otmMin}%`, onRemove: () => setOtmMin(0) });
   if (ivrMin > 0) activeChips.push({ key: 'ivr', label: `IVR ≥ ${ivrMin}%`, onRemove: () => setIvrMin(0) });
+  if (showIvx && ivxMin > 0 && setIvxMin) activeChips.push({ key: 'ivx', label: `Expiration IVX ≥ ${ivxMin}%`, onRemove: () => setIvxMin(0) });
   if (showCreditRatio && creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
   if (showStrategyToggle) {
     for (const s of strategies) {
@@ -139,6 +148,7 @@ export function FilteredResultControls({
     setPopMin(0);
     setOtmMin(0);
     setIvrMin(0);
+    if (showIvx && setIvxMin) setIvxMin(0);
     if (showCreditRatio) setCreditRatioMin(0);
     if (showStrategyToggle) for (const s of [...strategies]) toggleStrategy(s);
     setHiddenSymbols([]);
@@ -159,6 +169,22 @@ export function FilteredResultControls({
           ))}
         </div>
         <div className={`w-px h-4 ${th.border} border-l`} />
+        {showIvx && setIvxMin && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Expiration IVX ≥</span>
+              {IVX_PRESETS.map(v => (
+                <button key={v} onClick={() => setIvxMin(v)}
+                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                    ivxMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                  }`}>
+                  {v === 0 ? 'Any' : `${v}%`}
+                </button>
+              ))}
+            </div>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+          </>
+        )}
         <div className="flex items-center gap-1.5">
           <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
           {OTM_PRESETS.map(v => (

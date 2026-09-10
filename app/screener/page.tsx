@@ -1346,6 +1346,14 @@ function runCspChecklist(
   // One ScreenResult per discovered candidate — the core multi-candidate fix.
   return cspFindAll.results.map((r): ScreenResult => {
     const c = r.candidate;
+    // The broker's expiration map is keyed by the exact contract expiration.
+    // This is display/filter context only: raw IVX does not qualify or
+    // disqualify a CSP.
+    const expirationIvx = metrics.expirationIvxMap?.[c.expiration] ?? null;
+    c.expirationIvx = expirationIvx;
+    c.expectedMove = expirationIvx != null && price != null && c.dte > 0
+      ? price * (expirationIvx / 100) * Math.sqrt(c.dte / 365)
+      : null;
 
     // CSP-WORKFLOW-0001 — attach the CSP-specific score (lib/scans/cspScore.ts).
     // Every input is candidate-specific (this contract's own strike/OI/ROC/
@@ -1430,7 +1438,7 @@ function runCspChecklist(
 
     return {
       symbol, strategy: 'CSP', price, ivr: ivrValue,
-      ivx: null, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+      ivx: expirationIvx, ivx30: null, ivHv30Diff: null, liquidityRating: null,
       qualified, bestCandidate: c, failReasons,
       earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
       underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CSP',
@@ -5404,7 +5412,7 @@ const strategyScores = useMemo(() => {
               {result.ivx != null && (
                 <div className="text-xs shrink-0 w-28">
                   <div>
-                    <span className={th.label}>IVx </span>
+                    <span className={th.label}>{c.strategy === 'CSP' ? 'Expiration IVX ' : 'IVx '}</span>
                     <span className={`${getIvxColor(result.ivx)} font-medium`}>{result.ivx.toFixed(1)}%</span>
                   </div>
                   <div>
@@ -5614,6 +5622,7 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>Breakeven: </span><span className={th.text}>${c.breakeven?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(assignment price ${c.assignmentPrice?.toFixed(2) ?? '—'})</span></div>
                 <div><span className={th.label}>ROC (period): </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(premium / required cash)</span></div>
                 <div><span className={th.label}>Annualized ROC: </span><span className={th.text}>{c.annualizedRoc?.toFixed(0) ?? '—'}%</span></div>
+                <div><span className={th.label}>IVR / Expiration IVX: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : 'Unavailable'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : 'Unavailable'}</span></div>
               </div>
               {c.capitalBlocked ? (
                 <p className={`text-[9px] text-red-400 font-medium pt-1`}>⚠ {c.capitalWarning}</p>
@@ -9542,6 +9551,9 @@ export default function Home() {
   const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
   // IVR-0001: same post-scan narrowing pattern as the three filters above.
   const [filterIvrMin, setFilterIvrMin] = useState<number>(0);
+  // Expiration IVX is candidate-specific for CSPs. It is a post-scan view
+  // filter only, never a qualification or scoring gate.
+  const [filterIvxMin, setFilterIvxMin] = useState<number>(0);
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -9567,6 +9579,7 @@ export default function Home() {
     // below -- a result with no candidate still has an ivr reading and
     // should still be filterable by it.
     if (filterIvrMin > 0 && (r.ivr ?? -1) < filterIvrMin) return false;
+    if (activeSession?.requestedStrategy === 'csp' && filterIvxMin > 0 && (r.ivx ?? -1) < filterIvxMin) return false;
     const c = r.bestCandidate;
     if (c) {
       if ((c.pop ?? 0) < filterPopMin) return false;
@@ -10462,6 +10475,9 @@ export default function Home() {
                       setOtmMin={setFilterOtmMin}
                       ivrMin={filterIvrMin}
                       setIvrMin={setFilterIvrMin}
+                      ivxMin={filterIvxMin}
+                      setIvxMin={setFilterIvxMin}
+                      showIvx
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}

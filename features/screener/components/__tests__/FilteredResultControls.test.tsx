@@ -85,6 +85,14 @@ describe('FilteredResultControls', () => {
     expect(setIvrMin).toHaveBeenCalledWith(0);
   });
 
+  it('offers an expiration-specific IVX chip when a CSP enables it', () => {
+    const setIvxMin = vi.fn();
+    renderControls({ showIvx: true, ivxMin: 30, setIvxMin });
+    expect(screen.getByText('Expiration IVX ≥ 30%')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Remove filter: Expiration IVX ≥ 30%/ }));
+    expect(setIvxMin).toHaveBeenCalledWith(0);
+  });
+
   it('provides a single reset action that clears every active filter', () => {
     const { setPopMin, toggleStrategy, setHiddenSymbols } = renderControls({ hiddenSymbols: ['AAPL'] });
     fireEvent.click(screen.getByRole('button', { name: 'Reset result filters' }));
