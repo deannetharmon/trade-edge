@@ -98,6 +98,7 @@ export interface ExistingIncomeOpportunity {
   positionKey: string | null;
   title: string;
   reason: string;
+  nextStep: string;
   freshness: string;
   exactContract: string | null;
   accountNumber: string | null;

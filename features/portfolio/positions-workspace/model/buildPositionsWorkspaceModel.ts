@@ -51,11 +51,11 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
       accountNumber: position.accountNumber,
       sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
     };
-    if (!snapshotReady) { opportunities.push({ ...base, status: 'unavailable', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.' }); continue; }
-    if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position account identity does not match the active broker account.' }); continue; }
-    if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position is structurally ambiguous or missing leg evidence.' }); continue; }
-    if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-eligible', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).` }); continue; }
-    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A nearer-dated short call above this LEAPS strike is already open against this position.' }); continue; }
+    if (!snapshotReady) { opportunities.push({ ...base, status: 'unavailable', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.', nextStep: 'Refresh broker status, then try again.' }); continue; }
+    if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position account identity does not match the active broker account.', nextStep: 'Switch to the account holding this contract, then refresh.' }); continue; }
+    if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position is structurally ambiguous or missing leg evidence.', nextStep: 'Resolve the position structure before evaluating a short call.' }); continue; }
+    if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-eligible', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).`, nextStep: position.dte > DEFAULT_PMCC_DTE_RANGES.longMax ? `Wait until it reaches ${DEFAULT_PMCC_DTE_RANGES.longMax} DTE or less, then refresh.` : `This contract has fewer than ${DEFAULT_PMCC_DTE_RANGES.longMin} DTE; it will not become eligible by waiting.` }); continue; }
+    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A nearer-dated short call above this LEAPS strike is already open against this position.', nextStep: 'Wait until that short call is closed or expires, then refresh.' }); continue; }
     const longStrike = leg.strikePrice;
     const hasMatchingWorkingShort = snapshot!.workingOrders.some(order => order.legs.some(workingLeg => {
       const action = workingLeg.action.replace(/[^a-z]/gi, '').toLowerCase();
@@ -68,8 +68,8 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
         && expiry != null && expiry < position.expDate
         && Number.isFinite(workingStrike) && workingStrike > longStrike;
     }));
-    if (hasMatchingWorkingShort) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A matching short call is already working against this LEAPS.' }); continue; }
-    opportunities.push({ ...base, status: 'eligible', reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.' });
+    if (hasMatchingWorkingShort) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A matching short call is already working against this LEAPS.', nextStep: 'Wait for the working order to fill or cancel, then refresh.' }); continue; }
+    opportunities.push({ ...base, status: 'eligible', reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', nextStep: 'Find short call to open the PMCC Screener flow for this exact LEAPS.' });
   }
 
   const capacityReport = snapshot ? buildSnapshotCapacityReport(snapshot) : null;
@@ -81,18 +81,18 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
     const base = {
       id: `covered-call:${holding.symbol}`, kind: 'covered-call' as const, symbol: holding.symbol,
       positionKey: null, title: 'Covered call', freshness, exactContract: null,
-      accountNumber: holding.accountNumber,
+      accountNumber: holding.accountNumber, nextStep: '',
       sharesOwned: holding.quantity,
       allocatedContracts: capacity?.existingShortCallContracts ?? null,
       reservedContracts: capacity?.workingShortCallContracts ?? null,
       availableContracts: capacity?.availableCoveredContracts ?? null,
     };
     if (!snapshotReady || capacityReport?.status !== 'ok') {
-      opportunities.push({ ...base, status: 'unavailable', reason: 'Current share and short-call commitment evidence is required to verify covered-call capacity.' });
+      opportunities.push({ ...base, status: 'unavailable', reason: 'Current share and short-call commitment evidence is required to verify covered-call capacity.', nextStep: 'Refresh broker status, then try again.' });
     } else if (!capacity || capacity.availableCoveredContracts <= 0) {
-      opportunities.push({ ...base, status: 'no-capacity', reason: 'Fully covered / no available capacity after existing and working short calls.' });
+      opportunities.push({ ...base, status: 'no-capacity', reason: 'Fully covered / no available capacity after existing and working short calls.', nextStep: 'Wait until a short call is closed or expires, then refresh.' });
     } else {
-      opportunities.push({ ...base, status: 'eligible', reason: 'Share capacity is verified. Short-call timing has not yet been evaluated.' });
+      opportunities.push({ ...base, status: 'eligible', reason: 'Share capacity is verified. Short-call timing has not yet been evaluated.', nextStep: 'Evaluate covered-call candidates in the Screener.' });
     }
   }
   return opportunities;
