@@ -37,7 +37,7 @@ export const CSP_RETURN_STATUS_META: Record<CspReturnStatus, { label: string; cl
   LOW: { label: 'Low', className: 'text-red-400' },
   MODERATE: { label: 'Moderate', className: 'text-yellow-400' },
   TARGET_RANGE: { label: 'Target range', className: 'text-emerald-400' },
-  HIGH_RATE_REVIEW: { label: 'High rate — review risk, DTE, and liquidity', className: 'text-amber-400' },
+  HIGH_RATE_REVIEW: { label: 'Look closer before trading', className: 'text-amber-400' },
 };
 
 export function sortCspByThirtyDayEquivalent<T extends CspReturnInput>(items: readonly T[], direction: 'asc' | 'desc'): T[] {

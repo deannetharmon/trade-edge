@@ -10,7 +10,8 @@
 // qualified ResultCard path (app/screener/page.tsx) only ever showed this
 // same information inside its EXPANDED "CSP — Wheel Entry" section, which
 // the corrective-pass review flagged as insufficient -- a viewer should not
-// have to expand a card to see Bid/Ask/Mid/Cash required/Breakeven for a
+// have to expand a card to see Bid/Ask, Credit, Cash Required, and Breakeven
+// Price for a
 // CSP result. Extracting this into one shared component, used by BOTH the
 // qualified ResultCard and the disqualified audit card, guarantees the two
 // paths show identical fundamentals and can never drift apart again.
@@ -34,13 +35,7 @@ export interface CspFundamentalsRowProps {
 export function CspFundamentalsRow({ candidate: c, price, textMutedClassName, testId }: CspFundamentalsRowProps) {
   if (c.strategy !== 'CSP') return null;
   const otmPct = price != null && price > 0 ? ((price - c.shortStrike) / price) * 100 : null;
-  const creditPerShare = c.credit / 100;
   const oiWarn = c.cspOiPassing === false;
-  // CSP-0002 corrective pass — display the exact mid csp-finder.ts used for
-  // every formula (c.cspMid), never a locally recomputed (bid+ask)/2, so
-  // the "Mid" shown here can never drift from the mid the math actually
-  // used (see lib/scans/cspSearch.ts's deriveUsableMid).
-  const mid = c.cspMid;
   return (
     <div className={`flex flex-wrap gap-x-3 gap-y-0.5 px-3 pb-1.5 text-[9px] ${textMutedClassName}`} data-testid={testId}>
       <span>Δ {c.shortDelta.toFixed(2)}</span>
@@ -49,14 +44,10 @@ export function CspFundamentalsRow({ candidate: c, price, textMutedClassName, te
       {c.shortBid != null && c.shortAsk != null && (
         <span>Bid ${c.shortBid.toFixed(2)} · Ask ${c.shortAsk.toFixed(2)}</span>
       )}
-      {mid != null && <span>Mid ${mid.toFixed(2)}</span>}
-      <span>Credit/share ${creditPerShare.toFixed(2)}</span>
-      <span>Premium/contract ${c.credit.toFixed(2)}</span>
+      <span>Credit ${c.credit.toFixed(2)}</span>
       <span className={oiWarn ? 'text-amber-400/90' : undefined}>OI {c.shortOI}</span>
-      {c.requiredCash != null && <span>Cash required ${c.requiredCash.toLocaleString()}</span>}
-      {c.breakeven != null && <span>Breakeven ${c.breakeven.toFixed(2)}</span>}
-      {c.roc != null && <span>ROC {c.roc.toFixed(1)}%</span>}
-      {c.annualizedRoc != null && <span>Ann. ROC {c.annualizedRoc.toFixed(0)}%</span>}
+      {c.requiredCash != null && <span>Cash Required ${c.requiredCash.toLocaleString()}</span>}
+      {c.breakeven != null && <span>Breakeven Price ${c.breakeven.toFixed(2)}</span>}
       {c.cspOiWarning && (
         <span className="w-full text-amber-400/90">Warning: {c.cspOiWarning}</span>
       )}

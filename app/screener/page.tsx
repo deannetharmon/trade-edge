@@ -119,7 +119,7 @@ import type {
   ScreenerScanSession, ScreenerScanMode, ScreenerRequestedStrategy, ScreenerScanScope,
   ScreenerReasonCode, ScreenerSessionAccounting,
 } from '@/lib/screener/scanSession';
-import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
+import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, clearLeapsSessionCache, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
 import { computeLeapsAdvisorResultSetHash, persistLeapsAdvisorSession, restoreLeapsAdvisorSession, clearLeapsAdvisorSession, type LeapsAdvisorSession, type LeapsAdvisorMessage } from '@/lib/screener/leapsAdvisorCache';
 import { computeAdvisorResultSetHash, persistAdvisorSession, restoreAdvisorSession, clearAdvisorSession, type AdvisorSession, type AdvisorMessage, type AdvisorStrategy } from '@/lib/screener/advisorCache';
 
@@ -4920,16 +4920,14 @@ function ResultCard(props: ResultCardProps) {
 
 function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
   const metric = calculateCspReturnThisCycle(candidate);
-  if (!metric.available) return <div className="w-40 shrink-0 text-[10px] leading-tight text-slate-400" aria-label="CSP bid-based return is unavailable: a valid bid, strike, whole-number DTE, and contract multiplier are required">
-    <div><span className="text-slate-500">Cycle </span>—</div>
-    <div><span className="text-slate-500">30-day </span>Unavailable</div>
-    <div><span className="text-slate-500">Annualized </span>—</div>
+  if (!metric.available) return <div className="w-52 shrink-0 text-[10px] leading-tight text-slate-400" aria-label="Return by expiration is unavailable: a valid bid, strike, whole-number DTE, and contract multiplier are required">
+    <div><span className="text-slate-500">Return by expiration </span>—</div>
+    <div><span className="text-slate-500">30-day comparison </span>Unavailable</div>
   </div>;
   const meta = CSP_RETURN_STATUS_META[metric.status!];
-  return <div className="w-40 shrink-0 text-[10px] leading-tight text-slate-300" title="Bid-based estimate: premium uses the executable bid divided by cash secured at the strike. The 30-day equivalent normalizes this cycle's return; it is not a forecast or risk rating. Bid-based annualization is mathematical and differs from the existing midpoint-based ROC.">
-    <div aria-label="Return this cycle: executable bid premium divided by cash secured at the strike"><span className="text-slate-500">Cycle </span>{metric.cycleReturnPct!.toFixed(2)}%</div>
-    <div aria-label={`30-day equivalent: ${metric.thirtyDayEquivalentPct!.toFixed(2)} percent. ${meta.label}. Not a forecast or risk rating.`}><span className="text-slate-500">30-day </span><span className={`${meta.className} font-semibold`}>{metric.thirtyDayEquivalentPct!.toFixed(2)}% — {meta.label}</span></div>
-    <div aria-label="Bid-based annualized return: mathematical annualization, distinct from existing midpoint-based ROC"><span className="text-slate-500">Annualized </span>{metric.bidBasedAnnualizedReturnPct!.toFixed(1)}%</div>
+  return <div className="w-52 shrink-0 text-[10px] leading-tight text-slate-300" title="Return by expiration uses the executable bid divided by cash required at the strike.">
+    <div aria-label="Return by expiration: executable bid premium divided by cash required at the strike"><span className="text-slate-500">Return by expiration </span>{metric.cycleReturnPct!.toFixed(2)}%</div>
+    <div title="Adjusts the return to a 30-day period so options with different expiration dates can be compared. It is not a prediction." aria-label={`30-day comparison: ${metric.thirtyDayEquivalentPct!.toFixed(2)} percent. ${meta.label}. Not a prediction.`}><span className="text-slate-500">30-day comparison </span><span className={`${meta.className} font-semibold`}>{metric.thirtyDayEquivalentPct!.toFixed(2)}% — {meta.label}</span></div>
   </div>;
 }
 
@@ -5614,15 +5612,14 @@ const strategyScores = useMemo(() => {
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CSP — Wheel Entry</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Put: </span><span className={th.text}>{c.shortStrike}P exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
-                <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.credit.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(1 contract)</span></div>
+                <div><span className={th.label}>Credit: </span><span className="text-emerald-400 font-bold">${c.credit.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(1 contract)</span></div>
                 <div>
-                  <span className={th.label}>Required cash: </span>
+                  <span className={th.label}>Cash Required: </span>
                   <span className={`font-bold ${c.capitalBlocked ? 'text-red-400' : th.text}`}>${c.requiredCash?.toLocaleString() ?? '—'}</span>
                   <span className={`${th.textFaint} ml-1 text-[10px]`}>(strike × 100 — no margin)</span>
                 </div>
-                <div><span className={th.label}>Breakeven: </span><span className={th.text}>${c.breakeven?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(assignment price ${c.assignmentPrice?.toFixed(2) ?? '—'})</span></div>
-                <div><span className={th.label}>ROC (period): </span><span className={th.text}>{c.roc.toFixed(1)}%</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(premium / required cash)</span></div>
-                <div><span className={th.label}>Annualized ROC: </span><span className={th.text}>{c.annualizedRoc?.toFixed(0) ?? '—'}%</span></div>
+                <div><span className={th.label}>Breakeven Price: </span><span className={th.text}>${c.breakeven?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(assignment price ${c.assignmentPrice?.toFixed(2) ?? '—'})</span></div>
+                <div><span className={th.label}>Annualized Return: </span><span className={th.text}>{c.annualizedRoc?.toFixed(0) ?? '—'}%</span></div>
                 <div><span className={th.label}>IVR / Expiration IVX: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : 'Unavailable'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : 'Unavailable'}</span></div>
               </div>
               {c.capitalBlocked ? (
@@ -8396,7 +8393,7 @@ export default function Home() {
   }, [activeSession]);
 
   const clearResultsCache = () => {
-    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null);
+    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null); setLeapsResults([]);
     // SCREENER-RESULTS-0001 corrective — this used to clear every OTHER
     // cache key (raw scan, legacy results, targeted results) but never the
     // canonical session cache itself, and never the in-memory
@@ -8408,6 +8405,7 @@ export default function Home() {
     setActiveSession(null);
     activeSessionIdRef.current = null;
     clearScanSessionCache();
+    clearLeapsSessionCache();
     try { localStorage.removeItem(LS_RESULTS_CACHE_AT); localStorage.removeItem(LS_TARGETED_RESULTS_CACHE_AT); } catch {}
     idbDel(IDB_RAW_SCAN_KEY);
     idbDel(IDB_RESULTS_KEY);
@@ -8543,9 +8541,7 @@ export default function Home() {
     }
   }, [runtimeStockRules, runtimeEtfRules, rawScanCache, screenMode, stockPresetLabel, etfPresetLabel, applyRules]);
   const runScreen = async (sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, modeOverride?: 'filter' | 'rank' | 'targeted') => {    setError('');
-    setResults([]); setResultsCachedAt(null);
-    try { localStorage.removeItem(LS_RESULTS_CACHE_AT); } catch {}
-    idbDel(IDB_RESULTS_KEY);
+    clearResultsCache();
 
     const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
 
@@ -8807,6 +8803,7 @@ export default function Home() {
   };
 
   const runPMCCScan = async (request?: PmccScanRequest) => {
+    clearResultsCache();
     // FIND PMCCs manages existing long calls. Selected tickers narrow the
     // broker-discovered holdings; they never create a new long-leg search.
     const shortDteMin = request?.shortDteMin ?? pmccShortDteMin;
@@ -9027,6 +9024,7 @@ export default function Home() {
   // new long calls only for trader-supplied tickers; it never reads holdings
   // and never pairs a short call.
   const runLeapsScan = async (request: LeapsScanRequest) => {
+    clearResultsCache();
     if (!opportunityUniverse.length) {
       setError('Add at least one ticker to the Opportunity Universe before finding new LEAPS candidates.');
       return;
@@ -9132,6 +9130,7 @@ export default function Home() {
   // through the exact same result-card UI as BPS/BCS/IC/PMCC (same look
   // and feel, per DR-0001 §10). TE-0007: no separate CSP-only ticker list.
   const runCspScan = async (request: CspScanRequest) => {
+    clearResultsCache();
     const csp = opportunityUniverse;
     if (!csp.length) {
       setError('No tickers in the Opportunity Universe to scan. Add a ticker above first.');
@@ -9364,6 +9363,7 @@ export default function Home() {
   };
 
   const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules) => {
+    clearResultsCache();
     setError('');
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
@@ -11650,8 +11650,10 @@ export default function Home() {
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
+              clearResultsCache();
               runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession, isScanCurrent);
             } else if (mode === 'rank') {
+              clearResultsCache();
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {
               const found = FILTER_PRESETS.find(p => p.key === preset);
@@ -11731,7 +11733,7 @@ export default function Home() {
           }}
         />
       )}
-      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
+      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { clearResultsCache(); startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }

@@ -58,7 +58,7 @@ async function addToUniverse(symbols: string) {
 async function clickCspScan({ affordableOnly = false }: { affordableOnly?: boolean } = {}) {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
   if (affordableOnly) {
-    await userEvent.click(screen.getByLabelText(/Only show CSPs affordable/i));
+    await userEvent.click(screen.getByLabelText(/Only show affordable CSPs/i));
   }
   await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 }
@@ -215,8 +215,8 @@ describe('CSP-WORKFLOW-0001: AMD required acceptance fixture (multi-candidate)',
     expect(fundamentalsRows.length).toBe(2);
     for (const fundamentals of fundamentalsRows) {
       expect(fundamentals.textContent).toMatch(/Δ 0\.\d\d/); // a real, discovered delta -- never absent
-      expect(fundamentals.textContent).toMatch(/Credit\/share \$/);
-      expect(fundamentals.textContent).toMatch(/Cash required \$/);
+      expect(fundamentals.textContent).toMatch(/Credit \$/);
+      expect(fundamentals.textContent).toMatch(/Cash Required \$/);
     }
 
     // BLOCKER-05 addendum -- Best Opportunities eligibility is evaluated
@@ -365,7 +365,7 @@ describe('CSP-WORKFLOW-0001 core-correction: BLOCKER-02 production capital wirin
 });
 
 describe('CSP-0002: presentation parity and single-leg correctness', () => {
-  it('a qualified CSP displays Delta, POP, OTM, Credit/share, Premium/contract, OI, cash required, breakeven and ROC', async () => {
+  it('a qualified CSP displays distinct decision facts without repeating quote or return values', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);
     renderScreener();
@@ -385,12 +385,11 @@ describe('CSP-0002: presentation parity and single-leg correctness', () => {
     expect(cardText).toMatch(/OTM/);
     expect(cardText).toMatch(/Premium|Credit/);
     expect(cardText).toMatch(/OI/);
-    expect(cardText).toMatch(/Required cash|Cash required/);
-    expect(cardText).toMatch(/Breakeven/i);
-    expect(cardText).toMatch(/ROC/);
+    expect(cardText).toMatch(/Cash Required/);
+    expect(cardText).toMatch(/Breakeven Price/i);
   });
 
-  it('CSP-0002 corrective pass: a qualified CSP shows Bid, Ask, a clearly labeled Mid, and Cash required WITHOUT expanding the card', async () => {
+  it('CSP-0002 corrective pass: a qualified CSP shows one quote, credit, cash required, and breakeven without expanding the card', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);
     renderScreener();
@@ -404,10 +403,10 @@ describe('CSP-0002: presentation parity and single-leg correctness', () => {
     const fundamentals = await screen.findByTestId('csp-qualified-fundamentals');
     expect(fundamentals.textContent).toMatch(/Bid \$1\.20/);
     expect(fundamentals.textContent).toMatch(/Ask \$1\.28/);
-    expect(fundamentals.textContent).toMatch(/Mid \$1\.24/);
-    expect(fundamentals.textContent).toMatch(/Cash required \$/);
-    expect(fundamentals.textContent).toMatch(/Credit\/share \$/);
-    expect(fundamentals.textContent).toMatch(/Breakeven \$/);
+    expect(fundamentals.textContent).toMatch(/Credit \$/);
+    expect(fundamentals.textContent).toMatch(/Cash Required \$/);
+    expect(fundamentals.textContent).toMatch(/Breakeven Price \$/);
+    expect(fundamentals.textContent).not.toMatch(/Mid \$|Credit\/share|Premium\/contract|ROC/);
   });
 
   it('CSP presentation shows only the short put -- no long strike, protective leg, spread width, or spread-strategy badge', async () => {
@@ -482,7 +481,7 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     await userEvent.click(screen.getByRole('radio', { name: new RegExp(`^${modeLabel}`, 'i') }));
     if (modeLabel === 'Targeted') {
-      await userEvent.type(screen.getByLabelText('Minimum POP'), '70');
+      await userEvent.type(screen.getByLabelText('Minimum estimated POP'), '70');
       await userEvent.click(screen.getByRole('button', { name: 'CONFIRM TARGETS' }));
     }
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
@@ -500,8 +499,8 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
-    await userEvent.click(screen.getByLabelText(/Only show CSPs affordable/i));
-    await userEvent.type(screen.getByLabelText('Cash limit per CSP'), '8000');
+    await userEvent.click(screen.getByLabelText(/Only show affordable CSPs/i));
+    await userEvent.type(screen.getByLabelText('Cash cap per CSP'), '8000');
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
 
     await waitFor(() => expect(screen.getByText('Ranked Cash-Secured Put Scan')).toBeInTheDocument());
@@ -512,6 +511,6 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     // and not merely "whatever was last edited."
     expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
-    expect(screen.getByLabelText('Cash limit per CSP')).toHaveValue(8000);
+    expect(screen.getByLabelText('Cash cap per CSP')).toHaveValue('8000');
   });
 });
