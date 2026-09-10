@@ -1166,11 +1166,11 @@ async function cancelOrder(accountNumber: string, orderId: string, token: string
   return result;
 }
 
-// TastyTrade supports a native dry-run: POST to same endpoint with ?dry-run=true
+// TastyTrade supports a native dry-run: POST to the matching /dry-run endpoint.
 // Returns buying power effects and any errors without placing the order.
 async function ttValidateOrder(path: string, token: string, body: unknown): Promise<{ valid: boolean; warnings: string[]; errors: string[] }> {
   try {
-    const res = await fetch(`${BASE}${path}?dry-run=true`, {
+    const res = await fetch(`${BASE}${path}/dry-run`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
@@ -1190,8 +1190,8 @@ async function ttValidateOrder(path: string, token: string, body: unknown): Prom
       return { valid: false, warnings, errors: [errMsg] };
     }
     return { valid: errors.length === 0, warnings, errors };
-  } catch {
-    return { valid: true, warnings: [], errors: [] };
+  } catch (error) {
+    return { valid: false, warnings: [], errors: [error instanceof Error ? error.message : 'Validation request failed'] };
   }
 }
 
@@ -9081,11 +9081,12 @@ function pendingOrderIdentityKey(order: PendingOrder): string {
   return `pending::${order.accountNumber}::${order.symbol}::${order.expDate ?? 'unknown'}::${legsKey}`;
 }
 
-function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
+function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, onValidate, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
   order: PendingOrder; th: typeof THEMES[Theme];
   cancelling: boolean; replacing: boolean;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
+  onValidate: (order: PendingOrder) => Promise<string>;
   savedNote: string;
   onSaveNote: (order: PendingOrder, note: string) => Promise<void>;
   savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null;
@@ -9134,6 +9135,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   // the hood (see replacePendingOrder). Editing is local to this card so the
   // rest of the list doesn't re-render on every keystroke.
   const [editing, setEditing] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
   const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
 
   // The existing broker limit remains the default. A natural-side reference
@@ -9187,6 +9189,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
                 {replacing ? 'REPLACING...' : repriceAvailable ? 'REVIEW REPRICE' : 'REVIEW PRICE'}
               </button>
             )}
+            <button onClick={() => void onValidate(order).then(setValidation)} disabled={cancelling || replacing} className="text-[10px] px-2.5 py-1 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 transition-colors font-bold disabled:opacity-40">VALIDATE SHAPE</button>
             <button
               onClick={() => onCancel(order)}
               disabled={cancelling || replacing}
@@ -9228,6 +9231,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       {!editing && assessment.executionDecision === 'NO_PRICE_CHANGE_NEEDED' && (
         <p className={`mt-2 text-[9px] ${th.textFaint}`}>{assessment.explanation}</p>
       )}
+      {!editing && validation && <p className={`mt-2 text-[9px] ${th.textFaint}`}>{validation}</p>}
       {!editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-start gap-4">
           <div>
@@ -9479,11 +9483,12 @@ function PendingOrderPriceAlertEditor({ order, savedAlert, onSave }: { order: Pe
   </div>;
 }
 
-function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace }: {
+function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace, onValidate }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
+  onValidate: (order: PendingOrder) => Promise<string>;
 }) {
   // PENDING-NOTES-0001: fetched once here (not per-card) -- same pattern
   // PositionsWorkspace uses for its own notes/price alerts. Reuses the
@@ -9565,6 +9570,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
                 replacing={replacingOrderIds.has(order.id)}
                 onCancel={onCancel}
                 onReplace={onReplace}
+                onValidate={onValidate}
                 savedNote={pendingNotes[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? ''}
                 onSaveNote={savePendingNote}
                 savedAlert={pendingAlerts[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? null}
@@ -10217,6 +10223,14 @@ export default function PortfolioPage() {
     }
   };
 
+  const validatePendingOrder = async (order: PendingOrder): Promise<string> => {
+    try {
+      const token = await getAccessToken();
+      const result = await ttValidateOrder(`/accounts/${order.accountNumber}/orders`, token, buildReplaceOrder(order, order.limitPrice ?? 0));
+      return result.valid ? `Broker validation passed — opening order shape accepted${result.warnings.length ? `: ${result.warnings.join('; ')}` : '.'}` : `Broker validation failed: ${result.errors.join('; ')}`;
+    } catch (error: any) { return `Broker validation unavailable: ${error?.message ?? 'unknown error'}`; }
+  };
+
   // TastyTrade has no atomic order-replace -- cancel the existing complex
   // order, then place a fresh plain order with the same legs at the new
   // price. If cancel succeeds but the new order fails to go in, attempt one
@@ -10664,6 +10678,7 @@ export default function PortfolioPage() {
                     replacingOrderIds={replacingOrderIds}
                     onCancel={cancelPendingOrder}
                     onReplace={replacePendingOrder}
+                    onValidate={validatePendingOrder}
                   />
                 </div>
               )}
@@ -10708,6 +10723,7 @@ export default function PortfolioPage() {
                         replacingOrderIds={replacingOrderIds}
                         onCancel={cancelPendingOrder}
                         onReplace={replacePendingOrder}
+                        onValidate={validatePendingOrder}
                       />
                     )}
                     {filteredPositions.length > 0 && (
