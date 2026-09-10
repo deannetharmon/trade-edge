@@ -1669,7 +1669,9 @@ export async function loadPositions(
       for (const order of pendingOrders) {
         let mid = 0;
         let executable = 0;
-        let latestQuoteAt: string | null = null;
+        // A multi-leg quote is only as current as its stalest leg. Do not
+        // label a spread quote fresh merely because one leg updated recently.
+        let oldestQuoteAt: string | null = null;
         let reliable = true;
         for (const leg of order.legs) {
           const item = bySymbol.get(leg.symbol.replace(/\s+/g, ''));
@@ -1683,12 +1685,20 @@ export async function loadPositions(
           mid += sign * ((bid + ask) / 2) * leg.quantity;
           executable += sign * (sign > 0 ? bid : ask) * leg.quantity;
           const timestamp = extractBrokerQuoteTimestamp(item);
-          if (timestamp && (!latestQuoteAt || timestamp > latestQuoteAt)) latestQuoteAt = timestamp;
+          if (!timestamp) {
+            reliable = false;
+            break;
+          }
+          if (!oldestQuoteAt || timestamp < oldestQuoteAt) oldestQuoteAt = timestamp;
         }
-        order.quoteQuality = reliable ? 'RELIABLE' : 'UNAVAILABLE';
-        order.currentMidPrice = reliable ? Number(Math.abs(mid).toFixed(2)) : null;
-        order.currentExecutablePrice = reliable ? Number(Math.abs(executable).toFixed(2)) : null;
-        order.quoteCapturedAt = reliable ? latestQuoteAt : null;
+        const freshness = reliable ? deriveMarketableQuoteFreshness(oldestQuoteAt) : 'UNKNOWN';
+        const quoteIsFresh = freshness === 'FRESH';
+        order.quoteQuality = quoteIsFresh ? 'RELIABLE' : 'UNAVAILABLE';
+        order.currentMidPrice = quoteIsFresh ? Number(Math.abs(mid).toFixed(2)) : null;
+        order.currentExecutablePrice = quoteIsFresh ? Number(Math.abs(executable).toFixed(2)) : null;
+        // Keep valid timestamp evidence even when it is stale so the UI can
+        // show why the reference was withheld.
+        order.quoteCapturedAt = reliable ? oldestQuoteAt : null;
       }
 
       const underlyings = Array.from(new Set(pendingOrders.map(order => order.symbol).filter(Boolean)));

@@ -109,6 +109,66 @@ describe('acquirePortfolioBrokerSource', () => {
     expect(result.pendingOrders[0].legs).toHaveLength(2);
   });
 
+  it('uses the oldest fresh leg quote for a pending spread reference', async () => {
+    const newer = new Date(Date.now() - 1_000).toISOString();
+    const older = new Date(Date.now() - 2_000).toISOString();
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [{
+        id: 'spread-quote', status: 'Working', price: '2.50', 'price-effect': 'Credit', 'underlying-symbol': 'AAPL',
+        legs: [
+          { symbol: 'AAPL  261016P00100000', action: 'Sell to Open', quantity: 1 },
+          { symbol: 'AAPL  261016P00095000', action: 'Buy to Open', quantity: 1 },
+        ],
+      }] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
+        { symbol: 'AAPL  261016P00100000', bid: '4.00', ask: '4.20', 'updated-at': newer },
+        { symbol: 'AAPL  261016P00095000', bid: '0.90', ask: '1.10', 'updated-at': older },
+      ] } };
+      if (path.startsWith('/market-metrics?symbols=AAPL')) return { data: { items: [] } };
+      if (path === '/market-data/by-type?equity=AAPL') return { data: { items: [{ symbol: 'AAPL', bid: '200', ask: '201' }] } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders[0]).toMatchObject({
+      quoteQuality: 'RELIABLE', currentMidPrice: 3.1, currentExecutablePrice: 2.9,
+      quoteCapturedAt: older,
+    });
+  });
+
+  it('does not call a pending spread quote fresh when a leg timestamp is stale or missing', async () => {
+    const stale = '2000-01-01T00:00:00.000Z';
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [{
+        id: 'spread-stale', status: 'Working', price: '2.50', 'price-effect': 'Credit', 'underlying-symbol': 'AAPL',
+        legs: [
+          { symbol: 'AAPL  261016P00100000', action: 'Sell to Open', quantity: 1 },
+          { symbol: 'AAPL  261016P00095000', action: 'Buy to Open', quantity: 1 },
+        ],
+      }] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
+        { symbol: 'AAPL  261016P00100000', bid: '4.00', ask: '4.20', 'updated-at': new Date().toISOString() },
+        { symbol: 'AAPL  261016P00095000', bid: '0.90', ask: '1.10', 'updated-at': stale },
+      ] } };
+      if (path.startsWith('/market-metrics?symbols=AAPL')) return { data: { items: [] } };
+      if (path === '/market-data/by-type?equity=AAPL') return { data: { items: [{ symbol: 'AAPL', bid: '200', ask: '201' }] } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders[0]).toMatchObject({
+      quoteQuality: 'UNAVAILABLE', currentMidPrice: null, currentExecutablePrice: null, quoteCapturedAt: stale,
+    });
+  });
+
   // Bug fix regression test: an order with legs but a non-GTC TIF and a
   // non-limit/stop type (e.g. a same-day Market order) must NOT be treated
   // as a GTC close order. Previously the TIF/type check was dead code for

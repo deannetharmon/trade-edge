@@ -9136,18 +9136,16 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   const [editing, setEditing] = useState(false);
   const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
 
-  // REPRICE-0002: pre-fill from the current Executable price when a fresh
-  // two-sided quote exists, rather than starting from the stale original ask
-  // (or blank). This is a mechanical default from data already computed and
-  // shown on this card -- NOT a recommendation of what to price at. The
-  // person can still type any number; "Match Executable" below just resets
-  // to this same value if they've edited away from it. When no reliable
-  // quote exists, falls back to the original requested price, same as
-  // before -- this never fabricates a number.
+  // The existing broker limit remains the default. A natural-side reference
+  // is evidence, not a recommendation: for credit orders it can request more
+  // credit and therefore be less likely to fill.
   const hasReliableQuote = order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null;
-  const suggestedPrice = hasReliableQuote ? order.currentExecutablePrice! : order.limitPrice;
+  const awaitingExchangeConfirmation = ['received', 'queued', 'new'].includes(order.status.trim().toLowerCase());
+  const quoteCaptureDisplay = order.quoteCapturedAt
+    ? new Date(order.quoteCapturedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+    : null;
 
-  const startEdit = () => { setNewPrice(suggestedPrice?.toFixed(2) ?? ''); setEditing(true); };
+  const startEdit = () => { setNewPrice(order.limitPrice?.toFixed(2) ?? ''); setEditing(true); };
   const cancelEdit = () => setEditing(false);
   const parsedNewPrice = parseFloat(newPrice);
   const priceInvalid = isNaN(parsedNewPrice) || parsedNewPrice <= 0;
@@ -9202,8 +9200,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           <span>ID: {order.parentOrderId ?? order.id}</span>
           <span>Requested: {order.limitPrice != null ? `$${order.limitPrice.toFixed(2)}` : '—'}</span>
           <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
-          <span>Executable: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
-          <span>Quote: {order.quoteQuality === 'RELIABLE' ? 'fresh two-sided' : 'unavailable'}</span>
+          <span>Natural-side reference: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+          <span>Quote: {order.quoteQuality === 'RELIABLE' ? `fresh two-sided${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}` : `unavailable or stale${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}`}</span>
           {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
           {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
           {order.contingentExitCount ? <span>{order.contingentExitCount} contingent exit{order.contingentExitCount === 1 ? '' : 's'}</span> : null}
@@ -9211,6 +9209,11 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
             FIND NEW CANDIDATE
           </Link>
         </div>
+      )}
+      {!editing && awaitingExchangeConfirmation && (
+        <p className={`mt-2 text-[9px] ${th.textFaint}`}>
+          Broker has received the order but has not confirmed it is working at the exchange. Refresh broker status before changing price.
+        </p>
       )}
       {!editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-start gap-4">
@@ -9236,19 +9239,14 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               className={`w-24 text-[11px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} text-yellow-300 outline-none focus:border-yellow-500`}
               style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
             />
-            {/* REPRICE-0002: resets to the same mechanical default startEdit
-                already prefilled -- not a new/different suggestion, just a
-                quick way back to it after typing something else. Disabled
-                (not hidden) when no reliable quote exists, so it's visible
-                that "match" has nothing real to match against right now. */}
             <button
               type="button"
               disabled={!hasReliableQuote}
               onClick={() => hasReliableQuote && setNewPrice(order.currentExecutablePrice!.toFixed(2))}
               className={`text-[9px] px-2 py-1 rounded border ${th.border} ${hasReliableQuote ? `${th.textFaint} hover:border-yellow-500 hover:text-yellow-300` : 'opacity-30 cursor-not-allowed'}`}
-              title={hasReliableQuote ? `Reset to current Executable ($${order.currentExecutablePrice!.toFixed(2)})` : 'No reliable executable quote to match'}
+              title={hasReliableQuote ? `Use current natural-side reference ($${order.currentExecutablePrice!.toFixed(2)}); this is not a fill recommendation` : 'No fresh two-sided quote is available'}
             >
-              Match Executable
+              Use Natural-Side Reference
             </button>
           </div>
           {/* REPRICE-0003: total-credit impact of the price change, in
@@ -9268,7 +9266,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
                   <>
                     {label} at ${parsedNewPrice.toFixed(2)}: <span className="text-white font-bold">${newTotal.toFixed(2)}</span>
                     {origTotal != null && (
-                      <span className={delta! >= 0 ? ' text-emerald-400' : ' text-red-400'}>
+                      <span className="text-neutral-400">
                         {' '}({delta! >= 0 ? '+' : '−'}${Math.abs(delta!).toFixed(2)} vs. requested ${origTotal.toFixed(2)})
                       </span>
                     )}
@@ -9277,6 +9275,19 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
                 );
               })()}
             </div>
+          )}
+          {!priceInvalid && order.limitPrice != null && parsedNewPrice !== order.limitPrice && (
+            <p className={`text-[9px] ${th.textFaint}`}>
+              {order.priceEffect === 'Credit'
+                ? parsedNewPrice > order.limitPrice
+                  ? `This requests $${(parsedNewPrice - order.limitPrice).toFixed(2)} more credit than the resting order; it may be less marketable.`
+                  : `This requests $${(order.limitPrice - parsedNewPrice).toFixed(2)} less credit than the resting order; it may be more marketable.`
+                : order.priceEffect === 'Debit'
+                  ? parsedNewPrice > order.limitPrice
+                    ? `This pays $${(parsedNewPrice - order.limitPrice).toFixed(2)} more debit than the resting order; it may be more marketable.`
+                    : `This pays $${(order.limitPrice - parsedNewPrice).toFixed(2)} less debit than the resting order; it may be less marketable.`
+                  : 'Compare the new limit with the existing broker order before confirming.'}
+            </p>
           )}
           {/* REPRICE-0001: this reference line is deliberately identical to
               the one shown on the collapsed (!editing) row above -- Mid,
@@ -9291,15 +9302,17 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               genuinely-unavailable evidence the row already had. */}
           <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] ${th.textFaint}`}>
             <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
-            <span>Executable: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
-            <span>Quote: {order.quoteQuality === 'RELIABLE' ? 'fresh two-sided' : 'unavailable'}</span>
+            <span>Natural-side reference: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+            <span>Quote: {order.quoteQuality === 'RELIABLE' ? `fresh two-sided${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}` : `unavailable or stale${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}`}</span>
             {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
             {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
           </div>
           <p className={`text-[9px] ${th.textFaint}`}>
-            {order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null
-              ? 'Reprice against the Executable price above -- it reflects a fresh two-sided market. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'
-              : 'No fresh two-sided quote is available for this order right now -- Mid/Executable above may be stale or missing. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'}
+            {awaitingExchangeConfirmation
+              ? 'The broker has not confirmed this order is working at the exchange. Refresh broker status before changing price.'
+              : order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null
+                ? 'The natural-side reference above is a current broker-quote reference, not a fill recommendation. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'
+                : 'No fresh two-sided quote is available for this order right now. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'}
           </p>
           <div className="flex gap-2">
             <button
