@@ -110,6 +110,7 @@ import {
   summarizeReliableSupportedMaxRisk,
   formatReliableSupportedMaxRisk,
   formatPortfolioMaxRiskContext,
+  CONTRACT_MULTIPLIER,
 } from '@/lib/portfolio/positionMetrics';
 import {
   canonicalShortLegEntryCredit,
@@ -9091,6 +9092,15 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
       })
     : null;
+  // REPRICE-0003: canonical contract count for the total-credit calculation
+  // below. A vertical/IC spread's legs should all carry the same absolute
+  // quantity -- if they don't agree, something's wrong with the leg data
+  // and this fails closed to null (shown as unavailable) rather than guess
+  // which leg is right.
+  const canonicalOrderQuantity = (() => {
+    const quantities = new Set(order.legs.map(l => Math.abs(l.quantity)));
+    return quantities.size === 1 ? Array.from(quantities)[0] : null;
+  })();
   const assessment = assessPendingEntry(order);
   const ageMinutes = order.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60000)) : null;
   const ageDisplay = ageMinutes == null || !Number.isFinite(ageMinutes)
@@ -9207,6 +9217,33 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               Match Executable
             </button>
           </div>
+          {/* REPRICE-0003: total-credit impact of the price change, in
+              dollars -- direct arithmetic (price x contracts x 100), not a
+              judgment about whether the change is good. Only rendered when
+              canonicalOrderQuantity resolved cleanly (leg quantities agree)
+              and the typed price is valid; otherwise this block is silently
+              absent rather than showing a wrong or fabricated number. */}
+          {canonicalOrderQuantity != null && !priceInvalid && (
+            <div className={`text-[9px] ${th.textFaint}`}>
+              {(() => {
+                const newTotal = parsedNewPrice * canonicalOrderQuantity * CONTRACT_MULTIPLIER;
+                const origTotal = order.limitPrice != null ? order.limitPrice * canonicalOrderQuantity * CONTRACT_MULTIPLIER : null;
+                const delta = origTotal != null ? newTotal - origTotal : null;
+                const label = order.priceEffect === 'Debit' ? 'Total debit' : 'Total credit';
+                return (
+                  <>
+                    {label} at ${parsedNewPrice.toFixed(2)}: <span className="text-white font-bold">${newTotal.toFixed(2)}</span>
+                    {origTotal != null && (
+                      <span className={delta! >= 0 ? ' text-emerald-400' : ' text-red-400'}>
+                        {' '}({delta! >= 0 ? '+' : '−'}${Math.abs(delta!).toFixed(2)} vs. requested ${origTotal.toFixed(2)})
+                      </span>
+                    )}
+                    {' '}· {canonicalOrderQuantity} contract{canonicalOrderQuantity === 1 ? '' : 's'}
+                  </>
+                );
+              })()}
+            </div>
+          )}
           {/* REPRICE-0001: this reference line is deliberately identical to
               the one shown on the collapsed (!editing) row above -- Mid,
               Executable, and Quote quality are already computed on `order`
