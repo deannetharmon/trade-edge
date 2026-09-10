@@ -61,7 +61,8 @@ describe('positions workspace model', () => {
       key: 'AAPL-long-put', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
       legs: [{ symbol: 'AAPL  270618P00150000', optionType: 'P', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
     });
-    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall, longPut]), positions: [heldLongCall, longPut], pendingOrders: [], snapshotDataQuality: quality });
+    const current = { ...snapshot([heldLongCall, longPut]), coverageEvidence: { ...snapshot([heldLongCall, longPut]).coverageEvidence, existingShortCallsBySymbol: {} } };
+    const model = buildPositionsWorkspaceModel({ snapshot: current, positions: [heldLongCall, longPut], pendingOrders: [], snapshotDataQuality: quality });
     // PW-0002: a bare long put was never a PMCC candidate to begin with --
     // it's filtered out entirely, not shown as a "not-eligible" card (that
     // was the original bug PW-0002 fixed: ORCL/BE/MRNA-style long puts
@@ -69,9 +70,21 @@ describe('positions workspace model', () => {
     // fix and previously asserted the old, incorrect behavior.
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'eligible', exactContract: 'AAPL  270618C00150000' }),
-      expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 1, reservedContracts: 0, availableContracts: 1 }),
+      expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 0, reservedContracts: 0, availableContracts: 2 }),
     ]));
     expect((model.incomeOpportunities ?? []).some(o => o.positionKey === 'AAPL-long-put')).toBe(false);
+  });
+
+  it('blocks a PMCC launch when a nearer, higher-strike short call is paired to the exact LEAPS', () => {
+    const heldLongCall = position({
+      key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
+      pairedShortCallKey: 'AAPL-short-call',
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+    });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall]), positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: quality });
+    expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'pmcc-short-call', status: 'no-capacity', reason: expect.stringContaining('already open against this position') }),
+    ]));
   });
 
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {

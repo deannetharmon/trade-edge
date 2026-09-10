@@ -215,6 +215,7 @@ import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspac
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
 import { DebitStopObservation, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
+import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
 // (see docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2). The
@@ -9087,7 +9088,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
   onValidate: (order: PendingOrder) => Promise<{ message: string; passed: boolean }>;
-  onRefresh: () => Promise<unknown>;
+  onRefresh: ReturnType<typeof usePortfolioData>['refresh'];
   savedNote: string;
   onSaveNote: (order: PendingOrder, note: string) => Promise<void>;
   savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null;
@@ -9137,6 +9138,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   // rest of the list doesn't re-render on every keystroke.
   const [editing, setEditing] = useState(false);
   const [validation, setValidation] = useState<{ message: string; passed: boolean } | null>(null);
+  const [refreshingBrokerStatus, setRefreshingBrokerStatus] = useState(false);
+  const [brokerRefreshMessage, setBrokerRefreshMessage] = useState<string | null>(null);
   const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
 
   // The existing broker limit remains the default. A natural-side reference
@@ -9222,7 +9225,24 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       {!editing && awaitingExchangeConfirmation && (
         <div className={`mt-2 flex items-center gap-2 text-[9px] ${th.textFaint}`}>
           <span>Broker has received the order but has not confirmed it is working at the exchange.</span>
-          <button onClick={() => void onRefresh()} className="rounded border border-cyan-700 px-2 py-1 font-bold text-cyan-300 hover:bg-cyan-500/10">REFRESH BROKER STATUS</button>
+          <button
+            type="button"
+            disabled={refreshingBrokerStatus}
+            onClick={() => {
+              setRefreshingBrokerStatus(true); setBrokerRefreshMessage(null);
+              void onRefresh().then(result => {
+                if (result.status === 'success') {
+                  setBrokerRefreshMessage('Broker status refreshed.');
+                } else if (result.status === 'error') {
+                  setBrokerRefreshMessage(`Refresh failed: ${result.message}`);
+                } else {
+                  setBrokerRefreshMessage('Refresh was superseded by a newer request.');
+                }
+              }).catch(() => setBrokerRefreshMessage('Refresh failed. Try again.')).finally(() => setRefreshingBrokerStatus(false));
+            }}
+            className="rounded border border-cyan-700 px-2 py-1 font-bold text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-40"
+          >{refreshingBrokerStatus ? 'REFRESHING…' : 'REFRESH BROKER STATUS'}</button>
+          {brokerRefreshMessage && <span role="status" className={brokerRefreshMessage.startsWith('Broker status refreshed') ? 'text-emerald-300' : 'text-rose-300'}>{brokerRefreshMessage}</span>}
         </div>
       )}
       {!editing && partialExecution && (
@@ -9491,7 +9511,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
   onValidate: (order: PendingOrder) => Promise<{ message: string; passed: boolean }>;
-  onRefresh: () => Promise<unknown>;
+  onRefresh: ReturnType<typeof usePortfolioData>['refresh'];
 }) {
   // PENDING-NOTES-0001: fetched once here (not per-card) -- same pattern
   // PositionsWorkspace uses for its own notes/price alerts. Reuses the
@@ -10076,6 +10096,20 @@ export default function PortfolioPage() {
       onSnapshotHistoryAttached: captureLifecycleSnapshotsIfNeeded,
     });
   }, [refreshPortfolioData]);
+
+  const findPmccShortCall = useCallback((opportunity: {
+    accountNumber: string | null; positionKey: string | null; symbol: string; exactContract: string | null;
+  }) => {
+    if (!opportunity.accountNumber || !opportunity.positionKey || !opportunity.exactContract) return;
+    const handoff: PmccReviewHandoff = {
+      accountNumber: opportunity.accountNumber,
+      positionKey: opportunity.positionKey,
+      underlyingSymbol: opportunity.symbol,
+      occSymbol: opportunity.exactContract,
+    };
+    sessionStorage.setItem(PMCC_REVIEW_HANDOFF_STORAGE_KEY, JSON.stringify(handoff));
+    window.location.assign('/screener?launch=pmcc-held');
+  }, []);
 
   useEffect(() => {
     fetchPositions();
@@ -10699,6 +10733,7 @@ export default function PortfolioPage() {
                 onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
                 renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}
+                onFindPmccShortCall={findPmccShortCall}
               />
             </>
           ) : (

@@ -46,6 +46,7 @@ import {
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
+import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
@@ -7594,6 +7595,7 @@ export default function Home() {
   // all selected (hiddenSymbols starts empty).
   const [pmccHeldCandidates, setPmccHeldCandidates] = useState<Array<{ underlyingSymbol: string; dte: number }>>([]);
   const [pmccHiddenLeapsSymbols, setPmccHiddenLeapsSymbols] = useState<string[]>([]);
+  const [pmccHandoffOccSymbol, setPmccHandoffOccSymbol] = useState<string | null>(null);
   // PMCC-DISCOVERY-ASYNC-0001: discoverHeldPmccCandidates does a full
   // broker portfolio refresh, which was previously awaited BEFORE the
   // modal opened at all -- a real 5-10 second stall with no feedback.
@@ -8801,14 +8803,16 @@ export default function Home() {
     // selected in the modal -- defaults to all when nothing was
     // deselected, same convention as CC's ccHiddenSymbols.
     const selectedHeldCandidates = discovery.heldCandidates.filter(
-      c => !pmccHiddenLeapsSymbols.includes(c.underlyingSymbol),
+      c => !pmccHiddenLeapsSymbols.includes(c.underlyingSymbol)
+        && (pmccHandoffOccSymbol == null || c.occSymbol === pmccHandoffOccSymbol),
     );
     if (!selectedHeldCandidates.length) {
-      setError('Select at least one held LEAPS position before running the PMCC scan.');
+      setError(pmccHandoffOccSymbol ? 'The selected held LEAPS is no longer eligible. Refresh Portfolio and try again.' : 'Select at least one held LEAPS position before running the PMCC scan.');
       return;
     }
-    const { dte, heldSelection } = discovery;
+    const { dte } = discovery;
     const heldCandidates = selectedHeldCandidates;
+    const heldSelection = { ...discovery.heldSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(c => c.underlyingSymbol)));
     const heldLongDtes = heldCandidates.map(candidate => candidate.dte);
     const effectiveDte = { ...dte, longMin: Math.min(...heldLongDtes), longMax: Math.max(...heldLongDtes) };
@@ -8963,6 +8967,44 @@ export default function Home() {
       }
     }
   };
+
+  // Portfolio can launch this existing flow for one exact held LEAPS. The
+  // handoff is intentionally one-time and is revalidated against a fresh
+  // broker refresh before the modal can run.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('launch') !== 'pmcc-held') return;
+    const raw = sessionStorage.getItem(PMCC_REVIEW_HANDOFF_STORAGE_KEY);
+    sessionStorage.removeItem(PMCC_REVIEW_HANDOFF_STORAGE_KEY);
+    if (!raw) return;
+    let handoff: unknown;
+    try { handoff = JSON.parse(raw); } catch { return; }
+    if (!isPmccReviewHandoff(handoff)) return;
+    setError('');
+    setPmccHandoffOccSymbol(handoff.occSymbol);
+    setPmccHiddenLeapsSymbols([]);
+    setPmccHeldCandidates([]);
+    setPmccDiscoveryExclusions([]);
+    setPmccDiscoveryLoading(true);
+    setShowPmccScanModal(true);
+    void (async () => {
+      const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
+      setPmccDiscoveryLoading(false);
+      if (!discovery.ok) {
+        setPmccHeldCandidates([]);
+        setPmccDiscoveryExclusions(discovery.reason === 'empty' ? discovery.exclusions ?? [] : [{ symbol: handoff.underlyingSymbol, reason: discovery.error }]);
+        return;
+      }
+      const selected = discovery.heldCandidates.filter(candidate => candidate.accountNumber === handoff.accountNumber && candidate.positionKey === handoff.positionKey && candidate.occSymbol === handoff.occSymbol);
+      if (!selected.length) {
+        setPmccHeldCandidates([]);
+        setPmccDiscoveryExclusions([{ symbol: handoff.underlyingSymbol, reason: 'The held LEAPS no longer matches current broker positions.' }]);
+        return;
+      }
+      setPmccHeldCandidates(selected.map(candidate => ({ underlyingSymbol: candidate.underlyingSymbol, dte: candidate.dte })));
+    })();
+  // The handoff is consumed once on entry. Its own refresh is the authority.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Find LEAPS is deliberately independent from PMCC. It discovers possible
   // new long calls only for trader-supplied tickers; it never reads holdings
@@ -9863,6 +9905,7 @@ export default function Home() {
                   // in the background -- see the state comment above for
                   // why this was previously a 5-10 second blocking wait.
                   setError('');
+                  setPmccHandoffOccSymbol(null);
                   setPmccHeldCandidates([]);
                   setPmccDiscoveryLoading(true);
                   setShowPmccScanModal(true);

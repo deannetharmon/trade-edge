@@ -254,30 +254,31 @@ describe('PositionsWorkspace', () => {
     expect(renderAnalysisConversation).toHaveBeenCalledWith(position, analysis);
   });
 
-  it('shows portfolio-first income eligibility and keeps its review explicitly non-actionable', async () => {
+  it('shows portfolio-first income eligibility and launches only a verified held LEAPS into the PMCC flow', async () => {
     const user = userEvent.setup();
     const next = {
       ...model,
       incomeOpportunities: [{
         id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'eligible', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call',
-        reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', freshness: 'Current broker evidence', exactContract: 'AAPL  270618C00150000',
+        reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', freshness: 'Current broker evidence', exactContract: 'AAPL  270618C00150000', accountNumber: '5WT12345',
         sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
       }, {
         id: 'covered-call:AAPL', kind: 'covered-call', status: 'no-capacity', symbol: 'AAPL', positionKey: null, title: 'Covered call',
-        reason: 'Fully covered / no available capacity after existing and working short calls.', freshness: 'Current broker evidence', exactContract: null,
+        reason: 'Fully covered / no available capacity after existing and working short calls.', freshness: 'Current broker evidence', exactContract: null, accountNumber: '5WT12345',
         sharesOwned: 100, allocatedContracts: 1, reservedContracts: 0, availableContracts: 0,
       }],
     } as PositionsWorkspaceModel;
-    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    const onFindPmccShortCall = vi.fn();
+    render(<PositionsWorkspace model={next} th={THEMES.dark} onFindPmccShortCall={onFindPmccShortCall} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('region', { name: 'Existing-position income eligibility' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Fully covered / no available capacity')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Expand' }));
     expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Fully covered / no available capacity')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Review' }));
-    expect(screen.getByRole('status')).toHaveTextContent('no recommendation, ticket, or order has been created');
+    expect(screen.getByText('Short-call capacity unavailable')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Find short call' }));
+    expect(onFindPmccShortCall).toHaveBeenCalledWith(expect.objectContaining({ exactContract: 'AAPL  270618C00150000', positionKey: 'AAPL-1' }));
   });
 
   it('saves notes on Enter, accepts up to 150 characters, and restores saved notes after remount', async () => {

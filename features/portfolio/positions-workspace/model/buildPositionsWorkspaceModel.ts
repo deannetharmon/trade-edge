@@ -1,5 +1,6 @@
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { Position } from '@/lib/portfolio-data/types';
+import { DEFAULT_PMCC_DTE_RANGES } from '@/lib/scans/pmccDteRanges';
 import type { ExistingIncomeOpportunity, PositionsWorkspaceInput, PositionsWorkspaceModel, SymbolGroupViewModel } from './types';
 import { aggregateFinancialValues, aggregatePnlPercentage, buildOptionInstrumentViewModel, classifySymbolComposition, compositionLabel, optionMidpointValue } from './valuation';
 
@@ -47,11 +48,27 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
     const base = {
       id: `pmcc:${position.key}`, kind: 'pmcc-short-call' as const, symbol: position.symbol,
       positionKey: position.key, title: 'PMCC short call', freshness, exactContract,
+      accountNumber: position.accountNumber,
       sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
     };
     if (!snapshotReady) { opportunities.push({ ...base, status: 'unavailable', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.' }); continue; }
     if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position account identity does not match the active broker account.' }); continue; }
     if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position is structurally ambiguous or missing leg evidence.' }); continue; }
+    if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-eligible', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).` }); continue; }
+    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A nearer-dated short call above this LEAPS strike is already open against this position.' }); continue; }
+    const longStrike = leg.strikePrice;
+    const hasMatchingWorkingShort = snapshot!.workingOrders.some(order => order.legs.some(workingLeg => {
+      const action = workingLeg.action.replace(/[^a-z]/gi, '').toLowerCase();
+      const workingStrike = Number.parseInt(workingLeg.symbol?.replace(/\s+/g, '').match(/[CP](\d{8})$/)?.[1] ?? '', 10) / 1000;
+      const expiryMatch = workingLeg.symbol?.replace(/\s+/g, '').match(/[A-Z]{1,6}(\d{6})[CP]\d{8}$/);
+      const expiry = expiryMatch ? `20${expiryMatch[1].slice(0, 2)}-${expiryMatch[1].slice(2, 4)}-${expiryMatch[1].slice(4, 6)}` : null;
+      return workingLeg.underlyingSymbol === position.symbol
+        && (action === 'selltoopen' || action === 'sto')
+        && workingLeg.optionType === 'C'
+        && expiry != null && expiry < position.expDate
+        && Number.isFinite(workingStrike) && workingStrike > longStrike;
+    }));
+    if (hasMatchingWorkingShort) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A matching short call is already working against this LEAPS.' }); continue; }
     opportunities.push({ ...base, status: 'eligible', reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.' });
   }
 
@@ -64,6 +81,7 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
     const base = {
       id: `covered-call:${holding.symbol}`, kind: 'covered-call' as const, symbol: holding.symbol,
       positionKey: null, title: 'Covered call', freshness, exactContract: null,
+      accountNumber: holding.accountNumber,
       sharesOwned: holding.quantity,
       allocatedContracts: capacity?.existingShortCallContracts ?? null,
       reservedContracts: capacity?.workingShortCallContracts ?? null,

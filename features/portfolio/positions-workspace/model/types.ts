@@ -100,6 +100,7 @@ export interface ExistingIncomeOpportunity {
   reason: string;
   freshness: string;
   exactContract: string | null;
+  accountNumber: string | null;
   sharesOwned: number | null;
   allocatedContracts: number | null;
   reservedContracts: number | null;

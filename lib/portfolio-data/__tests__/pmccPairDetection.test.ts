@@ -93,6 +93,12 @@ describe('findPairedShortCall', () => {
     expect(isPairedPmccLong(long, [long, short])).toBe(true);
   });
 
+  it('does not pair a nearer short call at or below the held LEAPS strike', () => {
+    const long = position({ key: 'long-1', legs: [leg({ direction: 'Long', optionType: 'C', strikePrice: 700 })], dte: PMCC_LONG_DTE_MIN + 50 });
+    const belowLongStrike = position({ key: 'short-1', legs: [shortLeg({ strikePrice: 700 })], dte: PMCC_SHORT_DTE_MAX - 15, strategy: 'CC' });
+    expect(findPairedShortCall(long, [long, belowLongStrike])).toBeNull();
+  });
+
   it('returns null when the long leg does not clear the long-dated bar (Ian)', () => {
     // A short-dated long call paired with an even-shorter call is a spread,
     // not a PMCC base -- must fail even with an otherwise-valid short match.

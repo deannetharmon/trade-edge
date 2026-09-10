@@ -38,6 +38,14 @@ function isPmccShortLegCandidate(position: Position): boolean {
   return position.dte < PMCC_SHORT_DTE_MAX;
 }
 
+function isShortCallAboveLongStrike(longPosition: Position, shortPosition: Position): boolean {
+  const longStrike = longPosition.legs[0]?.strikePrice;
+  const shortStrike = shortPosition.legs[0]?.strikePrice;
+  return Number.isFinite(longStrike) && Number.isFinite(shortStrike)
+    && shortPosition.dte < longPosition.dte
+    && shortStrike > longStrike;
+}
+
 // Returns the held short-call Position paired against longPosition as a
 // PMCC, or null if longPosition isn't a PMCC long-leg candidate at all, or
 // no matching short call is currently held.
@@ -64,6 +72,7 @@ export function findPairedShortCall(longPosition: Position, allPositions: Positi
     candidate.key !== longPosition.key
     && candidate.symbol === longPosition.symbol
     && isPmccShortLegCandidate(candidate)
+    && isShortCallAboveLongStrike(longPosition, candidate)
   );
   if (candidates.length === 0) return null;
 
