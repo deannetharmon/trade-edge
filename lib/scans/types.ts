@@ -76,6 +76,10 @@ export interface SpreadCandidate {
    * lookups instead of symbol/symbol+strategy. */
   candidateId?: string;
   cspLiquidityClass?: import('./cspQualification').CspLiquidityClass;
+  /** True when this put is within the delta range selected for this scan.
+   * Contracts outside the range remain visible for comparison, but are not
+   * eligible for the primary recommendation. */
+  cspDeltaTargetPassing?: boolean;
   /** Independent of account eligibility — a market-qualified contract can
    * still be account-ineligible (unaffordable/unverified) and must remain
    * visible either way; see cspAccountEligibility. */

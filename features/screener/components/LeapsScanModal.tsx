@@ -28,6 +28,7 @@
 
 import { useMemo, useState } from 'react';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
+import { DeferredNumberInput } from './DeferredNumberInput';
 
 export interface LeapsScanRequest {
   deltaMin: number;
@@ -90,12 +91,11 @@ export function LeapsScanModal({ th, selectedTickerCount, initial, onClose, onRu
           {LEAPS_FIELDS.map(([key, label, step]) => (
             <label key={key} className="flex flex-col gap-1 text-[10px] text-neutral-400">
               {label}
-              <input
+              <DeferredNumberInput
                 aria-label={label}
-                type="number"
                 step={step}
                 value={draft[key]}
-                onChange={e => setField(key, Number(e.target.value))}
+                onValueChange={value => setField(key, value)}
                 className="mt-1 w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"
               />
             </label>

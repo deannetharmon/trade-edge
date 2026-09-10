@@ -33,6 +33,7 @@
 import { useMemo, useState } from 'react';
 import type { CcRulesType } from '@/lib/scans/constants';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
+import { DeferredNumberInput } from './DeferredNumberInput';
 
 export interface CcScanRequest {
   rules: CcRulesType;
@@ -144,12 +145,11 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
           {CC_FIELDS.map(([key, label, step]) => (
             <label key={key} className="flex flex-col gap-1 text-[10px] text-neutral-400">
               {label}
-              <input
+              <DeferredNumberInput
                 aria-label={label}
-                type="number"
                 step={step}
                 value={draft.rules[key]}
-                onChange={e => setRule(key, Number(e.target.value))}
+                onValueChange={value => setRule(key, value)}
                 className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"
               />
             </label>

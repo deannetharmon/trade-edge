@@ -159,6 +159,11 @@ export interface CspRawCandidate {
    * pass — BORDERLINE additionally carries a warning, applied one layer up
    * in csp-finder.ts). */
   liquidityClass: CspLiquidityClass;
+  /** Whether this contract is inside the user's preferred delta window.
+   * Discovery deliberately retains contracts outside that window so the
+   * screener can show the complete requested expiry range and explain why a
+   * contract was not selected as a primary opportunity. */
+  deltaTargetPassing: boolean;
 }
 
 export interface CspSearchDiagnostics {
@@ -272,6 +277,7 @@ function toValidCandidate(leg: {
     bidAskPassing: false,
     candidateId,
     liquidityClass: 'POOR', // provisional — Stage 4 fills in the real classification
+    deltaTargetPassing: false, // filled from the scan rules by the caller
   };
 }
 
@@ -354,11 +360,13 @@ export function searchCspCandidates(
       if ((leg as any).optionType !== 'P') continue;
       if (leg.delta == null || !isFiniteNumber(leg.delta)) continue;
       const absDelta = Math.abs(leg.delta);
-      if (absDelta < rules.deltaMin || absDelta > rules.deltaMax) continue;
-      putsInDeltaWindow++;
+      const deltaTargetPassing = absDelta >= rules.deltaMin && absDelta <= rules.deltaMax;
+      if (deltaTargetPassing) putsInDeltaWindow++;
 
       const candidate = toValidCandidate(leg as any, dte, underlyingSymbol);
-      if (candidate) validCandidates.push(candidate);
+      // Retain every quote-valid put in the requested DTE window. Delta is
+      // a recommendation preference, not a reason to conceal a contract.
+      if (candidate) validCandidates.push({ ...candidate, deltaTargetPassing });
     }
   }
 
@@ -371,16 +379,6 @@ export function searchCspCandidates(
       reason: 'NO_EXPIRATION_IN_DTE_WINDOW',
     };
   }
-  if (putsInDeltaWindow === 0) {
-    return {
-      candidates: [],
-      selectedCandidate: null,
-      selectedStatus: null,
-      diagnostics: { expirationsInDteWindow, putsInDeltaWindow: 0, validQuoteCandidates: 0, oiPassingCandidates: 0, spreadPassingCandidates: 0 },
-      reason: 'NO_PUT_IN_DELTA_WINDOW',
-    };
-  }
-
   const classified = validCandidates.map(c => classify(c, rules));
   const oiPassingCandidates = classified.filter(c => c.oiPassing).length;
   const spreadPassingCandidates = classified.filter(c => c.bidAskPassing).length;

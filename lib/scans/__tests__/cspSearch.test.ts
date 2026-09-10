@@ -72,7 +72,7 @@ describe('searchCspCandidates — structural discovery (Stages 1-3)', () => {
     expect(result.diagnostics.expirationsInDteWindow).toBe(0);
   });
 
-  it('expiration in window but no put delta inside range (a call at that delta, and a put outside range) -> NO_PUT_IN_DELTA_WINDOW', () => {
+  it('keeps a quote-valid put outside the preferred delta range for comparison', () => {
     const chain = chainOf([{
       dte: 35,
       legs: [
@@ -81,9 +81,11 @@ describe('searchCspCandidates — structural discovery (Stages 1-3)', () => {
       ],
     }]);
     const result = searchCspCandidates(chain, RULES);
-    expect(result.reason).toBe('NO_PUT_IN_DELTA_WINDOW');
+    expect(result.reason).toBeNull();
     expect(result.diagnostics.expirationsInDteWindow).toBe(1);
     expect(result.diagnostics.putsInDeltaWindow).toBe(0);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].deltaTargetPassing).toBe(false);
   });
 
   it('negative raw put delta is normalized via abs() and correctly discovered', () => {
@@ -107,10 +109,11 @@ describe('searchCspCandidates — structural discovery (Stages 1-3)', () => {
   it.each([
     ['just outside lower boundary, 0.149', -0.149],
     ['just outside upper boundary, 0.251', -0.251],
-  ])('%s is rejected from the delta window', (_label, rawDelta) => {
+  ])('%s remains visible but is marked outside the preferred delta window', (_label, rawDelta) => {
     const chain = chainOf([{ dte: 35, legs: [{ strike: 400, delta: rawDelta, bid: 5, ask: 5.05, oi: 1000 }] }]);
     const result = searchCspCandidates(chain, RULES);
-    expect(result.reason).toBe('NO_PUT_IN_DELTA_WINDOW');
+    expect(result.reason).toBeNull();
+    expect(result.candidates[0].deltaTargetPassing).toBe(false);
   });
 
   it.each([

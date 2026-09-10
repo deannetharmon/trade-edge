@@ -41,11 +41,25 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.getByText(/strong ≤ max\(\$0\.10, 10% of mid\), borderline through 15%/i)).toBeInTheDocument();
   });
 
-  it('defaults every mode to an affordable-capital filter and carries a manual ceiling into the request', async () => {
+  it('accepts a decimal typed from its leading dot without coercing the interim dot to zero', async () => {
     const onRun = vi.fn();
     const user = userEvent.setup();
     render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
-    expect(screen.getByLabelText(/Only show CSPs affordable/i)).toBeChecked();
+    const minDelta = screen.getByLabelText('Min delta');
+    await user.clear(minDelta);
+    await user.type(minDelta, '.12');
+    await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({
+      rules: expect.objectContaining({ DELTA_MIN: 0.12 }),
+    }));
+  });
+
+  it('shows every evaluated contract by default and carries a manual ceiling into the request', async () => {
+    const onRun = vi.fn();
+    const user = userEvent.setup();
+    render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
+    expect(screen.getByLabelText(/Only show CSPs affordable/i)).not.toBeChecked();
+    await user.click(screen.getByLabelText(/Only show CSPs affordable/i));
     await user.clear(screen.getByLabelText('Cash limit per CSP'));
     await user.type(screen.getByLabelText('Cash limit per CSP'), '8000');
     await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
@@ -69,13 +83,13 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
     await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
-    expect(screen.getByLabelText('Min DTE')).toHaveValue(30);
+    expect(screen.getByLabelText('Min DTE')).toHaveValue('30');
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeDisabled();
     await userEvent.type(screen.getByLabelText('Minimum POP'), '70');
     await userEvent.click(screen.getByRole('button', { name: 'CONFIRM TARGETS' }));
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
     await userEvent.click(screen.getByRole('radio', { name: /^Filter/i }));
-    expect(screen.getByLabelText('Min DTE')).toHaveValue(25);
+    expect(screen.getByLabelText('Min DTE')).toHaveValue('25');
     expect(screen.queryByLabelText('Minimum POP')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');

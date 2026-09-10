@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { CspRulesType } from '@/lib/scans/constants';
 import type { CspRankSort, CspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { ScanModalShell, ScanModeRadioGroup, type ScanModalTheme } from './ScanModalShell';
+import { DeferredNumberInput } from './DeferredNumberInput';
 
 export interface CspScanRequest {
   mode: CspRuleSnapshot['mode'];
@@ -99,12 +100,12 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const selectedPresetRef = useRef<HTMLButtonElement>(null);
   const defaultFor = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...PRESETS[1].rules }, popMin: null,
-    otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: true,
+    otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
   });
   const normalizeRequest = (request: CspScanRequest): CspScanRequest => ({
     ...request,
     capitalLimit: request.capitalLimit ?? null,
-    affordableOnly: request.affordableOnly ?? true,
+    affordableOnly: request.affordableOnly ?? false,
   });
   const [drafts, setDrafts] = useState<CspScanRequestsByMode>(() => requestsByMode ?? {
     filter: initial.mode === 'filter' ? normalizeRequest(initial) : defaultFor('filter'),
@@ -206,7 +207,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
         </div></fieldset>}
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {([['DTE_MIN','Min DTE'],['DTE_MAX','Max DTE'],['DELTA_MIN','Min delta'],['DELTA_MAX','Max delta'],['OI_MIN','Preferred OI'],['IVR_MIN','Min IVR %'],['IVR_MAX','Max IVR %'],['BID_ASK_MAX','Max bid/ask width']] as Array<[keyof CspRulesType,string]>).map(([key,label]) => <label key={key} className="flex flex-col gap-1 text-[10px] text-neutral-400">{label}<input aria-label={label} type="number" step={key.includes('DELTA') || key === 'BID_ASK_MAX' ? '0.01' : '1'} value={request.rules[key]} onChange={e => setRule(key, Number(e.target.value))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>)}
+          {([['DTE_MIN','Min DTE'],['DTE_MAX','Max DTE'],['DELTA_MIN','Min delta'],['DELTA_MAX','Max delta'],['OI_MIN','Preferred OI'],['IVR_MIN','Min IVR %'],['IVR_MAX','Max IVR %'],['BID_ASK_MAX','Max bid/ask width']] as Array<[keyof CspRulesType,string]>).map(([key,label]) => <label key={key} className="flex flex-col gap-1 text-[10px] text-neutral-400">{label}<DeferredNumberInput aria-label={label} step={key.includes('DELTA') || key === 'BID_ASK_MAX' ? '0.01' : '1'} value={request.rules[key]} onValueChange={value => setRule(key, value)} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>)}
           {mode === 'targeted' && <><label className="flex flex-col gap-1 text-[10px] text-neutral-400">Min POP %<input aria-label="Minimum POP" type="number" value={request.popMin ?? ''} onChange={e => updateDraft(prev => ({ ...prev, preset: 'custom', popMin: e.target.value === '' ? null : Number(e.target.value) }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>
           <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Min OTM %<input aria-label="Minimum OTM percentage" type="number" value={request.otmMin ?? ''} onChange={e => updateDraft(prev => ({ ...prev, preset: 'custom', otmMin: e.target.value === '' ? null : Number(e.target.value) }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>
           <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Min period ROC %<input aria-label="Minimum period ROC" type="number" value={request.rocMin ?? ''} onChange={e => updateDraft(prev => ({ ...prev, preset: 'custom', rocMin: e.target.value === '' ? null : Number(e.target.value) }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label></>}

@@ -14,6 +14,7 @@
 
 import { useMemo, useState } from 'react';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
+import { DeferredNumberInput } from './DeferredNumberInput';
 
 export interface PmccScanRequest {
   shortDteMin: number;
@@ -65,7 +66,7 @@ export function PmccScanModal({
     && draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
     && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
-  const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><input aria-label={label} type="number" step={step} value={draft[key]} onChange={event => setDraft(value => ({ ...value, [key]: Number(event.target.value) }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
+  const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose}>
     <p className="text-[10px] text-neutral-400">Your held LEAPS is the existing cover. These filters search and rank only the short calls to sell against it; no new long call is selected or purchased.</p>
     {discoveryLoading ? (

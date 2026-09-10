@@ -1371,6 +1371,9 @@ function runCspChecklist(
     });
 
     const failReasons: string[] = [];
+    if (!c.cspDeltaTargetPassing) {
+      failReasons.push(`Delta ${Math.abs(c.shortDelta).toFixed(2)} is outside the preferred ${cspRules.DELTA_MIN.toFixed(2)}-${cspRules.DELTA_MAX.toFixed(2)} range`);
+    }
     if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% exceeds the ${cspRules.IVR_MAX}% CSP risk cap`);
     if (r.marketQualification === 'DISQUALIFIED_EARNINGS') failReasons.push('Earnings within expiry window — assignment risk into a binary event');
     if (r.marketQualification === 'DISQUALIFIED_POOR_LIQUIDITY') failReasons.push(c.cspLiquidityReason ?? 'Poor liquidity');
@@ -1398,7 +1401,9 @@ function runCspChecklist(
     const oiCheck: CheckResult = c.cspOiPassing
       ? { status: 'pass', value: `${c.shortOI}`, reason: `≥ ${cspRules.OI_MIN} minimum` }
       : { status: 'warn', value: `${c.shortOI}`, reason: c.cspOiWarning ?? `Below ${cspRules.OI_MIN} — fills may be difficult` };
-    const deltaCheck: CheckResult = { status: 'pass', value: `Δ${c.shortDelta.toFixed(2)}`, reason: `Target ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` };
+    const deltaCheck: CheckResult = c.cspDeltaTargetPassing
+      ? { status: 'pass', value: `Δ${c.shortDelta.toFixed(2)}`, reason: `Within preferred ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` }
+      : { status: 'warn', value: `Δ${c.shortDelta.toFixed(2)}`, reason: `Outside preferred ${cspRules.DELTA_MIN}-${cspRules.DELTA_MAX}` };
     const creditCheck: CheckResult = { status: 'pass', value: `$${c.credit.toFixed(2)}`, reason: `Requires $${c.requiredCash?.toLocaleString() ?? '—'} cash` };
     const rocCheck: CheckResult = { status: c.roc >= 1 ? 'pass' : 'warn', value: `${c.roc.toFixed(1)}%`, reason: `Annualized ${c.annualizedRoc?.toFixed(0) ?? '—'}%` };
     const popCheck: CheckResult = { status: (c.pop ?? 0) >= 65 ? 'pass' : 'warn', value: `${c.pop?.toFixed(0) ?? '—'}%`, reason: '1 − |delta|, put side' };
@@ -1416,7 +1421,7 @@ function runCspChecklist(
     // separate boundary enforced downstream (see
     // isBestOpportunitiesEligible() in lib/scans/cspQualification.ts and its
     // callers) — never by this field alone.
-    const qualified = isMarketQualified(r.marketQualification);
+    const qualified = isMarketQualified(r.marketQualification) && c.cspDeltaTargetPassing === true;
     const candidateEarningsCheck: CheckResult = r.earningsWithinExpiration === true
       ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: 'Earnings on or before this contract expires' }
       : r.earningsWithinExpiration === false
@@ -7770,7 +7775,7 @@ export default function Home() {
   const [leapsTradeCandidate, setLeapsTradeCandidate] = useState<typeof leapsResults[number] | null>(null);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
-    popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: true,
+    popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
   });
   const [lastCspMode, setLastCspMode] = useState<CspScanRequest['mode']>('filter');
   const [cspRequestsByMode, setCspRequestsByMode] = useState<CspScanRequestsByMode>({
@@ -9222,10 +9227,14 @@ export default function Home() {
               failReasons: [...result.failReasons, ...targetedFailures],
             };
           });
-          const affordableResults = request.affordableOnly !== false
+          // Preserve the complete evaluated chain by default. If the trader
+          // explicitly requests the affordable-only view, apply that
+          // deliberate filter here; otherwise account eligibility remains a
+          // visible decision aid rather than a reason to hide a contract.
+          const displayedResults = request.affordableOnly
             ? results.filter(result => result.bestCandidate?.cspAccountEligibility === 'ELIGIBLE')
             : results;
-          session = recordSymbolEvaluated(session, symbol, affordableResults);
+          session = recordSymbolEvaluated(session, symbol, displayedResults);
         } catch (e: any) {
           session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
@@ -10387,7 +10396,7 @@ export default function Home() {
                       // confirmed draft when reopening this session so an
                       // explicit cash ceiling is never silently discarded.
                       capitalLimit: cspRequestsByMode[s.mode].capitalLimit ?? null,
-                      affordableOnly: cspRequestsByMode[s.mode].affordableOnly ?? true,
+                      affordableOnly: cspRequestsByMode[s.mode].affordableOnly ?? false,
                     };
                     setLastCspMode(s.mode);
                     setCspRequestsByMode(prev => ({ ...prev, [s.mode]: restored }));

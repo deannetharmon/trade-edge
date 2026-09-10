@@ -251,6 +251,7 @@ function buildSpreadCandidate(
     // CSP-WORKFLOW-0001 additions
     candidateId: c.candidateId,
     cspLiquidityClass: c.liquidityClass,
+    cspDeltaTargetPassing: c.deltaTargetPassing,
     cspMarketQualification: marketQualification,
     cspAccountEligibility: accountEligibility,
     cspAdvisoryWarnings: advisoryWarnings,
