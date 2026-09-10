@@ -9063,11 +9063,33 @@ function DraggableSection({ sectionId, index, total, th, onMove, onDragStart, on
 }
 
 // ── Pending Order Card ──────────────────────────────────────────────────────
-function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace }: {
+// PENDING-NOTES-0001: notes/price alerts on a pending order must survive a
+// reprice. Reprice is cancel-then-place under the hood (see
+// replacePendingOrder) -- the broker issues a NEW order.id every time, so
+// keying storage to order.id or order.parentOrderId would silently orphan
+// the note/alert on the very first "Confirm Replace." This mirrors
+// positionEntrySnapshotKey's approach for filled positions: derive
+// identity from the trade's own shape (account + symbol + expiry + legs),
+// which is stable across a reprice since the legs themselves don't change.
+// Prefixed with 'pending::' so it can never collide with a real position's
+// key in the same shared notes/price-alerts store.
+function pendingOrderIdentityKey(order: PendingOrder): string {
+  const legsKey = order.legs
+    .map(l => `${l.optionType ?? '?'}${l.strikePrice}x${Math.abs(l.quantity)}`)
+    .sort()
+    .join('|');
+  return `pending::${order.accountNumber}::${order.symbol}::${order.expDate ?? 'unknown'}::${legsKey}`;
+}
+
+function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
   order: PendingOrder; th: typeof THEMES[Theme];
   cancelling: boolean; replacing: boolean;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
+  savedNote: string;
+  onSaveNote: (order: PendingOrder, note: string) => Promise<void>;
+  savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null;
+  onSaveAlert: (order: PendingOrder, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 }) {
   const strategyColor = order.strategy === 'BPS'
     ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
@@ -9188,6 +9210,18 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           <Link href={`/screener?symbol=${encodeURIComponent(order.symbol)}`} className="ml-auto text-center text-[9px] px-2 py-1 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-500/10 font-bold">
             FIND NEW CANDIDATE
           </Link>
+        </div>
+      )}
+      {!editing && (
+        <div className="mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-start gap-4">
+          <div>
+            <p className={`text-[9px] uppercase tracking-wider ${th.textFaint} mb-1`}>Notes</p>
+            <PendingOrderNoteEditor order={order} savedNote={savedNote} onSave={onSaveNote} />
+          </div>
+          <div>
+            <p className={`text-[9px] uppercase tracking-wider ${th.textFaint} mb-1`}>Price Alert</p>
+            <PendingOrderPriceAlertEditor order={order} savedAlert={savedAlert} onSave={onSaveAlert} />
+          </div>
         </div>
       )}
       {editing && (
@@ -9340,12 +9374,148 @@ function PositionStrategyFilterBar({
   );
 }
 
+// PENDING-NOTES-0001: same draft/save/status shape as PositionsWorkspace's
+// PositionNoteEditor/PriceAlertEditor (Dane's consolidation principle --
+// same behavior, same UX language). Kept as separate components rather
+// than importing/generalizing the Position-typed originals: those are
+// typed strictly to Position and used across 15 passing tests in
+// PositionsWorkspace.tsx; broadening their prop types to also accept a
+// PendingOrder was a materially larger, riskier change than duplicating
+// ~40 lines here. Worth revisiting as a shared generalized component if
+// this pattern needs a third caller.
+const PENDING_NOTE_MAX_LENGTH = 150;
+
+function PendingOrderNoteEditor({ order, savedNote, onSave }: { order: PendingOrder; savedNote: string; onSave: (order: PendingOrder, note: string) => Promise<void> }) {
+  const [draft, setDraft] = useState(savedNote);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setDraft(savedNote); setState('idle'); setError(null); }, [savedNote, order.id]);
+  const save = async () => {
+    if (draft === savedNote || state === 'saving') return;
+    if (draft.length > PENDING_NOTE_MAX_LENGTH) { setError(`Maximum ${PENDING_NOTE_MAX_LENGTH} characters`); setState('error'); return; }
+    setState('saving'); setError(null);
+    try { await onSave(order, draft); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+  };
+  return <label className="block">
+    <span className="sr-only">Note for {order.symbol} {order.strategy} pending order</span>
+    <textarea aria-label={`Note for ${order.symbol} ${order.strategy} pending order`} value={draft} maxLength={PENDING_NOTE_MAX_LENGTH} rows={2} wrap="soft"
+      onChange={event => { setDraft(event.target.value); setState('idle'); }}
+      onBlur={() => void save()}
+      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void save(); } else if (event.key === 'Escape') { event.preventDefault(); setDraft(savedNote); setState('idle'); setError(null); } }}
+      className="w-40 resize-y rounded border border-white/20 bg-transparent px-2 py-1 text-[10px] text-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    <span className="mt-1 block text-[9px] text-white/40">{draft.length}/{PENDING_NOTE_MAX_LENGTH} · {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : 'Enter or blur to save'}</span>
+  </label>;
+}
+
+function PendingOrderPriceAlertEditor({ order, savedAlert, onSave }: { order: PendingOrder; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSave: (order: PendingOrder, targetPrice: number | null, direction: 'above' | 'below') => Promise<void> }) {
+  const [draft, setDraft] = useState(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : '');
+  const [direction, setDirection] = useState<'above' | 'below'>(savedAlert?.direction ?? 'above');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : '');
+    setDirection(savedAlert?.direction ?? 'above');
+    setState('idle'); setError(null);
+  }, [savedAlert?.targetPrice, savedAlert?.direction, order.id]);
+  const save = async () => {
+    if (state === 'saving') return;
+    const trimmed = draft.trim();
+    if (trimmed === '') {
+      if (savedAlert == null) return;
+      setState('saving'); setError(null);
+      try { await onSave(order, null, direction); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) { setError('Enter a positive price'); setState('error'); return; }
+    if (parsed === savedAlert?.targetPrice && direction === savedAlert?.direction) return;
+    setState('saving'); setError(null);
+    try { await onSave(order, parsed, direction); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+  };
+  const crossed = savedAlert != null && order.currentUnderlyingPrice != null
+    && (savedAlert.direction === 'above' ? order.currentUnderlyingPrice >= savedAlert.targetPrice : order.currentUnderlyingPrice <= savedAlert.targetPrice);
+  return <div>
+    <div className="flex items-center gap-1">
+      <label className="sr-only" htmlFor={`pending-alert-direction-${order.id}`}>Alert direction for {order.symbol}</label>
+      <select id={`pending-alert-direction-${order.id}`} value={direction} onChange={event => { setDirection(event.target.value as 'above' | 'below'); setState('idle'); }} className="rounded border border-white/20 bg-transparent px-1 py-1 text-[10px] text-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+        <option value="above" className="text-black">≥</option>
+        <option value="below" className="text-black">≤</option>
+      </select>
+      <label className="sr-only" htmlFor={`pending-alert-target-${order.id}`}>Target price for {order.symbol}</label>
+      <input id={`pending-alert-target-${order.id}`} type="text" inputMode="decimal" placeholder="Target $" value={draft}
+        onChange={event => { setDraft(event.target.value); setState('idle'); }}
+        onBlur={() => void save()}
+        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void save(); } else if (event.key === 'Escape') { event.preventDefault(); setDraft(savedAlert?.targetPrice != null ? String(savedAlert.targetPrice) : ''); setDirection(savedAlert?.direction ?? 'above'); setState('idle'); setError(null); } }}
+        className="w-16 rounded border border-white/20 bg-transparent px-2 py-1 text-[10px] text-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+    </div>
+    <span className="mt-1 block text-[9px] text-white/40">{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : 'Enter or blur to save'}</span>
+    {crossed && <span className="mt-1 block rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">Target reached</span>}
+  </div>;
+}
+
 function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
 }) {
+  // PENDING-NOTES-0001: fetched once here (not per-card) -- same pattern
+  // PositionsWorkspace uses for its own notes/price alerts. Reuses the
+  // SAME two API routes/redis stores as filled positions (they're generic
+  // accountNumber+positionKey stores with no server-side validation that
+  // the key belongs to an actual open position -- see position-notes and
+  // position-price-alerts route.ts) -- pending-order entries coexist
+  // safely alongside position entries in that one keyspace because
+  // pendingOrderIdentityKey always prefixes with 'pending::'.
+  //
+  // Hooks run before the `orders.length === 0` early return below --
+  // conditionally skipping hooks based on props is a React rules-of-hooks
+  // violation, so this fetch runs (and no-ops harmlessly) even when the
+  // section is about to render nothing.
+  const [pendingNotes, setPendingNotes] = useState<Record<string, string>>({});
+  const [pendingAlerts, setPendingAlerts] = useState<Record<string, { targetPrice: number; direction: 'above' | 'below' }>>({});
+  useEffect(() => {
+    if (typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-notes').then(async response => {
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({}));
+      if (active) setPendingNotes(payload.notes ?? {});
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-price-alerts').then(async response => {
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({}));
+      if (active) setPendingAlerts(payload.alerts ?? {});
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const savePendingNote = async (order: PendingOrder, note: string) => {
+    if (!order.accountNumber) throw new Error('Broker account identity is unavailable');
+    const positionKey = pendingOrderIdentityKey(order);
+    const response = await fetch('/api/position-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: order.accountNumber, positionKey, note }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error ?? 'Unable to save note');
+    setPendingNotes(current => ({ ...current, [`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(positionKey)}`]: note }));
+  };
+  const savePendingAlert = async (order: PendingOrder, targetPrice: number | null, direction: 'above' | 'below') => {
+    if (!order.accountNumber) throw new Error('Broker account identity is unavailable');
+    const positionKey = pendingOrderIdentityKey(order);
+    const response = await fetch('/api/position-price-alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: order.accountNumber, positionKey, targetPrice, direction }) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error ?? 'Unable to save price alert');
+    const storeKey = `${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(positionKey)}`;
+    setPendingAlerts(current => {
+      const next = { ...current };
+      if (targetPrice == null) delete next[storeKey];
+      else next[storeKey] = { targetPrice, direction };
+      return next;
+    });
+  };
   if (orders.length === 0) return null;
   const groups = groupPendingEntries(orders);
   return (
@@ -9369,6 +9539,10 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
                 replacing={replacingOrderIds.has(order.id)}
                 onCancel={onCancel}
                 onReplace={onReplace}
+                savedNote={pendingNotes[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? ''}
+                onSaveNote={savePendingNote}
+                savedAlert={pendingAlerts[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? null}
+                onSaveAlert={savePendingAlert}
               />
             ))}
           </div>
