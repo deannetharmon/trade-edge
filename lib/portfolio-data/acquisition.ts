@@ -1716,6 +1716,10 @@ export async function loadPositions(
           const rawIvr = metric?.['implied-volatility-index-rank'] ?? metric?.['iv-rank'];
           const parsedIvr = Number(rawIvr);
           order.currentIvr = Number.isFinite(parsedIvr) ? (parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr)) : null;
+          const rawIv = metric?.['implied-volatility'] ?? metric?.['iv'] ?? metric?.['implied-volatility-30-day'] ?? metric?.['iv-30-day'];
+          const parsedIv = Number(rawIv);
+          order.currentIv = Number.isFinite(parsedIv) ? (parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv)) : null;
+          order.dte = order.expDate ? Math.round((new Date(order.expDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : null;
           const underlying = underlyingBySymbol.get(order.symbol);
           const bid = Number(underlying?.bid), ask = Number(underlying?.ask), mark = Number(underlying?.mark ?? underlying?.['mark-price']);
           const spot = resolveUnderlyingPrice(bid, ask, mark);

@@ -314,6 +314,17 @@ export interface PendingOrder {
   quoteCapturedAt?: string | null;
   quoteQuality?: 'RELIABLE' | 'UNAVAILABLE';
   currentIvr?: number | null;
+  // POP-PENDING-0001: raw IV (not IVR) -- calcPositionPop's probability
+  // model needs the actual implied volatility as its sigma input; IVR is a
+  // percentile rank of IV against its own historical range and cannot
+  // substitute for it. Sourced from the same market-metrics response that
+  // already supplies currentIvr, just a different field on that object.
+  currentIv?: number | null;
+  // POP-PENDING-0001: DTE computed the same way Position's own dte is
+  // (see loadPositions), needed alongside currentIv to compute POP-if-
+  // filled for a pending order. Optional since it's only set once the
+  // market-metrics enrichment step runs.
+  dte?: number | null;
   currentUnderlyingPrice?: number | null;
   shortStrikeOtmPct?: number | null;
 }

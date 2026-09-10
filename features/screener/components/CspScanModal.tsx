@@ -13,6 +13,9 @@ export interface CspScanRequest {
   otmMin: number | null;
   rocMin: number | null;
   rankSecondary: CspRankSort;
+  /** Optional lower per-CSP cash ceiling; blank uses verified account funds. */
+  capitalLimit?: number | null;
+  affordableOnly?: boolean;
 }
 
 export type CspScanRequestsByMode = Record<CspScanRequest['mode'], CspScanRequest>;
@@ -96,12 +99,17 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const selectedPresetRef = useRef<HTMLButtonElement>(null);
   const defaultFor = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...PRESETS[1].rules }, popMin: null,
-    otmMin: null, rocMin: null, rankSecondary: 'none',
+    otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: true,
+  });
+  const normalizeRequest = (request: CspScanRequest): CspScanRequest => ({
+    ...request,
+    capitalLimit: request.capitalLimit ?? null,
+    affordableOnly: request.affordableOnly ?? true,
   });
   const [drafts, setDrafts] = useState<CspScanRequestsByMode>(() => requestsByMode ?? {
-    filter: initial.mode === 'filter' ? initial : defaultFor('filter'),
-    rank: initial.mode === 'rank' ? initial : defaultFor('rank'),
-    targeted: initial.mode === 'targeted' ? initial : defaultFor('targeted'),
+    filter: initial.mode === 'filter' ? normalizeRequest(initial) : defaultFor('filter'),
+    rank: initial.mode === 'rank' ? normalizeRequest(initial) : defaultFor('rank'),
+    targeted: initial.mode === 'targeted' ? normalizeRequest(initial) : defaultFor('targeted'),
   });
   const [mode, setMode] = useState<CspScanRequest['mode']>(initial.mode);
   const request = drafts[mode];
@@ -124,6 +132,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
       && (request.popMin == null || (request.popMin >= 0 && request.popMin <= 100))
       && (request.otmMin == null || request.otmMin >= 0)
       && (request.rocMin == null || request.rocMin >= 0)
+      && (request.capitalLimit == null || (Number.isFinite(request.capitalLimit) && request.capitalLimit >= 0))
       && (mode !== 'targeted' || hasTarget);
   }, [mode, request]);
 
@@ -203,6 +212,8 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
           <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Min period ROC %<input aria-label="Minimum period ROC" type="number" value={request.rocMin ?? ''} onChange={e => updateDraft(prev => ({ ...prev, preset: 'custom', rocMin: e.target.value === '' ? null : Number(e.target.value) }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label></>}
           {mode === 'rank' && <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Secondary sort<select aria-label="CSP secondary sort" value={request.rankSecondary} onChange={e => updateDraft(prev => ({ ...prev, rankSecondary: e.target.value as CspRankSort }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"><option value="none">None</option><option value="creditDollars">Credit</option><option value="rocPct">ROC</option><option value="otmPct">OTM %</option><option value="pop">POP</option><option value="relevantLegOI">Relevant-leg OI</option><option value="dte">DTE</option></select></label>}
         </div>
+
+        <fieldset className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"><legend className="px-1 text-xs font-bold text-neutral-300">Capital filter</legend><label className="flex items-center gap-2"><input type="checkbox" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show CSPs affordable with available capital</label>{request.affordableOnly && <label className="mt-3 flex flex-col gap-1">Maximum cash reserved per CSP <input aria-label="Maximum cash reserved per CSP" type="number" min="0" placeholder="Use active account funds" value={request.capitalLimit ?? ''} onChange={event => updateDraft(prev => ({ ...prev, capitalLimit: event.target.value === '' ? null : Number(event.target.value) }))} className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>}<p className="mt-2 text-neutral-400">Required cash is strike × 100 × contracts. Leave blank to use the active account&apos;s verified available CSP capital.</p></fieldset>
 
         <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300" data-testid="csp-rule-preview">DTE {request.rules.DTE_MIN}–{request.rules.DTE_MAX} · Δ {request.rules.DELTA_MIN.toFixed(2)}–{request.rules.DELTA_MAX.toFixed(2)} · preferred OI {request.rules.OI_MIN} · TradeEdge-enforced liquidity policy: strong ≤ max($0.10, 10% of mid), borderline through 15% · TradeEdge earnings policy: earnings inside expiration disqualify</div>
         <p className="mt-2 text-[10px] text-amber-300">Capital is verified against the active broker account shown in the app account control. Choose or switch it there once; scans and orders reuse that selection.</p>

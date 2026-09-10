@@ -111,6 +111,8 @@ import {
   formatReliableSupportedMaxRisk,
   formatPortfolioMaxRiskContext,
   CONTRACT_MULTIPLIER,
+  calcPositionPop,
+  type PopLeg,
 } from '@/lib/portfolio/positionMetrics';
 import {
   canonicalShortLegEntryCredit,
@@ -9315,6 +9317,36 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               })()}
             </div>
           )}
+          {/* POP-PENDING-0001: probability of profit IF this order fills at
+              the typed price -- explicitly and repeatedly labeled "if
+              filled," never presented as a live position's real economics.
+              This is the same guardrail from this morning's MRNA/GTC
+              fixes, applied here before shipping rather than after a bug
+              report: a number computed from a REQUESTED price, not money
+              actually collected, must never look identical to the real
+              POP shown on a filled position's row.
+              Only rendered for credit orders (POP-via-breakeven is
+              undefined for a net debit -- same rule positions use) and
+              only when every required input actually resolved: raw IV,
+              underlying price, DTE, and canonical quantity. Silently
+              absent otherwise -- never a fabricated or approximated
+              number. */}
+          {order.priceEffect !== 'Debit' && canonicalOrderQuantity != null && !priceInvalid && order.currentIv != null && order.currentUnderlyingPrice != null && order.dte != null && (() => {
+            const popLegs: PopLeg[] = order.legs.map(l => ({
+              optionType: l.optionType ?? 'P',
+              strikePrice: l.strikePrice,
+              direction: String(l.action).toLowerCase().startsWith('sell') ? 'Short' : 'Long',
+            }));
+            const hypotheticalCredit = parsedNewPrice * canonicalOrderQuantity * CONTRACT_MULTIPLIER;
+            const pop = calcPositionPop(order.strategy, popLegs, order.currentUnderlyingPrice, hypotheticalCredit, canonicalOrderQuantity, order.dte, order.currentIv);
+            if (pop == null) return null;
+            return (
+              <div className={`text-[9px] ${th.textFaint}`}>
+                POP if filled at ${parsedNewPrice.toFixed(2)}: <span className="text-white font-bold">{pop.toFixed(0)}%</span>
+                <span className="text-white/30"> (hypothetical -- nothing has been collected yet)</span>
+              </div>
+            );
+          })()}
           {!priceInvalid && order.limitPrice != null && parsedNewPrice !== order.limitPrice && (
             <p className={`text-[9px] ${th.textFaint}`}>
               {order.priceEffect === 'Credit'

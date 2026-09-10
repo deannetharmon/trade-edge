@@ -41,6 +41,17 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.getByText(/strong ≤ max\(\$0\.10, 10% of mid\), borderline through 15%/i)).toBeInTheDocument();
   });
 
+  it('defaults every mode to an affordable-capital filter and carries a manual ceiling into the request', async () => {
+    const onRun = vi.fn();
+    const user = userEvent.setup();
+    render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
+    expect(screen.getByLabelText(/Only show CSPs affordable/i)).toBeChecked();
+    await user.clear(screen.getByLabelText('Maximum cash reserved per CSP'));
+    await user.type(screen.getByLabelText('Maximum cash reserved per CSP'), '8000');
+    await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ affordableOnly: true, capitalLimit: 8000 }));
+  });
+
   it('closes on Escape and traps Tab focus inside the dialog', async () => {
     const onClose = vi.fn();
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={onClose} onRun={vi.fn()} />);

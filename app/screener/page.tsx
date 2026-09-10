@@ -7770,7 +7770,7 @@ export default function Home() {
   const [leapsTradeCandidate, setLeapsTradeCandidate] = useState<typeof leapsResults[number] | null>(null);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
-    popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none',
+    popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: true,
   });
   const [lastCspMode, setLastCspMode] = useState<CspScanRequest['mode']>('filter');
   const [cspRequestsByMode, setCspRequestsByMode] = useState<CspScanRequestsByMode>({
@@ -9166,7 +9166,7 @@ export default function Home() {
       // Resolve the persistent app-level account first. A manual cash
       // override may replace affordability figures, but can never create or
       // replace broker-account identity.
-      const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
+      const manualCash = request.capitalLimit ?? (cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride));
       const brokerCapital = await getCspCapitalContext(token);
       // A manual cash figure changes affordability only. It never invents
       // broker-account identity: the shared active account must still resolve.
@@ -9222,7 +9222,10 @@ export default function Home() {
               failReasons: [...result.failReasons, ...targetedFailures],
             };
           });
-          session = recordSymbolEvaluated(session, symbol, results);
+          const affordableResults = request.affordableOnly !== false
+            ? results.filter(result => result.bestCandidate?.cspAccountEligibility === 'ELIGIBLE')
+            : results;
+          session = recordSymbolEvaluated(session, symbol, affordableResults);
         } catch (e: any) {
           session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
@@ -10379,6 +10382,12 @@ export default function Home() {
                       rules: { IVR_MIN: s.ivrMin, IVR_MAX: s.ivrMax, DELTA_MIN: s.deltaMin, DELTA_MAX: s.deltaMax, DTE_MIN: s.dteMin, DTE_MAX: s.dteMax, OI_MIN: s.oiMin, BID_ASK_MAX: s.bidAskMax },
                       popMin: s.popMin, otmMin: s.otmMin, rocMin: s.rocMin,
                       rankSecondary: s.rankSecondary,
+                      // The capital filter is a per-mode draft setting, not
+                      // part of the market-rule snapshot. Preserve the
+                      // confirmed draft when reopening this session so an
+                      // explicit cash ceiling is never silently discarded.
+                      capitalLimit: cspRequestsByMode[s.mode].capitalLimit ?? null,
+                      affordableOnly: cspRequestsByMode[s.mode].affordableOnly ?? true,
                     };
                     setLastCspMode(s.mode);
                     setCspRequestsByMode(prev => ({ ...prev, [s.mode]: restored }));

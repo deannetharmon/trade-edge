@@ -55,8 +55,11 @@ async function addToUniverse(symbols: string) {
   await userEvent.type(input, symbols);
   await userEvent.click(screen.getByRole('button', { name: 'Add' }));
 }
-async function clickCspScan() {
+async function clickCspScan({ affordableOnly = true }: { affordableOnly?: boolean } = {}) {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+  if (!affordableOnly) {
+    await userEvent.click(screen.getByLabelText(/Only show CSPs affordable/i));
+  }
   await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 }
 function accountingText() {
@@ -316,7 +319,10 @@ describe('CSP-WORKFLOW-0001 core-correction: BLOCKER-02 production capital wirin
 
     renderScreener();
     await addToUniverse('NKE');
-    await clickCspScan();
+    // This assertion exercises the distinct diagnostic view. The trader has
+    // intentionally disabled the default affordability-only filter so the
+    // market-qualified, capital-unverified contracts remain visible.
+    await clickCspScan({ affordableOnly: false });
 
     // Market qualification is untouched: both puts are still discovered and
     // still counted as qualified (market-qualified is independent of
@@ -344,7 +350,9 @@ describe('CSP-WORKFLOW-0001 core-correction: BLOCKER-02 production capital wirin
 
     renderScreener();
     await addToUniverse('NKE');
-    await clickCspScan();
+    // Keep the diagnostic contracts visible for this explicit account-state
+    // test; ordinary scans retain the new affordability-only default.
+    await clickCspScan({ affordableOnly: false });
     await waitFor(() => expect(accountingText()).toMatch(/2 qualified/));
 
     // Both qualified NKE cards must display the truthful "no account
@@ -492,6 +500,7 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
+    await userEvent.type(screen.getByLabelText('Maximum cash reserved per CSP'), '8000');
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
 
     await waitFor(() => expect(screen.getByText('Ranked Cash-Secured Put Scan')).toBeInTheDocument());
@@ -502,5 +511,6 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     // and not merely "whatever was last edited."
     expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
+    expect(screen.getByLabelText('Maximum cash reserved per CSP')).toHaveValue(8000);
   });
 });
