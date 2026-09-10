@@ -9159,7 +9159,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   };
 
   return (
-    <div className={`border border-yellow-700/60 ${th.card} rounded-lg px-3 py-2.5`}>
+    <div className={`w-full max-w-4xl border border-yellow-700/60 ${th.card} rounded-lg px-3 py-2.5`}>
       <div className="flex items-center justify-between flex-wrap gap-x-4 gap-y-2">
         <div className="flex items-center gap-3 flex-wrap">
           <span className={`text-xs font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{order.symbol}</span>
