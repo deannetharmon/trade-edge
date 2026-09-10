@@ -12,6 +12,7 @@ import Link from 'next/link';
 import type { ExitType } from '@/lib/classifyExit';
 import type { TimeRange, Outcome, ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 import { fetchAndReconstructTrades, readCache, writeCache, getDeviceId } from '@/lib/tradeLog/reconstructTrades';
+import type { OrderLifecycleEvent } from '@/lib/order-lifecycle/types';
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
 type SortDir = 'asc' | 'desc';
 type GroupBy = 'none' | 'symbol' | 'outcome';
@@ -524,6 +525,18 @@ export default function TradeLogPage() {
   const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [isNewDevice, setIsNewDevice] = useState(false);
   const [showAI, setShowAI]     = useState(false);
+  const [lifecycleEvents, setLifecycleEvents] = useState<OrderLifecycleEvent[]>([]);
+  const [lifecycleError, setLifecycleError] = useState('');
+
+  const loadLifecycleEvents = useCallback(async () => {
+    try {
+      const response = await fetch('/api/order-lifecycle', { cache: 'no-store' });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Order History unavailable');
+      const body = await response.json();
+      setLifecycleEvents(Array.isArray(body.events) ? body.events : []);
+      setLifecycleError('');
+    } catch (eventError: any) { setLifecycleError(eventError.message ?? 'Order History unavailable'); }
+  }, []);
 
   const [filterStrategy, setFilterStrategy] = useState<string[]>(() => {
     try { const s = localStorage.getItem('hunter-tl-f-strategy'); return s ? JSON.parse(s) : []; } catch { return []; }
@@ -594,6 +607,7 @@ export default function TradeLogPage() {
   }, []);
 
   useEffect(() => { loadTrades('3m'); }, [loadTrades]);
+  useEffect(() => { loadLifecycleEvents(); }, [loadLifecycleEvents]);
 
   const handleRangeChange = (r: TimeRange) => { setRange(r); loadTrades(r); };
 
@@ -806,6 +820,12 @@ export default function TradeLogPage() {
           </div>
         )}
         {error && <div className="p-3 rounded-lg border border-red-500/40 bg-red-500/8"><p className="text-xs text-red-400 font-medium">{error}</p></div>}
+
+        <details className={`rounded-lg border ${th.border} ${th.card} p-3`}>
+          <summary className="cursor-pointer text-xs font-bold tracking-wide text-white">Order History <span className={th.textFaint}>({lifecycleEvents.length})</span></summary>
+          <p className={`mt-2 text-[10px] ${th.textFaint}`}>Canceled and working orders are lifecycle records only; they do not affect realized Trade Log P/L or Performance.</p>
+          {lifecycleError ? <p className="mt-2 text-xs text-amber-300">{lifecycleError}</p> : lifecycleEvents.length === 0 ? <p className={`mt-2 text-xs ${th.textFaint}`}>No TradeEdge order lifecycle events recorded yet.</p> : <div className="mt-3 space-y-2">{lifecycleEvents.slice(0, 50).map(event => <div key={event.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-t ${th.border} pt-2 text-xs`}><b className="text-white">{event.symbol}</b><span className={event.status === 'canceled' || event.status === 'rejected' || event.status === 'failed' ? 'text-amber-300' : event.status === 'filled' ? 'text-emerald-400' : 'text-sky-300'}>{event.status.replace('_', ' ')}</span><span className={th.textFaint}>{event.kind}{event.strategy ? ` · ${event.strategy}` : ''}</span><span className={th.textFaint}>{new Date(event.observedAt).toLocaleString()}</span><span className={th.textFaint}>#{event.brokerOrderId}</span>{event.workflowId && <span className="text-purple-300">Roll workflow</span>}</div>)}</div>}
+        </details>
 
         {!loading && total > 0 && (
           <div className={`${th.card} border ${th.border} rounded-xl grid grid-cols-2 md:grid-cols-5`}>

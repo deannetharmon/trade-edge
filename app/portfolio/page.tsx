@@ -7,6 +7,7 @@ import { buildTrustedChatSystemPrompt } from '@/lib/ai/trustedChatContext';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
+import { recordOrderLifecycleEvent } from '@/lib/order-lifecycle/client';
 import BalancesTab from '@/components/BalancesTab';
 import {
   classifyPositionLifecycle,
@@ -3763,6 +3764,21 @@ function BatchConfirmModal({
                 quantity: qty, orderId: openId,
                 status: dryRun ? 'dry-run' : 'submitted',
               });
+              if (!dryRun) {
+                await recordOrderLifecycleEvent({
+                  brokerOrderId: String(orderId),
+                  brokerComplexOrderId: String(orderId),
+                  accountNumber: item.pos.accountNumber,
+                  symbol: item.pos.symbol,
+                  strategy: item.pos.strategy,
+                  requestedPrice: finalCredit,
+                  orderType: 'OTOCO Roll (close → open)',
+                  quantity: qty,
+                  kind: 'roll',
+                  status: 'working',
+                  workflowId: crypto.randomUUID(),
+                }).catch(error => console.error('Roll submitted but lifecycle recording failed:', error));
+              }
 
               results.push({ symbol: item.pos.symbol, action: item.action, orderId: `Roll OTOCO #${orderId}`, status: 'working', limitPrice: item.limitPrice, estPnl: item.estPnl });
             } else {
@@ -9899,6 +9915,18 @@ export default function PortfolioPage() {
       const token = await getAccessToken();
       const orderCollection = order.sourceKind === 'live' ? 'orders' : 'complex-orders';
       await ttDelete(`/accounts/${order.accountNumber}/${orderCollection}/${order.id}`, token);
+      await recordOrderLifecycleEvent({
+        brokerOrderId: order.id,
+        brokerComplexOrderId: order.sourceKind === 'complex' ? order.id : order.parentOrderId ?? null,
+        accountNumber: order.accountNumber,
+        symbol: order.symbol,
+        strategy: order.strategy,
+        requestedPrice: order.limitPrice,
+        orderType: order.orderType,
+        quantity: order.legs.reduce((total, leg) => total + Math.abs(leg.quantity), 0) || null,
+        kind: 'entry',
+        status: 'canceled',
+      }).catch(error => console.error('Order canceled but lifecycle recording failed:', error));
       await fetchPositions(); // refetch so pendingOrders/positions reflect the cancellation
     } catch (e: any) {
       setError(`Could not cancel order: ${e.message ?? 'unknown error'}`);
