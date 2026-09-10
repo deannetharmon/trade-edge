@@ -68,7 +68,7 @@ export function PmccScanModal({
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
   const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose}>
-    <p className="text-[10px] text-neutral-400">Your held LEAPS is the existing cover. These filters search and rank only the short calls to sell against it; no new long call is selected or purchased.</p>
+    <p className="text-[10px] text-neutral-400">Searches short calls to sell against your held LEAPS.</p>
     {discoveryLoading ? (
       <p className="mt-3 text-[10px] text-neutral-400">Loading held LEAPS positions…</p>
     ) : symbols.length === 0 ? (
@@ -104,14 +104,14 @@ export function PmccScanModal({
       </div>
     )}
     <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {field('shortDteMin', 'Short call min DTE', '1')}
-      {field('shortDteMax', 'Short call max DTE', '1')}
-      {field('shortDeltaMin', 'Preferred short delta min', '0.01')}
-      {field('shortDeltaMax', 'Preferred short delta max', '0.01')}
-      {field('shortOiMin', 'Minimum short OI', '1')}
-      {field('maxSpreadPct', 'Maximum bid/ask spread %', '1')}
+      {field('shortDteMin', 'Min DTE', '1')}
+      {field('shortDteMax', 'Max DTE', '1')}
+      {field('shortDeltaMin', 'Min Δ', '0.01')}
+      {field('shortDeltaMax', 'Max Δ', '0.01')}
+      {field('shortOiMin', 'Short OI min', '1')}
+      {field('maxSpreadPct', 'Max spread %', '1')}
     </div>
-    <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">DTE {draft.shortDteMin}–{draft.shortDteMax} · preferred Δ {draft.shortDeltaMin.toFixed(2)}–{draft.shortDeltaMax.toFixed(2)} · min OI {draft.shortOiMin} · max spread {draft.maxSpreadPct.toFixed(0)}%. Delta ranks candidates; it does not hide an otherwise tradable short call.</p>
+    <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">Delta guides rank; it does not hide an otherwise tradable short call.</p>
     {!discoveryLoading && symbols.length > 0 && selectedCount === 0 && (
       <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
         ⚠ Select at least one held LEAPS position before running.

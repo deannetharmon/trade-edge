@@ -64,10 +64,10 @@ interface Props {
 const CC_FIELDS: Array<[keyof CcRulesType, string, string]> = [
   ['DTE_MIN', 'Min DTE', '1'],
   ['DTE_MAX', 'Max DTE', '1'],
-  ['DELTA_MIN', 'Min delta', '0.01'],
-  ['DELTA_MAX', 'Max delta', '0.01'],
-  ['OI_MIN', 'Min OI', '1'],
-  ['BID_ASK_MAX', 'Max bid/ask width', '0.01'],
+  ['DELTA_MIN', 'Min Δ', '0.01'],
+  ['DELTA_MAX', 'Max Δ', '0.01'],
+  ['OI_MIN', 'OI min', '1'],
+  ['BID_ASK_MAX', 'Max width', '0.01'],
 ];
 
 export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, holdingsLoading, initial, onClose, onRun }: Props) {
@@ -101,12 +101,7 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
       onClose={onClose}
     >
       <div className="flex flex-col gap-0">
-        <p className="text-[10px] text-neutral-400">
-          Share-coverage capacity is verified separately against your connected broker
-          account. A watchlist or universe can narrow which of your holdings are eligible,
-          but it cannot create coverage that doesn&rsquo;t exist. The fields below only affect
-          which calls qualify against your already-eligible lots.
-        </p>
+        <p className="text-[10px] text-neutral-400">Only broker-verified covered shares are eligible.</p>
 
         {holdingsLoading ? (
           <p className="mt-3 text-[10px] text-neutral-400">Loading eligible holdings…</p>
@@ -177,11 +172,7 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
           className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"
           data-testid="cc-rule-preview"
         >
-          DTE {draft.rules.DTE_MIN}–{draft.rules.DTE_MAX} · Δ{' '}
-          {draft.rules.DELTA_MIN.toFixed(2)}–{draft.rules.DELTA_MAX.toFixed(2)} · min OI{' '}
-          {draft.rules.OI_MIN} · max bid/ask width {draft.rules.BID_ASK_MAX.toFixed(2)} ·
-          strike must clear cost basis and current price · earnings inside expiration
-          disqualify
+          Calls must clear cost basis and current price. Earnings before expiration disqualify.
         </div>
 
         {!holdingsLoading && holdings.length > 0 && selectedCount === 0 && (

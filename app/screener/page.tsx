@@ -164,6 +164,7 @@ import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
+import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -5986,13 +5987,13 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <span className={`text-[9px] ${th.textFaint}`}>Min</span>
-                  <input type="number" value={tDteMin} onChange={e => setTDteMin(Math.max(0, parseInt(e.target.value) || 0))}
+                  <DeferredNumberInput aria-label="Minimum DTE" step="1" value={tDteMin} onValueChange={value => setTDteMin(Math.max(0, Math.trunc(value)))}
                     className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 </div>
                 <span className={`text-[9px] ${th.textFaint}`}>→</span>
                 <div className="flex items-center gap-1.5">
                   <span className={`text-[9px] ${th.textFaint}`}>Max</span>
-                  <input type="number" value={tDteMax} onChange={e => setTDteMax(Math.max(tDteMin + 1, parseInt(e.target.value) || 45))}
+                  <DeferredNumberInput aria-label="Maximum DTE" step="1" value={tDteMax} onValueChange={value => setTDteMax(Math.max(tDteMin + 1, Math.trunc(value)))}
                     className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 </div>
                 <span className={`text-[9px] ${th.textFaint}`}>days</span>
@@ -6018,9 +6019,9 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
 
             {/* POP floor */}
             <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN POP %</p>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>POP EST. MIN</p>
               <div className="flex items-center gap-2">
-                <input type="number" min={50} max={95} value={tPopMin} onChange={e => setTPopMin(Math.min(95, Math.max(50, parseInt(e.target.value) || 70)))}
+                <DeferredNumberInput aria-label="Minimum estimated POP" step="1" value={tPopMin} onValueChange={value => setTPopMin(Math.min(95, Math.max(50, Math.trunc(value))))}
                   className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 <div className="flex gap-1.5">
@@ -6040,7 +6041,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
             <div>
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN OTM %</p>
               <div className="flex items-center gap-2">
-                <input type="number" min={0} max={30} value={tOtmMin} onChange={e => setTOtmMin(Math.min(30, Math.max(0, parseFloat(e.target.value) || 0)))}
+                <DeferredNumberInput aria-label="Minimum OTM percentage" step="0.1" value={tOtmMin} onValueChange={value => setTOtmMin(Math.min(30, Math.max(0, value)))}
                   className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 <div className="flex gap-1.5">
@@ -6063,7 +6064,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
             <div>
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN IVR %</p>
               <div className="flex items-center gap-2">
-                <input type="number" min={0} max={100} value={tIvrMin} onChange={e => setTIvrMin(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                <DeferredNumberInput aria-label="Minimum IVR percentage" step="0.1" value={tIvrMin} onValueChange={value => setTIvrMin(Math.min(100, Math.max(0, value)))}
                   className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 <div className="flex gap-1.5">
@@ -7116,7 +7117,7 @@ function toOiStrategy(strategy: string): 'CSP' | 'CC' | 'BPS' | 'BCS' | 'IC' | '
 // only thing that varies per mode, matching each panel's existing palette
 // (purple=Ranked, teal=Targeted, amber=Filtered).
 function OiAndSortControls({
-  th, minOi, setMinOi, sort, setSort, accent, sortFields = SORT_FIELDS,
+  th, minOi, setMinOi, sort, setSort, accent, sortFields = SORT_FIELDS, oiLabel = MIN_OI_LABEL, oiHelper, sortLabels,
 }: {
   th: typeof THEMES[Theme];
   minOi: number;
@@ -7125,6 +7126,9 @@ function OiAndSortControls({
   setSort: (s: SortSpec) => void;
   accent: 'purple' | 'teal' | 'amber';
   sortFields?: readonly SortField[];
+  oiLabel?: string;
+  oiHelper?: string;
+  sortLabels?: Partial<Record<SortField, string>>;
 }) {
   const [customOi, setCustomOi] = useState<string>('');
   const isPreset = OI_PRESETS.some(p => p.value === minOi);
@@ -7138,7 +7142,7 @@ function OiAndSortControls({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className={`text-[9px] ${th.textFaint} shrink-0`}>{MIN_OI_LABEL}</span>
+        <span title={oiHelper ?? MIN_OI_HELPER_TEXT} className={`text-[9px] ${th.textFaint} shrink-0`}>{oiLabel}</span>
         {OI_PRESETS.map(p => (
           <button key={p.label} onClick={() => { setMinOi(p.value); setCustomOi(''); }}
             className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
@@ -7160,7 +7164,6 @@ function OiAndSortControls({
           aria-label="Custom minimum relevant-leg OI"
           className={`w-16 ${th.input} border ${!isPreset ? activeCls.split(' ')[0] : th.inputBorder} rounded px-1.5 py-0.5 text-[9px] ${th.text} text-center focus:outline-none`}
         />
-        <span className={`text-[8px] ${th.textFaint} basis-full`}>{MIN_OI_HELPER_TEXT}</span>
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
@@ -7169,7 +7172,7 @@ function OiAndSortControls({
             className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
               sort.primary === f ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
             }`}>
-            {SORT_FIELD_LABELS[f]}
+              {sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}
           </button>
         ))}
         <span className={`text-[9px] ${th.textFaint} shrink-0 ml-1`}>then</span>
@@ -7181,7 +7184,7 @@ function OiAndSortControls({
         >
           <option value="none">None</option>
           {sortFields.filter(f => f !== sort.primary).map(f => (
-            <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
+            <option key={f} value={f}>{sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}</option>
           ))}
         </select>
       </div>
@@ -10487,8 +10490,10 @@ export default function Home() {
                       setHiddenSymbols={setFilterHiddenSymbols}
                       th={th}
                       showStrategyToggle={false}
+                      showCreditRatio={false}
+                      popLabel="POP Est."
                       oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Put OI" oiHelper="Open interest on the short put. Missing OI does not pass a positive floor." sortLabels={{ rocPct: 'Cash Return', creditDollars: 'Premium $', relevantLegOI: 'Put OI', pop: 'POP Est.' }} sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
                       }
                     />
                     {cspTargetedSession && <div className="mt-2 flex items-center gap-2">
@@ -10500,7 +10505,6 @@ export default function Home() {
                       </button>
                       <span className={`text-[9px] ${th.textFaint}`}>Bid-based estimate; legacy midpoint ROC is unchanged.</span>
                     </div>}
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
@@ -10559,10 +10563,9 @@ export default function Home() {
                       showStrategyToggle={false}
                       showCreditRatio={false}
                       oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
                       }
                     />
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short call only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
@@ -10608,7 +10611,7 @@ export default function Home() {
                       <span className={`text-[9px] ${th.textFaint}`}>Ranks qualified PMCCs; it never relaxes eligibility.</span>
                     </div>
                     <p className={`mb-2 text-[9px] ${th.textFaint}`}>The Quality badge measures qualification health. Selecting Score ranks by the active Best Fit profile.</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Leg OI" oiHelper="The lower open interest of the held LEAPS call and short call. Missing OI does not pass a positive floor." sortLabels={{ creditDollars: 'Premium $', relevantLegOI: 'Leg OI' }} sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
                     {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
                         rank (Diane's original score mockup); grouped is
                         Ian's per-ticker triage view (PmccTickerDisclosure).
@@ -10625,7 +10628,6 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the lower of the long LEAPS call's and short call's OI — both legs are required positions, not a protective/core distinction (matching IC's identical two-required-legs rule; confirmed via lib/screener/screenerResultOrdering.ts's own computeRelevantLegOI). A positive OI floor fails closed when either leg's OI is missing.</p>
                     {/* TE-0007H — reuses the exact filterHiddenSymbols/
                         toggleFilterSymbol state and interaction pattern
                         already real and working in FilteredResultControls's

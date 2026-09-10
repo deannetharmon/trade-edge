@@ -48,12 +48,12 @@ interface Props {
 }
 
 const LEAPS_FIELDS: Array<[keyof LeapsScanRequest, string, string]> = [
-  ['deltaMin', 'Min delta', '0.01'],
-  ['deltaMax', 'Max delta', '0.01'],
+  ['deltaMin', 'Min Δ', '0.01'],
+  ['deltaMax', 'Max Δ', '0.01'],
   ['dteMin', 'Min DTE', '1'],
   ['dteMax', 'Max DTE', '1'],
-  ['oiMin', 'Min OI', '1'],
-  ['extrinsicPctMax', 'Max extrinsic % of cost (0 = Any)', '1'],
+  ['oiMin', 'OI min', '1'],
+  ['extrinsicPctMax', 'Max extrinsic %', '1'],
 ];
 
 export function LeapsScanModal({ th, selectedTickerCount, initial, onClose, onRun }: Props) {
@@ -80,12 +80,7 @@ export function LeapsScanModal({ th, selectedTickerCount, initial, onClose, onRu
       onClose={onClose}
     >
       <div className="flex flex-col gap-0">
-        <p className="text-[10px] text-neutral-400">
-          Only Min/Max DTE actually bound what gets fetched from the broker. Delta, OI, and
-          Extrinsic here just set your starting point on the results page -- every candidate
-          in the chosen DTE window is fetched regardless, and those three stay freely
-          adjustable afterward without rescanning.
-        </p>
+        <p className="text-[10px] text-neutral-400">DTE bounds the broker fetch. Δ, OI, and extrinsic set result filters and can change later without a rescan.</p>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {LEAPS_FIELDS.map(([key, label, step]) => (
@@ -124,15 +119,6 @@ export function LeapsScanModal({ th, selectedTickerCount, initial, onClose, onRu
           ))}
         </div>
 
-        <div
-          className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"
-          data-testid="leaps-scan-preview"
-        >
-          DTE {draft.dteMin}–{draft.dteMax} (bounds the fetch) · Δ{' '}
-          {draft.deltaMin.toFixed(2)}–{draft.deltaMax.toFixed(2)} · min OI {draft.oiMin} · max
-          extrinsic {draft.extrinsicPctMax === 0 ? 'Any' : `${draft.extrinsicPctMax}%`} -- starting
-          point for the results filters, adjustable after scanning without a rescan.
-        </div>
 
         {error && (
           <p role="alert" className="mt-2 text-xs text-red-400">

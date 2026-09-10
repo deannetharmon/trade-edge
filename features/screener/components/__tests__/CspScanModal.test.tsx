@@ -33,19 +33,19 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     });
   });
 
-  it('supports all three modes and exposes the approved relative liquidity policy', async () => {
+  it('supports all three modes and clearly states the automatic safeguards', async () => {
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
     for (const name of [/Filter/i, /Rank/i, /Targeted/i]) {
       expect(screen.getByRole('radio', { name })).toBeInTheDocument();
     }
-    expect(screen.getByText(/strong ≤ max\(\$0\.10, 10% of mid\), borderline through 15%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Liquidity and earnings checks are applied automatically/i)).toBeInTheDocument();
   });
 
   it('accepts a decimal typed from its leading dot without coercing the interim dot to zero', async () => {
     const onRun = vi.fn();
     const user = userEvent.setup();
     render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
-    const minDelta = screen.getByLabelText('Min delta');
+    const minDelta = screen.getByLabelText('Min Δ');
     await user.clear(minDelta);
     await user.type(minDelta, '.12');
     await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
@@ -58,13 +58,13 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     const onRun = vi.fn();
     const user = userEvent.setup();
     render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
-    expect(screen.getByLabelText(/Only show CSPs affordable/i)).not.toBeChecked();
-    await user.click(screen.getByLabelText(/Only show CSPs affordable/i));
-    await user.clear(screen.getByLabelText('Cash limit per CSP'));
-    await user.type(screen.getByLabelText('Cash limit per CSP'), '8000');
+    expect(screen.getByLabelText(/Only show affordable CSPs/i)).not.toBeChecked();
+    await user.click(screen.getByLabelText(/Only show affordable CSPs/i));
+    await user.clear(screen.getByLabelText('Cash cap per CSP'));
+    await user.type(screen.getByLabelText('Cash cap per CSP'), '8000');
     await user.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ affordableOnly: true, capitalLimit: 8000 }));
-    expect(screen.getByText(/Leave this blank to use available cash in your selected account/i)).toBeInTheDocument();
+    expect(screen.getByText(/Blank uses available account cash/i)).toBeInTheDocument();
     expect(screen.queryByText(/Capital is verified against/i)).not.toBeInTheDocument();
   });
 
@@ -85,12 +85,12 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
     expect(screen.getByLabelText('Min DTE')).toHaveValue('30');
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeDisabled();
-    await userEvent.type(screen.getByLabelText('Minimum POP'), '70');
+    await userEvent.type(screen.getByLabelText('Minimum estimated POP'), '70');
     await userEvent.click(screen.getByRole('button', { name: 'CONFIRM TARGETS' }));
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
     await userEvent.click(screen.getByRole('radio', { name: /^Filter/i }));
     expect(screen.getByLabelText('Min DTE')).toHaveValue('25');
-    expect(screen.queryByLabelText('Minimum POP')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Minimum estimated POP')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
   });
@@ -150,30 +150,22 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.getByRole('radio', { name: /More opportunities/i })).toHaveFocus();
   });
 
-  it('IVR and bid/ask width render as real editable inputs, not preset-locked', async () => {
-    // Closes the gap flagged in the fetch/scan/view filter audit: IVR_MIN,
-    // IVR_MAX, and BID_ASK_MAX previously had no input control at all and
-    // stayed silently locked to whatever preset was last selected, even
-    // under "Custom." Fixed separately; this is the regression test that
-    // was missing at the time, proving the fields stay wired rather than
-    // relying on reading the source and trusting it.
+  it('keeps IVR preferences editable but does not expose CSP\'s unused spread setting', async () => {
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
 
-    const ivrMin = screen.getByLabelText('Min IVR %') as HTMLInputElement;
-    const ivrMax = screen.getByLabelText('Max IVR %') as HTMLInputElement;
-    const bidAsk = screen.getByLabelText('Max bid/ask width') as HTMLInputElement;
+    const ivrMin = screen.getByLabelText('IVR pref.') as HTMLInputElement;
+    const ivrMax = screen.getByLabelText('IVR cap') as HTMLInputElement;
 
     expect(ivrMin.value).toBe(String(DEFAULT_CSP_RULES.IVR_MIN));
     expect(ivrMax.value).toBe(String(DEFAULT_CSP_RULES.IVR_MAX));
-    expect(bidAsk.value).toBe(String(DEFAULT_CSP_RULES.BID_ASK_MAX));
+    expect(screen.queryByLabelText('Max bid/ask width')).not.toBeInTheDocument();
 
     await userEvent.clear(ivrMin);
     await userEvent.type(ivrMin, '42');
     expect(ivrMin.value).toBe('42');
 
-    // Editing IVR, same as any other rule field, flips the preset to
-    // Custom -- confirming these three fields actually participate in the
-    // shared draft rather than being decorative and disconnected.
+    // Editing a preference flips the preset to Custom, proving the field is
+    // wired to the scan draft rather than decorative.
     expect(screen.getByRole('radio', { name: /Custom/i })).toHaveAttribute('aria-checked', 'true');
   });
 });

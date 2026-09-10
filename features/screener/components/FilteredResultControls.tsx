@@ -81,6 +81,7 @@ export interface FilteredResultControlsProps {
   showStrategyToggle?: boolean;
   showCreditRatio?: boolean;
   showIvx?: boolean;
+  popLabel?: string;
 }
 
 const POP_PRESETS = [0, 50, 60, 70, 80];
@@ -124,11 +125,12 @@ export function FilteredResultControls({
   showStrategyToggle = true,
   showCreditRatio = true,
   showIvx = false,
+  popLabel = 'POP',
 }: FilteredResultControlsProps) {
   const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
 
   const activeChips: ActiveChip[] = [];
-  if (popMin > 0) activeChips.push({ key: 'pop', label: `POP ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
+  if (popMin > 0) activeChips.push({ key: 'pop', label: `${popLabel} ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
   if (otmMin > 0) activeChips.push({ key: 'otm', label: `OTM ≥ ${otmMin}%`, onRemove: () => setOtmMin(0) });
   if (ivrMin > 0) activeChips.push({ key: 'ivr', label: `IVR ≥ ${ivrMin}%`, onRemove: () => setIvrMin(0) });
   if (showIvx && ivxMin > 0 && setIvxMin) activeChips.push({ key: 'ivx', label: `Expiration IVX ≥ ${ivxMin}%`, onRemove: () => setIvxMin(0) });
@@ -158,7 +160,7 @@ export function FilteredResultControls({
     <section aria-label="Result filters" data-testid="filtered-result-controls" className="space-y-3">
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
+          <span title="A displayed estimate, not a broker-guaranteed probability" className={`text-[9px] ${th.textFaint} shrink-0`}>{popLabel} ≥</span>
           {POP_PRESETS.map(v => (
             <button key={v} onClick={() => setPopMin(v)}
               className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
@@ -172,7 +174,7 @@ export function FilteredResultControls({
         {showIvx && setIvxMin && (
           <>
             <div className="flex items-center gap-1.5">
-              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Expiration IVX ≥</span>
+              <span title="Implied volatility for the candidate's exact expiration" className={`text-[9px] ${th.textFaint} shrink-0`}>Exp. IVX ≥</span>
               {IVX_PRESETS.map(v => (
                 <button key={v} onClick={() => setIvxMin(v)}
                   className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
