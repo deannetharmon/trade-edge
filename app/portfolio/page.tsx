@@ -9081,12 +9081,13 @@ function pendingOrderIdentityKey(order: PendingOrder): string {
   return `pending::${order.accountNumber}::${order.symbol}::${order.expDate ?? 'unknown'}::${legsKey}`;
 }
 
-function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, onValidate, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
+function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, onValidate, onRefresh, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
   order: PendingOrder; th: typeof THEMES[Theme];
   cancelling: boolean; replacing: boolean;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
-  onValidate: (order: PendingOrder) => Promise<string>;
+  onValidate: (order: PendingOrder) => Promise<{ message: string; passed: boolean }>;
+  onRefresh: () => Promise<unknown>;
   savedNote: string;
   onSaveNote: (order: PendingOrder, note: string) => Promise<void>;
   savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null;
@@ -9135,7 +9136,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   // the hood (see replacePendingOrder). Editing is local to this card so the
   // rest of the list doesn't re-render on every keystroke.
   const [editing, setEditing] = useState(false);
-  const [validation, setValidation] = useState<string | null>(null);
+  const [validation, setValidation] = useState<{ message: string; passed: boolean } | null>(null);
   const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
 
   // The existing broker limit remains the default. A natural-side reference
@@ -9219,9 +9220,10 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
         </div>
       )}
       {!editing && awaitingExchangeConfirmation && (
-        <p className={`mt-2 text-[9px] ${th.textFaint}`}>
-          Broker has received the order but has not confirmed it is working at the exchange. Refresh broker status before changing price.
-        </p>
+        <div className={`mt-2 flex items-center gap-2 text-[9px] ${th.textFaint}`}>
+          <span>Broker has received the order but has not confirmed it is working at the exchange.</span>
+          <button onClick={() => void onRefresh()} className="rounded border border-cyan-700 px-2 py-1 font-bold text-cyan-300 hover:bg-cyan-500/10">REFRESH BROKER STATUS</button>
+        </div>
       )}
       {!editing && partialExecution && (
         <p className="mt-2 text-[9px] text-amber-300">
@@ -9231,7 +9233,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       {!editing && assessment.executionDecision === 'NO_PRICE_CHANGE_NEEDED' && (
         <p className={`mt-2 text-[9px] ${th.textFaint}`}>{assessment.explanation}</p>
       )}
-      {!editing && validation && <p className={`mt-2 text-[9px] ${th.textFaint}`}>{validation}</p>}
+      {!editing && validation && <p className={`mt-2 text-[9px] ${validation.passed ? 'text-emerald-300' : 'text-red-300'}`}>{validation.message}</p>}
       {!editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-start gap-4">
           <div>
@@ -9483,12 +9485,13 @@ function PendingOrderPriceAlertEditor({ order, savedAlert, onSave }: { order: Pe
   </div>;
 }
 
-function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace, onValidate }: {
+function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace, onValidate, onRefresh }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
-  onValidate: (order: PendingOrder) => Promise<string>;
+  onValidate: (order: PendingOrder) => Promise<{ message: string; passed: boolean }>;
+  onRefresh: () => Promise<unknown>;
 }) {
   // PENDING-NOTES-0001: fetched once here (not per-card) -- same pattern
   // PositionsWorkspace uses for its own notes/price alerts. Reuses the
@@ -9571,6 +9574,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
                 onCancel={onCancel}
                 onReplace={onReplace}
                 onValidate={onValidate}
+                onRefresh={onRefresh}
                 savedNote={pendingNotes[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? ''}
                 onSaveNote={savePendingNote}
                 savedAlert={pendingAlerts[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? null}
@@ -10223,15 +10227,15 @@ export default function PortfolioPage() {
     }
   };
 
-  const validatePendingOrder = async (order: PendingOrder): Promise<string> => {
+  const validatePendingOrder = async (order: PendingOrder): Promise<{ message: string; passed: boolean }> => {
     try {
       const response = await fetch('/api/tastytrade/order-dry-run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: order.accountNumber, order: buildReplaceOrder(order, order.limitPrice ?? 0) }) });
       const data = await response.json().catch(() => ({}));
       const warnings = (data?.warnings ?? []).map((item: any) => item.message ?? String(item));
       const errors = (data?.errors ?? []).map((item: any) => item.message ?? String(item));
-      if (!response.ok || errors.length > 0) return `Broker validation failed: ${errors.join('; ') || data?.error?.message || data?.error || 'unknown error'}`;
-      return `Broker validation passed — opening order shape accepted${warnings.length ? `: ${warnings.join('; ')}` : '.'}`;
-    } catch (error: any) { return `Broker validation unavailable: ${error?.message ?? 'unknown error'}`; }
+      if (!response.ok || errors.length > 0) return { passed: false, message: `Broker validation failed: ${errors.join('; ') || data?.error?.message || data?.error || 'unknown error'}` };
+      return { passed: true, message: `Broker validation passed — opening order shape accepted${warnings.length ? `: ${warnings.join('; ')}` : '.'}` };
+    } catch (error: any) { return { passed: false, message: `Broker validation unavailable: ${error?.message ?? 'unknown error'}` }; }
   };
 
   // TastyTrade has no atomic order-replace -- cancel the existing complex
@@ -10682,6 +10686,7 @@ export default function PortfolioPage() {
                     onCancel={cancelPendingOrder}
                     onReplace={replacePendingOrder}
                     onValidate={validatePendingOrder}
+                    onRefresh={fetchPositions}
                   />
                 </div>
               )}
@@ -10727,6 +10732,7 @@ export default function PortfolioPage() {
                         onCancel={cancelPendingOrder}
                         onReplace={replacePendingOrder}
                         onValidate={validatePendingOrder}
+                        onRefresh={fetchPositions}
                       />
                     )}
                     {filteredPositions.length > 0 && (
