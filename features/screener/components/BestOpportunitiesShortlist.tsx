@@ -58,7 +58,7 @@ function ShortlistRow({
         <span className={`shrink-0 ${th.textFaint} w-14`}>OTM {formatPct(row.otmPct)}</span>
         <span className={`shrink-0 ${th.textFaint} w-16`}>ROC {formatPct(row.rocPct)}</span>
         <span className={`shrink-0 ${th.textFaint} w-16`}>OI {row.relevantLegOi ?? '—'}</span>
-        <span className={`shrink-0 font-bold w-16`}>Score {row.opportunityScore ?? '—'}</span>
+        <span className={`shrink-0 font-bold w-20`}>{row.strategy === 'CSP' ? 'CSP Score' : 'Score'} {row.opportunityScore ?? '—'}</span>
         {row.decisionConfidence != null && (
           <span className={`shrink-0 ${th.textFaint}`}>Confidence {row.decisionConfidence.toFixed(0)}</span>
         )}

@@ -51,35 +51,6 @@ export function CspFundamentalsRow({ candidate: c, price, textMutedClassName, te
       {c.cspOiWarning && (
         <span className="w-full text-amber-400/90">Warning: {c.cspOiWarning}</span>
       )}
-      {/* CSP-WORKFLOW-0001 core-correction (BLOCKER-03) — the CSP score is the
-          authoritative primary score for this candidate. Rounded to a whole
-          number for display (never a long float); the raw per-dimension
-          components stay inspectable via the title tooltip rather than being
-          collapsed away. When any of the 9 required dimensions is missing,
-          the score is UNAVAILABLE and this never fabricates a 0 or a
-          renormalized partial number in its place. */}
-      {c.cspScore && (
-        c.cspScore.scoreStatus === 'AVAILABLE'
-          ? (
-            <span
-              data-testid={`${testId}-csp-score`}
-              title={`Score components (0-100 each): ${Object.entries(c.cspScore.components)
-                .map(([k, v]) => `${k}=${v ?? 'n/a'}`)
-                .join(', ')}`}
-            >
-              Score {Math.round(c.cspScore.total as number)}
-            </span>
-          )
-          : (
-            <span
-              data-testid={`${testId}-csp-score`}
-              className="text-amber-400/90"
-              title={`Missing required inputs: ${c.cspScore.missingInputs.join(', ')}`}
-            >
-              Score unavailable
-            </span>
-          )
-      )}
     </div>
   );
 }

@@ -5009,6 +5009,12 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   // Ranking
   const scored = rankConfig ? scoreCandidate(result, rankConfig) : null;
   const light = scored ? trafficLight(scored.score, rankConfig!) : null;
+  // CSP has its own strategy-specific scoring model. The generic rank score
+  // remains useful to other strategies, but must never be presented as the
+  // CSP score alongside the authoritative value.
+  const cspScore = c?.strategy === 'CSP' && c.cspScore?.scoreStatus === 'AVAILABLE'
+    ? Math.round(c.cspScore.total as number)
+    : null;
   // Compute alternate strategy score for the + IC / + BPS badge
   // Compute visible strategy scores for this same symbol/expiration.
 // This is diagnostic first: it lets us see whether BPS, BCS, and IC are being
@@ -5276,11 +5282,15 @@ const strategyScores = useMemo(() => {
             return (
               <>
                 <span
-                  title={primary && primary.score != null ? `Strategy score (this candidate): ${primary.score}` : (primary?.reason ?? undefined)}
+                  title={result.strategy === 'CSP'
+                    ? (cspScore != null ? `CSP Score: ${cspScore}` : 'CSP Score unavailable')
+                    : (primary && primary.score != null ? `Strategy score (this candidate): ${primary.score}` : (primary?.reason ?? undefined))}
                   className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}
                 >
                   {result.strategy}
-                  {primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
+                  {result.strategy === 'CSP'
+                    ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
+                    : primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
                 </span>
                 {alternates.length > 0 && (
                   <span className={`text-[8px] ${th.textFaint} shrink-0 tracking-wide`}>Alternative scores:</span>
@@ -5299,7 +5309,9 @@ const strategyScores = useMemo(() => {
             );
           })() : (
   <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
-    {result.strategy}{scored && <span className="font-bold text-[9px]">{scored.score}</span>}
+    {result.strategy}{result.strategy === 'CSP'
+      ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
+      : scored && <span className="font-bold text-[9px]">{scored.score}</span>}
   </span>
 )}
         </div>
@@ -5316,6 +5328,13 @@ const strategyScores = useMemo(() => {
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Extrin. </span><span className={`${th.text} font-medium`}>{c.extrinsicCapture?.toFixed(0) ?? '—'}%</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Max P </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2) ?? '—'}</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>LEAPS </span><span className={`${th.text} font-medium`}>{c.longDte}d</span></div>
+            </> : c.strategy === 'CSP' ? <>
+              {result.ivx != null && (
+                <div className="text-xs shrink-0 w-28">
+                  <div><span className={th.label}>Expiration IVX </span><span className={`${getIvxColor(result.ivx)} font-medium`}>{result.ivx.toFixed(1)}%</span></div>
+                  <div><span className={th.label}>EM </span><span className={`${th.text} font-medium`}>{c.expectedMove != null ? `±$${c.expectedMove.toFixed(2)}` : '—'}</span></div>
+                </div>
+              )}
             </> : <>
               <div className="text-xs shrink-0 w-20">
                 <div>
@@ -5477,7 +5496,7 @@ const strategyScores = useMemo(() => {
           {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{t.reason}</div>}
 
 {/* Score breakdown in rank mode */}
-          {isRankMode && scored && light && (
+          {isRankMode && c?.strategy !== 'CSP' && scored && light && (
             <div className={`border ${light.border} ${light.bg} rounded-lg p-3`}>
               <div className="flex items-center justify-between mb-2">
                 <p className={`text-[10px] font-bold ${light.color}`}>{light.emoji} Score {scored.score}/100 — {light.label}</p>

@@ -446,12 +446,12 @@ describe('CSP-0002: presentation parity and single-leg correctness', () => {
     await waitFor(() => expect(accountingText()).toMatch(/1 qualified/));
 
     // OI 500/500 (the old shortOI/longOI pair display) must never render for
-    // CSP -- only the single relevant-leg number, scoped to the card's own
-    // OI row (identified by its title, since "500" also appears in the
-    // sidebar's rules panel and OI filter dropdown).
+    // CSP -- only the single relevant-leg number, scoped to the compact
+    // fundamentals row (since "500" also appears in the sidebar's rules
+    // panel and OI filter dropdown).
     expect(screen.queryByText('500/500')).not.toBeInTheDocument();
-    const oiRow = screen.getByTitle('Open interest — short leg / long leg, each colored on its own OI');
-    expect(oiRow.textContent).toBe('OI 500');
+    const fundamentals = screen.getByTestId('csp-qualified-fundamentals');
+    expect(fundamentals.textContent).toMatch(/OI 500/);
     // Canonical accounting is unaffected by this display-only distinction.
     expect(accountingText()).toMatch(/1 qualified/);
   });
