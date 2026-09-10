@@ -10225,9 +10225,12 @@ export default function PortfolioPage() {
 
   const validatePendingOrder = async (order: PendingOrder): Promise<string> => {
     try {
-      const token = await getAccessToken();
-      const result = await ttValidateOrder(`/accounts/${order.accountNumber}/orders`, token, buildReplaceOrder(order, order.limitPrice ?? 0));
-      return result.valid ? `Broker validation passed — opening order shape accepted${result.warnings.length ? `: ${result.warnings.join('; ')}` : '.'}` : `Broker validation failed: ${result.errors.join('; ')}`;
+      const response = await fetch('/api/tastytrade/order-dry-run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: order.accountNumber, order: buildReplaceOrder(order, order.limitPrice ?? 0) }) });
+      const data = await response.json().catch(() => ({}));
+      const warnings = (data?.warnings ?? []).map((item: any) => item.message ?? String(item));
+      const errors = (data?.errors ?? []).map((item: any) => item.message ?? String(item));
+      if (!response.ok || errors.length > 0) return `Broker validation failed: ${errors.join('; ') || data?.error?.message || data?.error || 'unknown error'}`;
+      return `Broker validation passed — opening order shape accepted${warnings.length ? `: ${warnings.join('; ')}` : '.'}`;
     } catch (error: any) { return `Broker validation unavailable: ${error?.message ?? 'unknown error'}`; }
   };
 
