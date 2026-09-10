@@ -94,9 +94,24 @@ export interface PortfolioDataContextValue {
 
 const PortfolioDataContext = createContext<PortfolioDataContextValue | null>(null);
 
+function pendingIdentity(order: PendingOrder) {
+  const legs = order.legs.map(leg => `${leg.symbol}|${leg.action}|${Math.abs(leg.quantity)}`).sort().join('|');
+  return `pending::${order.accountNumber}::${order.symbol}::${order.expDate ?? 'unknown'}::${legs}`;
+}
+
+function matchesFilledPosition(order: PendingOrder, position: Position) {
+  if (order.accountNumber !== position.accountNumber || order.symbol !== position.symbol || order.legs.length !== position.legs.length) return false;
+  return order.legs.every(orderLeg => position.legs.some(positionLeg =>
+    positionLeg.symbol === orderLeg.symbol && positionLeg.quantity === Math.abs(orderLeg.quantity) &&
+    ((orderLeg.action.toLowerCase().startsWith('sell') && positionLeg.direction === 'Short') ||
+     (orderLeg.action.toLowerCase().startsWith('buy') && positionLeg.direction === 'Long'))
+  ));
+}
+
 export function PortfolioDataProvider({ children }: { children: ReactNode }) {
   const [positions, setPositionsState] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  const pendingOrdersRef = useRef<PendingOrder[]>([]);
   const [balances, setBalances] = useState<PortfolioFinancialContext | null>(null);
   const [decisionReviews, setDecisionReviews] = useState<DecisionReviewStore>({});
   const [loading, setLoading] = useState(false);
@@ -214,6 +229,16 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
 
       callbacks?.onRawPositionsLoaded?.(data);
       setPositions(updated);
+      const priorPending = pendingOrdersRef.current;
+      const stillPending = new Set(pendingData.map(order => order.id));
+      for (const order of priorPending) {
+        const expectedQuantity = new Set(order.legs.map(leg => Math.abs(leg.quantity)));
+        const completeFill = expectedQuantity.size === 1 && order.filledQuantity === Array.from(expectedQuantity)[0];
+        if (stillPending.has(order.id) || !completeFill) continue;
+        const position = updated.find(candidate => matchesFilledPosition(order, candidate));
+        if (position) void fetch('/api/pending-entry-promotion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: order.accountNumber, fromPositionKey: pendingIdentity(order), toPositionKey: position.key }) });
+      }
+      pendingOrdersRef.current = pendingData;
       setPendingOrders(pendingData);
       setLastRefresh(new Date());
       callbacks?.onSnapshotHistoryAttached?.(updated);

@@ -165,7 +165,7 @@ describe('acquirePortfolioBrokerSource', () => {
     const source = await acquirePortfolioBrokerSource();
     const result = await loadPositions(source);
     expect(result.pendingOrders[0]).toMatchObject({
-      quoteQuality: 'UNAVAILABLE', currentMidPrice: null, currentExecutablePrice: null, quoteCapturedAt: stale,
+      quoteQuality: 'UNAVAILABLE', currentMidPrice: 3.1, currentExecutablePrice: 2.9, quoteCapturedAt: stale,
     });
   });
 

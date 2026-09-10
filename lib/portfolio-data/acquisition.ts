@@ -1694,8 +1694,12 @@ export async function loadPositions(
         const freshness = reliable ? deriveMarketableQuoteFreshness(oldestQuoteAt) : 'UNKNOWN';
         const quoteIsFresh = freshness === 'FRESH';
         order.quoteQuality = quoteIsFresh ? 'RELIABLE' : 'UNAVAILABLE';
-        order.currentMidPrice = quoteIsFresh ? Number(Math.abs(mid).toFixed(2)) : null;
-        order.currentExecutablePrice = quoteIsFresh ? Number(Math.abs(executable).toFixed(2)) : null;
+        // Retain complete-but-stale observations for trader context. They are
+        // explicitly not reliable quote evidence (quoteQuality stays
+        // UNAVAILABLE), so no pricing decision or replacement control may use
+        // them.
+        order.currentMidPrice = reliable ? Number(Math.abs(mid).toFixed(2)) : null;
+        order.currentExecutablePrice = reliable ? Number(Math.abs(executable).toFixed(2)) : null;
         // Keep valid timestamp evidence even when it is stale so the UI can
         // show why the reference was withheld.
         order.quoteCapturedAt = reliable ? oldestQuoteAt : null;

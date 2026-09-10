@@ -83,7 +83,7 @@ export function assessPendingEntry(order: PendingOrder): PendingEntryAssessment 
   if (['received', 'queued', 'new'].includes(status)) {
     return {
       state: 'SUBMISSION_IN_PROGRESS', recommendation: 'KEEP_WORKING',
-      stateLabel: 'Submission in Progress', recommendationLabel: 'Resolve Broker Status',
+      stateLabel: 'Awaiting Exchange Confirmation', recommendationLabel: 'Resolve Broker Status',
       executionDecision: 'RESOLVE_BROKER_STATUS',
       explanation: 'The broker has received the order but has not yet reported it live at the exchange.',
     };

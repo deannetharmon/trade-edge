@@ -9140,6 +9140,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   // is evidence, not a recommendation: for credit orders it can request more
   // credit and therefore be less likely to fill.
   const hasReliableQuote = order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null;
+  const quoteIsFresh = order.quoteQuality === 'RELIABLE';
   const awaitingExchangeConfirmation = ['received', 'queued', 'new'].includes(order.status.trim().toLowerCase());
   const repriceAvailable = assessment.executionDecision === 'REPRICE_AVAILABLE';
   const partialExecution = assessment.executionDecision === 'REVIEW_PARTIAL_EXECUTION';
@@ -9203,8 +9204,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           <span>Age: {ageDisplay}</span>
           <span>ID: {order.parentOrderId ?? order.id}</span>
           <span>Requested: {order.limitPrice != null ? `$${order.limitPrice.toFixed(2)}` : '—'}</span>
-          <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
-          <span>Natural-side reference: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+          <span>{quoteIsFresh ? 'Mid' : 'Last observed mid'}: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
+          <span>{quoteIsFresh ? 'Natural-side reference' : 'Last observed natural-side'}: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
           <span>Quote: {order.quoteQuality === 'RELIABLE' ? `fresh two-sided${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}` : `unavailable or stale${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}`}</span>
           {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
           {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
@@ -9313,8 +9314,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               it surfaces the same already-fetched, fail-closed-when-
               genuinely-unavailable evidence the row already had. */}
           <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] ${th.textFaint}`}>
-            <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
-            <span>Natural-side reference: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+            <span>{quoteIsFresh ? 'Mid' : 'Last observed mid'}: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
+            <span>{quoteIsFresh ? 'Natural-side reference' : 'Last observed natural-side'}: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
             <span>Quote: {order.quoteQuality === 'RELIABLE' ? `fresh two-sided${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}` : `unavailable or stale${quoteCaptureDisplay ? ` · ${quoteCaptureDisplay}` : ''}`}</span>
             {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
             {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
