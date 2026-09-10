@@ -424,7 +424,14 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
       <span className="block"><span className={th.textFaint}>Strike </span><b className="text-white">{p.popVsStrike == null ? '—' : `${p.popVsStrike.toFixed(1)}%`}</b></span>
     </>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
-    orders: <><span className={p.hasGtc ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span></>,
+    // GTC-SCOPE-0001: labeled by what this signal actually represents --
+    // p.gtcOrderId only ever resolves via findProfitGtcOrder (a limit
+    // order, explicitly never a stop -- see its doc comment), so a
+    // generic "GTC Live" badge sitting directly above "Stop Unsupported"
+    // or "Stop None" falsely read as if a protective stop were active.
+    // Protective-stop status has its own line immediately below (`Stop
+    // {stop.label}`) and is unaffected by this change.
+    orders: <><span className={p.gtcOrderId != null ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.warning}>Profit Target {p.gtcOrderId != null ? 'Live' : 'None'}</span><span className={`block ${SEMANTIC_TONE_CLASS[stop.tone]}`}>Stop {stop.label}</span><span className="mt-2 block">{stopControl ?? <span className={th.textFaint}>{stop.action} review blocked by the current canonical order workflow</span>}</span></>,
     notes: <PositionNoteEditor position={p} savedNote={savedNote} onSave={onSaveNote} />,
     priceAlert: <PriceAlertEditor position={p} savedAlert={savedAlert} onSave={onSaveAlert} />,
     recommendation: <>

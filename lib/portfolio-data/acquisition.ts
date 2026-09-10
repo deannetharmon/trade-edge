@@ -82,6 +82,7 @@ import {
   computePositionPnl,
   parseBrokerEntryPremium,
   aggregateBrokerPositionGreeks,
+  isSingleLegEntrySnapshotGreekSignStale,
   hasCompleteEntryEconomics,
   hasSupportedCreditEntryEconomics,
   reliableSupportedMaxRisk,
@@ -407,6 +408,32 @@ export async function postEntrySnapshots(
   }
 }
 
+// PM-0003: repairs stale-signed Greeks on entry snapshots that ALREADY
+// exist -- postEntrySnapshots() above hard-skips any key that already has
+// a stored snapshot (by design, for every other field), so a corrected
+// snapshot pushed through it would be silently dropped and the bug would
+// resurface on the next load. This calls the dedicated PATCH route, which
+// can only touch deltaAtEntry/thetaAtEntry/gammaAtEntry/vegaAtEntry on an
+// existing key -- never creates a new baseline, never touches any other
+// field.
+export async function repairEntrySnapshotGreeks(
+  entries: { positionKey: string; greeks: { deltaAtEntry: number | null; thetaAtEntry: number | null; gammaAtEntry: number | null; vegaAtEntry: number | null } }[]
+): Promise<Record<string, EntrySnapshot> | null> {
+  if (entries.length === 0) return null;
+  try {
+    const res = await fetch('/api/position-entry-snapshots', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.snapshots ?? null;
+  } catch {
+    return null;
+  }
+}
+
 
 // One-time migration: earlier versions of TradeEdge stored entry snapshots
 // in this browser's localStorage only, which meant the Trade Evolution
@@ -453,10 +480,34 @@ export async function attachEntrySnapshots(positions: Position[]): Promise<Posit
 
   const snapshots = await fetchEntrySnapshots();
   const toCreate: { positionKey: string; snapshot: EntrySnapshot }[] = [];
+  const toRepair: { positionKey: string; greeks: { deltaAtEntry: number | null; thetaAtEntry: number | null; gammaAtEntry: number | null; vegaAtEntry: number | null } }[] = [];
 
   const enriched = positions.map(pos => {
     const key = positionEntrySnapshotKey(pos);
     let snap = snapshots[key];
+
+    // PM-0003: an EXISTING single-leg snapshot can still be wrong -- not
+    // missing, but captured under an earlier, buggy sign convention (see
+    // isSingleLegEntrySnapshotGreekSignStale's doc comment in
+    // positionMetrics.ts). Detect and self-heal by recapturing fresh
+    // Greeks for that snapshot. Queued into toRepair (PATCH), NOT toCreate
+    // (POST) -- POST hard-skips any key that already exists, by design,
+    // so a "corrected" snapshot pushed through it would be silently
+    // dropped and the bug would resurface on the next load.
+    if (snap && pos.legs.length === 1) {
+      const stale = isSingleLegEntrySnapshotGreekSignStale(pos.legs[0], snap);
+      if (stale) {
+        const greeks = {
+          deltaAtEntry: pos.netDelta ?? null,
+          thetaAtEntry: pos.theta ?? null,
+          gammaAtEntry: pos.gamma ?? null,
+          vegaAtEntry: pos.netVega ?? null,
+        };
+        snap = { ...snap, ...greeks };
+        snapshots[key] = snap;
+        toRepair.push({ positionKey: key, greeks });
+      }
+    }
 
     if (!snap) {
       snap = {
@@ -500,6 +551,9 @@ export async function attachEntrySnapshots(positions: Position[]): Promise<Posit
 
   if (toCreate.length > 0) {
     await postEntrySnapshots(toCreate);
+  }
+  if (toRepair.length > 0) {
+    await repairEntrySnapshotGreeks(toRepair);
   }
 
   return enriched;
@@ -1432,11 +1486,6 @@ export async function loadPositions(
   // already swallows errors and returns {}), which correctly degrades every
   // position to UNKNOWN_PROVENANCE rather than throwing.
   const stopPolicies = await fetchStopPolicies();
-  const gtcSymbols = new Set<string>();
-  for (const order of gtcOrders) for (const leg of order.legs) {
-    const parsed = parseOptionSymbol(leg.symbol);
-    if (parsed.strikePrice > 0) gtcSymbols.add(leg.symbol.split(/\d{6}/)[0].trim());
-  }
 
   const pendingOrders: PendingOrder[] = [];
   // A multi-leg spread submitted directly in TastyTrade is returned by
@@ -1526,26 +1575,6 @@ export async function loadPositions(
       // Also accept if parent has no terminal-at (still open) and has nested orders
       const parentActive = !order['terminal-at'] && nestedOrders.length > 0;
       if (hasActiveNested || parentActive) {
-        for (const nestedOrder of nestedOrders) for (const leg of nestedOrder.legs ?? []) {
-          // Prefer underlying-symbol; fall back to parsing the OCC option symbol
-          const underlying = leg['underlying-symbol'];
-          if (underlying) {
-            const sym = underlying.split(' ')[0].trim();
-            gtcSymbols.add(sym);
-            // Also add SPX↔SPXW variants
-            if (sym === 'SPXW') gtcSymbols.add('SPX');
-            if (sym === 'SPX') gtcSymbols.add('SPXW');
-          } else if (leg.symbol) {
-            // OCC format: SPX   260726P07290000 — split on first digit sequence
-            const fromOcc = leg.symbol.split(/\d{6}/)[0].trim();
-            if (fromOcc) {
-              gtcSymbols.add(fromOcc);
-              if (fromOcc === 'SPXW') gtcSymbols.add('SPX');
-              if (fromOcc === 'SPX') gtcSymbols.add('SPXW');
-            }
-          }
-        }
-
         // Pending entry order detection: the trigger leg of an OTOCO opening
         // order uses Sell to Open / Buy to Open. GTC profit-target and stop
         // legs on an already-open position use Buy to Close / Sell to Close
@@ -2030,27 +2059,29 @@ export async function loadPositions(
       // where one shows and the other doesn't.
       popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
-      hasGtc: (() => {
-        // Check both the position symbol and its weekly option variant
-        // SPX positions may have SPXW option legs; SPXW positions may have SPXW legs
-        if (gtcSymbols.has(symbol)) return true;
-        // Map underlying to possible OCC prefix variants
-        const variants: Record<string, string> = { 'SPX': 'SPXW', 'NDX': 'NDXP', 'RUT': 'RUTW', 'VIX': 'VIXW' };
-        const reverseVariants: Record<string, string> = { 'SPXW': 'SPX', 'NDXP': 'NDX', 'RUTW': 'RUT', 'VIXW': 'VIX' };
-        const variant = variants[symbol] ?? reverseVariants[symbol];
-        return variant ? gtcSymbols.has(variant) : false;
-      })(),
-      gtcOrderId: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match?.id ?? null;
-      })(),
-      gtcComplexOrderId: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match?.complexOrderId ?? null;
-      })(),
-      gtcOrderPrice: (() => {
-        const match = findProfitGtcOrder(positionLegs, gtcOrders);
-        return match ? parseFloat(match.price) || null : null;
+      // GTC-SCOPE-0001: all four gtc* fields now derive from ONE
+      // position-scoped, profit-target-only match instead of two
+      // independent (and differently-scoped) lookups. Previously hasGtc
+      // came from a symbol-wide Set (gtcSymbols.has(symbol)) -- true for
+      // ANY live GTC order anywhere in the account on the same underlying
+      // ticker, including ones on a completely different position -- while
+      // gtcOrderId/gtcComplexOrderId/gtcOrderPrice already correctly used
+      // findProfitGtcOrder's position-scoped, profit-target-only match.
+      // That mismatch is exactly what let hasGtc be true (driving a green
+      // "Live" badge in the UI) while gtcOrderId was null for THIS
+      // position. Every other consumer of pos.hasGtc in this codebase
+      // (see app/portfolio/page.tsx, e.g. "GTC order: ... profit target
+      // working") already assumes hasGtc means "this position's own
+      // profit-target order is live" -- this fix makes the field actually
+      // match that assumed meaning, everywhere it's read, not just here.
+      ...(() => {
+        const profitGtcMatch = findProfitGtcOrder(positionLegs, gtcOrders);
+        return {
+          hasGtc: profitGtcMatch != null,
+          gtcOrderId: profitGtcMatch?.id ?? null,
+          gtcComplexOrderId: profitGtcMatch?.complexOrderId ?? null,
+          gtcOrderPrice: profitGtcMatch ? parseFloat(profitGtcMatch.price) || null : null,
+        };
       })(),
       stopLossStatus: stopLoss.status, stopLossPrice: stopLoss.price,
       stopLossPolicy: stopLoss.policy, stopLossDisplayPolicy: stopLoss.displayPolicy,

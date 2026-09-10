@@ -601,3 +601,53 @@ export function resolveUnderlyingPrice(bid: number, ask: number, mark: number): 
   if (twoSidedNonCrossed) return (bid + ask) / 2;
   return mark > 0 ? mark : null;
 }
+
+// PM-0003: self-healing check for stale-signed single-leg entry-snapshot
+// Greeks (TE bug: entry-snapshot delta/theta/gamma/vega for a standalone
+// long put showed short-put sign convention while the live/current Greeks
+// -- computed by the SAME aggregateBrokerPositionGreeks() above -- were
+// correctly signed for a long put). Root cause: entry snapshots are
+// captured once, lazily, the first time attachEntrySnapshots sees a
+// position with no stored snapshot (see acquisition.ts), by copying
+// whatever aggregateBrokerPositionGreeks produced AT THAT MOMENT. If that
+// formula's sign convention was buggy when a given snapshot was first
+// captured and was fixed later, the stored snapshot is permanently stale
+// with no migration path -- this function lets attachEntrySnapshots detect
+// that case and self-heal by recapturing fresh values.
+//
+// Scoped to single-leg positions ONLY: expected sign is unambiguous for
+// one leg (long put/short call -> delta negative; long call/short put ->
+// delta positive; long options always theta-negative/gamma-positive/
+// vega-positive; short options the reverse). A multi-leg spread's net
+// Greeks are a sum across legs and can legitimately land on either sign
+// depending on relative magnitudes -- there is no single expected sign to
+// check against, so multi-leg positions are intentionally left alone here.
+export interface SingleOptionLegLike { direction: 'Short' | 'Long'; optionType: 'P' | 'C' }
+
+export function expectedSingleLegDeltaSign(leg: SingleOptionLegLike): 1 | -1 {
+  const longSign = leg.optionType === 'C' ? 1 : -1;
+  return leg.direction === 'Long' ? longSign : (-longSign as 1 | -1);
+}
+
+export function isSingleLegEntrySnapshotGreekSignStale(
+  leg: SingleOptionLegLike,
+  entrySnapshot: { deltaAtEntry: number | null; thetaAtEntry: number | null; gammaAtEntry: number | null; vegaAtEntry: number | null },
+): boolean {
+  const expectedDeltaSign = expectedSingleLegDeltaSign(leg);
+  const expectedThetaSign = leg.direction === 'Long' ? -1 : 1;
+  const expectedGammaSign = leg.direction === 'Long' ? 1 : -1;
+  const expectedVegaSign = leg.direction === 'Long' ? 1 : -1;
+  const checks: Array<[number | null, 1 | -1]> = [
+    [entrySnapshot.deltaAtEntry, expectedDeltaSign],
+    [entrySnapshot.thetaAtEntry, expectedThetaSign],
+    [entrySnapshot.gammaAtEntry, expectedGammaSign],
+    [entrySnapshot.vegaAtEntry, expectedVegaSign],
+  ];
+  // Only judge fields that are actually present -- a null/missing field is
+  // an availability gap (already handled elsewhere), not a sign defect.
+  // Treat exact 0 as non-diagnostic (no sign to be wrong about) rather than
+  // flagging it; real Greeks land at fractions of a cent from 0 in
+  // practice, so an exact zero is itself a sign a value never populated.
+  return checks.some(([value, expectedSign]) => value != null && value !== 0 && Math.sign(value) !== expectedSign);
+}
+
