@@ -9141,6 +9141,8 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   // credit and therefore be less likely to fill.
   const hasReliableQuote = order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null;
   const awaitingExchangeConfirmation = ['received', 'queued', 'new'].includes(order.status.trim().toLowerCase());
+  const repriceAvailable = assessment.executionDecision === 'REPRICE_AVAILABLE';
+  const partialExecution = assessment.executionDecision === 'REVIEW_PARTIAL_EXECUTION';
   const quoteCaptureDisplay = order.quoteCapturedAt
     ? new Date(order.quoteCapturedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
     : null;
@@ -9175,13 +9177,15 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
                 ${order.limitPrice.toFixed(2)} {order.priceEffect ?? ''}
               </span>
             )}
-            <button
-              onClick={startEdit}
-              disabled={cancelling || replacing}
-              className="text-[10px] px-2.5 py-1 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
-            >
-              {replacing ? 'REPLACING...' : 'REVIEW / REPRICE'}
-            </button>
+            {!partialExecution && (
+              <button
+                onClick={startEdit}
+                disabled={cancelling || replacing}
+                className="text-[10px] px-2.5 py-1 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-40"
+              >
+                {replacing ? 'REPLACING...' : repriceAvailable ? 'REVIEW REPRICE' : 'REVIEW PRICE'}
+              </button>
+            )}
             <button
               onClick={() => onCancel(order)}
               disabled={cancelling || replacing}
@@ -9214,6 +9218,14 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
         <p className={`mt-2 text-[9px] ${th.textFaint}`}>
           Broker has received the order but has not confirmed it is working at the exchange. Refresh broker status before changing price.
         </p>
+      )}
+      {!editing && partialExecution && (
+        <p className="mt-2 text-[9px] text-amber-300">
+          Partial execution detected. Review the broker order detail before changing or cancelling the remaining contracts.
+        </p>
+      )}
+      {!editing && assessment.executionDecision === 'NO_PRICE_CHANGE_NEEDED' && (
+        <p className={`mt-2 text-[9px] ${th.textFaint}`}>{assessment.explanation}</p>
       )}
       {!editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap items-start gap-4">

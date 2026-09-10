@@ -17,7 +17,32 @@ describe('pending entry intelligence', () => {
 
   it('keeps a live credit order working when its requested credit is executable', () => {
     expect(assessPendingEntry(order('Live', { quoteQuality: 'RELIABLE', currentExecutablePrice: 1.3 }))).toMatchObject({
-      recommendation: 'KEEP_WORKING',
+      recommendation: 'KEEP_WORKING', executionDecision: 'NO_PRICE_CHANGE_NEEDED',
+    });
+  });
+
+  it('offers a reprice only when a live credit limit exceeds the natural-side reference', () => {
+    expect(assessPendingEntry(order('Working', { quoteQuality: 'RELIABLE', currentExecutablePrice: 1.1 }))).toMatchObject({
+      executionDecision: 'REPRICE_AVAILABLE', recommendationLabel: 'Reprice Available',
+    });
+  });
+
+  it('requires broker-status resolution before evaluating a received order price', () => {
+    expect(assessPendingEntry(order('Received', { quoteQuality: 'RELIABLE', currentExecutablePrice: 0.5 }))).toMatchObject({
+      executionDecision: 'RESOLVE_BROKER_STATUS', recommendationLabel: 'Resolve Broker Status',
+    });
+  });
+
+  it('fails closed to quote unavailable for a live order without fresh two-sided evidence', () => {
+    expect(assessPendingEntry(order('Working'))).toMatchObject({ executionDecision: 'QUOTE_UNAVAILABLE' });
+  });
+
+  it('mirrors price direction for debit orders', () => {
+    expect(assessPendingEntry(order('Working', { priceEffect: 'Debit', limitPrice: 1.25, quoteQuality: 'RELIABLE', currentExecutablePrice: 1.1 }))).toMatchObject({
+      executionDecision: 'NO_PRICE_CHANGE_NEEDED',
+    });
+    expect(assessPendingEntry(order('Working', { priceEffect: 'Debit', limitPrice: 0.9, quoteQuality: 'RELIABLE', currentExecutablePrice: 1.1 }))).toMatchObject({
+      executionDecision: 'REPRICE_AVAILABLE',
     });
   });
 
