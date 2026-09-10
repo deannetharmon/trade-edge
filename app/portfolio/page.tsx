@@ -9182,8 +9182,28 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
             />
           </div>
+          {/* REPRICE-0001: this reference line is deliberately identical to
+              the one shown on the collapsed (!editing) row above -- Mid,
+              Executable, and Quote quality are already computed on `order`
+              and shown right there one click earlier. Editing mode was
+              dropping all of it and replacing it with a hardcoded "no
+              executable quote is available here" sentence regardless of
+              whether a real quote existed, throwing away the exact context
+              a person needs at the exact moment they need it to choose a
+              number. This does not manufacture a price recommendation --
+              it surfaces the same already-fetched, fail-closed-when-
+              genuinely-unavailable evidence the row already had. */}
+          <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] ${th.textFaint}`}>
+            <span>Mid: {order.currentMidPrice != null ? `$${order.currentMidPrice.toFixed(2)}` : '—'}</span>
+            <span>Executable: {order.currentExecutablePrice != null ? `$${order.currentExecutablePrice.toFixed(2)}` : '—'}</span>
+            <span>Quote: {order.quoteQuality === 'RELIABLE' ? 'fresh two-sided' : 'unavailable'}</span>
+            {order.shortStrikeOtmPct != null ? <span>OTM: {order.shortStrikeOtmPct.toFixed(1)}%</span> : null}
+            {order.currentIvr != null ? <span>IVR: {order.currentIvr}%</span> : null}
+          </div>
           <p className={`text-[9px] ${th.textFaint}`}>
-            No executable quote is available here. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.
+            {order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null
+              ? 'Reprice against the Executable price above -- it reflects a fresh two-sided market. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'
+              : 'No fresh two-sided quote is available for this order right now -- Mid/Executable above may be stale or missing. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'}
           </p>
           <div className="flex gap-2">
             <button
