@@ -40,6 +40,9 @@ interface EntrySnapshot {
   popAtEntry: number | null;
   deltaAtEntry: number | null;
   thetaAtEntry: number | null;
+  gammaAtEntry: number | null;
+  vegaAtEntry: number | null;
+  stockPriceAtEntry: number | null;
   otmAtEntry: number | null;
   dteAtEntry: number | null;
 }
@@ -103,6 +106,80 @@ export async function POST(req: NextRequest) {
     // real baselines for entries that already existed under a key it just
     // tried to create — mirrors the client's fetchEntrySnapshots() shape.
     return NextResponse.json({ ok: true, snapshots: store, added, skipped });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+// PATCH /api/position-entry-snapshots
+// PM-0003: narrowly-scoped repair path for stale-signed Greeks on an
+// EXISTING entry snapshot (see isSingleLegEntrySnapshotGreekSignStale in
+// lib/portfolio/positionMetrics.ts). Deliberately separate from POST's
+// create-once-never-overwrite contract above, which must stay intact for
+// every other field on a snapshot (stockPriceAtEntry, ivAtEntry,
+// otmAtEntry, dteAtEntry, createdAt, popAtEntry are a position's permanent
+// historical record and are never touched here). This route can ONLY:
+//   (a) write to a key that already exists (never creates a new baseline)
+//   (b) touch deltaAtEntry/thetaAtEntry/gammaAtEntry/vegaAtEntry only
+// The client is trusted to have already run the staleness check before
+// calling this (same trust model this file already uses for POST's
+// snapshot content) -- this route does not have leg direction/optionType
+// available to re-derive the expected sign itself, since the store never
+// persisted position structure, only the resulting Greek values.
+// Body: { entries: { positionKey: string; greeks: { deltaAtEntry: number | null; thetaAtEntry: number | null; gammaAtEntry: number | null; vegaAtEntry: number | null } }[] }
+// Response: { ok: true, snapshots: EntrySnapshotStore, repaired: number, partial: number, skipped: number }
+// `partial` counts entries where at least one Greek field arrived null
+// (live value unavailable at repair time) and so kept its prior stored
+// value instead of being corrected -- visible here so a still-stale field
+// after a "repair" isn't silently indistinguishable from a clean one.
+export async function PATCH(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const userId = (session.user as any).id;
+  try {
+    const body = await req.json();
+    const entries: { positionKey: string; greeks: Partial<Pick<EntrySnapshot, 'deltaAtEntry' | 'thetaAtEntry' | 'gammaAtEntry' | 'vegaAtEntry'>> }[] = body?.entries ?? [];
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return NextResponse.json({ error: 'entries required' }, { status: 400 });
+    }
+
+    const raw = await redis.get(redisKey(userId));
+    const store: EntrySnapshotStore = raw ? JSON.parse(raw) : {};
+
+    let repaired = 0;
+    let partial = 0;
+    let skipped = 0;
+
+    for (const { positionKey, greeks } of entries) {
+      if (!positionKey || !greeks || !store[positionKey]) { skipped++; continue; } // repair-only: key must already exist
+      // Only overwrite fields the client actually sent a real number for.
+      // A null here means "live Greeks were unavailable when the repair
+      // ran" -- NOT "clear this field" -- so it must fall through to the
+      // existing stored value, same as before. What changed: that
+      // fallback is no longer silently indistinguishable from a full
+      // repair (Paul's review catch) -- `partial` counts entries where at
+      // least one field couldn't be corrected this round, so a stuck
+      // stale value is visible in the response instead of invisible.
+      const fields: Array<'deltaAtEntry' | 'thetaAtEntry' | 'gammaAtEntry' | 'vegaAtEntry'> =
+        ['deltaAtEntry', 'thetaAtEntry', 'gammaAtEntry', 'vegaAtEntry'];
+      let anyMissing = false;
+      const next = { ...store[positionKey] };
+      for (const field of fields) {
+        const incoming = greeks[field];
+        if (incoming == null) { anyMissing = true; continue; } // leave existing value untouched
+        next[field] = incoming;
+      }
+      store[positionKey] = next;
+      repaired++;
+      if (anyMissing) partial++;
+    }
+
+    if (repaired > 0) {
+      await redis.set(redisKey(userId), JSON.stringify(store));
+    }
+
+    return NextResponse.json({ ok: true, snapshots: store, repaired, partial, skipped });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

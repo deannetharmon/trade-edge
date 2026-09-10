@@ -18,6 +18,8 @@ import {
   computeEntryChangeTone,
   clampPct,
   parseBrokerEntryPremium,
+  isSingleLegEntrySnapshotGreekSignStale,
+  expectedSingleLegDeltaSign,
   toWholePositionThetaDollars,
   toWholePositionGammaShareEquivalent,
   toWholePositionVegaDollars,
@@ -762,5 +764,103 @@ describe('computeEntryChangeTone: absolute-delta direction', () => {
 
   it('-0.20 -> -0.40 (growing negative exposure) is unfavorable', () => {
     expect(computeEntryChangeTone(Math.abs(-0.20), Math.abs(-0.40), true)).toBe('bad');
+  });
+});
+
+// ── 6. PM-0003: entry-snapshot Greek sign staleness (standalone long put
+// regression) ────────────────────────────────────────────────────────────
+// This is the exact bug class that shipped: an entry snapshot's stored
+// delta/theta/gamma/vega had the sign convention of the WRONG position
+// direction (short-put signs on a standalone long put), while the live
+// Greeks -- computed by the same aggregateBrokerPositionGreeks() this file
+// already tests above -- were correctly signed. These tests exist so that
+// class of bug fails loudly here instead of silently shipping again.
+describe('aggregateBrokerPositionGreeks: standalone single-leg sign correctness', () => {
+  it('long put: delta negative, theta negative, gamma positive, vega positive', () => {
+    const legs = [{ symbol: 'MRNA261120P00140000', quantity: '1', 'quantity-direction': 'Long' }];
+    const maps = {
+      delta: { MRNA261120P00140000: -0.5 },
+      theta: { MRNA261120P00140000: -0.1 },
+      gamma: { MRNA261120P00140000: 0.009 },
+      vega: { MRNA261120P00140000: 0.2 },
+    };
+    const result = aggregateBrokerPositionGreeks(legs, maps);
+    expect(result.delta).toBeLessThan(0);
+    expect(result.theta).toBeLessThan(0);
+    expect(result.gamma).toBeGreaterThan(0);
+    expect(result.vega).toBeGreaterThan(0);
+  });
+
+  it('long call: delta positive, theta negative, gamma positive, vega positive', () => {
+    const legs = [{ symbol: 'AAPL261120C00250000', quantity: '1', 'quantity-direction': 'Long' }];
+    const maps = {
+      delta: { AAPL261120C00250000: 0.5 },
+      theta: { AAPL261120C00250000: -0.08 },
+      gamma: { AAPL261120C00250000: 0.01 },
+      vega: { AAPL261120C00250000: 0.15 },
+    };
+    const result = aggregateBrokerPositionGreeks(legs, maps);
+    expect(result.delta).toBeGreaterThan(0);
+    expect(result.theta).toBeLessThan(0);
+    expect(result.gamma).toBeGreaterThan(0);
+    expect(result.vega).toBeGreaterThan(0);
+  });
+
+  it('short put (CSP): delta positive, theta positive, gamma negative, vega negative', () => {
+    const legs = [{ symbol: 'MU260904P00800000', quantity: '1', 'quantity-direction': 'Short' }];
+    const maps = {
+      delta: { MU260904P00800000: -0.2 },
+      theta: { MU260904P00800000: -0.07 },
+      gamma: { MU260904P00800000: 0.001 },
+      vega: { MU260904P00800000: 0.08 },
+    };
+    const result = aggregateBrokerPositionGreeks(legs, maps);
+    expect(result.delta).toBeGreaterThan(0);
+    expect(result.theta).toBeGreaterThan(0);
+    expect(result.gamma).toBeLessThan(0);
+    expect(result.vega).toBeLessThan(0);
+  });
+});
+
+describe('expectedSingleLegDeltaSign', () => {
+  it('long put -> negative', () => expect(expectedSingleLegDeltaSign({ direction: 'Long', optionType: 'P' })).toBe(-1));
+  it('long call -> positive', () => expect(expectedSingleLegDeltaSign({ direction: 'Long', optionType: 'C' })).toBe(1));
+  it('short put -> positive', () => expect(expectedSingleLegDeltaSign({ direction: 'Short', optionType: 'P' })).toBe(1));
+  it('short call -> negative', () => expect(expectedSingleLegDeltaSign({ direction: 'Short', optionType: 'C' })).toBe(-1));
+});
+
+describe('isSingleLegEntrySnapshotGreekSignStale', () => {
+  const longPutLeg = { direction: 'Long' as const, optionType: 'P' as const };
+
+  it('flags the exact shipped bug: short-put-signed entry snapshot on a long put', () => {
+    // This is literally the MRNA row from the bug report: entry snapshot
+    // showed delta +0.4, theta +0.1, gamma -0.006, vega -0.3 -- every one
+    // of those has the sign of a SHORT put, not the long put this position
+    // actually is.
+    const staleSnapshot = { deltaAtEntry: 0.4, thetaAtEntry: 0.1, gammaAtEntry: -0.006, vegaAtEntry: -0.3 };
+    expect(isSingleLegEntrySnapshotGreekSignStale(longPutLeg, staleSnapshot)).toBe(true);
+  });
+
+  it('does not flag a correctly-signed long put entry snapshot', () => {
+    const correctSnapshot = { deltaAtEntry: -0.4, thetaAtEntry: -0.1, gammaAtEntry: 0.006, vegaAtEntry: 0.3 };
+    expect(isSingleLegEntrySnapshotGreekSignStale(longPutLeg, correctSnapshot)).toBe(false);
+  });
+
+  it('does not flag on missing (null) fields -- that is an availability gap, not a sign defect', () => {
+    const partialSnapshot = { deltaAtEntry: null, thetaAtEntry: null, gammaAtEntry: null, vegaAtEntry: null };
+    expect(isSingleLegEntrySnapshotGreekSignStale(longPutLeg, partialSnapshot)).toBe(false);
+  });
+
+  it('flags when even a single field has the wrong sign', () => {
+    const onlyDeltaWrong = { deltaAtEntry: 0.4, thetaAtEntry: -0.1, gammaAtEntry: 0.006, vegaAtEntry: 0.3 };
+    expect(isSingleLegEntrySnapshotGreekSignStale(longPutLeg, onlyDeltaWrong)).toBe(true);
+  });
+
+  it('correctly evaluates a short call the same way', () => {
+    const shortCallLeg = { direction: 'Short' as const, optionType: 'C' as const };
+    const correctShortCallSnapshot = { deltaAtEntry: -0.3, thetaAtEntry: 0.05, gammaAtEntry: -0.004, vegaAtEntry: -0.1 };
+    expect(isSingleLegEntrySnapshotGreekSignStale(shortCallLeg, correctShortCallSnapshot)).toBe(false);
+    const staleShortCallSnapshot = { deltaAtEntry: 0.3, thetaAtEntry: -0.05, gammaAtEntry: 0.004, vegaAtEntry: 0.1 };
+    expect(isSingleLegEntrySnapshotGreekSignStale(shortCallLeg, staleShortCallSnapshot)).toBe(true);
   });
 });
