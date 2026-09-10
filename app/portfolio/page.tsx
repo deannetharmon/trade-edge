@@ -9326,18 +9326,18 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
                 ? 'The natural-side reference above is a current broker-quote reference, not a fill recommendation. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'
                 : 'No fresh two-sided quote is available for this order right now. This is a manual same-trade reprice: legs, quantity, expiry, and price effect cannot change. Existing contingent exits are not recreated.'}
           </p>
-          <div className="flex gap-2">
+          <div className="flex justify-center items-center gap-2 pt-1">
             <button
               onClick={confirmReplace}
               disabled={priceInvalid || priceUnchanged || replacing}
-              className="flex-1 py-1.5 text-white text-[10px] font-bold rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:opacity-40"
+              className="min-w-40 px-5 py-1.5 text-white text-[10px] font-bold rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:opacity-40"
             >
               {replacing ? 'Replacing...' : 'Confirm Replace'}
             </button>
             <button
               onClick={cancelEdit}
               disabled={replacing}
-              className={`px-4 py-1.5 border ${th.border} ${th.textFaint} rounded-lg text-[10px] hover:border-white/30 transition-colors disabled:opacity-40`}
+              className={`px-5 py-1.5 border ${th.border} ${th.textFaint} rounded-lg text-[10px] hover:border-white/30 transition-colors disabled:opacity-40`}
             >
               Back
             </button>
