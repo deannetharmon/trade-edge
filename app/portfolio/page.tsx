@@ -9104,7 +9104,18 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   const [editing, setEditing] = useState(false);
   const [newPrice, setNewPrice] = useState(order.limitPrice?.toFixed(2) ?? '');
 
-  const startEdit = () => { setNewPrice(order.limitPrice?.toFixed(2) ?? ''); setEditing(true); };
+  // REPRICE-0002: pre-fill from the current Executable price when a fresh
+  // two-sided quote exists, rather than starting from the stale original ask
+  // (or blank). This is a mechanical default from data already computed and
+  // shown on this card -- NOT a recommendation of what to price at. The
+  // person can still type any number; "Match Executable" below just resets
+  // to this same value if they've edited away from it. When no reliable
+  // quote exists, falls back to the original requested price, same as
+  // before -- this never fabricates a number.
+  const hasReliableQuote = order.quoteQuality === 'RELIABLE' && order.currentExecutablePrice != null;
+  const suggestedPrice = hasReliableQuote ? order.currentExecutablePrice! : order.limitPrice;
+
+  const startEdit = () => { setNewPrice(suggestedPrice?.toFixed(2) ?? ''); setEditing(true); };
   const cancelEdit = () => setEditing(false);
   const parsedNewPrice = parseFloat(newPrice);
   const priceInvalid = isNaN(parsedNewPrice) || parsedNewPrice <= 0;
@@ -9171,7 +9182,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       )}
       {editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className={`text-[10px] ${th.textFaint}`}>Requested ${order.limitPrice?.toFixed(2) ?? '—'} → new {(order.priceEffect ?? 'limit').toLowerCase()} price</span>
             <input
               type="number" min="0.01" step="0.01" autoFocus
@@ -9181,6 +9192,20 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
               className={`w-24 text-[11px] px-2 py-1.5 rounded border ${th.inputBorder} ${th.input} text-yellow-300 outline-none focus:border-yellow-500`}
               style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
             />
+            {/* REPRICE-0002: resets to the same mechanical default startEdit
+                already prefilled -- not a new/different suggestion, just a
+                quick way back to it after typing something else. Disabled
+                (not hidden) when no reliable quote exists, so it's visible
+                that "match" has nothing real to match against right now. */}
+            <button
+              type="button"
+              disabled={!hasReliableQuote}
+              onClick={() => hasReliableQuote && setNewPrice(order.currentExecutablePrice!.toFixed(2))}
+              className={`text-[9px] px-2 py-1 rounded border ${th.border} ${hasReliableQuote ? `${th.textFaint} hover:border-yellow-500 hover:text-yellow-300` : 'opacity-30 cursor-not-allowed'}`}
+              title={hasReliableQuote ? `Reset to current Executable ($${order.currentExecutablePrice!.toFixed(2)})` : 'No reliable executable quote to match'}
+            >
+              Match Executable
+            </button>
           </div>
           {/* REPRICE-0001: this reference line is deliberately identical to
               the one shown on the collapsed (!editing) row above -- Mid,
