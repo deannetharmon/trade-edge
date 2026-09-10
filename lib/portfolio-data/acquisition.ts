@@ -1682,8 +1682,17 @@ export async function loadPositions(
             break;
           }
           const sign = String(leg.action).toLowerCase().startsWith('sell') ? 1 : -1;
-          mid += sign * ((bid + ask) / 2) * leg.quantity;
-          executable += sign * (sign > 0 ? bid : ask) * leg.quantity;
+          // MIDPRICE-SCALE-0001: this must be a PER-CONTRACT price, matching
+          // order.limitPrice's own convention (and TastyTrade's own displayed
+          // mid) -- NOT multiplied by leg.quantity. Every downstream consumer
+          // (the reprice input's prefill, "Use Mid"/"Use Natural-Side
+          // Reference", and the total-credit math) already multiplies by
+          // canonicalOrderQuantity exactly once on its own. Multiplying by
+          // leg.quantity here as well silently double-scaled this number for
+          // any order sized above 1 contract -- e.g. a 2-lot spread's mid
+          // came out ~2x the real per-contract value TastyTrade shows.
+          mid += sign * ((bid + ask) / 2);
+          executable += sign * (sign > 0 ? bid : ask);
           const timestamp = extractBrokerQuoteTimestamp(item);
           if (!timestamp) {
             reliable = false;

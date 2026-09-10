@@ -140,6 +140,49 @@ describe('acquirePortfolioBrokerSource', () => {
     });
   });
 
+  // MIDPRICE-SCALE-0001: same fixture as the test above, but every leg's
+  // quantity is 2 instead of 1 -- a 2-contract spread, matching the exact
+  // shape of the real bug (discovered on a live 2-contract MRVL BPS: the
+  // app showed ~$4.20-4.80 while TastyTrade's own mid showed ~$2.18-2.20,
+  // almost exactly double). currentMidPrice/currentExecutablePrice must
+  // stay PER-CONTRACT regardless of order size -- identical to the qty=1
+  // test above -- because order.limitPrice and every downstream consumer
+  // (reprice prefill, Use Mid/Use Natural-Side Reference, the total-credit
+  // math, pendingEntryIntelligence's limitPrice-vs-executable comparison)
+  // already assume a per-contract price and apply quantity scaling exactly
+  // once, separately. Before the fix, this test would have asserted 6.2/5.8
+  // (double-counted) instead of the correct 3.1/2.9.
+  it('keeps mid/executable per-contract, not quantity-scaled, for a multi-contract pending spread', async () => {
+    const newer = new Date(Date.now() - 1_000).toISOString();
+    const older = new Date(Date.now() - 2_000).toISOString();
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [{
+        id: 'spread-2lot', status: 'Working', price: '2.50', 'price-effect': 'Credit', 'underlying-symbol': 'AAPL',
+        legs: [
+          { symbol: 'AAPL  261016P00100000', action: 'Sell to Open', quantity: 2 },
+          { symbol: 'AAPL  261016P00095000', action: 'Buy to Open', quantity: 2 },
+        ],
+      }] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
+        { symbol: 'AAPL  261016P00100000', bid: '4.00', ask: '4.20', 'updated-at': newer },
+        { symbol: 'AAPL  261016P00095000', bid: '0.90', ask: '1.10', 'updated-at': older },
+      ] } };
+      if (path.startsWith('/market-metrics?symbols=AAPL')) return { data: { items: [] } };
+      if (path === '/market-data/by-type?equity=AAPL') return { data: { items: [{ symbol: 'AAPL', bid: '200', ask: '201' }] } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders[0]).toMatchObject({
+      quoteQuality: 'RELIABLE', currentMidPrice: 3.1, currentExecutablePrice: 2.9,
+      quoteCapturedAt: older,
+    });
+  });
+
   it('does not call a pending spread quote fresh when a leg timestamp is stale or missing', async () => {
     const stale = '2000-01-01T00:00:00.000Z';
     broker.ttFetch.mockImplementation(async (path: string) => {
