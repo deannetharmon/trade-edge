@@ -219,6 +219,55 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   };
   const columns = preferences.analysisView === 'custom' ? preferences.customColumnIds : columnsForView(preferences.analysisView);
   const rows = model.analysisRows.filter(row => matchesAnalysisFilters(row, preferences.filters));
+  // POSITIONS-SORT-0001: only columns with one unambiguous, directly
+  // comparable value on Position are sortable. Left out on purpose:
+  // 'strike' (multiple strikes/breakevens, no single canonical number),
+  // 'evolution' (six different Greeks shown at once, no representative
+  // value), 'orders' (categorical stop classification, not a natural
+  // order), 'notes'/'priceAlert' (free text), 'recommendation'
+  // (categorical action label). 'volatility' sorts by IVR specifically
+  // (not IV) since IVR is the more standard screening metric.
+  const SORTABLE_COLUMNS: ReadonlySet<AnalysisColumnId> = new Set<AnalysisColumnId>(['identity', 'dates', 'underlying', 'capital', 'entry', 'value', 'pnl', 'netEdge', 'pop', 'volatility']);
+  const sortValueFor = (position: Position, columnId: AnalysisColumnId): number | string | null => {
+    switch (columnId) {
+      case 'identity': return position.symbol;
+      case 'dates': return position.dte;
+      case 'underlying': return position.buffer;
+      case 'capital': return buildCapitalViewModel(position).value;
+      case 'entry': return position.entryCredit ?? position.creditReceived ?? null;
+      case 'value': return position.closeValue ?? position.currentValue ?? null;
+      case 'pnl': return position.closeNowPnl ?? position.pnl ?? null;
+      case 'netEdge': return netEdgeLive(position);
+      case 'pop': return position.pop;
+      case 'volatility': return position.ivr;
+      default: return null;
+    }
+  };
+  const [sort, setSort] = useState<{ column: AnalysisColumnId; direction: 'asc' | 'desc' } | null>(null);
+  const toggleSort = (columnId: AnalysisColumnId) => {
+    if (!SORTABLE_COLUMNS.has(columnId)) return;
+    setSort(current => {
+      if (current?.column !== columnId) return { column: columnId, direction: 'asc' };
+      if (current.direction === 'asc') return { column: columnId, direction: 'desc' };
+      return null; // third click on the same column clears back to natural order
+    });
+  };
+  const sortedRows = sort
+    ? [...rows].sort((a, b) => {
+        const av = sortValueFor(a.position, sort.column);
+        const bv = sortValueFor(b.position, sort.column);
+        // Nulls always sort last, regardless of direction -- a missing
+        // value isn't "low," it's unknown, and burying it at the bottom
+        // either way keeps it from masquerading as the smallest real value.
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        const cmp = typeof av === 'string' && typeof bv === 'string'
+          ? av.localeCompare(bv)
+          : av < bv ? -1 : av > bv ? 1 : 0;
+        return sort.direction === 'asc' ? cmp : -cmp;
+      })
+    : rows;
   const chooseView = (view: AnalysisViewId) => setPreferences(current => ({ ...current, analysisView: view, customColumnIds: view === 'custom' ? current.customColumnIds : columnsForView(view) }));
   return <>
     <section aria-label="Existing-position income eligibility" className={`mb-3 rounded-xl border ${th.border} p-3`}>
@@ -259,7 +308,12 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     </div>
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
     {priceAlertsLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Price alerts unavailable — {priceAlertsLoadError}</p>}
-    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'underlying' ? 'w-20 max-w-20 whitespace-nowrap' : column.id === 'entry' ? 'w-20 max-w-20' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{column.id === 'strike' ? 'Strike / BE' : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.id === 'entry' ? <><span className="block">Entry</span><span className="block">Credit / Debit</span></> : column.label}</th>)}</tr></thead><tbody>{rows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
+    <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
+  const sortable = SORTABLE_COLUMNS.has(column.id);
+  const isActiveSort = sort?.column === column.id;
+  const labelContent = column.id === 'strike' ? 'Strike / BE' : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.id === 'entry' ? <><span className="block">Entry</span><span className="block">Credit / Debit</span></> : column.label;
+  return <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : sortable ? `Sort by ${column.label}` : undefined} aria-sort={isActiveSort ? (sort!.direction === 'asc' ? 'ascending' : 'descending') : undefined} onClick={sortable ? () => toggleSort(column.id) : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${sortable ? 'cursor-pointer select-none hover:text-white/80' : ''} ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'underlying' ? 'w-20 max-w-20 whitespace-nowrap' : column.id === 'entry' ? 'w-20 max-w-20' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{labelContent}{sortable && <span aria-hidden="true" className={`ml-1 inline-block ${isActiveSort ? 'text-teal-400' : 'text-white/20'}`}>{isActiveSort ? (sort!.direction === 'asc' ? '▲' : '▼') : '⇅'}</span>}</th>;
+})}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
     {analysisPosition && <DialogShell title={`AI analysis — ${analysisPosition.symbol}`} onClose={() => { if (!analysisLoading) setAnalysisPosition(null); }}><div aria-live="polite">{analysisLoading ? <p>Analyzing {analysisPosition.symbol}…</p> : analysisError ? <div><p role="alert" className="text-red-400">{analysisError}</p><button type="button" onClick={() => analyze(analysisPosition)} className="mt-3 min-h-8 rounded border border-white/20 px-3 text-xs focus:ring-2 focus:ring-teal-400">Retry analysis</button></div> : analysis ? <div className="space-y-3 text-sm"><p className="text-[10px] uppercase tracking-wider text-white/50">AI interpretation · deterministic Suggested Action remains authoritative</p><p><b>{analysis.recommendation}</b> · {analysis.confidence} confidence</p><p>{analysis.summary}</p><details className="rounded border border-white/10 bg-white/[0.02] p-3 text-xs"><summary className="cursor-pointer font-semibold text-indigo-300">Position context locked for this conversation</summary><p className="mt-2 text-white/60">{analysisPosition.symbol} · {analysisPosition.strategy} · expires {analysisPosition.expDate} · {analysisPosition.dte} DTE</p><p className="mt-1 break-all font-sans text-[10px] text-white/40">Position ID: {analysisPosition.key}</p><p className="mt-1 text-white/40">Snapshot captured {new Date(analysis.generatedAt).toLocaleString()}. Follow-ups retain this snapshot and conversation history.</p></details>{renderAnalysisConversation && <section aria-label={`AI follow-up conversation for ${analysisPosition.symbol}`} className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/[0.04]"><div className="px-4 pt-3"><p className="text-xs font-semibold text-indigo-200">Continue with AI</p><p className="mt-1 text-[10px] text-white/50">Ask a follow-up or attach chart and option-chain images.</p></div>{renderAnalysisConversation(analysisPosition, analysis)}</section>}<details className="rounded border border-white/10 p-3 text-xs"><summary className="cursor-pointer font-semibold text-white/70">Show full AI reasoning and risks</summary><p className="mt-3 text-white/70">{analysis.reasoning}</p>{analysis.risks.length > 0 && <div className="mt-3"><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(risk => <li key={risk}>{risk}</li>)}</ul></div>}</details><p className="text-xs text-white/50">Advisory analysis only. No brokerage order is prepared or submitted.</p></div> : null}</div></DialogShell>}
