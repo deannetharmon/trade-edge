@@ -6407,7 +6407,45 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               <p className={`text-[8px] ${th.textFaint} mt-1`}>For Iron Condors, gates on the tighter of put/call side</p>
             </div>
 
-            {/* MIN IVR % -- IVR-0001: previously absent entirely; the floor
+            {/* MIN IVR % -- I
+
+            {/* MIN CREDIT RATIO % */}
+            <div className="space-y-1.5 mt-4">
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN CREDIT RATIO %</p>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded border border-neutral-800 bg-neutral-900 px-3 py-1">
+                  <input
+                    type="number"
+                    value={params.minCreditRatio ?? 0}
+                    onChange={(e) => setParams({ ...params, minCreditRatio: Number(e.target.value) })}
+                    className="w-12 bg-transparent text-sm font-semibold text-white focus:outline-none"
+                  />
+                  <span className="text-xs text-neutral-500">%</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {[
+                    { label: "Any", value: 0 },
+                    { label: "10%", value: 10 },
+                    { label: "15%", value: 15 },
+                    { label: "20%", value: 20 },
+                    { label: "25%", value: 25 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setParams({ ...params, minCreditRatio: opt.value })}
+                      className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        (params.minCreditRatio ?? 0) === opt.value
+                          ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400"
+                          : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>VR-0001: previously absent entirely; the floor
                 was silently whatever the (also-invisible) preset selection
                 happened to carry. Same explicit-field treatment as POP/OTM
                 above, and same 30% default the 'course' preset used to
@@ -6544,6 +6582,44 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
             ))}
           </div>
         </div>
+
+            {/* MIN CREDIT RATIO % */}
+            <div className="space-y-1.5 mt-4">
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN CREDIT RATIO %</p>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded border border-neutral-800 bg-neutral-900 px-3 py-1">
+                  <input
+                    type="number"
+                    value={params.minCreditRatio ?? 0}
+                    onChange={(e) => setParams({ ...params, minCreditRatio: Number(e.target.value) })}
+                    className="w-12 bg-transparent text-sm font-semibold text-white focus:outline-none"
+                  />
+                  <span className="text-xs text-neutral-500">%</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {[
+                    { label: "Any", value: 0 },
+                    { label: "10%", value: 10 },
+                    { label: "15%", value: 15 },
+                    { label: "20%", value: 20 },
+                    { label: "25%", value: 25 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setParams({ ...params, minCreditRatio: opt.value })}
+                      className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        (params.minCreditRatio ?? 0) === opt.value
+                          ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400"
+                          : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
         <div className="px-4 py-3 space-y-3">
           <div>
             <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-2`}>① Volatility & Timing</p>
