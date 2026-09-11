@@ -6251,6 +6251,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
+  const [tCreditRatioMin, setTCreditRatioMin] = useState<number>(0);
   const [tIvrMin, setTIvrMin] = useState(lastTargetedIvrMin);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
