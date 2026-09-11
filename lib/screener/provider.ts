@@ -1,6 +1,16 @@
 import { OptionContract } from "@/types/screener";
 
+const CACHE_TTL_MS = 60 * 1000;
+const chainCache = new Map<string, { timestamp: number; data: OptionContract[] }>();
+
 export async function fetchOptionChainFromProvider(symbol: string): Promise<OptionContract[]> {
+  const now = Date.now();
+  const cached = chainCache.get(symbol);
+
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   try {
     const baseUrl = process.env.MARKET_DATA_API_URL || 'https://api.tastyworks.com';
     const response = await fetch(`${baseUrl}/option-chains/${symbol}/nested`, {
@@ -8,18 +18,17 @@ export async function fetchOptionChainFromProvider(symbol: string): Promise<Opti
         'Authorization': `Bearer ${process.env.MARKET_DATA_API_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      next: { revalidate: 60 },
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch chain for ${symbol}: ${response.statusText}`);
-      return [];
+      console.error(`[Provider] HTTP ${response.status} fetching chain for ${symbol}`);
+      return cached?.data || [];
     }
 
     const payload = await response.json();
     const rawItems: any[] = payload.data?.items || payload.items || [];
 
-    return rawItems.map((item) => {
+    const contracts: OptionContract[] = rawItems.map((item) => {
       const bid = Number(item.bid || item.bid_price || 0);
       const ask = Number(item.ask || item.ask_price || 0);
       const mid = Number(item.mid || item.mid_price || (bid + ask) / 2);
@@ -41,8 +50,40 @@ export async function fetchOptionChainFromProvider(symbol: string): Promise<Opti
         type: (item.option_type || item.type || '').toLowerCase() === 'call' ? 'call' : 'put',
       };
     });
+
+    chainCache.set(symbol, { timestamp: now, data: contracts });
+    return contracts;
   } catch (error) {
-    console.error(`Error in fetchOptionChainFromProvider for ${symbol}:`, error);
-    return [];
+    console.error(`[Provider] Error fetching chain for ${symbol}:`, error);
+    return cached?.data || [];
   }
+}
+
+export async function fetchOptionChainsConcurrently(
+  symbols: string[],
+  concurrencyLimit = 3,
+  delayBetweenBatchesMs = 150
+): Promise<Map<string, OptionContract[]>> {
+  const results = new Map<string, OptionContract[]>();
+
+  for (let i = 0; i < symbols.length; i += concurrencyLimit) {
+    const chunk = symbols.slice(i, i + concurrencyLimit);
+
+    const chunkResults = await Promise.all(
+      chunk.map(async (symbol) => {
+        const chain = await fetchOptionChainFromProvider(symbol);
+        return { symbol, chain };
+      })
+    );
+
+    for (const { symbol, chain } of chunkResults) {
+      results.set(symbol, chain);
+    }
+
+    if (i + concurrencyLimit < symbols.length && delayBetweenBatchesMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayBetweenBatchesMs));
+    }
+  }
+
+  return results;
 }
