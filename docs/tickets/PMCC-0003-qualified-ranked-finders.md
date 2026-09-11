@@ -6,7 +6,7 @@
 **Architecture / QA:** Quinn  
 **Implementation:** Dane  
 **Review facilitation:** Frank  
-**Status:** Package A authorized; Packages B–F remain gated
+**Status:** Package A implemented and returned for review; Packages B–F remain gated
 **Target branch:** `feature/pmcc-leaps-ranked-finders`
 
 ## 1. Outcome

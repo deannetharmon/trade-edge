@@ -1,5 +1,11 @@
 # Technical Specification: PMCC Scoring Engine
 
+> **SUPERSEDED:** The scoring weights, delta/DTE limits, event treatment, and
+> implementation authority in this historical document are superseded by
+> `docs/tickets/PMCC-0003-qualified-ranked-finders.md`. Preserve this file as
+> decision history only. It is not an active production or implementation
+> specification.
+
 ## Overview & Objective
 Replace the legacy, yield-focused PMCC ranking model with an institutional-grade, multi-dimensional risk-adjusted scoring engine. The primary goal is prioritizing capital preservation and structural safety. All logic must reside in a dedicated module: `lib/scans/pmccScore.ts`.
 
