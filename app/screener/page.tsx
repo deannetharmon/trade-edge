@@ -3986,8 +3986,8 @@ function HeldPmccOrderModal({ result, th, onClose }: {
           />
         </div>
 
-        {eventRisk.status !== 'OK' && (
-          <p className={`text-xs rounded border px-3 py-2 mb-3 ${eventRisk.status === 'NOT_QUALIFIED' ? 'border-red-700 text-red-300' : 'border-amber-700 text-amber-300'}`}>{eventRisk.message}</p>
+        {(eventRisk.blockers.length > 0 || eventRisk.cautions.length > 0) && (
+          <p className={`text-xs rounded border px-3 py-2 mb-3 ${eventRisk.status === 'NOT_QUALIFIED' ? 'border-red-700 text-red-300' : 'border-amber-700 text-amber-300'}`}>{[...eventRisk.blockers, ...eventRisk.cautions].join(' · ')}</p>
         )}
 
         {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
