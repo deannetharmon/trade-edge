@@ -3878,7 +3878,14 @@ function HeldPmccOrderModal({ result, th, onClose }: {
     ? ((positionSnapshot.currentPrice - positionSnapshot.avgOpenPrice) / positionSnapshot.avgOpenPrice) * 100
     : null;
 
-  const canSubmit = phase === 'confirm' && positionSnapshot?.matched === true
+  // Deliberately does NOT include phase === 'confirm' here -- folding a
+  // phase comparison into this boolean is what triggered TS's aliased-
+  // condition narrowing against the later phase === 'dryrun' /
+  // phase === 'placing' checks below (types '"confirm"' and '"dryrun"'
+  // have no overlap). Same shape as PmccTradeModal's own canValidate
+  // above, which never mixes phase into its readiness boolean either --
+  // phase is checked separately, in each disabled={...} expression.
+  const canSubmit = positionSnapshot?.matched === true
     && quantity >= 1 && quantity <= (positionSnapshot?.quantity ?? 0)
     && eventRisk.status !== 'NOT_QUALIFIED' && eventRisk.status !== 'WAIT_MONITOR';
 
@@ -3999,13 +4006,13 @@ function HeldPmccOrderModal({ result, th, onClose }: {
         {phase !== 'done' ? (
           <div className="space-y-2">
             <button
-              onClick={runDryRun} disabled={!canSubmit || phase === 'dryrun'}
+              onClick={runDryRun} disabled={!canSubmit || phase !== 'confirm'}
               className={`w-full py-2 rounded-lg border ${th.border} ${th.textMuted} text-xs font-bold tracking-widest disabled:opacity-40`}
             >
               {phase === 'dryrun' ? 'CHECKING…' : 'DRY RUN'}
             </button>
             <button
-              onClick={placeOrder} disabled={!canSubmit || phase === 'placing'}
+              onClick={placeOrder} disabled={!canSubmit || phase !== 'confirm'}
               className="w-full py-2.5 rounded-xl border border-amber-500 text-amber-300 text-xs font-bold tracking-widest disabled:opacity-40"
             >
               {phase === 'placing' ? 'SUBMITTING…' : `SELL TO OPEN — ${quantity} FOR ${money(entryLimit)} CREDIT`}
