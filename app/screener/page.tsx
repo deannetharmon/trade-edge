@@ -3823,6 +3823,7 @@ function HeldPmccOrderModal({ result, th, onClose }: {
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState('');
   const [entryLimit, setEntryLimit] = useState(parseFloat(pair.shortLeg.executablePrice.toFixed(2)));
+  const [occAcknowledgedAt, setOccAcknowledgedAt] = useState<string | null>(null);
   const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
     now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
     quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
@@ -3863,12 +3864,12 @@ function HeldPmccOrderModal({ result, th, onClose }: {
           earningsDate: events.earningsDate ?? null, exDividendDate: events.exDividendDate ?? null,
           splitOrSymbolChangeDate: events.splitOrSymbolChangeDate ?? null,
           shortIsItmOrNearItm: result.price != null && result.price >= pair.shortLeg.strike * 0.99,
-          standardContract: null, occAcknowledgedAt: null,
+          standardContract: null, occAcknowledgedAt,
         }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
       })
       .catch(() => { /* falls back to the unknown-age default state set above */ });
     return () => { cancelled = true; };
-  }, [pair.longLeg.expiration, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
+  }, [occAcknowledgedAt, pair.longLeg.expiration, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
 
   const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
   const plDollar = positionSnapshot?.avgOpenPrice != null && positionSnapshot?.currentPrice != null
@@ -3996,6 +3997,16 @@ function HeldPmccOrderModal({ result, th, onClose }: {
         {(eventRisk.blockers.length > 0 || eventRisk.cautions.length > 0) && (
           <p className={`text-xs rounded border px-3 py-2 mb-3 ${eventRisk.status === 'NOT_QUALIFIED' ? 'border-red-700 text-red-300' : 'border-amber-700 text-amber-300'}`}>{[...eventRisk.blockers, ...eventRisk.cautions].join(' · ')}</p>
         )}
+
+        <div className="rounded-lg border border-amber-700 bg-amber-500/5 p-3 mb-3">
+          <p className="text-xs font-bold text-amber-300">OCC CONTRACT REVIEW</p>
+          <p className={`mt-1 text-[10px] ${th.textMuted}`}>This provider path does not yet return a definitive standard-contract flag. Review OCC information memos before acknowledging this contract review.</p>
+          <a className="mt-1 inline-block text-[10px] text-cyan-300 underline" href="https://www.theocc.com/market-data/market-data-reports/infomemos" target="_blank" rel="noreferrer">Open OCC Information Memos</a>
+          <label className="mt-2 flex items-start gap-2 text-[10px]">
+            <input type="checkbox" checked={Boolean(occAcknowledgedAt)} onChange={event => setOccAcknowledgedAt(event.target.checked ? new Date().toISOString() : null)} />
+            <span className={th.textMuted}>I reviewed the OCC contract information for {result.symbol}; no unhandled adjustment applies to this contract.</span>
+          </label>
+        </div>
 
         {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
 
