@@ -47,7 +47,7 @@ import {
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
-import { buildNewPmccEntryOrderLegs } from '@/lib/scans/pmccOrderIntent';
+import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
@@ -3801,6 +3801,231 @@ function buildPmccOrderLegs(pair: PmccPairResult): any[] {
   return buildNewPmccEntryOrderLegs(pair);
 }
 
+// PMCC-COMPARE-HELD-0001 — held-LEAPS sell-to-open order review. Entry-
+// only per Ian/Paul: no OTOCO wrapper, no profit-target attached here --
+// the short call is managed afterward like any other covered call, via
+// its own separate GTC ticket, same v1 principle PmccTradeModal below
+// already documents. A real fork, not a branch inside PmccTradeModal --
+// same reasoning as why PmccTradeModal was kept separate from
+// TradeModal: a single-leg Credit order and a two-leg Debit order are
+// different enough risk profiles that guarding one component against
+// firing the wrong pricing model is more dangerous than two small,
+// independently-correct components.
+function HeldPmccOrderModal({ result, th, onClose }: {
+  result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+}) {
+  const pair = result.pmccPair!;
+  const [quantity, setQuantity] = useState(1);
+  const [phase, setPhase] = useState<'loading' | 'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('loading');
+  const [positionSnapshot, setPositionSnapshot] = useState<{ matched: boolean; quantity: number; avgOpenPrice: number | null; currentPrice: number | null; dte: number | null } | null>(null);
+  const [accountNumber, setAccountNumber] = useState<string | null>(null);
+  const [dryRunPassed, setDryRunPassed] = useState(false);
+  const [error, setError] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [entryLimit, setEntryLimit] = useState(parseFloat(pair.shortLeg.executablePrice.toFixed(2)));
+  const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
+    now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
+    quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
+    splitOrSymbolChangeDate: null, shortIsItmOrNearItm: false, standardContract: null, occAcknowledgedAt: null,
+  }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
+
+  const loadSnapshot = async () => {
+    setPhase('loading'); setError('');
+    try {
+      const resolvedAccountNumber = await getAccountNumber();
+      setAccountNumber(resolvedAccountNumber);
+      const res = await fetch(`/api/pmcc-held-trade-review?underlyingSymbol=${encodeURIComponent(result.symbol)}&longOccSymbol=${encodeURIComponent(pair.longLeg.occSymbol)}&accountLocator=${encodeURIComponent(resolvedAccountNumber)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to verify the held position');
+      setPositionSnapshot(data.snapshot);
+      setQuantity(previous => Math.max(1, Math.min(previous, data.snapshot?.quantity ?? 1)));
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  useEffect(() => { loadSnapshot(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const from = new Date().toISOString().slice(0, 10);
+    const to = pair.shortLeg.expiration;
+    fetch(`/api/event-risk?symbol=${encodeURIComponent(result.symbol)}&from=${from}&to=${to}`)
+      .then(async response => response.ok ? response.json() : Promise.reject(new Error('Event calendar unavailable')))
+      .then(data => {
+        if (cancelled || !data?.verified || !data?.events) return;
+        const events = data.events;
+        setEventRisk(evaluateEventRisk({
+          now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
+          quoteAgeSeconds: pair.shortLeg.quote.ageSeconds ?? Infinity,
+          tradingHalted: false, eventCheckedAt: events.checkedAt ?? null,
+          earningsDate: events.earningsDate ?? null, exDividendDate: events.exDividendDate ?? null,
+          splitOrSymbolChangeDate: events.splitOrSymbolChangeDate ?? null,
+          shortIsItmOrNearItm: result.price != null && result.price >= pair.shortLeg.strike * 0.99,
+          standardContract: null, occAcknowledgedAt: null,
+        }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
+      })
+      .catch(() => { /* falls back to the unknown-age default state set above */ });
+    return () => { cancelled = true; };
+  }, [pair.longLeg.expiration, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
+
+  const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
+  const plDollar = positionSnapshot?.avgOpenPrice != null && positionSnapshot?.currentPrice != null
+    ? (positionSnapshot.currentPrice - positionSnapshot.avgOpenPrice) * 100 * Math.max(1, positionSnapshot.quantity)
+    : null;
+  const plPct = positionSnapshot?.avgOpenPrice && positionSnapshot?.currentPrice != null
+    ? ((positionSnapshot.currentPrice - positionSnapshot.avgOpenPrice) / positionSnapshot.avgOpenPrice) * 100
+    : null;
+
+  const canSubmit = phase === 'confirm' && positionSnapshot?.matched === true
+    && quantity >= 1 && quantity <= (positionSnapshot?.quantity ?? 0)
+    && eventRisk.status !== 'NOT_QUALIFIED' && eventRisk.status !== 'WAIT_MONITOR';
+
+  const submitRequestBody = (mode: 'dry-run' | 'submit') => {
+    // buildHeldLeapsShortCallOrderLegs both validates the pair/quantity
+    // shape client-side and produces the exact leg the server rebuilds
+    // and re-validates independently -- kept for parity with the
+    // two-leg ticket's buildPmccOrderLegs, even though the server never
+    // trusts this payload for the actual held-quantity ceiling.
+    buildHeldLeapsShortCallOrderLegs(pair, quantity);
+    return JSON.stringify({
+      mode, accountLocator: accountNumber, underlyingSymbol: result.symbol,
+      longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol,
+      quantity, limitPrice: entryLimit,
+    });
+  };
+
+  const runDryRun = async () => {
+    setPhase('dryrun'); setError(''); setDryRunPassed(false);
+    try {
+      const res = await fetch('/api/pmcc-held-trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: submitRequestBody('dry-run') });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Dry run failed (${res.status})`);
+      if (!data?.order) throw new Error('Structure is no longer eligible for review; refresh and check its current gate results.');
+      setDryRunPassed(true);
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const placeOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      const res = await fetch('/api/pmcc-held-trade-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: submitRequestBody('submit') });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Order failed (${res.status})`);
+      const submittedOrderId = data?.order?.order?.id ?? data?.order?.id ?? 'submitted';
+      setOrderId(String(submittedOrderId));
+      setPhase('done');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>SELL SHORT CALL — {result.symbol}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        <div className="p-3 bg-cyan-500/10 border border-cyan-600 rounded-lg mb-4">
+          <p className="text-[10px] text-cyan-300">Entry only. This sells a call against the long LEAPS you already hold -- it does not touch that position. No profit-target or stop-loss is submitted with this order; manage the short call separately, like any other covered call.</p>
+        </div>
+
+        {phase === 'loading' && <p className={`text-xs ${th.textMuted}`}>Verifying the held position…</p>}
+
+        {positionSnapshot && (
+          <div className={`rounded-lg border p-3 mb-3 ${positionSnapshot.matched ? 'border-emerald-700 bg-emerald-500/5' : 'border-red-700 bg-red-500/5'}`}>
+            <p className={`text-[10px] font-bold ${positionSnapshot.matched ? 'text-emerald-400' : 'text-red-400'}`}>
+              {positionSnapshot.matched ? 'Position verified — held long still matches this pair' : 'Held long call could not be verified in this account'}
+            </p>
+            {positionSnapshot.matched && (
+              <>
+                <p className={`text-xs mt-1 ${th.text}`}>{pair.longLeg.strike}C · {pair.longLeg.expiration} · {positionSnapshot.dte ?? pair.longLeg.dte} DTE</p>
+                <p className={`text-xs ${th.textMuted}`}>Qty held: {positionSnapshot.quantity} · Avg open {money(positionSnapshot.avgOpenPrice)}</p>
+                <p className="text-xs">
+                  <span className={th.textMuted}>Current {money(positionSnapshot.currentPrice)}</span>
+                  {plDollar != null && (
+                    <span className={`ml-2 font-semibold ${plDollar >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {plDollar >= 0 ? '+' : ''}{money(plDollar)} ({plPct != null ? `${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%` : '—'})
+                    </span>
+                  )}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="rounded-lg bg-amber-500/5 p-3 mb-3">
+          <p className={`text-xs ${th.text}`}><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}</p>
+          <p className={`text-xs ${th.textMuted}`}>Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}</p>
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <label className={`text-xs ${th.textMuted}`}>Quantity</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="range" min={1} max={Math.max(1, positionSnapshot?.quantity ?? 1)} value={quantity}
+              onChange={e => setQuantity(Number(e.target.value))}
+              disabled={!positionSnapshot?.matched}
+            />
+            <span className={`text-xs font-bold ${th.text}`}>{quantity} of {positionSnapshot?.quantity ?? '—'} held</span>
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <label className={`text-xs ${th.textMuted}`}>Limit price (credit)</label>
+          <input
+            type="number" step="0.01" value={entryLimit}
+            onChange={e => setEntryLimit(parseFloat(e.target.value) || 0)}
+            className={`w-full mt-1 rounded border ${th.border} bg-transparent px-2 py-1.5 text-sm ${th.text}`}
+          />
+        </div>
+
+        {eventRisk.status !== 'OK' && (
+          <p className={`text-xs rounded border px-3 py-2 mb-3 ${eventRisk.status === 'NOT_QUALIFIED' ? 'border-red-700 text-red-300' : 'border-amber-700 text-amber-300'}`}>{eventRisk.message}</p>
+        )}
+
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+        {dryRunPassed && phase === 'confirm' && (
+          <p className="text-[10px] text-emerald-400 mb-3">Dry run passed — buying power effect reviewed by the broker.</p>
+        )}
+
+        {phase !== 'done' ? (
+          <div className="space-y-2">
+            <button
+              onClick={runDryRun} disabled={!canSubmit || phase === 'dryrun'}
+              className={`w-full py-2 rounded-lg border ${th.border} ${th.textMuted} text-xs font-bold tracking-widest disabled:opacity-40`}
+            >
+              {phase === 'dryrun' ? 'CHECKING…' : 'DRY RUN'}
+            </button>
+            <button
+              onClick={placeOrder} disabled={!canSubmit || phase === 'placing'}
+              className="w-full py-2.5 rounded-xl border border-amber-500 text-amber-300 text-xs font-bold tracking-widest disabled:opacity-40"
+            >
+              {phase === 'placing' ? 'SUBMITTING…' : `SELL TO OPEN — ${quantity} FOR ${money(entryLimit)} CREDIT`}
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-emerald-700 bg-emerald-500/5 p-3">
+            <p className="text-xs text-emerald-400 font-bold">Order submitted</p>
+            <p className="text-[10px] text-emerald-300 mt-1">Broker order id: {orderId}</p>
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <button onClick={onClose} className={`mt-3 w-full py-2.5 border ${th.border} ${th.textMuted} rounded-xl text-xs font-bold tracking-widest`}>CLOSE</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // PmccTradeModal — a real fork of TradeModal, not a shared component with
 // PMCC-branch conditionals threaded through it. TradeModal's `c =
 // result.bestCandidate!` assumption, its OTM gate (built for a short
@@ -3828,13 +4053,7 @@ function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, sho
 }) {
   const pair = result.pmccPair!;
   if (pair.entryMode === 'covered-short-call-against-held-leaps') {
-    return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-      <div className={`w-full max-w-md rounded-xl border ${th.border} ${th.sidebar} p-5`} role="dialog" aria-modal="true">
-        <h2 className={`text-sm font-bold ${th.text}`}>HELD LEAPS REVIEW ONLY</h2>
-        <p className={`mt-3 text-sm ${th.textMuted}`}>This result uses a long call already held in your portfolio. TradeEdge has not created an order ticket. Review the proposed short call before taking any action in your broker.</p>
-        <button onClick={onClose} className={`mt-5 w-full rounded-lg border ${th.border} py-2 text-xs font-bold ${th.textMuted}`}>CLOSE</button>
-      </div>
-    </div>;
+    return <HeldPmccOrderModal result={result} th={th} onClose={onClose} />;
   }
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
@@ -4578,6 +4797,51 @@ function PmccLegRejectionAudit({ rejections, summary }: {
   </section>;
 }
 
+// PMCC-COMPARE-HELD-0001 — compact rank row for the flat PMCC ranked
+// list (Ian/Alan/Diane-approved mock). Reads pmccResultScore,
+// pmccAnnualizedRoi, pmccBreakeven, and pmccBreakevenAboveShortStrike --
+// the same shared helpers PmccResultCard itself now uses -- so the row
+// and the full card underneath it can never disagree. Wraps (does not
+// replace) the existing full PmccResultCard passed in as children;
+// tapping the row toggles whether that card is shown. No new data
+// sourcing -- every field here was already computed and available on
+// ScreenResult/pmccPair before this ticket.
+function PmccComparisonRow({ rank, result, th, isBest, children }: {
+  rank: number; result: ScreenResult; th: typeof THEMES[Theme]; isBest: boolean; children: JSX.Element;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const pair = result.pmccPair;
+  if (!pair) return children;
+  const score = pmccResultScore(result);
+  const roi = pmccAnnualizedRoi(result);
+  const breakeven = pmccBreakeven(result);
+  const breakevenAboveShortStrike = pmccBreakevenAboveShortStrike(result);
+  const creditPct = pair.metrics?.shortCreditToNetDebitPct ?? null;
+  return (
+    <div className={`rounded-xl border ${isBest ? 'border-emerald-700 bg-emerald-500/5' : th.border}`}>
+      <button
+        onClick={() => setExpanded(value => !value)}
+        className="w-full grid grid-cols-[24px_40px_1fr_56px_56px_56px_76px_20px] gap-2 items-center px-3 py-2.5 text-left"
+      >
+        <span className="text-xs font-bold">{rank}</span>
+        <span className={`text-xs font-bold ${isBest ? 'text-emerald-400' : th.text}`}>{score ?? '—'}</span>
+        <span className="text-xs">
+          {pair.shortLeg.strike}C · {pair.shortLeg.dte}d
+          <br /><span className={`text-[10px] ${th.textMuted}`}>Δ{pair.shortLeg.delta.toFixed(2)}</span>
+        </span>
+        <span className="text-xs">${pair.shortLeg.executablePrice.toFixed(2)}</span>
+        <span className="text-xs">{creditPct != null ? `${creditPct.toFixed(1)}%` : '—'}</span>
+        <span className="text-xs">{roi != null ? `${roi.toFixed(1)}%` : '—'}</span>
+        <span className={`text-xs ${breakevenAboveShortStrike ? 'text-amber-400' : th.text}`}>
+          {breakeven != null ? `$${breakeven.toFixed(2)}` : '—'}{breakevenAboveShortStrike ? ' ⚠' : ''}
+        </span>
+        <span className={`text-xs ${th.textMuted}`}>{expanded ? '▴' : '▾'}</span>
+      </button>
+      {expanded && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
+}
+
 function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showPairLookup, setShowPairLookup] = useState(false);
@@ -4605,6 +4869,11 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
       ? 'ready'
       : pmccDecision.readiness === 'MARKET_CLOSED' ? 'market_closed' : 'not_ready';
   const tradeAllowed = pmccDecision.action === 'NEW_PMCC_REVIEW_ALLOWED';
+  // PMCC-COMPARE-HELD-0001 — held mode's own "ready to act" action is
+  // HELD_PMCC_REVIEW_ONLY, never NEW_PMCC_REVIEW_ALLOWED (see
+  // evaluatePmccDecision) -- tradeAllowed intentionally stays false for
+  // held pairs; this is the separate gate for the sell-to-open button.
+  const heldTradeAllowed = pmccDecision.action === 'HELD_PMCC_REVIEW_ONLY';
   const READINESS_META: Record<typeof readinessState, { label: string; dot: string; text: string; border: string; bg: string }> = {
     ready:        { label: 'PMCC Structure Qualified', dot: 'bg-emerald-400', text: 'text-emerald-400', border: 'border-emerald-700/70', bg: 'bg-emerald-500/5' },
     market_closed:{ label: 'Qualified — market closed', dot: 'bg-amber-400', text: 'text-amber-400', border: 'border-amber-700/70', bg: 'bg-amber-500/5' },
@@ -4630,11 +4899,12 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   // team: self-consistent with what's already shown on the card, not a
   // separate assumed constant like the criteria's 21-45 DTE target
   // range, which would quietly diverge from the number on screen).
-  const breakeven = metrics ? pair!.longLeg.strike + metrics.netDebitPerShare : null;
-  // Ian's sanity check: a qualified pair should never have its breakeven
-  // above the short strike -- that would mean max profit is already
-  // structurally unreachable. Real validation, not just a display value.
-  const breakevenAboveShortStrike = breakeven != null && pair && breakeven > pair.shortLeg.strike;
+  // PMCC-COMPARE-HELD-0001 — now the shared pmccBreakeven/
+  // pmccBreakevenAboveShortStrike helpers (defined below, alongside
+  // pmccAnnualizedRoi/pmccResultScore) so the comparison row and this
+  // card can never quietly disagree on either value.
+  const breakeven = pmccBreakeven(result);
+  const breakevenAboveShortStrike = pmccBreakevenAboveShortStrike(result);
   const rollRunway = pair && pair.shortLeg.dte > 0
     ? Math.floor((pair.longLeg.dte - pair.shortLeg.dte) / pair.shortLeg.dte)
     : null;
@@ -4734,9 +5004,14 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   </span>
 )}</span></div>
       </div>
-      {pmccDecision.gates.some(gate => gate.status !== 'pass') && (
+      {pmccDecision.gates.some(gate => gate.status === 'fail' || gate.status === 'unavailable') && (
+        <p className="mt-2 text-[10px] text-red-300">
+          Blocked because: {pmccDecision.gates.filter(gate => gate.status === 'fail' || gate.status === 'unavailable').map(gate => gate.explanation).join(' · ')}
+        </p>
+      )}
+      {pmccDecision.gates.some(gate => gate.status === 'warning') && (
         <p className="mt-2 text-[10px] text-amber-300">
-          Why this result: {pmccDecision.gates.filter(gate => gate.status !== 'pass').map(gate => gate.explanation).join(' · ')}
+          Preference notes (does not block): {pmccDecision.gates.filter(gate => gate.status === 'warning').map(gate => gate.explanation).join(' · ')}
         </p>
       )}
       {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
@@ -4866,7 +5141,15 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
           {marketClosedOnly ? 'REVIEW PMCC — MARKET CLOSED' : 'REVIEW PMCC'}
         </button>
       )}
-      {heldLong && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Review-only: this screen proposes a short call against the exact long call held in the active account. It cannot submit or construct an order.</p>}
+      {heldLong && heldTradeAllowed && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
+          className="w-full py-2 rounded-lg border border-amber-500 text-amber-300 text-xs font-bold tracking-widest hover:bg-amber-500/10 transition-colors"
+        >
+          SELL SHORT CALL
+        </button>
+      )}
+      {heldLong && !heldTradeAllowed && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
       <button
         onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
         className="w-full py-1.5 rounded-lg border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:border-neutral-500 transition-colors"
@@ -7062,6 +7345,25 @@ function pmccAnnualizedRoi(result: ScreenResult): number | null {
   return metrics && pair && pair.shortLeg.dte > 0
     ? metrics.shortCreditToNetDebitPct * (365 / pair.shortLeg.dte)
     : null;
+}
+
+// PMCC-COMPARE-HELD-0001 — extracted from PmccResultCard's own inline
+// computation, same reasoning as pmccAnnualizedRoi above: the comparison
+// row and the full card must never disagree on breakeven or on whether
+// it sits above the short strike.
+function pmccBreakeven(result: ScreenResult): number | null {
+  const pair = result.pmccPair;
+  const metrics = pair?.metrics;
+  return pair && metrics ? pair.longLeg.strike + metrics.netDebitPerShare : null;
+}
+
+// Ian's sanity check: a qualified pair should never have its breakeven
+// above the short strike -- that would mean max profit is already
+// structurally unreachable. Real validation, not just a display value.
+function pmccBreakevenAboveShortStrike(result: ScreenResult): boolean {
+  const pair = result.pmccPair;
+  const breakeven = pmccBreakeven(result);
+  return breakeven != null && pair != null && breakeven > pair.shortLeg.strike;
 }
 
 // PMCC-CARD-SCORE-HEADER-0001 -- same extraction reasoning as
@@ -10975,7 +11277,17 @@ export default function Home() {
                           // which grouped mode can never show regardless of
                           // sort field, since grouping itself clusters every
                           // ticker's structures together first.
-                          filteredQualified.map(renderQualifiedCandidate)
+                          filteredQualified.map((r, index) => (
+                            <PmccComparisonRow
+                              key={r.candidateId ?? `${r.symbol}-${r.strategy}`}
+                              rank={index + 1}
+                              result={r}
+                              th={th}
+                              isBest={pmccBestInScan?.result === r}
+                            >
+                              {renderQualifiedCandidate(r)}
+                            </PmccComparisonRow>
+                          ))
                         ) : filteredQualified.map(r => {
                           // CSP-WORKFLOW-0001 — candidateId (when present,
                           // i.e. CSP results) is the stable identity; other

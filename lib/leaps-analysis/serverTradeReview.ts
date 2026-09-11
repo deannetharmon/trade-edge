@@ -168,3 +168,167 @@ export async function submitLeapsOrder(userId: string, input: { accountLocator: 
     const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`); return { review: reviewed.review, order: body?.data ?? body };
   } finally { reviewed.context.redis.disconnect(); }
 }
+
+// PMCC-COMPARE-HELD-0001 — held-LEAPS sell-to-open support. The long leg
+// is never re-purchased or re-validated as a new entry here (that's what
+// resolveWithContext + SERVER_LEAPS_POLICY are for, and they stay
+// untouched above for the two-leg path) -- it's a position the account
+// already owns, so the only question is whether it's STILL owned, in
+// what quantity, right now, independent of anything the scan or the
+// client claims.
+
+interface HeldPmccPositionMatch {
+  quantity: number;
+  avgOpenPrice: number | null;
+  expiration: string | null;
+}
+
+async function findHeldPmccLongPosition(context: BrokerContext, accountNumber: string, input: { underlyingSymbol: string; longOccSymbol: string }): Promise<HeldPmccPositionMatch | null> {
+  const positionsData = await brokerGet(`/accounts/${accountNumber}/positions`, context.accessToken);
+  const items: any[] = positionsData?.data?.items ?? [];
+  const match = items.find(item =>
+    String(item?.symbol ?? '') === input.longOccSymbol
+    && String(item?.['underlying-symbol'] ?? '').trim().toUpperCase() === input.underlyingSymbol
+    && item?.['quantity-direction'] === 'Long'
+    && (item?.['instrument-type'] === 'Equity Option' || item?.['instrument-type'] === 'Index Option'),
+  );
+  if (!match) return null;
+  return {
+    quantity: parseInt(match['quantity'] ?? '0', 10),
+    avgOpenPrice: finite(match['average-open-price']),
+    expiration: iso(match['expires-at'])?.slice(0, 10) ?? (typeof match['expires-at'] === 'string' ? match['expires-at'].slice(0, 10) : null),
+  };
+}
+
+export interface HeldPmccPositionSnapshot {
+  matched: boolean;
+  quantity: number;
+  avgOpenPrice: number | null;
+  currentPrice: number | null;
+  dte: number | null;
+}
+
+/** Display-only lookup for the order-review modal -- shows the trader
+ * what's actually held right now (quantity, cost basis, live price, DTE)
+ * before they pick a quantity. Never authoritative: submitHeldPmccShort-
+ * CallOrder below re-checks the same position independently, immediately
+ * before allowing an order, and does not trust this snapshot's result. */
+export async function fetchHeldPmccPositionSnapshot(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; longOccSymbol: string }): Promise<{ accountNumber: string; snapshot: HeldPmccPositionSnapshot }> {
+  const context = await brokerContext(userId);
+  try {
+    const accountNumber = await validatedAccount(context, input.accountLocator);
+    const match = await findHeldPmccLongPosition(context, accountNumber, input);
+    if (!match) return { accountNumber, snapshot: { matched: false, quantity: 0, avgOpenPrice: null, currentPrice: null, dte: null } };
+    let currentPrice: number | null = null;
+    try {
+      const review = await resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.longOccSymbol }, SERVER_LEAPS_POLICY);
+      currentPrice = review.bid != null && review.ask != null ? (review.bid + review.ask) / 2 : null;
+    } catch { /* display-only; a failed live quote does not block showing quantity/cost basis */ }
+    const dte = match.expiration ? Math.ceil((Date.parse(`${match.expiration}T00:00:00Z`) - Date.now()) / 86_400_000) : null;
+    return { accountNumber, snapshot: { matched: true, quantity: match.quantity, avgOpenPrice: match.avgOpenPrice, currentPrice, dte: dte != null && Number.isFinite(dte) ? dte : null } };
+  } finally {
+    context.redis.disconnect();
+  }
+}
+
+/** Fresh server evidence for the short leg, fresh position-ownership
+ * evidence for the long leg, canonical PMCC eligibility (held-mode
+ * gating, same policy evaluatePmccDecision already applies on the
+ * client), and broker validation are all repeated independently for
+ * dry-run and submit -- same posture as submitPmccOrder above, adapted
+ * for a single-leg Credit order against an already-owned long. */
+export async function submitHeldPmccShortCallOrder(userId: string, input: {
+  accountLocator: string | null;
+  underlyingSymbol: string;
+  longOccSymbol: string;
+  shortOccSymbol: string;
+  quantity: number;
+  limitPrice: number;
+  mode: 'dry-run' | 'submit';
+}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number }) {
+  if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
+  const context = await brokerContext(userId);
+  try {
+    const accountNumber = await validatedAccount(context, input.accountLocator);
+
+    // Position-freshness gate: the held long must still exist in THIS
+    // account as a Long option position with quantity at least covering
+    // what's being sold. This is the check that closes the gap the scan
+    // alone cannot -- the scan matched the held long against the live
+    // chain when it ran, but time has passed since then. Re-verified
+    // here, immediately before pairing/decision/submission, never
+    // trusted from an earlier scan or a client-supplied value.
+    const heldPosition = await findHeldPmccLongPosition(context, accountNumber, input);
+    if (!heldPosition) {
+      throw new Error('The held long call could not be found in this account. It may have been closed since this result was scanned.');
+    }
+    if (heldPosition.quantity < input.quantity) {
+      throw new Error(`Only ${heldPosition.quantity} contract(s) of the held long call remain in this account -- cannot sell ${input.quantity} short call(s) against it.`);
+    }
+
+    const [longReview, shortReview] = await Promise.all([
+      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.longOccSymbol }, SERVER_LEAPS_POLICY),
+      resolveWithContext(context, { underlyingSymbol: input.underlyingSymbol, occSymbol: input.shortOccSymbol }, SERVER_LEAPS_POLICY),
+    ]);
+    const now = new Date();
+    const marketSession = derivePmccMarketSession(now);
+    const underlyingFresh = fresh(longReview.underlyingQuoteTimestamp, now.getTime()) && fresh(shortReview.underlyingQuoteTimestamp, now.getTime());
+
+    const effectiveCriteria: PmccPairingCriteria = {
+      ...SERVER_PMCC_CRITERIA,
+      // Held contract, not a new-entry candidate -- same OI bypass the
+      // scan already applies at production time (lib/scans/pmccProduction.ts).
+      longOiMin: 0,
+      shortDelta: shortCriteriaOverride?.shortDelta ?? SERVER_PMCC_CRITERIA.shortDelta,
+      shortOiMin: shortCriteriaOverride?.shortOiMin ?? SERVER_PMCC_CRITERIA.shortOiMin,
+      quotePolicy: {
+        ...SERVER_PMCC_CRITERIA.quotePolicy,
+        qualifyingSpreadPctMax: shortCriteriaOverride?.qualifyingSpreadPctMax ?? SERVER_PMCC_CRITERIA.quotePolicy.qualifyingSpreadPctMax,
+      },
+    };
+    const heldLongOccSymbols = new Set([`occ:${input.longOccSymbol.replace(/\s+/g, '').toUpperCase()}`]);
+    const pairing = pairPmccCandidates({
+      symbol: input.underlyingSymbol,
+      underlyingPrice: longReview.spot ?? shortReview.spot ?? NaN,
+      longLegs: [pmccLeg(longReview)],
+      shortLegs: [pmccLeg(shortReview)],
+      criteria: effectiveCriteria,
+      heldLongOccSymbols,
+      asOf: now,
+      marketSession,
+    });
+    let pair = pairing.qualifiedPairs[0] ?? pairing.nearMissPairs[0] ?? null;
+    // Same annotation lib/scans/pmccProduction.ts applies at scan time --
+    // evaluatePmccDecision reads entryMode to pick the held-mode gating
+    // path (preference warnings instead of hard entry-delta/OI fails,
+    // and HELD_PMCC_REVIEW_ONLY instead of NEW_PMCC_REVIEW_ALLOWED as
+    // its "ready" action). Without this, a held pair would silently be
+    // graded as a brand-new entry.
+    if (pair) pair = { ...pair, entryMode: 'covered-short-call-against-held-leaps' };
+    const decision = evaluatePmccDecision({ pair, criteria: effectiveCriteria, marketSession });
+    if (!underlyingFresh && decision.qualification === 'QUALIFIED') {
+      decision.readiness = 'WAIT_MONITOR';
+      decision.action = 'BLOCKED';
+      decision.gates.push({ code: 'UNDERLYING_QUOTE_NOT_FRESH', status: 'unavailable', explanation: 'Underlying quote must be no more than 60 seconds old.', observedValue: longReview.underlyingQuoteTimestamp, threshold: '60 seconds', policySource: 'server-pmcc-held-v1' });
+    }
+    // Held mode's own "ready to act" action is HELD_PMCC_REVIEW_ONLY, not
+    // NEW_PMCC_REVIEW_ALLOWED -- same gate Ian confirmed should still
+    // block a sell-to-open exactly like it blocks a new PMCC entry.
+    if (decision.action !== 'HELD_PMCC_REVIEW_ONLY' || !pair) return { decision, order: null };
+
+    const instrumentType = shortReview.instrumentType;
+    const response = await fetch(`${API_BASE}/accounts/${accountNumber}/orders${input.mode === 'dry-run' ? '/dry-run' : ''}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${context.accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' },
+      body: JSON.stringify({
+        'time-in-force': 'GTC', 'order-type': 'Limit', price: input.limitPrice.toFixed(2), 'price-effect': 'Credit',
+        legs: [{ 'instrument-type': instrumentType, symbol: input.shortOccSymbol, quantity: input.quantity, action: 'Sell to Open' }],
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`);
+    return { decision, order: body?.data ?? body };
+  } finally {
+    context.redis.disconnect();
+  }
+}
