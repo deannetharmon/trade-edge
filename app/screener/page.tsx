@@ -6408,8 +6408,6 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               <p className={`text-[8px] ${th.textFaint} mt-1`}>For Iron Condors, gates on the tighter of put/call side</p>
             </div>
 
-            {/* MIN IVR % -- I
-
             {/* MIN CREDIT RATIO % */}
             <div className="space-y-1.5 mt-4">
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN CREDIT RATIO %</p>
@@ -6446,7 +6444,9 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                   ))}
                 </div>
               </div>
-            </div>{/* VR-0001: previously absent entirely; the floor
+            </div>
+
+            {/* MIN IVR % -- IVR-0001: previously absent entirely; the floor
                 was silently whatever the (also-invisible) preset selection
                 happened to carry. Same explicit-field treatment as POP/OTM
                 above, and same 30% default the course preset used to
@@ -6626,6 +6626,7 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
                   ))}
                 </div>
               </div>
+            </div>
         <div className="px-4 py-3 space-y-3">
           <div>
             <p className={`text-[8px] ${th.textFaint} tracking-widest uppercase font-bold mb-2`}>① Volatility & Timing</p>
