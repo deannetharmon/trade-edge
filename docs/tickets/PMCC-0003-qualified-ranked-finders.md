@@ -6,7 +6,7 @@
 **Architecture / QA:** Quinn  
 **Implementation:** Dane  
 **Review facilitation:** Frank  
-**Status:** Approved implementation order  
+**Status:** Revised for final team re-review; implementation paused
 **Target branch:** `feature/pmcc-leaps-ranked-finders`
 
 ## 1. Outcome
@@ -119,6 +119,28 @@ Requirements:
 - Raw or theoretical annualized premium must not dominate Auto ranking.
 - Any annualized value is labeled theoretical and not presented as a forecast.
 
+### Cadence-specific delta policy V1
+
+Use absolute call delta. These are recommendation bands, evaluated only after
+the contract passes the global hard boundary.
+
+| Profile | Preferred short-call delta |
+|---|---:|
+| 7 Day | 0.15–0.22 |
+| 14 Day | 0.18–0.25 |
+| 30–45 Day | 0.20–0.30 |
+
+The global supported boundary is 0.10–0.35. A contract outside that boundary
+is excluded from V1 recommendations. A contract inside the global boundary
+but outside its cadence preference may remain qualified with a ranking
+penalty and explicit tradeoff. Auto applies the preference for the cadence
+that produced each candidate; it does not compare every candidate to one
+universal target delta.
+
+These values are `short-call-cadence-v1-shadow`. They must be tested on real
+candidate distributions before user-facing activation. Changing them later
+requires a policy-version change.
+
 ## 8. Earnings policy
 
 Replace the fixed “earnings within 35 days” behavior with expiration-relative, trading-session-aware policy:
@@ -133,6 +155,23 @@ Replace the fixed “earnings within 35 days” behavior with expiration-relativ
 If the earnings date is unconfirmed and its estimated window overlaps the short-call life plus the required buffer, return `WAIT` / `UNAVAILABLE`; do not fabricate certainty.
 
 Respect before-market and after-market event timestamps. Add early-assignment evidence for dividend-paying underlyings when short-call extrinsic value and ex-dividend timing make it relevant.
+
+### Earnings evidence states
+
+- **Confirmed:** the provider identifies an actual scheduled date/time and the
+  observation belongs to the current market snapshot.
+- **Estimated:** the provider labels the date as expected/estimated or supplies
+  a date without confirmation evidence.
+- **Unknown:** no usable future event date is available.
+- **Stale:** the event observation predates the current scan's permitted data
+  age or conflicts with another current provider observation.
+
+Only **Confirmed** evidence may produce an unqualified pass. Estimated evidence
+whose uncertainty window cannot be established, Unknown evidence for a stock
+that normally reports earnings, and Stale/conflicting evidence produce
+`WAIT` / `UNAVAILABLE` for a new short-call recommendation. Broad-market ETFs
+and indexes may record earnings as `NOT_APPLICABLE` under an explicit
+underlying-classification policy.
 
 ## 9. FIND LEAPS
 
@@ -154,6 +193,26 @@ Evaluate each new long-call candidate using:
 - PMCC-foundation suitability as a separate assessment
 
 Keep the long-call delta and duration preferences versioned. The current shipped defaults and the older `PMCC_SPECIFICATION.md` conflict; do not silently adopt the older 0.78–0.88 / 270–400 rule. V1 must preserve the currently supported broader universe while shadow output is reviewed. Any tightening is a later policy decision based on real result distributions.
+
+### LEAPS delta and duration policy V1
+
+| Dimension | Supported boundary | Primary recommendation band | Preferred target |
+|---|---:|---:|---:|
+| Absolute long-call delta | 0.65–0.90 | 0.70–0.90 | 0.75–0.85 |
+| DTE | 180–900 | 365–900 | 540–900 |
+
+The supported boundary preserves visibility into the current broader universe
+while extending the ceiling to include approximately two-year-plus contracts
+such as an 827-DTE expiration. Contracts outside the primary recommendation
+band remain inspectable but cannot receive a primary recommendation. The
+preferred target affects ranking, not structural eligibility.
+
+For a new PMCC, the long leg must fall inside the primary recommendation band.
+For a held long call, these new-entry bands are informational preferences and
+must not pretend the contract is being purchased again.
+
+This policy is `leaps-entry-v2-shadow` and requires shadow validation before
+activation.
 
 ### Outcomes
 
@@ -213,6 +272,35 @@ Calculate at minimum:
 - Capital allocation passes
 - Required observations are fresh and mutually consistent
 
+### Cushion policy V1
+
+The existing `net debit < strike width` test remains the structural floor. A
+new PMCC primary recommendation must additionally satisfy:
+
+`minimum recommendation cushion per share = max($1.00, 3% of net debit per share)`
+
+Where:
+
+- `cushion per share = strike width - net debit per share`
+- `cushion percentage = cushion per share / net debit per share * 100`
+
+A pair with positive cushion that does not reach this recommendation minimum
+is a near miss, not a qualified recommendation. This deliberately rejects
+examples such as a $0.19 cushion on an approximately $49.81 net debit.
+
+Ranking continues to reward additional cushion rather than treating the
+minimum as full marks. This policy is `pmcc-cushion-v1-shadow`; shadow evidence
+must report how many otherwise-valid pairs it excludes before activation.
+
+### Existing PMCC credit-floor resolution
+
+The existing short-credit-as-percentage-of-width control remains a
+user-adjustable post-qualification filter and comparison preference. It is not
+a mandatory safety gate and cannot upgrade an unqualified pair. Preserve the
+current choices and saved preference during migration. Canonical ranking uses
+short-call premium quality as one component without requiring the user to set
+a credit floor.
+
 Do not claim that width-minus-debit guarantees profit. Clearly explain early assignment, slippage, changing long-leg extrinsic value, and lifecycle effects.
 
 ### Outcomes
@@ -239,6 +327,16 @@ The Opportunity Universe may not create eligibility. The user may narrow verifie
 - A held long outside new-entry preferences may still support a safe short call; disclose the variance rather than pretending it is being bought again.
 - Ambiguous structures, adjusted contracts without supported deliverables, stale holdings, wrong-account contracts, insufficient quantity, or unresolved allocations fail closed.
 - The only permitted order proposal is sell-to-open short call against the verified foundation.
+
+The held long call must expire after the proposed short call. V1 classifies
+remaining runway as follows:
+
+- 90 or more calendar days beyond short expiration: preferred
+- 30–89 calendar days beyond short expiration: caution and ranking penalty
+- Fewer than 30 calendar days beyond short expiration: fail
+
+This is a short-call-entry safety policy, not a retroactive judgment about the
+original LEAPS purchase.
 
 ### Lifecycle
 
@@ -330,6 +428,23 @@ Show modeled combined value, remaining long-call value and extrinsic value, shor
 
 Scenario analysis is explanatory and cannot upgrade qualification.
 
+### Scenario valuation boundary
+
+Do not invent a theoretical option-pricing model in this ticket. Phase 1 may
+show deterministic structure facts and intrinsic-value floors, but it must not
+present a future LEAPS mark as though it were known.
+
+A modeled future option value requires a separately versioned valuation
+contract that declares, at minimum, pricing model, volatility assumption,
+interest-rate input, dividend input, valuation timestamp, and behavior when
+any input is unavailable. Until that contract is implemented and approved,
+show future LEAPS value as **Unavailable — valuation model not approved**.
+
+Unavailable scenario valuation is non-blocking for structural qualification;
+it blocks only claims that depend on the missing projection. Scenario-model
+implementation is a later gated phase and cannot delay the core qualified
+finder unless the team separately promotes it to a release requirement.
+
 ## 15. Accounting and campaign integrity
 
 - Original LEAPS acquisition cost is immutable.
@@ -353,6 +468,22 @@ Do not reuse one `requestedStrategy: 'pmcc'` value where doing so would allow a 
 Version or invalidate affected local/session caches. A mismatched or legacy record must be rejected with a concise rescan notice, not coerced into the new shape.
 
 Preserve old history records unless their identity is actually ambiguous; route ambiguous history to reconciliation.
+
+Use these canonical workflow identities:
+
+- `leaps`
+- `new-pmcc`
+- `leaps-short-call`
+
+The existing ambiguous `requestedStrategy: 'pmcc'` cache/session identity must
+not be silently mapped to either new workflow. Invalidate it for finder-session
+restore and present a rescan notice. This affects transient finder/session
+caches only; it must not delete PMCC campaign, Trade Log, position, or broker
+history.
+
+Introduce V2 cache keys/schemas for both PMCC workflows. Validation must reject
+wrong-workflow payloads even when their other fields happen to be structurally
+compatible.
 
 ## 17. Order review and revalidation
 
@@ -403,6 +534,17 @@ Add or update unit, integration, and UI tests for:
 - Existing new-PMCC two-leg order safety
 - Unrelated strategy and portfolio regressions
 
+Add explicit boundary tests for the shadow policies introduced by this
+revision:
+
+- 0.64 / 0.65 / 0.70 / 0.75 / 0.85 / 0.90 / 0.91 long delta
+- 179 / 180 / 364 / 365 / 539 / 540 / 900 / 901 long DTE
+- Every cadence delta and DTE boundary
+- Cushion immediately below, equal to, and above both `$1.00` and `3% of net debit`
+- Held-long runway of 29 / 30 / 89 / 90 days beyond short expiration
+- Confirmed, Estimated, Unknown, Stale, and `NOT_APPLICABLE` earnings evidence
+- Legacy `pmcc` session rejection and V2 cross-workflow cache rejection
+
 ## 19. Delivery sequence
 
 1. Record repository audit and data-availability findings.
@@ -420,6 +562,30 @@ Add or update unit, integration, and UI tests for:
 13. Enable order-review handoff only after all prior gates pass.
 
 No unattended execution is authorized.
+
+### Reviewable implementation packages
+
+Do not deliver this as one indivisible change. Use the following review gates:
+
+1. **Package A — contracts and policies:** workflow identities, cache schemas,
+   cadence, earnings, LEAPS, cushion, and ranking policy modules with unit
+   tests; no launcher activation.
+2. **Package B — held workflow preservation:** rename current held finder to
+   **LEAPS SHORT CALLS**, migrate its session identity, preserve short-only
+   order authority, and run regression tests.
+3. **Package C — new PMCC discovery:** add **FIND NEW PMCC**, complete-pair
+   search, qualification, exclusions, and two-leg review proposal behind a
+   disabled-by-default feature flag.
+4. **Package D — canonical ranking and shadow output:** consolidate legacy
+   scoring consumers, generate old/new comparison fixtures, and obtain Ian /
+   Quinn review.
+5. **Package E — recommendation UX:** primary recommendation cards,
+   explanations, cadence selection, no-result states, and Diane review.
+6. **Package F — final handoff:** submission-time revalidation, full regression
+   suite, build, and Paul acceptance before feature-flag activation.
+
+Scenario valuation beyond deterministic structure facts remains outside these
+packages until its separate model contract is approved.
 
 ## 20. Required implementation report
 
