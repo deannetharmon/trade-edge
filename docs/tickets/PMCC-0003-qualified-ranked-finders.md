@@ -6,7 +6,7 @@
 **Architecture / QA:** Quinn  
 **Implementation:** Dane  
 **Review facilitation:** Frank  
-**Status:** Revised for final team re-review; implementation paused
+**Status:** Package A authorized; Packages B–F remain gated
 **Target branch:** `feature/pmcc-leaps-ranked-finders`
 
 ## 1. Outcome
@@ -165,6 +165,8 @@ Respect before-market and after-market event timestamps. Add early-assignment ev
 - **Unknown:** no usable future event date is available.
 - **Stale:** the event observation predates the current scan's permitted data
   age or conflicts with another current provider observation.
+- **Not scheduled:** an authoritative, current observation explicitly reports
+  no scheduled earnings event inside the provider's declared coverage horizon.
 
 Only **Confirmed** evidence may produce an unqualified pass. Estimated evidence
 whose uncertainty window cannot be established, Unknown evidence for a stock
@@ -172,6 +174,10 @@ that normally reports earnings, and Stale/conflicting evidence produce
 `WAIT` / `UNAVAILABLE` for a new short-call recommendation. Broad-market ETFs
 and indexes may record earnings as `NOT_APPLICABLE` under an explicit
 underlying-classification policy.
+
+`NOT_SCHEDULED` may pass only when the observation also records the provider's
+coverage horizon and that horizon extends through short expiration plus the
+required buffer. A null date by itself is `UNKNOWN`, never `NOT_SCHEDULED`.
 
 ## 9. FIND LEAPS
 
@@ -616,3 +622,80 @@ Dane may resolve ordinary technical details within this contract. Stop and retur
 - Scope or rollout risk
 
 Otherwise proceed through implementation and validation without reopening settled product decisions.
+
+## 22. Final cross-functional review record
+
+**Review date:** 2026-09-11
+**Gate owner:** Frank
+
+### Ian — methodology
+
+Approved the shadow-policy values for implementation and measurement:
+
+- Cadence-specific delta bands
+- 180–900 supported LEAPS DTE with 365–900 primary recommendation band
+- 0.65–0.90 supported long delta with 0.75–0.85 preferred target
+- Recommendation cushion of `max($1.00, 3% of net debit per share)`
+- Credit floor as a user filter / ranking preference, not a safety gate
+- Expiration-relative earnings policy
+- Held-long runway classifications
+
+These are approved for versioned shadow evaluation. User-facing activation
+still requires the Package D evidence review specified above; Dane may not
+silently tune them from observed results.
+
+### Diane — experience
+
+Approved:
+
+- **FIND LEAPS**
+- **FIND NEW PMCC**
+- **LEAPS SHORT CALLS**
+- Expanded held-flow title and helper text
+- Three primary recommendation cards
+- Secondary standalone-LEAPS link when no new PMCC qualifies
+- Progressive disclosure of calculations and exclusions
+
+The secondary link must not visually imply that a standalone LEAPS satisfies a
+PMCC request.
+
+### Quinn — architecture and QA
+
+Approved the identities, invariants, cache invalidation, failure-state model,
+boundary matrix, and package gates. The earnings evidence taxonomy is resolved
+by distinguishing `NOT_SCHEDULED` from a null/`UNKNOWN` date and requiring an
+explicit provider coverage horizon before `NOT_SCHEDULED` can pass.
+
+Scenario valuation remains non-blocking and unavailable until a separately
+approved valuation contract exists. Mechanical structure facts may still be
+shown.
+
+### Dane — feasibility
+
+Confirmed Package A is feasible using pure, versioned modules and tests. The
+current `LauncherStrategyId`, scan-session schema, cache validators, PMCC DTE
+configuration, decision gates, scoring modules, and server trade-review
+criteria are known integration points.
+
+No UI activation, cache migration, broker-order change, or speculative pricing
+model is authorized in Package A. Data availability is represented explicitly
+in policy evidence rather than hidden behind defaults.
+
+### Paul — product acceptance
+
+Accepted the three-workflow scope, current naming, phased delivery, shadow-only
+status of new methodology, and separation of qualification from ranking.
+
+### Frank — gate disposition
+
+All objections required to begin the foundation are resolved. **Package A is
+authorized.** Packages B–F remain unauthorized until Package A returns:
+
+- Shared workflow and policy contracts
+- Unit and boundary tests
+- Cache-version design (without migration activation)
+- Data-availability report
+- No production launcher or order-path behavior change
+
+Frank will route the Package A report to Ian, Diane, Quinn, Dane, and Paul for
+review before opening Package B.
