@@ -160,24 +160,50 @@ Respect before-market and after-market event timestamps. Add early-assignment ev
 
 - **Confirmed:** the provider identifies an actual scheduled date/time and the
   observation belongs to the current market snapshot.
-- **Estimated:** the provider labels the date as expected/estimated or supplies
-  a date without confirmation evidence.
-- **Unknown:** no usable future event date is available.
+- **Pending / Estimated:** the issuer has not confirmed the event, but a current
+  sourced expected date or bounded date range is available. Preserve the source,
+  as-of timestamp, and the range rather than collapsing it to false precision.
+- **Unknown:** required acquisition attempts failed or no usable confirmed date,
+  estimated date, or bounded estimate could be established.
 - **Stale:** the event observation predates the current scan's permitted data
   age or conflicts with another current provider observation.
 - **Not scheduled:** an authoritative, current observation explicitly reports
   no scheduled earnings event inside the provider's declared coverage horizon.
 
-Only **Confirmed** evidence may produce an unqualified pass. Estimated evidence
-whose uncertainty window cannot be established, Unknown evidence for a stock
-that normally reports earnings, and Stale/conflicting evidence produce
-`WAIT` / `UNAVAILABLE` for a new short-call recommendation. Broad-market ETFs
-and indexes may record earnings as `NOT_APPLICABLE` under an explicit
-underlying-classification policy.
+Confirmed evidence is evaluated against the scheduled event. Pending / Estimated
+evidence is evaluated conservatively against the earliest date in its bounded
+range. An estimate whose uncertainty window cannot be established, Unknown
+evidence, and Stale/conflicting evidence produce `WAIT` / `UNAVAILABLE` for a
+new short-call recommendation. Broad-market ETFs and indexes may record earnings
+as `NOT_APPLICABLE` under an explicit underlying-classification policy.
 
 `NOT_SCHEDULED` may pass only when the observation also records the provider's
 coverage horizon and that horizon extends through short expiration plus the
 required buffer. A null date by itself is `UNKNOWN`, never `NOT_SCHEDULED`.
+
+### Earnings acquisition requirement
+
+For a company stock, earnings evidence is required on every new short-call
+evaluation and again at submission-time revalidation. A null date from the
+existing market-metrics provider is not a completed lookup.
+
+Use a deterministic acquisition cascade:
+
+1. Current confirmed issuer / investor-relations event evidence when available.
+2. Current confirmed broker or licensed market-data event evidence.
+3. Current sourced consensus estimate or bounded expected-date range.
+4. `UNKNOWN` only after the configured sources fail or conflict.
+
+Internet or search results may help locate evidence, but a search-result snippet
+or unsourced date cannot become canonical policy input. Store the underlying
+source, observed status, as-of timestamp, confirmation state, and coverage
+horizon or estimated range.
+
+The product must say **Earnings date pending — estimated [date/range]** when the
+issuer has not confirmed the date. It must not say earnings are unknown merely
+because confirmation is pending. If no usable evidence can be obtained, show a
+specific degraded-data reason and block the short-call recommendation rather
+than silently treating the event as absent.
 
 ## 9. FIND LEAPS
 
@@ -663,8 +689,10 @@ PMCC request.
 
 Approved the identities, invariants, cache invalidation, failure-state model,
 boundary matrix, and package gates. The earnings evidence taxonomy is resolved
-by distinguishing `NOT_SCHEDULED` from a null/`UNKNOWN` date and requiring an
-explicit provider coverage horizon before `NOT_SCHEDULED` can pass.
+by distinguishing Confirmed, Pending / Estimated, `NOT_SCHEDULED`, and
+null/`UNKNOWN` evidence. A bounded pending estimate uses its earliest possible
+date; `NOT_SCHEDULED` requires an explicit provider coverage horizon before it
+can pass.
 
 Scenario valuation remains non-blocking and unavailable until a separately
 approved valuation contract exists. Mechanical structure facts may still be
