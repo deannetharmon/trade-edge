@@ -6416,8 +6416,8 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                 <div className="flex items-center rounded border border-neutral-800 bg-neutral-900 px-3 py-1">
                   <input
                     type="number"
-                    value={params.minCreditRatio ?? 0}
-                    onChange={(e) => setParams({ ...params, minCreditRatio: Number(e.target.value) })}
+                    value={tCreditRatioMin}
+                    onChange={(e) => setTCreditRatioMin(Number(e.target.value))}
                     className="w-12 bg-transparent text-sm font-semibold text-white focus:outline-none"
                   />
                   <span className="text-xs text-neutral-500">%</span>
@@ -6433,9 +6433,9 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setParams({ ...params, minCreditRatio: opt.value })}
+                      onClick={() => setTCreditRatioMin(opt.value)}
                       className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${
-                        (params.minCreditRatio ?? 0) === opt.value
+                        tCreditRatioMin === opt.value
                           ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400"
                           : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
                       }`}
@@ -6590,8 +6590,8 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
                 <div className="flex items-center rounded border border-neutral-800 bg-neutral-900 px-3 py-1">
                   <input
                     type="number"
-                    value={params.minCreditRatio ?? 0}
-                    onChange={(e) => setParams({ ...params, minCreditRatio: Number(e.target.value) })}
+                    value={tCreditRatioMin}
+                    onChange={(e) => setTCreditRatioMin(Number(e.target.value))}
                     className="w-12 bg-transparent text-sm font-semibold text-white focus:outline-none"
                   />
                   <span className="text-xs text-neutral-500">%</span>
@@ -6607,9 +6607,9 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setParams({ ...params, minCreditRatio: opt.value })}
+                      onClick={() => setTCreditRatioMin(opt.value)}
                       className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${
-                        (params.minCreditRatio ?? 0) === opt.value
+                        tCreditRatioMin === opt.value
                           ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400"
                           : "border-neutral-800 bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
                       }`}
