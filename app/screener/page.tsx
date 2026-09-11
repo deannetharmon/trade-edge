@@ -97,6 +97,10 @@ import {
   MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
   CREDIT_RATIO_PRESETS, MIN_CREDIT_RATIO_LABEL, MIN_CREDIT_RATIO_HELPER_TEXT,
 } from '@/lib/screener/screenerResultOrdering';
+// SCAN-RATE-LIMIT-0001 (Ian/Paul-approved pilot, spreads scans only) --
+// see lib/screener/rateLimitedFetch.ts for why this is not wired into
+// ttFetch itself.
+import { createReadRateLimiter, withRetry } from '@/lib/screener/rateLimitedFetch';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
 import type {
@@ -9010,51 +9014,71 @@ export default function Home() {
       // Trend is still fetched for Rank mode (used for the trend-alignment
       // badge and momentum scoring) but never used to skip a ticker.
       const isRankMode = (modeOverride ?? screenMode) === 'rank';
-      for (let i = 0; i < loopSymbols.length; i++) {
-        const symbol = loopSymbols[i];
-        pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
-        updateScreenerJob({ progressCurrent: i + 1 });
-        const classification = await classifyUnderlying(symbol, token);
+
+      // SCAN-RATE-LIMIT-0001 -- fetch phase runs every symbol concurrently
+      // (rate-limited per actual read call, not per symbol), then a plain
+      // sequential fold phase applies session updates in original symbol
+      // order below. Splitting it this way means session's own
+      // read-current-value/reassign update pattern is never touched from
+      // more than one place at a time -- concurrent workers only ever
+      // return their outcome, they never mutate session directly.
+      type SpreadsWorkerOutcome =
+        | { kind: 'evaluated'; symbol: string; results: ScreenResult[]; reasonCode?: ScreenerReasonCode }
+        | { kind: 'failed'; symbol: string; reasonCode: ScreenerReasonCode };
+      const spreadsReadLimiter = createReadRateLimiter();
+      let completedCount = 0;
+      const runSpreadsSymbolWorker = async (symbol: string): Promise<SpreadsWorkerOutcome> => {
+        const classification = await spreadsReadLimiter.schedule(() => withRetry(() => classifyUnderlying(symbol, token)));
         const isEtfTicker = classification === 'index' || classification === 'etf';
         let trendResult: TrendResult | undefined;
-        try { trendResult = await getTrend(symbol, isEtfTicker); } catch (e) { console.warn(e); }
+        try { trendResult = await spreadsReadLimiter.schedule(() => withRetry(() => getTrend(symbol, isEtfTicker))); } catch (e) { console.warn(e); }
 
-        // NO_TRADE (or trend fetch failure) means the chart didn't qualify —
-        // skip this ticker entirely in Filter mode. Rank mode explores
-        // regardless; a NO_TRADE chart can still have a real credit spread,
-        // and score (not the trend gate) decides where it lands. This is a
-        // genuine evaluated-with-zero-candidates outcome (trend WAS
-        // checked), not a scope exclusion or a failure.
+        let outcome: SpreadsWorkerOutcome;
         if (!isRankMode && (!trendResult || trendResult.strategy === 'NO_TRADE')) {
-          session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
-          continue;
-        }
-
-        try {
-          const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-          const rankDteWindow = isRankMode ? { min: RANK_SCAN_DTE_MIN, max: RANK_SCAN_DTE_MAX } : undefined;
-          const [chainData, price] = await Promise.all([
-            getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow),
-            getQuote(symbol, token),
-          ]);
-          if (isRankMode) {
-            scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
-            const candidates = exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel);
-            session = candidates.length > 0
-              ? recordSymbolEvaluated(session, symbol, candidates)
-              : recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
-          } else if (trendResult) {
-            const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
-            scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
-            const result = runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel);
-            session = recordSymbolEvaluated(session, symbol, [result]);
+          outcome = { kind: 'evaluated', symbol, results: [], reasonCode: 'NO_QUALIFYING_CANDIDATE' };
+        } else {
+          try {
+            const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
+            const rankDteWindow = isRankMode ? { min: RANK_SCAN_DTE_MIN, max: RANK_SCAN_DTE_MAX } : undefined;
+            const [chainData, price] = await Promise.all([
+              spreadsReadLimiter.schedule(() => withRetry(() => getChain(symbol, token, getChainRules(isEtfTicker), rankDteWindow))),
+              spreadsReadLimiter.schedule(() => withRetry(() => getQuote(symbol, token))),
+            ]);
+            if (isRankMode) {
+              scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
+              const candidates = exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel);
+              outcome = candidates.length > 0
+                ? { kind: 'evaluated', symbol, results: candidates }
+                : { kind: 'evaluated', symbol, results: [], reasonCode: 'NO_QUALIFYING_CANDIDATE' };
+            } else if (trendResult) {
+              const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
+              scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
+              const result = runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel);
+              outcome = { kind: 'evaluated', symbol, results: [result] };
+            } else {
+              outcome = { kind: 'evaluated', symbol, results: [] };
+            }
+          } catch (e: any) {
+            // Real acquisition failure — recorded as 'failed' with an explicit
+            // reason, never fabricated into a synthetic ScreenResult that
+            // would silently sit alongside genuine evaluations.
+            outcome = { kind: 'failed', symbol, reasonCode: 'MARKET_DATA_REQUEST_FAILED' };
           }
-        } catch (e: any) {
-          // Real acquisition failure — recorded as 'failed' with an explicit
-          // reason, never fabricated into a synthetic ScreenResult that
-          // would silently sit alongside genuine evaluations.
-          session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
+        // Progress reflects real completions, not dispatch order -- with
+        // concurrent workers, dispatch happens in one synchronous burst,
+        // so updating status/progress at dispatch time would make the bar
+        // jump to 100% instantly while work is still actually in flight.
+        completedCount += 1;
+        pushStatus(`Scanning ${symbol} (${completedCount}/${loopSymbols.length})...`);
+        updateScreenerJob({ progressCurrent: completedCount });
+        return outcome;
+      };
+      const spreadsOutcomes = await Promise.all(loopSymbols.map(symbol => runSpreadsSymbolWorker(symbol)));
+      for (const outcome of spreadsOutcomes) {
+        session = outcome.kind === 'failed'
+          ? recordSymbolFailed(session, outcome.symbol, outcome.reasonCode)
+          : recordSymbolEvaluated(session, outcome.symbol, outcome.results, outcome.reasonCode ? { reasonCode: outcome.reasonCode } : undefined);
       }
 
       session = completeSession(session);
