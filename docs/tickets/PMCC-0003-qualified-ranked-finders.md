@@ -6,7 +6,7 @@
 **Architecture / QA:** Quinn  
 **Implementation:** Dane  
 **Review facilitation:** Frank  
-**Status:** Package A implemented and returned for review; Packages B–F remain gated
+**Status:** Package A correction ordered in PMCC-0003A; Packages B–F remain gated
 **Target branch:** `feature/pmcc-leaps-ranked-finders`
 
 ## 1. Outcome
@@ -727,3 +727,11 @@ authorized.** Packages B–F remain unauthorized until Package A returns:
 
 Frank will route the Package A report to Ian, Diane, Quinn, Dane, and Paul for
 review before opening Package B.
+
+## 23. Package A review disposition
+
+The 2026-09-11 cross-functional review approved the Package A direction with
+conditions. Frank held Package B pending the contained corrections specified in
+`docs/tickets/PMCC-0003A-package-a-correction-order.md`. That addendum is the
+authoritative work order for closing Package A. It does not authorize Package B
+or any user-visible activation.
