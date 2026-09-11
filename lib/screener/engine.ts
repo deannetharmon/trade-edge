@@ -13,7 +13,10 @@ export async function executeScreenerSearch<T>(
 
   for (const symbol of underlyingSymbols) {
     try {
-      const rawChain = chainMap.get(symbol) || [];
+      const entry = chainMap.get(symbol);
+      const rawChain = entry?.contracts || [];
+      const metricsData = entry?.metrics;
+
       if (!rawChain || rawChain.length === 0) continue;
 
       const sanitizedChain = rawChain.filter((contract) => {
@@ -39,6 +42,10 @@ export async function executeScreenerSearch<T>(
       const matches = evaluateStrategy(sanitizedChain, params);
 
       for (const match of matches) {
+        if (metricsData?.trendBias) {
+          (match as any).trendBias = metricsData.trendBias;
+        }
+
         const { score, pop, liquidityScore } = scoreCandidate(match);
         const sampleMid = sanitizedChain[0].mid || (sanitizedChain[0].bid + sanitizedChain[0].ask) / 2;
         const sampleWidth = sanitizedChain[0].ask - sanitizedChain[0].bid;
@@ -51,6 +58,7 @@ export async function executeScreenerSearch<T>(
             spreadWidthPct: sampleMid > 0 ? sampleWidth / sampleMid : 0,
             liquidityScore,
             pop,
+            trendBias: metricsData?.trendBias,
           },
         });
       }

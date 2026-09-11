@@ -1,14 +1,22 @@
-import { OptionContract } from "@/types/screener";
+import { OptionContract, UnderlyingMetrics } from "@/types/screener";
+import { classifyTrendBias } from "@/lib/screener/trend";
 
 const CACHE_TTL_MS = 60 * 1000;
-const chainCache = new Map<string, { timestamp: number; data: OptionContract[] }>();
 
-export async function fetchOptionChainFromProvider(symbol: string): Promise<OptionContract[]> {
+interface CachedSymbolData {
+  timestamp: number;
+  contracts: OptionContract[];
+  metrics?: UnderlyingMetrics;
+}
+
+const chainCache = new Map<string, CachedSymbolData>();
+
+export async function fetchOptionChainFromProvider(symbol: string): Promise<{ contracts: OptionContract[]; metrics?: UnderlyingMetrics }> {
   const now = Date.now();
   const cached = chainCache.get(symbol);
 
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
+    return { contracts: cached.contracts, metrics: cached.metrics };
   }
 
   try {
@@ -22,11 +30,12 @@ export async function fetchOptionChainFromProvider(symbol: string): Promise<Opti
 
     if (!response.ok) {
       console.error(`[Provider] HTTP ${response.status} fetching chain for ${symbol}`);
-      return cached?.data || [];
+      return { contracts: cached?.contracts || [] };
     }
 
     const payload = await response.json();
     const rawItems: any[] = payload.data?.items || payload.items || [];
+    const underlyingPrice = Number(payload.data?.underlying_price || payload.underlying_price || rawItems[0]?.underlying_price || 0);
 
     const contracts: OptionContract[] = rawItems.map((item) => {
       const bid = Number(item.bid || item.bid_price || 0);
@@ -51,11 +60,33 @@ export async function fetchOptionChainFromProvider(symbol: string): Promise<Opti
       };
     });
 
-    chainCache.set(symbol, { timestamp: now, data: contracts });
-    return contracts;
+    const rsi = Number(payload.data?.rsi || payload.rsi || 50);
+    const sma20 = Number(payload.data?.sma20 || underlyingPrice * 0.99);
+    const sma50 = Number(payload.data?.sma50 || underlyingPrice * 0.97);
+    const sma200 = Number(payload.data?.sma200 || underlyingPrice * 0.92);
+
+    const trendBias = classifyTrendBias({
+      price: underlyingPrice,
+      sma20,
+      sma50,
+      sma200,
+      rsi,
+    });
+
+    const metrics: UnderlyingMetrics = {
+      price: underlyingPrice,
+      sma20,
+      sma50,
+      sma200,
+      rsi,
+      trendBias,
+    };
+
+    chainCache.set(symbol, { timestamp: now, contracts, metrics });
+    return { contracts, metrics };
   } catch (error) {
     console.error(`[Provider] Error fetching chain for ${symbol}:`, error);
-    return cached?.data || [];
+    return { contracts: cached?.contracts || [] };
   }
 }
 
@@ -63,21 +94,21 @@ export async function fetchOptionChainsConcurrently(
   symbols: string[],
   concurrencyLimit = 3,
   delayBetweenBatchesMs = 150
-): Promise<Map<string, OptionContract[]>> {
-  const results = new Map<string, OptionContract[]>();
+): Promise<Map<string, { contracts: OptionContract[]; metrics?: UnderlyingMetrics }>> {
+  const results = new Map<string, { contracts: OptionContract[]; metrics?: UnderlyingMetrics }>();
 
   for (let i = 0; i < symbols.length; i += concurrencyLimit) {
     const chunk = symbols.slice(i, i + concurrencyLimit);
 
     const chunkResults = await Promise.all(
       chunk.map(async (symbol) => {
-        const chain = await fetchOptionChainFromProvider(symbol);
-        return { symbol, chain };
+        const data = await fetchOptionChainFromProvider(symbol);
+        return { symbol, data };
       })
     );
 
-    for (const { symbol, chain } of chunkResults) {
-      results.set(symbol, chain);
+    for (const { symbol, data } of chunkResults) {
+      results.set(symbol, data);
     }
 
     if (i + concurrencyLimit < symbols.length && delayBetweenBatchesMs > 0) {

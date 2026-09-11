@@ -1,4 +1,4 @@
-import { OptionContract, ScreenerParams } from "@/types/screener";
+import { OptionContract, ScreenerParams, TrendBias } from "@/types/screener";
 
 export interface CreditSpreadCandidate {
   shortLeg: OptionContract;
@@ -8,6 +8,7 @@ export interface CreditSpreadCandidate {
   maxRisk: number;
   breakEven: number;
   returnOnRisk: number;
+  trendBias?: TrendBias;
 }
 
 export function evaluateCreditSpread(contracts: OptionContract[], params: ScreenerParams): CreditSpreadCandidate[] {
@@ -76,7 +77,19 @@ export function scoreCreditSpread(candidate: CreditSpreadCandidate): { score: nu
   const liquidityScore = Math.max(0, Math.min(100, Math.round((1 - avgSpreadPct) * 100)));
   const rorScore = Math.min(100, candidate.returnOnRisk * 2.5);
 
-  const compositeScore = Math.round((pop * 45) + (liquidityScore * 0.25) + (rorScore * 0.30));
+  let compositeScore = Math.round((pop * 45) + (liquidityScore * 0.25) + (rorScore * 0.30));
+
+  if (candidate.trendBias) {
+    if (candidate.type === 'put') {
+      if (candidate.trendBias === 'STRONG_BULLISH') compositeScore += 10;
+      else if (candidate.trendBias === 'WEAK_BULLISH') compositeScore += 5;
+      else if (candidate.trendBias === 'STRONG_BEARISH') compositeScore -= 20;
+    } else if (candidate.type === 'call') {
+      if (candidate.trendBias === 'STRONG_BEARISH') compositeScore += 10;
+      else if (candidate.trendBias === 'WEAK_BEARISH') compositeScore += 5;
+      else if (candidate.trendBias === 'STRONG_BULLISH') compositeScore -= 20;
+    }
+  }
 
   return {
     score: Math.max(0, Math.min(100, compositeScore)),

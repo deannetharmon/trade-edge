@@ -1,3 +1,15 @@
+export type TrendBias = 'STRONG_BULLISH' | 'WEAK_BULLISH' | 'SIDEWAYS' | 'WEAK_BEARISH' | 'STRONG_BEARISH';
+
+export interface UnderlyingMetrics {
+  price: number;
+  sma20: number;
+  sma50: number;
+  sma200: number;
+  rsi: number;
+  adx?: number;
+  trendBias: TrendBias;
+}
+
 export interface OptionContract {
   symbol: string;
   strike: number;
@@ -23,6 +35,7 @@ export interface ScreenerParams {
   maxDTE: number;
   maxSpreadWidthPct: number;
   requireGreeks: boolean;
+  trendAlignedOnly?: boolean;
 }
 
 export interface CandidateResult<T> {
@@ -33,6 +46,7 @@ export interface CandidateResult<T> {
     spreadWidthPct: number;
     liquidityScore: number;
     pop: number;
+    trendBias?: TrendBias;
   };
 }
 
