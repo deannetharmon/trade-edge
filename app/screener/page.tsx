@@ -855,7 +855,7 @@ const PMCC_LONG_DTE_SWEET_MAX = 540;
 
 
 const RULE_PRESETS = [
-  { key: 'course',    label: 'Course',     desc: 'Exact course rules',             color: 'ac-btn bg-blue-600/10',        rules: { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 } },
+  { key: course,    label: 'Course',     desc: 'Exact course rules',             color: 'ac-btn bg-blue-600/10',        rules: { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 } },
   { key: 'relaxed',   label: 'Relaxed',    desc: 'Wider net, still disciplined',   color: 'border-emerald-600 text-emerald-400 bg-emerald-600/10', rules: { IVR_MIN: 25, OI_MIN: 300, BID_ASK_MAX: 0.15, CREDIT_RATIO_MIN: 0.28, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 25 } },
   { key: 'lowvol',    label: 'Low Vol',    desc: 'Crushed IV environments',        color: 'border-yellow-600 text-yellow-400 bg-yellow-600/10',   rules: { IVR_MIN: 20, OI_MIN: 200, BID_ASK_MAX: 0.20, CREDIT_RATIO_MIN: 0.22, ROC_MIN_SPREAD: 12, ROC_MIN_IC: 20 } },
   { key: 'strict',    label: 'Strict',     desc: 'A+ setups only',                 color: 'border-red-600 text-red-400 bg-red-600/10',            rules: { IVR_MIN: 40, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.35, ROC_MIN_SPREAD: 25, ROC_MIN_IC: 35 } },
@@ -6224,7 +6224,7 @@ function SectionHeader({ label, th }: { label: string; th: typeof THEMES[Theme] 
 // ── Run Mode Modal ─────────────────────────────────────────────────────────
 const FILTER_PRESETS = [
   { key: 'strict',    label: 'Strict',      color: 'border-red-500 text-red-400',         desc: 'Tightest rules — high conviction only' },
-  { key: 'course',   label: 'Course',      color: 'ac-btn',        desc: 'Baseline rules — balanced approach' },
+  { key: course,   label: 'Course',      color: 'ac-btn',        desc: 'Baseline rules — balanced approach' },
   { key: 'relaxed',  label: 'Relaxed',     color: 'border-emerald-500 text-emerald-400',  desc: 'Looser rules — more opportunities' },
   { key: 'lowvol',   label: 'Low Vol',     color: 'border-yellow-500 text-yellow-400',    desc: 'Adapted for low IVR environments' },
   { key: 'shortterm',   label: 'Short Term',   color: 'border-orange-500 text-orange-400',  desc: '7–14 DTE — very active daily management' },
@@ -6246,14 +6246,14 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode);
-  const [preset, setPreset] = useState(lastPreset || 'course');
+  const [preset, setPreset] = useState(lastPreset || course);
   const [tDteMin, setTDteMin] = useState(lastTargetedDteMin);
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
   const [tCreditRatioMin, setTCreditRatioMin] = useState<number>(0);
   const [tIvrMin, setTIvrMin] = useState(lastTargetedIvrMin);
-  const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
+  const [tPreset, setTPreset] = useState(lastTargetedPreset || course);
 
   return (
     <ScanModalShell
@@ -6449,7 +6449,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
             </div>VR-0001: previously absent entirely; the floor
                 was silently whatever the (also-invisible) preset selection
                 happened to carry. Same explicit-field treatment as POP/OTM
-                above, and same 30% default the 'course' preset used to
+                above, and same 30% default the course preset used to
                 supply silently. */}
             <div>
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN IVR %</p>
@@ -6556,7 +6556,7 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
         <RangeIndicator
           value={edited[key] as number}
           strict={(RULE_PRESETS.find(p => p.key === 'strict')?.rules as any)?.[key]}
-          course={(RULE_PRESETS.find(p => p.key === 'course')?.rules as any)?.[key]}
+          course={(RULE_PRESETS.find(p => p.key === course)?.rules as any)?.[key]}
           relaxed={(RULE_PRESETS.find(p => p.key === 'relaxed')?.rules as any)?.[key]}
           lowvol={(RULE_PRESETS.find(p => p.key === 'lowvol')?.rules as any)?.[key]}
           fmt={(v) => String(v)}
@@ -6807,7 +6807,7 @@ function BestOpportunityFinder({
     shortterm: 'border-orange-500 text-orange-400',
     intermediate: 'border-amber-500 text-amber-400',
   };
-  const COURSE_RULES = RULE_PRESETS.find(p => p.key === 'course')!.rules;
+  const COURSE_RULES = RULE_PRESETS.find(p => p.key === course)!.rules;
   const levels = RULE_PRESETS.map(p => ({
     presetKey: p.key,
     presetLabel: p.label,
@@ -8544,7 +8544,7 @@ export default function Home() {
   // `etfRules`, though nothing in runTargetedScan actually enforced
   // rules.IVR_MIN as a hard reject; it was carried but unused. Defaults to
   // 0 ("Any"), matching every other filter's default in this same modal --
-  // NOT the 'course' preset's 30%, specifically so exposing this control
+  // NOT the course preset's 30%, specifically so exposing this control
   // doesn't silently start rejecting symbols whose IVR is temporarily
   // unavailable (metricsMap[symbol]?.ivRank ?? -1) the moment a user (or an
   // existing scan) hits this code path without deliberately opting in.
@@ -8558,7 +8558,7 @@ export default function Home() {
   // canonical score/ranking and never changes the scan request or filters.
   const [cspTargetedReturnSort, setCspTargetedReturnSort] = useState<'desc' | 'asc' | null>(null);
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
-  const [targetedPreset, setTargetedPreset] = useState<string>('course');
+  const [targetedPreset, setTargetedPreset] = useState<string>(course);
   const targetedCancelRef = useRef<boolean>(false);
   const [existingPositions, setExistingPositions] = useState<ExistingPosition[]>([]);
   useEffect(() => {
@@ -10765,7 +10765,7 @@ export default function Home() {
                 <div className="flex gap-1.5 flex-wrap">
                   {[
                     { key: 'strict', label: 'Strict', rules: { IVR_MIN: 40, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.35, ROC_MIN_SPREAD: 25, ROC_MIN_IC: 35 } },
-                    { key: 'course', label: 'Course', rules: { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 } },
+                    { key: course, label: 'Course', rules: { IVR_MIN: 30, OI_MIN: 500, BID_ASK_MAX: 0.10, CREDIT_RATIO_MIN: 0.33, ROC_MIN_SPREAD: 20, ROC_MIN_IC: 30 } },
                     { key: 'relaxed', label: 'Relaxed', rules: { IVR_MIN: 25, OI_MIN: 300, BID_ASK_MAX: 0.15, CREDIT_RATIO_MIN: 0.28, ROC_MIN_SPREAD: 15, ROC_MIN_IC: 25 } },
                     { key: 'lowvol', label: 'Low Vol', rules: { IVR_MIN: 20, OI_MIN: 200, BID_ASK_MAX: 0.20, CREDIT_RATIO_MIN: 0.22, ROC_MIN_SPREAD: 12, ROC_MIN_IC: 20 } },
                   ].map(p => {
