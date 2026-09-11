@@ -5085,17 +5085,46 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         <span>Show quote and pricing detail</span><span>{showQuoteDetail ? '▴' : '▾'}</span>
       </button>
       {showQuoteDetail && <div className={`border-t ${th.border} pt-3 space-y-3`}>
-        <div><b>{heldLong ? 'Held long OCC' : 'Long OCC'}:</b> {pair.longLeg.occSymbol}{heldLong && <><br/>Active account {pair.heldLongLeg?.accountNumber ?? '—'} · Position {pair.heldLongLeg?.positionKey ?? '—'} · Held quantity {pair.heldLongLeg?.quantity ?? '—'}</>}<br/>{quoteLine(pair.longLeg)}<br/>Quote {pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.longLeg)} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</div>
-        <div><b>Short OCC:</b> {pair.shortLeg.occSymbol}<br/>{quoteLine(pair.shortLeg)}<br/>Quote {pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · {age(pair.shortLeg)} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</div>
-        {metrics && <div className="space-y-1">
-          <p>Net debit {money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract · Strike width {money(metrics.strikeWidth)}</p>
-          <p>Natural price: long ask {money(pair.longLeg.quote.ask)} minus short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}</p>
-          <p>Long intrinsic {money(metrics.longIntrinsicPerShare)} · long extrinsic {money(metrics.longExtrinsicPerShare)}</p>
-          <p>Short credit / net debit {metrics.shortCreditToNetDebitPct.toFixed(1)}% · short credit / long extrinsic {metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</p>
-          <p>Width minus debit: {money(metrics.strikeWidth)} − {money(metrics.netDebitPerShare)} = {money(metrics.widthMinusDebitPerShare)}. This is structure economics, not maximum profit.</p>
-          <p>Net delta ideal range: {(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}, default scan criteria.</p>
-          <p>Total premium {totalPremium == null ? '—' : money(totalPremium)}, assumes level rolls. Profit {profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)} if closed today at current price.</p>
-        </div>}
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className={`rounded-lg border ${th.border} p-3`}>
+            <p className="text-xs font-bold mb-1">{heldLong ? 'Held long' : 'Long'} · {pair.longLeg.occSymbol}</p>
+            {heldLong && <p className={`text-[10px] ${th.textMuted} mb-2`}>Account {pair.heldLongLeg?.accountNumber ?? '—'} · Position {pair.heldLongLeg?.positionKey ?? '—'} · Qty {pair.heldLongLeg?.quantity ?? '—'}</p>}
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between"><span className={th.textFaint}>Bid / Ask</span><span>{money(pair.longLeg.quote.bid)} / {money(pair.longLeg.quote.ask)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Mid / Width</span><span>{money(pair.longLeg.quote.midpoint)} / {money(pair.longLeg.quote.width)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Spread</span><span>{pair.longLeg.quote.spreadPct?.toFixed(1) ?? '—'}%</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Quote age</span><span>{age(pair.longLeg)}</span></div>
+            </div>
+            <p className={`text-[9px] ${th.textFaint} mt-2`}>{pair.longLeg.quote.quoteTimestamp ?? 'timestamp missing'} · delayed {String(pair.longLeg.quote.delayed)} · readiness input {String(pair.longLeg.quote.readyInput)}</p>
+          </div>
+          <div className={`rounded-lg border ${th.border} p-3`}>
+            <p className="text-xs font-bold mb-1">Short · {pair.shortLeg.occSymbol}</p>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between"><span className={th.textFaint}>Bid / Ask</span><span>{money(pair.shortLeg.quote.bid)} / {money(pair.shortLeg.quote.ask)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Mid / Width</span><span>{money(pair.shortLeg.quote.midpoint)} / {money(pair.shortLeg.quote.width)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Spread</span><span>{pair.shortLeg.quote.spreadPct?.toFixed(1) ?? '—'}%</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Quote age</span><span>{age(pair.shortLeg)}</span></div>
+            </div>
+            <p className={`text-[9px] ${th.textFaint} mt-2`}>{pair.shortLeg.quote.quoteTimestamp ?? 'timestamp missing'} · delayed {String(pair.shortLeg.quote.delayed)} · readiness input {String(pair.shortLeg.quote.readyInput)}</p>
+          </div>
+        </div>
+        {metrics && (
+          <div className={`rounded-lg border ${th.border} p-3`}>
+            <p className="text-xs font-bold mb-2">Structure economics</p>
+            <div className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+              <div className="flex justify-between"><span className={th.textFaint}>Net debit</span><span>{money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Strike width</span><span>{money(metrics.strikeWidth)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Long intrinsic / extrinsic</span><span>{money(metrics.longIntrinsicPerShare)} / {money(metrics.longExtrinsicPerShare)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Width − debit</span><span>{money(metrics.widthMinusDebitPerShare)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Credit / net debit</span><span>{metrics.shortCreditToNetDebitPct.toFixed(1)}%</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Credit / long extrinsic</span><span>{metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Net delta ideal range</span><span>{(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Total premium (level rolls)</span><span>{totalPremium == null ? '—' : money(totalPremium)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>Profit if closed today</span><span>{profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)}</span></div>
+            </div>
+            <p className={`text-[9px] ${th.textFaint} mt-2`}>Natural price: long ask {money(pair.longLeg.quote.ask)} − short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}. Width−debit is structure economics, not maximum profit. Total premium/profit assume level rolls; delta range reflects default scan criteria.</p>
+          </div>
+        )}
       </div>}
 
       {score && (
