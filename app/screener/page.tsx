@@ -7649,6 +7649,12 @@ function TargetedScanResultsPanel({
   // above -- TargetedScanEntry already carries `ivr` (unlike the other
   // three, this floor was missing entirely, not just under-exposed).
   const [activeIvrMin, setActiveIvrMin]         = useState<number>(0);
+  // TARGETED-OI-0001 -- Any/100/250/500, matching every other OI control
+  // in this app (Put OI, Call OI, Leg OI). Post-filter: entries already
+  // carry a real SpreadCandidate (e.candidate) with real leg OI once the
+  // scan has run, same shape extractOiLegsFromSpreadCandidate already
+  // reads for every other panel.
+  const [activeOiMin, setActiveOiMin]           = useState<number>(0);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
   const [activeSort, setActiveSort]             = useState(sortBy);
@@ -7665,6 +7671,7 @@ function TargetedScanResultsPanel({
     setActiveOtmMin(0);
     setActiveCreditRatioMin(0);
     setActiveIvrMin(0);
+    setActiveOiMin(0);
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
@@ -7699,6 +7706,10 @@ function TargetedScanResultsPanel({
   if (activeCreditRatioMin > 0) pool = pool.filter(e => ((e.candidate.creditRatio ?? 0) * 100) >= activeCreditRatioMin);
   // 2d. IVR floor
   if (activeIvrMin > 0) pool = pool.filter(e => (e.ivr ?? -1) >= activeIvrMin);
+  // 2e. OI floor
+  if (activeOiMin > 0) pool = pool.filter(e =>
+    evaluateOiEligibility(extractOiLegsFromSpreadCandidate(e.strategy, e.candidate), activeOiMin).eligible,
+  );
   // 3. strategy filter
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
@@ -7818,6 +7829,20 @@ function TargetedScanResultsPanel({
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
                 {v === 0 ? 'Any' : `${v}%`}
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>Leg OI ≥</span>
+            {[0, 100, 250, 500].map(v => (
+              <button key={v} onClick={() => setActiveOiMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeOiMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : v}
               </button>
             ))}
           </div>
