@@ -1,10 +1,10 @@
-import { OptionContract, ScreenerParams, CandidateResult } from "@/types/screener";
+import { OptionContract, ScreenerParams, CandidateResult, UnderlyingMetrics } from "@/types/screener";
 import { fetchOptionChainsConcurrently } from "@/lib/screener/provider";
 
 export async function executeScreenerSearch<T>(
   underlyingSymbols: string[],
   params: ScreenerParams,
-  _fetchChainData: (symbol: string) => Promise<OptionContract[]>,
+  _fetchChainData: ((symbol: string) => Promise<{ contracts: OptionContract[]; metrics?: UnderlyingMetrics }>) | ((symbol: string) => Promise<OptionContract[]>) | unknown,
   evaluateStrategy: (contracts: OptionContract[], params: ScreenerParams) => T[],
   scoreCandidate: (candidate: T) => { score: number; pop: number; liquidityScore: number }
 ): Promise<CandidateResult<T>[]> {
