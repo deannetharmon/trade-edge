@@ -7026,6 +7026,7 @@ async function runTargetedScan(
     Array.from(new Set(symbols)).map(symbol => ({ symbol, primary: 'IC' as const }));
   const allSymbols = Array.from(new Set(strategyMap.map(e => e.symbol)));
 
+  console.log('[TARGETED-DEBUG] runTargetedScan invoked', { at: Date.now(), symbolCount: allSymbols.length });
   if (allSymbols.length === 0) { setError('No active tickers in watchlist.'); return; }
   setError(''); setLoading(true); setTargetedResults([]); setTargetedResultsCachedAt(null);
   idbDel(IDB_TARGETED_RESULTS_KEY);
@@ -7074,6 +7075,7 @@ async function runTargetedScan(
 
     for (let i = 0; i < loopSymbols.length; i++) {
       if (cancelRef.current) {
+        console.log('[TARGETED-DEBUG] cancellation detected', { at: Date.now(), symbolIndex: i, totalSymbols: loopSymbols.length, entriesSoFar: entries.length });
         pushStatus(`Stopped — ${entries.length} results loaded`);
         wasCancelled = true;
         break;
@@ -7332,10 +7334,13 @@ async function runTargetedScan(
     entries.sort((a, b) => b.score - a.score);
     session = wasCancelled ? stopSession(session, 'CANCELLED') : completeSession(session);
     const finalSession = session;
+    console.log('[TARGETED-DEBUG] about to commit', { at: Date.now(), wasCancelled, finalEntryCount: entries.length, sessionId: finalSession.sessionId, sessionStatus: finalSession.status });
     const committed = commitSession(finalSession, () => {
+      console.log('[TARGETED-DEBUG] commit callback fired -- setTargetedResults is running now', { at: Date.now(), entryCount: entries.length });
       setTargetedResults(entries);
       const cacheTs = Date.now();
       setTargetedResultsCachedAt(cacheTs);
+      console.log('[TARGETED-DEBUG] setTargetedResults + cache write done', { at: Date.now() });
       // SCREENER-RESULTS-0001 final corrective — tagged with the owning
       // session's sessionId, same rationale as rawScanCache above: on
       // restore, a valid canonical Targeted session must not be paired with
