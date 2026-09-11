@@ -110,6 +110,7 @@ export type ScreenerReasonCode =
   | 'UNSUPPORTED_CANDIDATE_STRUCTURE'
   | 'MARKET_DATA_REQUEST_FAILED'
   | 'EXCLUDED_BY_SCAN_SCOPE'
+  | 'EXCLUDED_HELD_POSITION'
   | 'CC_NO_CAPACITY'
   | 'CC_NO_SHARES_OWNED'
   | 'CC_FULLY_COVERED'
@@ -128,6 +129,7 @@ export const REASON_CODE_LABELS: Record<ScreenerReasonCode, string> = {
   UNSUPPORTED_CANDIDATE_STRUCTURE: 'Unsupported candidate structure',
   MARKET_DATA_REQUEST_FAILED: 'Market-data request failed',
   EXCLUDED_BY_SCAN_SCOPE: 'Excluded by the requested scan scope',
+  EXCLUDED_HELD_POSITION: 'Excluded — you already hold a position in this ticker',
   CC_NO_CAPACITY: 'No available covered-call capacity',
   CC_NO_SHARES_OWNED: 'No shares owned for this symbol',
   CC_FULLY_COVERED: 'Fully covered by existing short calls or working orders',
@@ -186,6 +188,7 @@ const STRATEGY_ALLOWED_MODES: Record<ScreenerRequestedStrategy, ReadonlySet<Scre
 // never an eligibility decision made before any attempt was made.
 const ALLOWED_SCOPE_EXCLUSION_REASON_CODES: ReadonlySet<ScreenerReasonCode> = new Set<ScreenerReasonCode>([
   'EXCLUDED_BY_SCAN_SCOPE',
+  'EXCLUDED_HELD_POSITION',
   'CC_NO_CAPACITY',
   'CC_NO_SHARES_OWNED',
   'CC_FULLY_COVERED',

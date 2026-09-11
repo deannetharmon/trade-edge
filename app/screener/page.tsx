@@ -7006,7 +7006,7 @@ async function runTargetedScan(
   // pure transition functions themselves (recordSymbolEvaluated, etc.) are
   // plain module-level imports and are called directly below, same as any
   // other caller in this file.
-  beginSession: (scope: ScreenerScanScope) => ScreenerScanSession,
+  beginSession: (scope: ScreenerScanScope, scopeExclusionReasonCode?: (symbol: string) => ScreenerReasonCode) => ScreenerScanSession,
   commitSession: (session: ScreenerScanSession, onCommit?: () => void) => boolean,
   // SCREENER-RESULTS-0001 corrective — same staleness guard used by every
   // in-component scan function (isScanCurrent): a superseded Targeted scan's
@@ -7014,6 +7014,9 @@ async function runTargetedScan(
   // error UI. Passed in for the same closure reason as beginSession/
   // commitSession above.
   isCurrent: (session: ScreenerScanSession | null) => boolean,
+  // EXCLUDE-HELD-0001 -- same closure reason as beginSession/commitSession
+  // above: this function cannot read component state directly.
+  excludeHeldPositions?: boolean,
 ): Promise<void> {
   // PMCC excluded — different philosophy, not a spread strategy.
   // `primary` is a fallback label only — actual strategy exploration below
@@ -7045,7 +7048,19 @@ async function runTargetedScan(
   // shown; the session is a PARALLEL authoritative accounting record — see
   // the ticket's explicit instruction that Targeted keeps its established
   // filters/ordering unchanged.
-  let session = beginSession({ universeSymbols: symbols, eligibleSymbols: symbols });
+  // EXCLUDE-HELD-0001 -- same pre-fetch exclusion as runScreen/runCspScan.
+  const heldSymbolsForTargeted = excludeHeldPositions
+    ? new Set((await loadPortfolioTickers()).current)
+    : null;
+  const eligibleForTargeted = heldSymbolsForTargeted
+    ? symbols.filter(s => !heldSymbolsForTargeted!.has(s))
+    : symbols;
+  let session = beginSession(
+    { universeSymbols: symbols, eligibleSymbols: eligibleForTargeted },
+    heldSymbolsForTargeted
+      ? (symbol: string) => (heldSymbolsForTargeted!.has(symbol) ? 'EXCLUDED_HELD_POSITION' : 'EXCLUDED_BY_SCAN_SCOPE')
+      : undefined,
+  );
   const loopSymbols = session.plannedScanSymbols;
   let wasCancelled = false;
 
@@ -8221,6 +8236,12 @@ export default function Home() {
   // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
   // percentage of strike width, same shape as filteredMinOi.
   const [filteredMinCreditRatio, setFilteredMinCreditRatio] = useState<number>(0);
+  // EXCLUDE-HELD-0001 (Ian/Paul-approved) -- CSP and spreads (Filter/
+  // Rank/Targeted) only. Deliberately NOT offered on CC or PMCC: both of
+  // those scans exist BECAUSE you already hold a position (shares for
+  // CC, the LEAPS for PMCC) -- applying this toggle there would exclude
+  // every symbol those scans are built to show you.
+  const [excludeHeldPositions, setExcludeHeldPositions] = useState(false);
   const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
   const [pmccBestFitProfile, setPmccBestFitProfile] = useState<PmccBestFitProfile>('balanced');
   // PMCC-VIEW-MODE-0001 -- Diane's original score mockup was a flat,
@@ -8983,10 +9004,23 @@ export default function Home() {
     // and only committed to React state at completion/error, via
     // commitScanSession()'s stale check.
     const sessionMode: ScreenerScanMode = modeOverride === 'rank' ? 'rank' : 'filter';
+    // EXCLUDE-HELD-0001 -- resolved BEFORE beginScanSession, so an
+    // excluded symbol is never scanned at all (no wasted chain/quote/
+    // trend reads), and shows up in the accounting as a genuine,
+    // named scope exclusion rather than a silently-dropped result.
+    const heldSymbolsForScreen = excludeHeldPositions
+      ? new Set((await loadPortfolioTickers()).current)
+      : null;
+    const eligibleForScreen = heldSymbolsForScreen
+      ? activeSymbols.filter(s => !heldSymbolsForScreen.has(s))
+      : activeSymbols;
     let session = beginScanSession({
       mode: sessionMode,
       requestedStrategy: 'spreads',
-      scope: { universeSymbols: activeSymbols, eligibleSymbols: activeSymbols },
+      scope: { universeSymbols: activeSymbols, eligibleSymbols: eligibleForScreen },
+      scopeExclusionReasonCode: heldSymbolsForScreen
+        ? (symbol: string) => (heldSymbolsForScreen.has(symbol) ? 'EXCLUDED_HELD_POSITION' : 'EXCLUDED_BY_SCAN_SCOPE')
+        : undefined,
     });
     const loopSymbols = session.plannedScanSymbols;
 
@@ -9589,10 +9623,20 @@ export default function Home() {
     // the launcher highlight (derived from activeSession.requestedStrategy
     // below, in the render) can no longer silently drift back to
     // "FIND SPREADS" after a CSP scan completes.
+    // EXCLUDE-HELD-0001 -- same pre-fetch exclusion as runScreen above.
+    const heldSymbolsForCsp = excludeHeldPositions
+      ? new Set((await loadPortfolioTickers()).current)
+      : null;
+    const eligibleForCsp = heldSymbolsForCsp
+      ? csp.filter(s => !heldSymbolsForCsp.has(s))
+      : csp;
     let session = beginScanSession({
       mode: request.mode,
       requestedStrategy: 'csp',
-      scope: { universeSymbols: csp, eligibleSymbols: csp },
+      scope: { universeSymbols: csp, eligibleSymbols: eligibleForCsp },
+      scopeExclusionReasonCode: heldSymbolsForCsp
+        ? (symbol: string) => (heldSymbolsForCsp.has(symbol) ? 'EXCLUDED_HELD_POSITION' : 'EXCLUDED_BY_SCAN_SCOPE')
+        : undefined,
       // CSP-WORKFLOW-0001 core-correction (BLOCKER-06) — every CSP session
       // now carries the immutable snapshot of the rules that actually ran.
       // Every CSP scan today applies exactly DEFAULT_CSP_RULES (there is no
@@ -12105,7 +12149,7 @@ export default function Home() {
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
               clearResultsCache();
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope }), commitScanSession, isScanCurrent);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode }), commitScanSession, isScanCurrent, excludeHeldPositions);
             } else if (mode === 'rank') {
               clearResultsCache();
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
@@ -12120,6 +12164,16 @@ export default function Home() {
           }}
         />
       )}
+      <label className="flex items-center gap-2 mb-2 text-[10px] cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={excludeHeldPositions}
+          onChange={e => setExcludeHeldPositions(e.target.checked)}
+        />
+        <span className={th.textMuted} title="Applies to CSP and spreads (Filter/Rank/Targeted) scans only -- not offered on CC or PMCC, which scan holdings by design.">
+          Exclude tickers where a current position exists
+        </span>
+      </label>
       {showCspRunModal && (
         <CspScanModal
           th={th}
