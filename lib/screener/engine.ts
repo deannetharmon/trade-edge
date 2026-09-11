@@ -1,17 +1,19 @@
 import { OptionContract, ScreenerParams, CandidateResult } from "@/types/screener";
+import { fetchOptionChainsConcurrently } from "@/lib/screener/provider";
 
 export async function executeScreenerSearch<T>(
   underlyingSymbols: string[],
   params: ScreenerParams,
-  fetchChainData: (symbol: string) => Promise<OptionContract[]>,
+  _fetchChainData: (symbol: string) => Promise<OptionContract[]>,
   evaluateStrategy: (contracts: OptionContract[], params: ScreenerParams) => T[],
   scoreCandidate: (candidate: T) => { score: number; pop: number; liquidityScore: number }
 ): Promise<CandidateResult<T>[]> {
   const results: CandidateResult<T>[] = [];
+  const chainMap = await fetchOptionChainsConcurrently(underlyingSymbols, 3, 150);
 
   for (const symbol of underlyingSymbols) {
     try {
-      const rawChain = await fetchChainData(symbol);
+      const rawChain = chainMap.get(symbol) || [];
       if (!rawChain || rawChain.length === 0) continue;
 
       const sanitizedChain = rawChain.filter((contract) => {
