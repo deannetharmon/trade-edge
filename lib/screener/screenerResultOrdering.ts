@@ -383,6 +383,30 @@ export const MIN_OI_LABEL = 'Minimum relevant-leg OI';
 export const MIN_OI_HELPER_TEXT =
   'The "relevant leg" depends on the strategy -- e.g. the short put for a Cash-Secured Put, the short call for a Covered Call, or the lower of both short legs for an Iron Condor. Protective long legs are never required to clear this floor -- except for PMCC, where the long LEAPS call is a required core position rather than a protective leg.';
 
+// PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
+// percentage of strike width, same convention and tiers as the existing
+// CREDIT_RATIO_MIN used by BPS/BCS/IC (see lib/scans/constants.ts:
+// Strict 0.35, Course 0.33, Relaxed 0.28, Low Vol/danger-floor 0.20).
+// Deliberately NOT a dollar-credit floor -- a raw dollar amount means
+// nothing without the width it's collected against.
+export interface CreditRatioPreset {
+  label: string;
+  value: number; // 0 == "Any"; otherwise a fraction, e.g. 0.20 == 20%
+}
+
+export const CREDIT_RATIO_PRESETS: CreditRatioPreset[] = [
+  { label: 'Any', value: 0 },
+  { label: '20%', value: 0.20 },
+  { label: '25%', value: 0.25 },
+  { label: '33%', value: 0.33 },
+  { label: '35%', value: 0.35 },
+];
+
+export const MIN_CREDIT_RATIO_LABEL = 'Min credit — % of width';
+
+export const MIN_CREDIT_RATIO_HELPER_TEXT =
+  'Short-leg credit as a percentage of strike width, same convention as the Credit Ratio Min used elsewhere (0.33 = course · 0.25 = floor · 0.20 = danger). Missing credit or width does not pass a positive floor.';
+
 // ── Adapter: real SpreadCandidate-shaped data -> OiCandidateLegs ──────────
 //
 // SpreadCandidate (lib/scans/types.ts) reuses shortOI/longOI generically

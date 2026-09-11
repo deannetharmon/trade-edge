@@ -95,6 +95,7 @@ import {
   computeRelevantLegOI, evaluateOiEligibility, extractOiLegsFromSpreadCandidate,
   sortItems, setPrimarySortField, setSecondarySortField, OI_PRESETS, MIN_OI_LABEL,
   MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
+  CREDIT_RATIO_PRESETS, MIN_CREDIT_RATIO_LABEL, MIN_CREDIT_RATIO_HELPER_TEXT,
 } from '@/lib/screener/screenerResultOrdering';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
@@ -7483,6 +7484,7 @@ function toOiStrategy(strategy: string): 'CSP' | 'CC' | 'BPS' | 'BCS' | 'IC' | '
 // (purple=Ranked, teal=Targeted, amber=Filtered).
 function OiAndSortControls({
   th, minOi, setMinOi, sort, setSort, accent, sortFields = SORT_FIELDS, oiLabel = MIN_OI_LABEL, oiHelper, sortLabels,
+  minCreditRatio, setMinCreditRatio, creditRatioLabel = MIN_CREDIT_RATIO_LABEL, creditRatioHelper,
 }: {
   th: typeof THEMES[Theme];
   minOi: number;
@@ -7494,9 +7496,17 @@ function OiAndSortControls({
   oiLabel?: string;
   oiHelper?: string;
   sortLabels?: Partial<Record<SortField, string>>;
+  // PMCC-CREDIT-FILTER-0001 -- optional: only call sites that pass both
+  // minCreditRatio and setMinCreditRatio render the credit-floor row.
+  minCreditRatio?: number;
+  setMinCreditRatio?: (n: number) => void;
+  creditRatioLabel?: string;
+  creditRatioHelper?: string;
 }) {
   const [customOi, setCustomOi] = useState<string>('');
+  const [customCreditRatio, setCustomCreditRatio] = useState<string>('');
   const isPreset = OI_PRESETS.some(p => p.value === minOi);
+  const isCreditRatioPreset = minCreditRatio != null && CREDIT_RATIO_PRESETS.some(p => p.value === minCreditRatio);
   const activeCls = accent === 'purple' ? 'border-purple-500 text-purple-300 bg-purple-500/15'
     : accent === 'teal' ? 'border-teal-500 text-teal-300 bg-teal-500/15'
     : 'border-amber-500 text-amber-300 bg-amber-500/15';
@@ -7530,6 +7540,33 @@ function OiAndSortControls({
           className={`w-16 ${th.input} border ${!isPreset ? activeCls.split(' ')[0] : th.inputBorder} rounded px-1.5 py-0.5 text-[9px] ${th.text} text-center focus:outline-none`}
         />
       </div>
+      {minCreditRatio != null && setMinCreditRatio && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span title={creditRatioHelper ?? MIN_CREDIT_RATIO_HELPER_TEXT} className={`text-[9px] ${th.textFaint} shrink-0`}>{creditRatioLabel}</span>
+          {CREDIT_RATIO_PRESETS.map(p => (
+            <button key={p.label} onClick={() => { setMinCreditRatio(p.value); setCustomCreditRatio(''); }}
+              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                isCreditRatioPreset && minCreditRatio === p.value ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
+              }`}>
+              {p.label}
+            </button>
+          ))}
+          <input
+            type="number"
+            min={0}
+            max={100}
+            placeholder="Custom %"
+            value={customCreditRatio}
+            onChange={e => {
+              setCustomCreditRatio(e.target.value);
+              const n = parseFloat(e.target.value);
+              if (Number.isFinite(n) && n >= 0) setMinCreditRatio(n / 100);
+            }}
+            aria-label="Custom minimum credit ratio percent"
+            className={`w-16 ${th.input} border ${!isCreditRatioPreset ? activeCls.split(' ')[0] : th.inputBorder} rounded px-1.5 py-0.5 text-[9px] ${th.text} text-center focus:outline-none`}
+          />
+        </div>
+      )}
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
         {sortFields.map(f => (
@@ -8177,6 +8214,9 @@ export default function Home() {
   // below). Disqualified-section ordering is unaffected -- it's already an
   // audit trail of *why* something didn't qualify, not a ranked results list.
   const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
+  // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
+  // percentage of strike width, same shape as filteredMinOi.
+  const [filteredMinCreditRatio, setFilteredMinCreditRatio] = useState<number>(0);
   const [filteredSort, setFilteredSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
   const [pmccBestFitProfile, setPmccBestFitProfile] = useState<PmccBestFitProfile>('balanced');
   // PMCC-VIEW-MODE-0001 -- Diane's original score mockup was a flat,
@@ -10046,6 +10086,18 @@ export default function Home() {
     filteredOiByResult.set(r, oi);
     return oi.eligible;
   });
+  // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit as a percentage
+  // of strike width, same "missing does not pass a positive floor"
+  // convention as the OI filter above. cspTargetedSession is exempt for
+  // the same reason effectiveFilteredMinOi is.
+  const effectiveFilteredMinCreditRatio = cspTargetedSession ? 0 : filteredMinCreditRatio;
+  if (effectiveFilteredMinCreditRatio > 0) {
+    filteredQualified = filteredQualified.filter(r => {
+      const credit = r.bestCandidate?.credit;
+      const width = r.bestCandidate?.spreadWidth;
+      return credit != null && width != null && width > 0 && (credit / width) >= effectiveFilteredMinCreditRatio;
+    });
+  }
   // TE-0007F — a second real, pre-existing bug found while wiring PMCC
   // sort/filter: this whole sortItems call was unconditionally skipped
   // for PMCC sessions (activePmccSession ? filteredQualified : ...),
@@ -10979,7 +11031,7 @@ export default function Home() {
                       <span className={`text-[9px] ${th.textFaint}`}>Ranks qualified PMCCs; it never relaxes eligibility.</span>
                     </div>
                     <p className={`mb-2 text-[9px] ${th.textFaint}`}>The Quality badge measures qualification health. Selecting Score ranks by the active Best Fit profile.</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Leg OI" oiHelper="The lower open interest of the held LEAPS call and short call. Missing OI does not pass a positive floor." sortLabels={{ creditDollars: 'Premium $', relevantLegOI: 'Leg OI' }} sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} />
+                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Leg OI" oiHelper="The lower open interest of the held LEAPS call and short call. Missing OI does not pass a positive floor." sortLabels={{ creditDollars: 'Premium $', relevantLegOI: 'Leg OI' }} sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} minCreditRatio={filteredMinCreditRatio} setMinCreditRatio={setFilteredMinCreditRatio} />
                     {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
                         rank (Diane's original score mockup); grouped is
                         Ian's per-ticker triage view (PmccTickerDisclosure).
