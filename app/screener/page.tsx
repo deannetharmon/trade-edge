@@ -12045,6 +12045,12 @@ export default function Home() {
             setPmccShortDteMin(request.shortDteMin); setPmccShortDteMax(request.shortDteMax);
             setPmccShortDeltaMin(request.shortDeltaMin); setPmccShortDeltaMax(request.shortDeltaMax);
             setPmccShortOiMin(request.shortOiMin); setPmccMaxSpreadPct(request.maxSpreadPct);
+            // PMCC-OI-DEFAULT-0001 -- Dean's request: the post-scan "Leg OI"
+            // filter was always defaulting to "Any" regardless of what OI
+            // floor was actually configured in the scan itself, which read
+            // as the scan's own filter silently not applying. Sync it to
+            // match what was just run.
+            setFilteredMinOi(request.shortOiMin);
             try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct })); } catch {}
             setShowPmccScanModal(false); void runPMCCScan(request);
           }}
