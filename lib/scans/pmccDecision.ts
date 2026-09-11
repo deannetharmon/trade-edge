@@ -19,10 +19,25 @@ function gate(
   return { code, status, explanation, observedValue, threshold, policySource };
 }
 
+// PMCC-COMPARE-HELD-0001 — for a held long, only the short leg is
+// actually being transacted. The long leg is already owned; there is
+// nothing the trader can do about its bid/ask spread short of closing
+// and reopening the LEAPS itself, so its quote quality must never gate
+// whether the short call can be reviewed/sold. Gating on it made every
+// held LEAPS with an inherently wide spread (routine for longer-dated,
+// less-liquid strikes) permanently stuck in Wait/Monitor regardless of
+// the short leg's own liquidity or market hours -- Ian's real, common-
+// case complaint, not an edge case. Same held-mode bypass principle
+// already applied to delta/OI/DTE below, now applied here too.
 function quoteGate(pair: PmccPairResult, marketSession: PmccMarketSession): PmccDecisionGate {
-  const quotes = [pair.longLeg.quote, pair.shortLeg.quote];
+  const held = pair.entryMode === 'covered-short-call-against-held-leaps';
+  const quotes = held ? [pair.shortLeg.quote] : [pair.longLeg.quote, pair.shortLeg.quote];
   if (quotes.every(quote => quote.readyInput)) {
-    return gate('QUOTES_READY', 'pass', 'Both-leg quotes are current and actionable.', 'current', 'ready', 'snapshot.criteria.quotePolicy');
+    return gate(
+      'QUOTES_READY', 'pass',
+      held ? 'Short-leg quote is current and actionable.' : 'Both-leg quotes are current and actionable.',
+      'current', 'ready', 'snapshot.criteria.quotePolicy',
+    );
   }
   const comparableClosedSnapshot = marketSession !== 'open' && quotes.every(quote =>
     quote.status === 'market_closed'
@@ -34,11 +49,17 @@ function quoteGate(pair: PmccPairResult, marketSession: PmccMarketSession): Pmcc
     return gate(
       'MARKET_CLOSED_QUOTES', 'warning',
       'Market closed — quotes are from the prior session. Recheck pricing after the market opens.',
-      marketSession, 'two usable two-sided snapshot quotes', 'snapshot.marketSession',
+      marketSession, held ? 'one usable two-sided short-leg snapshot quote' : 'two usable two-sided snapshot quotes', 'snapshot.marketSession',
     );
   }
   const unavailable = quotes.filter(quote => !quote.readyInput).map(quote => `${quote.status}: ${quote.reason}`).join(' · ');
-  return gate('QUOTES_NOT_ACTIONABLE', 'unavailable', unavailable || 'Both-leg quote evidence is unavailable.', unavailable || null, 'fresh, non-delayed, usable two-sided quotes', 'snapshot.criteria.quotePolicy');
+  return gate(
+    'QUOTES_NOT_ACTIONABLE', 'unavailable',
+    unavailable || (held ? 'Short-leg quote evidence is unavailable.' : 'Both-leg quote evidence is unavailable.'),
+    unavailable || null,
+    held ? 'fresh, non-delayed, usable short-leg quote' : 'fresh, non-delayed, usable two-sided quotes',
+    'snapshot.criteria.quotePolicy',
+  );
 }
 
 /** The only PMCC decision boundary. Scoring and presentation consume this
