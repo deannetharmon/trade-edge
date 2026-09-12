@@ -6350,6 +6350,11 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                     if (r?.IVR_MIN != null) setTIvrMin(r.IVR_MIN);
                     if (r?.DTE_MIN != null) setTDteMin(r.DTE_MIN);
                     if (r?.DTE_MAX != null) setTDteMax(r.DTE_MAX);
+                    // Dean: POP min always 70, OTM min always 6% -- fixed
+                    // universal defaults, since no preset defines either
+                    // and every preset should apply the same baseline here.
+                    setTPopMin(70);
+                    setTOtmMin(6);
                   }}
                     className={`text-[9px] px-2 py-1.5 rounded border transition-colors font-bold ${
                       tPreset === p.key ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
