@@ -5374,42 +5374,29 @@ const strategyScores = useMemo(() => {
           }
         : cachedEntry.chainData;
 
-      // ALT-SCORE-DEBUG-0001 -- temporarily always calling runChecklist
-      // fresh (even for the primary strategy) so it goes through the same
-      // [TIER-DEBUG] logging as the alternates, for direct comparison on
-      // the same chain. Revert to `strategy === result.strategy ? result : ...`
-      // once root cause is confirmed.
       // ALT-SCORE-FIX-0001 -- uses cachedEntry.rules/etfRules (the actual
       // scan-time snapshot), not the live `rules` variable, which can
-      // drift from what the scan itself used.
-      const strategyResult = runChecklist(
-        cachedEntry.symbol,
-        strategy,
-        cachedEntry.metrics,
-        chainDataForExp,
-        cachedEntry.price,
-        cachedEntry.rules,
-        cachedEntry.trendResult,
-        undefined,
-        cachedEntry.etfRules
-      );
+      // drift from what the scan itself used. Primary strategy reuses
+      // the already-computed `result` rather than calling runChecklist
+      // again -- no need to redo work the scan itself already did.
+      const strategyResult =
+        strategy === result.strategy
+          ? result
+          : runChecklist(
+              cachedEntry.symbol,
+              strategy,
+              cachedEntry.metrics,
+              chainDataForExp,
+              cachedEntry.price,
+              cachedEntry.rules,
+              cachedEntry.trendResult,
+              undefined,
+              cachedEntry.etfRules
+            );
 
       const scoredStrategy = scoreCandidate(strategyResult, rankConfig);
 
       if (!scoredStrategy || !strategyResult.bestCandidate) {
-        if (strategy !== result.strategy) {
-          console.log('[ALT-SCORE-DEBUG]', {
-            symbol: cachedEntry.symbol,
-            attemptedStrategy: strategy,
-            primaryStrategy: result.strategy,
-            currentExp,
-            chainLength: chainDataForExp.chains[currentExp ?? '']?.length ?? 0,
-            hadScoredStrategy: !!scoredStrategy,
-            hadBestCandidate: !!strategyResult.bestCandidate,
-            qualified: strategyResult.qualified,
-            failReasons: strategyResult.failReasons,
-          });
-        }
         return {
           strategy,
           score: null as number | null,
@@ -5426,10 +5413,7 @@ const strategyScores = useMemo(() => {
         reason: strategyResult.failReasons?.[0] ?? '',
         current: strategy === result.strategy,
       };
-    } catch (e) {
-      if (strategy !== result.strategy) {
-        console.log('[ALT-SCORE-DEBUG] threw', { symbol: cachedEntry.symbol, attemptedStrategy: strategy, error: e instanceof Error ? e.message : String(e) });
-      }
+    } catch {
       return {
         strategy,
         score: null as number | null,
@@ -5606,27 +5590,6 @@ const strategyScores = useMemo(() => {
         </div>
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
-          {result.ruleSetApplied && (
-            <span className={`text-[8px] px-1.5 py-0.5 border rounded shrink-0 font-medium tracking-wider
-              ${result.ruleSetApplied.includes('ETF')
-                ? 'border-blue-800 text-blue-400/80 bg-blue-500/5'
-                : result.ruleSetApplied === 'Strict'
-                ? 'border-red-900 text-red-400/70 bg-red-500/5'
-                : result.ruleSetApplied === 'Course'
-                ? 'border-slate-700 text-slate-400/70'
-                : result.ruleSetApplied === 'Relaxed'
-                ? 'border-emerald-900 text-emerald-400/70 bg-emerald-500/5'
-                : result.ruleSetApplied === 'Low Vol'
-                ? 'border-yellow-900 text-yellow-400/70 bg-yellow-500/5'
-                : result.ruleSetApplied === 'Short Term'
-                ? 'border-orange-900 text-orange-400/70 bg-orange-500/5'
-                : result.ruleSetApplied === 'Intermediate'
-                ? 'border-amber-900 text-amber-400/70 bg-amber-500/5'
-                : 'border-slate-700 text-slate-500'
-              }`}>
-              {result.ruleSetApplied}
-            </span>
-          )}
           {isRankMode && scored && light && (
             <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${light.color} ${light.border} ${light.bg}`}>
               {light.emoji} {scored.score} — {light.label}
@@ -5660,9 +5623,6 @@ const strategyScores = useMemo(() => {
                     ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
                     : primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
                 </span>
-                {alternates.length > 0 && (
-                  <span className={`text-[8px] ${th.textFaint} shrink-0 tracking-wide`}>Alternative scores:</span>
-                )}
                 {alternates.map(s => (
                   <span
                     key={s.strategy}
@@ -10408,10 +10368,6 @@ export default function Home() {
             <p className={`text-[9px] ${th.textFaint}`}>
               {opportunityUniverse.length} ticker{opportunityUniverse.length === 1 ? '' : 's'} in your Opportunity Universe
             </p>
-            <p className={`text-[9px] ${th.textFaint} leading-relaxed`}>
-              Enter the companies you are willing to evaluate, then choose a strategy. Covered Calls use verified owned shares; the list can narrow them but cannot create coverage.
-            </p>
-
             {/* FINVIZ-REF-0001: static reference only, no live pull -- Quinn:
                 Finviz has no official free API, and any automated pull would
                 mean scraping their screener page (fragile, likely against

@@ -66,18 +66,10 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
 bestCandidate = strategy === 'IC'
   ? findBestIC(chainItems, exp, price, relaxedRules)
   : findBestSpread(chainItems, strategy, exp, price, relaxedRules, expIvxForPop); if (bestCandidate) break; }
-    console.log('[TIER-DEBUG] relaxed tier', { symbol, strategy, foundCandidate: !!bestCandidate });
-  } else {
-    console.log('[TIER-DEBUG] relaxed tier SKIPPED', { symbol, strategy, ivrStatus: ivrCheck.status, validExpirationsCount: validExpirations.length });
   }
   // Last resort: fully unfiltered — show best available strike regardless of rules
   if (!strictOnly && !bestCandidate && validExpirations.length > 0) {
-    for (const exp of validExpirations) {
-      const chainItems = chainData.chains[exp] || [];
-      bestCandidate = strategy === 'IC' ? findBestICUnfiltered(chainItems, exp, price) : findBestSpreadUnfiltered(chainItems, strategy, exp, price);
-      console.log('[TIER-DEBUG] unfiltered tier', { symbol, strategy, exp, chainItemCount: chainItems.length, foundCandidate: !!bestCandidate });
-      if (bestCandidate) break;
-    }
+    for (const exp of validExpirations) { const chainItems = chainData.chains[exp] || []; bestCandidate = strategy === 'IC' ? findBestICUnfiltered(chainItems, exp, price) : findBestSpreadUnfiltered(chainItems, strategy, exp, price); if (bestCandidate) break; }
   }
   if (bestCandidate) {
     failReasons.length = 0;
