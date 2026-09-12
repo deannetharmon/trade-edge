@@ -193,6 +193,8 @@ function installFakeIndexedDB(): Map<string, unknown> {
 }
 
 const c: CheckResult = { status: 'pass', value: '', reason: '' };
+// ALT-SCORE-FIX-0001 -- RawScanEntry now requires rules/etfRules.
+import { DEFAULT_RULES, DEFAULT_ETF_RULES } from '@/lib/scans/constants';
 
 // TE-0007D corrective (second, real root cause found alongside the missing
 // createTask input above): lib/screener/hooks/useRankedScan.ts's completion
@@ -212,6 +214,8 @@ function makeRawScanEntry(symbol: string): RawScanEntry {
     metrics: { symbol, ivRank: 55, earningsExpectedDate: null },
     chainData: { expirations: [], chains: {}, isEtfOrIndex: false },
     price: 190,
+    rules: DEFAULT_RULES,
+    etfRules: DEFAULT_ETF_RULES,
   };
 }
 

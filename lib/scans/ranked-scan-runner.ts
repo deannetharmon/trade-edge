@@ -127,7 +127,7 @@ export async function runRankedScan(
       ]);
       throwIfCancelled(signal);
 
-      scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
+      scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult, rules: sRules, etfRules: eRules });
       screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel));
       throwIfCancelled(signal);
     } catch (e: any) {
