@@ -6332,6 +6332,32 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
           <div className="flex flex-col gap-4">
             <p className={`text-[9px] tracking-widest font-medium ${th.textFaint}`}>SCAN CONFIG</p>
 
+            {/* TARGETED-PRESETS-0001 -- a preset here is a starting point,
+                never a lock: every field below stays editable after
+                selection, same as Filter mode's own preset never blocked
+                further edits in RulesModal. Only overrides fields the
+                preset actually defines (IVR always; DTE only for
+                shortterm/intermediate) -- POP and OTM have no preset
+                values to apply, so they're left untouched regardless of
+                which preset is picked. */}
+            <div>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>START FROM A PRESET</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {FILTER_PRESETS.map(p => (
+                  <button key={p.key} onClick={() => {
+                    setTPreset(p.key);
+                    const r = RULE_PRESETS.find(rp => rp.key === p.key)?.rules as Record<string, number | undefined> | undefined;
+                    if (r?.IVR_MIN != null) setTIvrMin(r.IVR_MIN);
+                    if (r?.DTE_MIN != null) setTDteMin(r.DTE_MIN);
+                    if (r?.DTE_MAX != null) setTDteMax(r.DTE_MAX);
+                  }}
+                    className={`text-[9px] px-2 py-1.5 rounded border transition-colors font-bold ${
+                      tPreset === p.key ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
+                    }`}>{p.label}</button>
+                ))}
+              </div>
+            </div>
+
             {/* DTE range */}
             <div>
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>DTE RANGE</p>
