@@ -521,6 +521,8 @@ function findRankModeCandidatesForSymbol(
         chainData,
         price,
         trendResult,
+        rules: sRules,
+        etfRules: eRules,
       },
       allStrategies: [],
     });
@@ -5377,14 +5379,19 @@ const strategyScores = useMemo(() => {
       // [TIER-DEBUG] logging as the alternates, for direct comparison on
       // the same chain. Revert to `strategy === result.strategy ? result : ...`
       // once root cause is confirmed.
+      // ALT-SCORE-FIX-0001 -- uses cachedEntry.rules/etfRules (the actual
+      // scan-time snapshot), not the live `rules` variable, which can
+      // drift from what the scan itself used.
       const strategyResult = runChecklist(
         cachedEntry.symbol,
         strategy,
         cachedEntry.metrics,
         chainDataForExp,
         cachedEntry.price,
-        rules,
-        cachedEntry.trendResult
+        cachedEntry.rules,
+        cachedEntry.trendResult,
+        undefined,
+        cachedEntry.etfRules
       );
 
       const scoredStrategy = scoreCandidate(strategyResult, rankConfig);
@@ -7215,7 +7222,7 @@ async function runTargetedScan(
                   failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);
-                const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult };
+                const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult, rules: appliedRules, etfRules };
                 entries.push({
                   symbol, primaryStrategy: trendStrategy, expiration: exp, dte, strategy: strat,
                   candidate, screenResult: displayResult, pop: candidate.pop ?? 0,
@@ -7353,7 +7360,7 @@ async function runTargetedScan(
                   },
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);
-                const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult };
+                const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult, rules: appliedRules, etfRules };
 
                 entries.push({
                   symbol, primaryStrategy: trendStrategy, expiration: exp, dte, strategy: strat,
@@ -9166,14 +9173,14 @@ export default function Home() {
               spreadsReadLimiter.schedule(() => withRetry(() => getQuote(symbol, token))),
             ]);
             if (isRankMode) {
-              scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult });
+              scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult, rules: sRules, etfRules: eRules });
               const candidates = exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel);
               outcome = candidates.length > 0
                 ? { kind: 'evaluated', symbol, results: candidates }
                 : { kind: 'evaluated', symbol, results: [], reasonCode: 'NO_QUALIFYING_CANDIDATE' };
             } else if (trendResult) {
               const s = trendResult.strategy as 'BPS' | 'BCS' | 'IC';
-              scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult });
+              scanCache.push({ symbol, strategy: s, metrics, chainData, price, trendResult, rules: sRules, etfRules: eRules });
               const result = runChecklist(symbol, s, metrics, chainData, price, sRules, trendResult, sLabel, eRules, eLabel);
               outcome = { kind: 'evaluated', symbol, results: [result] };
             } else {

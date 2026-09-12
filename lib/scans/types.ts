@@ -1,5 +1,6 @@
 // lib/scans/types.ts
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
+import type { RulesType } from './constants';
 
 export interface CheckResult { status: 'pass' | 'fail' | 'warn' | 'pending'; value: string; reason: string; }
 
@@ -241,4 +242,13 @@ export interface RawScanEntry {
   chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean };
   price: number | null;
   trendResult?: TrendResult;
+  // ALT-SCORE-FIX-0001 -- the rules actually in effect when this scan
+  // ran, frozen at that moment. Consumers (e.g. strategyScores'
+  // alternate-strategy comparison) must use these, not whatever rules
+  // happen to be live in the UI later -- DTE/IVR/credit-ratio windows
+  // can drift between scan time and render time, and a live-rules
+  // re-check can silently reject the exact candidate the scan itself
+  // just found.
+  rules: RulesType;
+  etfRules: RulesType;
 }
