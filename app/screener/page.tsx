@@ -5372,18 +5372,20 @@ const strategyScores = useMemo(() => {
           }
         : cachedEntry.chainData;
 
-      const strategyResult =
-        strategy === result.strategy
-          ? result
-          : runChecklist(
-              cachedEntry.symbol,
-              strategy,
-              cachedEntry.metrics,
-              chainDataForExp,
-              cachedEntry.price,
-              rules,
-              cachedEntry.trendResult
-            );
+      // ALT-SCORE-DEBUG-0001 -- temporarily always calling runChecklist
+      // fresh (even for the primary strategy) so it goes through the same
+      // [TIER-DEBUG] logging as the alternates, for direct comparison on
+      // the same chain. Revert to `strategy === result.strategy ? result : ...`
+      // once root cause is confirmed.
+      const strategyResult = runChecklist(
+        cachedEntry.symbol,
+        strategy,
+        cachedEntry.metrics,
+        chainDataForExp,
+        cachedEntry.price,
+        rules,
+        cachedEntry.trendResult
+      );
 
       const scoredStrategy = scoreCandidate(strategyResult, rankConfig);
 
