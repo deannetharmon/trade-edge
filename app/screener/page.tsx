@@ -5388,6 +5388,19 @@ const strategyScores = useMemo(() => {
       const scoredStrategy = scoreCandidate(strategyResult, rankConfig);
 
       if (!scoredStrategy || !strategyResult.bestCandidate) {
+        if (strategy !== result.strategy) {
+          console.log('[ALT-SCORE-DEBUG]', {
+            symbol: cachedEntry.symbol,
+            attemptedStrategy: strategy,
+            primaryStrategy: result.strategy,
+            currentExp,
+            chainLength: chainDataForExp.chains[currentExp ?? '']?.length ?? 0,
+            hadScoredStrategy: !!scoredStrategy,
+            hadBestCandidate: !!strategyResult.bestCandidate,
+            qualified: strategyResult.qualified,
+            failReasons: strategyResult.failReasons,
+          });
+        }
         return {
           strategy,
           score: null as number | null,
@@ -5404,7 +5417,10 @@ const strategyScores = useMemo(() => {
         reason: strategyResult.failReasons?.[0] ?? '',
         current: strategy === result.strategy,
       };
-    } catch {
+    } catch (e) {
+      if (strategy !== result.strategy) {
+        console.log('[ALT-SCORE-DEBUG] threw', { symbol: cachedEntry.symbol, attemptedStrategy: strategy, error: e instanceof Error ? e.message : String(e) });
+      }
       return {
         strategy,
         score: null as number | null,
