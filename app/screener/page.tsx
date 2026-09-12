@@ -6246,14 +6246,14 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode);
-  const [preset, setPreset] = useState(lastPreset || course);
+  const [preset, setPreset] = useState(lastPreset || 'course');
   const [tDteMin, setTDteMin] = useState(lastTargetedDteMin);
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
   const [tCreditRatioMin, setTCreditRatioMin] = useState<number>(0);
   const [tIvrMin, setTIvrMin] = useState(lastTargetedIvrMin);
-  const [tPreset, setTPreset] = useState(lastTargetedPreset || course);
+  const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
   return (
     <ScanModalShell
@@ -6556,7 +6556,7 @@ function RulesModal({ stockRules, etfRules, rankConfig, onClose, onRun, th }: {
         <RangeIndicator
           value={edited[key] as number}
           strict={(RULE_PRESETS.find(p => p.key === 'strict')?.rules as any)?.[key]}
-          course={(RULE_PRESETS.find(p => p.key === course)?.rules as any)?.[key]}
+          course={(RULE_PRESETS.find(p => p.key === 'course')?.rules as any)?.[key]}
           relaxed={(RULE_PRESETS.find(p => p.key === 'relaxed')?.rules as any)?.[key]}
           lowvol={(RULE_PRESETS.find(p => p.key === 'lowvol')?.rules as any)?.[key]}
           fmt={(v) => String(v)}
@@ -6813,7 +6813,7 @@ function BestOpportunityFinder({
     shortterm: 'border-orange-500 text-orange-400',
     intermediate: 'border-amber-500 text-amber-400',
   };
-  const COURSE_RULES = RULE_PRESETS.find(p => p.key === course)!.rules;
+  const COURSE_RULES = RULE_PRESETS.find(p => p.key === 'course')!.rules;
   const levels = RULE_PRESETS.map(p => ({
     presetKey: p.key,
     presetLabel: p.label,
@@ -8564,7 +8564,7 @@ export default function Home() {
   // canonical score/ranking and never changes the scan request or filters.
   const [cspTargetedReturnSort, setCspTargetedReturnSort] = useState<'desc' | 'asc' | null>(null);
   const [targetedResults, setTargetedResults] = useState<TargetedScanEntry[]>([]);
-  const [targetedPreset, setTargetedPreset] = useState<string>(course);
+  const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
   const [existingPositions, setExistingPositions] = useState<ExistingPosition[]>([]);
   useEffect(() => {
