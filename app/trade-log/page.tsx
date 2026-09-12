@@ -491,20 +491,25 @@ function MultiSelect({ label, options, selected, onChange, th }: {
 // is shown after filtering"), not a separately-filtered set.
 function exportTradeLogCsv(trades: ClosedTrade[], excludedIds: Set<string>) {
   if (trades.length === 0) return;
+  // Dean: dates were reading as "lumped together" because ID (a
+  // Symbol-OpenDate-Expiry-CloseDate concatenation, meant as an internal
+  // key) was the first column. Real Open/Close/Expiry dates -- always
+  // separate fields -- now lead instead, with DTE at Entry sitting right
+  // next to Hold Days for an easy side-by-side; ID moved to the end.
   const headers = [
-    'ID', 'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Open Time', 'Open Day of Week',
-    'Expiry', 'Hold Days', 'Strikes', 'Credit Received', 'Close Price', 'P/L', 'P/L %',
-    'Outcome', 'Quantity', 'Fees', 'Excluded', 'DTE at Close', 'DTE at Entry', 'Exit Type',
+    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'Hold Days',
+    'DTE at Close', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
+    'P/L', 'P/L %', 'Outcome', 'Quantity', 'Fees', 'Excluded', 'Exit Type',
     'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
-    'Remaining Quantity', 'Source Transaction IDs',
+    'Remaining Quantity', 'Source Transaction IDs', 'ID',
   ];
   const rows = trades.map(t => [
-    t.id, t.symbol, t.strategy, t.openDate, t.closeDate, t.openTime, t.openDow,
-    t.expiry, t.holdDays, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+    t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.holdDays,
+    t.dteAtClose, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
     t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
-    excludedIds.has(t.id) ? 'Yes' : 'No', t.dteAtClose, t.dteAtEntry, t.exitType,
+    excludedIds.has(t.id) ? 'Yes' : 'No', t.exitType,
     t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,
-    t.remainingQuantity, t.sourceTransactionIds.join('; '),
+    t.remainingQuantity, t.sourceTransactionIds.join('; '), t.id,
   ]);
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -528,11 +533,11 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
   if (trades.length === 0) return;
   const byTransaction = buildSnapshotIndex(snapshots);
   const headers = [
-    'ID', 'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Open Time', 'Open Day of Week',
-    'Expiry', 'Hold Days', 'Strikes', 'Credit Received', 'Close Price', 'P/L', 'P/L %',
-    'Outcome', 'Quantity', 'Fees', 'Excluded', 'DTE at Close', 'DTE at Entry', 'Exit Type',
+    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'Hold Days',
+    'DTE at Close', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
+    'P/L', 'P/L %', 'Outcome', 'Quantity', 'Fees', 'Excluded', 'Exit Type',
     'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
-    'Remaining Quantity', 'Source Transaction IDs',
+    'Remaining Quantity', 'Source Transaction IDs', 'ID',
     'Score Momentum', 'Score IVR', 'Score EM Clearance', 'Score Range', 'Score Technical',
     'Score Liquidity', 'Score Buffer', 'Score Strategy Alignment', 'Score Delta Quality',
     'Score Composite', 'Profit Target', 'Stop Loss',
@@ -540,12 +545,12 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
   const rows = trades.map(t => {
     const snapshot = findSnapshotForTrade(t, byTransaction);
     return [
-      t.id, t.symbol, t.strategy, t.openDate, t.closeDate, t.openTime, t.openDow,
-      t.expiry, t.holdDays, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+      t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.holdDays,
+      t.dteAtClose, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
       t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
-      excludedIds.has(t.id) ? 'Yes' : 'No', t.dteAtClose, t.dteAtEntry, t.exitType,
+      excludedIds.has(t.id) ? 'Yes' : 'No', t.exitType,
       t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,
-      t.remainingQuantity, t.sourceTransactionIds.join('; '),
+      t.remainingQuantity, t.sourceTransactionIds.join('; '), t.id,
       evidenceValue(snapshot?.scoreMomentum), evidenceValue(snapshot?.scoreIvr),
       evidenceValue(snapshot?.scoreEmClearance), evidenceValue(snapshot?.scoreRange),
       evidenceValue(snapshot?.scoreTechnical), evidenceValue(snapshot?.scoreLiquidity),
