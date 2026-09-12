@@ -9289,6 +9289,23 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
             >
               Use Natural-Side Reference
             </button>
+            {/* REPRICE-CONVENTION-0001 (Ian): a labeled market convention
+                the person can choose to apply, not the app picking a price
+                for them -- same shape as "Use Natural-Side Reference"
+                above, same disabled-when-unavailable treatment. Mid is a
+                different, standard reference point (the market's "fair
+                value" midpoint, vs. natural-side's "what a market maker
+                would take right now"), so it's offered as its own
+                explicit choice rather than folded into the other button. */}
+            <button
+              type="button"
+              disabled={order.currentMidPrice == null}
+              onClick={() => order.currentMidPrice != null && setNewPrice(order.currentMidPrice.toFixed(2))}
+              className={`text-[9px] px-2 py-1 rounded border ${th.border} ${order.currentMidPrice != null ? `${th.textFaint} hover:border-yellow-500 hover:text-yellow-300` : 'opacity-30 cursor-not-allowed'}`}
+              title={order.currentMidPrice != null ? `Use current mid ($${order.currentMidPrice.toFixed(2)}); this is not a fill recommendation` : 'No mid price is available'}
+            >
+              Use Mid
+            </button>
           </div>
           {/* REPRICE-0003: total-credit impact of the price change, in
               dollars -- direct arithmetic (price x contracts x 100), not a
