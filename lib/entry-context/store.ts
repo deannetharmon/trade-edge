@@ -28,12 +28,14 @@ type RedisSnapshotClient = {
   smembers(key: string): Promise<string[]>;
 };
 
-function parseSnapshot(value: string): EntrySnapshot {
-  const parsed = JSON.parse(value) as EntrySnapshot;
-  if (!parsed || parsed.schemaVersion !== '1' || !parsed.entrySnapshotId || !parsed.executionId) {
-    throw new Error('Stored entry snapshot is invalid');
+function parseSnapshot(value: string): EntrySnapshot | null {
+  try {
+    const parsed = JSON.parse(value) as EntrySnapshot;
+    if (!parsed || !parsed.executionId) return null;
+    return parsed;
+  } catch {
+    return null;
   }
-  return parsed;
 }
 
 export async function saveImmutableEntrySnapshot<T extends EntrySnapshot>(
@@ -47,7 +49,9 @@ export async function saveImmutableEntrySnapshot<T extends EntrySnapshot>(
     if (created === 'OK') { await redis.sadd(entrySnapshotAccountIndexKey(storageAccountId), key); return { snapshot, created: true }; }
     const existing = await redis.get(key);
     if (existing == null) throw new Error('Entry snapshot idempotency read failed');
-    return { snapshot: parseSnapshot(existing) as T, created: false };
+    const parsed = parseSnapshot(existing);
+    if (!parsed) throw new Error('Entry snapshot idempotency read returned invalid payload');
+    return { snapshot: parsed as T, created: false };
   };
   return client ? persist(client) : withAutopilotRedis(redis => persist(redis));
 }
@@ -56,7 +60,11 @@ export async function readEntrySnapshotsForAccount(accountId: string, client?: R
   const read = async (redis: RedisSnapshotClient) => {
     const keys = await redis.smembers(entrySnapshotAccountIndexKey(storageAccountId));
     const values = await Promise.all(keys.map(key => redis.get(key)));
-    return values.flatMap(value => value == null ? [] : [parseSnapshot(value)]);
+    return values.flatMap(value => {
+      if (value == null) return [];
+      const parsed = parseSnapshot(value);
+      return parsed ? [parsed] : [];
+    });
   };
   return client ? read(client) : withAutopilotRedis(redis => read(redis));
 }
