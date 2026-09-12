@@ -64,7 +64,10 @@ export const BASE = 'https://api.tastytrade.com';
 export const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 
 
-export const LS_ACCESS_TOKEN = 'tt_access_token_cache';
-export const LS_ACCESS_TOKEN_EXPIRY = 'tt_access_token_expiry';
+// AUTH-TOKEN-CONSOLIDATION-0001: canonical values now live in
+// lib/auth/tastytradeToken.ts (auth logic has no business being owned by
+// this scans-specific file); re-exported here so existing importers of
+// these two constants from lib/scans/constants don't need updating too.
+export { LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from '@/lib/auth/tastytradeToken';
 
 

@@ -3,24 +3,14 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
 
-async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  let token: string;
-  try {
-    const result = await refreshBrowserAccessToken();
-    token = result.accessToken;
-  }
-  catch { window.location.href = '/login'; throw new Error('Session expired'); }
-  sessionStorage.setItem('tt_access_token', token);
-  return token;
-}
+// AUTH-TOKEN-CONSOLIDATION-0001: local copy (no expiry check at all)
+// replaced with the shared, correct implementation.
 
 async function ttFetch(path: string, token: string) {
   const res = await fetch(`${BASE}${path}`, {

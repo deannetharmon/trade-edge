@@ -6,7 +6,6 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
-import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -221,19 +220,9 @@ const DEFAULT_RULES = {
 };
 type RulesType = typeof DEFAULT_RULES;
 
-// ── Auth ──────────────────────────────────────────────────────────────────
-async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  let token: string;
-  try {
-    const result = await refreshBrowserAccessToken();
-    token = result.accessToken;
-  }
-  catch { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  sessionStorage.setItem('tt_access_token', token);
-  return token;
-}
+// AUTH-TOKEN-CONSOLIDATION-0001: local copy (no expiry check at all)
+// replaced with the shared, correct implementation.
+import { getAccessToken } from '@/lib/auth/tastytradeToken';
 async function ttFetch(path: string, token: string) {
   const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' });
   if (res.status === 401) { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }

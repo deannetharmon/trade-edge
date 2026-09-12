@@ -17,43 +17,10 @@ import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-const LS_ACCESS_TOKEN = 'tt_access_token_cache';
-const LS_ACCESS_TOKEN_EXPIRY = 'tt_access_token_expiry';
-
-// Same three-tier token caching used across the app (screener/portfolio).
-async function getAccessToken(): Promise<string> {
-  const sessionCached = sessionStorage.getItem('tt_access_token');
-  if (sessionCached) return sessionCached;
-
-  try {
-    const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
-    const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
-    if (lsCached && expiry && Date.now() < parseInt(expiry)) {
-      sessionStorage.setItem('tt_access_token', lsCached);
-      return lsCached;
-    }
-  } catch {}
-
-  let token: string;
-  let expiresIn: number;
-  try {
-    const result = await refreshBrowserAccessToken();
-    token = result.accessToken;
-    expiresIn = result.expiresIn;
-  } catch {
-    sessionStorage.removeItem('tt_access_token');
-    try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
-    window.location.href = '/login';
-    throw new Error('Session expired');
-  }
-
-  sessionStorage.setItem('tt_access_token', token);
-  try {
-    localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + Math.max(60, expiresIn - 60) * 1000));
-  } catch {}
-  return token;
-}
+// AUTH-TOKEN-CONSOLIDATION-0001: local copy replaced with the shared,
+// correct implementation. LS_ACCESS_TOKEN/LS_ACCESS_TOKEN_EXPIRY are
+// still used by this file's own ttFetch below, hence importing them too.
+import { getAccessToken, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from '@/lib/auth/tastytradeToken';
 
 interface WheelConfig {
   defaultDeltaMin: number;

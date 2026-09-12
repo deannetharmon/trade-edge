@@ -11,8 +11,7 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 // ── Constants ──────────────────────────────────────────────────────────────
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-const LS_ACCESS_TOKEN = 'tt_access_token_cache';
-const LS_ACCESS_TOKEN_EXPIRY = 'tt_access_token_expiry';
+import { getAccessToken, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from '@/lib/auth/tastytradeToken';
 const LS_ENGINE_ALLOC = 'hunter-engine-allocation';
 const LS_ENGINE_WATCHLIST = 'hunter-engine-watchlist';
 const LS_ENGINE_SUBTAB = 'hunter-engine-subtab';
@@ -164,36 +163,11 @@ interface WheelSuggestion {
 }
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
-// TT-TOKEN-EXPIRY-FIX-0001: was hardcoded to a fake 23h window; TastyTrade
-// access tokens actually expire in ~15min. Now caches against the real
-// expiresIn returned by refreshBrowserAccessToken(), minus a 60s buffer --
-// same fix applied to lib/scans/tastytrade-client.ts's getAccessToken().
-async function getAccessToken(): Promise<string> {
-  const sessionCached = sessionStorage.getItem('tt_access_token');
-  if (sessionCached) return sessionCached;
-  try {
-    const lsCached = localStorage.getItem(LS_ACCESS_TOKEN);
-    const expiry = localStorage.getItem(LS_ACCESS_TOKEN_EXPIRY);
-    if (lsCached && expiry && Date.now() < parseInt(expiry)) {
-      sessionStorage.setItem('tt_access_token', lsCached);
-      return lsCached;
-    }
-  } catch {}
-  let token: string;
-  let expiresIn: number;
-  try {
-    const result = await refreshBrowserAccessToken();
-    token = result.accessToken;
-    expiresIn = result.expiresIn;
-  }
-  catch { window.location.href = '/login'; throw new Error('Session expired'); }
-  sessionStorage.setItem('tt_access_token', token);
-  try {
-    localStorage.setItem(LS_ACCESS_TOKEN, token);
-    localStorage.setItem(LS_ACCESS_TOKEN_EXPIRY, String(Date.now() + Math.max(60, expiresIn - 60) * 1000));
-  } catch {}
-  return token;
-}
+// AUTH-TOKEN-CONSOLIDATION-0001: this file's TT-TOKEN-EXPIRY-FIX-0001
+// propagation was itself incomplete -- the sessionStorage check ran
+// before any expiry check, so a session-cached token could still be
+// stale for the rest of the tab's life. Replaced with the shared,
+// genuinely correct implementation.
 
 async function ttFetch(path: string, token: string): Promise<any> {
   const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });

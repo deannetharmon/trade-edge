@@ -14,7 +14,6 @@
 // (there is now exactly one implementation), which is the "unless an
 // existing bug is corrected" case called out in the PI-0008E ticket.
 //
-import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 // PI-0008E also closes two silent-data-loss gaps identified in PI-0008D:
 //   - Partial closes: the old code required exact quantity equality between
@@ -86,36 +85,15 @@ export const LS_KEY: Record<TimeRange, string> = {
   '1w': LS_TL_1W, '2w': LS_TL_2W, '1m': LS_TL_1M, '3m': LS_TL_3M, '6m': LS_TL_6M, '12m': LS_TL_12M,
 };
 
-// ── Auth / network (browser-only; byte-identical to the pre-PI-0008E copies
-//    other than living in one place now) ──────────────────────────────────
-export async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  const expiresAt = sessionStorage.getItem('tt_access_token_expires_at');
-
-  if (cached && expiresAt && Date.now() < Number(expiresAt)) {
-    return cached;
-  }
-
-  try {
-    const result = await refreshBrowserAccessToken();
-    const newExpiresAt = Date.now() + (result.expiresIn - 60) * 1000;
-    sessionStorage.setItem('tt_access_token', result.accessToken);
-    sessionStorage.setItem('tt_access_token_expires_at', String(newExpiresAt));
-    return result.accessToken;
-  } catch (error) {
-    // Restored: on a genuine, unrecoverable auth failure, send the user
-    // back to login rather than letting the error surface silently to
-    // whichever of the 7 call sites happen to import this function --
-    // several of those (e.g. portfolio's refreshItemQuote) only
-    // console.warn on failure, with no user-facing indication a fresh
-    // login is needed. The expiration check above (the real fix in this
-    // change) is preserved; only the missing fallback is restored.
-    sessionStorage.removeItem('tt_access_token');
-    sessionStorage.removeItem('tt_access_token_expires_at');
-    if (typeof window !== 'undefined') window.location.href = '/login';
-    throw new Error('Session expired');
-  }
-}
+// ── Auth / network (browser-only) ──────────────────────────────────
+// AUTH-TOKEN-CONSOLIDATION-0001: this copy stored its own separate
+// sessionStorage-only key (tt_access_token_expires_at) that didn't
+// survive a page reload. Now uses the shared module's dual
+// sessionStorage+localStorage approach with the standard keys -- a real
+// improvement, not just deduplication. The old key is simply orphaned,
+// not migrated; harmless, since it's never read again.
+import { getAccessToken } from '@/lib/auth/tastytradeToken';
+export { getAccessToken };
 
 export async function ttFetch(path: string, token: string) {
   const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' });
