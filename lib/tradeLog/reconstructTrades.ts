@@ -103,9 +103,17 @@ export async function getAccessToken(): Promise<string> {
     sessionStorage.setItem('tt_access_token_expires_at', String(newExpiresAt));
     return result.accessToken;
   } catch (error) {
+    // Restored: on a genuine, unrecoverable auth failure, send the user
+    // back to login rather than letting the error surface silently to
+    // whichever of the 7 call sites happen to import this function --
+    // several of those (e.g. portfolio's refreshItemQuote) only
+    // console.warn on failure, with no user-facing indication a fresh
+    // login is needed. The expiration check above (the real fix in this
+    // change) is preserved; only the missing fallback is restored.
     sessionStorage.removeItem('tt_access_token');
     sessionStorage.removeItem('tt_access_token_expires_at');
-    throw error;
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    throw new Error('Session expired');
   }
 }
 
