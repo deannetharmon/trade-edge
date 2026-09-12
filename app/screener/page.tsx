@@ -5456,8 +5456,16 @@ const strategyScores = useMemo(() => {
     <div className={`border ${cardBorder} ${scoreBorderL} ${cardBg} rounded-lg cursor-pointer transition-all hover:shadow-md`}
          onClick={() => { setExpanded(!expanded); setShowChart(false); }}>
 
-      {/* Header Row */}
-      <div className="px-4 py-3 flex items-center gap-2">
+      {/* Header Row -- items-start (not items-center): Col 2's badges can
+          wrap to a second line (alternative BPS/BCS/IC scores). With
+          items-center, that extra height splits above AND below Col 2's
+          content instead of growing the row, so the wrapped second line
+          drifted down into Col 1's Research button below it. items-start
+          aligns every column to the row's top edge and lets the row grow
+          to fit whichever column is tallest -- no drift into a neighbor's
+          space. Single-line rows (the common case) look the same either
+          way. */}
+      <div className="px-4 py-3 flex items-start gap-2">
         {/* Col 1: Symbol + price — fixed */}
         <div className="w-16 shrink-0">
           <p className={`font-bold ${th.text} text-sm`}>{result.symbol}</p>
