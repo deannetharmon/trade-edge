@@ -136,7 +136,12 @@ export function ScanModalShell({
 
 export type ScanMode = 'filter' | 'rank' | 'targeted';
 
-const MODE_ORDER: ScanMode[] = ['filter', 'rank', 'targeted'];
+// FILTER-MODE-REMOVAL-0002 -- 'filter' intentionally excluded from the
+// selectable list. Full deletion deferred -- Filter's rendering is
+// entangled with CSP's own results panel in several places and needs a
+// careful, separate pass, not a blind sweep. The ScanMode type and every
+// mode === 'filter' branch elsewhere are left untouched.
+const MODE_ORDER: ScanMode[] = ['rank', 'targeted'];
 
 const MODE_LABEL: Record<ScanMode, string> = { filter: 'FILTER', rank: 'RANK', targeted: 'TARGETED' };
 const MODE_ICON: Record<ScanMode, string> = { filter: '⊘', rank: '⬡', targeted: '⊕' };
@@ -171,7 +176,7 @@ export function ScanModeRadioGroup({ th, ariaLabel, value, onChange, description
   };
 
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="grid grid-cols-3 gap-2">
+    <div role="radiogroup" aria-label={ariaLabel} className="grid grid-cols-2 gap-2">
       {MODE_ORDER.map((mode, index) => {
         const selected = value === mode;
         return (

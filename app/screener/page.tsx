@@ -6245,7 +6245,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; preset: string }) => void;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode);
+  const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode === 'filter' ? 'rank' : lastMode);
   const [preset, setPreset] = useState(lastPreset || 'course');
   const [tDteMin, setTDteMin] = useState(lastTargetedDteMin);
   const [tDteMax, setTDteMax] = useState(lastTargetedDteMax);
