@@ -19,7 +19,10 @@ export function entrySnapshotOwnerScope(userId: string, accountId: string): stri
 export function entrySnapshotRedisKey(accountId: string, executionId: string): string {
   return `${ENTRY_SNAPSHOT_REDIS_PREFIX}:${encodeURIComponent(accountId)}:${encodeURIComponent(executionId)}`;
 }
-export function entrySnapshotAccountIndexKey(accountId: string): string { return `${ENTRY_SNAPSHOT_ACCOUNT_INDEX_PREFIX}:${encodeURIComponent(accountId)}`; }
+
+export function entrySnapshotAccountIndexKey(accountId: string): string {
+  return `${ENTRY_SNAPSHOT_ACCOUNT_INDEX_PREFIX}:${encodeURIComponent(accountId)}`;
+}
 
 type RedisSnapshotClient = {
   get(key: string): Promise<string | null>;
@@ -30,9 +33,19 @@ type RedisSnapshotClient = {
 
 function parseSnapshot(value: string): EntrySnapshot | null {
   try {
-    const parsed = JSON.parse(value) as EntrySnapshot;
-    if (!parsed || !parsed.executionId) return null;
-    return parsed;
+    const parsed = JSON.parse(value) as Record<string, any>;
+    if (!parsed) return null;
+
+    // Fallback normalization for older/legacy snapshot formats
+    const executionId = parsed.executionId ?? parsed.transactionId ?? parsed.brokerId ?? parsed.orderId;
+    if (!executionId) return null;
+
+    return {
+      ...parsed,
+      schemaVersion: parsed.schemaVersion ?? '1',
+      entrySnapshotId: parsed.entrySnapshotId ?? parsed.id ?? `legacy-${executionId}`,
+      executionId,
+    } as EntrySnapshot;
   } catch {
     return null;
   }
@@ -46,7 +59,10 @@ export async function saveImmutableEntrySnapshot<T extends EntrySnapshot>(
   const persist = async (redis: RedisSnapshotClient) => {
     const key = entrySnapshotRedisKey(storageAccountId, snapshot.executionId);
     const created = await redis.set(key, JSON.stringify(snapshot), 'NX');
-    if (created === 'OK') { await redis.sadd(entrySnapshotAccountIndexKey(storageAccountId), key); return { snapshot, created: true }; }
+    if (created === 'OK') {
+      await redis.sadd(entrySnapshotAccountIndexKey(storageAccountId), key);
+      return { snapshot, created: true };
+    }
     const existing = await redis.get(key);
     if (existing == null) throw new Error('Entry snapshot idempotency read failed');
     const parsed = parseSnapshot(existing);
@@ -56,7 +72,11 @@ export async function saveImmutableEntrySnapshot<T extends EntrySnapshot>(
   return client ? persist(client) : withAutopilotRedis(redis => persist(redis));
 }
 
-export async function readEntrySnapshotsForAccount(accountId: string, client?: RedisSnapshotClient, storageAccountId = accountId): Promise<EntrySnapshot[]> {
+export async function readEntrySnapshotsForAccount(
+  accountId: string,
+  client?: RedisSnapshotClient,
+  storageAccountId = accountId,
+): Promise<EntrySnapshot[]> {
   const read = async (redis: RedisSnapshotClient) => {
     const keys = await redis.smembers(entrySnapshotAccountIndexKey(storageAccountId));
     const values = await Promise.all(keys.map(key => redis.get(key)));
