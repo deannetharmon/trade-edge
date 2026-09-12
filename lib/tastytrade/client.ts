@@ -14,20 +14,16 @@
 // Addendum and docs/reviews/TC-0001-Implementation-Report.md for the full
 // symbol-by-symbol relocation audit.
 //
-import { refreshBrowserAccessToken } from './browser-token';
+// AUTH-TOKEN-CONSOLIDATION-0001: this file's own getAccessToken had no
+// expiry check and no redirect-on-failure fallback at all -- the most
+// exposed of nine independent copies found across the app. Now re-exports
+// the single shared, correct implementation instead. See
+// lib/auth/tastytradeToken.ts for the real logic and its test coverage.
+export { getAccessToken, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from '@/lib/auth/tastytradeToken';
 
 export const BASE = 'https://api.tastytrade.com';
 
 export const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
-
-// ── Auth & API ─────────────────────────────────────────────────────────────
-export async function getAccessToken(): Promise<string> {
-  const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  const result = await refreshBrowserAccessToken();
-  sessionStorage.setItem('tt_access_token', result.accessToken);
-  return result.accessToken;
-}
 
 export async function ttFetch(path: string, token: string) {
   void token; // Credentials are held by the signed-in user's server-side record.
