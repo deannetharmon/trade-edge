@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const accountId = request.nextUrl.searchParams.get('accountId');
   if (!accountId) return NextResponse.json({ error: 'accountId is required' }, { status: 400 });
   try {
-    return NextResponse.json({ snapshots: await readEntrySnapshotsForAccount(accountId, undefined, entrySnapshotOwnerScope(userId, accountId)) });
+    return NextResponse.json({ snapshots: await readEntrySnapshotsForAccount(accountId) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Snapshot read failed' }, { status: 500 });
   }
