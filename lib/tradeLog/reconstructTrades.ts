@@ -90,15 +90,23 @@ export const LS_KEY: Record<TimeRange, string> = {
 //    other than living in one place now) ──────────────────────────────────
 export async function getAccessToken(): Promise<string> {
   const cached = sessionStorage.getItem('tt_access_token');
-  if (cached) return cached;
-  let token: string;
+  const expiresAt = sessionStorage.getItem('tt_access_token_expires_at');
+
+  if (cached && expiresAt && Date.now() < Number(expiresAt)) {
+    return cached;
+  }
+
   try {
     const result = await refreshBrowserAccessToken();
-    token = result.accessToken;
+    const newExpiresAt = Date.now() + (result.expiresIn - 60) * 1000;
+    sessionStorage.setItem('tt_access_token', result.accessToken);
+    sessionStorage.setItem('tt_access_token_expires_at', String(newExpiresAt));
+    return result.accessToken;
+  } catch (error) {
+    sessionStorage.removeItem('tt_access_token');
+    sessionStorage.removeItem('tt_access_token_expires_at');
+    throw error;
   }
-  catch { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login'; throw new Error('Session expired'); }
-  sessionStorage.setItem('tt_access_token', token);
-  return token;
 }
 
 export async function ttFetch(path: string, token: string) {
