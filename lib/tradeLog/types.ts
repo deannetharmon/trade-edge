@@ -35,7 +35,7 @@ export type ReconstructionStatus = 'COMPLETE' | 'INCOMPLETE';
 export interface ClosedTrade {
   id: string;
   symbol: string;
-  strategy: 'BPS' | 'BCS' | 'IC' | 'SPREAD' | 'OTHER';
+  strategy: 'BPS' | 'BCS' | 'IC' | 'SPREAD' | 'CSP' | 'SHORT_CALL' | 'OTHER';
   openDate: string;
   closeDate: string;
   openTime: string;   // HH:MM local (ET)

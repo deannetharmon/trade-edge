@@ -231,6 +231,8 @@ function stratColor(s: string) {
   if (s === 'BPS') return 'text-emerald-400 border-emerald-600';
   if (s === 'BCS') return 'text-red-400 border-red-600';
   if (s === 'IC')  return 'text-blue-400 ac-border';
+  if (s === 'CSP') return 'text-amber-400 border-amber-600';
+  if (s === 'SHORT_CALL') return 'text-orange-400 border-orange-600';
   return 'text-slate-400 border-slate-600';
 }
 
@@ -497,15 +499,15 @@ function exportTradeLogCsv(trades: ClosedTrade[], excludedIds: Set<string>) {
   // separate fields -- now lead instead, with DTE at Entry sitting right
   // next to Hold Days for an easy side-by-side; ID moved to the end.
   const headers = [
-    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'Hold Days',
-    'DTE at Close', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
+    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'DTE at Close',
+    'Hold Days', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
     'P/L', 'P/L %', 'Outcome', 'Quantity', 'Fees', 'Excluded', 'Exit Type',
     'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
     'Remaining Quantity', 'Source Transaction IDs', 'ID',
   ];
   const rows = trades.map(t => [
-    t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.holdDays,
-    t.dteAtClose, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+    t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.dteAtClose,
+    t.holdDays, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
     t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
     excludedIds.has(t.id) ? 'Yes' : 'No', t.exitType,
     t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,
@@ -533,8 +535,8 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
   if (trades.length === 0) return;
   const byTransaction = buildSnapshotIndex(snapshots);
   const headers = [
-    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'Hold Days',
-    'DTE at Close', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
+    'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'DTE at Close',
+    'Hold Days', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
     'P/L', 'P/L %', 'Outcome', 'Quantity', 'Fees', 'Excluded', 'Exit Type',
     'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
     'Remaining Quantity', 'Source Transaction IDs', 'ID',
@@ -545,8 +547,8 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
   const rows = trades.map(t => {
     const snapshot = findSnapshotForTrade(t, byTransaction);
     return [
-      t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.holdDays,
-      t.dteAtClose, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+      t.symbol, t.strategy, t.openDate, t.closeDate, t.expiry, t.dteAtEntry, t.dteAtClose,
+      t.holdDays, t.openTime, t.openDow, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
       t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
       excludedIds.has(t.id) ? 'Yes' : 'No', t.exitType,
       t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,

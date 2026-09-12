@@ -382,6 +382,15 @@ function groupFillsIntoTrades(fills: Fill[]): ClosedTrade[] {
     if (putLegCount >= 2 && callLegCount === 0) strategy = 'BPS';
     else if (callLegCount >= 2 && putLegCount === 0) strategy = 'BCS';
     else if (putLegCount >= 2 && callLegCount >= 2) strategy = 'IC';
+    // Single-leg trades weren't given their own real label before -- a
+    // single short put is a Cash-Secured Put, a genuinely nameable
+    // strategy, not an unclassifiable "OTHER". Gated on isShort so a
+    // bought (long) put/call, if one ever appears, isn't mislabeled.
+    // Short calls are labeled honestly as SHORT_CALL rather than assumed
+    // "Covered Call" -- this reconstruction only sees option fills, not
+    // whether shares were actually held to cover it (Ian's call).
+    else if (putLegCount === 1 && callLegCount === 0 && putFills[0]?.isShort) strategy = 'CSP';
+    else if (callLegCount === 1 && putLegCount === 0 && callFills[0]?.isShort) strategy = 'SHORT_CALL';
     else if (groupFills.length > 0) strategy = 'OTHER';
 
     const sortedPuts  = Array.from(new Set(putFills.map(f => f.strike))).sort((a, b) => b - a);
