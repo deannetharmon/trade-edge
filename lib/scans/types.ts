@@ -231,7 +231,12 @@ export interface RankConfig {
 
 
 export interface DimensionScore {
-  momentum: number; ivr: number; emClearance: number; range: number; technical: number; liquidity: number; buffer: number; total: number;
+  momentum: number; ivr: number; emClearance: number; range: number; technical: number; liquidity: number; buffer: number;
+  // TRADE-ENTRY-SNAPSHOT-0001 -- previously computed and folded into
+  // `total` but never exposed individually; Sam's redundancy analysis
+  // needs these as separate values.
+  strategyAlignment: number; deltaQuality: number;
+  total: number;
 }
 
 

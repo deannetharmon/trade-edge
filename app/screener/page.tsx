@@ -3558,6 +3558,54 @@ function TradeModal({ result, th, onClose }: {
     });
   };
 
+  // TRADE-ENTRY-SNAPSHOT-0001 -- Iron Condor capture, parallel to the
+  // BPS/BCS path below but its own separate function per Ian's decision.
+  // Known real gap: the current candidate structure (SpreadCandidate)
+  // only tracks one shared shortDelta/shortIv/shortBid/shortAsk for IC,
+  // not separate put-side and call-side values -- those fields go here
+  // (put side, since that's what's actually populated), and the
+  // call-side-specific evidence fields are honestly marked unavailable
+  // rather than guessed. Capturing real call-side quote/delta/IV data
+  // would need its own separate scan-pipeline enhancement.
+  const persistPendingIronCondorEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
+    if (c.strategy !== 'IC') return;
+    const at = new Date().toISOString();
+    const quoteAt = typeof c.quoteFetchedAt === 'number' && Number.isFinite(c.quoteFetchedAt)
+      ? new Date(c.quoteFetchedAt).toISOString()
+      : null;
+    const evidence = (value: number | null | undefined, source: string, asOf: string | null = quoteAt) => value == null || !asOf ? unavailableEvidence<number>('Entry quote timestamp unavailable') : availableEvidence(value, source, asOf);
+    const scored = scoreCandidate(result, getSavedRankConfig());
+    const scoreEvidence = (value: number | undefined) => scored && value != null ? availableEvidence(value, 'scoreCandidate at entry', at) : unavailableEvidence<number>('Score could not be computed at entry');
+    const response = await fetch('/api/entry-context/pending-ic', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId, brokerOrderId, openingOrderIds, submittedAt: at, strategy: 'IC', symbol: result.symbol, expiration: c.expiration,
+        putShortStrike: c.shortStrike, putLongStrike: c.longStrike,
+        callShortStrike: c.shortCallStrike, callLongStrike: c.longCallStrike, quantity,
+        fillPrice: unavailableEvidence('Aggregate spread fill is unavailable until broker execution evidence is captured'),
+        underlyingPrice: evidence(result.price, 'scan underlying quote'),
+        putShortDelta: evidence(c.shortDelta, 'scan option chain'),
+        callShortDelta: unavailableEvidence('Call-side delta is not separately tracked by the current scan pipeline'),
+        putShortLegIv: evidence(c.shortIv, 'scan option chain'),
+        callShortLegIv: unavailableEvidence('Call-side IV is not separately tracked by the current scan pipeline'),
+        ivr: evidence(result.ivr, 'market metrics'), underlyingIv: unavailableEvidence('Underlying IV was not supplied by the scan result'),
+        expectedMove: evidence(c.expectedMove, 'scan expected-move formula'),
+        earningsDate: result.earningsDate && quoteAt ? availableEvidence(result.earningsDate, 'market metrics', quoteAt) : unavailableEvidence('Earnings date or timestamp unavailable'),
+        putQuoteBid: evidence(c.shortBid, 'scan option chain'), putQuoteAsk: evidence(c.shortAsk, 'scan option chain'),
+        callQuoteBid: unavailableEvidence('Call-side quote is not separately tracked by the current scan pipeline'),
+        callQuoteAsk: unavailableEvidence('Call-side quote is not separately tracked by the current scan pipeline'),
+        scoreMomentum: scoreEvidence(scored?.dims.momentum), scoreIvr: scoreEvidence(scored?.dims.ivr),
+        scoreEmClearance: scoreEvidence(scored?.dims.emClearance), scoreRange: scoreEvidence(scored?.dims.range),
+        scoreTechnical: scoreEvidence(scored?.dims.technical), scoreLiquidity: scoreEvidence(scored?.dims.liquidity),
+        scoreBuffer: scoreEvidence(scored?.dims.buffer), scoreStrategyAlignment: scoreEvidence(scored?.dims.strategyAlignment),
+        scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
+        profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
+        stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
+      }),
+    });
+    if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
+  };
+
   const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
     if (c.strategy !== 'BPS' && c.strategy !== 'BCS') return;
     const at = new Date().toISOString();
@@ -3565,6 +3613,16 @@ function TradeModal({ result, th, onClose }: {
       ? new Date(c.quoteFetchedAt).toISOString()
       : null;
     const evidence = (value: number | null | undefined, source: string, asOf: string | null = quoteAt) => value == null || !asOf ? unavailableEvidence<number>('Entry quote timestamp unavailable') : availableEvidence(value, source, asOf);
+    // TRADE-ENTRY-SNAPSHOT-0001 -- compute the engine's own score breakdown
+    // at the moment of entry, regardless of which scan mode the trade was
+    // browsed under (Filter/Rank/Targeted all use the same underlying
+    // scoreCandidate, matching the existing scoreCandidateLocal pattern
+    // used elsewhere in this file). This is what the engine said about
+    // this specific trade when it was actually placed -- not recomputed
+    // later, and not skipped just because the trade came from a mode that
+    // doesn't display a composite score.
+    const scored = scoreCandidate(result, getSavedRankConfig());
+    const scoreEvidence = (value: number | undefined) => scored && value != null ? availableEvidence(value, 'scoreCandidate at entry', at) : unavailableEvidence<number>('Score could not be computed at entry');
     const response = await fetch('/api/entry-context/pending', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3579,6 +3637,13 @@ function TradeModal({ result, th, onClose }: {
         earningsDate: result.earningsDate && quoteAt ? availableEvidence(result.earningsDate, 'market metrics', quoteAt) : unavailableEvidence('Earnings date or timestamp unavailable'),
         quoteBid: evidence(c.shortBid, 'scan option chain'), quoteAsk: evidence(c.shortAsk, 'scan option chain'),
         quoteMid: c.shortBid != null && c.shortAsk != null ? availableEvidence((c.shortBid + c.shortAsk) / 2, 'scan option chain', at) : unavailableEvidence('Short-leg quote unavailable'),
+        scoreMomentum: scoreEvidence(scored?.dims.momentum), scoreIvr: scoreEvidence(scored?.dims.ivr),
+        scoreEmClearance: scoreEvidence(scored?.dims.emClearance), scoreRange: scoreEvidence(scored?.dims.range),
+        scoreTechnical: scoreEvidence(scored?.dims.technical), scoreLiquidity: scoreEvidence(scored?.dims.liquidity),
+        scoreBuffer: scoreEvidence(scored?.dims.buffer), scoreStrategyAlignment: scoreEvidence(scored?.dims.strategyAlignment),
+        scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
+        profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
+        stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
       }),
     });
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
@@ -3627,7 +3692,7 @@ function TradeModal({ result, th, onClose }: {
       setOrderId(submittedOrderId);
       // ENTRY-0001A: this records planning/quote evidence only. The immutable
       // trade snapshot is still created later, only after broker fills confirm.
-      try { await persistPendingEntry(accountNumber, String(submittedOrderId), openingOrderIds); }
+      try { await persistPendingEntry(accountNumber, String(submittedOrderId), openingOrderIds); await persistPendingIronCondorEntry(accountNumber, String(submittedOrderId), openingOrderIds); }
       catch (entryContextError) {
         console.warn(entryContextError);
         setEntryContextWarning('Order submitted, but entry context could not be saved. No snapshot will be claimed unless broker evidence is later captured.');

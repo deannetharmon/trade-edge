@@ -13,6 +13,10 @@ import type { ExitType } from '@/lib/classifyExit';
 import type { TimeRange, Outcome, ClosedTrade } from '@/lib/tradeLog/reconstructTrades';
 import { fetchAndReconstructTrades, readCache, writeCache, getDeviceId } from '@/lib/tradeLog/reconstructTrades';
 import type { OrderLifecycleEvent } from '@/lib/order-lifecycle/types';
+import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from '@/lib/entry-context/types';
+import { buildSnapshotIndex, findSnapshotForTrade } from '@/lib/entry-context/performance';
+
+type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
 type SortDir = 'asc' | 'desc';
 type GroupBy = 'none' | 'symbol' | 'outcome';
@@ -510,6 +514,54 @@ function exportTradeLogCsv(trades: ClosedTrade[], excludedIds: Set<string>) {
   a.click(); URL.revokeObjectURL(url);
 }
 
+// TRADE-ENTRY-SNAPSHOT-0001 -- separate button, not an enriched version of
+// the existing export, so today's export behavior never silently changes
+// for anyone who doesn't need the extra fields (Diane's UX call). Uses
+// the same shared matching rule as the performance rollup and the row
+// indicator, via findSnapshotForTrade.
+function evidenceValue(evidence: { state: string; value: unknown } | undefined): string {
+  if (!evidence || evidence.state !== 'AVAILABLE') return '';
+  return String(evidence.value ?? '');
+}
+
+function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<string>, snapshots: EntrySnapshot[]) {
+  if (trades.length === 0) return;
+  const byTransaction = buildSnapshotIndex(snapshots);
+  const headers = [
+    'ID', 'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Open Time', 'Open Day of Week',
+    'Expiry', 'Hold Days', 'Strikes', 'Credit Received', 'Close Price', 'P/L', 'P/L %',
+    'Outcome', 'Quantity', 'Fees', 'Excluded', 'DTE at Close', 'DTE at Entry', 'Exit Type',
+    'Reconstruction Status', 'Closure Mechanism', 'Opened Quantity', 'Closed Quantity',
+    'Remaining Quantity', 'Source Transaction IDs',
+    'Score Momentum', 'Score IVR', 'Score EM Clearance', 'Score Range', 'Score Technical',
+    'Score Liquidity', 'Score Buffer', 'Score Strategy Alignment', 'Score Delta Quality',
+    'Score Composite', 'Profit Target', 'Stop Loss',
+  ];
+  const rows = trades.map(t => {
+    const snapshot = findSnapshotForTrade(t, byTransaction);
+    return [
+      t.id, t.symbol, t.strategy, t.openDate, t.closeDate, t.openTime, t.openDow,
+      t.expiry, t.holdDays, t.strikes, t.creditReceived.toFixed(2), t.closePrice.toFixed(2),
+      t.pnl.toFixed(2), t.pnlPct.toFixed(1), t.outcome, t.quantity, t.fees.toFixed(2),
+      excludedIds.has(t.id) ? 'Yes' : 'No', t.dteAtClose, t.dteAtEntry, t.exitType,
+      t.reconstructionStatus, t.closureMechanism, t.openedQuantity, t.closedQuantity,
+      t.remainingQuantity, t.sourceTransactionIds.join('; '),
+      evidenceValue(snapshot?.scoreMomentum), evidenceValue(snapshot?.scoreIvr),
+      evidenceValue(snapshot?.scoreEmClearance), evidenceValue(snapshot?.scoreRange),
+      evidenceValue(snapshot?.scoreTechnical), evidenceValue(snapshot?.scoreLiquidity),
+      evidenceValue(snapshot?.scoreBuffer), evidenceValue(snapshot?.scoreStrategyAlignment),
+      evidenceValue(snapshot?.scoreDeltaQuality), evidenceValue(snapshot?.scoreComposite),
+      evidenceValue(snapshot?.profitTarget), evidenceValue(snapshot?.stopLoss),
+    ];
+  });
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `trade-log-full-detail-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 export default function TradeLogPage() {
   const [theme, setTheme]       = useState<Theme>(getSavedTheme);
@@ -527,6 +579,7 @@ export default function TradeLogPage() {
   const [showAI, setShowAI]     = useState(false);
   const [lifecycleEvents, setLifecycleEvents] = useState<OrderLifecycleEvent[]>([]);
   const [lifecycleError, setLifecycleError] = useState('');
+  const [entrySnapshots, setEntrySnapshots] = useState<EntrySnapshot[]>([]);
 
   const loadLifecycleEvents = useCallback(async () => {
     try {
@@ -592,6 +645,14 @@ export default function TradeLogPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId, brokerOrderId: pending.brokerOrderId }),
         })));
+        // TRADE-ENTRY-SNAPSHOT-0001 -- fetch confirmed snapshots for the row
+        // indicator and full-detail export, right after reconciling any
+        // pending entries above (so freshly-promoted ones are included).
+        try {
+          const snapshotsResponse = await fetch(`/api/entry-context/snapshots?accountId=${encodeURIComponent(accountId)}`);
+          const snapshotsBody = snapshotsResponse.ok ? await snapshotsResponse.json() : null;
+          setEntrySnapshots(snapshotsBody?.snapshots ?? []);
+        } catch { setEntrySnapshots([]); }
       }
       if (unmatchedClosures.length > 0) {
         // PI-0008E: closing/assignment/exercise transactions that couldn't be
@@ -798,6 +859,10 @@ export default function TradeLogPage() {
             <button onClick={() => exportTradeLogCsv(sorted, excludedIds)} disabled={sorted.length === 0}
               className={`text-[10px] px-3 py-1.5 border ${th.border} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-50 tracking-wider`}>
               ⬇ Export CSV
+            </button>
+            <button onClick={() => exportTradeLogFullDetailCsv(sorted, excludedIds, entrySnapshots)} disabled={sorted.length === 0}
+              className={`text-[10px] px-3 py-1.5 border border-teal-600 rounded text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50 tracking-wider`}>
+              ⬇ Export full detail
             </button>
           </div>
         </div>

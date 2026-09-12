@@ -156,6 +156,8 @@ export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: 
         technical: Math.round(pmccScores.shortDeltaScore),
         liquidity: Math.round(pmccScores.roiScore),
         buffer: Math.round(pmccScores.wmdScore),
+        strategyAlignment: 0,
+        deltaQuality: 0,
         total: pmccScores.totalScore,
       },
     };
@@ -357,6 +359,8 @@ export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: 
         technical: Math.round(technicalScore),
         liquidity: Math.round(liquidityScore),
         buffer: Math.round(bufferScore),
+        strategyAlignment: Math.round(strategyAlignmentScore),
+        deltaQuality: Math.round(deltaQualityScore),
         total: Math.min(100, total),
       },
     };

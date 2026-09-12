@@ -1,5 +1,12 @@
 import { withAutopilotRedis } from '@/lib/autopilot/persistence/redis';
-import type { CreditSpreadEntrySnapshot } from './types';
+import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from './types';
+
+// TRADE-ENTRY-SNAPSHOT-0001 -- both snapshot types share this store: same
+// Redis key shape (accountId + executionId, no strategy-specific prefix),
+// and executionId is a real broker transaction id, globally unique per
+// account, so there is no collision risk between the two kinds sharing
+// one namespace.
+type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
 
 export const ENTRY_SNAPSHOT_REDIS_PREFIX = 'entry-context:v1:snapshot';
 export const ENTRY_SNAPSHOT_ACCOUNT_INDEX_PREFIX = 'entry-context:v1:account';
@@ -21,31 +28,31 @@ type RedisSnapshotClient = {
   smembers(key: string): Promise<string[]>;
 };
 
-function parseSnapshot(value: string): CreditSpreadEntrySnapshot {
-  const parsed = JSON.parse(value) as CreditSpreadEntrySnapshot;
+function parseSnapshot(value: string): EntrySnapshot {
+  const parsed = JSON.parse(value) as EntrySnapshot;
   if (!parsed || parsed.schemaVersion !== '1' || !parsed.entrySnapshotId || !parsed.executionId) {
     throw new Error('Stored entry snapshot is invalid');
   }
   return parsed;
 }
 
-export async function saveImmutableEntrySnapshot(
-  snapshot: CreditSpreadEntrySnapshot,
+export async function saveImmutableEntrySnapshot<T extends EntrySnapshot>(
+  snapshot: T,
   client?: RedisSnapshotClient,
   storageAccountId = snapshot.accountId,
-): Promise<{ snapshot: CreditSpreadEntrySnapshot; created: boolean }> {
+): Promise<{ snapshot: T; created: boolean }> {
   const persist = async (redis: RedisSnapshotClient) => {
     const key = entrySnapshotRedisKey(storageAccountId, snapshot.executionId);
     const created = await redis.set(key, JSON.stringify(snapshot), 'NX');
     if (created === 'OK') { await redis.sadd(entrySnapshotAccountIndexKey(storageAccountId), key); return { snapshot, created: true }; }
     const existing = await redis.get(key);
     if (existing == null) throw new Error('Entry snapshot idempotency read failed');
-    return { snapshot: parseSnapshot(existing), created: false };
+    return { snapshot: parseSnapshot(existing) as T, created: false };
   };
   return client ? persist(client) : withAutopilotRedis(redis => persist(redis));
 }
 
-export async function readEntrySnapshotsForAccount(accountId: string, client?: RedisSnapshotClient, storageAccountId = accountId): Promise<CreditSpreadEntrySnapshot[]> {
+export async function readEntrySnapshotsForAccount(accountId: string, client?: RedisSnapshotClient, storageAccountId = accountId): Promise<EntrySnapshot[]> {
   const read = async (redis: RedisSnapshotClient) => {
     const keys = await redis.smembers(entrySnapshotAccountIndexKey(storageAccountId));
     const values = await Promise.all(keys.map(key => redis.get(key)));
@@ -58,7 +65,7 @@ export async function readEntrySnapshot(
   accountId: string,
   executionId: string,
   client?: RedisSnapshotClient,
-): Promise<CreditSpreadEntrySnapshot | null> {
+): Promise<EntrySnapshot | null> {
   const read = async (redis: RedisSnapshotClient) => {
     const value = await redis.get(entrySnapshotRedisKey(accountId, executionId));
     return value == null ? null : parseSnapshot(value);
