@@ -173,6 +173,18 @@ export interface PositionObjectiveInput {
   hitTarget?: boolean | null;
   needsClose?: boolean | null;
   hasGtc?: boolean | null;
+  // EXIT-PRESSURE-0001 -- the trader's own pre-set stop-loss level for this
+  // specific position, as a P/L percentage (same scale/convention as
+  // pnlPct), from its entry snapshot's stopLossPct -- if one exists (only
+  // trades opened after TRADE-ENTRY-SNAPSHOT-0001 have this; most
+  // positions today will pass null here). Distinct from
+  // DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct, which is a single
+  // generic threshold applied to every position regardless of what the
+  // trader actually planned for that specific trade. Used only to change
+  // how a material-loss breach is explained (a quiet confirmation the plan
+  // is executing, vs. a generic policy-threshold alert) -- never to change
+  // whether or how strongly CUT_LOSSES is recommended.
+  ownStopLossPct?: number | null;
   buffer?: number | null;
   earningsDate?: string | null;
   expDate?: string | null;
@@ -861,6 +873,15 @@ export function evaluatePositionObjective(
     marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
   const marketableMaterialLoss = marketableDecisionEligible && rawMarketableMaterialLoss;
   const materialLoss = midMaterialLoss || marketableMaterialLoss;
+  // EXIT-PRESSURE-0001 -- true only when materialLoss ALSO fired AND the
+  // loss has reached the trader's own pre-set stop specifically (not just
+  // the generic policy default). Never fires materialLoss on its own, and
+  // never on marketable pricing alone -- this only changes how an already-
+  // firing material-loss breach gets explained, so it inherits whichever
+  // evidence (mid or marketable) actually caused materialLoss to be true.
+  const hitOwnStop = materialLoss && input.ownStopLossPct != null &&
+    ((pnlPct != null && pnlPct <= input.ownStopLossPct) ||
+     (marketablePnlPct != null && marketablePnlPct <= input.ownStopLossPct));
 
   const midWeakHealthLoss =
     pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
@@ -921,6 +942,7 @@ export function evaluatePositionObjective(
     dte,
     pnlPct,
     materialLoss,
+    hitOwnStop,
     weakHealthLoss,
     itmOrCriticalBuffer,
     profitTargetReached,

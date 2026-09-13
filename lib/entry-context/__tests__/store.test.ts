@@ -29,7 +29,7 @@ const snapshot = (executionId = 'open-1') => createCreditSpreadEntrySnapshot({
   return5d: unavailableEvidence('Historical price series is not configured'), return20d: unavailableEvidence('Historical price series is not configured'),
   scoreMomentum: unavailableEvidence('n/a'), scoreIvr: unavailableEvidence('n/a'), scoreEmClearance: unavailableEvidence('n/a'), scoreRange: unavailableEvidence('n/a'),
   scoreTechnical: unavailableEvidence('n/a'), scoreLiquidity: unavailableEvidence('n/a'), scoreBuffer: unavailableEvidence('n/a'), scoreStrategyAlignment: unavailableEvidence('n/a'),
-  scoreDeltaQuality: unavailableEvidence('n/a'), scoreComposite: unavailableEvidence('n/a'), profitTarget: unavailableEvidence('n/a'), stopLoss: unavailableEvidence('n/a'),
+  scoreDeltaQuality: unavailableEvidence('n/a'), scoreComposite: unavailableEvidence('n/a'), profitTarget: unavailableEvidence('n/a'), stopLoss: unavailableEvidence('n/a'), stopLossPct: unavailableEvidence('n/a'),
 });
 
 describe('entry snapshot store', () => {

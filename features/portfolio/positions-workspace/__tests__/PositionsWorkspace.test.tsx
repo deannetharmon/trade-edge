@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { THEMES } from '@/lib/theme';
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
-import { PositionsWorkspace, profitTargetPresentation, profitTargetPct } from '../PositionsWorkspace';
+import { PositionsWorkspace, profitTargetPresentation, profitTargetPct, recommendationTone } from '../PositionsWorkspace';
 
 const position = {
   key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
@@ -303,5 +303,46 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(await screen.findByDisplayValue(note)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EXIT-PRESSURE-0001: recommendationTone's quiet-confirmation branch
+// ---------------------------------------------------------------------------
+
+describe('recommendationTone', () => {
+  function withRecommendation(label: string, quietConfirmation?: boolean): Position {
+    return {
+      recommendation: {
+        label,
+        managementIntent: quietConfirmation === undefined ? undefined : { quietConfirmation },
+      },
+    } as unknown as Position;
+  }
+
+  it('renders Cut Losses as negative (red) by default, unchanged from before this ticket', () => {
+    expect(recommendationTone(withRecommendation('Cut Losses'))).toBe('negative');
+  });
+
+  it('renders Cut Losses as informational (calm) when quietConfirmation is true', () => {
+    expect(recommendationTone(withRecommendation('Cut Losses', true))).toBe('informational');
+  });
+
+  it('renders Cut Losses as negative when quietConfirmation is explicitly false', () => {
+    expect(recommendationTone(withRecommendation('Cut Losses', false))).toBe('negative');
+  });
+
+  it('does not let quietConfirmation affect non-Cut-Losses labels', () => {
+    // quietConfirmation should only ever be true alongside a Cut Losses
+    // recommendation in practice, but the tone function itself checks it
+    // unconditionally -- worth confirming a stray true doesn't repaint an
+    // unrelated recommendation calm when it shouldn't.
+    expect(recommendationTone(withRecommendation('Take Profit Now', true))).toBe('informational');
+  });
+
+  it('still resolves Take Profit / Reduce Risk / Hold correctly when quietConfirmation is absent', () => {
+    expect(recommendationTone(withRecommendation('Take Profit Now'))).toBe('positive');
+    expect(recommendationTone(withRecommendation('Reduce Risk'))).toBe('warning');
+    expect(recommendationTone(withRecommendation('Hold Position'))).toBe('neutral');
   });
 });

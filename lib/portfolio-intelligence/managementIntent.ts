@@ -146,6 +146,12 @@ export interface ManagementIntentEvidence {
   // -- this module does not read policy thresholds itself, it only reacts
   // to whether they were already breached.
   materialLoss?: boolean;
+  // EXIT-PRESSURE-0001 -- true only alongside materialLoss=true, when the
+  // breach specifically matches the trader's own pre-set stop for this
+  // position (not just the generic policy default). Changes only how the
+  // CUT_LOSSES bump below is explained -- never whether or how strongly it
+  // fires. See positionObjective.ts's computation for the full reasoning.
+  hitOwnStop?: boolean;
   weakHealthLoss?: boolean;
   itmOrCriticalBuffer?: boolean;
   profitTargetReached?: boolean;
@@ -234,6 +240,14 @@ export interface ManagementIntentResult {
   intent: ManagementIntent;
   label: string;
   reasons: string[];
+  // EXIT-PRESSURE-0001 -- true when the winning intent's top contribution
+  // is specifically the trader's own pre-set stop being hit (id
+  // 'hit-own-stop'), not a generic policy-threshold breach. A typed signal
+  // for the UI to render this as a quiet confirmation instead of the same
+  // urgent styling used for a breach the trader didn't already plan for --
+  // deliberately not left to the UI layer string-matching `reasons[0]`,
+  // which would silently break if this wording ever changes.
+  quietConfirmation?: boolean;
   // Ranked, excludes the winner. Always includes Roll Position when it was
   // part of the relevant set and didn't win (ticket #5).
   alternatives: ManagementIntentCandidate[];
@@ -381,10 +395,21 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
   // ticket's brief that Health Score become supporting evidence rather than
   // a dominant driver.
   if (evidence.materialLoss) {
+    // EXIT-PRESSURE-0001 -- when the breach specifically matches the
+    // trader's own pre-set stop, this isn't new information landing on
+    // an anxious moment -- it's the plan they set calmly at entry
+    // executing exactly as intended. Same score weight (this doesn't
+    // change whether or how strongly CUT_LOSSES fires), different id and
+    // wording so the UI can render it as a quiet confirmation rather than
+    // the same urgent alert used for a breach the trader didn't already
+    // plan for.
+    const atOwnStop = evidence.hitOwnStop === true;
     bump(scores, 'CUT_LOSSES', W.materialLoss, {
-      id: 'material-loss',
-      label: 'Material loss threshold breached',
-      explanation: 'Loss has reached the policy loss-stop threshold.',
+      id: atOwnStop ? 'hit-own-stop' : 'material-loss',
+      label: atOwnStop ? 'At your stop' : 'Material loss threshold breached',
+      explanation: atOwnStop
+        ? 'This is the stop-loss level you set when you opened the position.'
+        : 'Loss has reached the policy loss-stop threshold.',
       evidenceField: 'materialLoss',
     });
   } else if (evidence.weakHealthLoss) {
@@ -697,6 +722,7 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
     intent: winner.intent,
     label: winner.label,
     reasons: winner.reasons.slice(0, 4),
+    quietConfirmation: winner.contributions.some((c) => c.id === 'hit-own-stop'),
     alternatives: alternatives.slice(0, 3),
     candidates,
     winnerScore: winner.score,

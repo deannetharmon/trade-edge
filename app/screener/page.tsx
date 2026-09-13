@@ -3628,6 +3628,7 @@ function TradeModal({ result, th, onClose }: {
         scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
         profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
         stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
+        stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
       }),
     });
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
@@ -3671,6 +3672,7 @@ function TradeModal({ result, th, onClose }: {
         scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
         profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
         stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
+        stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
       }),
     });
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');

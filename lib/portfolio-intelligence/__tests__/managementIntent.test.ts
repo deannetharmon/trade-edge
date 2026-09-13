@@ -263,3 +263,61 @@ describe('Acceptance: Material Loss', () => {
     expect(threatened!.title).toMatch(/^Cut Losses:/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// EXIT-PRESSURE-0001: hitOwnStop -- quiet confirmation vs. generic alert
+// ---------------------------------------------------------------------------
+
+describe('EXIT-PRESSURE-0001: hitOwnStop', () => {
+  it('a generic policy-threshold breach (no own stop known) still gets the original wording', () => {
+    const result = selectManagementIntent({ context: 'credit-spread', materialLoss: true });
+    expect(result.intent).toBe('CUT_LOSSES');
+    expect(result.reasons[0]).toBe('Loss has reached the policy loss-stop threshold.');
+  });
+
+  it('a breach that matches the trader own pre-set stop gets the quiet wording instead', () => {
+    const result = selectManagementIntent({ context: 'credit-spread', materialLoss: true, hitOwnStop: true });
+    expect(result.intent).toBe('CUT_LOSSES');
+    expect(result.reasons[0]).toBe('This is the stop-loss level you set when you opened the position.');
+  });
+
+  it('hitOwnStop alone (materialLoss false) does not fire CUT_LOSSES on its own', () => {
+    const result = selectManagementIntent({ context: 'credit-spread', materialLoss: false, hitOwnStop: true });
+    expect(result.intent).not.toBe('CUT_LOSSES');
+  });
+
+  it('end-to-end: evaluatePositionObjective computes hitOwnStop from ownStopLossPct and pnlPct', () => {
+    const { legacyRecommendation } = evaluatePositionObjective(
+      baseInput({ symbol: 'SOFI', pnlPct: -110, ownStopLossPct: -100 }),
+      NOW,
+    );
+    expect(legacyRecommendation.managementIntent!.intent).toBe('CUT_LOSSES');
+    expect(legacyRecommendation.managementIntent!.reasons[0]).toBe(
+      'This is the stop-loss level you set when you opened the position.'
+    );
+  });
+
+  it('end-to-end: a material loss that does NOT match the trader own stop keeps the generic wording', () => {
+    // pnlPct breaches the generic -100% policy default, but the trader's
+    // own stop was set much wider (-150%) -- this loss hasn't reached it.
+    const { legacyRecommendation } = evaluatePositionObjective(
+      baseInput({ symbol: 'SOFI', pnlPct: -110, ownStopLossPct: -150 }),
+      NOW,
+    );
+    expect(legacyRecommendation.managementIntent!.intent).toBe('CUT_LOSSES');
+    expect(legacyRecommendation.managementIntent!.reasons[0]).toBe(
+      'Loss has reached the policy loss-stop threshold.'
+    );
+  });
+
+  it('end-to-end: no ownStopLossPct supplied (most positions today) behaves exactly as before', () => {
+    const { legacyRecommendation } = evaluatePositionObjective(
+      baseInput({ symbol: 'SOFI', pnlPct: -110 }),
+      NOW,
+    );
+    expect(legacyRecommendation.managementIntent!.intent).toBe('CUT_LOSSES');
+    expect(legacyRecommendation.managementIntent!.reasons[0]).toBe(
+      'Loss has reached the policy loss-stop threshold.'
+    );
+  });
+});

@@ -67,6 +67,15 @@ export interface CreditSpreadEntrySnapshot {
   // separately at reconciliation, against ClosedTrade, not stored here.
   profitTarget: Evidence<number>;
   stopLoss: Evidence<number>;
+  // EXIT-PRESSURE-0001 -- stopLoss above is a dollar/debit trigger price,
+  // not directly comparable to a live position's percentage P/L (and
+  // stopMultiple varies per trade, so it can't be safely reconstructed
+  // from stopLoss alone). This is the equivalent already computed at
+  // order-submission time for display (stopPnlPct in page.tsx) -- e.g.
+  // -100 for a standard 2x-credit stop -- captured here so a live
+  // position's own pre-set stop can be compared directly against its
+  // current pnlPct, without needing the credit amount at all.
+  stopLossPct: Evidence<number>;
 }
 
 export type CreditSpreadEntrySnapshotInput = Omit<CreditSpreadEntrySnapshot, 'schemaVersion' | 'entrySnapshotId' | 'analysis'>;
@@ -78,7 +87,7 @@ export type CreditSpreadEntrySnapshotInput = Omit<CreditSpreadEntrySnapshot, 'sc
 export const SCORE_AND_PLAN_FIELD_NAMES = [
   'scoreMomentum', 'scoreIvr', 'scoreEmClearance', 'scoreRange', 'scoreTechnical',
   'scoreLiquidity', 'scoreBuffer', 'scoreStrategyAlignment', 'scoreDeltaQuality',
-  'scoreComposite', 'profitTarget', 'stopLoss',
+  'scoreComposite', 'profitTarget', 'stopLoss', 'stopLossPct',
 ] as const;
 
 export function unavailableEvidence<T>(reason: string): Evidence<T> {
@@ -113,7 +122,7 @@ export function createCreditSpreadEntrySnapshot(input: CreditSpreadEntrySnapshot
     [input.scoreRange, 'scoreRange'], [input.scoreTechnical, 'scoreTechnical'], [input.scoreLiquidity, 'scoreLiquidity'],
     [input.scoreBuffer, 'scoreBuffer'], [input.scoreStrategyAlignment, 'scoreStrategyAlignment'],
     [input.scoreDeltaQuality, 'scoreDeltaQuality'], [input.scoreComposite, 'scoreComposite'],
-    [input.profitTarget, 'profitTarget'], [input.stopLoss, 'stopLoss'],
+    [input.profitTarget, 'profitTarget'], [input.stopLoss, 'stopLoss'], [input.stopLossPct, 'stopLossPct'],
   ];
   fields.forEach(([evidence, field]) => assertEvidence(evidence, field));
   const facts = buildCreditSpreadEntryFacts({
@@ -189,6 +198,9 @@ export interface IronCondorEntrySnapshot {
   scoreComposite: Evidence<number>;
   profitTarget: Evidence<number>;
   stopLoss: Evidence<number>;
+  // EXIT-PRESSURE-0001 -- see the matching field on CreditSpreadEntrySnapshot
+  // for why this is needed alongside the dollar-value stopLoss above.
+  stopLossPct: Evidence<number>;
   analysis: {
     otmBufferPct: Evidence<number>;
     expectedMoveClearancePct: Evidence<number>;

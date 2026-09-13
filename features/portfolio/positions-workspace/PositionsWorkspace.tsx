@@ -327,7 +327,13 @@ function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = 
   return <span className="block"><span className="text-white/70">{label} </span><span className="text-white/40">{number(prior, digits)}{prior == null ? '' : suffix}</span><span className="px-1 text-white/30">→</span><span className={`${SEMANTIC_TONE_CLASS[tone]} ${material ? 'font-semibold' : ''}`}>{number(current, digits)}{current == null ? '' : suffix}</span></span>;
 }
 
-function recommendationTone(position: Position): SemanticTone {
+export function recommendationTone(position: Position): SemanticTone {
+  // EXIT-PRESSURE-0001 -- a Cut Losses recommendation that specifically
+  // matches the trader's own pre-set stop is a quiet confirmation the plan
+  // is executing, not new alarming information -- rendered calm/
+  // informational rather than the same urgent red used for a breach the
+  // trader didn't already plan for.
+  if (position.recommendation?.managementIntent?.quietConfirmation) return 'informational';
   const label = (position.recommendation?.label ?? 'Hold').toLowerCase();
   if (label.includes('profit')) return 'positive';
   if (label.includes('cut') || label.includes('close')) return 'negative';

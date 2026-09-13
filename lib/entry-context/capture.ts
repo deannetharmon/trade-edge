@@ -42,6 +42,7 @@ export interface ConfirmedOpeningExecution {
   scoreComposite: Evidence<number>;
   profitTarget: Evidence<number>;
   stopLoss: Evidence<number>;
+  stopLossPct: Evidence<number>;
   tradeGroupId?: string | null;
 }
 
@@ -93,6 +94,7 @@ export function captureConfirmedCreditSpreadEntry(
     scoreComposite: execution.scoreComposite,
     profitTarget: execution.profitTarget,
     stopLoss: execution.stopLoss,
+    stopLossPct: execution.stopLossPct,
     ivTrend: unavailableEvidence('Historical IV series is not configured'),
     realizedVolatility: unavailableEvidence('Historical price series is not configured'),
     return5d: unavailableEvidence('Historical price series is not configured'),
@@ -143,6 +145,7 @@ export interface ConfirmedOpeningIronCondorExecution {
   scoreComposite: Evidence<number>;
   profitTarget: Evidence<number>;
   stopLoss: Evidence<number>;
+  stopLossPct: Evidence<number>;
   tradeGroupId?: string | null;
 }
 
@@ -194,6 +197,7 @@ export function captureConfirmedIronCondorEntry(
     scoreComposite: execution.scoreComposite,
     profitTarget: execution.profitTarget,
     stopLoss: execution.stopLoss,
+    stopLossPct: execution.stopLossPct,
     ivTrend: unavailableEvidence('Historical IV series is not configured'),
     realizedVolatility: unavailableEvidence('Historical price series is not configured'),
     return5d: unavailableEvidence('Historical price series is not configured'),
