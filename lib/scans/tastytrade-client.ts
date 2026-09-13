@@ -14,7 +14,7 @@ import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
 import { requireActiveBrokerAccount, resolveActiveBrokerAccount, type BrokerAccountResolutionStatus } from '@/lib/tastytrade/accountSelection';
 
-export const classificationCache = new Map<string, 'index' | 'etf' | 'stock'>();
+export const classificationCache = new Map<string, 'index' | 'etf' | 'stock' | 'unsupported'>();
 
 
 export async function ttFetch(path: string, token: string): Promise<any> {
@@ -51,22 +51,43 @@ export async function ttFetch(path: string, token: string): Promise<any> {
 export { getAccessToken } from '@/lib/auth/tastytradeToken';
 
 
-export async function classifyUnderlying(symbol: string, token: string): Promise<'index' | 'etf' | 'stock'> {
+// Real cash-settled indexes that genuinely have no equity record at
+// TastyTrade -- absence of a record for one of these means "index," not
+// "unsupported." Matches the same whitelist used elsewhere in the app
+// (app/portfolio/page.tsx, app/rinse-repeat/page.tsx, etc.) for the same
+// purpose.
+const KNOWN_CASH_SETTLED_INDEXES = new Set(['SPX', 'SPXW', 'NDX', 'RUT', 'VIX', 'XSP', 'DJX']);
+
+export async function classifyUnderlying(symbol: string, token: string): Promise<'index' | 'etf' | 'stock' | 'unsupported'> {
   const s = symbol.toUpperCase();
   const cached = classificationCache.get(s);
   if (cached) return cached;
 
-  let result: 'index' | 'etf' | 'stock';
+  let result: 'index' | 'etf' | 'stock' | 'unsupported';
   try {
     const data = await ttFetch(`/instruments/equities/${s}`, token);
     const item = data?.data;
     if (item?.['is-index']) result = 'index';
     else if (item?.['is-etf']) result = 'etf';
     else result = 'stock';
-  } catch {
-    // Not found as an equity at all — true cash-settled indexes (SPX, VIX,
-    // NDX, RUT) have no equity record, so absence of a record means index.
-    result = 'index';
+  } catch (error) {
+    // Not found as an equity at all. A KNOWN cash-settled index (SPX, VIX,
+    // NDX, RUT, ...) genuinely has no equity record -- absence there means
+    // index, same as before. Anything else that's specifically a 404 (not
+    // a network blip or other transient failure) means the symbol just
+    // isn't a valid TastyTrade instrument at all -- e.g. a foreign-exchange
+    // ticker like WML (Wealth Minerals, TSXV-listed, not supported here) --
+    // and gets flagged as unsupported rather than silently guessed as an
+    // index it isn't. Any other kind of error still falls back to the old
+    // "index" guess, since a transient failure shouldn't permanently
+    // mislabel a symbol that might be perfectly valid.
+    const message = error instanceof Error ? error.message : '';
+    const isGenuineNotFound = message.includes('(404)');
+    result = KNOWN_CASH_SETTLED_INDEXES.has(s)
+      ? 'index'
+      : isGenuineNotFound
+        ? 'unsupported'
+        : 'index';
   }
   classificationCache.set(s, result);
   return result;
@@ -167,7 +188,14 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
   const gateMax = dteWindow ? dteWindow.max : ((Number.isFinite(RULES.DTE_MAX) ? RULES.DTE_MAX : 60) + 5);
   const [loDte, hiDte] = gateMin <= gateMax ? [gateMin, gateMax] : [gateMax, gateMin];
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  const classification = await classifyUnderlying(symbol, token);
+  // 'unsupported' (genuinely invalid symbol) coerced to 'stock' here --
+  // this function's return type is narrow and used deep in the scan
+  // pipeline; a truly unsupported symbol's own chain lookup will fail
+  // naturally further down anyway, so nothing is being silently masked.
+  // The watchlist UI (which needs the distinction) gets it directly from
+  // classifyUnderlying, not through here.
+  const rawClassification = await classifyUnderlying(symbol, token);
+  const classification = rawClassification === 'unsupported' ? 'stock' : rawClassification;
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
   const expirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};

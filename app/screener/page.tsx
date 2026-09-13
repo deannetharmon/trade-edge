@@ -330,7 +330,7 @@ interface FilterSuggestion {
 }
 interface WatchlistTicker {
   symbol: string;
-  classification: 'index' | 'etf' | 'stock' | 'pending';
+  classification: 'index' | 'etf' | 'stock' | 'pending' | 'unsupported';
   active: boolean;
 }
 type SavedFilters = Record<string, string[]>;
@@ -1226,7 +1226,14 @@ async function getPMCCChain(
   dteRanges: { shortMin: number; shortMax: number; longMin: number; longMax: number },
 ): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  const classification = await classifyUnderlying(symbol, token);
+  // 'unsupported' (genuinely invalid symbol) is coerced to 'stock' here --
+  // this function's return type is narrow and used deep in the scan
+  // pipeline; a truly unsupported symbol's own chain lookup will fail
+  // naturally further down anyway, so nothing is being silently masked.
+  // The watchlist UI (which needs the distinction) gets it directly from
+  // classifyUnderlying, not through here.
+  const rawClassification = await classifyUnderlying(symbol, token);
+  const classification = rawClassification === 'unsupported' ? 'stock' : rawClassification;
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
   const shortExpirations: string[] = [], longExpirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
@@ -2447,9 +2454,17 @@ function WatchlistBox({
   const etfsOnly = tickers.filter(t => t.classification === 'etf');
   const equities = tickers.filter(t => t.classification === 'stock');
   const pending = tickers.filter(t => t.classification === 'pending');
+  // Genuinely not a valid TastyTrade instrument (e.g. a foreign-exchange
+  // ticker) -- flagged in red rather than silently guessed as an index.
+  const unsupported = tickers.filter(t => t.classification === 'unsupported');
 
   const TickerChip = ({ t }: { t: WatchlistTicker }) => (
-    <div className={`flex items-center gap-1.5 px-2 py-1 border ${th.inputBorder} rounded-md`}>
+    <div
+      className={`flex items-center gap-1.5 px-2 py-1 border rounded-md ${
+        t.classification === 'unsupported' ? 'border-red-600' : th.inputBorder
+      }`}
+      title={t.classification === 'unsupported' ? 'Not a valid TastyTrade instrument -- can\'t be scanned' : undefined}
+    >
       <input
         type="checkbox"
         checked={t.active}
@@ -2457,7 +2472,9 @@ function WatchlistBox({
         disabled={disabled || t.classification === 'pending'}
         className="cursor-pointer shrink-0"
       />
-      <span className={`text-[11px] font-medium flex-1 ${t.active ? th.text : th.textMuted}`}>
+      <span className={`text-[11px] font-medium flex-1 ${
+        t.classification === 'unsupported' ? 'text-red-500' : t.active ? th.text : th.textMuted
+      }`}>
         {t.symbol}{t.classification === 'pending' && <span className={`ml-1 ${th.textFaint}`}>⟳</span>}
       </span>
       <button
@@ -2594,6 +2611,16 @@ function WatchlistBox({
               <GroupHeader label="Equities" count={equities.length} group="stock" />
               <div className="grid grid-cols-3 gap-1">
                 {equities.map(t => <TickerChip key={t.symbol} t={t} />)}
+              </div>
+            </div>
+          )}
+          {unsupported.length > 0 && (
+            <div>
+              <p className="text-[9px] text-red-500 uppercase tracking-widest mb-1">
+                Not Supported ({unsupported.length}) -- not a valid TastyTrade instrument
+              </p>
+              <div className="grid grid-cols-3 gap-1">
+                {unsupported.map(t => <TickerChip key={t.symbol} t={t} />)}
               </div>
             </div>
           )}
