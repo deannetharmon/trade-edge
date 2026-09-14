@@ -486,6 +486,10 @@ export function exploreAllCandidatesForRank(
                 shortIv: normalizeIv(shortLeg.iv),
                 expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
                 expectedMove: null,
+                // ADVISORY-QUOTE-EVIDENCE-0001: see the matching comment in
+                // app/screener/page.tsx's Targeted-mode equivalent.
+                shortBid: shortLeg.bid, shortAsk: shortLeg.ask,
+                longBid: longLeg.bid, longAsk: longLeg.ask,
               };
             }
           }

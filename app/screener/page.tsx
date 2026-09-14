@@ -3786,7 +3786,7 @@ function TradeModal({ result, th, onClose }: {
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Expected-move clearance</span><span className={getEmClearanceColor(emClearancePct)}>{emClearancePct == null ? 'Unavailable' : `${emClearancePct >= 0 ? '+' : ''}${emClearancePct.toFixed(1)}% vs EM`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Short delta / DTE</span><span className={th.text}>{c.shortDelta != null ? `${Math.abs(c.shortDelta).toFixed(2)} / ${c.dte}d` : `Unavailable / ${c.dte}d`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>IVR</span><span className={result.ivr == null ? th.textFaint : th.text}>{result.ivr == null ? 'Unavailable' : `${result.ivr.toFixed(0)}%`}</span></div>
-            <div className="flex justify-between text-xs"><span className={th.textFaint}>Earnings</span><span className={result.earningsDate ? 'text-amber-300' : th.textFaint}>{result.earningsDate ?? 'Unavailable'}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Earnings</span><span className={result.checks?.earnings && result.checks.earnings.status !== 'pass' ? 'text-amber-300' : th.textFaint}>{result.checks?.earnings?.value ?? (result.earningsDate ?? 'Unavailable')}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Quote evidence</span><span className={c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? th.text : th.textFaint}>{c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? 'Both legs quoted' : 'Unavailable'}</span></div>
             {emClearancePct != null && emClearancePct < 0 && <p className="text-[9px] text-red-300">Advisory: the short strike sits inside the modelled expected move.</p>}
             {earningsWithinExpiry && <p className="text-[9px] text-amber-300">Advisory: earnings falls within this position’s expiration window.</p>}
@@ -7395,6 +7395,13 @@ async function runTargetedScan(
                     shortIv: normalizeIv(shortLeg.iv),
                     expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
                     expectedMove: null,
+                    // ADVISORY-QUOTE-EVIDENCE-0001: bid/ask already computed
+                    // above for the credit blend (naturalCredit) -- carried
+                    // through here too so the order modal's "Quote evidence"
+                    // field can actually show it instead of always reading
+                    // Unavailable for every BPS/BCS trade.
+                    shortBid: shortLeg.bid, shortAsk: shortLeg.ask,
+                    longBid: longLeg.bid, longAsk: longLeg.ask,
                   };
                   }
                 }
