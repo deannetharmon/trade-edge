@@ -1,4 +1,13 @@
-export type OptionStrategyType = 'LONG_CALL' | 'SHORT_OPTION' | 'CSP' | 'PMCC';
+// types/options.ts
+
+export type OptionStrategyType = 
+  | 'LONG_CALL'
+  | 'SHORT_CALL'
+  | 'CSP'
+  | 'PMCC'
+  | 'LONG_PUT'
+  | 'IRON_CONDOR'
+  | 'STRADDLE';
 
 export interface ShortLegTelemetry {
   strike: number;
@@ -25,5 +34,5 @@ export interface OptionsTelemetryProps {
   ivNow: number;
   ivrStart: number;
   ivrNow: number;
-  shortLeg?: ShortLegTelemetry;
+  shortLeg?: ShortLegTelemetry; 
 }
