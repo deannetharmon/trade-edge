@@ -35,8 +35,8 @@ export interface SpreadCandidate {
   longCallOI?: number;
   callCredit?: number; 
   callWidth?: number; 
-  totalCredit?: number; o
-  ptimized?: boolean;
+  totalCredit?: number; 
+  optimized?: boolean;
   shortOccSymbol?: string; 
   longOccSymbol?: string;
   shortCallOccSymbol?: string; 
