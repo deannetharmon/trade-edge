@@ -225,4 +225,76 @@ describe('acquirePortfolioBrokerSource', () => {
     });
     expect(orders).toHaveLength(0);
   });
+
+  // PENDING-ENTRY-DECISION-SUPPORT-0001: a real OTOCO bracket -- entry
+  // trigger plus a profit-target limit and a stop-loss stop-limit as
+  // contingent exits -- should surface the exits' actual terms, not just
+  // a count.
+  it('surfaces the real profit-target and stop-loss terms for an OTOCO pending entry', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [{
+        id: 'otoco-1',
+        orders: [
+          {
+            id: 'trigger-1', status: 'Working', 'time-in-force': 'GTC', 'order-type': 'Limit',
+            price: '1.85', 'price-effect': 'Credit', 'underlying-symbol': 'MRVL',
+            legs: [
+              { symbol: 'MRVL  280616P00115000', 'underlying-symbol': 'MRVL', action: 'Sell to Open', quantity: 5 },
+              { symbol: 'MRVL  280616P00110000', 'underlying-symbol': 'MRVL', action: 'Buy to Open', quantity: 5 },
+            ],
+          },
+          {
+            id: 'profit-target-1', status: 'Contingent', 'time-in-force': 'GTC', 'order-type': 'Limit',
+            price: '0.93', 'price-effect': 'Debit',
+            legs: [
+              { symbol: 'MRVL  280616P00115000', action: 'Buy to Close', quantity: 5 },
+              { symbol: 'MRVL  280616P00110000', action: 'Sell to Close', quantity: 5 },
+            ],
+          },
+          {
+            id: 'stop-loss-1', status: 'Contingent', 'time-in-force': 'GTC', 'order-type': 'Stop Limit',
+            'stop-trigger': '3.70', price: '3.90', 'price-effect': 'Debit',
+            legs: [
+              { symbol: 'MRVL  280616P00115000', action: 'Buy to Close', quantity: 5 },
+              { symbol: 'MRVL  280616P00110000', action: 'Sell to Close', quantity: 5 },
+            ],
+          },
+        ],
+      }] }, pagination: { 'total-pages': 1 } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders).toHaveLength(1);
+    const pending = result.pendingOrders[0];
+    expect(pending.contingentExitCount).toBe(2);
+    expect(pending.contingentExits).toHaveLength(2);
+    expect(pending.contingentExits).toContainEqual({ kind: 'PROFIT_TARGET', price: 0.93, priceEffect: 'Debit' });
+    expect(pending.contingentExits).toContainEqual({ kind: 'STOP_LOSS', price: 3.70, priceEffect: 'Debit' });
+  });
+
+  it('returns an empty contingentExits array, not undefined, when there are no contingent exits', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'ACC1' } }] } };
+      if (path === '/accounts/ACC1/positions?include-marks=true') return { data: { items: [] } };
+      if (path === '/accounts/ACC1/orders/live') return { data: { items: [{
+        id: 'spread-solo', status: 'Working', price: '1.25', 'price-effect': 'Credit', 'underlying-symbol': 'AAPL',
+        legs: [
+          { symbol: 'AAPL  261016P00100000', 'underlying-symbol': 'AAPL', action: 'Sell to Open', quantity: 1 },
+          { symbol: 'AAPL  261016P00095000', 'underlying-symbol': 'AAPL', action: 'Buy to Open', quantity: 1 },
+        ],
+      }] } };
+      if (path === '/accounts/ACC1/complex-orders?page-offset=0&per-page=50') return { data: { items: [] }, pagination: { 'total-pages': 1 } };
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const source = await acquirePortfolioBrokerSource();
+    const result = await loadPositions(source);
+    expect(result.pendingOrders[0].contingentExitCount).toBe(0);
+    expect(result.pendingOrders[0].contingentExits).toEqual([]);
+  });
 });

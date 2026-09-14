@@ -36,6 +36,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT } from '@/lib/tastytrade/accountSelection';
 import type { Position, PendingOrder, PositionSnapshot } from '@/lib/portfolio-data/types';
+import { fetchPendingOrderSnapshotStore, capturePendingOrderSnapshots } from '@/lib/pending-order-snapshot/capture';
+import type { PendingOrderQuoteSnapshot } from '@/app/api/pending-order-snapshots/route';
 import type { PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
 import { acquirePortfolioSnapshot, LCC_0001A_SNAPSHOT_ENABLED } from '@/lib/portfolio-snapshot/acquire';
 import { ACCOUNT_UNRESOLVED_REASON, POSITIONS_UNAVAILABLE_REASON } from '@/lib/portfolio-snapshot/dataQuality';
@@ -83,6 +85,11 @@ export interface PortfolioDataContextValue {
   // acquisition completes. No existing field's shape or timing contract changes.
   snapshot: PortfolioSnapshot | null;
   snapshotDataQuality: SnapshotDataQuality;
+  // PENDING-ENTRY-DECISION-SUPPORT-0001 -- keyed by PendingOrder.id, same
+  // shape as position snapshot history but a separate store (see the
+  // ticket for why these aren't merged). Empty object before the first
+  // fetch completes, never undefined.
+  pendingOrderSnapshotStore: Record<string, PendingOrderQuoteSnapshot[]>;
   setPositions: Dispatch<SetStateAction<Position[]>>;
   setPendingOrders: Dispatch<SetStateAction<PendingOrder[]>>;
   setDecisionReviews: Dispatch<SetStateAction<DecisionReviewStore>>;
@@ -125,6 +132,7 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
     staleQuotes: false,
     warnings: [],
   });
+  const [pendingOrderSnapshotStore, setPendingOrderSnapshotStore] = useState<Record<string, PendingOrderQuoteSnapshot[]>>({});
   // Monotonic request identity makes every portfolio refresh latest-wins.
   // A slower, older broker response can never overwrite newer quote evidence,
   // and only the current request is allowed to clear the shared loading state.
@@ -240,6 +248,19 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       }
       pendingOrdersRef.current = pendingData;
       setPendingOrders(pendingData);
+      // PENDING-ENTRY-DECISION-SUPPORT-0001 -- fire-and-forget, same
+      // non-blocking pattern as the snapshot/trend fetches above. Cleans up
+      // history for orders that dropped out of pendingData (filled or
+      // cancelled) and captures a new data point for any still-pending
+      // order whose reference has moved enough to be worth logging.
+      const nowPendingIds = new Set(pendingData.map(o => o.id));
+      const droppedOut = priorPending.filter(o => !nowPendingIds.has(o.id));
+      void fetchPendingOrderSnapshotStore()
+        .then(store => {
+          setPendingOrderSnapshotStore(store);
+          return capturePendingOrderSnapshots(pendingData, droppedOut, store);
+        })
+        .catch(err => console.error('Pending order snapshot store fetch failed (non-blocking):', err));
       setLastRefresh(new Date());
       callbacks?.onSnapshotHistoryAttached?.(updated);
       return { status: 'success', positions: updated };
@@ -306,6 +327,7 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
     composition,
     snapshot,
     snapshotDataQuality,
+    pendingOrderSnapshotStore,
     setPositions,
     setPendingOrders,
     setDecisionReviews,

@@ -135,6 +135,8 @@ import { canonicalRecommendationForCard, canonicalRecommendationToAction, projec
 // docs/design/ES-0002-Pending-Order-Replacement-Safety.md.
 import type { PendingOrderEvidence, ActualReplacementOrderEvidence } from '@/lib/portfolio/pendingOrderReplacementSafety';
 import { runPendingOrderReplacementWorkflow } from '@/lib/portfolio/pendingOrderReplacementSubmission';
+import type { PendingOrderQuoteSnapshot } from '@/app/api/pending-order-snapshots/route';
+import { computeDrift } from '@/lib/pending-order-snapshot/driftEngine';
 import { assessPendingEntry, groupPendingEntries } from '@/lib/portfolio/pendingEntryIntelligence';
 import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext } from '@/lib/portfolio-intelligence';
 import { calculatePositionHealthScore, evaluatePositionObjective, buildPortfolioFinancialContext, calculateRemainingOpportunity, normalizePositionObjectivePct } from '@/lib/portfolio-intelligence';
@@ -9084,7 +9086,7 @@ function pendingOrderIdentityKey(order: PendingOrder): string {
   return `pending::${order.accountNumber}::${order.symbol}::${order.expDate ?? 'unknown'}::${legsKey}`;
 }
 
-function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, onValidate, onRefresh, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
+function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplace, onValidate, onRefresh, savedNote, onSaveNote, savedAlert, onSaveAlert, snapshotHistory }: {
   order: PendingOrder; th: typeof THEMES[Theme];
   cancelling: boolean; replacing: boolean;
   onCancel: (order: PendingOrder) => void;
@@ -9095,6 +9097,7 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   onSaveNote: (order: PendingOrder, note: string) => Promise<void>;
   savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null;
   onSaveAlert: (order: PendingOrder, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
+  snapshotHistory: PendingOrderQuoteSnapshot[];
 }) {
   const strategyColor = order.strategy === 'BPS'
     ? 'border-emerald-600 text-emerald-400 bg-emerald-500/10'
@@ -9154,6 +9157,25 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
   const partialExecution = assessment.executionDecision === 'REVIEW_PARTIAL_EXECUTION';
   const quoteCaptureDisplay = order.quoteCapturedAt
     ? new Date(order.quoteCapturedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+    : null;
+
+  // PENDING-ENTRY-DECISION-SUPPORT-0001: the single computation the
+  // recommendation number, reasoning sentence, and favorable/unfavorable
+  // badge all derive from -- see driftEngine.ts. referenceAtPlacement is
+  // the first ever recorded snapshot; with no history at all yet (capture
+  // hasn't run, or this order predates the feature), there's no baseline
+  // to compare against, so this renders the same gathering-data state
+  // regardless of order age -- never a fabricated baseline.
+  const minutesElapsed = order.createdAt ? (Date.now() - new Date(order.createdAt).getTime()) / 60000 : 0;
+  const referenceAtPlacement = snapshotHistory[0]?.currentReference;
+  const drift = hasReliableQuote && referenceAtPlacement != null && order.limitPrice != null && (order.priceEffect === 'Credit' || order.priceEffect === 'Debit')
+    ? computeDrift({
+        requestedPrice: order.limitPrice,
+        priceEffect: order.priceEffect,
+        referenceAtPlacement,
+        currentReference: order.currentExecutablePrice!,
+        minutesElapsed,
+      })
     : null;
 
   const startEdit = () => { setNewPrice(order.limitPrice?.toFixed(2) ?? ''); setEditing(true); };
@@ -9224,6 +9246,19 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
           </Link>
         </div>
       )}
+      {order.contingentExits && order.contingentExits.length > 0 && (
+        <div className={`mt-2 pt-2 border-t border-yellow-700/30 flex flex-wrap gap-x-4 gap-y-0.5 text-[9px] ${th.textFaint}`}>
+          <span className="uppercase tracking-wider">Contingent exits ({order.contingentExits.length})</span>
+          {order.contingentExits.map((exit, i) => (
+            <span key={i}>
+              {exit.kind === 'PROFIT_TARGET' ? 'Profit target' : 'Stop loss'}:{' '}
+              <span className="font-bold text-white">
+                {exit.price != null ? `$${exit.price.toFixed(2)}` : '—'}{exit.priceEffect ? ` ${exit.priceEffect.toLowerCase()}` : ''}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
       {!editing && awaitingExchangeConfirmation && (
         <div className={`mt-2 flex items-center gap-2 text-[9px] ${th.textFaint}`}>
           <span>Broker has received the order but has not confirmed it is working at the exchange.</span>
@@ -9270,6 +9305,57 @@ function PendingOrderCard({ order, th, cancelling, replacing, onCancel, onReplac
       )}
       {editing && (
         <div className="mt-2 pt-2 border-t border-yellow-700/30 space-y-2">
+          {(drift?.gatheringData || (!drift && hasReliableQuote)) && (
+            <div className={`rounded border ${th.border} ${th.input} p-2.5 space-y-1`}>
+              <div className={`flex items-center gap-1.5 text-[10px] ${th.textFaint}`}>
+                <span>Gathering data{drift ? ` · ${Math.ceil(drift.minutesRemaining)} min left` : ''}</span>
+              </div>
+              <p className={`text-[10px] ${th.textFaint}`}>
+                Your ask is <span className="font-bold text-white">${order.limitPrice?.toFixed(2)}</span>, reference is <span className="font-bold text-white">${order.currentExecutablePrice?.toFixed(2)}</span>.
+                Too early to tell if that's moving; recommendations start after 30 minutes to rule out normal quote noise.
+              </p>
+            </div>
+          )}
+          {drift && !drift.gatheringData && (
+            <div className={`rounded border ${th.border} ${th.input} p-2.5 space-y-2`}>
+              <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Recommended reprice</p>
+              {drift.clearsThreshold && drift.recommendedPrice != null ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className="text-center">
+                      <p className={`text-[8px] uppercase ${th.textFaint}`}>Current ask</p>
+                      <p className="text-lg font-bold text-neutral-500 line-through">${order.limitPrice?.toFixed(2)}</p>
+                    </div>
+                    <span className={th.textFaint}>→</span>
+                    <div className="text-center">
+                      <p className={`text-[8px] uppercase ${th.textFaint}`}>Recommended</p>
+                      <p className="text-xl font-bold text-cyan-300">${drift.recommendedPrice.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  <p className={`text-[10px] ${th.textFaint}`}>
+                    Halfway between your <span className="font-bold text-white">${order.limitPrice?.toFixed(2)}</span> ask and the <span className="font-bold text-white">${order.currentExecutablePrice?.toFixed(2)}</span> natural-side reference.
+                  </p>
+                  <p className={`text-[10px] ${th.textFaint}`}>
+                    Reference moved <span className="font-bold text-white">${drift.movedAmount.toFixed(2)}</span> {drift.direction === 'TOWARD' ? 'toward' : 'away from'} your ask since placement — past the <span className="font-bold text-white">${drift.thresholdUsed.toFixed(2)}</span> minimum.
+                  </p>
+                  <span className={`inline-block text-[9px] px-2 py-0.5 rounded ${drift.favorability === 'MORE_FAVORABLE' ? 'bg-emerald-900/40 text-emerald-300' : 'bg-amber-900/40 text-amber-300'}`}>
+                    {drift.favorability === 'MORE_FAVORABLE' ? 'More favorable' : 'Less favorable'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setNewPrice(drift.recommendedPrice!.toFixed(2))}
+                    className="block text-[9px] px-2 py-1 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-500/10 font-bold"
+                  >
+                    Use ${drift.recommendedPrice.toFixed(2)}
+                  </button>
+                </>
+              ) : (
+                <p className={`text-[10px] ${th.textFaint}`}>
+                  Reference moved <span className="font-bold text-white">${drift.movedAmount.toFixed(2)}</span> since placement, under the <span className="font-bold text-white">${drift.thresholdUsed.toFixed(2)}</span> minimum — not enough to count as real drift.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`text-[10px] ${th.textFaint}`}>Requested ${order.limitPrice?.toFixed(2) ?? '—'} → new {(order.priceEffect ?? 'limit').toLowerCase()} price</span>
             <input
@@ -9537,13 +9623,14 @@ function PendingOrderPriceAlertEditor({ order, savedAlert, onSave }: { order: Pe
   </div>;
 }
 
-function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace, onValidate, onRefresh }: {
+function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderIds, onCancel, onReplace, onValidate, onRefresh, snapshotStore }: {
   orders: PendingOrder[]; th: typeof THEMES[Theme];
   cancellingOrderIds: Set<string>; replacingOrderIds: Set<string>;
   onCancel: (order: PendingOrder) => void;
   onReplace: (order: PendingOrder, newPrice: number) => void;
   onValidate: (order: PendingOrder) => Promise<{ message: string; passed: boolean }>;
   onRefresh: ReturnType<typeof usePortfolioData>['refresh'];
+  snapshotStore: Record<string, PendingOrderQuoteSnapshot[]>;
 }) {
   // PENDING-NOTES-0001: fetched once here (not per-card) -- same pattern
   // PositionsWorkspace uses for its own notes/price alerts. Reuses the
@@ -9631,6 +9718,7 @@ function PendingOrdersSection({ orders, th, cancellingOrderIds, replacingOrderId
                 onSaveNote={savePendingNote}
                 savedAlert={pendingAlerts[`${encodeURIComponent(order.accountNumber)}::${encodeURIComponent(pendingOrderIdentityKey(order))}`] ?? null}
                 onSaveAlert={savePendingAlert}
+                snapshotHistory={snapshotStore[order.id] ?? []}
               />
             ))}
           </div>
@@ -10013,7 +10101,7 @@ export default function PortfolioPage() {
   // exact same context. See components/portfolio-data/
   // PortfolioDataProvider.tsx's module doc for the full rationale.
   const {
-    positions, pendingOrders, balances, decisionReviews, loading, error, lastRefresh, composition, snapshot, snapshotDataQuality,
+    positions, pendingOrders, balances, decisionReviews, loading, error, lastRefresh, composition, snapshot, snapshotDataQuality, pendingOrderSnapshotStore,
     setPositions, setPendingOrders, setDecisionReviews, setError,
     refresh: refreshPortfolioData, refreshBalances, refreshDecisionReviews,
   } = usePortfolioData();
@@ -10753,6 +10841,7 @@ export default function PortfolioPage() {
                     onReplace={replacePendingOrder}
                     onValidate={validatePendingOrder}
                     onRefresh={fetchPositions}
+                    snapshotStore={pendingOrderSnapshotStore}
                   />
                 </div>
               )}
@@ -10800,6 +10889,7 @@ export default function PortfolioPage() {
                         onReplace={replacePendingOrder}
                         onValidate={validatePendingOrder}
                         onRefresh={fetchPositions}
+                        snapshotStore={pendingOrderSnapshotStore}
                       />
                     )}
                     {filteredPositions.length > 0 && (

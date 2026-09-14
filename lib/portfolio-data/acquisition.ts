@@ -1498,7 +1498,7 @@ export async function loadPositions(
     rawOrder: any,
     id: string,
     sourceKind: PendingOrder['sourceKind'],
-    grouping?: { parentOrderId?: string | null; contingentExitCount?: number },
+    grouping?: { parentOrderId?: string | null; contingentExitCount?: number; contingentExits?: PendingOrder['contingentExits'] },
   ): PendingOrder | null => {
     const status = String(rawOrder?.status ?? '').trim().toLowerCase();
     if (['filled', 'cancelled', 'canceled', 'rejected', 'expired', 'removed'].includes(status)) return null;
@@ -1558,6 +1558,7 @@ export async function loadPositions(
       timeInForce: rawOrder?.['time-in-force'] ?? null,
       parentOrderId: grouping?.parentOrderId ?? rawOrder?.['complex-order-tag'] ?? null,
       contingentExitCount: grouping?.contingentExitCount ?? 0,
+      contingentExits: grouping?.contingentExits ?? [],
       filledQuantity: rawOrder?.['filled-quantity'] != null
         ? Number(rawOrder['filled-quantity'])
         : null,
@@ -1616,15 +1617,36 @@ export async function loadPositions(
           // bracket legs are still Live, which keeps hasActiveNested true; without
           // this check the filled opening order leaks into Pending Orders.
           if (isOpeningOrder) {
-            const contingentExitCount = nestedOrders.filter((nested: any) => {
+            const contingentExitOrders = nestedOrders.filter((nested: any) => {
               if (nested === openingSource) return false;
               return (nested.legs ?? []).some((leg: any) =>
                 ['buy to close', 'sell to close'].includes(String(leg.action ?? '').trim().toLowerCase())
               );
-            }).length;
+            });
+            const contingentExitCount = contingentExitOrders.length;
+            // PENDING-ENTRY-DECISION-SUPPORT-0001: reuse the same
+            // mapGtcOrder/isStopOrder parsing already proven for filled
+            // positions' GTC brackets, rather than a second parser for the
+            // same broker order shape.
+            const contingentExits = contingentExitOrders.map((nested: any) => {
+              const gtc = mapGtcOrder(nested);
+              const stop = isStopOrder(gtc);
+              // For a stop order, "the price" that matters to the trader is
+              // the trigger level (where it activates), not the limit price
+              // attached for execution once triggered -- those can differ,
+              // and showing the limit here would misrepresent where the
+              // stop actually sits.
+              const rawPrice = stop ? (gtc.stopPrice ?? gtc.price) : gtc.price;
+              return {
+                kind: (stop ? 'STOP_LOSS' : 'PROFIT_TARGET') as 'STOP_LOSS' | 'PROFIT_TARGET',
+                price: rawPrice ? parseFloat(rawPrice) : null,
+                priceEffect: nested?.['price-effect'] ?? null,
+              };
+            });
             const pending = toPendingOrder(openingSource, String(order.id ?? ''), 'complex', {
               parentOrderId: String(order.id ?? ''),
               contingentExitCount,
+              contingentExits,
             });
             if (pending) {
               pendingOrders.push(pending);

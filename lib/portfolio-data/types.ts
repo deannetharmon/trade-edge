@@ -304,6 +304,17 @@ export interface PendingOrder {
   /** Number of broker child orders waiting on the opening fill (for example,
    * a profit target and stop in an OTOCO bracket). */
   contingentExitCount?: number;
+  // PENDING-ENTRY-DECISION-SUPPORT-0001: the actual terms of each
+  // contingentExitCount entry, not just the count. Parsed with the same
+  // mapGtcOrder/isStopOrder logic already proven for filled positions'
+  // GTC brackets, not a separate parser. Empty array (not undefined) when
+  // contingentExitCount is 0 or the terms couldn't be parsed -- absence
+  // of data is distinct from zero contingent exits.
+  contingentExits?: Array<{
+    kind: 'PROFIT_TARGET' | 'STOP_LOSS';
+    price: number | null;
+    priceEffect: string | null;
+  }>;
   /** Broker-reported filled quantity when present.  Absence means unknown,
    * never zero inferred by the client. */
   filledQuantity?: number | null;
