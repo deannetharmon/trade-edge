@@ -14,8 +14,8 @@ export const mockTelemetryData: Record<string, OptionsTelemetryProps> = {
     gammaNow: 0.012,
     vegaStart: 0.30,
     vegaNow: 0.15,
-    ivStart: '68.0%',
-    ivNow: '75.0%',
+    ivStart: 68, // Fixed: changed '68.0%' to 68
+    ivNow: 75,   // Fixed: changed '75.0%' to 75
     ivrStart: 1,
     ivrNow: 29,
   },
