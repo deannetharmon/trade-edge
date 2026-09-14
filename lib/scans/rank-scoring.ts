@@ -435,7 +435,11 @@ export function exploreAllCandidatesForRank(
             const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
             const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
             if (!longLeg) continue;
-            const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
+            const midCredit = shortLeg.mid - longLeg.mid;
+            const naturalCredit = shortLeg.bid - longLeg.ask;
+            const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
+            if (suggestedCredit <= 0) continue;
+            const credit = suggestedCredit;
             if (credit <= 0) continue; // structural floor — not a real premium-selling trade otherwise
             const creditRatio = credit / width;
             const maxLoss = width - credit;
@@ -455,7 +459,11 @@ export function exploreAllCandidatesForRank(
               bestCandidate = {
                 strategy: strat, expiration: exp, dte, shortStrike: shortLeg.strikePrice, longStrike,
                 shortDelta: absDelta, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
-                credit, spreadWidth: width, creditRatio, roc, pop: modelPop, optimized: false,
+                credit,
+                midCredit: Number(midCredit.toFixed(2)),
+                naturalCredit: Number(naturalCredit.toFixed(2)),
+                spreadFriction: Number((midCredit - naturalCredit).toFixed(2)),
+                spreadWidth: width, creditRatio, roc, pop: modelPop, optimized: false,
                 shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
                 shortIv: normalizeIv(shortLeg.iv),
                 expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
