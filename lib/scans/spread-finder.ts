@@ -16,7 +16,11 @@ export function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: 
     const longStrike = strategy === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
     const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
     if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
-    const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
+    const midCredit = shortLeg.mid - longLeg.mid;
+    const naturalCredit = shortLeg.bid - longLeg.ask;
+    const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
+    if (suggestedCredit <= 0) continue;
+    const credit = suggestedCredit;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0; if (roc < RULES.ROC_MIN_SPREAD) continue;
     const ivForPop = normalizeIv(ivPctForPop) ?? normalizeIv(shortLeg.iv);
@@ -91,7 +95,11 @@ export function tryICSideAtWidth(legs: any[], side: 'put' | 'call', width: numbe
     const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
     const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
     if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
-    const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2)); if (credit <= 0) continue;
+    const midCredit = shortLeg.mid - longLeg.mid;
+    const naturalCredit = shortLeg.bid - longLeg.ask;
+    const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
+    if (suggestedCredit <= 0) continue;
+      const credit = suggestedCredit;
     const creditRatio = credit / width; if (creditRatio < RULES.CREDIT_RATIO_MIN) continue;
     const maxLoss = width - credit; const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
     const pop = (1 - absDelta) * 100;
