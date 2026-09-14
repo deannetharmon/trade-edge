@@ -8,12 +8,20 @@ const getTrendArrow = (start: number, now: number): string => {
   return '→';
 };
 
-// Integer Volatility Formatter
-const toWhole = (val: number): number => Math.round(val);
+// Robust Whole-Integer Formatter (Strips .0 and converts string floats)
+const toWhole = (val: number | string | undefined | null): string => {
+  if (val == null) return '0';
+  const cleanNum = typeof val === 'number'
+    ? val
+    : parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+
+  return isNaN(cleanNum) ? '0' : Math.round(cleanNum).toString();
+};
 
 // IVR Visual Bar Renderer (10-block scale)
-const renderIvrBar = (ivr: number): string => {
-  const filled = Math.min(10, Math.max(0, Math.round(ivr / 10)));
+const renderIvrBar = (ivr: number | string): string => {
+  const numericIvr = typeof ivr === 'number' ? ivr : parseFloat(String(ivr)) || 0;
+  const filled = Math.min(10, Math.max(0, Math.round(numericIvr / 10)));
   return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}]`;
 };
 
@@ -109,7 +117,7 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = ({
         <div className="flex justify-between items-center">
           <span>IV</span>
           <span className="font-mono text-slate-200">
-            {toWhole(ivStart)}% <span className="text-slate-600">{getTrendArrow(ivStart, ivNow)}</span>{' '}
+            {toWhole(ivStart)}% <span className="text-slate-600">{getTrendArrow(Number(ivStart), Number(ivNow))}</span>{' '}
             <span className="font-semibold text-sky-400">{toWhole(ivNow)}%</span>
           </span>
         </div>
@@ -118,7 +126,7 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = ({
             IVR <span className="text-[9px] text-slate-600 font-mono">{renderIvrBar(ivrNow)}</span>
           </span>
           <span className="font-mono text-slate-200">
-            {toWhole(ivrStart)} <span className="text-slate-600">{getTrendArrow(ivrStart, ivrNow)}</span>{' '}
+            {toWhole(ivrStart)} <span className="text-slate-600">{getTrendArrow(Number(ivrStart), Number(ivrNow))}</span>{' '}
             <span className="font-semibold text-sky-400">{toWhole(ivrNow)}</span>
           </span>
         </div>
