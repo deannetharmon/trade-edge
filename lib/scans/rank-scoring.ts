@@ -440,7 +440,7 @@ export function exploreAllCandidatesForRank(
             const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
             if (suggestedCredit <= 0) continue;
             const credit = suggestedCredit;
-            if (credit <= 0) continue; // structural floor — not a real premium-selling trade otherwise
+            //if (credit <= 0) continue; // structural floor — not a real premium-selling trade otherwise
             const creditRatio = credit / width;
             const maxLoss = width - credit;
             const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
