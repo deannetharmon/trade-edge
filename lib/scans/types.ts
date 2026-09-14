@@ -7,20 +7,40 @@ export interface CheckResult { status: 'pass' | 'fail' | 'warn' | 'pending'; val
 
 export interface SpreadCandidate {
   sourceResultId?: string;
-  strategy: string; expiration: string; dte: number;
-  shortStrike: number; longStrike: number; shortDelta: number;
-  credit: number; spreadWidth: number; creditRatio: number;
+  strategy: string; 
+  expiration: string; 
+  dte: number;
+  shortStrike: number; 
+  longStrike: number; 
+  shortDelta: number;
+  credit: number; 
+  midCredit?: number;
+  naturalCredit?: number;
+  spreadFriction?: number;
+  spreadWidth: number; 
+  creditRatio: number;
   capitalRequired?: number;
   theoreticalMaxLoss?: number;
   contractMultiplier?: number;
   quantity?: number;
-  roc: number; pop: number | null; shortOI: number; longOI: number; shortIv?: number | null;
-  expirationIvx?: number | null; expectedMove?: number | null;
-  shortCallStrike?: number; longCallStrike?: number;
-  shortCallOI?: number; longCallOI?: number;
-  callCredit?: number; callWidth?: number; totalCredit?: number; optimized?: boolean;
-  shortOccSymbol?: string; longOccSymbol?: string;
-  shortCallOccSymbol?: string; longCallOccSymbol?: string;
+  roc: number; pop: number | null; 
+  shortOI: number; 
+  longOI: number; 
+  shortIv?: number | null;
+  expirationIvx?: number | null; 
+  expectedMove?: number | null;
+  shortCallStrike?: number; 
+  longCallStrike?: number;
+  shortCallOI?: number; 
+  longCallOI?: number;
+  callCredit?: number; 
+  callWidth?: number; 
+  totalCredit?: number; o
+  ptimized?: boolean;
+  shortOccSymbol?: string; 
+  longOccSymbol?: string;
+  shortCallOccSymbol?: string; 
+  longCallOccSymbol?: string;
   
   shortBid?: number;
   shortAsk?: number;
