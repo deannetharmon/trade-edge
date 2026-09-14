@@ -12,6 +12,7 @@ import type {
   RankConfig, DimensionScore, RawScanEntry,
 } from '@/lib/scans/types';
 import type { RulesType, CspRulesType, CcRulesType } from '@/lib/scans/constants';
+import { assessOiLiquidity } from '@/lib/scans/oiLiquidity';
 import {
   INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
   DEFAULT_RULES, DEFAULT_ETF_RULES, DEFAULT_CSP_RULES, DEFAULT_CC_RULES, YAHOO_INDEX_CHART_MAP,
@@ -6114,7 +6115,20 @@ const strategyScores = useMemo(() => {
           <div className="flex gap-2 mt-2">
             {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
               <button
-                onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // OI-LIQUIDITY-CHOICE-0001, Phase 1: OI never hard-fails
+                  // (see assessOiLiquidity) -- but a warn on it used to be
+                  // silently ignored here, the button never checked it at
+                  // all. Now it's disclosed and requires acknowledgment,
+                  // stating the real numbers, before proceeding -- Dean's
+                  // own choice to make, not a silent gate either way.
+                  if (result.checks.oi.status === 'warn') {
+                    const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
+                    if (!proceed) return;
+                  }
+                  onTrade?.(result);
+                }}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
               >
                 ⚡ TRADE THIS
@@ -7410,22 +7424,7 @@ async function runTargetedScan(
                       value: `${bestCandidate.roc.toFixed(0)}%`,
                       reason: `Min ${appliedRules.ROC_MIN_SPREAD}%`,
                     },                    
-                    oi: (() => {
-                      // Gate on the SHORT leg only -- it's the one traded twice
-                      // (open + close) and the one carrying assignment risk. The
-                      // long leg is protection that typically only transacts as
-                      // part of the same combo order, so its OI alone rarely
-                      // blocks a clean fill the way thin short-leg OI does.
-                      const shortLegOi = bestCandidate.shortOI;
-
-                      return {
-                        status: shortLegOi >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
-                        value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
-                        reason: shortLegOi >= appliedRules.OI_MIN
-                          ? `Short leg ≥ ${appliedRules.OI_MIN}`
-                          : `Below OI floor ${appliedRules.OI_MIN} on short leg`,
-                      };
-                    })(),
+                    oi: assessOiLiquidity({ shortOI: bestCandidate.shortOI, longOI: bestCandidate.longOI, oiMin: appliedRules.OI_MIN }),
                   },
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);

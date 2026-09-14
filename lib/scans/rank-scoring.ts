@@ -126,6 +126,22 @@ export function calculatePmccScore(
   };
 }
 
+// OI-LIQUIDITY-CHOICE-0001: extracted for direct, pinned testing of the
+// OI-to-score curve at specific values, rather than only exercisable
+// through the full scoreCandidate call. OI weighted 35% (down from 60%,
+// see the ticket for why), creditRatio and roc split the remaining 65%
+// evenly since they were already weighted equal to each other.
+export function computeLiquidityScore(minOI: number, creditRatio: number, roc: number): number {
+  const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
+  // Steep curve: OI=0→0, OI=100→0.324, OI=300→0.699, OI=500→1.0, OI>500→1.0
+  // (verified directly via the pinned tests in __tests__/liquidityScore.test.ts --
+  // this comment previously said 0.18/0.54, which was stale/incorrect)
+  const oiScore = minOI <= 0 ? 0 : clamp(Math.pow(minOI / 500, 0.7));
+  const creditRatioScore = clamp((creditRatio - 0.15) / 0.35);
+  const rocScore = clamp(roc / 35);
+  return oiScore * 0.35 + creditRatioScore * 0.325 + rocScore * 0.325;
+}
+
 export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: number; dims: DimensionScore } | null {
   const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
   const t = result.trendResult;
@@ -267,17 +283,19 @@ export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: 
   const technicalScore = clamp(technicalRaw) * cfg.weightTechnical;
 
   // ── Liquidity (10pts) ─────────────────────────────────────────────────────
-  // OI is weighted heavily here — low OI means the spread is physically untradeable
-  // regardless of how good the other metrics look. OI < 100 is near-zero; OI >= 500 is full score.
+  // OI-LIQUIDITY-CHOICE-0001: reduced from 60% to 35% (Ian) -- now that low
+  // OI is a disclosed, acknowledged choice rather than a silent gate (see
+  // assessOiLiquidity / the TRADE THIS confirmation), the score no longer
+  // needs to double as a soft-block. OI still meaningfully drags a
+  // thin-liquidity candidate's rank -- it should generally lose to an
+  // equally-good setup with real depth -- but can no longer single-handedly
+  // bury an otherwise-excellent candidate. Curve shape unchanged, only the
+  // weight. Starting value, not permanently settled -- revisit after real
+  // use. The freed 25 points split evenly between creditRatio and roc,
+  // which were already weighted equal to each other.
   let liquidityRaw = 0.4;
   if (c) {
-    const minOI = Math.min(c.shortOI, c.longOI);
-    // Steep curve: OI=0→0, OI=100→0.18, OI=300→0.54, OI=500→1.0, OI>500→1.0
-    const oiScore = minOI <= 0 ? 0 : clamp(Math.pow(minOI / 500, 0.7));
-    const creditRatioScore = clamp((c.creditRatio - 0.15) / 0.35);
-    const rocScore = clamp(c.roc / 35);
-    // OI now carries 60% of liquidity score (was 40%) — low OI is a much bigger drag
-    liquidityRaw = oiScore * 0.6 + creditRatioScore * 0.2 + rocScore * 0.2;
+    liquidityRaw = computeLiquidityScore(Math.min(c.shortOI, c.longOI), c.creditRatio, c.roc);
   }
   const liquidityScore = clamp(liquidityRaw) * cfg.weightLiquidity;
 

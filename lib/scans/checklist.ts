@@ -5,6 +5,7 @@ import type { RulesType } from './constants';
 import { DEFAULT_ETF_RULES, INDEX_IVR_MIN } from './constants';
 import { daysUntil, formatDisplayDate, estimateNextEarningsDate, normalizeIv } from './scan-utils';
 import { findBestIC, findBestSpread, findBestICUnfiltered, findBestSpreadUnfiltered } from './spread-finder';
+import { assessOiLiquidity } from './oiLiquidity';
 
 export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
   const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
@@ -106,18 +107,22 @@ bestCandidate = strategy === 'IC'
   // alongside the short leg in the same spread order, so its OI alone rarely
   // blocks a clean fill the way thin short-leg OI does. For IC, both short
   // legs (put + call) carry the same exposure, so the worse of the two gates.
+  // OI-LIQUIDITY-CHOICE-0001, Phase 1: the actual pass/warn decision is
+  // now the single shared assessOiLiquidity -- never a hard fail, low OI
+  // is disclosed, not silently blocked. The IC dual-leg handling (worse
+  // of put/call short legs) is a real structural difference, preserved
+  // here rather than folded into the shared function itself.
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
     : (() => {
         const shortLegOi = strategy === 'IC'
           ? Math.min(bestCandidate.shortOI, bestCandidate.shortCallOI ?? 0)
           : bestCandidate.shortOI;
+        const assessed = assessOiLiquidity({ shortOI: shortLegOi, longOI: bestCandidate.longOI, oiMin: effectiveRules.OI_MIN });
         const val = strategy === 'IC'
           ? `P ${bestCandidate.shortOI}/${bestCandidate.longOI} · C ${bestCandidate.shortCallOI ?? '—'}/${bestCandidate.longCallOI ?? '—'}`
-          : `${bestCandidate.shortOI}/${bestCandidate.longOI}`;
-        if (shortLegOi >= effectiveRules.OI_MIN) return { status: 'pass' as const, value: val, reason: `Short leg${strategy === 'IC' ? 's' : ''} ≥ ${effectiveRules.OI_MIN}` };
-        if (shortLegOi >= 100) return { status: 'warn' as const, value: val, reason: `Below target (${effectiveRules.OI_MIN}) on short leg — fills may be difficult` };
-        return { status: 'warn' as const, value: val, reason: `Very low OI on short leg — spread likely untradeable` };
+          : assessed.value;
+        return { ...assessed, value: val };
       })();
   const deltaCheck: CheckResult = bestCandidate ? { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Within target range' } : { status: 'pending', value: '—', reason: 'No candidate' };
 
