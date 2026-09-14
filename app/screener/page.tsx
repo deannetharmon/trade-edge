@@ -7318,8 +7318,20 @@ async function runTargetedScan(
                   const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
                   const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
                   if (!longLeg) continue;
-                  const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
-                  if (credit <= 0) continue;
+                  // TARGETED-CREDIT-FIX-0001: this inline block duplicates
+                  // exploreAllCandidatesForRank (lib/scans/rank-scoring.ts) and
+                  // trySpreadAtWidth (lib/scans/spread-finder.ts), both already
+                  // fixed to blend toward the conservative natural-side credit
+                  // instead of pure mid-price math -- this copy was missed. Same
+                  // fix applied here: mid-only credit was systematically
+                  // overstating what the market would actually pay, producing
+                  // suggested entry prices well above the real natural-side
+                  // reference and orders that don't fill.
+                  const midCredit = shortLeg.mid - longLeg.mid;
+                  const naturalCredit = shortLeg.bid - longLeg.ask;
+                  const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
+                  if (suggestedCredit <= 0) continue;
+                  const credit = suggestedCredit;
                   const creditRatio = credit / width;
                   const maxLoss = width - credit;
                   const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
@@ -7356,6 +7368,9 @@ async function runTargetedScan(
                     shortOI: shortLeg.openInterest ?? 0,
                     longOI: longLeg.openInterest ?? 0,
                     credit,
+                    midCredit: Number(midCredit.toFixed(2)),
+                    naturalCredit: Number(naturalCredit.toFixed(2)),
+                    spreadFriction: Number((midCredit - naturalCredit).toFixed(2)),
                     spreadWidth: width,
                     creditRatio,
                     roc,
