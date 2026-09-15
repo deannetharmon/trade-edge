@@ -7787,6 +7787,11 @@ function TargetedScanResultsPanel({
   const [hiddenSymbols, setHiddenSymbols]       = useState<string[]>([]);
   const [showTopN, setShowTopN]                 = useState<number>(50);
   const [activePopMin, setActivePopMin]         = useState<number>(popMin);
+  // SCORE-FILTER-0001 -- Dean's request while troubleshooting the strategy-
+  // filter/badge-instability issue: Any/70/80/90, same post-scan pattern
+  // as every other floor in this panel. Filters on e.score, already
+  // present on every TargetedScanEntry.
+  const [activeScoreMin, setActiveScoreMin]     = useState<number>(0);
   const [activeOtmMin, setActiveOtmMin]         = useState<number>(0);
   const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
   // TARGETED-DTE-FILTER-0001 -- same post-scan narrowing pattern as
@@ -7817,6 +7822,7 @@ function TargetedScanResultsPanel({
   const [resetKey, setResetKey] = useState(0);
   useEffect(() => {
     setActivePopMin(popMin);
+    setActiveScoreMin(0);
     setActiveOtmMin(0);
     setActiveDteMin(0);
     setActiveCreditRatioMin(0);
@@ -7847,6 +7853,8 @@ function TargetedScanResultsPanel({
   if (hiddenSymbols.length > 0) pool = pool.filter(e => !hiddenSymbols.includes(e.symbol));
   // 2. POP floor
   pool = pool.filter(e => e.pop >= activePopMin);
+  // 2a. Score floor
+  if (activeScoreMin > 0) pool = pool.filter(e => e.score >= activeScoreMin);
   // 2b. OTM floor
   if (activeOtmMin > 0) pool = pool.filter(e => {
     const otm = calcTargetedEntryOtmPct(e);
@@ -7953,6 +7961,20 @@ function TargetedScanResultsPanel({
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
                 {v}%
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>Score ≥</span>
+            {[0, 70, 80, 90].map(v => (
+              <button key={v} onClick={() => setActiveScoreMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeScoreMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : v}
               </button>
             ))}
           </div>
