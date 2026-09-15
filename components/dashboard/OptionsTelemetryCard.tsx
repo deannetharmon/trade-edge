@@ -48,17 +48,25 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = (data) => {
   const thetaVerdict = getMetricVerdict('thetaNow', thetaStart, thetaNow);
   const gammaVerdict = getMetricVerdict('gammaNow', gammaStart, gammaNow);
 
-  // Bigger, bolder arrow glyph (Dean's original legibility complaint) --
-  // color driven by the verdict, not a separate hand-picked color per
-  // cell. Magnitude-based amber warnings (isThetaExtreme, isGammaHigh)
-  // are a different, pre-existing concern and stay untouched -- they
-  // flag "this number is unusually large," not "this got better or
-  // worse," and both signals can be true independently.
-  const VerdictArrow = ({ verdict }: { verdict: ReturnType<typeof getMetricVerdict> }) => (
-    <span className={`${VERDICT_COLOR_CLASS[verdict]} text-sm leading-none`} aria-hidden="true">
-      {verdict === 'improving' ? '▲' : verdict === 'worsening' ? '▼' : '—'}
-    </span>
-  );
+  // Bigger, bolder arrow glyph (Dean's original legibility complaint).
+  // Correction: shape must reflect the RAW number's direction (up/down),
+  // color reflects the verdict (good/bad) -- these are separate facts,
+  // not the same thing. Originally built with shape tied to verdict
+  // instead, which is wrong for an inverted metric like Gamma -- a rise
+  // in gamma (bad, red) would have shown a down arrow, contradicting
+  // what actually happened to the number. Matches the live portfolio
+  // page's PositionsWorkspace.tsx SemanticComparison, which has this
+  // right. Magnitude-based amber warnings (isThetaExtreme, isGammaHigh)
+  // are a different, pre-existing concern and stay untouched.
+  const VerdictArrow = ({ verdict, prior, current }: { verdict: ReturnType<typeof getMetricVerdict>; prior: number; current: number }) => {
+    const moved = Number.isFinite(prior) && Number.isFinite(current) && current !== prior;
+    const arrowGlyph = moved ? (current > prior ? '▲' : '▼') : '—';
+    return (
+      <span className={`${VERDICT_COLOR_CLASS[verdict]} text-sm leading-none`} aria-hidden="true">
+        {arrowGlyph}
+      </span>
+    );
+  };
 
   return (
     <div className="w-full max-w-sm rounded-xl bg-slate-950 border border-slate-800 p-4 font-mono text-slate-100 shadow-lg">
@@ -81,7 +89,7 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = (data) => {
           <span className="text-slate-400">P/L</span>
           <span className="text-slate-200 text-right">{formatCurrency(plStart)}</span>
           <span className={`text-right font-bold flex items-center justify-end gap-1 ${VERDICT_COLOR_CLASS[plVerdict]}`}>
-            <VerdictArrow verdict={plVerdict} />
+            <VerdictArrow verdict={plVerdict} prior={plStart} current={plNow} />
             {formatCurrency(plNow)}
           </span>
         </div>
@@ -98,7 +106,7 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = (data) => {
           <span className="text-slate-400">Theta (θ)</span>
           <span className="text-slate-200 text-right">{formatGreek(thetaStart)}</span>
           <span className={`text-right font-semibold flex items-center justify-end gap-1 ${isThetaExtreme ? 'text-amber-400' : VERDICT_COLOR_CLASS[thetaVerdict]}`}>
-            <VerdictArrow verdict={thetaVerdict} />
+            <VerdictArrow verdict={thetaVerdict} prior={thetaStart} current={thetaNow} />
             {formatGreek(thetaNow)}
           </span>
         </div>
@@ -108,7 +116,7 @@ export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = (data) => {
           <span className="text-slate-400">Gamma (Γ)</span>
           <span className="text-slate-200 text-right">{formatGamma(gammaStart)}</span>
           <span className={`text-right font-semibold flex items-center justify-end gap-1 ${isGammaHigh ? 'text-rose-400 animate-pulse' : VERDICT_COLOR_CLASS[gammaVerdict]}`}>
-            <VerdictArrow verdict={gammaVerdict} />
+            <VerdictArrow verdict={gammaVerdict} prior={gammaStart} current={gammaNow} />
             {formatGamma(gammaNow)}
           </span>
         </div>
