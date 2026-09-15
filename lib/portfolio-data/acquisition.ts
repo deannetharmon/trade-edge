@@ -1837,6 +1837,7 @@ export async function loadPositions(
         quantity: parseInt(l['quantity'] ?? '1', 10),
         avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
+        currentDelta: deltaMap[l.symbol?.replace(/\s+/g, '')] ?? null,
       };
     });
 

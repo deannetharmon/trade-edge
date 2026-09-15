@@ -3,7 +3,7 @@ import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import { aggregateFinancialValues, aggregatePnlPercentage, buildOptionInstrumentViewModel, classifySymbolComposition, optionMidpointValue } from '../model/valuation';
 
-const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P', quantity = 1): PositionLeg => ({ symbol: 'X', direction, optionType, quantity, strikePrice: 100, avgOpenPrice: 1, currentPrice: 1 });
+const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P', quantity = 1): PositionLeg => ({ symbol: 'X', direction, optionType, quantity, strikePrice: 100, avgOpenPrice: 1, currentPrice: 1 , currentDelta: null});
 const option = (overrides: Partial<Position> = {}): Position => ({ key: 'X', symbol: 'X', legs: [leg('Long', 'C')], quantity: 1, identity: { quantity: 1 }, structureAmbiguous: false, entryPriceEffect: 'Debit', entryEconomicsComplete: true, entryCredit: 100, currentValue: 760, closeValue: 750, pnl: 660, closeNowPnl: 650, ...overrides } as unknown as Position);
 const equity = (overrides: Partial<EquityHolding> = {}): EquityHolding => ({ accountNumber: 'A', symbol: 'X', direction: 'Long', quantity: 2, settledQuantity: null, basis: 1500, basisComplete: true, currentPrice: 1438, marketValue: 2876, unrealizedPnl: -124, quoteAsOf: null, staleQuote: false, deliverable: 'standard', dataQualityWarnings: [], ...overrides });
 

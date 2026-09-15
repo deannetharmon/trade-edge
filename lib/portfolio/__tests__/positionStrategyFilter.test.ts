@@ -36,6 +36,7 @@ function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
     quantity: 1,
     avgOpenPrice: 2.5,
     currentPrice: null,
+    currentDelta: null,
     ...overrides,
   };
 }
@@ -122,11 +123,11 @@ describe('resolvePositionStrategyFilterKey', () => {
   it('resolves a standalone long put (any DTE, ungated) to PUT', () => {
     const shortDated = position({
       strategy: 'NONE',
-      legs: [{ symbol: occSymbol('SPY', 15, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+      legs: [{ symbol: occSymbol('SPY', 15, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null , currentDelta: null}],
     });
     const longDated = position({
       strategy: 'NONE',
-      legs: [{ symbol: occSymbol('SPY', 400, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+      legs: [{ symbol: occSymbol('SPY', 400, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null , currentDelta: null}],
     });
     expect(resolvePositionStrategyFilterKey(shortDated)).toBe('PUT');
     expect(resolvePositionStrategyFilterKey(longDated)).toBe('PUT');
@@ -222,7 +223,7 @@ describe('resolvePositionStrategyDisplayLabel', () => {
     const csp = position({ strategy: 'NONE', legs: [leg({ optionType: 'P', direction: 'Short' })] });
     const longPut = position({
       strategy: 'NONE',
-      legs: [{ symbol: occSymbol('SPY', 30, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null }],
+      legs: [{ symbol: occSymbol('SPY', 30, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null , currentDelta: null}],
     });
     expect(resolvePositionStrategyDisplayLabel(csp)).toBe('CSP');
     expect(resolvePositionStrategyDisplayLabel(longPut)).toBe('LONG PUT');

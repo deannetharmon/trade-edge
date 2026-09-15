@@ -1,8 +1,13 @@
 import React from 'react';
 import { OptionsTelemetryProps } from '@/types/options';
-import { AlertTriangle, AlertOctagon } from 'lucide-react';
+import { getMetricVerdict, VERDICT_COLOR_CLASS } from '@/lib/dashboard/metricDirectionRules';
+// TELEMETRY-METRIC-DIRECTION-0001: lucide-react was never an actual
+// dependency of this project (not in package.json), which broke the
+// build. Replaced with the plain unicode warning glyph already used
+// consistently elsewhere in this app (app/portfolio/page.tsx) rather
+// than add a new dependency for two icons.
 
-export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = ({ data }) => {
+export const OptionsTelemetryCard: React.FC<OptionsTelemetryProps> = (data) => {
   const {
     strategy,
     symbol,
@@ -31,9 +36,29 @@ export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = (
   const formatGreek = (val: number, decimals: number = 2) => val.toFixed(decimals);
   const formatGamma = (val: number) => val.toFixed(3);
 
-  const isPlPositive = plNow >= 0;
   const isGammaHigh = gammaNow > 0.05;
   const isThetaExtreme = Math.abs(thetaNow) > 0.50;
+
+  // TELEMETRY-METRIC-DIRECTION-0001: real verdicts, from the one shared
+  // rules function -- only for the three metrics with a genuine
+  // universal rule. Delta (main row), Vega, and IV/IVR are deliberately
+  // NOT run through this -- they stay neutral, confirmed final with
+  // Dean, not a placeholder.
+  const plVerdict = getMetricVerdict('plNow', plStart, plNow);
+  const thetaVerdict = getMetricVerdict('thetaNow', thetaStart, thetaNow);
+  const gammaVerdict = getMetricVerdict('gammaNow', gammaStart, gammaNow);
+
+  // Bigger, bolder arrow glyph (Dean's original legibility complaint) --
+  // color driven by the verdict, not a separate hand-picked color per
+  // cell. Magnitude-based amber warnings (isThetaExtreme, isGammaHigh)
+  // are a different, pre-existing concern and stay untouched -- they
+  // flag "this number is unusually large," not "this got better or
+  // worse," and both signals can be true independently.
+  const VerdictArrow = ({ verdict }: { verdict: ReturnType<typeof getMetricVerdict> }) => (
+    <span className={`${VERDICT_COLOR_CLASS[verdict]} text-sm leading-none`} aria-hidden="true">
+      {verdict === 'improving' ? '▲' : verdict === 'worsening' ? '▼' : '—'}
+    </span>
+  );
 
   return (
     <div className="w-full max-w-sm rounded-xl bg-slate-950 border border-slate-800 p-4 font-mono text-slate-100 shadow-lg">
@@ -55,7 +80,8 @@ export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = (
         <div className="grid grid-cols-3 py-0.5 items-center">
           <span className="text-slate-400">P/L</span>
           <span className="text-slate-200 text-right">{formatCurrency(plStart)}</span>
-          <span className={`text-right font-bold ${isPlPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+          <span className={`text-right font-bold flex items-center justify-end gap-1 ${VERDICT_COLOR_CLASS[plVerdict]}`}>
+            <VerdictArrow verdict={plVerdict} />
             {formatCurrency(plNow)}
           </span>
         </div>
@@ -71,7 +97,8 @@ export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = (
         <div className="grid grid-cols-3 py-0.5 items-center">
           <span className="text-slate-400">Theta (θ)</span>
           <span className="text-slate-200 text-right">{formatGreek(thetaStart)}</span>
-          <span className={`text-right font-semibold ${isThetaExtreme ? 'text-amber-400' : 'text-sky-400'}`}>
+          <span className={`text-right font-semibold flex items-center justify-end gap-1 ${isThetaExtreme ? 'text-amber-400' : VERDICT_COLOR_CLASS[thetaVerdict]}`}>
+            <VerdictArrow verdict={thetaVerdict} />
             {formatGreek(thetaNow)}
           </span>
         </div>
@@ -80,7 +107,8 @@ export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = (
         <div className="grid grid-cols-3 py-0.5 items-center">
           <span className="text-slate-400">Gamma (Γ)</span>
           <span className="text-slate-200 text-right">{formatGamma(gammaStart)}</span>
-          <span className={`text-right font-semibold ${isGammaHigh ? 'text-rose-400 animate-pulse' : 'text-sky-400'}`}>
+          <span className={`text-right font-semibold flex items-center justify-end gap-1 ${isGammaHigh ? 'text-rose-400 animate-pulse' : VERDICT_COLOR_CLASS[gammaVerdict]}`}>
+            <VerdictArrow verdict={gammaVerdict} />
             {formatGamma(gammaNow)}
           </span>
         </div>
@@ -133,12 +161,12 @@ export const OptionsTelemetryCard: React.FC<{ data: OptionsTelemetryProps }> = (
 
           {shortLeg.deltaNow >= 0.50 ? (
             <div className="flex items-center gap-1.5 text-[11px] bg-rose-950/60 border border-rose-800/80 text-rose-300 p-2 rounded-md">
-              <AlertOctagon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span className="text-rose-400 shrink-0" aria-hidden="true">⛔</span>
               <span>CRITICAL: Short leg ITM / Delta breached 0.50 cap.</span>
             </div>
           ) : shortLeg.deltaNow >= 0.40 ? (
             <div className="flex items-center gap-1.5 text-[11px] bg-amber-950/60 border border-amber-800/80 text-amber-300 p-2 rounded-md">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-amber-400 shrink-0" aria-hidden="true">⚠</span>
               <span>WARNING: Short delta entering roll boundary (0.40+).</span>
             </div>
           ) : null}

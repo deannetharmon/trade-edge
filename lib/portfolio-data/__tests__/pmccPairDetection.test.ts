@@ -13,6 +13,7 @@ function leg(overrides: Partial<PositionLeg> = {}): PositionLeg {
     quantity: 1,
     avgOpenPrice: 50,
     currentPrice: null,
+    currentDelta: null,
     ...overrides,
   };
 }

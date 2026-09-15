@@ -1,5 +1,11 @@
 // types/options.ts
 
+// TELEMETRY-METRIC-DIRECTION-0001: widened to include BPS/BCS, which
+// Position.strategy (lib/portfolio-data/types.ts) actually uses for the
+// two most common real strategies in this app -- this type was built
+// against the sandbox mocks, not against what a real position contains.
+// IC (Position's own strategy value) maps onto IRON_CONDOR below, same
+// underlying strategy, different naming convention (confirmed with Dean).
 export type OptionStrategyType = 
   | 'LONG_CALL'
   | 'SHORT_CALL'
@@ -7,7 +13,9 @@ export type OptionStrategyType =
   | 'PMCC'
   | 'LONG_PUT'
   | 'IRON_CONDOR'
-  | 'STRADDLE';
+  | 'STRADDLE'
+  | 'BPS'
+  | 'BCS';
 
 export interface ShortLegTelemetry {
   strike: number;

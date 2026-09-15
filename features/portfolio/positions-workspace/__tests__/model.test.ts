@@ -55,11 +55,11 @@ describe('positions workspace model', () => {
   it('derives portfolio-first PMCC and covered-call eligibility with exact evidence', () => {
     const heldLongCall = position({
       key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
-      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}],
     });
     const longPut = position({
       key: 'AAPL-long-put', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
-      legs: [{ symbol: 'AAPL  270618P00150000', optionType: 'P', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+      legs: [{ symbol: 'AAPL  270618P00150000', optionType: 'P', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}],
     });
     const current = { ...snapshot([heldLongCall, longPut]), coverageEvidence: { ...snapshot([heldLongCall, longPut]).coverageEvidence, existingShortCallsBySymbol: {} } };
     const model = buildPositionsWorkspaceModel({ snapshot: current, positions: [heldLongCall, longPut], pendingOrders: [], snapshotDataQuality: quality });
@@ -79,7 +79,7 @@ describe('positions workspace model', () => {
     const heldLongCall = position({
       key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295,
       pairedShortCallKey: 'AAPL-short-call',
-      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }],
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}],
     });
     const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall]), positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: quality });
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
@@ -88,7 +88,7 @@ describe('positions workspace model', () => {
   });
 
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
-    const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 }] });
+    const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}] });
     const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });
     expect(model.incomeOpportunities).toEqual([expect.objectContaining({ kind: 'pmcc-short-call', status: 'unavailable', reason: expect.stringContaining('Current attributable') })]);
   });

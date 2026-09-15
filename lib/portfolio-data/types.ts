@@ -27,6 +27,13 @@ export interface PositionLeg {
   // unavailable entry economics.
   avgOpenPrice: number | null;
   currentPrice: number | null;
+  // TELEMETRY-METRIC-DIRECTION-0001: per-leg current delta, sourced from
+  // the same deltaMap already built during acquisition (broker-reported
+  // per-instrument Greeks) -- was being captured but never carried
+  // through to PositionLeg. Only the short leg's own delta is accurate
+  // for per-leg risk display; net position delta (Position.netDelta) is
+  // netted against the long leg and is not a substitute for this.
+  currentDelta: number | null;
 }
 
 

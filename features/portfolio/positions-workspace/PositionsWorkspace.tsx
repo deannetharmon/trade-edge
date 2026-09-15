@@ -9,7 +9,7 @@ import type { THEMES, Theme } from '@/lib/theme';
 import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
-import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, SEMANTIC_TONE_CLASS, stopPresentation, type SemanticTone } from './model/presentation';
+import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, type SemanticTone } from './model/presentation';
 import { buildBreakevenViewModel } from './model/breakeven';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
@@ -457,7 +457,15 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     // the literal moment the take-profit rule says exit -- otherwise follows
     // the sign of the % itself (Ian: signed, never floored to 0).
     pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}%)</span>}</b><span className="block">{profitTargetPresentation(p)}</span></>,
-    evolution: <><span className="block text-white">first tracked → now</span><SemanticComparison label="P/L" prior={firstPnl} current={pnl} tone={comparisonTone(firstPnl, pnl)} digits={0} /><SemanticComparison label="Δ" prior={first?.netDelta ?? p.deltaAtEntry} current={p.netDelta} tone={directionalMovementTone(first?.netDelta ?? p.deltaAtEntry, p.netDelta)} /><SemanticComparison label="Θ" prior={first?.theta ?? p.thetaAtEntry} current={p.theta} tone={directionalMovementTone(first?.theta ?? p.thetaAtEntry, p.theta)} /><SemanticComparison label="Γ" prior={first?.gamma ?? p.gammaAtEntry} current={p.gamma} tone={directionalMovementTone(first?.gamma ?? p.gammaAtEntry, p.gamma)} digits={3} /><SemanticComparison label="V" prior={first?.netVega ?? p.vegaAtEntry} current={p.netVega} tone={directionalMovementTone(first?.netVega ?? p.vegaAtEntry, p.netVega)} /><SemanticComparison label="IV" prior={first?.iv ?? p.ivAtEntry} current={p.iv} tone={directionalMovementTone(first?.iv ?? p.ivAtEntry, p.iv)} suffix="%" /><SemanticComparison label="IVR" prior={first?.ivr ?? p.ivrAtEntry} current={p.ivr} tone={directionalMovementTone(first?.ivr ?? p.ivrAtEntry, p.ivr)} /></>,
+    // TELEMETRY-METRIC-DIRECTION-0001: directionalMovementTone previously
+    // treated every metric identically (any movement = informational,
+    // no movement = neutral) -- didn't implement the team's actual rules.
+    // Theta/Gamma now use comparisonTone (already correct, already used
+    // for P/L above) with the real goodWhenHigher direction per metric.
+    // Delta/Vega/IV/IVR are genuinely neutral -- no verdict, confirmed
+    // final with Dean, not a placeholder -- so they no longer call
+    // directionalMovementTone at all.
+    evolution: <><span className="block text-white">first tracked → now</span><SemanticComparison label="P/L" prior={firstPnl} current={pnl} tone={comparisonTone(firstPnl, pnl)} digits={0} /><SemanticComparison label="Δ" prior={first?.netDelta ?? p.deltaAtEntry} current={p.netDelta} tone="neutral" /><SemanticComparison label="Θ" prior={first?.theta ?? p.thetaAtEntry} current={p.theta} tone={comparisonTone(first?.theta ?? p.thetaAtEntry, p.theta, true)} /><SemanticComparison label="Γ" prior={first?.gamma ?? p.gammaAtEntry} current={p.gamma} tone={comparisonTone(first?.gamma ?? p.gammaAtEntry, p.gamma, false)} digits={3} /><SemanticComparison label="V" prior={first?.netVega ?? p.vegaAtEntry} current={p.netVega} tone="neutral" /><SemanticComparison label="IV" prior={first?.iv ?? p.ivAtEntry} current={p.iv} tone="neutral" suffix="%" /><SemanticComparison label="IVR" prior={first?.ivr ?? p.ivrAtEntry} current={p.ivr} tone="neutral" /></>,
     // PW-0001: theta - estimated gamma drag, peak-relative color, day-over-day
     // change, rollover alarm. Standalone column, not folded into greeks/evolution
     // -- derived composite with its own peak-tracking semantics per Ian/Diane.
