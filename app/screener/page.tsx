@@ -7285,7 +7285,7 @@ async function runTargetedScan(
                 const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, undefined, isEtf ? etfRules : undefined, undefined, true);
                 const displayResult: ScreenResult = {
                   ...result,
-                  bestCandidate: result.bestCandidate ?? candidate,
+                  bestCandidate: candidate,  // TARGETED-IC-OTM-FILTER-0001: always our specific strike, never runChecklist's pick -- same fix the BPS/BCS site below already has (see its comment). This was the one remaining occurrence: IC's fallback to result.bestCandidate could silently substitute a DIFFERENT strike than the one already checked against the OTM filter above, so the card could display one candidate's OTM% while the filter (calcTargetedEntryOtmPct, reading entry.candidate) checked a different one -- exactly Dean's reported symptom (a 22.1%-OTM card disappearing at a >=4% filter).
                   qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
                   failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
                 };

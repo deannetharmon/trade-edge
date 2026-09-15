@@ -412,7 +412,15 @@ export function exploreAllCandidatesForRank(
           const candidate = findBestICUnfiltered(chainItems, exp, price);
           if (!candidate) continue;
           const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
-          const icBestCandidate = result.bestCandidate ?? candidate;
+          // TARGETED-IC-OTM-FILTER-0001: always our specific strike from
+          // findBestICUnfiltered above, never runChecklist's own pick --
+          // same fix as the equivalent Targeted-mode site (see its
+          // comment). Lower severity here than Targeted mode's bug (Rank
+          // mode only has one downstream reference to this value, not two
+          // diverging ones), but still a real correctness risk: without
+          // this, Rank mode could silently substitute a different strike
+          // than the one its own search actually found.
+          const icBestCandidate = candidate;
           // Recompute earnings against THIS candidate's actual dte -- the
           // strictOnly call into runChecklist above never set its internal
           // bestCandidate, so its earnings check is still the generic
