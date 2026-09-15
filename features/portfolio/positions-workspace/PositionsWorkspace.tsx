@@ -324,7 +324,15 @@ const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take 
 
 function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = '' }: { label: string; prior: number | null | undefined; current: number | null | undefined; tone: SemanticTone; digits?: number; suffix?: string }) {
   const material = tone !== 'neutral';
-  return <span className="block"><span className="text-white/70">{label} </span><span className="text-white/40">{number(prior, digits)}{prior == null ? '' : suffix}</span><span className="px-1 text-white/30">→</span><span className={`${SEMANTIC_TONE_CLASS[tone]} ${material ? 'font-semibold' : ''}`}>{number(current, digits)}{current == null ? '' : suffix}</span></span>;
+  // TELEMETRY-METRIC-DIRECTION-0001: real up/down arrow, colored per the
+  // same tone driving the value text -- the static gray "→" separator
+  // alone didn't carry any directional information, which was the actual
+  // complaint (Dean: hard to see whether a metric moved up or down, not
+  // just that it's colored). No arrow at all when the value didn't move
+  // or is missing -- matches the neutral tone in that case.
+  const moved = prior != null && current != null && Number.isFinite(prior) && Number.isFinite(current) && current !== prior;
+  const arrowGlyph = moved ? (current! > prior! ? '▲' : '▼') : '—';
+  return <span className="block"><span className="text-white/70">{label} </span><span className="text-white/40">{number(prior, digits)}{prior == null ? '' : suffix}</span><span className={`px-1 text-sm leading-none ${material ? SEMANTIC_TONE_CLASS[tone] : 'text-white/30'}`} aria-hidden="true">{arrowGlyph}</span><span className={`${SEMANTIC_TONE_CLASS[tone]} ${material ? 'font-semibold' : ''}`}>{number(current, digits)}{current == null ? '' : suffix}</span></span>;
 }
 
 export function recommendationTone(position: Position): SemanticTone {
