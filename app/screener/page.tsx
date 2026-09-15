@@ -7789,6 +7789,11 @@ function TargetedScanResultsPanel({
   const [activePopMin, setActivePopMin]         = useState<number>(popMin);
   const [activeOtmMin, setActiveOtmMin]         = useState<number>(0);
   const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
+  // TARGETED-DTE-FILTER-0001 -- same post-scan narrowing pattern as
+  // POP/OTM/Credit Ratio/IVR above. Any/21/30/45, matching Dean's
+  // request and the existing DTE bucket boundaries already used to
+  // group results below (Closing Zone / Short Entry / Target Zone).
+  const [activeDteMin, setActiveDteMin]         = useState<number>(0);
   // IVR-0001: same post-scan narrowing pattern as POP/OTM/Credit Ratio
   // above -- TargetedScanEntry already carries `ivr` (unlike the other
   // three, this floor was missing entirely, not just under-exposed).
@@ -7813,6 +7818,7 @@ function TargetedScanResultsPanel({
   useEffect(() => {
     setActivePopMin(popMin);
     setActiveOtmMin(0);
+    setActiveDteMin(0);
     setActiveCreditRatioMin(0);
     setActiveIvrMin(0);
     setActiveOiMin(0);
@@ -7846,6 +7852,8 @@ function TargetedScanResultsPanel({
     const otm = calcTargetedEntryOtmPct(e);
     return otm != null && otm >= activeOtmMin;
   });
+  // 2b2. DTE floor
+  if (activeDteMin > 0) pool = pool.filter(e => e.dte >= activeDteMin);
   // 2c. credit ratio floor
   if (activeCreditRatioMin > 0) pool = pool.filter(e => ((e.candidate.creditRatio ?? 0) * 100) >= activeCreditRatioMin);
   // 2d. IVR floor
@@ -7959,6 +7967,20 @@ function TargetedScanResultsPanel({
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
                 {v === 0 ? 'Any' : `${v}%`}
+              </button>
+            ))}
+          </div>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>DTE ≥</span>
+            {[0, 21, 30, 45].map(v => (
+              <button key={v} onClick={() => setActiveDteMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeDteMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : v}
               </button>
             ))}
           </div>
