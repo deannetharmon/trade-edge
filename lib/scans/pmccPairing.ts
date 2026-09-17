@@ -120,7 +120,6 @@ function filterLegs(
   asOf: Date,
   marketSession: PmccMarketSession,
   heldLongOccSymbols: ReadonlySet<string> = new Set(),
-  allowShortDeltaOutsideTarget = false,
 ): { eligible: PmccEligibleLeg[]; rejected: PmccLegRejection[] } {
   const eligible: PmccEligibleLeg[] = [];
   const rejected: PmccLegRejection[] = [];
@@ -150,8 +149,17 @@ function filterLegs(
 
     const delta = leg.delta == null ? null : Math.abs(leg.delta);
     if (delta == null || !Number.isFinite(delta)) reasons.push(reason('INSUFFICIENT_DATA', 'Delta is missing or invalid'));
-    else if (!isHeldLong && !(role === 'short' && allowShortDeltaOutsideTarget)
-      && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
+    // OI-LIQUIDITY-CHOICE-0001 / PMCC-HEALTH-CHECK-0001 -- short-leg delta
+    // no longer silently rejects a candidate here, regardless of held or
+    // new entry mode. Team's corrected position (Ian, after reconsidering):
+    // an off-target short delta is a real risk-tolerance trade-off, the
+    // same category as OI -- not a data-integrity problem the way a
+    // missing delta or a crossed quote is. It's now disclosed as a
+    // warning gate in pmccDecision.ts (NEW_SHORT_DELTA) instead, so the
+    // trader sees the real numbers and makes the choice, rather than the
+    // candidate silently never existing. Long-leg delta behavior is
+    // completely unchanged below -- this only touches the short role.
+    else if (role !== 'short' && !isHeldLong && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
 
     if (leg.openInterest == null || !Number.isFinite(leg.openInterest)) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
     else if (!isHeldLong && leg.openInterest < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
@@ -278,7 +286,7 @@ export function pairPmccCandidates(input: {
   const isHeldPmccScan = (input.heldLongOccSymbols?.size ?? 0) > 0;
   const shorts = filterLegs(
     'short', input.shortLegs, symbol, input.underlyingPrice, input.criteria, input.asOf, input.marketSession,
-    new Set(), isHeldPmccScan,
+    new Set(),
   );
   const counts = emptyCounts();
   counts.eligibleLongLegs = longs.eligible.length;

@@ -60,4 +60,42 @@ describe('canonical PMCC decision', () => {
     expect(decision).toMatchObject({ qualification: 'DISQUALIFIED', readiness: 'MARKET_CLOSED', action: 'BLOCKED' });
     expect(pmccDecisionRankEligible(decision)).toBe(false);
   });
+
+  // PMCC-HEALTH-CHECK-0001: NEW_SHORT_DELTA -- a real, disclosed gate
+  // replacing the silent pairing-stage rejection this ticket removed.
+  // Always a warning, never a fail, and identical in held and new modes
+  // (Ian's corrected position -- no held/new asymmetry for the short
+  // leg, since it's a fresh discretionary choice every time regardless
+  // of whether the LEAP underneath is already owned).
+  it('an off-target short delta fires NEW_SHORT_DELTA as a warning (not a fail) in new-entry mode, with the real numbers', () => {
+    const offTarget = pair('new-pmcc');
+    offTarget.longLeg = { ...offTarget.longLeg, delta: 0.75 }; // within 0.70-0.85, isolates the short-delta gate from the unrelated long-delta one
+    offTarget.shortLeg = { ...offTarget.shortLeg, delta: 0.45 }; // outside the 0.20-0.35 criteria
+    const decision = evaluatePmccDecision({ pair: offTarget, criteria, marketSession: 'open' });
+    const gate = decision.gates.find(g => g.code === 'NEW_SHORT_DELTA');
+    expect(gate?.status).toBe('warning');
+    expect(gate?.explanation).toContain('0.45');
+    expect(gate?.explanation).toContain('0.10 above'); // 0.45 - 0.35
+    expect(gate?.threshold).toBe('0.20–0.35');
+    // A warning must never disqualify or block on its own.
+    expect(decision.qualification).toBe('QUALIFIED');
+  });
+
+  it('the same off-target short delta fires identically in held mode -- no held/new asymmetry', () => {
+    const offTarget = pair('covered-short-call-against-held-leaps');
+    offTarget.shortLeg = { ...offTarget.shortLeg, delta: 0.45 };
+    const decision = evaluatePmccDecision({ pair: offTarget, criteria, marketSession: 'open' });
+    const gate = decision.gates.find(g => g.code === 'NEW_SHORT_DELTA');
+    expect(gate?.status).toBe('warning');
+    expect(gate?.explanation).toContain('0.45');
+    expect(decision.qualification).toBe('QUALIFIED');
+  });
+
+  it('a short delta within range passes NEW_SHORT_DELTA cleanly, in both held and new modes', () => {
+    const newDecision = evaluatePmccDecision({ pair: pair('new-pmcc'), criteria, marketSession: 'open' });
+    expect(newDecision.gates.find(g => g.code === 'NEW_SHORT_DELTA')?.status).toBe('pass');
+
+    const heldDecision = evaluatePmccDecision({ pair: pair('covered-short-call-against-held-leaps'), criteria, marketSession: 'open' });
+    expect(heldDecision.gates.find(g => g.code === 'NEW_SHORT_DELTA')?.status).toBe('pass');
+  });
 });

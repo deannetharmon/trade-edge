@@ -111,6 +111,30 @@ export function evaluatePmccDecision(input: {
     gates.push(gate('NEW_LONG_DELTA', pair.longLeg.delta >= criteria.longDelta.min && pair.longLeg.delta <= criteria.longDelta.max ? 'pass' : 'fail', 'New PMCC long delta must remain inside the submitted range.', pair.longLeg.delta, `${criteria.longDelta.min.toFixed(2)}–${criteria.longDelta.max.toFixed(2)}`, 'snapshot.criteria.longDelta'));
   }
 
+  // PMCC-HEALTH-CHECK-0001 -- applies identically in held and new modes,
+  // deliberately outside the held/else branch above. Ian's corrected
+  // position: the short call is a fresh, discretionary choice every
+  // single time regardless of whether the LEAP underneath it is already
+  // owned, so there's no "already committed" argument for softening this
+  // the way HELD_LONG_DELTA_PREFERENCE softens the long leg. Always a
+  // warning, never a silent block or a hard fail -- an off-target short
+  // delta is a real risk-tolerance trade-off (same category as OI), not
+  // a data-integrity problem. Real observed/threshold numbers shown, per
+  // the team's standing bar all night.
+  {
+    const { min, max } = criteria.shortDelta;
+    if (pair.shortLeg.delta < min || pair.shortLeg.delta > max) {
+      const variance = pair.shortLeg.delta < min ? min - pair.shortLeg.delta : pair.shortLeg.delta - max;
+      gates.push(gate(
+        'NEW_SHORT_DELTA', 'warning',
+        `Short call Δ${pair.shortLeg.delta.toFixed(2)} is ${variance.toFixed(2)} ${pair.shortLeg.delta < min ? 'below' : 'above'} the preferred ${min.toFixed(2)}–${max.toFixed(2)} range. This changes the premium/assignment-risk trade-off but does not disqualify the structure.`,
+        pair.shortLeg.delta, `${min.toFixed(2)}–${max.toFixed(2)}`, 'snapshot.criteria.shortDelta',
+      ));
+    } else {
+      gates.push(gate('NEW_SHORT_DELTA', 'pass', 'Short call delta is within the preferred range.', pair.shortLeg.delta, `${min.toFixed(2)}–${max.toFixed(2)}`, 'snapshot.criteria.shortDelta'));
+    }
+  }
+
   if (input.trendAgainst) {
     gates.push(gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
   }
