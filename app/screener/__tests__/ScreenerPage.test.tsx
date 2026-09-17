@@ -559,29 +559,18 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.queryByText(/ADD TICKERS AND RUN HUNTER/)).not.toBeInTheDocument();
   });
 
-  it('Spreads Filter mode preview box shows the selected preset\'s real values', async () => {
-    // Closes the gap Quinn flagged: nothing previously confirmed the
-    // Filter-mode preview box shows the *correct* numbers for a given
-    // preset, only that it renders something.
+  it('Rank mode preview shows the active saved rules', async () => {
     seedWatchlist();
     renderScreenerPage();
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND SPREADS' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'FIND SPREADS' }));
     const dialog = await screen.findByRole('dialog', { name: /SCAN SELECTED/ });
-    fireEvent.click(within(dialog).getByRole('button', { name: /^Strict/ }));
-
-    const preview = screen.getByTestId('filter-preset-preview');
-    expect(preview).toHaveTextContent('IVR ≥ 40%');
+    expect(within(dialog).getByRole('radio', { name: /RANK scan mode/ })).toHaveAttribute('aria-checked', 'true');
+    const preview = screen.getByTestId('rank-active-rules-preview');
+    expect(preview).toHaveTextContent('IVR ≥ 30%');
     expect(preview).toHaveTextContent('OI ≥ 500');
     expect(preview).toHaveTextContent('$0.10');
-    expect(preview).toHaveTextContent('35%');
-
-    // Switching preset must change the displayed numbers, not just the
-    // selected-button highlight -- proves the preview is wired to the
-    // real selection, not a static string.
-    fireEvent.click(within(dialog).getByRole('button', { name: /^Relaxed/ }));
-    expect(screen.getByTestId('filter-preset-preview')).toHaveTextContent('IVR ≥ 25%');
-    expect(screen.queryByTestId('filter-preset-preview')).not.toHaveTextContent('IVR ≥ 40%');
+    expect(preview).toHaveTextContent('33%');
   });
 
   it('shows configurable PMCC short-call search defaults and persists edits on submit', async () => {
@@ -600,12 +589,12 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     // this modal; this test predates that design and was asserting fields
     // that were never real. Real label text confirmed directly from
     // features/screener/components/PmccScanModal.tsx.
-    const shortMin = await screen.findByLabelText('Short call min DTE') as HTMLInputElement;
-    const shortMax = screen.getByLabelText('Short call max DTE') as HTMLInputElement;
-    const deltaMin = screen.getByLabelText('Preferred short delta min') as HTMLInputElement;
-    const deltaMax = screen.getByLabelText('Preferred short delta max') as HTMLInputElement;
-    const oiMin = screen.getByLabelText('Minimum short OI') as HTMLInputElement;
-    const maxSpread = screen.getByLabelText('Maximum bid/ask spread %') as HTMLInputElement;
+    const shortMin = await screen.findByLabelText('Min DTE') as HTMLInputElement;
+    const shortMax = screen.getByLabelText('Max DTE') as HTMLInputElement;
+    const deltaMin = screen.getByLabelText('Min Δ') as HTMLInputElement;
+    const deltaMax = screen.getByLabelText('Max Δ') as HTMLInputElement;
+    const oiMin = screen.getByLabelText('Short OI min') as HTMLInputElement;
+    const maxSpread = screen.getByLabelText('Max spread %') as HTMLInputElement;
 
     expect(shortMin.value).toBe('21');
     expect(shortMax.value).toBe('45');
@@ -622,6 +611,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     // change anything until a valid run is actually submitted.
     expect(window.localStorage.getItem('hunter-pmcc-dte-ranges')).toBeNull();
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'RUN PMCC SCAN →' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'RUN PMCC SCAN →' }));
 
     // FIX: persisted shape is short-leg-only now (app/screener/page.tsx's
@@ -654,12 +644,12 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
 
-    await waitFor(() => expect(screen.getByLabelText('Short call min DTE')).toHaveValue(10));
-    expect(screen.getByLabelText('Short call max DTE')).toHaveValue(30);
-    expect(screen.getByLabelText('Preferred short delta min')).toHaveValue(0.22);
-    expect(screen.getByLabelText('Preferred short delta max')).toHaveValue(0.33);
-    expect(screen.getByLabelText('Minimum short OI')).toHaveValue(150);
-    expect(screen.getByLabelText('Maximum bid/ask spread %')).toHaveValue(8);
+    await waitFor(() => expect(screen.getByLabelText('Min DTE')).toHaveValue('10'));
+    expect(screen.getByLabelText('Max DTE')).toHaveValue('30');
+    expect(screen.getByLabelText('Min Δ')).toHaveValue('0.22');
+    expect(screen.getByLabelText('Max Δ')).toHaveValue('0.33');
+    expect(screen.getByLabelText('Short OI min')).toHaveValue('150');
+    expect(screen.getByLabelText('Max spread %')).toHaveValue('8');
   });
 
   it('blocks a PMCC scan when a selected DTE range is invalid', async () => {
@@ -670,8 +660,8 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'FIND PMCCs' })).toBeEnabled());
     vi.mocked(getAccessToken).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
-    fireEvent.change(await screen.findByLabelText('Short call min DTE'), { target: { value: '46' } });
-    fireEvent.change(screen.getByLabelText('Short call max DTE'), { target: { value: '45' } });
+    fireEvent.change(await screen.findByLabelText('Min DTE'), { target: { value: '46' } });
+    fireEvent.change(screen.getByLabelText('Max DTE'), { target: { value: '45' } });
 
     // TE-0007D corrective — FIND PMCCs now opens a pre-scan modal (matching
     // CSP/CC/Spreads); an invalid DTE range disables RUN PMCC SCAN rather
@@ -705,7 +695,9 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'RUN PMCC SCAN →' }));
+    const runPmcc = await screen.findByRole('button', { name: 'RUN PMCC SCAN →' });
+    await waitFor(() => expect(runPmcc).toBeEnabled());
+    fireEvent.click(runPmcc);
 
     await waitFor(() => expect(screen.getByText('PMCC AUDIT RESULTS')).toBeInTheDocument());
     // FIX: same PmccTickerDisclosure expand requirement as the dedicated

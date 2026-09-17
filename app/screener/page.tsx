@@ -3525,10 +3525,20 @@ function TradeModal({ result, th, onClose }: {
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
   const [entryContextWarning, setEntryContextWarning] = useState('');
+  const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number; maxAgeSeconds: number } | null>(null);
+  const [validationNow, setValidationNow] = useState(Date.now());
   const isPMCC = c.strategy === 'PMCC';
 
   const defaultEntryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
   const [entryLimit, setEntryLimit] = useState(parseFloat(defaultEntryPrice.toFixed(2)));
+
+  useEffect(() => {
+    if (!quoteValidation) return;
+    const timer = window.setInterval(() => setValidationNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [quoteValidation]);
+
+  const validationFresh = quoteValidation != null && validationNow - quoteValidation.at <= 15_000;
 
   const [gtcPct, setGtcPct] = useState(50);
   const [stopMultiple, setStopMultiple] = useState(2);
@@ -3585,6 +3595,34 @@ function TradeModal({ result, th, onClose }: {
       quantity: qty,
       legs: buildOrderLegs(result, c),
     });
+  };
+
+  // Scan-time prices are ideas, not executable evidence. This reads the exact
+  // option legs at validation time and uses natural-side pricing so a ticket
+  // never presents a midpoint-only credit as current execution evidence.
+  const refreshExecutionQuotes = async (expectedCredit?: number) => {
+    const legs = buildOrderLegs(result, c);
+    const symbols = legs.map(leg => String(leg.symbol)).filter(Boolean);
+    if (symbols.length !== legs.length) throw new Error('Exact option symbols are required to refresh this order. Rescan the candidate.');
+    const token = await getAccessToken();
+    const quotes = await getExecutableOptionQuotes(symbols, token);
+    const quoteBySymbol = new Map(quotes.map(quote => [quote.symbol, quote]));
+    let executableCredit = 0;
+    let maxAgeSeconds = 0;
+    for (const leg of legs) {
+      const quote = quoteBySymbol.get(String(leg.symbol));
+      if (quote?.bid == null || quote.ask == null || quote.bid <= 0 || quote.ask < quote.bid || quote.ageSeconds == null || quote.ageSeconds > 15) {
+        throw new Error('Live quotes are unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
+      }
+      maxAgeSeconds = Math.max(maxAgeSeconds, quote.ageSeconds);
+      executableCredit += String(leg.action).startsWith('Sell') ? quote.bid : -quote.ask;
+    }
+    executableCredit = Number(executableCredit.toFixed(2));
+    if (expectedCredit != null && Math.abs(executableCredit - expectedCredit) >= 0.01) {
+      throw new Error(`Market moved from the last validation ($${expectedCredit.toFixed(2)} to $${executableCredit.toFixed(2)} executable credit). Refresh and validate again.`);
+    }
+    setQuoteValidation({ at: Date.now(), executableCredit, maxAgeSeconds });
+    return executableCredit;
   };
 
   // TRADE-ENTRY-SNAPSHOT-0001 -- Iron Condor capture, parallel to the
@@ -3683,6 +3721,7 @@ function TradeModal({ result, th, onClose }: {
   const runDryRun = async () => {
     setPhase('dryrun'); setError('');
     try {
+      await refreshExecutionQuotes();
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildOtocoPayload(quantity);
@@ -3703,6 +3742,8 @@ function TradeModal({ result, th, onClose }: {
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
+      if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
+      await refreshExecutionQuotes(quoteValidation.executableCredit);
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const payload = buildOtocoPayload(quantity);
@@ -3777,6 +3818,14 @@ function TradeModal({ result, th, onClose }: {
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Order type</span>
             <span className={th.text}>{isPMCC ? 'Net Debit' : 'Net Credit'} Limit · GTC</span>
+          </div>
+          <div className="flex justify-between text-[10px] pt-1">
+            <span className={th.textFaint}>Execution evidence</span>
+            <span className={validationFresh ? 'text-emerald-400' : 'text-amber-300'}>
+              {validationFresh
+                ? `Validated just now · $${quoteValidation.executableCredit.toFixed(2)} executable credit`
+                : 'Quotes from scan · refresh required before order'}
+            </span>
           </div>
         </div>
 
@@ -3873,7 +3922,7 @@ function TradeModal({ result, th, onClose }: {
             {!dryRunResult ? (
               <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun' || otmGateBlocking}
                 className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
-                {phase === 'dryrun' ? 'VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : 'VALIDATE ORDER'}
+                {phase === 'dryrun' ? 'REFRESHING & VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : 'REFRESH & VALIDATE'}
               </button>
             ) : (
               <>
@@ -12361,7 +12410,9 @@ export default function Home() {
               clearResultsCache();
               runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode }), commitScanSession, isScanCurrent, excludeHeldPositions);
             } else if (mode === 'rank') {
-              clearResultsCache();
+              // Ranked refresh intentionally retains the last valid shortlist
+              // while its replacement is running. startRankedScan replaces it
+              // only once the new task completes successfully.
               startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
             } else {
               const found = FILTER_PRESETS.find(p => p.key === preset);
@@ -12457,7 +12508,7 @@ export default function Home() {
           }}
         />
       )}
-      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { clearResultsCache(); startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
+      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }
