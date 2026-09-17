@@ -135,6 +135,61 @@ export function evaluatePmccDecision(input: {
     }
   }
 
+  // PMCC-HEALTH-CHECK-0002: EXTRINSIC_RATIO. Compares each leg's daily
+  // extrinsic decay rate, not raw dollars, since the two legs run on
+  // wildly different timeframes (short ~30-45 DTE, LEAP 270+ DTE).
+  // Ratio > 1 means the short call earns faster than the LEAP bleeds
+  // time value -- the textbook-favorable PMCC setup. Below 1, the
+  // position pays more in LEAP decay than it collects, even if it still
+  // looks fine on paper. 'unavailable' is deliberately distinct from
+  // 'warning' -- a missing/invalid extrinsic input must never render as
+  // a false caution about the ratio itself. Identical in held and new
+  // modes, same reasoning as NEW_SHORT_DELTA above.
+  {
+    const shortExtrinsic = pair.shortLeg.extrinsic;
+    const longExtrinsic = pair.longLeg.extrinsic;
+    const shortDte = pair.shortLeg.dte;
+    const longDte2 = pair.longLeg.dte;
+    const inputsValid = shortExtrinsic != null && Number.isFinite(shortExtrinsic) && shortExtrinsic >= 0
+      && longExtrinsic != null && Number.isFinite(longExtrinsic) && longExtrinsic > 0
+      && shortDte > 0 && longDte2 > 0;
+    if (!inputsValid) {
+      gates.push(gate('EXTRINSIC_RATIO', 'unavailable', 'Extrinsic-value ratio is unavailable -- one or both legs are missing a valid extrinsic value.', null, '≥ 1.00', 'derived.extrinsicRatio'));
+    } else {
+      const shortDailyRate = shortExtrinsic / shortDte;
+      const longDailyRate = longExtrinsic / longDte2;
+      const ratio = shortDailyRate / longDailyRate;
+      const ratioLabel = ratio.toFixed(2);
+      const rateDetail = `Short call earns $${shortDailyRate.toFixed(3)}/day vs. $${longDailyRate.toFixed(3)}/day of LEAP time-value decay.`;
+      if (ratio < 0.5) {
+        gates.push(gate('EXTRINSIC_RATIO', 'warning', `Extrinsic ratio ${ratioLabel} is well below 1.00 -- the short call is earning far less than the LEAP is losing to time decay. ${rateDetail}`, ratioLabel, '≥ 1.00', 'derived.extrinsicRatio'));
+      } else if (ratio < 1.0) {
+        gates.push(gate('EXTRINSIC_RATIO', 'warning', `Extrinsic ratio ${ratioLabel} is below 1.00 -- the short call isn't keeping pace with LEAP decay. ${rateDetail}`, ratioLabel, '≥ 1.00', 'derived.extrinsicRatio'));
+      } else {
+        gates.push(gate('EXTRINSIC_RATIO', 'pass', `Extrinsic ratio ${ratioLabel} -- the short call is earning faster than the LEAP is losing to time decay. ${rateDetail}`, ratioLabel, '≥ 1.00', 'derived.extrinsicRatio'));
+      }
+    }
+  }
+
+  // PMCC-HEALTH-CHECK-0002: LEAP_APPROACHING_DANGER_ZONE. New, separate
+  // gate from HELD_LONG_DTE_PREFERENCE above -- that gate asks "has this
+  // drifted outside my general preference," this one specifically asks
+  // "is this approaching the point where delta erosion accelerates."
+  // Two tiers, not one binary flag: 90 DTE remaining gives real runway
+  // to notice and plan; 60 DTE is the actual danger point Ian named.
+  // Identical in held and new modes -- a fresh LEAP purchase and an
+  // already-held one both age toward the same danger zone the same way.
+  {
+    const longDteRemaining = pair.longLeg.dte;
+    if (longDteRemaining <= 60) {
+      gates.push(gate('LEAP_APPROACHING_DANGER_ZONE', 'warning', `LEAP has ${longDteRemaining} DTE remaining -- inside the 60-day zone where delta erosion accelerates meaningfully. Worth an active roll/close decision, not passive monitoring.`, longDteRemaining, '> 60 DTE', 'policy.leapDangerZone'));
+    } else if (longDteRemaining <= 90) {
+      gates.push(gate('LEAP_APPROACHING_DANGER_ZONE', 'warning', `LEAP has ${longDteRemaining} DTE remaining -- approaching the 60-day danger zone where delta erosion accelerates. Real runway left, but worth tracking.`, longDteRemaining, '> 90 DTE', 'policy.leapDangerZone'));
+    } else {
+      gates.push(gate('LEAP_APPROACHING_DANGER_ZONE', 'pass', 'LEAP DTE is well outside the delta-erosion danger zone.', longDteRemaining, '> 90 DTE', 'policy.leapDangerZone'));
+    }
+  }
+
   if (input.trendAgainst) {
     gates.push(gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
   }

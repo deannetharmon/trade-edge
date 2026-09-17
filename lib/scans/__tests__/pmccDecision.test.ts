@@ -98,4 +98,133 @@ describe('canonical PMCC decision', () => {
     const heldDecision = evaluatePmccDecision({ pair: pair('covered-short-call-against-held-leaps'), criteria, marketSession: 'open' });
     expect(heldDecision.gates.find(g => g.code === 'NEW_SHORT_DELTA')?.status).toBe('pass');
   });
+
+  // PMCC-HEALTH-CHECK-0002: EXTRINSIC_RATIO
+  describe('EXTRINSIC_RATIO', () => {
+    function pairWithRatio(shortExtrinsic: number, shortDte: number, longExtrinsic: number, longDte: number, entryMode: 'new-pmcc' | 'covered-short-call-against-held-leaps' = 'new-pmcc') {
+      const p = pair(entryMode);
+      p.shortLeg = { ...p.shortLeg, extrinsic: shortExtrinsic, dte: shortDte };
+      // delta: 0.75 keeps this within criteria.longDelta (0.70-0.85) so
+      // NEW_LONG_DELTA (an unrelated gate) never disqualifies these tests --
+      // the default fixture's 0.68 deliberately fails new-pmcc mode to test
+      // a different scenario elsewhere in this file.
+      p.longLeg = { ...p.longLeg, extrinsic: longExtrinsic, dte: longDte, delta: 0.75 };
+      return p;
+    }
+
+    it('reports unavailable, not a false warning, when either leg\u2019s extrinsic is null', () => {
+      const p = pair('new-pmcc'); // default fixture has shortLeg.extrinsic: null
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      expect(decision.gates.find(g => g.code === 'EXTRINSIC_RATIO')?.status).toBe('unavailable');
+    });
+
+    it('exactly 1.00 (the pass/warning boundary) is a pass, not a warning', () => {
+      // shortDailyRate = 1/30 = 0.03333; longDailyRate = 10/300 = 0.03333 -> ratio = 1.0 exactly
+      const p = pairWithRatio(1, 30, 10, 300);
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'EXTRINSIC_RATIO');
+      expect(gate?.status).toBe('pass');
+      expect(gate?.observedValue).toBe('1.00');
+    });
+
+    it('just below 1.00 is a warning, not a pass', () => {
+      const p = pairWithRatio(0.99, 30, 10, 300); // ratio ~0.99
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'EXTRINSIC_RATIO');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('below 1.00');
+      expect(gate?.explanation).not.toContain('well below');
+    });
+
+    it('exactly 0.50 (the two-tier boundary) is the milder warning tier, not the stronger one', () => {
+      // shortDailyRate = 0.5/30; longDailyRate = 1/30 -> ratio = 0.5 exactly
+      const p = pairWithRatio(0.5, 30, 1, 30);
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'EXTRINSIC_RATIO');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('below 1.00');
+      expect(gate?.explanation).not.toContain('well below');
+    });
+
+    it('just below 0.50 escalates to the stronger warning tier', () => {
+      const p = pairWithRatio(0.49, 30, 1, 30);
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'EXTRINSIC_RATIO');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('well below');
+    });
+
+    it('a genuinely extreme ratio still renders a real, readable number, not something confusing', () => {
+      // Very short DTE short leg against a very cheap, long-dated LEAP.
+      const p = pairWithRatio(5, 1, 0.10, 365);
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'EXTRINSIC_RATIO');
+      expect(gate?.status).toBe('pass');
+      expect(typeof gate?.observedValue).toBe('string');
+      expect(gate?.explanation).toContain('$5.000/day');
+      expect(gate?.explanation).toMatch(/\$0\.000\d*\/day/);
+    });
+
+    it('behaves identically in held and new modes', () => {
+      const newDecision = evaluatePmccDecision({ pair: pairWithRatio(0.3, 30, 1, 30, 'new-pmcc'), criteria, marketSession: 'open' });
+      const heldDecision = evaluatePmccDecision({ pair: pairWithRatio(0.3, 30, 1, 30, 'covered-short-call-against-held-leaps'), criteria, marketSession: 'open' });
+      expect(newDecision.gates.find(g => g.code === 'EXTRINSIC_RATIO')?.status)
+        .toBe(heldDecision.gates.find(g => g.code === 'EXTRINSIC_RATIO')?.status);
+    });
+
+    it('a warning-tier ratio never disqualifies the decision on its own', () => {
+      const p = pairWithRatio(0.1, 30, 1, 30); // well below 0.5
+      const decision = evaluatePmccDecision({ pair: p, criteria, marketSession: 'open' });
+      expect(decision.qualification).toBe('QUALIFIED');
+    });
+  });
+
+  // PMCC-HEALTH-CHECK-0002: LEAP_APPROACHING_DANGER_ZONE
+  describe('LEAP_APPROACHING_DANGER_ZONE', () => {
+    function pairWithLeapDte(dte: number, entryMode: 'new-pmcc' | 'covered-short-call-against-held-leaps' = 'new-pmcc') {
+      const p = pair(entryMode);
+      // delta: 0.75 -- see the matching comment in pairWithRatio above.
+      p.longLeg = { ...p.longLeg, dte, delta: 0.75 };
+      return p;
+    }
+
+    it('exactly 90 DTE (the pass/warning boundary) is already the approaching-tier warning', () => {
+      const decision = evaluatePmccDecision({ pair: pairWithLeapDte(90), criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('approaching');
+    });
+
+    it('91 DTE (just past the boundary) passes cleanly', () => {
+      const decision = evaluatePmccDecision({ pair: pairWithLeapDte(91), criteria, marketSession: 'open' });
+      expect(decision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE')?.status).toBe('pass');
+    });
+
+    it('exactly 60 DTE (the two-tier boundary) is already the urgent tier', () => {
+      const decision = evaluatePmccDecision({ pair: pairWithLeapDte(60), criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('accelerates meaningfully');
+    });
+
+    it('61 DTE is the milder approaching tier, not urgent', () => {
+      const decision = evaluatePmccDecision({ pair: pairWithLeapDte(61), criteria, marketSession: 'open' });
+      const gate = decision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE');
+      expect(gate?.status).toBe('warning');
+      expect(gate?.explanation).toContain('approaching');
+      expect(gate?.explanation).not.toContain('accelerates meaningfully');
+    });
+
+    it('behaves identically in held and new modes', () => {
+      const newDecision = evaluatePmccDecision({ pair: pairWithLeapDte(45, 'new-pmcc'), criteria, marketSession: 'open' });
+      const heldDecision = evaluatePmccDecision({ pair: pairWithLeapDte(45, 'covered-short-call-against-held-leaps'), criteria, marketSession: 'open' });
+      expect(newDecision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE')?.status)
+        .toBe(heldDecision.gates.find(g => g.code === 'LEAP_APPROACHING_DANGER_ZONE')?.status);
+    });
+
+    it('a warning-tier LEAP DTE never disqualifies the decision on its own', () => {
+      const decision = evaluatePmccDecision({ pair: pairWithLeapDte(45), criteria, marketSession: 'open' });
+      expect(decision.qualification).toBe('QUALIFIED');
+    });
+  });
 });

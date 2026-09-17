@@ -171,8 +171,15 @@ function filterLegs(
     if (!isHeldLong && !quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));
 
     const executablePrice = role === 'long' ? quote.ask : quote.bid;
-    const intrinsic = role === 'long' ? Math.max(underlyingPrice - leg.strike, 0) : null;
-    const extrinsic = role === 'long' && executablePrice != null && intrinsic != null ? executablePrice - intrinsic : null;
+    // PMCC-HEALTH-CHECK-0002: intrinsic/extrinsic now computed for BOTH
+    // legs, not just long. Same real formula either way (not a hardcoded
+    // 0 for short) -- for a call, intrinsic = max(underlying - strike, 0),
+    // which naturally evaluates to 0 for a genuinely OTM short leg (the
+    // SHORT_NOT_OTM check above) without assuming it rather than
+    // computing it. Needed for the new EXTRINSIC_RATIO gate in
+    // pmccDecision.ts, which compares both legs' extrinsic decay rates.
+    const intrinsic = executablePrice != null ? Math.max(underlyingPrice - leg.strike, 0) : null;
+    const extrinsic = executablePrice != null && intrinsic != null ? executablePrice - intrinsic : null;
     if (role === 'long' && (extrinsic == null || !Number.isFinite(extrinsic) || extrinsic < 0)) reasons.push(reason('INVALID_EXTRINSIC'));
 
     if (reasons.length > 0 || identity == null || dte == null || delta == null || leg.openInterest == null || executablePrice == null) {
