@@ -16,6 +16,22 @@ import { requireActiveBrokerAccount, resolveActiveBrokerAccount, type BrokerAcco
 
 export const classificationCache = new Map<string, 'index' | 'etf' | 'stock' | 'unsupported'>();
 
+// Tastytrade caps each market-data request at 100 instruments. Fetching those
+// pages serially made a single large option chain wait on every prior page.
+// The deployment may tune this limit without changing scan rules. It is
+// bounded to avoid an accidental configuration value overwhelming the broker.
+const OPTION_QUOTE_BATCH_SIZE = 100;
+const DEFAULT_OPTION_QUOTE_BATCH_CONCURRENCY = 3;
+const MAX_OPTION_QUOTE_BATCH_CONCURRENCY = 6;
+
+export function getOptionQuoteBatchConcurrency(): number {
+  const rawConfigured = process.env.NEXT_PUBLIC_OPTION_QUOTE_BATCH_CONCURRENCY;
+  if (rawConfigured == null || rawConfigured.trim() === '') return DEFAULT_OPTION_QUOTE_BATCH_CONCURRENCY;
+  const configured = Number(rawConfigured);
+  if (!Number.isFinite(configured)) return DEFAULT_OPTION_QUOTE_BATCH_CONCURRENCY;
+  return Math.min(MAX_OPTION_QUOTE_BATCH_CONCURRENCY, Math.max(1, Math.floor(configured)));
+}
+
 
 export async function ttFetch(path: string, token: string): Promise<any> {
   void token; // Broker credentials and reads stay server-side to avoid browser CORS failures.
@@ -217,11 +233,44 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
     }
   }
   if (allOCCSymbols.length === 0) return { expirations, chains, isEtfOrIndex, classification };
-  for (let i = 0; i < allOCCSymbols.length; i += 100) {
-    const chunk = allOCCSymbols.slice(i, i + 100);
-    const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
-    let greeksData: any;
-    try { greeksData = await ttFetch(`/market-data/by-type?${qs}`, token); } catch { continue; }
+  const quoteBatches = Array.from(
+    { length: Math.ceil(allOCCSymbols.length / OPTION_QUOTE_BATCH_SIZE) },
+    (_, index) => allOCCSymbols.slice(index * OPTION_QUOTE_BATCH_SIZE, (index + 1) * OPTION_QUOTE_BATCH_SIZE)
+  );
+  const quoteResponses: Array<any | null> = new Array(quoteBatches.length).fill(null);
+  const quoteBatchConcurrency = getOptionQuoteBatchConcurrency();
+  let nextBatchIndex = 0;
+  const quoteFetchStartedAt = performance.now();
+
+  await Promise.all(
+    Array.from({ length: Math.min(quoteBatchConcurrency, quoteBatches.length) }, async () => {
+      while (nextBatchIndex < quoteBatches.length) {
+        const batchIndex = nextBatchIndex++;
+        const qs = quoteBatches[batchIndex].map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
+        try {
+          quoteResponses[batchIndex] = await ttFetch(`/market-data/by-type?${qs}`, token);
+        } catch {
+          // This deliberately matches the prior per-batch behavior: a failed
+          // page yields no contracts from that page, while the rest of the
+          // chain remains available for evaluation.
+        }
+      }
+    })
+  );
+
+  console.info('[scan-timing] option-quote-batches', {
+    symbol,
+    contracts: allOCCSymbols.length,
+    batches: quoteBatches.length,
+    concurrency: quoteBatchConcurrency,
+    elapsedMs: Math.round(performance.now() - quoteFetchStartedAt),
+    failedBatches: quoteResponses.filter(response => response == null).length,
+  });
+
+  // Consume results in original batch order. Concurrency changes only request
+  // overlap, not the ordering of contracts entering the scoring engine.
+  for (const greeksData of quoteResponses) {
+    if (greeksData == null) continue;
     for (const item of greeksData?.data?.items ?? []) {
       if (symbol.toUpperCase() === 'MRVL') {        
         console.log('MRVL option market-data raw item:', item);
