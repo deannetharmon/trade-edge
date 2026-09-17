@@ -3601,6 +3601,12 @@ function TradeModal({ result, th, onClose }: {
   // option legs at validation time and uses natural-side pricing so a ticket
   // never presents a midpoint-only credit as current execution evidence.
   const refreshExecutionQuotes = async (expectedCredit?: number) => {
+    // Options cannot be reliably refreshed outside the regular session. Say
+    // that plainly instead of making a trader infer a market closure from an
+    // otherwise ambiguous stale-quote error.
+    if (derivePmccMarketSession(new Date()) !== 'open') {
+      throw new Error('Market is closed. Live executable quotes cannot be validated. Refresh during regular market hours before placing this order.');
+    }
     const legs = buildOrderLegs(result, c);
     const symbols = legs.map(leg => String(leg.symbol)).filter(Boolean);
     if (symbols.length !== legs.length) throw new Error('Exact option symbols are required to refresh this order. Rescan the candidate.');
