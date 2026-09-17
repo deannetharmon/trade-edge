@@ -13,6 +13,7 @@ import type {
 } from '@/lib/scans/types';
 import type { RulesType, CspRulesType, CcRulesType } from '@/lib/scans/constants';
 import { assessOiLiquidity } from '@/lib/scans/oiLiquidity';
+import { computeExpectedMove } from '@/lib/scans/expectedMove';
 import {
   INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
   DEFAULT_RULES, DEFAULT_ETF_RULES, DEFAULT_CSP_RULES, DEFAULT_CC_RULES, YAHOO_INDEX_CHART_MAP,
@@ -7394,7 +7395,7 @@ async function runTargetedScan(
                     longOccSymbol: longLeg.occSymbol,
                     shortIv: normalizeIv(shortLeg.iv),
                     expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
-                    expectedMove: null,
+                    expectedMove: computeExpectedMove(price, normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null, dte),
                     // ADVISORY-QUOTE-EVIDENCE-0001: bid/ask already computed
                     // above for the credit blend (naturalCredit) -- carried
                     // through here too so the order modal's "Quote evidence"

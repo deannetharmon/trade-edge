@@ -5,6 +5,7 @@ import type { RulesType } from './constants';
 import { RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX } from './constants';
 import { daysUntil, formatDisplayDate, estimateNextEarningsDate, calcSpreadPop, normalizeIv } from './scan-utils';
 import { findBestICUnfiltered } from './spread-finder';
+import { computeExpectedMove } from './expectedMove';
 import { runChecklist } from './checklist';
 
 // Shared with the order-entry warning gate (TradeModal) so the hard-block
@@ -493,7 +494,7 @@ export function exploreAllCandidatesForRank(
                 shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
                 shortIv: normalizeIv(shortLeg.iv),
                 expirationIvx: normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null,
-                expectedMove: null,
+                expectedMove: computeExpectedMove(price, normalizeIv(metrics.expirationIvxMap?.[exp]) ?? null, dte),
                 // ADVISORY-QUOTE-EVIDENCE-0001: see the matching comment in
                 // app/screener/page.tsx's Targeted-mode equivalent.
                 shortBid: shortLeg.bid, shortAsk: shortLeg.ask,
