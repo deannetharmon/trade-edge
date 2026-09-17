@@ -198,7 +198,13 @@ export async function getExecutableOptionQuotes(symbols: string[], token: string
 }
 
 
-export async function getChain(symbol: string, token: string, RULES: RulesType, dteWindow?: { min: number; max: number }): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
+export async function getChain(
+  symbol: string,
+  token: string,
+  RULES: RulesType,
+  dteWindow?: { min: number; max: number },
+  quoteScope?: { underlyingPrice: number | null; otmMinPct: number },
+): Promise<{ expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
   // dteWindow overrides the rule-set DTE gate when provided (rank mode passes a fixed wide window).
   const gateMin = dteWindow ? dteWindow.min : ((Number.isFinite(RULES.DTE_MIN) ? RULES.DTE_MIN : 0) - 5);
   const gateMax = dteWindow ? dteWindow.max : ((Number.isFinite(RULES.DTE_MAX) ? RULES.DTE_MAX : 60) + 5);
@@ -215,6 +221,15 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
   const isEtfOrIndex = classification === 'index' || classification === 'etf';
   const expirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
   const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
+  // A Targeted scan can safely omit option legs on the wrong side of its OTM
+  // floor: a BPS/IC put short must be at or below this put boundary and its
+  // long is farther out; the symmetric rule holds for BCS/IC calls. POP and
+  // credit remain quote-time decisions and are deliberately not guessed here.
+  const scopePrice = quoteScope?.underlyingPrice;
+  const otmFraction = Math.max(0, quoteScope?.otmMinPct ?? 0) / 100;
+  const canScopeByOtm = scopePrice != null && Number.isFinite(scopePrice) && scopePrice > 0 && otmFraction > 0;
+  const maxPutStrike = canScopeByOtm ? scopePrice * (1 - otmFraction) : null;
+  const minCallStrike = canScopeByOtm ? scopePrice * (1 + otmFraction) : null;
   for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
     const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
     const dte = daysUntil(expDate); if (dte < loDte || dte > hiDte) continue;
@@ -228,8 +243,12 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
     for (const strike of expGroup.strikes ?? []) {
       const strikePrice = parseFloat(strike['strike-price'] ?? '0');
       const callSym: string = strike['call'], putSym: string = strike['put'];
-      if (callSym) { allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' }; }
-      if (putSym) { allOCCSymbols.push(putSym); symbolMeta[putSym] = { expDate, strike: strikePrice, optionType: 'P' }; }
+      if (callSym && (minCallStrike == null || strikePrice >= minCallStrike)) {
+        allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' };
+      }
+      if (putSym && (maxPutStrike == null || strikePrice <= maxPutStrike)) {
+        allOCCSymbols.push(putSym); symbolMeta[putSym] = { expDate, strike: strikePrice, optionType: 'P' };
+      }
     }
   }
   if (allOCCSymbols.length === 0) return { expirations, chains, isEtfOrIndex, classification };

@@ -7311,16 +7311,18 @@ async function runTargetedScan(
         const isEtf = classification === 'index' || classification === 'etf';
         // Use real rules but with user-specified DTE range
         const appliedRules: RulesType = { ...(isEtf ? etfRules : rules), DTE_MIN: dteMin, DTE_MAX: dteMax };
-        const chainRules: RulesType = {
-          ...(isEtf ? etfRules : rules),
-          DTE_MIN: RANK_SCAN_DTE_MIN,
-          DTE_MAX: RANK_SCAN_DTE_MAX,
-        };
-        
-        const [chainData, price] = await Promise.all([
-          (async () => { const startedAt = Date.now(); const value = await getChain(symbol, token, chainRules); chainMs = Date.now() - startedAt; return value; })(),
-          (async () => { const startedAt = Date.now(); const value = await getQuote(symbol, token); quoteMs = Date.now() - startedAt; return value; })(),
-        ]);
+        // Targeted controls are acquisition controls, not just post-download
+        // filters. Fetch spot first so getChain can request only the selected
+        // DTE window and legs on the eligible OTM side of the market.
+        const quoteStartedAt = Date.now();
+        const price = await getQuote(symbol, token);
+        quoteMs = Date.now() - quoteStartedAt;
+        const chainStartedAt = Date.now();
+        const chainData = await getChain(
+          symbol, token, appliedRules, { min: dteMin, max: dteMax },
+          { underlyingPrice: price, otmMinPct: otmMin },
+        );
+        chainMs = Date.now() - chainStartedAt;
         const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
         let trendResult: TrendResult | undefined;
         const trendStartedAt = Date.now();
