@@ -258,14 +258,16 @@ export async function getChain(symbol: string, token: string, RULES: RulesType, 
     })
   );
 
-  console.info('[scan-timing] option-quote-batches', {
+  // JSON text, rather than a console object, so a browser Console export
+  // retains the actual values instead of reducing the entry to "Object".
+  console.info('[scan-timing] option-quote-batches', JSON.stringify({
     symbol,
     contracts: allOCCSymbols.length,
     batches: quoteBatches.length,
     concurrency: quoteBatchConcurrency,
     elapsedMs: Math.round(performance.now() - quoteFetchStartedAt),
     failedBatches: quoteResponses.filter(response => response == null).length,
-  });
+  }));
 
   // Consume results in original batch order. Concurrency changes only request
   // overlap, not the ordering of contracts entering the scoring engine.

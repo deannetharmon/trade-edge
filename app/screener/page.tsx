@@ -7253,11 +7253,11 @@ async function runTargetedScan(
   const loopSymbols = session.plannedScanSymbols;
   let wasCancelled = false;
   const scanStartedAt = Date.now();
-  console.info('[scan-timing] targeted-scan-start', {
+  console.info('[scan-timing] targeted-scan-start', JSON.stringify({
     sessionId: session.sessionId,
     symbolCount: loopSymbols.length,
     startedAt: new Date(scanStartedAt).toISOString(),
-  });
+  }));
 
   try {
     const token = await getAccessToken();
@@ -7288,10 +7288,10 @@ async function runTargetedScan(
       // Progress still advances (above) so the bar doesn't stall on
       // filtered-out symbols.
       if (ivrMin > 0 && (metricsMap[symbol]?.ivRank ?? -1) < ivrMin) {
-        console.info('[scan-timing] targeted-symbol', {
+        console.info('[scan-timing] targeted-symbol', JSON.stringify({
           sessionId: session.sessionId, symbol, index: i + 1, total: loopSymbols.length,
           totalMs: Date.now() - symbolStartedAt, skipped: 'ivr-floor', ivr: metricsMap[symbol]?.ivRank ?? null,
-        });
+        }));
         continue;
       }
       pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
@@ -7551,21 +7551,21 @@ async function runTargetedScan(
       } else {
         session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
       }
-      console.info('[scan-timing] targeted-symbol', {
+      console.info('[scan-timing] targeted-symbol', JSON.stringify({
         sessionId: session.sessionId, symbol, index: i + 1, total: loopSymbols.length,
         totalMs: Date.now() - symbolStartedAt, classifyMs, chainMs, quoteMs, trendMs, evaluationMs,
         validExpirationCount, candidateCount: symbolEntries.length,
         outcome: symbolThrew ? 'failed' : symbolEntries.length > 0 ? 'candidates' : 'no-candidate',
-      });
+      }));
     }
 
     entries.sort((a, b) => b.score - a.score);
     session = wasCancelled ? stopSession(session, 'CANCELLED') : completeSession(session);
     const finalSession = session;
-    console.info('[scan-timing] targeted-scan-complete', {
+    console.info('[scan-timing] targeted-scan-complete', JSON.stringify({
       sessionId: finalSession.sessionId, totalMs: Date.now() - scanStartedAt,
       marketMetricsMs: metricsMs, plannedSymbols: loopSymbols.length, resultCount: entries.length, wasCancelled,
-    });
+    }));
     console.log('[TARGETED-DEBUG] about to commit', { at: Date.now(), wasCancelled, finalEntryCount: entries.length, sessionId: finalSession.sessionId, sessionStatus: finalSession.status });
     const committed = commitSession(finalSession, () => {
       console.log('[TARGETED-DEBUG] commit callback fired -- setTargetedResults is running now', { at: Date.now(), entryCount: entries.length });
@@ -7589,9 +7589,9 @@ async function runTargetedScan(
     });
     void committed;
   } catch (e: any) {
-    console.info('[scan-timing] targeted-scan-failed', {
+    console.info('[scan-timing] targeted-scan-failed', JSON.stringify({
       sessionId: session.sessionId, totalMs: Date.now() - scanStartedAt, message: e?.message ?? String(e),
-    });
+    }));
     // SCREENER-RESULTS-0001 corrective — same staleness guard as the other
     // scan functions: a superseded Targeted scan's catch must not clobber
     // a newer scan's loading/status/error/job state.
