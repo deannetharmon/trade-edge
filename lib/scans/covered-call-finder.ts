@@ -25,6 +25,7 @@ import type { CcRulesType } from './constants';
 import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
+import { assessOiLiquidity } from './oiLiquidity';
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -76,7 +77,19 @@ function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams
   if (leg.ask < leg.bid) return false; // crossed market
 
   if (leg.ask - leg.bid > p.bidAskMax) return false;
-  if (leg.openInterest < p.oiMin) return false;
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI deliberately removed from this
+  // gate. Every other condition above is a genuine data-integrity or
+  // structural requirement (no delta at all, a crossed market, strikes
+  // outside the target range) -- a leg failing one of those literally
+  // cannot be evaluated. Thin OI is different: it's a real, disclosable
+  // liquidity concern, not missing data, and a covered call carries less
+  // stake in that concern than a credit spread would (the position is
+  // already fully collateralized by shares already owned -- no new
+  // capital risk from a harder fill). Silently excluding a thin-OI
+  // candidate here was stricter than spreads without a principled
+  // reason. Disclosed instead, at the point a candidate is actually
+  // selected -- see ccLiquidityWarning below, now built on the same
+  // assessOiLiquidity used everywhere else in this app.
 
   return true;
 }
@@ -221,9 +234,18 @@ function buildCcSpreadCandidate(
     : null;
 
   const bidAskWidth = parseFloat((best.ask - best.bid).toFixed(4));
-  const ccLiquidityWarning = best.openInterest < params.rules.OI_MIN * 2
-    ? `Open interest ${best.openInterest} is thin — fills may be difficult`
-    : null;
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- was a separate, CC-only 2x-floor
+  // caution, only ever reachable for candidates that had already survived
+  // the (now-removed) hard oiMin exclude. Replaced with the same
+  // assessOiLiquidity every other strategy in this app uses -- one
+  // consistent voice and threshold for "is this OI thin enough to
+  // disclose," not a different rule per strategy without a stated reason.
+  // Now correctly reachable for candidates below oiMin too, since those
+  // can actually become `best` now that OI no longer hard-excludes them.
+  const ccOiAssessment = assessOiLiquidity({
+    shortOI: best.openInterest, longOI: best.openInterest, oiMin: params.rules.OI_MIN,
+  });
+  const ccLiquidityWarning = ccOiAssessment.status === 'warn' ? ccOiAssessment.reason : null;
   // TE-0007C corrective round: fires both when cost basis is entirely
   // unavailable AND when it's only partially known (costBasis is null in
   // both cases — see CoveredCallCapacity.costBasisComplete) — a partial

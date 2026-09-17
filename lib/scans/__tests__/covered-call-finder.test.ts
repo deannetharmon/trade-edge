@@ -259,15 +259,26 @@ describe('TE-0007C corrective round: one-sided quotes and full-universe eligibil
   // Requirement 12: the delta-closest contract is illiquid, but a second
   // eligible contract exists further from delta center — the second must be
   // selected, not "no candidate."
-  it('12. delta-closest contract is illiquid (low OI); a second eligible contract is selected instead', () => {
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2: this test's premise changed. OI no
+  // longer hard-excludes a leg -- the delta-closest, thin-OI contract is
+  // now eligible and correctly wins on delta proximity, with a disclosed
+  // warning rather than being silently dropped. The "second contract gets
+  // picked instead" behavior now belongs to genuine hard-exclude reasons
+  // (crossed market, wrong delta, bad quote) -- covered by tests 13-14
+  // below, not OI.
+  it('12. thin OI no longer excludes a candidate -- delta-closest wins, with a disclosed warning', () => {
     const expDate = nearTermExpDate(30);
-    const deltaClosestButIlliquid = legAt(105, { delta: 0.275, oi: 5, occSymbol: 'ILLIQUID' }, expDate); // OI_MIN is 100
+    const deltaClosestThinOi = legAt(105, { delta: 0.275, oi: 5, occSymbol: 'THIN_OI' }, expDate); // OI_MIN is 100
     const secondEligible = legAt(110, { delta: 0.22, oi: 500, occSymbol: 'ELIGIBLE' }, expDate);
-    const chain = { expirations: [expDate], chains: { [expDate]: [deltaClosestButIlliquid, secondEligible] } };
+    const chain = { expirations: [expDate], chains: { [expDate]: [deltaClosestThinOi, secondEligible] } };
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
     expect(cand).not.toBeNull();
-    expect(cand!.shortStrike).toBe(110);
-    expect(cand!.shortOccSymbol).toBe('ELIGIBLE');
+    // Delta-closest now wins on its own merits -- OI is no longer a reason
+    // to skip it.
+    expect(cand!.shortStrike).toBe(105);
+    expect(cand!.shortOccSymbol).toBe('THIN_OI');
+    expect(cand!.ccLiquidityWarning).toContain('5');
+    expect(cand!.ccLiquidityWarning).toContain('100');
   });
 
   // Requirement 13: the delta-closest contract is one-sided, but a second
@@ -284,12 +295,38 @@ describe('TE-0007C corrective round: one-sided quotes and full-universe eligibil
   });
 
   // Requirement 14: no candidate is returned when every contract fails.
-  it('14. no candidate is returned when every contract in the chain fails eligibility', () => {
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2: "illiquid" alone no longer fails
+  // eligibility -- it's now the only genuinely eligible contract in this
+  // chain and gets correctly selected (with a disclosed warning), so
+  // "no candidate returned" is no longer the right expectation here. The
+  // real "everything fails" case now needs every candidate to fail on a
+  // reason that's still a genuine hard exclude.
+  it('14. no candidate is returned when every contract fails on a genuine hard-exclude reason', () => {
     const expDate = nearTermExpDate(30);
-    const illiquid = legAt(105, { delta: 0.28, oi: 5 }, expDate);
     const oneSided = legAt(110, { delta: 0.25, bid: 0, ask: 1.0 }, expDate);
     const wrongDelta = legAt(115, { delta: 0.60 }, expDate);
-    const chain = { expirations: [expDate], chains: { [expDate]: [illiquid, oneSided, wrongDelta] } };
+    const chain = { expirations: [expDate], chains: { [expDate]: [oneSided, wrongDelta] } };
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
+  });
+
+  it('14b. thin OI alone is no longer enough to exclude every candidate -- it becomes the selected, disclosed candidate', () => {
+    const expDate = nearTermExpDate(30);
+    const illiquid = legAt(105, { delta: 0.28, oi: 5 }, expDate);
+    const chain = { expirations: [expDate], chains: { [expDate]: [illiquid] } };
+    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
+    expect(cand).not.toBeNull();
+    expect(cand!.ccLiquidityWarning).not.toBeNull();
+  });
+
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 (Quinn's requirement): confirm a
+  // genuinely different hard-exclude condition -- bid/ask spread too wide
+  // -- still correctly excludes on its own after OI came out of the same
+  // combined eligibility function. No prior test in this file covered this
+  // condition explicitly.
+  it('14c. bid/ask spread wider than BID_ASK_MAX is still correctly excluded', () => {
+    const expDate = nearTermExpDate(30);
+    const tooWide = legAt(105, { delta: 0.28, bid: 1.00, ask: 1.30, occSymbol: 'TOO_WIDE' }, expDate); // 0.30 width > 0.20 max
+    const chain = { expirations: [expDate], chains: { [expDate]: [tooWide] } };
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
   });
 
