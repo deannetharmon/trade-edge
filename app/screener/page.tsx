@@ -7252,11 +7252,19 @@ async function runTargetedScan(
   );
   const loopSymbols = session.plannedScanSymbols;
   let wasCancelled = false;
+  const scanStartedAt = Date.now();
+  console.info('[scan-timing] targeted-scan-start', {
+    sessionId: session.sessionId,
+    symbolCount: loopSymbols.length,
+    startedAt: new Date(scanStartedAt).toISOString(),
+  });
 
   try {
     const token = await getAccessToken();
     pushStatus('Fetching market metrics...');
+    const metricsStartedAt = Date.now();
     const metricsArray = await getMarketMetrics(loopSymbols, token);
+    const metricsMs = Date.now() - metricsStartedAt;
     const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
     const entries: TargetedScanEntry[] = [];
@@ -7269,6 +7277,7 @@ async function runTargetedScan(
         break;
       }
       const symbol = loopSymbols[i];
+      const symbolStartedAt = Date.now();
       const primary: 'BPS' | 'BCS' | 'IC' = 'IC';
       updateScreenerJob({ progressCurrent: i + 1 });
       // IVR-0001: metricsMap is already fully fetched for every symbol
@@ -7278,13 +7287,27 @@ async function runTargetedScan(
       // the metrics fetch already paid for every symbol regardless.
       // Progress still advances (above) so the bar doesn't stall on
       // filtered-out symbols.
-      if (ivrMin > 0 && (metricsMap[symbol]?.ivRank ?? -1) < ivrMin) continue;
+      if (ivrMin > 0 && (metricsMap[symbol]?.ivRank ?? -1) < ivrMin) {
+        console.info('[scan-timing] targeted-symbol', {
+          sessionId: session.sessionId, symbol, index: i + 1, total: loopSymbols.length,
+          totalMs: Date.now() - symbolStartedAt, skipped: 'ivr-floor', ivr: metricsMap[symbol]?.ivRank ?? null,
+        });
+        continue;
+      }
       pushStatus(`Scanning ${symbol} (${i + 1}/${loopSymbols.length})...`);
       updateScreenerJob({ progressCurrent: i + 1 });
       const entriesBeforeThisSymbol = entries.length;
       let symbolThrew = false;
+      let classifyMs: number | null = null;
+      let chainMs: number | null = null;
+      let quoteMs: number | null = null;
+      let trendMs: number | null = null;
+      let evaluationMs: number | null = null;
+      let validExpirationCount = 0;
       try {
+        const classifyStartedAt = Date.now();
         const classification = await classifyUnderlying(symbol, token);
+        classifyMs = Date.now() - classifyStartedAt;
         const isEtf = classification === 'index' || classification === 'etf';
         // Use real rules but with user-specified DTE range
         const appliedRules: RulesType = { ...(isEtf ? etfRules : rules), DTE_MIN: dteMin, DTE_MAX: dteMax };
@@ -7295,17 +7318,20 @@ async function runTargetedScan(
         };
         
         const [chainData, price] = await Promise.all([
-          getChain(symbol, token, chainRules),
-          getQuote(symbol, token),
+          (async () => { const startedAt = Date.now(); const value = await getChain(symbol, token, chainRules); chainMs = Date.now() - startedAt; return value; })(),
+          (async () => { const startedAt = Date.now(); const value = await getQuote(symbol, token); quoteMs = Date.now() - startedAt; return value; })(),
         ]);
         const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
         let trendResult: TrendResult | undefined;
-        try { trendResult = await getTrend(symbol, isEtf); } catch {}
+        const trendStartedAt = Date.now();
+        try { trendResult = await getTrend(symbol, isEtf); } catch {} finally { trendMs = Date.now() - trendStartedAt; }
 
+        const evaluationStartedAt = Date.now();
         const validExps = chainData.expirations.filter(exp => {
           const dte = daysUntil(exp);
           return dte >= dteMin && dte <= dteMax;
         });
+        validExpirationCount = validExps.length;
 
         for (const exp of validExps) {
           const dte = daysUntil(exp);
@@ -7504,6 +7530,7 @@ async function runTargetedScan(
             } catch {}
           }
         }
+        evaluationMs = Date.now() - evaluationStartedAt;
       } catch (e: any) {
         console.warn(`Targeted scan error for ${symbol}: ${e.message}`);
         symbolThrew = true;
@@ -7524,11 +7551,21 @@ async function runTargetedScan(
       } else {
         session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
       }
+      console.info('[scan-timing] targeted-symbol', {
+        sessionId: session.sessionId, symbol, index: i + 1, total: loopSymbols.length,
+        totalMs: Date.now() - symbolStartedAt, classifyMs, chainMs, quoteMs, trendMs, evaluationMs,
+        validExpirationCount, candidateCount: symbolEntries.length,
+        outcome: symbolThrew ? 'failed' : symbolEntries.length > 0 ? 'candidates' : 'no-candidate',
+      });
     }
 
     entries.sort((a, b) => b.score - a.score);
     session = wasCancelled ? stopSession(session, 'CANCELLED') : completeSession(session);
     const finalSession = session;
+    console.info('[scan-timing] targeted-scan-complete', {
+      sessionId: finalSession.sessionId, totalMs: Date.now() - scanStartedAt,
+      marketMetricsMs: metricsMs, plannedSymbols: loopSymbols.length, resultCount: entries.length, wasCancelled,
+    });
     console.log('[TARGETED-DEBUG] about to commit', { at: Date.now(), wasCancelled, finalEntryCount: entries.length, sessionId: finalSession.sessionId, sessionStatus: finalSession.status });
     const committed = commitSession(finalSession, () => {
       console.log('[TARGETED-DEBUG] commit callback fired -- setTargetedResults is running now', { at: Date.now(), entryCount: entries.length });
@@ -7552,6 +7589,9 @@ async function runTargetedScan(
     });
     void committed;
   } catch (e: any) {
+    console.info('[scan-timing] targeted-scan-failed', {
+      sessionId: session.sessionId, totalMs: Date.now() - scanStartedAt, message: e?.message ?? String(e),
+    });
     // SCREENER-RESULTS-0001 corrective — same staleness guard as the other
     // scan functions: a superseded Targeted scan's catch must not clobber
     // a newer scan's loading/status/error/job state.
