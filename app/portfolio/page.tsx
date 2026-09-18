@@ -91,7 +91,7 @@ import {
 } from '@/lib/portfolio/profitProtectingStop';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
-import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded } from '@/lib/portfolio/existingGtcReplacement';
+import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -1169,6 +1169,31 @@ async function cancelOrder(accountNumber: string, orderId: string, token: string
   const result = await res.json().catch(() => ({}));
   console.log('CANCEL RAW SUCCESS:', JSON.stringify(result).slice(0, 200));
   return result;
+}
+
+// Resolves the paired leg of a position's complex/OCO GTC (almost always the
+// stop leg) from TradeEdge's own already-collected broker evidence
+// (stopAssessment.rawEvidence -- see stopLossPolicy.ts), so a complex order's
+// cancel-and-restore can rebuild the FULL bracket rather than being refused
+// outright. Returns null -- never a partial/guessed reconstruction -- unless
+// evidence is complete, the matched order is fully resolvable, and every
+// field needed to resubmit it is present. cancelExistingGtcForReplacement
+// treats null exactly like "can't reconstruct" and blocks the cancel.
+function resolveReconstructablePairedLeg(pos: Position): ReconstructablePairedLeg | null {
+  const assessment = pos.stopAssessment;
+  if (!assessment?.evidenceComplete || !assessment.matchedOrderId) return null;
+  const order = assessment.rawEvidence.orders.find(o => o.orderId === assessment.matchedOrderId);
+  if (!order) return null;
+  if (order.triggerPrice == null || order.limitPrice == null || !order.priceEffect) return null;
+  if (!order.legs.length) return null;
+  return {
+    orderType: order.orderType,
+    timeInForce: order.timeInForce,
+    triggerPrice: order.triggerPrice,
+    limitPrice: order.limitPrice,
+    priceEffect: order.priceEffect,
+    legs: order.legs.map(l => ({ symbol: l.symbol, action: l.action, quantity: l.quantity, ratio: l.ratio })),
+  };
 }
 
 // TastyTrade supports a native dry-run: POST to the matching /dry-run endpoint.
@@ -3445,6 +3470,7 @@ function BatchConfirmModal({
       for (const item of activeItems) {
         let cancelledExistingGtc = false;
         let replacementSubmitted = false;
+        let cancelledPairedLeg: ReconstructablePairedLeg | null = null;
         try {
           let orderId: string;
 
@@ -3452,6 +3478,7 @@ function BatchConfirmModal({
           if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key)) {
             try {
               const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
+              const pairedLeg = gtcComplexId ? resolveReconstructablePairedLeg(item.pos) : null;
               const cancellation = await cancelExistingGtcForReplacement(
                 {
                   hasGtc: item.pos.hasGtc,
@@ -3459,6 +3486,7 @@ function BatchConfirmModal({
                   orderId: item.pos.gtcOrderId,
                   complexOrderId: gtcComplexId,
                   originalPrice: item.pos.gtcOrderPrice,
+                  pairedLeg,
                 },
                 async orderId => {
                   console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${orderId} complexId=${gtcComplexId}`);
@@ -3468,6 +3496,7 @@ function BatchConfirmModal({
                 },
               );
               cancelledExistingGtc = cancellation.cancelled;
+              cancelledPairedLeg = cancellation.pairedLeg;
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
@@ -3832,8 +3861,9 @@ function BatchConfirmModal({
                   cancelled: cancelledExistingGtc,
                   replacementSubmitted,
                   originalPrice: item.pos.gtcOrderPrice,
+                  pairedLeg: cancelledPairedLeg,
                 },
-                async restorePrice => {
+                async (restorePrice, pairedLeg) => {
                   if (!item.closeIdentity) throw new Error('Canonical position identity is unavailable for restoration.');
               const restoreBody = buildCloseOrder(item.pos, restorePrice, 'GTC');
               const restorePnl = creditClosePnlDollars(item.closeIdentity.entryPricePointsPerUnit, restorePrice, item.closeIdentity.quantity);
@@ -3854,16 +3884,55 @@ function BatchConfirmModal({
                 },
                 displayedExpectedPnlDollars: restorePnl,
               };
+              // No paired leg -- this was a simple GTC. Restore it exactly as
+              // before: one plain limit order at the original price.
+              if (!pairedLeg) {
+                const restored = await submitCloseOrderIfSafe(
+                  { identity: item.closeIdentity, structureAmbiguous: item.pos.structureAmbiguous, structureBlockMessage: item.pos.structureBlockMessage },
+                  restoreGateInput,
+                  async () => {
+                    const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, restoreBody);
+                    return String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
+                  },
+                );
+                if (!restored.submitted) throw new Error(restored.reason);
+                return ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+              }
+              // Complex/OCO GTC -- rebuild BOTH legs exactly as TradeEdge's
+              // own broker evidence recorded the paired leg, mirroring the
+              // OCO body shape used when this bracket is placed fresh (see
+              // the Set/Edit Profit Target flow above).
+              const restoreOcoBody = {
+                type: 'OCO',
+                orders: [
+                  {
+                    'order-type': restoreBody['order-type'],
+                    'time-in-force': restoreBody['time-in-force'],
+                    price: restoreBody.price,
+                    'price-effect': restoreBody['price-effect'],
+                    legs: restoreBody.legs,
+                  },
+                  {
+                    'order-type': pairedLeg.orderType,
+                    'time-in-force': pairedLeg.timeInForce,
+                    'stop-trigger': pairedLeg.triggerPrice.toFixed(2),
+                    price: pairedLeg.limitPrice.toFixed(2),
+                    'price-effect': pairedLeg.priceEffect,
+                    legs: pairedLeg.legs,
+                  },
+                ],
+              };
               const restored = await submitCloseOrderIfSafe(
                 { identity: item.closeIdentity, structureAmbiguous: item.pos.structureAmbiguous, structureBlockMessage: item.pos.structureBlockMessage },
                 restoreGateInput,
                 async () => {
-                  const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, restoreBody);
-                  return String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
+                  const res = await ttPostComplex(`/accounts/${item.pos.accountNumber}/complex-orders`, token, restoreOcoBody);
+                  const { complexOrderId, stopOrderId } = resolveOcoStopOrderId(res);
+                  return stopOrderId ?? complexOrderId ?? 'submitted';
                 },
               );
               if (!restored.submitted) throw new Error(restored.reason);
-                  return ` The original GTC was restored at ${restorePrice.toFixed(2)} (ID #${restored.result}).`;
+                  return ` The original GTC + stop bracket was restored at ${restorePrice.toFixed(2)} / stop trigger $${pairedLeg.triggerPrice.toFixed(2)} (ID #${restored.result}).`;
                 },
               );
               if (restorationMessage) reportedError += restorationMessage;

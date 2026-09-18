@@ -52,7 +52,59 @@ describe('existing GTC replacement safety', () => {
     );
 
     expect(result).toBe('RESTORED-1');
-    expect(restore).toHaveBeenCalledWith(4.03);
+    expect(restore).toHaveBeenCalledWith(4.03, null);
+  });
+
+  it('cancels a complex/OCO GTC when a complete paired leg is supplied', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const pairedLeg = {
+      orderType: 'Stop Limit',
+      timeInForce: 'GTC',
+      triggerPrice: 3.5,
+      limitPrice: 3.85,
+      priceEffect: 'Debit',
+      legs: [{ symbol: 'MRVL  261016P00190000', action: 'Buy to Close', quantity: 2, ratio: 1 }],
+    };
+
+    const cancelled = await cancelExistingGtcForReplacement(
+      {
+        hasGtc: true,
+        confirmed: true,
+        orderId: 'GTC-1',
+        complexOrderId: 'OCO-1',
+        originalPrice: 2.21,
+        pairedLeg,
+      },
+      cancel,
+    );
+
+    expect(cancel).toHaveBeenCalledWith('GTC-1');
+    expect(cancelled).toEqual({ cancelled: true, originalPrice: 2.21, pairedLeg });
+  });
+
+  it('rebuilds the full bracket on restore when the cancelled GTC was complex/OCO', async () => {
+    const restore = vi.fn().mockResolvedValue('RESTORED-OCO-1');
+    const pairedLeg = {
+      orderType: 'Stop Limit',
+      timeInForce: 'GTC',
+      triggerPrice: 3.5,
+      limitPrice: 3.85,
+      priceEffect: 'Debit',
+      legs: [{ symbol: 'MRVL  261016P00190000', action: 'Buy to Close', quantity: 2, ratio: 1 }],
+    };
+
+    const result = await restoreOriginalGtcIfNeeded(
+      {
+        cancelled: true,
+        replacementSubmitted: false,
+        originalPrice: 2.21,
+        pairedLeg,
+      },
+      restore,
+    );
+
+    expect(result).toBe('RESTORED-OCO-1');
+    expect(restore).toHaveBeenCalledWith(2.21, pairedLeg);
   });
 
   it('propagates restoration failure for the critical broker warning', async () => {
