@@ -23,10 +23,6 @@ export interface TrendClassification {
   strategy: TrendStrategyHint;
   confidence: number;
   reason: string;
-  /** Observational sub-signals for thesis-health reads; they do not alter the classifier's thresholds. */
-  mom60: number | null;
-  higherLows: boolean | null;
-  lowerHighs: boolean | null;
 }
 
 function avgNumbers(arr: number[]): number {
@@ -49,7 +45,7 @@ function avgNumbers(arr: number[]): number {
  */
 export function classifyTrendFromCloses(closes: number[]): TrendClassification {
   if (closes.length < 90) {
-    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data', mom60: null, higherLows: null, lowerHighs: null };
+    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Not enough data' };
   }
 
   const price = closes[closes.length - 1];
@@ -75,12 +71,12 @@ export function classifyTrendFromCloses(closes: number[]): TrendClassification {
   const confidence = Math.min(100, Math.abs(score) * 10);
 
   if (score >= 4) {
-    return { trend: 'uptrend', strategy: 'BPS', confidence, reason: 'Price above MA60/MA90, positive momentum', mom60, higherLows, lowerHighs };
+    return { trend: 'uptrend', strategy: 'BPS', confidence, reason: 'Price above MA60/MA90, positive momentum' };
   }
   if (score <= -4) {
-    return { trend: 'downtrend', strategy: 'BCS', confidence, reason: 'Price below MA60/MA90, negative momentum', mom60, higherLows, lowerHighs };
+    return { trend: 'downtrend', strategy: 'BCS', confidence, reason: 'Price below MA60/MA90, negative momentum' };
   }
-  return { trend: 'sideways', strategy: 'IC', confidence, reason: 'Mixed signals, range-bound', mom60, higherLows, lowerHighs };
+  return { trend: 'sideways', strategy: 'IC', confidence, reason: 'Mixed signals, range-bound' };
 }
 
 export type TechnicalAlignment = 'aligned' | 'against' | 'neutral' | 'unknown';
@@ -92,7 +88,7 @@ export type TechnicalAlignment = 'aligned' | 'against' | 'neutral' | 'unknown';
 // classified with the bullish set here, matching how the position's
 // thesis (not its short leg's week-to-week management) relates to trend.
 const BULLISH_STRATEGIES = new Set(['BPS', 'CSP', 'PMCC']);
-const BEARISH_STRATEGIES = new Set(['BCS']);
+const BEARISH_STRATEGIES = new Set(['BCS', 'CC']);
 
 /**
  * Maps a trend direction and a POSITION's own strategy to whether the
@@ -120,3 +116,5 @@ export function technicalAlignmentForStrategy(
   if (trend === 'uptrend') return bullish ? 'aligned' : 'against';
   return bullish ? 'against' : 'aligned'; // downtrend
 }
+
+

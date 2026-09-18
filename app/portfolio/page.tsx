@@ -84,13 +84,11 @@ import {
   hasSupportedCreditEntryEconomics,
   canonicalEntryCredit,
   entryPnlPct,
-  debitPnlPctOfCapitalAtRisk,
   reliableSupportedMaxRisk,
   summarizeReliableSupportedMaxRisk,
   formatReliableSupportedMaxRisk,
   formatPortfolioMaxRiskContext,
 } from '@/lib/portfolio/positionMetrics';
-import { assessLeapsThesisHealth } from '@/lib/portfolio/leapsThesisHealth';
 import {
   canonicalShortLegEntryCredit,
   canonicalShortLegCreditPerContract,
@@ -2844,9 +2842,6 @@ async function getTrend(symbol: string, shortPutStrike: number | null = null): P
       strategy: 'NO_TRADE',
       confidence: 0,
       reason: 'Chart data unavailable',
-      mom60: null,
-      higherLows: null,
-      lowerHighs: null,
       supportAnalysis: {
         verdict: 'UNKNOWN',
         score: 0,
@@ -7758,8 +7753,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
   };
 
   const _bannerNetEdge = netEdgeLive(pos);
-  const thesisHealth = assessLeapsThesisHealth(pos, trend);
-  const debitPnlPct = debitPnlPctOfCapitalAtRisk({ ...pos, pnl: pos.pnl ?? pos.plOpen });
   const _reviewNotClose = pos.needsClose && _bannerNetEdge != null && _bannerNetEdge > 0;
   const borderClass = checked
     ? 'border-blue-500/60'
@@ -7769,17 +7762,6 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
 
   return (
     <div ref={cardRef} className={`border ${borderClass} ${th.card} rounded-lg transition-all`}>
-      {thesisHealth.applicable && thesisHealth.severity !== 'normal' && (
-        <div className={`border-b px-4 py-2 ${thesisHealth.severity === 'critical' ? 'border-red-400/50 bg-red-500/10' : 'border-amber-300/50 bg-amber-500/10'}`}>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
-            <b className={thesisHealth.severity === 'critical' ? 'text-red-300' : 'text-amber-200'}>{thesisHealth.severity === 'critical' ? 'THESIS HEALTH · CRITICAL' : 'THESIS HEALTH · WARNING'}</b>
-            <span>ITM {thesisHealth.firstTrackedItmPct?.toFixed(1) ?? '—'}% → {thesisHealth.currentItmPct?.toFixed(1) ?? '—'}%</span>
-            <span>Δ {thesisHealth.entryDelta?.toFixed(2) ?? '—'} → {thesisHealth.currentDelta?.toFixed(2) ?? '—'}</span>
-            <span>Trend {thesisHealth.trend ?? 'loading'} · mom60 {thesisHealth.mom60 == null ? '—' : `${(thesisHealth.mom60 * 100).toFixed(1)}%`} · {thesisHealth.higherLows == null ? 'structure —' : thesisHealth.higherLows ? 'higher lows' : thesisHealth.lowerHighs ? 'lower highs' : 'mixed structure'}</span>
-          </div>
-          {thesisHealth.reasons.map(reason => <p key={reason} className="mt-1 text-[10px] text-white/80">{reason}</p>)}
-        </div>
-      )}
       {pos.needsClose && (() => {
         // Net-edge-aware banner: past the 21-DTE rule, but if net edge is still
         // healthy and positive, this is a REVIEW (amber), not a CLOSE NOW (red).
@@ -8167,13 +8149,10 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
             </div>
 
             <div onClick={e => e.stopPropagation()} className="border-t-2 border-emerald-600/50 pt-1">
-              <p className={`text-[9px] ${th.textFaint}`}>{pos.entryPriceEffect === 'Debit' ? 'Capital-at-risk P/L' : <>{Math.round(pos.profitTarget * 100)}% Target <span className="text-[7px]">(model)</span></>}</p>
-              {pos.entryPriceEffect === 'Debit' ? (
-                <><p className={`text-xs font-bold ${debitPnlPct == null ? 'text-amber-400' : debitPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "'DM Mono', monospace" }}>{debitPnlPct == null ? 'Unavailable' : `${debitPnlPct >= 0 ? '+' : ''}${debitPnlPct.toFixed(1)}%`}</p><p className={`text-[8px] ${th.textFaint}`}>P/L of capital at risk</p></>
-              ) : !creditEntryEconomicsComplete ? (
+              <p className={`text-[9px] ${th.textFaint}`}>{Math.round(pos.profitTarget * 100)}% Target <span className="text-[7px]">(model)</span></p>
+              {!creditEntryEconomicsComplete ? (
                 <p className="text-xs text-amber-400">Unavailable</p>
-              ) : (
-                editingTarget ? (
+              ) : editingTarget ? (
                 <div className="flex items-center gap-1">
                   <input type="number" min="10" max="100" value={targetInput}
                     onChange={e => setTargetInput(e.target.value)}
@@ -8183,19 +8162,18 @@ function PositionCard({ pos, th, checked, onToggle, onProfitTargetChange, onInte
                     style={{ fontFamily: "'DM Mono', monospace" }} />
                   <span className="text-[9px] text-blue-400">%</span>
                 </div>
-                ) : (
+              ) : (
                 <div className="cursor-pointer" onClick={() => { setTargetInput(String(Math.round(pos.profitTarget * 100))); setEditingTarget(true); }}>
                   <p className={`text-xs ac-hover-text transition-colors ${pos.hitTarget ? 'text-emerald-400 font-bold' : th.textFaint}`}
                     style={{ fontFamily: "'DM Mono', monospace" }}>
                     ${pos.targetPrice.toFixed(2)}{pos.hitTarget && ' ✓'}
                   </p>
                 </div>
-                )
               )}
-              {pos.entryPriceEffect !== 'Debit' && !editingTarget && projection != null && projection.status === 'ontrack' && (
+              {!editingTarget && projection != null && projection.status === 'ontrack' && (
                 <p className="text-[9px] text-emerald-400">~by {projection.dateLabel}</p>
               )}
-              {pos.entryPriceEffect !== 'Debit' && !editingTarget && projection != null && projection.status === 'unlikely' && (
+              {!editingTarget && projection != null && projection.status === 'unlikely' && (
                 <p className="text-[9px] text-yellow-400">50% unlikely before 21-DTE</p>
               )}
             </div>

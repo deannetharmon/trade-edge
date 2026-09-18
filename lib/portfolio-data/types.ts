@@ -376,9 +376,6 @@ export interface TrendResult {
   strategy: 'BPS' | 'BCS' | 'IC' | 'NO_TRADE';
   confidence: number;
   reason: string;
-  mom60: number | null;
-  higherLows: boolean | null;
-  lowerHighs: boolean | null;
   supportAnalysis?: PriceSupportAnalysis;
 }
 

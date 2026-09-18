@@ -12,7 +12,6 @@
 // have to wait for another real-money example to surface it.
 
 import { technicalAlignmentForStrategy, classifyTrendFromCloses } from '../trendClassification';
-import { describe, expect, it } from 'vitest';
 
 describe('technicalAlignmentForStrategy', () => {
   describe('PMCC -- bullish strategy', () => {
@@ -90,3 +89,4 @@ describe('classifyTrendFromCloses', () => {
     expect(classifyTrendFromCloses(closes).trend).toBe('downtrend');
   });
 });
+
