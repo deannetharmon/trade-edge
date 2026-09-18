@@ -464,7 +464,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
     // the sign of the % itself (Ian: signed, never floored to 0).
-    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}%)</span>}</b><span className="block">{profitTargetPresentation(p)}</span></>,
+    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block">{profitTargetPresentation(p)}</span></>,
     // TELEMETRY-METRIC-DIRECTION-0001: directionalMovementTone previously
     // treated every metric identically (any movement = informational,
     // no movement = neutral) -- didn't implement the team's actual rules.
