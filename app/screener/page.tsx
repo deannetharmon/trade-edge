@@ -6571,7 +6571,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
             <div>
               <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MINIMUM CREDIT / RISK</p>
               <div className="flex items-center gap-2 flex-wrap">
-                {[0, 20, 25, 33, 35].map(v => (
+                {[0, 15, 20, 25, 33, 35].map(v => (
                   <button key={v} onClick={() => { setTCreditRatioMin(v); setTCreditRatioOverride(true); }}
                     className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                       tCreditRatioMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
