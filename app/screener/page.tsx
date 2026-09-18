@@ -7180,6 +7180,12 @@ function BestOpportunityFinder({
 // ── Raw Scan Cache ─────────────────────────────────────────────────────────
 
 // ── Targeted Scan Runner ──────────────────────────────────────────────────
+function getTargetedSymbolConcurrency(): number {
+  const configured = Number(process.env.NEXT_PUBLIC_TARGETED_SYMBOL_CONCURRENCY);
+  if (!Number.isFinite(configured)) return 2;
+  return Math.max(1, Math.min(3, Math.floor(configured)));
+}
+
 async function runTargetedScan(
   symbols: string[],
   dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number,
@@ -7268,6 +7274,48 @@ async function runTargetedScan(
     const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
     const entries: TargetedScanEntry[] = [];
+    type TargetedFetch = {
+      isEtf: boolean; appliedRules: RulesType; price: number | null;
+      chainData: Awaited<ReturnType<typeof getChain>>; trendResult?: TrendResult;
+      classifyMs: number; quoteMs: number; chainMs: number; trendMs: number;
+    };
+    const fetchedBySymbol = new Map<string, TargetedFetch>();
+    const fetchSymbols = loopSymbols.filter(symbol => ivrMin <= 0 || (metricsMap[symbol]?.ivRank ?? -1) >= ivrMin);
+    const targetedSymbolConcurrency = getTargetedSymbolConcurrency();
+    let nextFetchIndex = 0;
+    let completedFetches = 0;
+    const fetchWorker = async () => {
+      while (!cancelRef.current) {
+        const fetchIndex = nextFetchIndex++;
+        if (fetchIndex >= fetchSymbols.length) return;
+        const symbol = fetchSymbols[fetchIndex];
+        const classifyStartedAt = Date.now();
+        try {
+          const classification = await classifyUnderlying(symbol, token);
+          const classifyMs = Date.now() - classifyStartedAt;
+          const isEtf = classification === 'index' || classification === 'etf';
+          const appliedRules: RulesType = { ...(isEtf ? etfRules : rules), DTE_MIN: dteMin, DTE_MAX: dteMax };
+          const quoteStartedAt = Date.now();
+          const price = await getQuote(symbol, token);
+          const quoteMs = Date.now() - quoteStartedAt;
+          const chainStartedAt = Date.now();
+          const chainData = await getChain(symbol, token, appliedRules, { min: dteMin, max: dteMax }, { underlyingPrice: price, otmMinPct: otmMin });
+          const chainMs = Date.now() - chainStartedAt;
+          const trendStartedAt = Date.now();
+          let trendResult: TrendResult | undefined;
+          try { trendResult = await getTrend(symbol, isEtf); } catch {}
+          const trendMs = Date.now() - trendStartedAt;
+          fetchedBySymbol.set(symbol, { isEtf, appliedRules, price, chainData, trendResult, classifyMs, quoteMs, chainMs, trendMs });
+        } catch (error) {
+          console.warn(`Targeted scan error for ${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+          completedFetches += 1;
+          pushStatus(`Fetching ${symbol} (${completedFetches}/${fetchSymbols.length})...`);
+          updateScreenerJob({ progressCurrent: completedFetches });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(targetedSymbolConcurrency, fetchSymbols.length) }, fetchWorker));
 
     for (let i = 0; i < loopSymbols.length; i++) {
       if (cancelRef.current) {
@@ -7305,28 +7353,11 @@ async function runTargetedScan(
       let evaluationMs: number | null = null;
       let validExpirationCount = 0;
       try {
-        const classifyStartedAt = Date.now();
-        const classification = await classifyUnderlying(symbol, token);
-        classifyMs = Date.now() - classifyStartedAt;
-        const isEtf = classification === 'index' || classification === 'etf';
-        // Use real rules but with user-specified DTE range
-        const appliedRules: RulesType = { ...(isEtf ? etfRules : rules), DTE_MIN: dteMin, DTE_MAX: dteMax };
-        // Targeted controls are acquisition controls, not just post-download
-        // filters. Fetch spot first so getChain can request only the selected
-        // DTE window and legs on the eligible OTM side of the market.
-        const quoteStartedAt = Date.now();
-        const price = await getQuote(symbol, token);
-        quoteMs = Date.now() - quoteStartedAt;
-        const chainStartedAt = Date.now();
-        const chainData = await getChain(
-          symbol, token, appliedRules, { min: dteMin, max: dteMax },
-          { underlyingPrice: price, otmMinPct: otmMin },
-        );
-        chainMs = Date.now() - chainStartedAt;
+        const fetched = fetchedBySymbol.get(symbol);
+        if (!fetched) throw new Error('Market data was not fetched before this scan was cancelled or failed.');
+        const { isEtf, appliedRules, price, chainData, trendResult } = fetched;
+        ({ classifyMs, quoteMs, chainMs, trendMs } = fetched);
         const metrics = metricsMap[symbol] || { symbol, ivRank: null, earningsExpectedDate: null };
-        let trendResult: TrendResult | undefined;
-        const trendStartedAt = Date.now();
-        try { trendResult = await getTrend(symbol, isEtf); } catch {} finally { trendMs = Date.now() - trendStartedAt; }
 
         const evaluationStartedAt = Date.now();
         const validExps = chainData.expirations.filter(exp => {
