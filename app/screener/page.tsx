@@ -145,6 +145,7 @@ import { LauncherButton, type LauncherStrategyId } from '@/features/screener/com
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { PmccScanModal, type PmccScanCriteria } from '@/features/screener/components/PmccScanModal';
+import { LeapsScanModal } from '@/features/screener/components/LeapsScanModal';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
@@ -6493,6 +6494,7 @@ export default function Home() {
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const [showPmccScanModal, setShowPmccScanModal] = useState(false);
+  const [showLeapsScanModal, setShowLeapsScanModal] = useState(false);
   const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
@@ -8305,10 +8307,13 @@ export default function Home() {
               >
                 {runningLauncher === 'pmcc' ? 'SCANNING...' : 'FIND PMCCs'}
               </LauncherButton>
-              <button disabled
-                title="Standalone LEAPS scanning requires its own conviction, duration, delta, valuation, and exit rules. PMCC scanning remains available separately."
-                className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border ${th.border} ${th.textFaint} opacity-50 cursor-not-allowed text-[10px]`}>
-                FIND LEAPS — COMING SOON
+              <button
+                aria-label="FIND LEAPS"
+                onClick={() => setShowLeapsScanModal(true)}
+                disabled={loading || !opportunityUniverse.length}
+                title={!opportunityUniverse.length ? 'Add a ticker to the Opportunity Universe first.' : 'Find standalone LEAPS opportunities and submit directly to your broker.'}
+                className={`col-span-2 text-xs font-bold tracking-widest py-2 rounded-lg border border-blue-500 text-blue-300 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 text-[10px]`}>
+                FIND LEAPS
               </button>
             </div>
 
@@ -9662,11 +9667,20 @@ export default function Home() {
           }}
         />
       )}
+      {showLeapsScanModal && (
+        <LeapsScanModal
+          th={th}
+          universe={opportunityUniverse}
+          onClose={() => {
+            setShowLeapsScanModal(false);
+            requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND LEAPS"]')?.focus());
+          }}
+        />
+      )}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }
-
 
 
 
