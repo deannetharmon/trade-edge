@@ -13,12 +13,13 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'movement', label: 'What Moved', group: 'Movement' },
   { id: 'greeks', label: 'Greeks', group: 'Risk & Greeks' },
   { id: 'volatility', label: 'IV / IVR', group: 'Risk & Greeks' },
+  { id: 'thesisHealth', label: 'LEAPS Thesis Health', group: 'Risk & Greeks' },
   { id: 'orders', label: 'GTC / Stop', group: 'Orders' },
   { id: 'recommendation', label: 'Suggested action', group: 'Recommendation' },
 ] as const;
 
 const MANAGEMENT: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'value', 'pnl', 'movement', 'orders', 'recommendation'];
-const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'movement', 'greeks', 'volatility', 'recommendation'];
+const RISK: AnalysisColumnId[] = ['identity', 'dates', 'underlying', 'strike', 'pnl', 'evolution', 'movement', 'greeks', 'volatility', 'thesisHealth', 'recommendation'];
 const FULL = ANALYSIS_COLUMNS.map(column => column.id);
 
 export function columnsForView(view: Exclude<AnalysisViewId, 'custom'>): AnalysisColumnId[] {

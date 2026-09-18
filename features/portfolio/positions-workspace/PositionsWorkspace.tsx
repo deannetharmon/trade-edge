@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ActionType, Position } from '@/lib/portfolio-data/types';
 import type { THEMES, Theme } from '@/lib/theme';
+import { debitPnlPctOfCapitalAtRisk } from '@/lib/portfolio/positionMetrics';
+import { assessLeapsThesisHealth } from '@/lib/portfolio/leapsThesisHealth';
 import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
@@ -91,23 +93,27 @@ const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take 
 
 function AnalysisRow({ position: p, columns, th, actions, onExecute }: { position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType) => void }) {
   const first = p.snapshotHistory?.[0]; const prior = p.snapshotHistory?.[p.snapshotHistory.length - 1];
+  const thesis = assessLeapsThesisHealth(p);
+  const debitPnlPct = debitPnlPctOfCapitalAtRisk({ ...p, pnl: p.closeNowPnl ?? p.pnl });
+  const thesisTone = thesis.severity === 'critical' ? 'border-l-red-400' : thesis.severity === 'warning' ? 'border-l-amber-300' : 'border-l-transparent';
   const cell: Record<AnalysisColumnId, ReactNode> = {
     identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{p.strategy}</span><span className={th.textFaint}>{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span></>,
     dates: <>{p.entryDate ?? 'Entry unavailable'}<b className="block text-white">{p.expDate}</b><span>{p.dte} DTE</span></>,
     underlying: <><b className="text-white">{money(p.stockPrice)}</b><span className="block text-emerald-300">{number(p.buffer)}% OTM</span></>,
     strike: <>{p.legs.map(leg => `${leg.strikePrice}${leg.optionType}`).join(' / ') || '—'}</>,
-    capital: <>{p.maxRiskReliable === false ? 'Unavailable' : money(p.maxRisk)}</>,
+    capital: <>{p.entryPriceEffect === 'Debit' ? money(p.maxRisk) : p.maxRiskReliable === false ? 'Unavailable' : money(p.maxRisk)}</>,
     entry: <><b className="text-white">{p.entryPriceEffect}</b><span className="block">{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
     value: <><span>Buyback {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
-    pnl: <><b className={(p.closeNowPnl ?? p.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}>{money(p.closeNowPnl ?? p.pnl)}</b><span className="block">Target {p.profitTarget}%</span></>,
+    pnl: <><b className={(p.closeNowPnl ?? p.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}>{money(p.closeNowPnl ?? p.pnl)}</b><span className="block">{p.entryPriceEffect === 'Debit' ? debitPnlPct == null ? 'Capital-at-risk P/L unavailable' : `${debitPnlPct >= 0 ? '+' : ''}${debitPnlPct.toFixed(1)}% of capital at risk` : `Target ${p.profitTarget}%`}</span></>,
     evolution: <><span className="block text-white">first tracked → now</span><span>POP {number(first?.pop ?? p.pop)} → {number(p.pop)}</span><span className="block">Δ {number(first?.netDelta ?? p.deltaAtEntry)} → {number(p.netDelta)}</span><span className="block">Θ {number(first?.theta ?? p.thetaAtEntry)} → {number(p.theta)}</span><span className="block">Γ {number(first?.gamma ?? p.gammaAtEntry, 3)} → {number(p.gamma, 3)}</span><span className="block">V {number(first?.netVega ?? p.vegaAtEntry)} → {number(p.netVega)}</span><span className="block">IV {number(first?.iv ?? p.ivAtEntry)} → {number(p.iv)} · IVR {number(first?.ivr ?? p.ivrAtEntry)} → {number(p.ivr)}</span><span className="block">OTM {number(first?.buffer ?? p.otmAtEntry)} → {number(p.buffer)} · DTE {first?.dte ?? p.dteAtEntry ?? '—'} → {p.dte}</span></>,
     movement: <details><summary className="cursor-pointer text-white">{prior ? 'Prior snapshot → now' : 'Tracking — first day tracked'}</summary>{prior && <span className="mt-1 block">Stock {money(prior.stockPrice)} → {money(p.stockPrice)}<br/>P/L {money(prior.pnl)} → {money(p.pnl)}<br/>IV {number(prior.iv)} → {number(p.iv)} · POP {number(prior.pop)} → {number(p.pop)}<br/><span className={th.textFaint}>Why this changed: observed metric movement since the prior qualified snapshot; no causal claim.</span></span>}</details>,
     greeks: <>Δ {number(p.netDelta)}<br/>Θ {number(p.theta)}<br/>Γ {number(p.gamma, 3)}<br/>V {number(p.netVega)}</>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
+    thesisHealth: !thesis.applicable ? <span className={th.textFaint}>Not applicable — multi-leg debit structures use their own risk read.</span> : <><b className={thesis.severity === 'critical' ? 'text-red-400' : thesis.severity === 'warning' ? 'text-amber-300' : 'text-emerald-400'}>{thesis.pairedPmcc ? 'PMCC foundation · ' : ''}{thesis.severity === 'critical' ? 'Critical' : thesis.severity === 'warning' ? 'Warning' : 'On thesis'}</b><span className="block">ITM {number(thesis.firstTrackedItmPct)}% → {number(thesis.currentItmPct)}%</span><span className="block">{thesis.pairedPmcc ? 'Foundation Δ' : `Erosion ${number(thesis.erosionPp)} pp · Δ`} {number(thesis.entryDelta, 2)} → {number(thesis.currentDelta, 2)}</span><span className={`block ${th.textFaint}`}>Trend is shown on the position card; no shorter trend window is introduced.</span>{thesis.reasons.map(reason => <span key={reason} className="mt-1 block">{reason}</span>)}</>,
     orders: <><span className={p.hasGtc ? 'text-emerald-400' : 'text-amber-300'}>GTC {p.hasGtc ? 'Live' : 'None'}</span><span className="block">Stop {p.stopLossClassification.replaceAll('_', ' ')}</span></>,
     recommendation: <><b className="text-white">{p.recommendation?.label ?? 'Hold'}</b><span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>{actions.length > 0 && <span className="mt-2 flex max-w-56 flex-wrap gap-1">{actions.map(action => <button key={action} type="button" onClick={() => onExecute?.(p, action)} className="min-h-11 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{ACTION_LABELS[action] ?? action}</button>)}</span>}<span className={`mt-1 block ${th.textFaint}`}>Actions open the existing review flow; no order is submitted here.</span></>,
   };
-  return <tr className="align-top hover:bg-white/[0.03]">{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
+  return <tr className={`align-top border-l-4 ${thesisTone} hover:bg-white/[0.03]`}>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => <td key={column.id} className={`max-w-64 border-b border-r border-white/10 px-3 py-3 ${th.textMuted} ${column.id === 'identity' ? `sticky left-0 z-10 ${th.card}` : ''}`}>{cell[column.id]}</td>)}</tr>;
 }
 
 function FilterDialog({ draft, setDraft, onClose, onApply, onClear }: { draft: PositionAnalysisFilters; setDraft: (value: PositionAnalysisFilters) => void; onClose: () => void; onApply: () => void; onClear: () => void }) {

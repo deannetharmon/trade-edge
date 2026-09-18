@@ -57,6 +57,21 @@ export function entryPnlPct(position: EntryEconomicsLike & { pnl?: number | null
 }
 
 /**
+ * Debit positions do not have a credit-capture target. Their comparable
+ * economics read is open P/L as a percent of capital at risk. This is kept
+ * separate from entryPnlPct so credit-only callers cannot accidentally treat
+ * a debit as a credit entry.
+ */
+export function debitPnlPctOfCapitalAtRisk(
+  position: EntryEconomicsLike & { pnl?: number | null; maxRisk?: number | null },
+): number | null {
+  if (position.entryPriceEffect !== 'Debit') return null;
+  if (position.pnl == null || !Number.isFinite(position.pnl)) return null;
+  if (position.maxRisk == null || !Number.isFinite(position.maxRisk) || position.maxRisk <= 0) return null;
+  return (position.pnl / position.maxRisk) * 100;
+}
+
+/**
  * Returns a max-risk value only when it is explicitly reliable and grounded
  * in supported net-credit entry economics. Compatibility/legacy fields,
  * debit structures, and omitted reliability provenance all fail closed.

@@ -39,14 +39,14 @@ export async function fetchTrendForSymbol(symbol: string): Promise<TrendClassifi
     const chartSymbol = INDEX_CHART_SYMBOLS[symbol.toUpperCase()] ?? symbol;
     const res = await fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`, { cache: 'no-store' });
     if (!res.ok) {
-      return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Chart data unavailable' };
+      return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Chart data unavailable', mom60: null, higherLows: null, lowerHighs: null };
     }
     const data = await res.json();
     const bars: { c: number }[] = data?.bars ?? [];
     const closes = bars.map((b: any) => Number(b.c)).filter((c: any): c is number => Number.isFinite(c));
     return classifyTrendFromCloses(closes);
   } catch {
-    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Chart data unavailable' };
+    return { trend: 'unknown', strategy: 'NO_TRADE', confidence: 0, reason: 'Chart data unavailable', mom60: null, higherLows: null, lowerHighs: null };
   }
 }
 
@@ -67,4 +67,3 @@ export async function fetchTrendStore(symbols: string[]): Promise<Record<string,
   }));
   return Object.fromEntries(results);
 }
-
