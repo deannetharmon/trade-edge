@@ -171,7 +171,7 @@ import { LauncherButton, type LauncherStrategyId } from '@/features/screener/com
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
-import { LeapsScanModal } from '@/features/screener/components/LeapsScanModal';
+import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
@@ -12666,8 +12666,13 @@ export default function Home() {
       {showLeapsScanModal && (
         <LeapsScanModal
           th={th}
-          universe={opportunityUniverse}
+          selectedTickerCount={opportunityUniverse.length}
+          initial={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
           onClose={() => setShowLeapsScanModal(false)}
+          onRun={(request: LeapsScanRequest) => {
+            setShowLeapsScanModal(false);
+            void runLeapsScan(request);
+          }}
         />
       )}
       {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
