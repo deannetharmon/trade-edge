@@ -5,6 +5,23 @@ import type { RulesType } from './constants';
 import { getWidthSteps, getBidAskMax, normalizeIv, calcSpreadPop, daysUntil } from './scan-utils';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from './financials';
 
+export function calculateTargetedConservativeCredit(
+  shortLeg: any, longLeg: any, width: number, requireValidQuotes: boolean,
+): { credit: number; creditRatio: number; midCredit: number; naturalCredit: number } | null {
+  if (!Number.isFinite(width) || width <= 0) return null;
+  if (requireValidQuotes) {
+    const values = [shortLeg.bid, shortLeg.ask, longLeg.bid, longLeg.ask, shortLeg.mid, longLeg.mid];
+    if (!values.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) return null;
+    if (shortLeg.bid < 0 || shortLeg.ask < shortLeg.bid || longLeg.bid < 0 || longLeg.ask < longLeg.bid) return null;
+  }
+  const midCredit = shortLeg.mid - longLeg.mid;
+  const naturalCredit = shortLeg.bid - longLeg.ask;
+  const credit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
+  const creditRatio = credit / width;
+  if (!Number.isFinite(credit) || credit <= 0 || !Number.isFinite(creditRatio)) return null;
+  return { credit, creditRatio, midCredit, naturalCredit };
+}
+
 export function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: string, width: number, price: number | null, RULES: RulesType, ivPctForPop?: number | null): SpreadCandidate | null {
   const bidAskMax = getBidAskMax(price);
   const candidates: SpreadCandidate[] = [];
@@ -228,4 +245,77 @@ export function findBestICUnfiltered(chain: any[], expDate: string, price: numbe
   } catch { return null; }
   const roc = totalCredit / (capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER) * 100;
   return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike, shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit, spreadWidth: putSpread.spreadWidth, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1, creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100, shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI, longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.spreadWidth, totalCredit, optimized: false, shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol, shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
+}
+
+// Targeted Scan deliberately has looser structural gates than the rules-based
+// scanner.  This helper preserves that behavior while applying a *launch-time*
+// credit/risk floor using executable (natural blended toward mid) credits.
+// The public `creditRatio` on an IC is historically put-side only, so the
+// floor must be applied independently while each wing is selected.
+export function findBestTargetedICWithCreditRatioFloor(
+  chain: any[], expDate: string, price: number | null, minimumCreditRatio: number,
+): SpreadCandidate | null {
+  // Zero is the compatibility path: Targeted scans without the new filter
+  // retain their established candidate selection exactly.
+  if (!(minimumCreditRatio > 0)) return findBestICUnfiltered(chain, expDate, price);
+
+  type Wing = {
+    shortStrike: number; longStrike: number; shortDelta: number; credit: number;
+    creditRatio: number; roc: number; pop: number; width: number;
+    shortOI: number; longOI: number; shortOccSymbol?: string; longOccSymbol?: string;
+  };
+  const buildWings = (side: 'put' | 'call'): Wing[] => {
+    const legs = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === (side === 'put' ? 'P' : 'C'));
+    const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
+    const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
+    const candidates: Wing[] = [];
+    for (const shortLeg of legs) {
+      const delta = shortLeg.delta;
+      if (!Number.isFinite(delta)) continue;
+      const shortDelta = Math.abs(delta);
+      if (shortDelta < 0.05 || shortDelta > 0.60) continue;
+      for (let width = stepSize; width <= maxWidth; width += stepSize) {
+        const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
+        const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
+        if (!longLeg) continue;
+        // A positive launch floor makes quote validity an eligibility
+        // requirement, rather than allowing a fabricated/mid-only credit.
+        const quote = calculateTargetedConservativeCredit(shortLeg, longLeg, width, true);
+        if (!quote || quote.creditRatio < minimumCreditRatio) continue;
+        const { credit, creditRatio } = quote;
+        const maxLoss = width - credit;
+        const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+        candidates.push({ shortStrike: shortLeg.strikePrice, longStrike, shortDelta, credit, creditRatio, roc,
+          pop: (1 - shortDelta) * 100, width, shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
+          shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol });
+      }
+    }
+    return candidates.sort((a, b) => {
+      const popDiff = b.pop - a.pop;
+      return Math.abs(popDiff) >= 5 ? popDiff : b.roc - a.roc;
+    });
+  };
+
+  const puts = buildWings('put');
+  const calls = buildWings('call');
+  if (!puts.length || !calls.length) return null;
+  // Select from qualifying wings only. Preserve Targeted's independent wing
+  // selection rather than silently imposing a new strike-spacing rule.
+  const putSpread = puts[0];
+  const callSpread = calls[0];
+  const totalCredit = Number((putSpread.credit + callSpread.credit).toFixed(2));
+  let capital;
+  try {
+    capital = calculateIronCondorCapital({ putWidth: putSpread.width, callWidth: callSpread.width, totalCredit, creditUnit: 'per_share', contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1 });
+  } catch { return null; }
+  const maxLossPerShare = capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER;
+  const roc = maxLossPerShare > 0 ? (totalCredit / maxLossPerShare) * 100 : 0;
+  return { strategy: 'IC', expiration: expDate, dte: daysUntil(expDate), shortStrike: putSpread.shortStrike, longStrike: putSpread.longStrike,
+    shortDelta: putSpread.shortDelta, shortOI: putSpread.shortOI, longOI: putSpread.longOI, credit: putSpread.credit,
+    spreadWidth: putSpread.width, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1,
+    creditRatio: putSpread.creditRatio, roc, pop: (1 - putSpread.shortDelta - callSpread.shortDelta) * 100,
+    shortCallStrike: callSpread.shortStrike, longCallStrike: callSpread.longStrike, shortCallOI: callSpread.shortOI,
+    longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.width, totalCredit, optimized: false,
+    shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol,
+    shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
 }

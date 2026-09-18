@@ -888,4 +888,16 @@ describe('CSP-WORKFLOW-0001 core-correction (BLOCKER-06): canonical rule-snapsho
     expect(validation.valid).toBe(false);
     if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
   });
+
+  it('persists and validates the immutable Targeted launch snapshot', () => {
+    let session = createScanSession({
+      mode: 'targeted', requestedStrategy: 'spreads',
+      scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+      targetedSnapshot: { minimumCreditRatio: 0.25, preset: 'course', creditRatioOverride: true },
+    });
+    session = recordSymbolEvaluated(session, 'AMD', [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
+    const complete = completeSession(session);
+    expect(complete.targetedSnapshot).toEqual({ minimumCreditRatio: 0.25, preset: 'course', creditRatioOverride: true });
+    expect(validateSessionData(complete).valid).toBe(true);
+  });
 });

@@ -31,7 +31,7 @@ import {
 } from '@/lib/scans/tastytrade-client';
 import {
   trySpreadAtWidth, findBestSpread, tryICSideAtWidth, findBestIC,
-  findBestSpreadUnfiltered, findBestICUnfiltered,
+  findBestSpreadUnfiltered, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor, calculateTargetedConservativeCredit,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
@@ -125,6 +125,7 @@ import {
 import type {
   ScreenerScanSession, ScreenerScanMode, ScreenerRequestedStrategy, ScreenerScanScope,
   ScreenerReasonCode, ScreenerSessionAccounting,
+  TargetedScanLaunchSnapshot,
 } from '@/lib/screener/scanSession';
 import { persistScanSession, restoreScanSession, clearScanSessionCache, persistLeapsSession, restoreLeapsSession, clearLeapsSessionCache, consumeScanSessionRestoreNotice } from '@/lib/screener/scanSessionCache';
 import { computeLeapsAdvisorResultSetHash, persistLeapsAdvisorSession, restoreLeapsAdvisorSession, clearLeapsAdvisorSession, type LeapsAdvisorSession, type LeapsAdvisorMessage } from '@/lib/screener/leapsAdvisorCache';
@@ -1015,6 +1016,7 @@ const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
 const LS_TARGETED_RESULTS_CACHE_AT = 'hunter-targeted-results-cache-at'; // mirrors LS_RESULTS_CACHE_AT for Targeted mode's own freshness badge timestamp
+const LS_TARGETED_MIN_CREDIT_RATIO = 'hunter-targeted-min-credit-ratio';
 
 // ── IndexedDB helper for rawScanCache ───────────────────────────────────────
 // rawScanCache holds the full options chain per scanned symbol, which can
@@ -1620,6 +1622,11 @@ interface TargetedScanEntry {
   trendResult?: TrendResult;
   cachedEntry: RawScanEntry;
   allStrategies: { strategy: 'BPS' | 'BCS' | 'IC'; candidate: SpreadCandidate; pop: number; score: number }[];
+  // Immutable launch snapshot carried with cards/cache so a restored result
+  // can never imply that a lower display filter would recreate exclusions.
+  scanMinimumCreditRatio?: number;
+  scanPreset?: string;
+  creditRatioOverride?: boolean;
 }
 
 function runChecklistAllExpirations(
@@ -6388,7 +6395,7 @@ const FILTER_PRESETS = [
   { key: 'intermediate',label: 'Intermediate', color: 'border-amber-500 text-amber-400',    desc: '15–29 DTE — active management' },
 ];
 
-function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedIvrMin, lastTargetedPreset, onRun, onClose }: {
+function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedIvrMin, lastTargetedCreditRatioMin, lastTargetedCreditRatioOverride, lastTargetedPreset, onRun, onClose }: {
   th: typeof THEMES[Theme];
   lastMode: 'filter' | 'rank' | 'targeted';
   lastPreset: string;
@@ -6398,8 +6405,10 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   lastTargetedPopMin: number;
   lastTargetedOtmMin: number;
   lastTargetedIvrMin: number;
+  lastTargetedCreditRatioMin: number;
+  lastTargetedCreditRatioOverride: boolean;
   lastTargetedPreset: string;
-  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; preset: string }) => void;
+  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; creditRatioMin: number; creditRatioOverride: boolean; preset: string }) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode === 'filter' ? 'rank' : lastMode);
@@ -6409,6 +6418,8 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tPopMin, setTPopMin] = useState(lastTargetedPopMin);
   const [tOtmMin, setTOtmMin] = useState(lastTargetedOtmMin);
   const [tIvrMin, setTIvrMin] = useState(lastTargetedIvrMin);
+  const [tCreditRatioMin, setTCreditRatioMin] = useState(lastTargetedCreditRatioMin);
+  const [tCreditRatioOverride, setTCreditRatioOverride] = useState(lastTargetedCreditRatioOverride);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
 
   return (
@@ -6507,6 +6518,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                     if (r?.IVR_MIN != null) setTIvrMin(r.IVR_MIN);
                     if (r?.DTE_MIN != null) setTDteMin(r.DTE_MIN);
                     if (r?.DTE_MAX != null) setTDteMax(r.DTE_MAX);
+                    if (r?.CREDIT_RATIO_MIN != null) { setTCreditRatioMin(Math.round(r.CREDIT_RATIO_MIN * 100)); setTCreditRatioOverride(false); }
                     // Dean: POP min always 70, OTM min always 6% -- fixed
                     // universal defaults, since no preset defines either
                     // and every preset should apply the same baseline here.
@@ -6554,6 +6566,23 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                     }`}>{r.label}</button>
                 ))}
               </div>
+            </div>
+
+            <div>
+              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MINIMUM CREDIT / RISK</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {[0, 20, 25, 33, 35].map(v => (
+                  <button key={v} onClick={() => { setTCreditRatioMin(v); setTCreditRatioOverride(true); }}
+                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                      tCreditRatioMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
+                    }`}>{v === 0 ? 'Any' : `${v}%`}</button>
+                ))}
+                <DeferredNumberInput aria-label="Custom minimum credit risk percentage" step="1" value={tCreditRatioMin}
+                  onValueChange={value => { setTCreditRatioMin(Math.min(100, Math.max(0, value))); setTCreditRatioOverride(true); }}
+                  className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
+                <span className={`text-[9px] ${th.textFaint}`}>% custom</span>
+              </div>
+              <p className={`text-[8px] ${th.textFaint} mt-1`}>Only show trades where conservative entry credit is at least this share of spread width. Higher minimums reduce results; they do not guarantee fills.</p>
             </div>
 
             {/* POP floor */}
@@ -6621,7 +6650,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
 
         <button onClick={() => {
           if (mode === 'targeted') {
-            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, preset: tPreset });
+            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, creditRatioMin: tCreditRatioMin, creditRatioOverride: tCreditRatioOverride, preset: tPreset });
           } else {
             onRun(mode, mode === 'filter' ? preset : undefined);
           }
@@ -7188,7 +7217,8 @@ function getTargetedSymbolConcurrency(): number {
 
 async function runTargetedScan(
   symbols: string[],
-  dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number,
+  dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number, minimumCreditRatio: number,
+  scanPreset: string, creditRatioOverride: boolean,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
@@ -7200,7 +7230,7 @@ async function runTargetedScan(
   // pure transition functions themselves (recordSymbolEvaluated, etc.) are
   // plain module-level imports and are called directly below, same as any
   // other caller in this file.
-  beginSession: (scope: ScreenerScanScope, scopeExclusionReasonCode?: (symbol: string) => ScreenerReasonCode) => ScreenerScanSession,
+  beginSession: (scope: ScreenerScanScope, scopeExclusionReasonCode?: (symbol: string) => ScreenerReasonCode, targetedSnapshot?: TargetedScanLaunchSnapshot) => ScreenerScanSession,
   commitSession: (session: ScreenerScanSession, onCommit?: () => void) => boolean,
   // SCREENER-RESULTS-0001 corrective — same staleness guard used by every
   // in-component scan function (isScanCurrent): a superseded Targeted scan's
@@ -7255,6 +7285,7 @@ async function runTargetedScan(
     heldSymbolsForTargeted
       ? (symbol: string) => (heldSymbolsForTargeted!.has(symbol) ? 'EXCLUDED_HELD_POSITION' : 'EXCLUDED_BY_SCAN_SCOPE')
       : undefined,
+    { minimumCreditRatio, preset: scanPreset, creditRatioOverride },
   );
   const loopSymbols = session.plannedScanSymbols;
   let wasCancelled = false;
@@ -7262,6 +7293,7 @@ async function runTargetedScan(
   console.info('[scan-timing] targeted-scan-start', JSON.stringify({
     sessionId: session.sessionId,
     symbolCount: loopSymbols.length,
+    minimumCreditRatio, scanPreset, creditRatioOverride,
     startedAt: new Date(scanStartedAt).toISOString(),
   }));
 
@@ -7391,7 +7423,9 @@ async function runTargetedScan(
 
               // For IC use the single unfiltered best — ICs are composite
               if (strat === 'IC') {
-                const candidate = findBestICUnfiltered(chainItems, exp, price);
+                const candidate = minimumCreditRatio > 0
+                  ? findBestTargetedICWithCreditRatioFloor(chainItems, exp, price, minimumCreditRatio)
+                  : findBestICUnfiltered(chainItems, exp, price);
                 if (!candidate || (candidate.pop ?? 0) < popMin) continue;
                 if (candidate.dte < dteMin || candidate.dte > dteMax) continue;
                 // OTM floor — IC gates on the tighter (worse) side of put/call,
@@ -7414,7 +7448,7 @@ async function runTargetedScan(
                   symbol, primaryStrategy: trendStrategy, expiration: exp, dte, strategy: strat,
                   candidate, screenResult: displayResult, pop: candidate.pop ?? 0,
                   score: scored?.score ?? 0, ivr: metrics.ivRank ?? null, price, isEtf, trendResult, cachedEntry,
-                  allStrategies: [],
+                  allStrategies: [], scanMinimumCreditRatio: minimumCreditRatio, scanPreset, creditRatioOverride,
                 });
                 continue;
               }
@@ -7460,12 +7494,14 @@ async function runTargetedScan(
                   // overstating what the market would actually pay, producing
                   // suggested entry prices well above the real natural-side
                   // reference and orders that don't fill.
-                  const midCredit = shortLeg.mid - longLeg.mid;
-                  const naturalCredit = shortLeg.bid - longLeg.ask;
-                  const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
-                  if (suggestedCredit <= 0) continue;
-                  const credit = suggestedCredit;
-                  const creditRatio = credit / width;
+                  // A positive scan floor requires real, two-sided quotes;
+                  // without it, retain Targeted's established behavior.
+                  const creditQuote = calculateTargetedConservativeCredit(shortLeg, longLeg, width, minimumCreditRatio > 0);
+                  if (!creditQuote) continue;
+                  const { midCredit, naturalCredit, credit, creditRatio } = creditQuote;
+                  // This belongs before POP and before best-candidate choice:
+                  // a rejected width must not prevent another width passing.
+                  if (minimumCreditRatio > 0 && (!Number.isFinite(creditRatio) || creditRatio < minimumCreditRatio)) continue;
                   const maxLoss = width - credit;
                   const roc = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
                   
@@ -7561,7 +7597,7 @@ async function runTargetedScan(
                   candidate: bestCandidate, screenResult: displayResult,
                   pop: bestCandidate.pop ?? 0, score: scored?.score ?? 0,
                   ivr: metrics.ivRank ?? null, price, isEtf, trendResult, cachedEntry,
-                  allStrategies: [],
+                  allStrategies: [], scanMinimumCreditRatio: minimumCreditRatio, scanPreset, creditRatioOverride,
                 });
               }
             } catch {}
@@ -7602,6 +7638,7 @@ async function runTargetedScan(
     console.info('[scan-timing] targeted-scan-complete', JSON.stringify({
       sessionId: finalSession.sessionId, totalMs: Date.now() - scanStartedAt,
       marketMetricsMs: metricsMs, plannedSymbols: loopSymbols.length, resultCount: entries.length, wasCancelled,
+      minimumCreditRatio, scanPreset, creditRatioOverride,
     }));
     console.log('[TARGETED-DEBUG] about to commit', { at: Date.now(), wasCancelled, finalEntryCount: entries.length, sessionId: finalSession.sessionId, sessionStatus: finalSession.status });
     const committed = commitSession(finalSession, () => {
@@ -7903,12 +7940,13 @@ function OiAndSortControls({
 type TargetedSortField = 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
 
 function TargetedScanResultsPanel({
-  entries, sortBy, setSortBy, popMin, th, rankConfig, rules, etfRules, existingPositions, onTrade,
+  entries, sortBy, setSortBy, popMin, scanMinimumCreditRatio, th, rankConfig, rules, etfRules, existingPositions, onTrade,
 }: {
   entries: TargetedScanEntry[];
   sortBy: TargetedSortField;
   setSortBy: (v: TargetedSortField) => void;
   popMin: number;
+  scanMinimumCreditRatio: number;
   th: typeof THEMES[Theme];
   rankConfig: RankConfig;
   rules: RulesType;
@@ -7926,7 +7964,8 @@ function TargetedScanResultsPanel({
   // present on every TargetedScanEntry.
   const [activeScoreMin, setActiveScoreMin]     = useState<number>(0);
   const [activeOtmMin, setActiveOtmMin]         = useState<number>(0);
-  const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(0);
+  const scanCreditRatioFloorPct = Math.max(0, scanMinimumCreditRatio * 100);
+  const [activeCreditRatioMin, setActiveCreditRatioMin] = useState<number>(scanCreditRatioFloorPct);
   // TARGETED-DTE-FILTER-0001 -- same post-scan narrowing pattern as
   // POP/OTM/Credit Ratio/IVR above. Any/21/30/45, matching Dean's
   // request and the existing DTE bucket boundaries already used to
@@ -7958,7 +7997,7 @@ function TargetedScanResultsPanel({
     setActiveScoreMin(0);
     setActiveOtmMin(0);
     setActiveDteMin(0);
-    setActiveCreditRatioMin(0);
+    setActiveCreditRatioMin(scanCreditRatioFloorPct);
     setActiveIvrMin(0);
     setActiveOiMin(0);
     setHiddenSymbols([]);
@@ -7967,7 +8006,7 @@ function TargetedScanResultsPanel({
     setActiveSort(sortBy);
     setResetKey(k => k + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanIdRef.current]);
+  }, [scanIdRef.current, scanCreditRatioFloorPct]);
 
   if (entries.length === 0) return null;
 
@@ -7996,7 +8035,19 @@ function TargetedScanResultsPanel({
   // 2b2. DTE floor
   if (activeDteMin > 0) pool = pool.filter(e => e.dte >= activeDteMin);
   // 2c. credit ratio floor
-  if (activeCreditRatioMin > 0) pool = pool.filter(e => ((e.candidate.creditRatio ?? 0) * 100) >= activeCreditRatioMin);
+  const effectiveCreditRatioMin = Math.max(scanCreditRatioFloorPct, activeCreditRatioMin);
+  if (effectiveCreditRatioMin > 0) pool = pool.filter(e => {
+    const putRatio = e.candidate.creditRatio;
+    if (!Number.isFinite(putRatio) || Number(putRatio) * 100 < effectiveCreditRatioMin) return false;
+    // IC's public creditRatio is historically put-side only. A tightened
+    // post-scan floor must preserve the same both-wings contract as launch.
+    if (e.strategy !== 'IC') return true;
+    const callCredit = e.candidate.callCredit;
+    const callWidth = e.candidate.callWidth;
+    const callRatio = typeof callCredit === 'number' && typeof callWidth === 'number' && callWidth > 0
+      ? callCredit / callWidth : NaN;
+    return Number.isFinite(callRatio) && callRatio * 100 >= effectiveCreditRatioMin;
+  });
   // 2d. IVR floor
   if (activeIvrMin > 0) pool = pool.filter(e => (e.ivr ?? -1) >= activeIvrMin);
   // 2e. OI floor
@@ -8047,7 +8098,9 @@ function TargetedScanResultsPanel({
         {/* Scan title — deliberately larger/bolder than the controls below it, so the
             active scan mode is unmistakable even at a glance (small inline badges were
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
-        <p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
+        <div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
+          {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300">Scan minimum credit/risk: {scanCreditRatioFloorPct}%</span>}
+        </div>
 
         {/* Row 1: count + sort + show top */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -8142,16 +8195,18 @@ function TargetedScanResultsPanel({
           <div className={`w-px h-4 ${th.border} border-l`} />
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
-            {[0, 15, 20, 25, 33].map(v => (
-              <button key={v} onClick={() => setActiveCreditRatioMin(v)}
+            {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300 font-bold">{scanCreditRatioFloorPct}% scan floor</span>}
+            {[0, 15, 20, 25, 33, 35].filter(v => scanCreditRatioFloorPct > 0 ? v > scanCreditRatioFloorPct : true).map(v => (
+              <button key={v} onClick={() => setActiveCreditRatioMin(Math.max(scanCreditRatioFloorPct, v))}
                 className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                  activeCreditRatioMin === v
+                  effectiveCreditRatioMin === Math.max(scanCreditRatioFloorPct, v)
                     ? 'border-teal-500 text-teal-300 bg-teal-500/15'
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
                 {v === 0 ? 'Any' : `${v}%`}
               </button>
             ))}
+            {scanCreditRatioFloorPct > 0 && <span className={`text-[8px] ${th.textFaint}`}>Rescan required to include lower-credit candidates.</span>}
           </div>
           <div className={`w-px h-4 ${th.border} border-l`} />
           <div className="flex items-center gap-1.5">
@@ -8632,6 +8687,7 @@ export default function Home() {
     // snapshot for this session, forwarded unchanged to createScanSession().
     ruleSnapshot?: ReturnType<typeof buildCspRuleSnapshot>;
     pmccSnapshot?: PmccScanSnapshot;
+    targetedSnapshot?: TargetedScanLaunchSnapshot;
   }): ScreenerScanSession => {
     setActiveSession(prev => {
       if (prev && prev.status === 'running') {
@@ -8788,6 +8844,8 @@ export default function Home() {
   // unavailable (metricsMap[symbol]?.ivRank ?? -1) the moment a user (or an
   // existing scan) hits this code path without deliberately opting in.
   const [targetedIvrMin, setTargetedIvrMin] = useState<number>(0);
+  const [targetedCreditRatioMin, setTargetedCreditRatioMin] = useState<number>(0);
+  const [targetedCreditRatioOverride, setTargetedCreditRatioOverride] = useState<boolean>(false);
   // SCREENER-OI-0001 corrective pass: Targeted mode explicitly keeps its
   // pre-existing, established single-field sort and does NOT get the new
   // canonical minimum-OI floor or secondary sort -- see the note above
@@ -8888,6 +8946,10 @@ export default function Home() {
     try {
       const m = localStorage.getItem(LS_SCREEN_MODE);
       if (m === 'filter' || m === 'rank' || m === 'targeted' || m === 'leaps') setScreenMode(m);
+    } catch {}
+    try {
+      const saved = Number(localStorage.getItem(LS_TARGETED_MIN_CREDIT_RATIO));
+      if (Number.isFinite(saved) && saved >= 0 && saved <= 100) setTargetedCreditRatioMin(saved);
     } catch {}
   }, []);
 
@@ -9218,6 +9280,19 @@ export default function Home() {
 
   const downloadCSV = () => {
     const csv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    if (activeSession?.mode === 'targeted' && activeSession.requestedStrategy === 'spreads') {
+      const snapshot = activeSession.targetedSnapshot;
+      const headers = ['Symbol','Strategy','Expiration','DTE','Short Put Strike','Long Put Strike','Short Call Strike','Long Call Strike','Credit','Call Credit','Credit Ratio %','Call Credit Ratio %','POP %','ROC %','Scan Minimum Credit/Risk %','Scan Preset','Credit/Risk Manually Overridden'];
+      const rows = targetedResults.map(entry => {
+        const c = entry.candidate;
+        const callRatio = typeof c.callCredit === 'number' && typeof c.callWidth === 'number' && c.callWidth > 0 ? c.callCredit / c.callWidth : null;
+        const launch = entry.scanMinimumCreditRatio ?? snapshot?.minimumCreditRatio ?? 0;
+        return [entry.symbol, entry.strategy, entry.expiration, entry.dte, c.shortStrike, c.longStrike, c.shortCallStrike ?? '', c.longCallStrike ?? '', c.credit, c.callCredit ?? '', c.creditRatio * 100, callRatio == null ? '' : callRatio * 100, c.pop, c.roc, launch * 100, entry.scanPreset ?? snapshot?.preset ?? '', entry.creditRatioOverride ?? snapshot?.creditRatioOverride ?? false ? 'YES' : 'NO'].map(csv).join(',');
+      });
+      const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `targeted-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+      return;
+    }
     if (activeSession?.requestedStrategy === 'csp') {
       const blob = new Blob([buildCspCsv(results, activeSession)], { type: 'text/csv' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `csp-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
@@ -11566,6 +11641,10 @@ export default function Home() {
                     sortBy={targetedSortBy}
                     setSortBy={setTargetedSortBy}
                     popMin={targetedPopMin}
+                    // Older cached cards predate the immutable launch field;
+                    // treat their unknown floor as Any rather than borrowing
+                    // the user's current (possibly later) launch setting.
+                    scanMinimumCreditRatio={targetedResults[0]?.scanMinimumCreditRatio ?? 0}
                     th={th}
                     rankConfig={rankConfig}
                     rules={runtimeStockRules}
@@ -12472,6 +12551,8 @@ export default function Home() {
           lastTargetedPopMin={targetedPopMin}
           lastTargetedOtmMin={targetedOtmMin}
           lastTargetedIvrMin={targetedIvrMin}
+          lastTargetedCreditRatioMin={targetedCreditRatioMin}
+          lastTargetedCreditRatioOverride={targetedCreditRatioOverride}
           lastTargetedPreset={targetedPreset}
           onClose={() => setShowRunModal(false)}
           onRun={(mode, preset, targetedOpts) => {
@@ -12484,14 +12565,17 @@ export default function Home() {
               setTargetedPopMin(targetedOpts.popMin);
               setTargetedOtmMin(targetedOpts.otmMin);
               setTargetedIvrMin(targetedOpts.ivrMin);
+              setTargetedCreditRatioMin(targetedOpts.creditRatioMin);
+              setTargetedCreditRatioOverride(targetedOpts.creditRatioOverride);
               setTargetedPreset(targetedOpts.preset);
+              try { localStorage.setItem(LS_TARGETED_MIN_CREDIT_RATIO, String(targetedOpts.creditRatioMin)); } catch {}
               // Find rules for chosen preset
               const foundPreset = RULE_PRESETS.find(p => p.key === targetedOpts.preset);
               const tRules: RulesType = foundPreset ? { ...DEFAULT_RULES, ...foundPreset.rules } : runtimeStockRules;
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
               clearResultsCache();
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode }), commitScanSession, isScanCurrent, excludeHeldPositions);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, targetedOpts.creditRatioMin / 100, targetedOpts.preset, targetedOpts.creditRatioOverride, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode, targetedSnapshot) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode, targetedSnapshot }), commitScanSession, isScanCurrent, excludeHeldPositions);
             } else if (mode === 'rank') {
               // Ranked refresh intentionally retains the last valid shortlist
               // while its replacement is running. startRankedScan replaces it

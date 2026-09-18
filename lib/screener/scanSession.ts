@@ -224,7 +224,7 @@ const ALLOWED_SCOPE_EXCLUSION_REASON_CODES: ReadonlySet<ScreenerReasonCode> = ne
 // UNKNOWN_SCHEMA_VERSION and is discarded outright (see
 // lib/screener/scanSessionCache.ts's restoreScanSession()) before any code
 // path would need to backfill a `ruleSnapshot` for it.
-const SCHEMA_VERSION = 8 as const;
+const SCHEMA_VERSION = 9 as const;
 
 // ── Symbol normalization ────────────────────────────────────────────────
 export function normalizeSymbols(symbols: string[]): string[] {
@@ -291,6 +291,22 @@ export interface ScreenerSymbolOutcome {
   candidateCount: number;
 }
 
+// Immutable Targeted launch facts. Kept separate from the CSP-only rule
+// snapshot so each scan strategy remains validated against its own contract.
+export interface TargetedScanLaunchSnapshot {
+  minimumCreditRatio: number;
+  preset: string;
+  creditRatioOverride: boolean;
+}
+
+function isValidTargetedScanLaunchSnapshot(value: unknown): value is TargetedScanLaunchSnapshot {
+  if (value == null || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.minimumCreditRatio === 'number' && Number.isFinite(v.minimumCreditRatio) && v.minimumCreditRatio >= 0 && v.minimumCreditRatio <= 1
+    && typeof v.preset === 'string' && v.preset.length > 0
+    && typeof v.creditRatioOverride === 'boolean';
+}
+
 export interface ScreenerScanSession {
   sessionId: string;
   mode: ScreenerScanMode;
@@ -315,6 +331,7 @@ export interface ScreenerScanSession {
   // closed on schemaVersion mismatch before this field is ever read).
   ruleSnapshot: CspRuleSnapshot | null;
   pmccSnapshot: PmccScanSnapshot | null;
+  targetedSnapshot: TargetedScanLaunchSnapshot | null;
 }
 
 // ── Construction ─────────────────────────────────────────────────────────
@@ -345,6 +362,7 @@ export function createScanSession(args: {
   // every non-CSP strategy today.
   ruleSnapshot?: CspRuleSnapshot;
   pmccSnapshot?: PmccScanSnapshot;
+  targetedSnapshot?: TargetedScanLaunchSnapshot;
 }): ScreenerScanSession {
   if (!STRATEGY_ALLOWED_MODES[args.requestedStrategy].has(args.mode)) {
     throw new ScanSessionConstructionError(
@@ -398,6 +416,7 @@ export function createScanSession(args: {
     schemaVersion: SCHEMA_VERSION,
     ruleSnapshot: args.ruleSnapshot ?? null,
     pmccSnapshot: args.pmccSnapshot ?? null,
+    targetedSnapshot: args.targetedSnapshot ?? null,
   };
 
   for (const { symbol, reasonCode } of exclusions) {
@@ -968,6 +987,7 @@ export type SessionValidationError =
   | 'INVALID_CSP_QUALIFICATION'
   | 'INVALID_RULE_SNAPSHOT'
   | 'INVALID_PMCC_SNAPSHOT'
+  | 'INVALID_TARGETED_SNAPSHOT'
   | 'INVALID_PMCC_RESULT';
 
 export type SessionValidationResult =
@@ -1010,6 +1030,11 @@ export function validateSessionData(data: unknown): SessionValidationResult {
     if (!isValidPmccScanSnapshot(d.pmccSnapshot)) errors.push('INVALID_PMCC_SNAPSHOT');
   } else if (d.pmccSnapshot !== null) {
     errors.push('INVALID_PMCC_SNAPSHOT');
+  }
+  if (strategyValid && modeValid && d.requestedStrategy === 'spreads' && d.mode === 'targeted') {
+    if (!isValidTargetedScanLaunchSnapshot(d.targetedSnapshot)) errors.push('INVALID_TARGETED_SNAPSHOT');
+  } else if (d.targetedSnapshot !== null) {
+    errors.push('INVALID_TARGETED_SNAPSHOT');
   }
 
   if (strategyValid && modeValid) {
@@ -1327,6 +1352,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       schemaVersion: SCHEMA_VERSION,
       ruleSnapshot: (d.ruleSnapshot ?? null) as CspRuleSnapshot | null,
       pmccSnapshot: (d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
+      targetedSnapshot: (d.targetedSnapshot ?? null) as TargetedScanLaunchSnapshot | null,
     },
   };
 }

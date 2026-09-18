@@ -32,9 +32,10 @@ function baseSession(overrides: Partial<ScreenerScanSession> = {}): ScreenerScan
     ],
     cacheProvenance: 'live',
     cachedAt: null,
-    schemaVersion: 8,
+    schemaVersion: 9,
     pmccSnapshot: null,
     ruleSnapshot: null,
+    targetedSnapshot: null,
     ...overrides,
   };
 }
