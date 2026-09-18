@@ -7336,6 +7336,10 @@ async function runTargetedScan(
       // Progress still advances (above) so the bar doesn't stall on
       // filtered-out symbols.
       if (ivrMin > 0 && (metricsMap[symbol]?.ivRank ?? -1) < ivrMin) {
+        // An IVR-floor skip is still a completed evaluation outcome. Without
+        // recording it, completeSession correctly rejects the run because a
+        // selected symbol would have no canonical outcome at all.
+        session = recordSymbolEvaluated(session, symbol, [], { reasonCode: 'NO_QUALIFYING_CANDIDATE' });
         console.info('[scan-timing] targeted-symbol', JSON.stringify({
           sessionId: session.sessionId, symbol, index: i + 1, total: loopSymbols.length,
           totalMs: Date.now() - symbolStartedAt, skipped: 'ivr-floor', ivr: metricsMap[symbol]?.ivRank ?? null,
