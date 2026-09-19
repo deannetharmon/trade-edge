@@ -50,12 +50,13 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
       positionKey: position.key, title: 'PMCC short call', freshness, exactContract,
       accountNumber: position.accountNumber,
       sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
+      heldPmccLong: exactContract ? { expiration: position.expDate, dte: position.dte, strike: leg.strikePrice, quantity: position.quantity } : undefined,
     };
-    if (!snapshotReady) { opportunities.push({ ...base, status: 'unavailable', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.', nextStep: 'Refresh broker status, then try again.' }); continue; }
-    if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position account identity does not match the active broker account.', nextStep: 'Switch to the account holding this contract, then refresh.' }); continue; }
-    if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-eligible', reason: 'Position is structurally ambiguous or missing leg evidence.', nextStep: 'Resolve the position structure before evaluating a short call.' }); continue; }
-    if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-eligible', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).`, nextStep: position.dte > DEFAULT_PMCC_DTE_RANGES.longMax ? `Wait until it reaches ${DEFAULT_PMCC_DTE_RANGES.longMax} DTE or less, then refresh.` : `This contract has fewer than ${DEFAULT_PMCC_DTE_RANGES.longMin} DTE; it will not become eligible by waiting.` }); continue; }
-    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A nearer-dated short call above this LEAPS strike is already open against this position.', nextStep: 'Wait until that short call is closed or expires, then refresh.' }); continue; }
+    if (!snapshotReady) { opportunities.push({ ...base, status: 'not-ready', reason: 'Current attributable portfolio evidence is required before a PMCC short-call review.', nextStep: 'Refresh broker status, then try again.' }); continue; }
+    if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-ready', reason: 'Position account identity does not match the active broker account.', nextStep: 'Switch to the account holding this contract, then refresh.' }); continue; }
+    if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-ready', reason: 'Position is structurally ambiguous or missing leg evidence.', nextStep: 'Resolve the position structure before evaluating a short call.' }); continue; }
+    if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-ready', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).`, nextStep: position.dte > DEFAULT_PMCC_DTE_RANGES.longMax ? `Wait until it reaches ${DEFAULT_PMCC_DTE_RANGES.longMax} DTE or less, then refresh.` : `This contract has fewer than ${DEFAULT_PMCC_DTE_RANGES.longMin} DTE; it will not become eligible by waiting.` }); continue; }
+    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'monitor', monitorReason: 'capacity-reserved', reason: 'A nearer-dated short call above this LEAPS strike is already open against this LEAPS.', nextStep: 'Wait until that short call is closed or expires, then refresh.' }); continue; }
     const longStrike = leg.strikePrice;
     const hasMatchingWorkingShort = snapshot!.workingOrders.some(order => order.legs.some(workingLeg => {
       const action = workingLeg.action.replace(/[^a-z]/gi, '').toLowerCase();
@@ -68,8 +69,8 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
         && expiry != null && expiry < position.expDate
         && Number.isFinite(workingStrike) && workingStrike > longStrike;
     }));
-    if (hasMatchingWorkingShort) { opportunities.push({ ...base, status: 'no-capacity', reason: 'A matching short call is already working against this LEAPS.', nextStep: 'Wait for the working order to fill or cancel, then refresh.' }); continue; }
-    opportunities.push({ ...base, status: 'eligible', reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', nextStep: 'Find short call to open the PMCC Screener flow for this exact LEAPS.' });
+    if (hasMatchingWorkingShort) { opportunities.push({ ...base, status: 'monitor', monitorReason: 'capacity-reserved', reason: 'A matching short call is already working against this LEAPS.', nextStep: 'Wait for the working order to fill or cancel, then refresh.' }); continue; }
+    opportunities.push({ ...base, status: 'review-income-call', reason: 'Exact held long-call identity and available capacity are verified. The PMCC review will recheck current short-call candidates and quotes.', nextStep: 'Review PMCC short calls for this exact LEAPS.' });
   }
 
   const capacityReport = snapshot ? buildSnapshotCapacityReport(snapshot) : null;

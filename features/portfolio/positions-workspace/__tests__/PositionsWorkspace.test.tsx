@@ -6,6 +6,9 @@ import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
 import { PositionsWorkspace, profitTargetPresentation, profitTargetPct, recommendationTone } from '../PositionsWorkspace';
 
+const { evaluateHeldPmccLiveReadiness } = vi.hoisted(() => ({ evaluateHeldPmccLiveReadiness: vi.fn() }));
+vi.mock('@/lib/scans/pmccHeldReadinessClient', () => ({ evaluateHeldPmccLiveReadiness }));
+
 const position = {
   key: 'AAPL-1', symbol: 'AAPL', strategy: 'CSP', quantity: 1, expDate: '2026-09-25', dte: 32,
   entryDate: '2026-08-20', stockPrice: 200, buffer: 12.9, legs: [], maxRisk: 1000,
@@ -41,6 +44,7 @@ describe('PositionsWorkspace', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ notes: {} }) }));
+    evaluateHeldPmccLiveReadiness.mockReset();
   });
 
   it('switches between the accessible portfolio and analysis tabs', async () => {
@@ -259,9 +263,10 @@ describe('PositionsWorkspace', () => {
     const next = {
       ...model,
       incomeOpportunities: [{
-        id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'eligible', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call',
+        id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'review-income-call', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call',
         reason: 'Exact held long-call identity is verified. Short-call timing has not yet been evaluated.', freshness: 'Current broker evidence', exactContract: 'AAPL  270618C00150000', accountNumber: '5WT12345',
         sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null,
+        heldPmccLong: { expiration: '2027-06-18', dte: 280, strike: 150, quantity: 1 },
       }, {
         id: 'covered-call:AAPL', kind: 'covered-call', status: 'no-capacity', symbol: 'AAPL', positionKey: null, title: 'Covered call',
         reason: 'Fully covered / no available capacity after existing and working short calls.', freshness: 'Current broker evidence', exactContract: null, accountNumber: '5WT12345',
@@ -269,6 +274,7 @@ describe('PositionsWorkspace', () => {
       }],
     } as PositionsWorkspaceModel;
     const onFindPmccShortCall = vi.fn();
+    evaluateHeldPmccLiveReadiness.mockResolvedValue({ status: 'review-income-call', reason: 'A current short-call candidate meets the PMCC review policy.', asOf: '2026-09-18T15:00:00.000Z', candidate: { delta: 0.25, dte: 30, openInterest: 500, credit: 1.2, spreadPct: 4 } });
     render(<PositionsWorkspace model={next} th={THEMES.dark} onFindPmccShortCall={onFindPmccShortCall} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('region', { name: 'Existing-position income eligibility' })).toBeInTheDocument();
@@ -276,9 +282,38 @@ describe('PositionsWorkspace', () => {
     expect(screen.queryByText('Fully covered / no available capacity')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Expand' }));
     expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true');
+    await screen.findByRole('button', { name: 'Review PMCC short calls' });
     expect(screen.getByText('Short-call capacity unavailable')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Find short call' }));
+    await user.click(screen.getByRole('button', { name: 'Review PMCC short calls' }));
     expect(onFindPmccShortCall).toHaveBeenCalledWith(expect.objectContaining({ exactContract: 'AAPL  270618C00150000', positionKey: 'AAPL-1' }));
+  });
+
+  it.each([
+    [{ status: 'monitor', monitorReason: 'no-qualifying-short-call', reason: 'No qualifying short-call candidate is currently available.', asOf: '2026-09-18T15:00:00.000Z' }, 'Monitor'],
+    [{ status: 'monitor', monitorReason: 'quote-quality', reason: 'Current quote quality is outside the review policy.', asOf: '2026-09-18T15:00:00.000Z' }, 'Monitor'],
+    [{ status: 'market-closed', reason: 'Current short-call quotes are reviewed during regular market hours.', asOf: '2026-09-18T15:00:00.000Z' }, 'Market closed'],
+    [{ status: 'not-ready', reason: 'Market data is unavailable.', asOf: '2026-09-18T15:00:00.000Z' }, 'Not ready'],
+  ] as const)('renders live PMCC readiness outcome %s', async (readiness, label) => {
+    const user = userEvent.setup();
+    evaluateHeldPmccLiveReadiness.mockResolvedValue(readiness);
+    const next = { ...model, incomeOpportunities: [{ id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'review-income-call', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call', reason: 'Foundation verified.', nextStep: 'Review PMCC short calls.', freshness: 'Current broker evidence', exactContract: 'AAPL  270618C00150000', accountNumber: '5WT12345', sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null, heldPmccLong: { expiration: '2027-06-18', dte: 280, strike: 150, quantity: 1 } }] } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review PMCC short calls' })).not.toBeInTheDocument();
+  });
+
+  it('fails closed when a PMCC record lacks exact held-LEAPS evidence', async () => {
+    const user = userEvent.setup();
+    const next = { ...model, incomeOpportunities: [{ id: 'pmcc:AAPL-1', kind: 'pmcc-short-call', status: 'review-income-call', symbol: 'AAPL', positionKey: 'AAPL-1', title: 'PMCC short call', reason: 'Foundation verified.', nextStep: 'Refresh broker evidence.', freshness: 'Current broker evidence', exactContract: null, accountNumber: '5WT12345', sharesOwned: null, allocatedContracts: null, reservedContracts: null, availableContracts: null }] } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(screen.getByText('Not ready')).toBeInTheDocument();
+    expect(screen.getByText('Exact held-LEAPS identity is incomplete, so PMCC review cannot run.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review PMCC short calls' })).not.toBeInTheDocument();
+    expect(evaluateHeldPmccLiveReadiness).not.toHaveBeenCalled();
   });
 
   it('saves notes on Enter, accepts up to 150 characters, and restores saved notes after remount', async () => {

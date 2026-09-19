@@ -69,7 +69,7 @@ describe('positions workspace model', () => {
     // showing up as PMCC "not-eligible" clutter). This test predates that
     // fix and previously asserted the old, incorrect behavior.
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'eligible', exactContract: 'AAPL  270618C00150000' }),
+      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'review-income-call', exactContract: 'AAPL  270618C00150000' }),
       expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 0, reservedContracts: 0, availableContracts: 2 }),
     ]));
     expect((model.incomeOpportunities ?? []).some(o => o.positionKey === 'AAPL-long-put')).toBe(false);
@@ -83,14 +83,14 @@ describe('positions workspace model', () => {
     });
     const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall]), positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: quality });
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'pmcc-short-call', status: 'no-capacity', reason: expect.stringContaining('already open against this position') }),
+      expect.objectContaining({ kind: 'pmcc-short-call', status: 'monitor', monitorReason: 'capacity-reserved', reason: expect.stringContaining('already open against this LEAPS') }),
     ]));
   });
 
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
     const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}] });
     const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });
-    expect(model.incomeOpportunities).toEqual([expect.objectContaining({ kind: 'pmcc-short-call', status: 'unavailable', reason: expect.stringContaining('Current attributable') })]);
+    expect(model.incomeOpportunities).toEqual([expect.objectContaining({ kind: 'pmcc-short-call', status: 'not-ready', reason: expect.stringContaining('Current attributable') })]);
   });
 });
 

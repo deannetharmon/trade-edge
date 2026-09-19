@@ -34,7 +34,8 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor, calculateTargetedConservativeCredit,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
-import { DEFAULT_PMCC_DTE_RANGES, classifyPmccDte, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { getPmccChain } from '@/lib/scans/pmccChainClient';
 import { buildCreditSpreadEntryFacts } from '@/lib/entry-context/analysis';
 import { availableEvidence, unavailableEvidence } from '@/lib/entry-context/types';
 import { buildPmccFailureAuditResult, derivePmccMarketSession, runPmccSymbolProduction } from '@/lib/scans/pmccProduction';
@@ -1221,70 +1222,6 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 }
 
 
-
-// PMCC fetches only the two user-selected DTE windows. An expiration in an
-// intentionally overlapping range remains eligible for either leg.
-async function getPMCCChain(
-  symbol: string,
-  token: string,
-  dteRanges: { shortMin: number; shortMax: number; longMin: number; longMax: number },
-): Promise<{ shortExpirations: string[]; longExpirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification: 'index' | 'etf' | 'stock' }> {
-  const nested = await ttFetch(`/option-chains/${symbol}/nested`, token);
-  // 'unsupported' (genuinely invalid symbol) is coerced to 'stock' here --
-  // this function's return type is narrow and used deep in the scan
-  // pipeline; a truly unsupported symbol's own chain lookup will fail
-  // naturally further down anyway, so nothing is being silently masked.
-  // The watchlist UI (which needs the distinction) gets it directly from
-  // classifyUnderlying, not through here.
-  const rawClassification = await classifyUnderlying(symbol, token);
-  const classification = rawClassification === 'unsupported' ? 'stock' : rawClassification;
-  const isEtfOrIndex = classification === 'index' || classification === 'etf';
-  const shortExpirations: string[] = [], longExpirations: string[] = [], chains: Record<string, any[]> = {}, allOCCSymbols: string[] = [];
-  const symbolMeta: Record<string, { expDate: string; strike: number; optionType: string }> = {};
-  for (const expGroup of nested?.data?.items?.[0]?.expirations ?? []) {
-    const expDate: string = expGroup['expiration-date']; if (!expDate) continue;
-    const dte = daysUntil(expDate);
-    const { isShortWindow, isLongWindow } = classifyPmccDte(dte, dteRanges);
-    if (!isShortWindow && !isLongWindow) continue;
-    for (const strike of expGroup.strikes ?? []) {
-      const strikePrice = parseFloat(strike['strike-price'] ?? '0');
-      const callSym: string = strike['call'];
-      if (callSym) { allOCCSymbols.push(callSym); symbolMeta[callSym] = { expDate, strike: strikePrice, optionType: 'C' }; }
-    }
-    if (isShortWindow) shortExpirations.push(expDate);
-    if (isLongWindow) longExpirations.push(expDate);
-  }
-  if (allOCCSymbols.length === 0) return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
-  for (let i = 0; i < allOCCSymbols.length; i += 100) {
-    const chunk = allOCCSymbols.slice(i, i + 100);
-    const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
-    let greeksData: any;
-    try { greeksData = await ttFetch(`/market-data/by-type?${qs}`, token); } catch { continue; }
-    for (const item of greeksData?.data?.items ?? []) {
-      const meta = symbolMeta[item.symbol]; if (!meta) continue;
-      const bid = parseFloat(item.bid ?? '0'), ask = parseFloat(item.ask ?? '0');
-      const delta = item.delta != null ? parseFloat(item.delta) : null;
-      const oi = parseInt(item['open-interest'] ?? '0', 10);
-      if (!chains[meta.expDate]) chains[meta.expDate] = [];
-      chains[meta.expDate].push({
-        underlyingSymbol: symbol,
-        strikePrice: meta.strike,
-        expirationDate: meta.expDate,
-        optionType: 'C',
-        delta,
-        openInterest: oi,
-        bid,
-        ask,
-        mid: (bid + ask) / 2,
-        occSymbol: item.symbol,
-        quoteTimestamp: item['quote-time'] ?? item['updated-at'] ?? item.timestamp ?? null,
-        delayed: item.delayed ?? item['is-delayed'] ?? null,
-      });
-    }
-  }
-  shortExpirations.sort(); longExpirations.sort();
-  return { shortExpirations, longExpirations, chains, isEtfOrIndex, classification };
-}
 
 // ── HUNTER Logic ─────────────────────────────────────────────────────────
 
@@ -5377,7 +5314,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
             const token = await getAccessToken();
             const longDte = daysUntil(longExpiration);
             const shortDte = daysUntil(shortExpiration);
-            const rawChain = await getPMCCChain(result.symbol, token, {
+            const rawChain = await getPmccChain(result.symbol, token, {
               shortMin: 0, shortMax: shortDte + 5,
               longMin: 0, longMax: longDte + 5,
             });
@@ -9778,7 +9715,7 @@ export default function Home() {
           },
           acquire: async () => {
             const [pmccChain, price] = await Promise.all([
-              getPMCCChain(symbol, token, {
+              getPmccChain(symbol, token, {
                 shortMin: effectiveDte.shortMin, shortMax: effectiveDte.shortMax,
                 longMin: effectiveDte.longMin, longMax: effectiveDte.longMax,
               }),
@@ -9937,7 +9874,7 @@ export default function Home() {
         // DTE range, not the fixed PMCC_LONG_DTE_MIN/MAX constants -- the
         // dataset genuinely only contains what was asked for.
         const [chain, quote, metricsArray] = await Promise.all([
-          getPMCCChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: request.dteMin, longMax: request.dteMax }),
+          getPmccChain(symbol, token, { shortMin: 0, shortMax: 0, longMin: request.dteMin, longMax: request.dteMax }),
           getQuote(symbol, token).catch(() => null),
           getMarketMetrics([symbol], token).catch(() => []),
         ]);
@@ -12366,13 +12303,11 @@ export default function Home() {
             const sorted = [...filtered].sort((a, b) => {
               const aValue = sortValue(a);
               const bValue = sortValue(b);
-              // A missing quote means this percentage cannot be calculated.
-              // Keep those rows after comparable candidates in either direction.
-              if (leapsSort === 'extrinsicPctOfCost') {
-                const aMissing = !Number.isFinite(aValue);
-                const bMissing = !Number.isFinite(bValue);
-                if (aMissing !== bMissing) return aMissing ? 1 : -1;
-              }
+              // Missing evidence is unknown, not a low or high value. Keep it
+              // after comparable candidates in every sort, regardless of direction.
+              const aMissing = !Number.isFinite(aValue);
+              const bMissing = !Number.isFinite(bValue);
+              if (aMissing !== bMissing) return aMissing ? 1 : -1;
               return (aValue - bValue) * (leapsSortDir === 'asc' ? 1 : -1);
             });
             // LEAPS-0002 (Diane): matches the Targeted Scan's own
@@ -12462,7 +12397,7 @@ export default function Home() {
                               setLeapsSortDir(direction => direction === 'asc' ? 'desc' : 'asc');
                             } else {
                               setLeapsSort(field);
-                              setLeapsSortDir('asc');
+                              setLeapsSortDir(field === 'score' || field === 'openInterest' ? 'desc' : 'asc');
                             }
                           }}
                           className={chip(leapsSort === field)}

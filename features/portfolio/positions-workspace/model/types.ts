@@ -83,7 +83,12 @@ export interface PositionAnalysisRowViewModel {
 }
 
 export type ExistingIncomeOpportunityKind = 'pmcc-short-call' | 'covered-call';
-export type ExistingIncomeOpportunityStatus = 'eligible' | 'no-capacity' | 'not-eligible' | 'unavailable';
+/**
+ * A readiness state describes whether the trader can safely proceed to the
+ * next review step. It is deliberately not a trade recommendation.
+ */
+export type ExistingIncomeOpportunityStatus = 'review-income-call' | 'monitor' | 'not-ready' | 'eligible' | 'no-capacity' | 'not-eligible' | 'unavailable';
+export type IncomeMonitorReason = 'no-qualifying-short-call' | 'quote-quality' | 'capacity-reserved' | 'preference-not-met';
 
 /**
  * A portfolio-first, review-only income opportunity. This deliberately does
@@ -106,6 +111,11 @@ export interface ExistingIncomeOpportunity {
   allocatedContracts: number | null;
   reservedContracts: number | null;
   availableContracts: number | null;
+  /** Present only for Monitor. This prevents the UI from using Monitor as a
+   * vague catch-all and gives the trader one actionable primary reason. */
+  monitorReason?: IncomeMonitorReason;
+  /** Exact held-long identity needed for a fresh, shared PMCC evaluation. */
+  heldPmccLong?: { expiration: string; dte: number; strike: number; quantity: number };
 }
 
 export interface PositionsWorkspaceModel {
