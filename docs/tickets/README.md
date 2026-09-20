@@ -49,6 +49,19 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [POSITIONS-0005 Standalone LEAPS Reviewed Stop](./POSITIONS-0005-standalone-leaps-reviewed-stop.md)
 - [TRADELOG-0002 Order Lifecycle History for Cancellations and Rolls](./TRADELOG-0002-order-lifecycle-cancel-roll-history.md)
 
+## Security and AI policy (draft - pending team sign-off)
+
+- [SEC-0001 Tracked .env.local Credentials and API Authentication Triage](./SEC-0001-tracked-env-file-and-api-auth-triage.md) - **urgent**
+- [AI-SEC-0001 Authenticate Legacy AI Routes](./AI-SEC-0001-legacy-ai-route-authentication.md)
+- [AI-POLICY-0001 Deterministic-First AI Analysis (epic)](./AI-POLICY-0001-epic.md)
+  - [0001A Gateway Foundation](./AI-POLICY-0001A-gateway-foundation.md)
+  - [0001B Snapshot Freeze, scan_summary, grounded_chat](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md)
+  - [0001C AI Panel UI](./AI-POLICY-0001C-ai-panel-ui.md)
+  - [0001D leaps_deep_analysis](./AI-POLICY-0001D-leaps-deep-analysis.md)
+  - [0001E pmcc_deep_analysis](./AI-POLICY-0001E-pmcc-deep-analysis.md)
+  - [0001F Evaluation and Launch Gates](./AI-POLICY-0001F-evaluation-and-launch-gates.md)
+  - [0001G retrospective_batch (deferred)](./AI-POLICY-0001G-retrospective-batch.md)
+
 ## Proposed entry-quality sequence
 
 - [ENTRY-0001A Credit-Spread Entry Snapshot Foundation](./ENTRY-0001A-credit-spread-entry-snapshot-foundation.md)

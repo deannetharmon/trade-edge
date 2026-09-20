@@ -20,3 +20,4 @@ Each decision should include:
 - [ADR-0002 Command Bus and Task Manager Separation](./ADR-0002-command-bus-task-manager-separation.md)
 - [ADR-0003 Ranked Scan Cancellation Semantics](./ADR-0003-ranked-scan-cancellation.md)
 - [ADR-0004 Feature-Oriented Architecture](./ADR-0004-feature-oriented-architecture.md)
+- [ADR-0005 Trust Classes for AI Analysis Inputs](./ADR-0005-ai-analysis-input-trust-classes.md) (proposed)
