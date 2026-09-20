@@ -4,7 +4,7 @@
 // pinned here so a change to a threshold is a deliberate, visible decision.
 
 import { describe, expect, it } from 'vitest';
-import { buildLeapsDashboard, LEAPS_DASHBOARD_POLICY, type DashboardSnapshot, type LeapsDashboardInput } from '../dashboard';
+import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, LEAPS_DASHBOARD_POLICY, sortPicksByScore, type DashboardSnapshot, type LeapsDashboardInput, type LeapsPickCandidate } from '../dashboard';
 
 const snapshot = (over: Partial<DashboardSnapshot> = {}): DashboardSnapshot => ({
   createdAt: '2026-09-20T07:54:58.000Z',
@@ -52,7 +52,7 @@ describe('the GOOGL 250C example', () => {
 
 describe('thresholds (Ian)', () => {
   it('pins the policy values', () => {
-    expect(LEAPS_DASHBOARD_POLICY).toEqual({ mostlyIntrinsicMaxExtrinsicPct: 15, ivrLow: 30, ivrHigh: 50, spreadWatchPct: 5 });
+    expect(LEAPS_DASHBOARD_POLICY).toEqual({ mostlyIntrinsicMaxExtrinsicPct: 15, ivrLow: 30, ivrHigh: 50, spreadWatchPct: 5, highDeltaMin: 0.8 });
   });
 
   it.each([[15, 'good'], [15.01, 'watch']])('extrinsic %s%% of cost is a %s callout', (extrinsic, tone) => {
@@ -144,5 +144,90 @@ describe('failures, gaps and modes', () => {
     const before = JSON.stringify(i);
     buildLeapsDashboard(i);
     expect(JSON.stringify(i)).toBe(before);
+  });
+});
+
+// ---- LEAPS-DASH-0003: advisor pick cards ---------------------------------------------------------------------
+const pickCandidate = (over: Partial<LeapsPickCandidate> = {}): LeapsPickCandidate => ({
+  strike: 250, dte: 270, delta: 0.8457, underlyingPrice: 350.858, extrinsicValue: 12.692, bid: 112.2, ask: 114.9, score: 73, spreadPct: 2.38, ivx: 36.4, ivRank: 20, ...over,
+});
+const summary = (over: Partial<LeapsPickCandidate> = {}, pmccShortDeltaMax = 0.35, pmccShortDteMin = 21) => buildLeapsPickSummary({ candidate: pickCandidate(over), pmccShortDeltaMax, pmccShortDteMin });
+const pickTile = (s: ReturnType<typeof summary>, id: string) => s.tiles.find(t => t.id === id)!;
+const pickCallout = (s: ReturnType<typeof summary>, id: string) => s.callouts.find(c => c.id === id);
+
+describe('buildLeapsPickSummary (advisor cards)', () => {
+  it('the GOOGL example: five tiles and rule-based callouts, good news last', () => {
+    const s = summary();
+    expect(s.tiles.map(t => [t.id, t.value, t.tone])).toEqual([
+      ['delta', '0.85', 'neutral'], ['dte', '270', 'neutral'], ['extrinsic', '11%', 'good'], ['spread', '2.4%', 'neutral'], ['pmcc-start', 'now', 'good'],
+    ]);
+    expect(s.callouts.map(c => [c.id, c.tone])).toEqual([['delta', 'good'], ['extrinsic', 'good'], ['pmcc-start', 'good']]);
+    expect(pickCallout(s, 'delta')!.text).toBe('High delta: moves closely with the stock.');
+    expect(pickCallout(s, 'extrinsic')!.text).toBe('Low extrinsic: little time value at risk.');
+  });
+
+  it.each([[0.79, false], [0.8, true]])('delta %s high-delta callout: %s', (delta, shown) => {
+    expect(Boolean(pickCallout(summary({ delta }), 'delta'))).toBe(shown);
+  });
+
+  it('extrinsic uses the same boundary as the analysis dashboard (15% of cost)', () => {
+    // mid = 113.55; 15% of mid = 17.0325
+    expect(pickCallout(summary({ extrinsicValue: 17.0325 }), 'extrinsic')!.tone).toBe('good');
+    expect(pickCallout(summary({ extrinsicValue: 17.1 }), 'extrinsic')!.tone).toBe('watch');
+  });
+
+  it('a wide spread is amber with dollars to cross; a normal spread has no callout', () => {
+    const wide = summary({ spreadPct: 6.2, bid: 100, ask: 106 });
+    expect(pickTile(wide, 'spread')).toMatchObject({ value: '6.2%', tone: 'watch' });
+    expect(pickCallout(wide, 'spread')!.text).toBe('Spread is 6.2%: about $600 per contract to cross.');
+    expect(pickCallout(summary(), 'spread')).toBeUndefined();
+  });
+
+  it('spread falls back to the bid/ask when the candidate has no spread figure', () => {
+    expect(pickTile(summary({ spreadPct: undefined }), 'spread').value).toBe('2.4%');
+  });
+
+  it('PMCC start: above says now; below shows the rise needed; no IVx shows a dash and no callout', () => {
+    const below = summary({ underlyingPrice: 340 });
+    expect(pickTile(below, 'pmcc-start')).toMatchObject({ tone: 'watch', value: '+2.8%' });
+    expect(pickCallout(below, 'pmcc-start')!.text).toBe('Stock is 2.8% below its PMCC start price (estimate).');
+    const none = summary({ ivx: null });
+    expect(pickTile(none, 'pmcc-start')).toMatchObject({ tone: 'neutral', value: '—' });
+    expect(pickCallout(none, 'pmcc-start')).toBeUndefined();
+  });
+
+  it('uses the trader\'s own PMCC short-call settings', () => {
+    const conservative = summary({ underlyingPrice: 347 }, 0.35, 21);   // start price ~349.38 -> below
+    const relaxed = summary({ underlyingPrice: 347 }, 0.20, 45);        // start price ~322 -> above
+    expect(pickTile(conservative, 'pmcc-start').tone).toBe('watch');
+    expect(pickTile(relaxed, 'pmcc-start').tone).toBe('good');
+  });
+
+  it('missing quote data gives dashes, not guesses', () => {
+    const s = summary({ bid: null, ask: null, extrinsicValue: null, spreadPct: null, delta: null });
+    expect(s.tiles.map(t => t.value)).toEqual(['—', '270', '—', '—', '—']);
+    expect(s.callouts).toEqual([]);
+  });
+});
+
+describe('advisor ordering and concentration', () => {
+  it('sorts picks by score, highest first, unscored last, ties keep the advisor order', () => {
+    const picks = [{ n: 'a', score: 47 }, { n: 'b', score: null }, { n: 'c', score: 52 }, { n: 'd', score: 47 }];
+    expect(sortPicksByScore(picks).map(p => p.n)).toEqual(['c', 'a', 'd', 'b']);
+    expect(picks.map(p => p.n)).toEqual(['a', 'b', 'c', 'd']); // input not mutated
+  });
+
+  it.each([
+    [['NFLX', 'UBER'], 'Both picks are in two companies: results will track NFLX and UBER closely.'],
+    [['NFLX', 'UBER', 'NFLX'], '3 picks in two companies: results will track NFLX and UBER closely.'],
+    [['NFLX', 'NFLX'], '2 picks in one company (NFLX): results will move together.'],
+  ])('%j -> concentration callout', (symbols, text) => {
+    expect(buildConcentrationCallout(symbols)).toEqual({ id: 'concentration', tone: 'watch', text });
+  });
+
+  it('three or more companies, or a single pick, is not flagged', () => {
+    expect(buildConcentrationCallout(['A', 'B', 'C'])).toBeNull();
+    expect(buildConcentrationCallout(['A'])).toBeNull();
+    expect(buildConcentrationCallout([])).toBeNull();
   });
 });

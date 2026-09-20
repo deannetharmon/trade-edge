@@ -82,8 +82,9 @@ import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioD
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
 import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { parseOccSymbol } from '@/lib/optionSymbol';
-import { LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
-import { buildLeapsDashboard } from '@/lib/leaps-analysis/dashboard';
+import { CalloutList, LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
+import { LeapsAdvisorPickCard } from '@/features/screener/components/LeapsAdvisorPickCard';
+import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
@@ -2723,13 +2724,18 @@ function leapsIvCombinedClass(ivRankSignal: LeapsIvSignal, ivxSignal: LeapsIvSig
 // state (session/loading/chat input) since nothing outside this panel
 // needs to read it -- same reasoning LeapsResultRow's own header comment
 // gives for owning its per-row state locally.
-function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
+function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify, pmccShortDeltaMax = DEFAULT_PMCC_SHORT_DELTA_RANGE.max, pmccShortDteMin = PMCC_SHORT_DTE_MIN }: {
   th: typeof THEMES[Theme];
   candidates: Array<{
     symbol: string; occSymbol: string | null; strike: number; expiration: string; dte: number;
     delta: number | null; underlyingPrice: number | null; extrinsicValue: number | null;
     bid: number | null; ask: number | null; score: number | null;
+    // LEAPS-DASH-0003: present on the real result rows; the advisor cards use them for their tiles and callouts.
+    spreadPct?: number | null; ivx?: number | null; ivRank?: number | null;
   }>;
+  // The trader's own PMCC short-call settings, for the PMCC start tile.
+  pmccShortDeltaMax?: number;
+  pmccShortDteMin?: number;
   filters: { deltaMin: number; deltaMax: number; dteMin: number; dteMax: number; oiMin: number; extrinsicPctMax: number };
   onClose: () => void;
   // LEAPS-ADVISOR-VERIFY-LINK-0001: scrolls to and opens the matching
@@ -2861,60 +2867,53 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
             </details>
           )}
 
-          {session.recommendation && session.recommendation.length > 0 && (
-            <div className="space-y-2">
-              {/* Ian: Advisor compares scan-time data; Analyze with AI
-                  re-verifies live quotes right before a trade. Always
-                  visible, not just on hover/click, so the distinction is
-                  explained even if nobody uses the button below. */}
-              <p className="text-[10px] italic text-neutral-400">Advisor compares scan-time data. Run Analyze with AI on your final pick to re-verify live quotes before trading.</p>
-              {session.recommendation.map((r, i) => {
-                const stillVisible = candidates.some(c => c.occSymbol === r.occSymbol);
-                // Diane (2026-09-20): show the contract the way the result rows do ("$250 C · 2027-06-17"), not as the raw
-                // OCC code ("NFLX 271217C00050000"), with its key numbers on their own line instead of run together.
-                const parsedContract = parseOccSymbol(r.occSymbol);
-                const contractLabel = parsedContract.strikePrice != null && parsedContract.expiry != null
-                  ? `${formatMoneyDropExactZeroCents(parsedContract.strikePrice)} C · ${parsedContract.expiry}`
-                  : r.occSymbol;
-                const pick = candidates.find(c => c.occSymbol === r.occSymbol);
-                const pickFacts = pick ? [
-                  pick.score != null ? `Score ${pick.score}` : null,
-                  pick.delta != null ? `Δ ${pick.delta.toFixed(2)}` : null,
-                  `${pick.dte}d`,
-                  pick.bid != null && pick.ask != null ? `Bid ${formatMoneyDropExactZeroCents(pick.bid)} / Ask ${formatMoneyDropExactZeroCents(pick.ask)}` : null,
-                ].filter(Boolean).join(' · ') : null;
-                return (
-                  <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold text-violet-200">{r.symbol} · {contractLabel}</p>
-                        {pickFacts && <p className={`mt-0.5 text-[10px] ${th.textMuted}`}>{pickFacts}</p>}
-                      </div>
-                      <button
-                        onClick={() => stillVisible && onVerify(r.occSymbol)}
-                        disabled={!stillVisible}
-                        title={stillVisible ? undefined : 'This candidate is no longer in your filtered results.'}
-                        className="shrink-0 rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Verify before trading →
-                      </button>
-                    </div>
-                    <p className="mt-1 text-neutral-200">{r.reasoning}</p>
-                  </div>
-                );
-              })}
+          {session.recommendation && session.recommendation.length > 0 && (() => {
+            // LEAPS-DASH-0003: picks are shown as dashboard cards ordered by TradeEdge score; tiles and callouts are computed by
+            // rule from scan-time data. The advisor's AI text only chose the picks and explains them (collapsed under each).
+            const picks = sortPicksByScore(session.recommendation.map(r => {
+              const pick = candidates.find(c => c.occSymbol === r.occSymbol) ?? null;
+              return { r, pick, score: pick?.score ?? null };
+            }));
+            const concentration = buildConcentrationCallout(picks.map(entry => entry.r.symbol));
+            return (
+              <div className="space-y-2">
+                {/* Ian: Advisor compares scan-time data; Analyze with AI re-verifies live quotes right before a trade. */}
+                <p className="text-[10px] italic text-neutral-400">Ordered by TradeEdge score. Numbers and callouts are computed from scan-time data. Run Analyze with AI on your final pick to re-verify live quotes before trading.</p>
+                {picks.map(({ r, pick, score }, i) => {
+                  const parsedContract = parseOccSymbol(r.occSymbol);
+                  const contractLabel = parsedContract.strikePrice != null && parsedContract.expiry != null
+                    ? `${formatMoneyDropExactZeroCents(parsedContract.strikePrice)} C · ${parsedContract.expiry}`
+                    : r.occSymbol;
+                  return (
+                    <LeapsAdvisorPickCard
+                      key={i}
+                      th={th}
+                      symbol={r.symbol}
+                      contractLabel={contractLabel}
+                      score={score}
+                      summary={pick ? buildLeapsPickSummary({ candidate: pick, pmccShortDeltaMax, pmccShortDteMin }) : null}
+                      reasoning={r.reasoning}
+                      verifyEnabled={pick != null}
+                      onVerify={() => pick && onVerify(r.occSymbol)}
+                    />
+                  );
+                })}
+                {concentration && <CalloutList callouts={[concentration]} th={th} />}
+              </div>
+            );
+          })()}
+
+          <details className="rounded border border-neutral-800 bg-neutral-900/40 p-2" open={session.messages.length > 1}>
+            <summary className="cursor-pointer text-[10px] font-bold text-neutral-400">Advisor's notes and conversation ({session.messages.length})</summary>
+            <div className="mt-2 space-y-1.5">
+              {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
+              {session.messages.map((m, i) => (
+                <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
+                  <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
+                </p>
+              ))}
             </div>
-          )}
-
-          {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
-
-          <div className="space-y-1.5 border-t border-neutral-800 pt-2">
-            {session.messages.map((m, i) => (
-              <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
-                <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
-              </p>
-            ))}
-          </div>
+          </details>
 
           <div className="flex items-end gap-2">
             <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask a follow-up..."
@@ -12523,6 +12522,8 @@ export default function Home() {
                   <LeapsAdvisorPanel
                     th={th}
                     candidates={sorted}
+                    pmccShortDeltaMax={pmccShortDeltaMax}
+                    pmccShortDteMin={pmccShortDteMin}
                     filters={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
                     onClose={() => setShowLeapsAdvisorPanel(false)}
                     onVerify={(occSymbol) => {

@@ -3,13 +3,13 @@
 // LEAPS-DASH-0001 -- renders the rule-computed dashboard for "Analyze with AI": chips, rule line, six tiles, callouts.
 // Purely presentational: every number and sentence comes from buildLeapsDashboard (lib/leaps-analysis/dashboard.ts).
 
-import type { DashboardTone, LeapsDashboard } from '@/lib/leaps-analysis/dashboard';
+import type { DashboardCallout, DashboardTone, LeapsDashboard } from '@/lib/leaps-analysis/dashboard';
 
-const TEXT: Record<DashboardTone, string> = { good: 'text-emerald-400', watch: 'text-amber-300', bad: 'text-red-400', neutral: 'text-neutral-400' };
-const BORDER: Record<DashboardTone, string> = { good: 'border-emerald-500/40', watch: 'border-amber-500/40', bad: 'border-red-500/50', neutral: 'border-neutral-700' };
-const FILL: Record<DashboardTone, string> = { good: 'bg-emerald-500/10', watch: 'bg-amber-500/10', bad: 'bg-red-500/10', neutral: 'bg-neutral-800/40' };
-const ICON: Record<DashboardTone, string> = { good: '✓', watch: '⚠', bad: '✗', neutral: '•' };
-const LABEL: Record<DashboardTone, string> = { good: 'Good', watch: 'Watch', bad: 'Problem', neutral: 'Note' };
+export const TEXT: Record<DashboardTone, string> = { good: 'text-emerald-400', watch: 'text-amber-300', bad: 'text-red-400', neutral: 'text-neutral-400' };
+export const BORDER: Record<DashboardTone, string> = { good: 'border-emerald-500/40', watch: 'border-amber-500/40', bad: 'border-red-500/50', neutral: 'border-neutral-700' };
+export const FILL: Record<DashboardTone, string> = { good: 'bg-emerald-500/10', watch: 'bg-amber-500/10', bad: 'bg-red-500/10', neutral: 'bg-neutral-800/40' };
+export const ICON: Record<DashboardTone, string> = { good: '✓', watch: '⚠', bad: '✗', neutral: '•' };
+export const LABEL: Record<DashboardTone, string> = { good: 'Good', watch: 'Watch', bad: 'Problem', neutral: 'Note' };
 
 export function LeapsAnalysisDashboard({ dashboard, th }: { dashboard: LeapsDashboard; th: { text: string; textMuted: string } }) {
   return (
@@ -33,17 +33,23 @@ export function LeapsAnalysisDashboard({ dashboard, th }: { dashboard: LeapsDash
           </div>
         ))}
       </div>
-      {dashboard.callouts.length > 0 && (
-        <ul className="space-y-1.5">
-          {dashboard.callouts.map(callout => (
-            <li key={callout.id} className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] ${BORDER[callout.tone]} ${FILL[callout.tone]}`}>
-              <span aria-hidden="true" className={TEXT[callout.tone]}>{ICON[callout.tone]}</span>
-              <span className="sr-only">{LABEL[callout.tone]}:</span>
-              <span className={th.text}>{callout.text}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <CalloutList callouts={dashboard.callouts} th={th} />
     </div>
+  );
+}
+
+/** Short callouts, each with an icon and a screen-reader label; shared by the analysis dashboard and the advisor cards. */
+export function CalloutList({ callouts, th, compact = false }: { callouts: DashboardCallout[]; th: { text: string }; compact?: boolean }) {
+  if (callouts.length === 0) return null;
+  return (
+    <ul className={compact ? 'flex flex-wrap gap-1.5' : 'space-y-1.5'}>
+      {callouts.map(callout => (
+        <li key={callout.id} className={`flex items-start gap-2 border text-[11px] ${compact ? 'rounded-full px-2.5 py-1' : 'rounded-lg px-3 py-2'} ${BORDER[callout.tone]} ${FILL[callout.tone]}`}>
+          <span aria-hidden="true" className={TEXT[callout.tone]}>{ICON[callout.tone]}</span>
+          <span className="sr-only">{LABEL[callout.tone]}:</span>
+          <span className={th.text}>{callout.text}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -7,7 +7,7 @@
 // Thresholds are Ian's (2026-09-20) and live in LEAPS_DASHBOARD_POLICY so they can be tuned in one place.
 // Every callout says what the number means; none recommends an action.
 
-import type { PmccStartPrice } from '@/lib/scans/pmccStartPrice';
+import { computePmccStartPrice, type PmccStartPrice } from '@/lib/scans/pmccStartPrice';
 
 export type DashboardTone = 'good' | 'watch' | 'bad' | 'neutral';
 
@@ -26,6 +26,8 @@ export const LEAPS_DASHBOARD_POLICY = {
   ivrHigh: 50,
   /** A spread above this % of the option's mid is called out (the hard limit is the scan's own spread gate). */
   spreadWatchPct: 5,
+  /** Advisor cards: at or above this delta the contract "moves closely with the stock". */
+  highDeltaMin: 0.8,
 } as const;
 
 /** The parts of the analysis snapshot the dashboard reads (a structural subset of the stored snapshot). */
@@ -156,4 +158,72 @@ export function buildLeapsDashboard(input: LeapsDashboardInput): LeapsDashboard 
 
   callouts.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]); // stable: failures first, then watch, then good
   return { chips, ruleLine, tiles, callouts };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// LEAPS-DASH-0003 -- the LEAPS Advisor's pick cards: five tiles and rule-computed callouts per pick, plus a
+// concentration note. The advisor's AI text only chooses picks and explains them; nothing here comes from the model.
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface LeapsPickCandidate {
+  strike: number; dte: number; delta: number | null; underlyingPrice: number | null; extrinsicValue: number | null;
+  bid: number | null; ask: number | null; score: number | null; spreadPct?: number | null; ivx?: number | null; ivRank?: number | null;
+}
+export interface LeapsPickSummary { tiles: DashboardTile[]; callouts: DashboardCallout[] }
+
+export function buildLeapsPickSummary(input: { candidate: LeapsPickCandidate; pmccShortDeltaMax: number; pmccShortDteMin: number }): LeapsPickSummary {
+  const { candidate: c, pmccShortDeltaMax, pmccShortDteMin } = input;
+  const policy = LEAPS_DASHBOARD_POLICY;
+  const mid = c.bid != null && c.ask != null ? (c.bid + c.ask) / 2 : null;
+  const extrinsicPct = c.extrinsicValue != null && mid != null && mid > 0 ? (c.extrinsicValue / mid) * 100 : null;
+  const spreadPct = c.spreadPct ?? (mid != null && mid > 0 && c.bid != null && c.ask != null ? ((c.ask - c.bid) / mid) * 100 : null);
+  const spreadDollars = c.bid != null && c.ask != null ? (c.ask - c.bid) * 100 : null;
+  const pmcc = computePmccStartPrice({ spot: c.underlyingPrice, breakeven: mid != null ? c.strike + mid : null, ivxPct: c.ivx, shortDeltaMax: pmccShortDeltaMax, shortDteMin: pmccShortDteMin });
+
+  const extrinsicTone: DashboardTone = extrinsicPct == null ? 'neutral' : extrinsicPct <= policy.mostlyIntrinsicMaxExtrinsicPct ? 'good' : 'watch';
+  const spreadTone: DashboardTone = spreadPct == null ? 'neutral' : spreadPct > policy.spreadWatchPct ? 'watch' : 'neutral';
+  const pmccTone: DashboardTone = pmcc.status === 'above' ? 'good' : pmcc.status === 'below' ? 'watch' : 'neutral';
+
+  const tiles: DashboardTile[] = [
+    { id: 'delta', label: 'Delta', value: c.delta == null ? '—' : c.delta.toFixed(2), tone: 'neutral', parts: [] },
+    { id: 'dte', label: 'DTE', value: String(c.dte), tone: 'neutral', parts: [] },
+    { id: 'extrinsic', label: 'Extrinsic', value: extrinsicPct == null ? '—' : `${extrinsicPct.toFixed(0)}%`, tone: extrinsicTone, parts: [] },
+    { id: 'spread', label: 'Spread', value: spreadPct == null ? '—' : pct(spreadPct), tone: spreadTone, parts: [] },
+    { id: 'pmcc-start', label: 'PMCC start', value: pmcc.status === 'above' ? 'now' : pmcc.status === 'below' ? `+${pct(pmcc.pctToStart ?? 0)}` : '—', tone: pmccTone, parts: [] },
+  ];
+
+  const callouts: DashboardCallout[] = [];
+  if (c.delta != null && c.delta >= policy.highDeltaMin) callouts.push({ id: 'delta', tone: 'good', text: 'High delta: moves closely with the stock.' });
+  if (extrinsicPct != null) {
+    callouts.push(extrinsicPct <= policy.mostlyIntrinsicMaxExtrinsicPct
+      ? { id: 'extrinsic', tone: 'good', text: 'Low extrinsic: little time value at risk.' }
+      : { id: 'extrinsic', tone: 'watch', text: `Extrinsic is ${pct(extrinsicPct)} of cost: some time value at risk.` });
+  }
+  if (spreadPct != null && spreadPct > policy.spreadWatchPct) {
+    callouts.push({ id: 'spread', tone: 'watch', text: `Spread is ${pct(spreadPct)}${spreadDollars != null ? `: about ${money(Math.round(spreadDollars))} per contract to cross` : ''}.` });
+  }
+  if (pmcc.status === 'above') callouts.push({ id: 'pmcc-start', tone: 'good', text: 'Stock is above its PMCC start price (estimate).' });
+  if (pmcc.status === 'below') callouts.push({ id: 'pmcc-start', tone: 'watch', text: `Stock is ${pct(pmcc.pctToStart ?? 0)} below its PMCC start price (estimate).` });
+  callouts.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]);
+  return { tiles, callouts };
+}
+
+/** Order picks by TradeEdge score, highest first; picks without a score go last; ties keep the advisor's order. */
+export function sortPicksByScore<T extends { score: number | null }>(items: T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (b.item.score ?? -Infinity) - (a.item.score ?? -Infinity) || a.index - b.index)
+    .map(entry => entry.item);
+}
+
+/** A watch callout when several picks sit in one or two companies, so their results move together. */
+export function buildConcentrationCallout(symbols: string[]): DashboardCallout | null {
+  const distinct = Array.from(new Set(symbols));
+  if (symbols.length < 2 || distinct.length > 2) return null;
+  const text = distinct.length === 1
+    ? `${symbols.length} picks in one company (${distinct[0]}): results will move together.`
+    : symbols.length === 2
+      ? `Both picks are in two companies: results will track ${distinct[0]} and ${distinct[1]} closely.`
+      : `${symbols.length} picks in two companies: results will track ${distinct[0]} and ${distinct[1]} closely.`;
+  return { id: 'concentration', tone: 'watch', text };
 }
