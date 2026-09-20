@@ -7,23 +7,28 @@
 import type { LeapsPickSummary } from '@/lib/leaps-analysis/dashboard';
 import { BORDER, CalloutList, TEXT } from './LeapsAnalysisDashboard';
 
-export function LeapsAdvisorPickCard({ th, symbol, contractLabel, score, summary, reasoning, verifyEnabled, onVerify }: {
+export function LeapsAdvisorPickCard({ th, symbol, contractLabel, score, showScore = true, summary, reasoning, verifyEnabled = false, onVerify }: {
   th: { text: string; textMuted: string };
   symbol: string;
   contractLabel: string;
   score: number | null;
+  /** The Covered Call and PMCC advisors have no comparable score, so they hide the badge. */
+  showScore?: boolean;
   summary: LeapsPickSummary | null;
   reasoning: string;
-  verifyEnabled: boolean;
-  onVerify: () => void;
+  /** The Verify button shows only when a handler is supplied (the LEAPS advisor links to Analyze with AI; the others have no such link). */
+  verifyEnabled?: boolean;
+  onVerify?: () => void;
 }) {
   return (
     <div className="rounded-lg border border-neutral-700 bg-neutral-900/60 p-3" data-testid="leaps-advisor-pick-card">
       <div className="flex items-start gap-3">
-        <div className="flex w-14 shrink-0 flex-col items-center rounded-md border border-violet-500/60 py-1">
-          <span className="font-mono text-lg font-semibold text-violet-200">{score ?? '—'}</span>
-          <span className="text-[9px] uppercase tracking-wider text-neutral-400">score</span>
-        </div>
+        {showScore && (
+          <div className="flex w-14 shrink-0 flex-col items-center rounded-md border border-violet-500/60 py-1">
+            <span className="font-mono text-lg font-semibold text-violet-200">{score ?? '—'}</span>
+            <span className="text-[9px] uppercase tracking-wider text-neutral-400">score</span>
+          </div>
+        )}
         <div className="min-w-0 flex-1 space-y-2">
           <p className="flex flex-wrap items-baseline gap-x-3">
             <span className={`${th.text} text-[15px] font-bold tracking-wide`}>{symbol}</span>
@@ -47,14 +52,16 @@ export function LeapsAdvisorPickCard({ th, symbol, contractLabel, score, summary
             </details>
           )}
         </div>
-        <button
-          onClick={onVerify}
-          disabled={!verifyEnabled}
-          title={verifyEnabled ? undefined : 'This candidate is no longer in your filtered results.'}
-          className="shrink-0 rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Verify before trading →
-        </button>
+        {onVerify && (
+          <button
+            onClick={onVerify}
+            disabled={!verifyEnabled}
+            title={verifyEnabled ? undefined : 'This candidate is no longer in your filtered results.'}
+            className="shrink-0 rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Verify before trading →
+          </button>
+        )}
       </div>
     </div>
   );

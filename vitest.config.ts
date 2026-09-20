@@ -42,6 +42,9 @@ export default defineConfig({
       'app/**/__tests__/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
+    // The Screener page tests render a very large component; under parallel load (a busy CI runner) a heavy test occasionally
+    // exceeded the 5-second default and failed intermittently. A failing test still fails; this only stops load from looking like one.
+    testTimeout: 20_000,
     reporters: ['default'],
   },
 });

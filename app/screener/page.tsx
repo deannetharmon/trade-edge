@@ -84,6 +84,8 @@ import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { parseOccSymbol } from '@/lib/optionSymbol';
 import { CalloutList, LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
 import { LeapsAdvisorPickCard } from '@/features/screener/components/LeapsAdvisorPickCard';
+import { buildCcPickSummary, buildPmccPickSummary } from '@/lib/scans/advisorCards';
+import type { LeapsPickSummary } from '@/lib/leaps-analysis/dashboard';
 import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
@@ -2955,13 +2957,15 @@ function formatAdvisorPickLabel(strategy: string, identifier: string): string {
   return cc ? `Short ${formatMoneyDropExactZeroCents(Number(cc[1]))} C · ${cc[2]}` : identifier;
 }
 
-function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onClose }: {
+function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onClose, describePick }: {
   th: typeof THEMES[Theme];
   strategy: AdvisorStrategy;
   resultIdentifiers: string[];
   filters: Record<string, unknown>;
   summarize: () => unknown[];
   onClose: () => void;
+  // LEAPS-DASH-0004: tiles and callouts for a pick, computed by rule from the scan result it refers to (null when it is no longer in the results).
+  describePick?: (identifier: string) => LeapsPickSummary | null;
 }) {
   const [session, setSession] = useState<AdvisorSession | null>(null);
   const [stale, setStale] = useState(false);
@@ -3058,24 +3062,35 @@ function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onC
 
           {session.recommendation && session.recommendation.length > 0 && (
             <div className="space-y-2">
+              {/* LEAPS-DASH-0004: dashboard cards; numbers and callouts are computed from the scan results, the advisor's reasoning is collapsed under each pick. */}
+              <p className="text-[10px] italic text-neutral-400">In the advisor's order. Numbers and callouts are computed from your scan results; the advisor's reasoning is under each pick.</p>
               {session.recommendation.map((r, i) => (
-                <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
-                  <p className="font-bold text-violet-200">{r.symbol} · {formatAdvisorPickLabel(strategy, r.identifier)}</p>
-                  <p className="mt-1 text-neutral-200">{r.reasoning}</p>
-                </div>
+                <LeapsAdvisorPickCard
+                  key={i}
+                  th={th}
+                  symbol={r.symbol}
+                  contractLabel={formatAdvisorPickLabel(strategy, r.identifier)}
+                  score={null}
+                  showScore={false}
+                  summary={describePick ? describePick(r.identifier) : null}
+                  reasoning={r.reasoning}
+                />
               ))}
+              {(() => { const concentration = buildConcentrationCallout(session.recommendation.map(r => r.symbol)); return concentration ? <CalloutList callouts={[concentration]} th={th} /> : null; })()}
             </div>
           )}
 
-          {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
-
-          <div className="space-y-1.5 border-t border-neutral-800 pt-2">
-            {session.messages.map((m, i) => (
-              <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
-                <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
-              </p>
-            ))}
-          </div>
+          <details className="rounded border border-neutral-800 bg-neutral-900/40 p-2" open={session.messages.length > 1}>
+            <summary className="cursor-pointer text-[10px] font-bold text-neutral-400">Advisor's notes and conversation ({session.messages.length})</summary>
+            <div className="mt-2 space-y-1.5">
+              {session.sizingNote && <p className="text-amber-200">{session.sizingNote}</p>}
+              {session.messages.map((m, i) => (
+                <p key={i} className={m.role === 'user' ? 'text-cyan-300' : 'text-neutral-200'}>
+                  <b>{m.role === 'user' ? 'You' : 'Advisor'}:</b> {m.content}
+                </p>
+              ))}
+            </div>
+          </details>
 
           <div className="flex items-end gap-2">
             <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask a follow-up..."
@@ -11467,6 +11482,16 @@ export default function Home() {
                         resultIdentifiers={filteredQualified.filter(r => r.bestCandidate).map(r => `${r.symbol}-${r.bestCandidate!.shortStrike}-${r.bestCandidate!.expiration}`)}
                         filters={{ minOi: filteredMinOi }}
                         onClose={() => setShowCcAdvisorPanel(false)}
+                        describePick={identifier => {
+                          const r = filteredQualified.find(item => item.bestCandidate && `${item.symbol}-${item.bestCandidate.shortStrike}-${item.bestCandidate.expiration}` === identifier);
+                          if (!r || !r.bestCandidate) return null;
+                          const c = r.bestCandidate;
+                          return buildCcPickSummary({
+                            strike: c.shortStrike, dte: c.dte, delta: c.shortDelta ?? null,
+                            premiumPerContract: c.ccPremiumPerContract ?? null, annualizedYieldPct: c.ccAnnualizedYieldOnShares ?? null,
+                            strikeVsStockPct: c.ccStrikeVsStockPct ?? null, strikeVsCostBasisPct: c.ccStrikeVsCostBasisPct ?? null,
+                          });
+                        }}
                         summarize={() => filteredQualified.filter(r => r.bestCandidate).map(r => {
                           const c = r.bestCandidate!;
                           return {
@@ -11528,6 +11553,16 @@ export default function Home() {
                         resultIdentifiers={filteredQualified.filter(r => r.pmccPair).map(r => `${r.pmccPair!.longLeg.occSymbol}-${r.pmccPair!.shortLeg.occSymbol}`)}
                         filters={{ bestFitProfile: pmccBestFitProfile, minOi: filteredMinOi }}
                         onClose={() => setShowPmccAdvisorPanel(false)}
+                        describePick={identifier => {
+                          const r = filteredQualified.find(item => item.pmccPair && `${item.pmccPair.longLeg.occSymbol}-${item.pmccPair.shortLeg.occSymbol}` === identifier);
+                          if (!r || !r.pmccPair) return null;
+                          const pair = r.pmccPair;
+                          return buildPmccPickSummary({
+                            shortStrike: pair.shortLeg.strike, shortDte: pair.shortLeg.dte, shortDelta: pair.shortLeg.delta, shortCredit: pair.shortLeg.executablePrice,
+                            shortSpreadPct: pair.shortLeg.quote.spreadPct, underlyingPrice: r.price,
+                            netDebitPerShare: pair.metrics?.netDebitPerShare ?? null, strikeWidth: pair.metrics?.strikeWidth ?? null, widthMinusDebitPerShare: pair.metrics?.widthMinusDebitPerShare ?? null,
+                          });
+                        }}
                         summarize={() => filteredQualified.filter(r => r.pmccPair).map(r => {
                           const pair = r.pmccPair!;
                           return {
