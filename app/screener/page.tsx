@@ -2936,6 +2936,24 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
 // duplicated a third time. `summarize` is supplied per-caller since
 // PMCC's pmccPair shape and CC's bestCandidate shape are genuinely
 // different data, not something worth forcing into one shape.
+// Diane (2026-09-20): Covered Call and PMCC advisor picks arrive as internal identifiers ("AAPL-230-2026-10-16",
+// "AAPL 270617C00150000-AAPL 261016C00230000"). Show them the way the result cards write a contract
+// ("$230 C · 2026-10-16"); anything unrecognised is shown as received.
+function formatAdvisorPickLabel(strategy: string, identifier: string): string {
+  const contract = (occ: string) => {
+    const parsed = parseOccSymbol(occ);
+    return parsed.strikePrice != null && parsed.expiry != null ? `${formatMoneyDropExactZeroCents(parsed.strikePrice)} C · ${parsed.expiry}` : null;
+  };
+  if (strategy === 'PMCC') {
+    const parts = identifier.split('-');
+    const longLabel = parts.length === 2 ? contract(parts[0]) : null;
+    const shortLabel = parts.length === 2 ? contract(parts[1]) : null;
+    return longLabel && shortLabel ? `Long ${longLabel}  ▸  Short ${shortLabel}` : identifier;
+  }
+  const cc = identifier.match(/^.+?-(\d+(?:\.\d+)?)-(\d{4}-\d{2}-\d{2})$/);
+  return cc ? `Short ${formatMoneyDropExactZeroCents(Number(cc[1]))} C · ${cc[2]}` : identifier;
+}
+
 function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onClose }: {
   th: typeof THEMES[Theme];
   strategy: AdvisorStrategy;
@@ -3041,7 +3059,7 @@ function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onC
             <div className="space-y-2">
               {session.recommendation.map((r, i) => (
                 <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
-                  <p className="font-bold text-violet-200">{r.symbol} · {r.identifier}</p>
+                  <p className="font-bold text-violet-200">{r.symbol} · {formatAdvisorPickLabel(strategy, r.identifier)}</p>
                   <p className="mt-1 text-neutral-200">{r.reasoning}</p>
                 </div>
               ))}
