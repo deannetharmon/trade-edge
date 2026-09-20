@@ -55,6 +55,7 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [AI-SEC-0001 Authenticate Legacy AI Routes](./AI-SEC-0001-legacy-ai-route-authentication.md)
 - [LEAPS-AI-0002 Market-Aware Quote Freshness for Analyze with AI](./LEAPS-AI-0002-market-aware-analysis-freshness.md)
 - [LEAPS-AI-0003 Analyze with AI Uses Scan Filters; Prior-Session Age Cap](./LEAPS-AI-0003-analysis-uses-scan-filters.md)
+- [CI-0001 Continuous Integration (type check + tests on every push)](./CI-0001-continuous-integration.md)
 - [AI-POLICY-0001 Deterministic-First AI Analysis (epic)](./AI-POLICY-0001-epic.md)
   - [0001A Gateway Foundation](./AI-POLICY-0001A-gateway-foundation.md)
   - [0001B Snapshot Freeze, scan_summary, grounded_chat](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md)

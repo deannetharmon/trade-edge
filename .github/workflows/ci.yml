@@ -1,0 +1,41 @@
+# CI-0001 -- runs the type check and the full test suite on every push and pull request.
+# Vercel builds the app but does not run tests; this is what makes a red test visible the day it appears.
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# No secrets are used and the token is read-only. Uses pull_request (never pull_request_target), so forks get no access.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verify:
+    name: Type check and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.check.json
+
+      - name: Tests
+        run: npm test

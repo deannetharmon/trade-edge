@@ -1,0 +1,11 @@
+{
+  // CI-0001: the type check used by CI (and by hand): `npx tsc --noEmit -p tsconfig.check.json`.
+  // tsconfig.json targets es5 for the Next.js build, which makes tsc report false errors on modern syntax
+  // (Map/Set iteration, etc.). The type check only needs the same settings with an es2017 target and no emit.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "es2017",
+    "noEmit": true,
+    "incremental": false
+  }
+}

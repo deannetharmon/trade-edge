@@ -46,3 +46,7 @@
 ## Follow-up (2026-09-20): model must not state qualification
 
 First live use showed an analysis of a `CONTRACT_QUALIFIED` contract saying "not fully qualified": the prompt sentence written for discovery mode (`REVIEW_REQUIRED`) was applied to a qualified contract. Fixed: the prompt no longer asks the model to comment on qualification (TradeEdge's amber line already labels discovery mode), and `validateAnalysisOutput` rejects any model text that states or implies qualification (`qualified`, `unqualified`, `qualify/qualifies/qualifying`); one automatic retry, then the analysis shows as unavailable. The status field name `qualification.status` and the value `CONTRACT_QUALIFIED` remain allowed as evidence. Tests: `qualificationClaims.test.ts` and two route-level cases (retry succeeds; persistent claim is not displayed). Full suite: 260 files / 3308 passed / 2 skipped / 1 todo / 0 failed; `tsc` exit 0.
+
+## Follow-up (2026-09-20): display-precision numbers
+
+The analysis evidence showed raw broker floats (`extrinsicPerShare: 12.692000000000007`, `spreadPct: 2.3778071334214026`). `buildSnapshot` now rounds the mechanics and the qualification percentages to 2 decimals and delta / implied volatility to 4; broker prices, strike and open interest are untouched, and qualification status and gates are unchanged. Tests: `snapshotRounding.test.ts`.
