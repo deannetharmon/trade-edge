@@ -4,7 +4,7 @@
 // call's expiration is a blocker (red); an ex-dividend date before expiration is red only when the call is near or in the money.
 
 import { describe, expect, it } from 'vitest';
-import { buildEventCallouts, isNearItm, type EventCheckInput } from '../eventNote';
+import { buildEventCallouts, earningsDateInWindow, isNearItm, type EventCheckInput } from '../eventNote';
 
 const TODAY = '2026-09-21';
 const input = (over: Partial<EventCheckInput> = {}): EventCheckInput => ({
@@ -70,5 +70,18 @@ describe('isNearItm (same 3% band as the cycle card)', () => {
     expect(isNearItm(375, null)).toBe(false);
     expect(isNearItm(375, undefined)).toBe(false);
     expect(isNearItm(375, 0)).toBe(false);
+  });
+});
+
+describe('earningsDateInWindow', () => {
+  const base = { status: 'ok' as const, shortExpiration: '2026-10-16', today: TODAY };
+  it('returns the date only for a verified calendar with earnings inside the window', () => {
+    expect(earningsDateInWindow({ ...base, calendar: { earningsDate: '2026-10-01', exDividendDate: null } })).toBe('2026-10-01');
+    expect(earningsDateInWindow({ ...base, calendar: { earningsDate: '2026-10-17', exDividendDate: null } })).toBeNull();
+    expect(earningsDateInWindow({ ...base, calendar: { earningsDate: null, exDividendDate: '2026-10-01' } })).toBeNull();
+  });
+  it('never returns a date from unverified or missing data', () => {
+    expect(earningsDateInWindow({ ...base, status: 'unavailable', calendar: { earningsDate: '2026-10-01', exDividendDate: null } })).toBeNull();
+    expect(earningsDateInWindow({ ...base, status: 'loading', calendar: null })).toBeNull();
   });
 });

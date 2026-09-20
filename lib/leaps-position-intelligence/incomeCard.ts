@@ -9,6 +9,7 @@
 
 import { money, pct, type DashboardCallout, type DashboardTile, type DashboardTone } from '@/lib/leaps-analysis/dashboard';
 import { EXISTING_LEAPS_REVIEW_DTE } from './policy';
+import type { MandateGateResult } from './mandateGates';
 
 export interface IncomeCardLongCall {
   strike: number; dte: number; quantity: number;
@@ -54,8 +55,10 @@ export function longBreakevenTile(l: IncomeCardLongCall): DashboardTile {
 
 /**
  * `events`: callouts from buildEventCallouts (LEAPS-EVENTS-0001). When omitted the card keeps its standing "not checked yet" note.
+ * `gates`: the trader's income rules applied to the candidate (LEAPS-MANDATE-0001). When supplied, its callouts replace the built-in
+ * breakeven-floor callout, and an "Upside kept" tile replaces "Delta kept" when a target is set.
  */
-export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate: IncomeCardCandidate | null; reviewDte?: number; events?: DashboardCallout[] }): IncomeCard {
+export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate: IncomeCardCandidate | null; reviewDte?: number; events?: DashboardCallout[]; gates?: MandateGateResult }): IncomeCard {
   const { longCall: l, candidate: c } = input;
   const reviewDte = input.reviewDte ?? EXISTING_LEAPS_REVIEW_DTE;
   const contracts = l.quantity;
@@ -87,12 +90,21 @@ export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate
     } else {
       candidateTiles.push(tile('if-assigned', 'If assigned', '—', 'neutral', [{ text: 'needs your entry cost', tone: 'neutral' }]));
     }
-    candidateTiles.push(l.delta != null
-      ? tile('delta-kept', 'Delta kept', (l.delta - c.delta).toFixed(2), 'neutral', [{ text: `${l.delta.toFixed(2)} long − ${c.delta.toFixed(2)} short`, tone: 'neutral' }])
-      : tile('delta-kept', 'Delta kept', '—', 'neutral'));
+    const gates = input.gates;
+    if (gates && gates.participationPct != null) {
+      const enough = gates.participationRequiredPct == null || gates.participationPct >= gates.participationRequiredPct;
+      candidateTiles.push(tile('upside-kept', 'Upside kept', `${gates.participationPct.toFixed(0)}%`, enough ? 'good' : 'bad',
+        gates.participationRequiredPct != null ? [{ text: `${enough ? 'meets' : 'below'} your ${gates.participationRequiredPct}% · to your target`, tone: enough ? 'good' : 'bad' }] : [{ text: 'to your target', tone: 'neutral' }]));
+    } else {
+      candidateTiles.push(l.delta != null
+        ? tile('delta-kept', 'Delta kept', (l.delta - c.delta).toFixed(2), 'neutral', [{ text: `${l.delta.toFixed(2)} long − ${c.delta.toFixed(2)} short`, tone: 'neutral' }])
+        : tile('delta-kept', 'Delta kept', '—', 'neutral'));
+    }
 
-    if (clears === true) callouts.push({ id: 'floor', tone: 'good', text: 'Short strike clears your LEAPS breakeven at expiration.' });
-    if (clears === false) callouts.push({ id: 'floor', tone: 'bad', text: 'Short strike is below your LEAPS breakeven: an assignment would lock in a loss.' });
+    if (!input.gates) {
+      if (clears === true) callouts.push({ id: 'floor', tone: 'good', text: 'Short strike clears your LEAPS breakeven at expiration.' });
+      if (clears === false) callouts.push({ id: 'floor', tone: 'bad', text: 'Short strike is below your LEAPS breakeven: an assignment would lock in a loss.' });
+    }
     if (mark != null && l.stockPrice != null && l.dte > 0) {
       const extrinsic = Math.max(0, mark - Math.max(l.stockPrice - l.strike, 0));
       const perMonth = extrinsic / (l.dte / 30);
@@ -106,6 +118,7 @@ export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate
     if (input.events === undefined) callouts.push({ id: 'events', tone: 'watch', text: 'Earnings and ex-dividend dates are not checked here yet: check them before selling.' });
     else callouts.push(...input.events);
   }
+  if (input.gates) callouts.push(...input.gates.callouts);
   if (l.dte < reviewDte) callouts.push({ id: 'dte', tone: 'watch', text: `LEAPS has ${l.dte} days left: past your ${reviewDte}-day review point.` });
   if (entry == null) callouts.push({ id: 'entry', tone: 'watch', text: 'Entry cost is missing, so breakeven and the if-assigned result are unavailable.' });
 

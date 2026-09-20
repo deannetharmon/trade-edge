@@ -34,6 +34,11 @@ export function isNearItm(strike: number, stockPrice: number | null | undefined)
   return stockPrice != null && stockPrice > 0 && (strike / stockPrice - 1) * 100 < CYCLE_CARD_POLICY.nearStrikePct;
 }
 
+/** The earnings date inside [today, expiry] when the calendar was verified; otherwise null (unverified data is never treated as a date). */
+export function earningsDateInWindow(input: Pick<EventCheckInput, 'status' | 'calendar' | 'shortExpiration' | 'today'>): string | null {
+  return input.status === 'ok' && input.calendar && within(input.calendar.earningsDate, input.today, input.shortExpiration) ? input.calendar.earningsDate : null;
+}
+
 export function buildEventCallouts(input: EventCheckInput): DashboardCallout[] {
   if (input.status === 'loading') return [{ id: 'events', tone: 'neutral', text: 'Checking earnings and ex-dividend dates…' }];
   if (input.status === 'unavailable' || !input.calendar) {

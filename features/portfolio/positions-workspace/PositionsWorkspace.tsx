@@ -17,7 +17,10 @@ import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecomm
 import { evaluateHeldPmccLiveReadiness, type HeldPmccLiveReadiness } from '@/lib/scans/pmccHeldReadinessClient';
 import { buildIncomeCard } from '@/lib/leaps-position-intelligence/incomeCard';
 import { buildCycleCard } from '@/lib/leaps-position-intelligence/cycleCard';
-import { buildEventCallouts, isNearItm, type EventCalendarDates, type EventCheckStatus } from '@/lib/leaps-position-intelligence/eventNote';
+import { buildEventCallouts, earningsDateInWindow, isNearItm, type EventCalendarDates, type EventCheckStatus } from '@/lib/leaps-position-intelligence/eventNote';
+import { applyMandateGates, describeIncomeRules } from '@/lib/leaps-position-intelligence/mandateGates';
+import type { LeapsMandate } from '@/lib/leaps-position-intelligence/types';
+import { MandateForm } from './MandateForm';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
@@ -138,6 +141,22 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [opportunity]);
+  // LEAPS-MANDATE-0001: the trader's saved income rules for this held LEAPS (read-only here; saved through the form below).
+  const [mandate, setMandate] = useState<LeapsMandate | null>(null);
+  const [editingMandate, setEditingMandate] = useState(false);
+  const mandateAccount = opportunity.accountNumber;
+  const mandateOcc = opportunity.exactContract;
+  const hasHeldLong = Boolean(opportunity.heldPmccLong);
+  useEffect(() => {
+    if (!mandateAccount || !mandateOcc || !hasHeldLong) return;
+    let active = true;
+    Promise.resolve()
+      .then(() => fetch(`/api/leaps-mandate?accountNumber=${encodeURIComponent(mandateAccount)}&longOcc=${encodeURIComponent(mandateOcc)}`))
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('mandate request failed')))
+      .then(data => { if (active) setMandate((data?.mandate ?? null) as LeapsMandate | null); })
+      .catch(() => { /* no saved rules could be read: the defaults stay in force */ });
+    return () => { active = false; };
+  }, [mandateAccount, mandateOcc, hasHeldLong]);
   const requiresLiveEvaluation = opportunity.status === 'review-income-call' && Boolean(opportunity.accountNumber && opportunity.positionKey && opportunity.exactContract && opportunity.heldPmccLong);
   const missingLiveEvidence = opportunity.status === 'review-income-call' && !requiresLiveEvaluation;
   // Never flash a positive readiness label before the fresh shared evaluator
@@ -152,7 +171,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
     : opportunity.status === 'monitor' && opportunity.monitorReason === 'capacity-reserved'
       ? 'A short call is already open or working against this exact LEAPS.'
       : null;
-  const canReview = live?.status === 'review-income-call';
+  const liveReview = live?.status === 'review-income-call';
   // LEAPS-POS-0001: the held LEAPS as a dashboard -- your LEAPS, the income call under review, and short rule-based callouts.
   // Every number comes from the position's own facts and the live candidate (lib/leaps-position-intelligence/incomeCard.ts).
   const held = opportunity.heldPmccLong;
@@ -185,9 +204,20 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
     shortExpiration: eventExpiration, mode: pairedShort ? 'open-call' : 'candidate',
     nearItm: isNearItm(pairedShort?.strike ?? liveCandidate?.strike ?? 0, held?.stockPrice), today: new Date().toISOString().slice(0, 10),
   }) : undefined;
+  // LEAPS-MANDATE-0001: the trader's rules (or the defaults: breakeven floor, no selling through earnings) applied to the candidate.
+  const today = new Date().toISOString().slice(0, 10);
+  const earningsDate = eventExpiration ? earningsDateInWindow({ status: eventCheck.key === eventKey ? eventCheck.status : 'loading', calendar: eventCheck.key === eventKey ? eventCheck.calendar : null, shortExpiration: eventExpiration, today }) : null;
+  const gate = held && !pairedShort ? applyMandateGates({
+    mandate, longStrike: held.strike, entryDebitPerShare: held.entryDebitPerShare ?? null, stockPrice: held.stockPrice ?? null,
+    candidate: liveCandidate ? { strike: liveCandidate.strike, credit: liveCandidate.credit } : null, earningsInWindow: earningsDate,
+  }) : null;
+  const gated = gate && gate.state !== 'review-income-call' ? gate : null;
+  const canReview = liveReview && !gated;
+  const displayLabel = gated ? (gated.state === 'hold-uncovered' ? 'Hold uncovered' : gated.state === 'reassess-thesis' ? 'Reassess thesis' : 'Monitor') : label;
+  const displayTone = gated ? (gated.state === 'reassess-thesis' ? 'text-red-300' : 'text-amber-300') : tone;
   const incomeCard = held ? buildIncomeCard({
     longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
-    candidate: liveCandidate, events,
+    candidate: liveCandidate, events, gates: gate ?? undefined,
   }) : null;
   const cycleCard = held && pairedShort ? buildCycleCard({
     longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
@@ -196,7 +226,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   }) : null;
   // The long explanatory sentence is the whole story for Monitor / Not ready; for a Review state the dashboard carries it and the sentence moves under Details.
   const reasonLine = <p className={`mt-2 ${th.textFaint}`}>{reason}</p>;
-  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${tone}`}>{label}{cycleCard?.windowOpen && <span className="ml-2 rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">CLOSE OR ROLL WINDOW</span>}</p></div>{canReview && <button type="button" onClick={() => onFind?.(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div>{status !== 'review-income-call' && !cycleCard && reasonLine}{monitorMessage && !cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{cycleCard && pairedShort && (<div className="mt-3 space-y-3" data-testid="cycle-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Short call since you sold it · ${pairedShort.strike} C · {pairedShort.expiration}</p><TileGrid tiles={cycleCard.shortTiles} th={th} /></div><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={cycleCard.longTiles} th={th} /></div><CalloutList callouts={cycleCard.callouts} th={th} /></div>)}{!cycleCard && incomeCard && (<div className="mt-3 space-y-3" data-testid="income-readiness-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={incomeCard.longTiles} th={th} /></div>{liveCandidate && incomeCard.candidateTiles.length > 0 && (<div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Income call to review · Sell {Math.abs(held!.quantity)} × ${liveCandidate.strike} C · {liveCandidate.expiration}</p><TileGrid tiles={incomeCard.candidateTiles} th={th} /></div>)}<CalloutList callouts={incomeCard.callouts} th={th} /></div>)}<p className="mt-2 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><details className="mt-2 rounded border border-white/10 p-2"><summary className="cursor-pointer text-[10px] text-neutral-400">Details</summary>{(status === 'review-income-call' || cycleCard) && reasonLine}{monitorMessage && cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></details></div>;
+  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${displayTone}`}>{displayLabel}{cycleCard?.windowOpen && <span className="ml-2 rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">CLOSE OR ROLL WINDOW</span>}</p></div>{canReview && <button type="button" onClick={() => onFind?.(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div>{status !== 'review-income-call' && !cycleCard && reasonLine}{monitorMessage && !cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{cycleCard && pairedShort && (<div className="mt-3 space-y-3" data-testid="cycle-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Short call since you sold it · ${pairedShort.strike} C · {pairedShort.expiration}</p><TileGrid tiles={cycleCard.shortTiles} th={th} /></div><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={cycleCard.longTiles} th={th} /></div><CalloutList callouts={cycleCard.callouts} th={th} /></div>)}{!cycleCard && incomeCard && (<div className="mt-3 space-y-3" data-testid="income-readiness-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={incomeCard.longTiles} th={th} /></div>{liveCandidate && incomeCard.candidateTiles.length > 0 && (<div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Income call to review · Sell {Math.abs(held!.quantity)} × ${liveCandidate.strike} C · {liveCandidate.expiration}</p><TileGrid tiles={incomeCard.candidateTiles} th={th} /></div>)}<CalloutList callouts={incomeCard.callouts} th={th} /></div>)}{held && !cycleCard && mandateAccount && mandateOcc && (<div className="mt-2 text-[10px]" data-testid="income-rules">{editingMandate ? <MandateForm underlyingSymbol={opportunity.symbol} longOccSymbol={mandateOcc} accountNumber={mandateAccount} breakeven={held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null} initial={mandate} onSaved={saved => { setMandate(saved); setEditingMandate(false); }} onCancel={() => setEditingMandate(false)} /> : <p className={th.textFaint}>{describeIncomeRules(mandate, held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null)}<button type="button" onClick={() => setEditingMandate(true)} className="ml-2 text-teal-300 underline focus:ring-2 focus:ring-teal-400">{mandate ? 'Edit rules' : 'Set your income rules'}</button></p>}</div>)}<p className="mt-2 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><details className="mt-2 rounded border border-white/10 p-2"><summary className="cursor-pointer text-[10px] text-neutral-400">Details</summary>{(status === 'review-income-call' || cycleCard) && reasonLine}{monitorMessage && cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></details></div>;
 }
 
 interface ManagementActionProps {

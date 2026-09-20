@@ -5,6 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildIncomeCard, type IncomeCardCandidate, type IncomeCardLongCall } from '../incomeCard';
+import { applyMandateGates } from '../mandateGates';
+import type { LeapsMandate } from '../types';
 
 const longCall = (over: Partial<IncomeCardLongCall> = {}): IncomeCardLongCall => ({
   strike: 250, dte: 270, quantity: 1, entryDebitPerShare: 113.55, markPerShare: 120.45, delta: 0.85, stockPrice: 350.86, ...over,
@@ -130,5 +132,40 @@ describe('real event callouts (LEAPS-EVENTS-0001)', () => {
 
   it('without a candidate there is nothing to check, so no event callout', () => {
     expect(buildIncomeCard({ longCall: longCall(), candidate: null, events: [{ id: 'events', tone: 'good', text: 'x' }] }).callouts).toEqual([]);
+  });
+});
+
+describe('income rules (LEAPS-MANDATE-0001)', () => {
+  const mandate: LeapsMandate = { version: 'LEAPS-PI-1.1', thesis: '', invalidation: '', thesisTargetHigh: 390, invalidationPrice: null, posture: 'balanced', incomeCapStrike: null, minimumCycleCredit: null, allowKnownEarningsCycle: false };
+  const gatesFor = (m: LeapsMandate | null, cand: { strike: number; credit: number } | null = { strike: 375, credit: 6.4 }) =>
+    applyMandateGates({ mandate: m, longStrike: 250, entryDebitPerShare: 113.55, stockPrice: 350.86, candidate: cand, earningsInWindow: null });
+
+  it('with a target the Upside kept tile replaces Delta kept, and the gate callouts replace the built-in floor callout', () => {
+    const c = buildIncomeCard({ longCall: longCall(), candidate: candidate(), gates: gatesFor(mandate) });
+    expect(c.candidateTiles.map(t => t.id)).toEqual(['credit', 'short-strike', 'if-assigned', 'upside-kept']);
+    expect(tile(c.candidateTiles, 'upside-kept')).toMatchObject({ value: '62%', tone: 'good' });
+    expect(tile(c.candidateTiles, 'upside-kept').parts[0].text).toBe('meets your 55% · to your target');
+    expect(c.callouts.some(x => x.id === 'floor')).toBe(false);
+    expect(c.callouts.map(x => x.id)).toEqual(expect.arrayContaining(['gate-income-floor', 'gate-upside-participation']));
+  });
+
+  it('a failing participation shows the tile in red', () => {
+    const c = buildIncomeCard({ longCall: longCall(), candidate: candidate({ strike: 364 }), gates: gatesFor({ ...mandate, posture: 'upside-first' }, { strike: 364, credit: 6.4 }) });
+    expect(tile(c.candidateTiles, 'upside-kept')).toMatchObject({ tone: 'bad' });
+    expect(c.callouts.some(x => x.id === 'gate-upside-participation' && x.tone === 'bad')).toBe(true);
+  });
+
+  it('without a target the Delta kept tile stays', () => {
+    const c = buildIncomeCard({ longCall: longCall(), candidate: candidate(), gates: gatesFor({ ...mandate, thesisTargetHigh: null }) });
+    expect(c.candidateTiles.map(t => t.id)).toEqual(['credit', 'short-strike', 'if-assigned', 'delta-kept']);
+  });
+
+  it('a thesis-invalidated callout shows even when there is no candidate', () => {
+    const c = buildIncomeCard({ longCall: longCall(), candidate: null, gates: gatesFor({ ...mandate, invalidationPrice: 351 }, null) });
+    expect(c.callouts).toEqual([expect.objectContaining({ id: 'gate-invalidated', tone: 'bad' })]);
+  });
+
+  it('without gates the card behaves exactly as before', () => {
+    expect(buildIncomeCard({ longCall: longCall(), candidate: candidate() }).callouts.some(x => x.id === 'floor')).toBe(true);
   });
 });
