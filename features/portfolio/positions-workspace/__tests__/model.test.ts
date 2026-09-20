@@ -87,6 +87,22 @@ describe('positions workspace model', () => {
     ]));
   });
 
+  it('carries the paired short call\'s own facts so the card can show the open cycle', () => {
+    const heldLongCall = position({
+      key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295, pairedShortCallKey: 'AAPL-short-call',
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22, currentDelta: 0.8 }],
+    });
+    const shortCall = position({
+      key: 'AAPL-short-call', accountNumber: 'fixture', expDate: '2026-10-16', dte: 24,
+      legs: [{ symbol: 'AAPL  261016C00230000', optionType: 'C', strikePrice: 230, direction: 'Short', quantity: 1, avgOpenPrice: 6.4, currentPrice: 2.43, currentDelta: -0.18 }],
+    });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall, shortCall]), positions: [heldLongCall, shortCall], pendingOrders: [], snapshotDataQuality: quality });
+    expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'monitor', monitorReason: 'capacity-reserved',
+        pairedShort: { positionKey: 'AAPL-short-call', strike: 230, expiration: '2026-10-16', dte: 24, quantity: 1, soldPerShare: 6.4, markPerShare: 2.43, delta: 0.18 } }),
+    ]));
+  });
+
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
     const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}] });
     const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });

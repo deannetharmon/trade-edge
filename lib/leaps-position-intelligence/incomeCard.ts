@@ -26,7 +26,31 @@ export interface IncomeCard { longTiles: DashboardTile[]; candidateTiles: Dashbo
 const TONE_RANK: Record<DashboardTone, number> = { bad: 0, watch: 1, good: 2, neutral: 3 };
 const SHARES = 100;
 const tile = (id: string, label: string, value: string, tone: DashboardTone, parts: Array<{ text: string; tone: DashboardTone }> = []): DashboardTile => ({ id, label, value, tone, parts });
-const signedMoney = (value: number) => `${value < 0 ? '-' : '+'}${money(Math.abs(Math.round(value * 100) / 100))}`;
+export const signedMoney = (value: number) => `${value < 0 ? '-' : '+'}${money(Math.abs(Math.round(value * 100) / 100))}`;
+
+/** "Value (mark)" for the held LEAPS: current mark against what was paid. Shared by the income card and the cycle card. */
+export function longValueTile(l: IncomeCardLongCall): DashboardTile {
+  const mark = l.markPerShare;
+  const entry = l.entryDebitPerShare;
+  if (mark != null && entry != null) {
+    const value = mark * SHARES * l.quantity;
+    const paid = entry * SHARES * l.quantity;
+    const change = value - paid;
+    const tone: DashboardTone = change >= 0 ? 'good' : 'watch';
+    return tile('value', 'Value (mark)', money(Math.round(value * 100) / 100), 'neutral', [{ text: `${signedMoney(change)}${paid > 0 ? ` · ${change >= 0 ? '+' : '-'}${pct(Math.abs(change / paid) * 100)}` : ''} vs paid`, tone }]);
+  }
+  return tile('value', 'Value (mark)', mark != null ? money(Math.round(mark * SHARES * l.quantity * 100) / 100) : '—', 'neutral', [{ text: 'entry cost unavailable', tone: 'neutral' }]);
+}
+
+/** "Breakeven at expiry": LEAPS strike plus entry cost, against the stock. */
+export function longBreakevenTile(l: IncomeCardLongCall): DashboardTile {
+  const entry = l.entryDebitPerShare;
+  if (entry == null) return tile('breakeven', 'Breakeven at expiry', '—', 'neutral', [{ text: 'needs your entry cost', tone: 'neutral' }]);
+  const breakeven = l.strike + entry;
+  const above = l.stockPrice != null && l.stockPrice > 0 ? (breakeven / l.stockPrice - 1) * 100 : null;
+  const tone: DashboardTone = above == null ? 'neutral' : above > 0 ? 'watch' : 'good';
+  return tile('breakeven', 'Breakeven at expiry', money(Math.round(breakeven * 100) / 100), tone, above == null ? [{ text: 'stock price unavailable', tone: 'neutral' }] : [{ text: above > 0 ? `+${pct(above)} above stock` : `${pct(Math.abs(above))} below stock`, tone }]);
+}
 
 export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate: IncomeCardCandidate | null; reviewDte?: number }): IncomeCard {
   const { longCall: l, candidate: c } = input;
@@ -37,23 +61,7 @@ export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate
   const breakeven = entry != null ? l.strike + entry : null;
 
   // ---- the long LEAPS ---------------------------------------------------------------------------------------------
-  const longTiles: DashboardTile[] = [];
-  if (mark != null && entry != null) {
-    const value = mark * SHARES * contracts;
-    const paid = entry * SHARES * contracts;
-    const change = value - paid;
-    const tone: DashboardTone = change >= 0 ? 'good' : 'watch';
-    longTiles.push(tile('value', 'Value (mark)', money(Math.round(value * 100) / 100), 'neutral', [{ text: `${signedMoney(change)}${paid > 0 ? ` · ${change >= 0 ? '+' : '-'}${pct(Math.abs(change / paid) * 100)}` : ''} vs paid`, tone }]));
-  } else {
-    longTiles.push(tile('value', 'Value (mark)', mark != null ? money(Math.round(mark * SHARES * contracts * 100) / 100) : '—', 'neutral', [{ text: 'entry cost unavailable', tone: 'neutral' }]));
-  }
-  if (breakeven != null) {
-    const above = l.stockPrice != null && l.stockPrice > 0 ? (breakeven / l.stockPrice - 1) * 100 : null;
-    const tone: DashboardTone = above == null ? 'neutral' : above > 0 ? 'watch' : 'good';
-    longTiles.push(tile('breakeven', 'Breakeven at expiry', money(Math.round(breakeven * 100) / 100), tone, above == null ? [{ text: 'stock price unavailable', tone: 'neutral' }] : [{ text: above > 0 ? `+${pct(above)} above stock` : `${pct(Math.abs(above))} below stock`, tone }]));
-  } else {
-    longTiles.push(tile('breakeven', 'Breakeven at expiry', '—', 'neutral', [{ text: 'needs your entry cost', tone: 'neutral' }]));
-  }
+  const longTiles: DashboardTile[] = [longValueTile(l), longBreakevenTile(l)];
   longTiles.push(tile('dte', 'DTE left', String(l.dte), l.dte < reviewDte ? 'watch' : 'neutral', [{ text: `review point ${reviewDte} days`, tone: l.dte < reviewDte ? 'watch' : 'neutral' }]));
   longTiles.push(tile('delta', 'Delta', l.delta == null ? '—' : l.delta.toFixed(2), 'neutral'));
 

@@ -56,7 +56,17 @@ function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncom
     if (position.accountNumber !== snapshot!.accountNumber) { opportunities.push({ ...base, status: 'not-ready', reason: 'Position account identity does not match the active broker account.', nextStep: 'Switch to the account holding this contract, then refresh.' }); continue; }
     if (position.structureAmbiguous || !exactContract) { opportunities.push({ ...base, status: 'not-ready', reason: 'Position is structurally ambiguous or missing leg evidence.', nextStep: 'Resolve the position structure before evaluating a short call.' }); continue; }
     if (position.dte < DEFAULT_PMCC_DTE_RANGES.longMin || position.dte > DEFAULT_PMCC_DTE_RANGES.longMax) { opportunities.push({ ...base, status: 'not-ready', reason: `Held long call is outside the PMCC long-term range (${DEFAULT_PMCC_DTE_RANGES.longMin}–${DEFAULT_PMCC_DTE_RANGES.longMax} DTE).`, nextStep: position.dte > DEFAULT_PMCC_DTE_RANGES.longMax ? `Wait until it reaches ${DEFAULT_PMCC_DTE_RANGES.longMax} DTE or less, then refresh.` : `This contract has fewer than ${DEFAULT_PMCC_DTE_RANGES.longMin} DTE; it will not become eligible by waiting.` }); continue; }
-    if (position.pairedShortCallKey) { opportunities.push({ ...base, status: 'monitor', monitorReason: 'capacity-reserved', reason: 'A nearer-dated short call above this LEAPS strike is already open against this LEAPS.', nextStep: 'Wait until that short call is closed or expires, then refresh.' }); continue; }
+    if (position.pairedShortCallKey) {
+      // LEAPS-POS-0002: carry the paired short call's own facts so the card can show the open cycle. Missing or unusual
+      // structures simply leave this out; the card then shows the existing Monitor explanation.
+      const pairedPosition = options.find(item => item.key === position.pairedShortCallKey);
+      const pairedLeg = pairedPosition && Array.isArray(pairedPosition.legs) && pairedPosition.legs.length === 1 ? pairedPosition.legs[0] : null;
+      const pairedShort = pairedPosition && pairedLeg && pairedLeg.direction === 'Short' && pairedLeg.optionType === 'C'
+        ? { positionKey: pairedPosition.key, strike: pairedLeg.strikePrice, expiration: pairedPosition.expDate, dte: pairedPosition.dte, quantity: Math.abs(pairedLeg.quantity), soldPerShare: pairedLeg.avgOpenPrice, markPerShare: pairedLeg.currentPrice, delta: pairedLeg.currentDelta == null ? null : Math.abs(pairedLeg.currentDelta) }
+        : undefined;
+      opportunities.push({ ...base, pairedShort, status: 'monitor', monitorReason: 'capacity-reserved', reason: 'A nearer-dated short call above this LEAPS strike is already open against this LEAPS.', nextStep: 'Wait until that short call is closed or expires, then refresh.' });
+      continue;
+    }
     const longStrike = leg.strikePrice;
     const hasMatchingWorkingShort = snapshot!.workingOrders.some(order => order.legs.some(workingLeg => {
       const action = workingLeg.action.replace(/[^a-z]/gi, '').toLowerCase();

@@ -121,6 +121,8 @@ export interface ExistingIncomeOpportunity {
     // supply them; the card shows dashes rather than guessing.
     entryDebitPerShare?: number | null; markPerShare?: number | null; delta?: number | null; stockPrice?: number | null;
   };
+  /** LEAPS-POS-0002: the open short call paired to this LEAPS (single-leg short call in the same portfolio snapshot), when there is one. */
+  pairedShort?: { positionKey: string; strike: number; expiration: string; dte: number; quantity: number; soldPerShare: number | null; markPerShare: number | null; delta: number | null };
 }
 
 export interface PositionsWorkspaceModel {
