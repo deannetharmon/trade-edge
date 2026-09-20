@@ -86,6 +86,38 @@ describe('POST /api/leaps-analysis criteria', () => {
   });
 });
 
+describe('POST /api/leaps-analysis qualification claims', () => {
+  const claiming = { ...modelOutput, mechanics: 'The contract is not fully qualified and I am explaining mechanics only.' };
+  const reply = (output: unknown) => ({ ok: true, status: 200, json: async () => ({ model: 'gpt-4o-mini', choices: [{ message: { content: JSON.stringify(output) } }], usage: { prompt_tokens: 10, completion_tokens: 10 } }) });
+
+  it('rejects a first answer that states qualification and retries once with the repair prompt', async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(reply(claiming)).mockResolvedValueOnce(reply(modelOutput));
+    const { POST } = await import('../route');
+
+    const res = await POST(post(FILTERS));
+    const body = await res.json();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(body.status).toBe('MECHANICS_REVIEWED');
+    expect(body.output.mechanics).not.toMatch(/qualif/i);
+    expect(body.attempts).toBe(2);
+  });
+
+  it('does not display an analysis that keeps claiming qualification', async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(reply(claiming));
+    const { POST } = await import('../route');
+
+    const res = await POST(post(FILTERS));
+    const body = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(body.output).toBeNull();
+    expect(body.status).toBe('ANALYSIS_UNAVAILABLE');
+  });
+});
+
 describe('POST /api/leaps-analysis eligibility (decision D-A)', () => {
   it('runs the model for a qualified contract', async () => {
     const { POST } = await import('../route');

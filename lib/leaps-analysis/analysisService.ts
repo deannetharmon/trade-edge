@@ -49,7 +49,7 @@ export function buildSnapshot(review: ServerLeapsReview, intent: LeapsIntent, qu
   return { ...unsigned, id: crypto.randomUUID(), hash, createdAt, expiresAt: new Date(Date.now() + LEAPS_ANALYSIS_TTL_SECONDS * 1000).toISOString(), unavailable };
 }
 
-const forbidden = /\b(best|safest|safe|recommended|recommendation|buy|approved|approval|guarantee(?:s|d)?|predict(?:ion|ed|s)?|position siz(?:e|ing)|submit(?:ting)? (?:an )?order|take (?:this|the) trade)\b/i;
+const forbidden = /\b(qualified|unqualified|qualif(?:y|ies|ying)|best|safest|safe|recommended|recommendation|buy|approved|approval|guarantee(?:s|d)?|predict(?:ion|ed|s)?|position siz(?:e|ing)|submit(?:ting)? (?:an )?order|take (?:this|the) trade)\b/i;
 function strings(value: unknown): string[] { if (typeof value === 'string') return [value]; if (Array.isArray(value)) return value.flatMap(strings); if (value && typeof value === 'object') return Object.values(value).flatMap(strings); return []; }
 export function validateAnalysisOutput(value: unknown): { valid: boolean; output?: AnalysisOutput } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { valid: false };
