@@ -559,7 +559,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.queryByText(/ADD TICKERS AND RUN HUNTER/)).not.toBeInTheDocument();
   });
 
-  it('shows the LEAPS ticker first in the row, immediately left of the score', async () => {
+  it('shows the LEAPS ticker first in the row with the chart link under it, then the score', async () => {
     window.localStorage.setItem('hunter-screen-mode', 'leaps');
     kv.set(LEAPS_CACHE_KEY, {
       results: [{
@@ -576,13 +576,17 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     renderScreenerPage();
 
     const ticker = await screen.findByTestId('leaps-result-ticker');
+    const tickerColumn = screen.getByTestId('leaps-result-ticker-column');
     const scoreColumn = screen.getByTestId('leaps-result-score-column');
     const status = screen.getByText(/REVIEW REQUIRED|CONTRACT QUALIFIED|NOT QUALIFIED|DATA UNAVAILABLE/);
     expect(ticker).toHaveTextContent('GS');
-    // Ticker, then score, then the status badge: each precedes the next in document order.
-    expect(ticker.compareDocumentPosition(scoreColumn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Ticker column, then score, then the status badge: each precedes the next in document order.
+    expect(tickerColumn.compareDocumentPosition(scoreColumn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scoreColumn.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(ticker.nextElementSibling).toBe(scoreColumn);
+    expect(tickerColumn.nextElementSibling).toBe(scoreColumn);
+    // The chart link sits under the ticker, not under the score.
+    expect(within(tickerColumn).getByText(/chart/i)).toBeInTheDocument();
+    expect(within(scoreColumn).queryByText(/chart/i)).not.toBeInTheDocument();
   });
 
   it('Rank mode preview shows the active saved rules', async () => {

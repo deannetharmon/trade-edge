@@ -3174,9 +3174,13 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     <div ref={rowRef} className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <div className="flex items-center gap-2 text-[11px] shrink-0">
-          {/* Dean (2026-09-20): the ticker leads the row, immediately left of the score --
-              it was buried after the status badge and hard to find in a long list. */}
-          <span className={`${th.text} text-[14px] font-bold tracking-wide`} data-testid="leaps-result-ticker">{candidate.symbol}</span>
+          {/* Dean (2026-09-20): the ticker leads the row, with the chart link directly under it --
+              the ticker was buried after the status badge and hard to find in a long list. */}
+          <div className="flex flex-col items-start gap-1" data-testid="leaps-result-ticker-column">
+            <span className={`${th.text} text-[14px] font-bold tracking-wide`} data-testid="leaps-result-ticker">{candidate.symbol}</span>
+            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+          </div>
           {/* LEAPS-0004: the score is the first thing after the ticker -- Ian's own composite ranking
               number, the single "how good is this candidate overall"
               signal, gets top billing ahead of the status/price
@@ -3190,10 +3194,6 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
             ) : (
               <span className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textMuted}`} title="Score unavailable -- delta or open interest missing">—</span>
             )}
-            {/* Dean: chart moved here, left side directly under the score --
-                was previously in the confirmations row on the right. */}
-            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
-              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
           </div>
           <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${qualificationMeta}`}>
             {qualification.status.replaceAll('_', ' ')}

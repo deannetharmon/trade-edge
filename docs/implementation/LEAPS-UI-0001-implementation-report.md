@@ -23,3 +23,7 @@
 - New test passes; it **fails against the previous markup**. `ScreenerPage.test.tsx`: 40 passed.
 - Full `vitest run`: **260 files passed; 3309 tests passed, 2 skipped, 1 todo, 0 failed** (the 3308 from before plus this one).
 - **Not verified:** the visual result in a browser (jsdom checks order, not looks). Please look at the LEAPS list once after deploy.
+
+## Follow-up (LEAPS-UI-0002, 2026-09-20)
+
+The chart link moved from under the score to under the ticker: the row now reads **[ticker over chart link] · score · status badge · price ...**. Test updated to assert the chart link is inside the ticker column and not the score column.
