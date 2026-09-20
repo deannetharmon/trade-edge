@@ -34,7 +34,9 @@ import { CommandProvider } from '@/components/commands/CommandProvider';
 import type { TaskManager } from '@/lib/tasks/task-manager';
 import { completeSession, createScanSession, recordSymbolEvaluated, recordSymbolFailed } from '@/lib/screener/scanSession';
 import { LEAPS_CACHE_KEY, SCAN_SESSION_CACHE_KEY } from '@/lib/screener/scanSessionCache';
-import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
+import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY, DEFAULT_PMCC_SHORT_DELTA_RANGE } from '@/lib/scans/pmccConfig';
+import { DEFAULT_PMCC_DTE_RANGES } from '@/lib/scans/pmccDteRanges';
+import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { PMCC_DECISION_POLICY_VERSION, evaluatePmccDecision } from '@/lib/scans/pmccDecision';
 import type { PmccPairResult } from '@/lib/scans/pmccTypes';
 import type { ScreenResult, CheckResult, RawScanEntry } from '@/lib/scans/types';
@@ -587,6 +589,59 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     // The chart link sits under the ticker, not under the score.
     expect(within(tickerColumn).getByText(/chart/i)).toBeInTheDocument();
     expect(within(scoreColumn).queryByText(/chart/i)).not.toBeInTheDocument();
+  });
+
+  // LEAPS-PMCC-START-0001: each LEAPS card shows the estimated stock price from which every call in the trader's
+  // PMCC short-call range clears the LEAPS's breakeven.
+  const leapsRow = (extra: Record<string, unknown>) => ({
+    symbol: 'GS', expiration: '2027-06-17', dte: 284, strike: 800,
+    delta: 0.82, openInterest: 246, bid: 279.35, ask: 285.70,
+    occSymbol: 'GS270617C00800000', underlyingPrice: 1037.94,
+    spreadPct: 2.2, extrinsicValue: 44.58, dataQuality: 'ok',
+    score: 53, scoreIncomplete: false, ...extra,
+  });
+  const seedLeaps = (row: Record<string, unknown>) => {
+    window.localStorage.setItem('hunter-screen-mode', 'leaps');
+    kv.set(LEAPS_CACHE_KEY, {
+      results: [row],
+      filters: { deltaMin: 0.70, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 0 },
+      cachedAt: Date.now(),
+    });
+  };
+
+  it('shows the PMCC start price with how far the stock must rise when it is below it', async () => {
+    seedLeaps(leapsRow({ ivx: 30, ivRank: 25 }));
+    renderScreenerPage();
+
+    const expected = computePmccStartPrice({
+      spot: 1037.94, breakeven: 800 + (279.35 + 285.70) / 2, ivxPct: 30,
+      shortDeltaMax: DEFAULT_PMCC_SHORT_DELTA_RANGE.max, shortDteMin: DEFAULT_PMCC_DTE_RANGES.shortMin,
+    });
+    expect(expected.status).toBe('below');
+
+    const start = await screen.findByTestId('leaps-pmcc-start-price');
+    expect(start).toHaveTextContent('PMCC start ≥');
+    expect(start).toHaveTextContent('est.');
+    expect(start).toHaveTextContent(`needs +${expected.pctToStart!.toFixed(1)}%`);
+    expect(start.getAttribute('title')).toMatch(/Estimate: the stock price from which every call in your PMCC short-call range/);
+  });
+
+  it('shows a check when the stock is already above the PMCC start price', async () => {
+    seedLeaps(leapsRow({ ivx: 30, ivRank: 25, underlyingPrice: 1100 }));
+    renderScreenerPage();
+
+    const start = await screen.findByTestId('leaps-pmcc-start-price');
+    expect(start).toHaveTextContent('✓ stock above');
+    expect(start).not.toHaveTextContent('needs +');
+  });
+
+  it('shows a dash instead of a made-up price when the underlying IVx is missing', async () => {
+    seedLeaps(leapsRow({ ivx: null, ivRank: null }));
+    renderScreenerPage();
+
+    const start = await screen.findByTestId('leaps-pmcc-start-price');
+    expect(start).toHaveTextContent('PMCC start ≥—');
+    expect(start).not.toHaveTextContent('est.');
   });
 
   it('Rank mode preview shows the active saved rules', async () => {

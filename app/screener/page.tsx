@@ -80,6 +80,7 @@ import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import type { Position } from '@/lib/portfolio-data/types';
 import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
+import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
@@ -3057,7 +3058,7 @@ function AdvisorPanel({ th, strategy, resultIdentifiers, filters, summarize, onC
   );
 }
 
-function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, onTrade, autoOpenAnalysis, onAutoOpenConsumed, rowRef }: {
+function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax, pmccShortDeltaMax = DEFAULT_PMCC_SHORT_DELTA_RANGE.max, pmccShortDteMin = PMCC_SHORT_DTE_MIN, onTrade, autoOpenAnalysis, onAutoOpenConsumed, rowRef }: {
   candidate: {
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -3071,6 +3072,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   dteMax: number;
   oiMin: number;
   extrinsicPctMax: number;
+  // LEAPS-PMCC-START-0001: the trader's own PMCC short-call settings (highest short delta, shortest short DTE).
+  pmccShortDeltaMax?: number;
+  pmccShortDteMin?: number;
   onTrade: () => void;
   // LEAPS-ADVISOR-VERIFY-LINK-0001: set true (by a parent, keyed on
   // occSymbol) to programmatically open this row's own Analyze with AI
@@ -3124,6 +3128,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   const extrinsicPctOfCost = candidate.extrinsicValue != null && totalCost != null && totalCost > 0
     ? (candidate.extrinsicValue * 100 / totalCost) * 100
     : null;
+  // LEAPS-PMCC-START-0001: estimated stock price from which every call in the trader's PMCC short-call range clears this LEAPS's breakeven.
+  const pmccStart = computePmccStartPrice({ spot: candidate.underlyingPrice, breakeven, ivxPct: candidate.ivx, shortDeltaMax: pmccShortDeltaMax, shortDteMin: pmccShortDteMin });
+  const pmccStartTitle = `Estimate: the stock price from which every call in your PMCC short-call range (delta up to ${pmccShortDeltaMax.toFixed(2)}, at least ${pmccShortDteMin} DTE) sits at or above this LEAPS's breakeven, so a first call cannot lock in a loss. Uses the underlying's IVx${candidate.ivx != null ? ` (${candidate.ivx.toFixed(1)}%)` : ''} and a 4% rate. Check the live call chain before selling.`;
   // Ian: %ITM/%OTM belongs in the identity line, not the confirmations
   // row -- it changes what the candidate *is* (stock-replacement vs.
   // speculative leverage), not a pass/fail range check like delta/spread.
@@ -3228,6 +3235,23 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
               </span>
             )}
             {breakeven != null && candidate.underlyingPrice == null && <span className="ml-1 text-[10px] font-normal text-amber-400">(% vs. current unavailable)</span>}
+          </span>
+          {/* LEAPS-PMCC-START-0001 (Ian): when the first call can be sold without locking in a loss. Always an estimate. */}
+          <span data-testid="leaps-pmcc-start-price" title={pmccStartTitle}>
+            <span className={`text-[9px] ${th.textMuted} mr-1`}>PMCC start ≥</span>
+            {pmccStart.status === 'unavailable' ? (
+              <span className={`text-[10px] ${th.textMuted}`}>—</span>
+            ) : (
+              <>
+                <b className={th.text}>{formatMoneyDropExactZeroCents(pmccStart.startPrice!)}</b>
+                <span className="ml-1 text-[10px] font-normal text-slate-400">est.</span>
+                {pmccStart.status === 'above' ? (
+                  <span className="ml-1 text-[10px] font-normal text-emerald-400">✓ stock above</span>
+                ) : (
+                  <span className="ml-1 text-[10px] font-normal text-amber-400">needs +{pmccStart.pctToStart!.toFixed(1)}%</span>
+                )}
+              </>
+            )}
           </span>
           <span>
             <span className={`text-[9px] ${th.textMuted} mr-1`}>Extrinsic</span>
@@ -12446,7 +12470,7 @@ export default function Home() {
 
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
+                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={pmccShortDeltaMax} pmccShortDteMin={pmccShortDteMin}
                     onTrade={() => setLeapsTradeCandidate(candidate)}
                     rowRef={candidate.occSymbol ? (el => { leapsRowRefs.current[candidate.occSymbol!] = el; }) : undefined}
                     autoOpenAnalysis={candidate.occSymbol != null && leapsVerifyTarget === candidate.occSymbol}
@@ -12459,7 +12483,7 @@ export default function Home() {
                     <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
                     <div className="space-y-2">{insufficientCandidates.map(candidate => (
                       <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
-                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax}
+                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={pmccShortDeltaMax} pmccShortDteMin={pmccShortDteMin}
                         onTrade={() => setLeapsTradeCandidate(candidate)} />
                     ))}</div>
                   </div>
