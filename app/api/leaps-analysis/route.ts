@@ -3,12 +3,13 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, claimAnalysis, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
 import { resolveLeapsContractEvidence } from '@/lib/leaps-analysis/serverTradeReview';
+import { isLeapsAnalysisEnabled } from '@/lib/leaps-analysis/featureFlag';
 
 const intents = new Set<LeapsIntent>(['standalone', 'stock_replacement', 'future_pmcc', 'not_specified']);
 const system = `Analyze only the immutable LEAPS snapshot supplied by the server. Separate observed evidence from bounded inference. Discuss contract mechanics and the balance among intrinsic/extrinsic value, capital, delta, DTE, liquidity/spread, IV, and breakeven. Lower extrinsic and higher intrinsic can support stock-replacement or future-PMCC mechanics, but do not treat either as sufficient. Never select a contract, direct a transaction, rank it against unseen candidates, predict returns or prices, size a position, approve qualification, or use authority language. Use only one posture from the schema.`;
 
 async function user() { const session = await getServerSession(authOptions); return (session?.user as { id?: string } | undefined)?.id ?? null; }
-function enabled() { return process.env.LEAPS_ANALYSIS_ENABLED === 'true'; }
+function enabled() { return isLeapsAnalysisEnabled(); }
 function allowedModel() {
   const model = process.env.LEAPS_ANALYSIS_MODEL?.trim();
   const allowlist = (process.env.LEAPS_ANALYSIS_ALLOWED_MODELS ?? 'gpt-4o-mini,gpt-4o,gpt-5-mini,gpt-5').split(',').map(x => x.trim()).filter(Boolean);
