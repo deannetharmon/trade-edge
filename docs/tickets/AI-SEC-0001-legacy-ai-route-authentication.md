@@ -1,6 +1,6 @@
 # AI-SEC-0001 — Authenticate Legacy AI Routes and Retire the Public-Named Key
 
-**Status:** Draft — needs Paul's approval of D11 (see [epic](./AI-POLICY-0001-epic.md)); independent of the AI-POLICY phases
+**Status:** Approved — D11 = require login (Dean, 2026-09-19). Implemented; see the [implementation report](../implementation/AI-SEC-0001-implementation-report.md).
 **Related:** [SEC-0001](./SEC-0001-tracked-env-file-and-api-auth-triage.md) (do S1 there first)
 
 ## Problem
@@ -59,6 +59,6 @@ Only the signed-in trader can spend the OpenAI key; the key name no longer invit
 
 ## Rollout notes
 
-1. **Before merging:** Dean confirms `OPENAI_API_KEY` is set in Vercel for **Production and Preview** (this ticket removes the `NEXT_PUBLIC_` fallback; `/api/ocr` has no other key source today).
+1. **Before merging:** Dean confirms `OPENAI_API_KEY` is set in Vercel for **Production and Preview** (this ticket removes the `NEXT_PUBLIC_` fallback; `/api/ocr` has no other key source today). **Confirmed by Dean 2026-09-19.**
 2. Merge; verify on preview, then production.
 3. After the merge, Dean removes `NEXT_PUBLIC_OPENAI_API_KEY` from Vercel. Whether to rotate the OpenAI key is Dean's decision: check the OpenAI usage dashboard for unexplained spend; rotate if any is found or if you cannot rule out exposure.

@@ -1,6 +1,6 @@
 # AI-POLICY-0001A — AI Policy Gateway Foundation
 
-**Status:** Draft — pending sign-offs (Alan: ADR-0005, D4/D5/D8/D12/D13 · Ian: D7 ages, D9 lexicon · Paul: D6 · Dean: D3)
+**Status:** Approved to start — decisions accepted by Dean 2026-09-19. D3 and D6 gate *enabling* a route, not this build.
 **Epic:** [AI-POLICY-0001](./AI-POLICY-0001-epic.md) · **ADR:** [ADR-0005](../decisions/ADR-0005-ai-analysis-input-trust-classes.md)
 **Delivers spec ACs:** 1 (boundary), 2, 3, 5, 6, 10, 11, 12 (budgets) — foundation only
 
@@ -85,6 +85,7 @@ A pure server-side library `lib/ai-policy/`. **No API routes, no UI, no change t
 - `orderCommand`: place (an )?order, submit, sell to open, buy to open, sell to close, buy to close, limit order, market order, stop order, gtc, send the order, execute
 - `rankingComparison`: best, top pick, ranks?, ranked, better than, worse than, outperforms?, preferred, prefer, winner, first choice
 - `stateOverride`: override, ignore the (warning|flag), mark (it )?as (ready|eligible), treat (it )?as (ready|eligible), despite being (ineligible|not ready), loosen, widen your filters?, relax the, raise your (delta|dte), lower your (delta|dte), change your (filter|criteria)
+- `prediction` (Ian, 2026-09-19): likely to, should expect, will (expire|be assigned|hit|reach|rise|fall), high probability, sweet spot, cheap, rich
 - `derivedMath`: works out to, calculates to, adds up to, net of, minus, plus, times, multiplied by, divided by, approximately equals, roughly equals
 - `numberWords`: zero…twenty, thirty…ninety, hundred, thousand, million, percent, per cent, dollars?, bucks, half, double, triple, x%
 
@@ -129,6 +130,9 @@ No routes, UI, snapshot builders, or prompt templates for real routes (route spe
 
 Nothing is reachable: no routes or UI import the library. Merge is behavior-neutral. Dean adds the new env vars in Vercel only when 0001B is about to be enabled in Preview.
 
-## Open items for sign-off
+## Sign-off conditions (accepted by Dean 2026-09-19)
 
-Alan (ADR-0005, D4, D5, D8, D12, D13) · Ian (lexicon seed, D7 ages) · Paul (D6 numbers) · Dean (D3 governance attestation and reasoning-tier model name).
+- Alan: the D4 deletion procedure is documented in the implementation report; provider timeout (45 s) stays below `maxDuration` (60 s).
+- Quinn: validator fixtures freeze only after the lexicon is final; the budget Lua check is run on a Vercel preview and recorded.
+- Ian: lexicon seed plus the `prediction` category above.
+- Still open, needed only to enable a route: D3 (reasoning-tier model name, OpenAI data-controls attestation) and D6 (budget numbers).

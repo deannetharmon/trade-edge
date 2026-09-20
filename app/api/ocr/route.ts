@@ -1,17 +1,35 @@
+// app/api/ocr/route.ts
+//
+// Extracts ticker symbols from a screenshot via OpenAI vision.
+// AI-SEC-0001: requires a signed-in session; reads only the server-side
+// OPENAI_API_KEY (no NEXT_PUBLIC_ fallback); rejects non-image media types.
+
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSessionUserId } from '@/lib/ai/requireSession';
+
+const ALLOWED_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 export async function POST(req: NextRequest) {
+  const userId = await requireSessionUserId();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
+
   try {
     const { base64, mediaType } = await req.json();
     if (!base64 || !mediaType) {
       return NextResponse.json({ error: 'Missing base64 or mediaType' }, { status: 400 });
+    }
+    if (!ALLOWED_MEDIA_TYPES.has(String(mediaType))) {
+      return NextResponse.json({ error: 'Unsupported image type' }, { status: 400 });
     }
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? ''}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: 'gpt-4o',

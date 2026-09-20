@@ -1,6 +1,6 @@
 # ADR-0005 — Trust Classes for AI Analysis Inputs
 
-**Status:** Proposed — draft for Alan's review
+**Status:** Accepted — Dean, 2026-09-19 (Alan's position: approve; conditions recorded in 0001A and 0001E)
 **Related:** [AI-POLICY-0001 epic](../tickets/AI-POLICY-0001-epic.md), [specification](../specifications/AI-POLICY-0001-Deterministic-First-AI-Analysis.md), ADR-0004
 
 ## Context

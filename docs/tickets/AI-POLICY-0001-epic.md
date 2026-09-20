@@ -1,6 +1,6 @@
 # AI-POLICY-0001 — Deterministic-First AI Analysis (Epic)
 
-**Status:** Draft — pending team sign-off (see [Sign-offs](#sign-offs))
+**Status:** Decisions accepted by Dean on 2026-09-19 except D3 and D6 (open) — see [Sign-offs](#sign-offs)
 **Requirements source:** [AI-POLICY-0001 specification](../specifications/AI-POLICY-0001-Deterministic-First-AI-Analysis.md) (authoritative)
 **Architecture decision:** [ADR-0005 Trust classes for AI analysis inputs](../decisions/ADR-0005-ai-analysis-input-trust-classes.md)
 **Verified against:** `main` @ 02b8276c
@@ -17,7 +17,7 @@ The specification has 13 acceptance criteria across five routes, a UI, a governa
 |---|---|---|
 | [SEC-0001](./SEC-0001-tracked-env-file-and-api-auth-triage.md) | **Urgent:** tracked `.env.local` credentials; API auth triage | Dean, today (step S1 needs no code) |
 | [AI-SEC-0001](./AI-SEC-0001-legacy-ai-route-authentication.md) | Authenticate legacy AI routes, retire public-named key | Paul approval (D11) — independent of the rest |
-| [AI-POLICY-0001A](./AI-POLICY-0001A-gateway-foundation.md) | AI policy gateway foundation (`lib/ai-policy`) — no routes, no UI | ADR-0005 accepted; D3–D9 decided |
+| [AI-POLICY-0001A](./AI-POLICY-0001A-gateway-foundation.md) | AI policy gateway foundation (`lib/ai-policy`) — no routes, no UI | ADR-0005 accepted (done); D3/D6 needed only to enable a route |
 | [AI-POLICY-0001B](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md) | Snapshot freeze, `scan_summary`, `grounded_chat` routes | 0001A |
 | [AI-POLICY-0001C](./AI-POLICY-0001C-ai-panel-ui.md) | AI panel UI, lifecycle states, accessible citations | 0001B; Diane's approved mocks |
 | [AI-POLICY-0001D](./AI-POLICY-0001D-leaps-deep-analysis.md) | `leaps_deep_analysis` route | 0001A; Ian's LEAPS field list |
@@ -56,33 +56,35 @@ Recommended defaults are what the phase tickets assume. Nothing here is decided 
 
 | # | Decision | Recommended default | Owner | Status |
 |---|---|---|---|---|
-| D1 | Snapshot trust model | ADR-0005: `server_verified` for deep routes, `client_attested` for scan summary/chat | Alan | Proposed |
-| D2 | Legacy AI routes and LEAPS-ADVISOR-0001B | Freeze `/api/advisor`, `/api/leaps-advisor` as-is (no new features). 0001B superseded by this epic. Migrate/retire `/api/analyze` etc. under a new ticket AI-POLICY-0002 after 0001D | Paul | Proposed |
+| D1 | Snapshot trust model | ADR-0005: `server_verified` for deep routes, `client_attested` for scan summary/chat | Alan | Accepted 2026-09-19 |
+| D2 | Legacy AI routes and LEAPS-ADVISOR-0001B | Freeze `/api/advisor`, `/api/leaps-advisor` as-is (no new features). 0001B superseded by this epic. Migrate/retire `/api/analyze` etc. under a new ticket AI-POLICY-0002 after 0001D | Paul | Accepted 2026-09-19 |
 | D3 | Provider, models, governance | OpenAI only. Economy tier `gpt-4o-mini`; reasoning tier **named by Dean** (route unavailable until set). Dean verifies OpenAI org data controls (no-train, retention, region) and sets the attestation env vars; missing → fail closed | Dean | Open |
-| D4 | Retention | Prompts/outputs/artifacts: 90 days (matches `LEAPS_ANALYSIS_TTL_SECONDS`). Audit record = hashes + metadata only (no prompt/output text), 548 days (matches `pmcc-review-snapshots`), access limited to the owning user's scope. Deletion request removes artifacts, keeps audit metadata | Alan, Dean | Proposed |
-| D5 | Kill switches | Env flags (default off) **plus** Redis override keys checked per request: `ai-policy:kill:global`, `ai-policy:kill:route:<route>`. Redis wins over env. No redeploy needed to stop | Alan | Proposed |
+| D4 | Retention | Prompts/outputs/artifacts: 90 days (matches `LEAPS_ANALYSIS_TTL_SECONDS`). Audit record = hashes + metadata only (no prompt/output text), 548 days (matches `pmcc-review-snapshots`), access limited to the owning user's scope. Deletion request removes artifacts, keeps audit metadata | Alan, Dean | Accepted 2026-09-19 |
+| D5 | Kill switches | Env flags (default off) **plus** Redis override keys checked per request: `ai-policy:kill:global`, `ai-policy:kill:route:<route>`. Redis wins over env. No redeploy needed to stop | Alan | Accepted 2026-09-19 |
 | D6 | Budgets | Route hourly limits and per-user monthly / global daily USD budgets are env-configured; **any unset → route unavailable** (forces a conscious number). Suggested starting hourly limits: summary 20, chat 60, LEAPS deep 10, PMCC deep 10 | Paul | Open |
-| D7 | Freshness max ages | Config table, fail-closed if a required source has no max age. Proposed for Ian: quote/Greeks 300 s, broker position/capacity 900 s, earnings/calendar 86 400 s, scan calculation ≤ 8 h and status `complete` | Ian | Proposed |
-| D8 | No-numbers-in-prose output design | Adopt (see Architecture) | Alan, Quinn | Proposed |
-| D9 | Prohibited-language lexicon | Seed list in 0001A; Ian owns and versions it; expansion never needs a code change beyond the lexicon file | Ian | Proposed |
-| D10 | `retrospective_batch` | Defer 0001G until Paul defines the reports | Paul | Proposed |
-| D11 | `wheel-simulator` login requirement | It calls `/api/analyze` but is outside the middleware matcher. Add `/wheel-simulator/:path*` to the matcher and require a session on `/api/analyze` (single app, single trader) | Paul | Open |
-| D12 | Accessibility testing | No new dependency. Testing-Library role/name/focus assertions + a manual keyboard/screen-reader checklist per release | Alan, Quinn | Proposed |
-| D13 | Sync vs async deep analysis | Synchronous with `maxDuration = 60`, 45 s provider timeout, explicit loading state. Revisit only if the reasoning tier routinely exceeds it | Alan | Proposed |
-| D14 | Deep analysis of an ineligible LEAPS candidate | Unavailable (`INPUT_INELIGIBLE`), no provider call — mirrors today's `MORE_INFORMATION_NEEDED`. Alternative: explain *why* ineligible using cited reason codes only | Ian | Open |
-| D15 | Meaning of "paired short-call structure" for `pmcc_deep_analysis` | Foundation plus (a) the open paired short call if one exists and/or (b) the short-call structure evaluated in the caller's current PMCC evaluation input | Paul, Ian | Open |
+| D7 | Freshness max ages | Config table, fail-closed if a required source has no max age. Proposed for Ian: quote/Greeks 300 s, broker position/capacity 900 s, earnings/calendar 86 400 s, scan calculation ≤ 8 h and status `complete` | Ian | Accepted 2026-09-19 |
+| D8 | No-numbers-in-prose output design | Adopt (see Architecture) | Alan, Quinn | Accepted 2026-09-19 |
+| D9 | Prohibited-language lexicon | Seed list in 0001A; Ian owns and versions it; expansion never needs a code change beyond the lexicon file | Ian | Accepted 2026-09-19 |
+| D10 | `retrospective_batch` | Defer 0001G until Paul defines the reports | Paul | Accepted 2026-09-19 |
+| D11 | `wheel-simulator` login requirement | It calls `/api/analyze` but is outside the middleware matcher. Add `/wheel-simulator/:path*` to the matcher and require a session on `/api/analyze` (single app, single trader) | Paul | Accepted 2026-09-19 |
+| D12 | Accessibility testing | No new dependency. Testing-Library role/name/focus assertions + a manual keyboard/screen-reader checklist per release | Alan, Quinn | Accepted 2026-09-19 |
+| D13 | Sync vs async deep analysis | Synchronous with `maxDuration = 60`, 45 s provider timeout, explicit loading state. Revisit only if the reasoning tier routinely exceeds it | Alan | Accepted 2026-09-19 |
+| D14 | Deep analysis of an ineligible LEAPS candidate | Unavailable (`INPUT_INELIGIBLE`), no provider call — mirrors today's `MORE_INFORMATION_NEEDED`. Alternative: explain *why* ineligible using cited reason codes only | Ian | Accepted 2026-09-19 |
+| D15 | Meaning of "paired short-call structure" for `pmcc_deep_analysis` | Foundation plus (a) the open paired short call if one exists and/or (b) the short-call structure evaluated in the caller's current PMCC evaluation input | Paul, Ian | Accepted 2026-09-19 |
 
 ## Sign-offs
 
+Sign-off round recorded 2026-09-19. Role positions were voiced in-session as advisory input; Dean is the approver and accepted them. Priority after SEC-0001 and AI-SEC-0001: start 0001A.
+
 | Role | Signs off on | Status |
 |---|---|---|
-| Paul (Product Owner) | Scope, D2, D6, D10, D11, D15, SEC-0001 triage table, launch-gate owner/approver | Pending |
-| Ian (Trader) | D7, D9 lexicon, D14, LEAPS/PMCC analysis field lists, launch thresholds for usefulness/accuracy | Pending |
-| Alan (Chief Architect) | ADR-0005, D1, D4, D5, D8, D12, D13 | Pending |
-| Diane (UX) | Mocks for the seven states on Screener, LEAPS, PMCC, Positions (desktop + mobile); field-label catalog | Pending |
-| Quinn (Test) | Test plan per phase, prohibited-output fixture list, acceptance-criteria traceability | Pending |
-| Frank (Scrum Master) | Sequencing against in-flight work (paper-trading parity, PMCC discovery flow) | Pending |
-| Dean (Sponsor) | D3 provider governance evidence, credential decisions, launch-gate approval | Pending |
+| Paul (Product Owner) | Scope, D2, D6, D10, D11, D15, SEC-0001 triage table, launch-gate owner/approver | Accepted 2026-09-19 (conditions in phase tickets) |
+| Ian (Trader) | D7, D9 lexicon, D14, LEAPS/PMCC analysis field lists, launch thresholds for usefulness/accuracy | Accepted 2026-09-19 (conditions in phase tickets) |
+| Alan (Chief Architect) | ADR-0005, D1, D4, D5, D8, D12, D13 | Accepted 2026-09-19 (conditions in phase tickets) |
+| Diane (UX) | Mocks for the seven states on Screener, LEAPS, PMCC, Positions (desktop + mobile); field-label catalog | Pending — mocks, label catalog, copy owed; blocks 0001C only |
+| Quinn (Test) | Test plan per phase, prohibited-output fixture list, acceptance-criteria traceability | Accepted 2026-09-19 (conditions in phase tickets) |
+| Frank (Scrum Master) | Sequencing against in-flight work (paper-trading parity, PMCC discovery flow) | Accepted 2026-09-19 (conditions in phase tickets) |
+| Dean (Sponsor) | D3 provider governance evidence, credential decisions, launch-gate approval | D11, priority, OPENAI_API_KEY answered 2026-09-19; **D3 and D6 still open** |
 
 ## Acceptance-criteria traceability
 

@@ -1,9 +1,11 @@
 // app/api/analyze/route.ts
 // Server-side proxy for OpenAI API with optional web-search support.
 // Model names are selected by AI profile in lib/ai/models.ts.
+// AI-SEC-0001: requires a signed-in session and the server-only OPENAI_API_KEY.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAiModel, isAiProfile, type AiProfile } from '@/lib/ai/models';
+import { requireSessionUserId } from '@/lib/ai/requireSession';
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_API = 'https://api.openai.com/v1/responses';
@@ -95,7 +97,15 @@ async function callChatCompletions(apiKey: string, model: string, messages: any[
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY ?? process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+  // AI-SEC-0001: session first -- before the key is read, the body is parsed,
+  // or any upstream call is made. middleware.ts does not cover /api/*.
+  const userId = await requireSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // AI-SEC-0001: server-only key; the NEXT_PUBLIC_ fallback is removed.
+  const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });

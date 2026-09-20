@@ -9,5 +9,6 @@ export const config = {
     '/rinse-repeat/:path*',
     '/trade-log/:path*',
     '/performance/:path*',
+    '/wheel-simulator/:path*',
   ],
 };
