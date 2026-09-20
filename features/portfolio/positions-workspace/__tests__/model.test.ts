@@ -103,6 +103,21 @@ describe('positions workspace model', () => {
     ]));
   });
 
+  it('carries the position\'s entry baseline (per-share delta) and current IVR for the since-open tiles', () => {
+    const heldLongCall = position({
+      key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295, quantity: 2, ivr: 20,
+      entryDate: '2026-08-14', entrySnapshotCreatedAt: '2026-08-14T15:30:00.000Z', stockPriceAtEntry: 336.66, deltaAtEntry: 1.76, ivrAtEntry: 29,
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 2, avgOpenPrice: 20, currentPrice: 22, currentDelta: 0.85 }],
+    });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall]), positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: quality });
+    expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ positionKey: 'AAPL-long-call', heldPmccLong: expect.objectContaining({
+        nowIvr: 20,
+        atEntry: { capturedAt: '2026-08-14T15:30:00.000Z', entryDate: '2026-08-14', stockPrice: 336.66, deltaPerShare: 0.88, ivr: 29 },
+      }) }),
+    ]));
+  });
+
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
     const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}] });
     const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });

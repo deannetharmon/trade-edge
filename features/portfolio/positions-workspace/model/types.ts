@@ -120,6 +120,9 @@ export interface ExistingIncomeOpportunity {
     // LEAPS-POS-0001: portfolio-snapshot facts for the income-readiness card. Optional and null when the broker did not
     // supply them; the card shows dashes rather than guessing.
     entryDebitPerShare?: number | null; markPerShare?: number | null; delta?: number | null; stockPrice?: number | null;
+    /** LEAPS-SINCE-0001: current IVR, and the position's entry baseline (the existing position-entry-snapshot store). */
+    nowIvr?: number | null;
+    atEntry?: { capturedAt: string | null; entryDate: string | null; stockPrice: number | null; deltaPerShare: number | null; ivr: number | null };
   };
   /** LEAPS-POS-0002: the open short call paired to this LEAPS (single-leg short call in the same portfolio snapshot), when there is one. */
   pairedShort?: { positionKey: string; strike: number; expiration: string; dte: number; quantity: number; soldPerShare: number | null; markPerShare: number | null; delta: number | null };
