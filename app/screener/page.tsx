@@ -3174,12 +3174,15 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     <div ref={rowRef} className={`rounded-xl border-l-4 border-l-emerald-600 border ${th.border} p-3`}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <div className="flex items-center gap-2 text-[11px] shrink-0">
-          {/* LEAPS-0004: score comes first -- Ian's own composite ranking
+          {/* Dean (2026-09-20): the ticker leads the row, immediately left of the score --
+              it was buried after the status badge and hard to find in a long list. */}
+          <span className={`${th.text} text-[14px] font-bold tracking-wide`} data-testid="leaps-result-ticker">{candidate.symbol}</span>
+          {/* LEAPS-0004: the score is the first thing after the ticker -- Ian's own composite ranking
               number, the single "how good is this candidate overall"
-              signal, gets top billing ahead of even the symbol/price
+              signal, gets top billing ahead of the status/price
               identification, same prominence PMCC's own score already
               gets on its cards. */}
-          <div className="flex flex-col items-start gap-1">
+          <div className="flex flex-col items-start gap-1" data-testid="leaps-result-score-column">
             {candidate.score != null ? (
               <span className={`text-[12px] font-bold px-2 py-0.5 rounded border ${scoreColor}`} title={candidate.scoreIncomplete ? 'Score computed from partial data' : undefined}>
                 {candidate.score}{candidate.scoreIncomplete && '*'}
@@ -3195,7 +3198,6 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
           <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold ${qualificationMeta}`}>
             {qualification.status.replaceAll('_', ' ')}
           </span>
-          <span className={`${th.text} font-bold`}>{candidate.symbol}</span>
           {candidate.underlyingPrice != null && <span className={th.textMuted}>${candidate.underlyingPrice.toFixed(2)}</span>}
           {/* Dean: moved next to current price, not strike/expiration -- it's
               a price-vs-strike relationship, reads more naturally here. */}

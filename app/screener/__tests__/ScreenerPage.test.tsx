@@ -559,6 +559,32 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.queryByText(/ADD TICKERS AND RUN HUNTER/)).not.toBeInTheDocument();
   });
 
+  it('shows the LEAPS ticker first in the row, immediately left of the score', async () => {
+    window.localStorage.setItem('hunter-screen-mode', 'leaps');
+    kv.set(LEAPS_CACHE_KEY, {
+      results: [{
+        symbol: 'GS', expiration: '2027-06-17', dte: 284, strike: 800,
+        delta: 0.82, openInterest: 246, bid: 279.35, ask: 285.70,
+        occSymbol: 'GS270617C00800000', underlyingPrice: 1037.94,
+        spreadPct: 2.2, extrinsicValue: 44.58, dataQuality: 'ok',
+        score: 53, scoreIncomplete: false,
+      }],
+      filters: { deltaMin: 0.70, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 0 },
+      cachedAt: Date.now(),
+    });
+
+    renderScreenerPage();
+
+    const ticker = await screen.findByTestId('leaps-result-ticker');
+    const scoreColumn = screen.getByTestId('leaps-result-score-column');
+    const status = screen.getByText(/REVIEW REQUIRED|CONTRACT QUALIFIED|NOT QUALIFIED|DATA UNAVAILABLE/);
+    expect(ticker).toHaveTextContent('GS');
+    // Ticker, then score, then the status badge: each precedes the next in document order.
+    expect(ticker.compareDocumentPosition(scoreColumn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scoreColumn.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ticker.nextElementSibling).toBe(scoreColumn);
+  });
+
   it('Rank mode preview shows the active saved rules', async () => {
     seedWatchlist();
     renderScreenerPage();
