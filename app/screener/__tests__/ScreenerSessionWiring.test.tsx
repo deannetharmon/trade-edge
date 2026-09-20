@@ -434,7 +434,13 @@ describe('SCREENER-RESULTS-0001 corrective: Targeted cancellation (4)', () => {
   // symbols were fetched (attempted) vs never reached (skipped by the
   // cancellation), and that the STOP SCAN control's own lifecycle (visible
   // while running, gone once stopped) behaves correctly.
+  // 8a6bc4d8 ("Add bounded targeted scan concurrency") made Targeted fetch up to N symbols at once (default 2,
+  // env NEXT_PUBLIC_TARGETED_SYMBOL_CONCURRENCY, clamped 1-3). This test asserts the strictly sequential case, so it
+  // pins concurrency to 1; the concurrent case has its own test below.
+  afterEach(() => { vi.unstubAllEnvs(); });
+
   it('clicking STOP SCAN mid-flight halts further symbols; already-attempted symbols are not silently skipped', async () => {
+    vi.stubEnv('NEXT_PUBLIC_TARGETED_SYMBOL_CONCURRENCY', '1');
     const heldChain = deferred<any>();
     // AAA resolves immediately (a real attempt, no candidate). BBB hangs on
     // its chain fetch until the test explicitly resolves it, giving the
@@ -475,6 +481,38 @@ describe('SCREENER-RESULTS-0001 corrective: Targeted cancellation (4)', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /STOP SCAN/i })).not.toBeInTheDocument());
     expect(getChainMock).toHaveBeenCalledTimes(2);
     expect(getChainMock.mock.calls.map(c => c[0])).toEqual(['AAA', 'BBB']);
+    expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
+  });
+
+  it('with concurrency 2, STOP SCAN lets in-flight symbols finish but never starts another', async () => {
+    vi.stubEnv('NEXT_PUBLIC_TARGETED_SYMBOL_CONCURRENCY', '2');
+    const heldB = deferred<any>();
+    const heldC = deferred<any>();
+    // Two workers: one takes AAA (resolves immediately) then CCC; the other takes BBB. BBB and CCC hang, so both
+    // workers are busy when STOP is clicked; DDD is still waiting in the queue and must never be fetched.
+    getChainMock.mockImplementation((symbol: string) => {
+      if (symbol === 'BBB') return heldB.promise;
+      if (symbol === 'CCC') return heldC.promise;
+      return Promise.resolve(emptyChain);
+    });
+
+    renderScreener();
+    await addToUniverse('AAA,BBB,CCC,DDD');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
+    await userEvent.click(await screen.findByRole('radio', { name: /TARGETED/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
+
+    await waitFor(() => expect(getChainMock).toHaveBeenCalledTimes(3));
+    expect(getChainMock.mock.calls.map(c => c[0]).sort()).toEqual(['AAA', 'BBB', 'CCC']);
+
+    await userEvent.click(await screen.findByRole('button', { name: /STOP SCAN/i }));
+    heldB.resolve(emptyChain);
+    heldC.resolve(emptyChain);
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /STOP SCAN/i })).not.toBeInTheDocument());
+    expect(getChainMock).toHaveBeenCalledTimes(3);
+    expect(getChainMock.mock.calls.map(c => c[0])).not.toContain('DDD');
     expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
   });
 });

@@ -45,10 +45,24 @@ describe('canonical PMCC decision', () => {
     expect(decision.gates).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'NEW_LONG_DELTA', status: 'fail' })]));
   });
 
-  it('uses Wait/Monitor for stale evidence and excludes it from ranking', () => {
-    const decision = evaluatePmccDecision({ pair: pair('covered-short-call-against-held-leaps', quote('stale', false)), criteria, marketSession: 'open' });
+  // PMCC-COMPARE-HELD-0001 (4ea75ed7): for a held long, only the short leg being sold gates readiness -- the long
+  // leg is already owned, so its quote quality must never block reviewing the short call. This test previously put
+  // the stale quote on the long leg; the stale evidence that matters for a held pair is the SHORT leg's.
+  it('uses Wait/Monitor for a stale short-leg quote and excludes it from ranking', () => {
+    const decision = evaluatePmccDecision({ pair: pair('covered-short-call-against-held-leaps', quote('acceptable', true), quote('stale', false)), criteria, marketSession: 'open' });
     expect(decision).toMatchObject({ qualification: 'QUALIFIED', readiness: 'WAIT_MONITOR', action: 'BLOCKED' });
     expect(pmccDecisionRankEligible(decision)).toBe(false);
+  });
+
+  it('does not gate a held pair on a stale long-leg quote (only the short leg being sold gates readiness)', () => {
+    const decision = evaluatePmccDecision({ pair: pair('covered-short-call-against-held-leaps', quote('stale', false), quote('acceptable', true)), criteria, marketSession: 'open' });
+    expect(decision.readiness).toBe('READY');
+    expect(decision.gates.find(gate => gate.code === 'QUOTES_READY')?.status).toBe('pass');
+  });
+
+  it('still gates a new-entry pair on a stale long-leg quote (both legs are transacted)', () => {
+    const decision = evaluatePmccDecision({ pair: pair('new-pmcc', quote('stale', false), quote('acceptable', true)), criteria, marketSession: 'open' });
+    expect(decision.readiness).toBe('WAIT_MONITOR');
   });
 
   it('keeps a structural failure disqualified even when the market is closed', () => {

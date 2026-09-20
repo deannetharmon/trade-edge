@@ -301,30 +301,16 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     renderScreener();
 
     const card = await screen.findByTestId('pmcc-result-card');
-    // FIX: this text moved into the "quote and pricing detail" disclosure
-    // (see the header comment right above decisionStrip: "Net debit,
-    // strike width, total premium, and profit-at-current-price move into
-    // the 'quote and pricing detail' disclosure below") -- needs the outer
-    // card expanded, then that inner disclosure expanded too. Wording also
-    // drifted: real text is "Net delta ideal range: 0.40–0.65, default
-    // scan criteria." (no parentheses), and "Total premium $X, assumes
-    // level rolls. Profit $Y if closed today at current price." is one
-    // combined sentence, not two separate phrases -- confirmed directly
-    // from source.
-    // FIX: DEFAULT_PMCC_SHORT_DELTA_RANGE.max is 0.35 now (raised from an
-    // earlier 0.30 specifically to include liquid calls like UBER's
-    // 0.32-delta -- see lib/scans/pmccConfig.ts's own comment), making the
-    // ideal range 0.70 - 0.35 = 0.35, not 0.40. Confirmed directly against
-    // the real constant rather than the stale hand-math in this comment.
+    // The pricing detail is a labelled two-column grid (ee247b83): each row is a label span plus a value span.
+    // Needs the outer card expanded, then the inner "quote and pricing detail" disclosure expanded too.
+    // DEFAULT_PMCC_SHORT_DELTA_RANGE.max is 0.35 (raised from 0.30 to include liquid calls such as a 0.32-delta),
+    // so the ideal net-delta range is 0.70 - 0.35 = 0.35 up to 0.85 - 0.20 = 0.65.
     fireEvent.click(within(card).getByRole('button', { name: /Expand .* PMCC details/ }));
     fireEvent.click(within(card).getByRole('button', { name: /Show quote and pricing detail/ }));
-    // FIX: each {} interpolation in the JSX splits this into several text
-    // nodes ("Net delta ideal range: ", "0.40", "–", "0.65", ...) -- a
-    // single regex expecting it all as one string never matches. Anchored
-    // on a stable substring, then checked against the whole <p>'s
-    // textContent instead.
-    expect(within(card).getByText(/Net delta ideal range:/).closest('p')).toHaveTextContent('Net delta ideal range: 0.35–0.65, default scan criteria.');
-    expect(within(card).getByText(/Total premium/).closest('p')).toHaveTextContent('Total premium $30.00, assumes level rolls. Profit $15.00 if closed today at current price.');
+    const row = (label: string) => within(card).getByText(label).closest('div') as HTMLElement;
+    expect(row('Net delta ideal range')).toHaveTextContent('0.35–0.65');
+    expect(row('Total premium (level rolls)')).toHaveTextContent('$30.00');
+    expect(row('Profit if closed today')).toHaveTextContent('$15.00');
   });
 
   it('does not flag the breakeven/short-strike warning for a healthy structure', async () => {

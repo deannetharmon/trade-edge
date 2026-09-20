@@ -61,27 +61,25 @@ describe('PT-0002B portfolio execution integration', () => {
     expect(brokerMutation).toHaveBeenCalledOnce();
   });
 
-  it('guards SetStopLossButton.submit before submission work', () => {
-    const block = section(
-      'function SetStopLossButton',
-      'export default function PortfolioPage',
-    );
-
-    const submitIndex = block.indexOf(
-      'const submit = async () => {',
-    );
-    const guardIndex = block.indexOf(
-      "'set stop-loss order'",
-      submitIndex,
-    );
-    const accessTokenIndex = block.indexOf(
-      'const token = await getAccessToken();',
-      submitIndex,
-    );
+  // Each stop-order component has its own submit(); slice per component so the check cannot silently pick up a
+  // neighbour's submit (StandaloneLeapsStopControl sits between SetStopLossButton and SetStopLossButtonInner).
+  function expectGuardBeforeBrokerWork(componentStart: string, componentEnd: string, guardLabel: string) {
+    const block = section(componentStart, componentEnd);
+    const submitIndex = block.indexOf('const submit = async () => {');
+    const guardIndex = block.indexOf(guardLabel, submitIndex);
+    const accessTokenIndex = block.indexOf('const token = await getAccessToken();', submitIndex);
 
     expect(submitIndex).toBeGreaterThanOrEqual(0);
-    expect(guardIndex).toBeGreaterThan(submitIndex);
-    expect(accessTokenIndex).toBeGreaterThan(guardIndex);
+    expect(guardIndex, `${guardLabel} guard must be inside submit()`).toBeGreaterThan(submitIndex);
+    expect(accessTokenIndex, 'the broker token must be requested only after the guard').toBeGreaterThan(guardIndex);
+  }
+
+  it('guards SetStopLossButtonInner.submit before submission work', () => {
+    expectGuardBeforeBrokerWork('function SetStopLossButtonInner', 'export default function PortfolioPage', "'set stop-loss order'");
+  });
+
+  it('guards StandaloneLeapsStopControl.submit before submission work', () => {
+    expectGuardBeforeBrokerWork('function StandaloneLeapsStopControl', '// STOP-DIALOG-LABELING-0001 follow-up', "'set standalone LEAPS stop'");
   });
 
   it('guards cancelPendingOrder before ttDelete', () => {

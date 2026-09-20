@@ -175,7 +175,11 @@ describe('TE-0007C final corrective pass: CC capacity gate wiring', () => {
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalledTimes(1));
-    await userEvent.click(await screen.findByRole('button', { name: 'RUN CC SCAN →' }));
+    // CC-SELECT-0001 (45f1a383): RUN CC SCAN is disabled while holdings load, so a second, overlapping capacity
+    // load can no longer come from the run button. It still happens when the trader closes the modal and
+    // reopens it while the first load is in flight -- which is the overlap this guard protects.
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CCs' }));
     await waitFor(() => expect(getCoveredCallCapacityReportMock).toHaveBeenCalledTimes(2));
 
     const newerReport = {
@@ -190,11 +194,13 @@ describe('TE-0007C final corrective pass: CC capacity gate wiring', () => {
     newer.resolve(newerReport);
     await waitFor(() => expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalledTimes(1));
     expect(emitCoveredCallCapacityShadowMock.mock.calls[0][0]).toBe(newerReport);
-    expect(await screen.findByRole('button', { name: /NKE \(2\)/i })).toBeInTheDocument();
+    // The holdings chip renders in both the open modal and the sidebar panel (CC-SELECT-0001), so expect one or more.
+    expect((await screen.findAllByRole('button', { name: /NKE \(2\)/i })).length).toBeGreaterThan(0);
 
     older.resolve({ status: 'ok', bySymbol: {}, warnings: [] });
-    await Promise.resolve();
-    await Promise.resolve();
+    // Wait a full macrotask so the older load's continuation AND its queued microtask have both run; a couple of
+    // `await Promise.resolve()` ticks were not enough to reach it, which let the guard go untested.
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(emitCoveredCallCapacityShadowMock).toHaveBeenCalledTimes(1);
   });
 

@@ -78,9 +78,11 @@ describe('TE-0007: launcher routing', () => {
     await addToUniverse('NVDA');
     const findSpreads = await screen.findByRole('button', { name: 'FIND SPREADS' });
     await userEvent.click(findSpreads);
-    expect(await screen.findByRole('radio', { name: /FILTER/ })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /RANK/ })).toBeInTheDocument();
+    // FILTER-MODE-REMOVAL-0002 (3e8d9491): Filter is hidden; Rank and Targeted remain. When SCREENER-CONFIG-0001
+    // reinstates Filter this assertion fails on purpose -- restore `expect(... /FILTER/ ...).toBeInTheDocument()`.
+    expect(await screen.findByRole('radio', { name: /RANK/ })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /TARGETED/ })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /FILTER/ })).not.toBeInTheDocument();
   });
 
   it('2. Find CSPs passes the canonical Opportunity Universe to the CSP scan', async () => {

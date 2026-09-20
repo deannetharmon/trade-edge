@@ -469,8 +469,11 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toHaveAttribute('aria-busy', 'false');
   });
 
+  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from the selectable modes. Restore the Filter row below when
+  // SCREENER-CONFIG-0001 reinstates it: ['Filter', 'Filtered Cash-Secured Put Scan'].
+  it.todo('creates a canonical Filter CSP session only after confirmation -- pending SCREENER-CONFIG-0001 (Filter hidden)');
+
   it.each([
-    ['Filter', 'Filtered Cash-Secured Put Scan'],
     ['Rank', 'Ranked Cash-Secured Put Scan'],
     ['Targeted', 'Targeted Cash-Secured Put Scan'],
   ])('creates a canonical %s CSP session only after confirmation', async (modeLabel, expectedIdentity) => {

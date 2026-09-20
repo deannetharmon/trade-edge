@@ -33,12 +33,24 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     });
   });
 
-  it('supports all three modes and clearly states the automatic safeguards', async () => {
+  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from the selectable modes ("hide-first": the default CSP draft is
+  // still Filter, so the modal opens on the Filter form with no mode radio selected, and the default scan still runs
+  // in Filter mode -- UnifiedStrategyLauncher test 7 depends on that). These tests pin TODAY's behavior. When
+  // SCREENER-CONFIG-0001 reinstates Filter they fail on purpose: restore the three-mode assertions (git history
+  // before 3e8d9491) and the Filter-dependent tests in CspCandidateDiscovery, ScreenerUXHierarchy, and
+  // UnifiedStrategyLauncher.
+  it('offers Rank and Targeted while Filter is hidden, and clearly states the automatic safeguards', async () => {
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
-    for (const name of [/Filter/i, /Rank/i, /Targeted/i]) {
-      expect(screen.getByRole('radio', { name })).toBeInTheDocument();
-    }
+    expect(screen.getAllByRole('radio', { name: /^(Rank|Targeted)/i })).toHaveLength(2);
+    expect(screen.queryByRole('radio', { name: /^Filter/i })).not.toBeInTheDocument();
     expect(screen.getByText(/Liquidity and earnings checks are applied automatically/i)).toBeInTheDocument();
+  });
+
+  it('opens on the hidden Filter draft with neither visible mode selected (known hide-first state)', async () => {
+    render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
+    expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: /^Targeted/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
   });
 
   it('accepts a decimal typed from its leading dot without coercing the interim dot to zero', async () => {
@@ -75,12 +87,12 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Filter, Rank, and Targeted drafts isolated and requires deliberate Targeted confirmation', async () => {
+  it('keeps Rank and Targeted drafts isolated and requires deliberate Targeted confirmation', async () => {
     const onRun = vi.fn();
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={onRun} />);
+    await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.clear(screen.getByLabelText('Min DTE'));
     await userEvent.type(screen.getByLabelText('Min DTE'), '25');
-    await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
     await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
     expect(screen.getByLabelText('Min DTE')).toHaveValue('30');
@@ -88,11 +100,10 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     await userEvent.type(screen.getByLabelText('Minimum estimated POP'), '70');
     await userEvent.click(screen.getByRole('button', { name: 'CONFIRM TARGETS' }));
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
-    await userEvent.click(screen.getByRole('radio', { name: /^Filter/i }));
-    expect(screen.getByLabelText('Min DTE')).toHaveValue('25');
-    expect(screen.queryByLabelText('Minimum estimated POP')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
+    expect(screen.getByLabelText('Min DTE')).toHaveValue('25');
     expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
+    expect(screen.queryByLabelText('Minimum estimated POP')).not.toBeInTheDocument();
   });
 
   it('does not allow Targeted confirmation until POP, OTM, or ROC actually narrows the scan', async () => {
@@ -114,14 +125,15 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
 
   it('supports roving radio focus with arrow keys and a non-color selected cue', async () => {
     render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
-    const filter = screen.getByRole('radio', { name: /^filter/i });
-    expect(filter).toHaveFocus();
-    expect(filter).toHaveTextContent('Selected');
-    await userEvent.keyboard('{ArrowRight}');
     const rank = screen.getByRole('radio', { name: /^rank/i });
+    await userEvent.click(rank);
     expect(rank).toHaveFocus();
-    expect(rank).toHaveAttribute('aria-checked', 'true');
     expect(rank).toHaveTextContent('Selected');
+    await userEvent.keyboard('{ArrowRight}');
+    const targeted = screen.getByRole('radio', { name: /^targeted/i });
+    expect(targeted).toHaveFocus();
+    expect(targeted).toHaveAttribute('aria-checked', 'true');
+    expect(targeted).toHaveTextContent('Selected');
   });
 
   it('uses roving tabindex and arrow-key selection for the preset radiogroup', async () => {
@@ -144,7 +156,8 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     const custom = screen.getByRole('radio', { name: /Custom/i });
     expect(custom).toHaveAttribute('aria-checked', 'true');
     expect(custom).toHaveAttribute('tabindex', '0');
-    expect(screen.getAllByRole('radio').filter(radio => radio.getAttribute('aria-checked') === 'true')).toHaveLength(2);
+    // Only the preset radio is selected: no mode radio is selected while Filter is hidden (FILTER-MODE-REMOVAL-0002).
+    expect(screen.getAllByRole('radio').filter(radio => radio.getAttribute('aria-checked') === 'true')).toHaveLength(1);
     custom.focus();
     await userEvent.keyboard('{ArrowLeft}');
     expect(screen.getByRole('radio', { name: /More opportunities/i })).toHaveFocus();

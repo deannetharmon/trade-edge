@@ -281,7 +281,10 @@ describe('SCREENER-OI-0001: 18. no regression to Covered Call capacity protectio
     await clickCcScan();
 
     await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
-    const oiLabel = screen.getByText(MIN_OI_LABEL);
+    // b3bd83ad ("Standardize screener controls and simplify scan copy") made the Filtered-mode OI label
+    // strategy-specific: Covered Call shows "Call OI" (CSP "Put OI", PMCC "Leg OI"). Same control, same behavior.
+    // "Call OI" also appears in the CC scan modal; the results-panel control is the one with the OI preset buttons.
+    const oiLabel = screen.getAllByText('Call OI').find(el => within(el.closest('div') as HTMLElement).queryByRole('button', { name: '250' })) as HTMLElement;
     expect(oiLabel).toBeInTheDocument();
     const oiRow = oiLabel.closest('div') as HTMLElement;
 

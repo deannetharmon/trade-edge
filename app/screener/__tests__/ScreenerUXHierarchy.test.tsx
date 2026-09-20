@@ -98,7 +98,10 @@ afterEach(() => {
 });
 
 describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Filtered)', () => {
-  it('renders scan identity -> accounting -> controls -> Best Opportunities -> symbol outcomes, in that DOM order', async () => {
+  // SKIPPED pending SCREENER-CONFIG-0001: FIND SPREADS -> RUN SCREENER used to run in Filter mode; since
+  // FILTER-MODE-REMOVAL-0002 (3e8d9491) it runs Ranked, so the Filtered results panel this asserts is unreachable
+  // from the launcher. Un-skip when Filter is reinstated.
+  it.skip('renders scan identity -> accounting -> controls -> Best Opportunities -> symbol outcomes, in that DOM order', async () => {
     // NKE evaluates with a qualifying candidate; GHOST's chain fetch fails
     // outright (a real "failed" symbol outcome, not a fabricated
     // disqualification), giving Symbol outcomes something real to show.
@@ -198,7 +201,8 @@ describe('SCREENER-UX-0001 corrective pass: narrow-viewport rendering', () => {
   // width, i.e. nothing in this pass is conditionally omitted or crashes
   // below desktop width. Full visual/responsive verification is recorded as
   // backlog in the implementation report.
-  it('renders every hierarchy section and keeps disclosures operable at a 375px viewport width', async () => {
+  // SKIPPED pending SCREENER-CONFIG-0001 -- same reason as the Filtered hierarchy test above.
+  it.skip('renders every hierarchy section and keeps disclosures operable at a 375px viewport width', async () => {
     Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 });
     window.dispatchEvent(new Event('resize'));
 
