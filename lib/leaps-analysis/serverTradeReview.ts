@@ -12,6 +12,9 @@ const API_BASE = 'https://api.tastytrade.com';
 const QUOTE_MAX_AGE_MS = 60_000;
 // LEAPS-AI-0002: analysis-only freshness window while the regular session is open. Order paths keep QUOTE_MAX_AGE_MS.
 const ANALYSIS_QUOTE_MAX_AGE_MS = 300_000;
+// LEAPS-AI-0003: prior-session quotes (market not open) must still be recent: 5 calendar days covers the longest normal closure (a holiday weekend, ~4.8 days).
+const PRIOR_SESSION_MAX_AGE_DAYS = 5;
+const PRIOR_SESSION_MAX_AGE_MS = PRIOR_SESSION_MAX_AGE_DAYS * 86_400_000;
 export const SERVER_LEAPS_POLICY: LeapsEntryCriteria = { deltaMin: 0.70, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 20, spreadPctMax: 10, requireQuoteTimestamp: true, policyVersion: 'leaps-entry-server-v1' };
 export type BrokerContext = { accessToken: string; redis: Redis };
 export type ServerLeapsReview = { qualification: LeapsEntryQualification; occSymbol: string; symbol: string; strike: number; expiration: string; dte: number; bid: number | null; ask: number | null; spot: number | null; delta: number | null; openInterest: number | null; impliedVolatility: number | null; optionQuoteTimestamp: string | null; underlyingQuoteTimestamp: string | null; instrumentType: 'Equity Option' | 'Index Option'; multiplier: number; provider: 'tastytrade'; fetchedAt: string; marketSession?: string; quoteBasis?: 'live' | 'last_session' };
@@ -55,11 +58,11 @@ async function resolveWithContext(context: BrokerContext, input: { underlyingSym
   const nowMs = Date.now(); const marketSession = derivePmccMarketSession(new Date(nowMs));
   const priorSessionQuotes = freshness === 'analysis' && marketSession !== 'open' && marketSession !== 'unknown';
   const maxAgeMs = freshness === 'analysis' ? ANALYSIS_QUOTE_MAX_AGE_MS : QUOTE_MAX_AGE_MS;
-  const quotesFresh = priorSessionQuotes ? optionQuoteTimestamp != null && underlyingQuoteTimestamp != null : fresh(optionQuoteTimestamp, nowMs, maxAgeMs) && fresh(underlyingQuoteTimestamp, nowMs, maxAgeMs);
+  const quotesFresh = priorSessionQuotes ? fresh(optionQuoteTimestamp, nowMs, PRIOR_SESSION_MAX_AGE_MS) && fresh(underlyingQuoteTimestamp, nowMs, PRIOR_SESSION_MAX_AGE_MS) : fresh(optionQuoteTimestamp, nowMs, maxAgeMs) && fresh(underlyingQuoteTimestamp, nowMs, maxAgeMs);
   const quoteBasis: 'live' | 'last_session' = priorSessionQuotes && quotesFresh ? 'last_session' : 'live';
   const dte = Math.ceil((Date.parse(`${contract.expiration}T00:00:00Z`) - Date.now()) / 86_400_000);
   const qualification = evaluateLeapsEntry({ occSymbol: input.occSymbol, strike: contract.strike, dte, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), bid, ask, underlyingPrice: spot, quoteTimestamp: quotesFresh ? optionQuoteTimestamp : null }, criteria);
-  if (!quotesFresh) { const gate = qualification.gates.find(item => item.id === 'freshness'); if (gate) gate.message = `Option and underlying quotes must both be no more than ${maxAgeMs / 1000} seconds old${freshness === 'analysis' ? ' while the market is open' : ''}`; }
+  if (!quotesFresh) { const gate = qualification.gates.find(item => item.id === 'freshness'); if (gate) gate.message = priorSessionQuotes ? (optionQuoteTimestamp == null || underlyingQuoteTimestamp == null ? 'Option and underlying quote timestamps are required' : `Quotes are more than ${PRIOR_SESSION_MAX_AGE_DAYS} days old`) : `Option and underlying quotes must both be no more than ${maxAgeMs / 1000} seconds old${freshness === 'analysis' ? ' while the market is open' : ''}`; }
   return { qualification, occSymbol: input.occSymbol, symbol: input.underlyingSymbol, strike: contract.strike, expiration: contract.expiration, dte, bid, ask, spot, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), impliedVolatility: finite(option?.volatility ?? option?.['implied-volatility'] ?? option?.iv), optionQuoteTimestamp, underlyingQuoteTimestamp, instrumentType: String(option?.['instrument-type'] ?? '').toLowerCase().includes('index') ? 'Index Option' : 'Equity Option', multiplier: contract.multiplier, provider: 'tastytrade', fetchedAt: new Date().toISOString(), marketSession, quoteBasis };
 }
 
@@ -165,7 +168,7 @@ export async function submitPmccOrder(userId: string, input: {
 }
 
 /** Analysis lookup intentionally has no brokerage-account input or output. */
-export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input, SERVER_LEAPS_POLICY, 'analysis'); } finally { context.redis.disconnect(); } }
+export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria = SERVER_LEAPS_POLICY) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input, criteria, 'analysis'); } finally { context.redis.disconnect(); } }
 
 /** Account ownership and exact live contract evidence are revalidated on every call. */
 export async function reviewLeapsContract(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria = SERVER_LEAPS_POLICY) { const context = await brokerContext(userId); try { const accountNumber = await validatedAccount(context, input.accountLocator); const review = await resolveWithContext(context, input, criteria); return { accountNumber, context, review }; } catch (error) { context.redis.disconnect(); throw error; } }

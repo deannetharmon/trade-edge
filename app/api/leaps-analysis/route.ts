@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, claimAnalysis, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
+import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, isAnalysisEligible, snapshotCriteria, claimAnalysis, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
 import { resolveLeapsContractEvidence } from '@/lib/leaps-analysis/serverTradeReview';
 import { isLeapsAnalysisEnabled } from '@/lib/leaps-analysis/featureFlag';
+import { resolveAnalysisCriteria } from '@/lib/leaps-analysis/criteria';
 
 const intents = new Set<LeapsIntent>(['standalone', 'stock_replacement', 'future_pmcc', 'not_specified']);
-const system = `Analyze only the immutable LEAPS snapshot supplied by the server. Separate observed evidence from bounded inference. Discuss contract mechanics and the balance among intrinsic/extrinsic value, capital, delta, DTE, liquidity/spread, IV, and breakeven. Lower extrinsic and higher intrinsic can support stock-replacement or future-PMCC mechanics, but do not treat either as sufficient. Never select a contract, direct a transaction, rank it against unseen candidates, predict returns or prices, size a position, approve qualification, or use authority language. If contract.quoteBasis is 'last_session', the quotes come from the prior trading session because the market is not open: say so plainly at the start of the mechanics, never describe those prices as current, and state that pricing must be rechecked after the market opens. Use only one posture from the schema.`;
+const system = `Analyze only the immutable LEAPS snapshot supplied by the server. Separate observed evidence from bounded inference. Discuss contract mechanics and the balance among intrinsic/extrinsic value, capital, delta, DTE, liquidity/spread, IV, and breakeven. Lower extrinsic and higher intrinsic can support stock-replacement or future-PMCC mechanics, but do not treat either as sufficient. Never select a contract, direct a transaction, rank it against unseen candidates, predict returns or prices, size a position, approve qualification, or use authority language. If contract.quoteBasis is 'last_session', the quotes come from the prior trading session because the market is not open: say so plainly at the start of the mechanics, never describe those prices as current, and state that pricing must be rechecked after the market opens. The qualification status and gates were computed by TradeEdge from the trader's own scan filters (see snapshot.criteria); never restate them as your own judgment and never suggest changing a filter. If the status is REVIEW_REQUIRED, no extrinsic ceiling is set: say plainly that the contract is not fully qualified and that you are explaining mechanics only. Use only one posture from the schema.`;
 
 async function user() { const session = await getServerSession(authOptions); return (session?.user as { id?: string } | undefined)?.id ?? null; }
 function enabled() { return isLeapsAnalysisEnabled(); }
@@ -41,10 +42,12 @@ export async function POST(request: NextRequest) {
     const proposedId = crypto.randomUUID(); const claim = await claimAnalysis(redis, userId, fingerprint, proposedId);
     if (claim.cachedId) { const cached = await getAnalysisRecord(redis, userId, claim.cachedId); if (cached) return NextResponse.json(await markCurrent(redis, userId, cached)); }
 
-    const review = await resolveLeapsContractEvidence(userId, { underlyingSymbol, occSymbol });
-    const snapshot = buildSnapshot(review, intent, quantity, objective); snapshot.id = proposedId;
+    // LEAPS-AI-0003: judged against the trader's own scan filters when supplied (same rule as the order gate), else the fixed server policy.
+    const { criteria, source: criteriaSource } = resolveAnalysisCriteria(body);
+    const review = await resolveLeapsContractEvidence(userId, { underlyingSymbol, occSymbol }, criteria);
+    const snapshot = buildSnapshot(review, intent, quantity, objective, snapshotCriteria(criteria, criteriaSource)); snapshot.id = proposedId;
     const base = { id: snapshot.id, requestHash: fingerprint, snapshot, model: null, attempts: 0, createdAt: snapshot.createdAt, expiresAt: snapshot.expiresAt, current: true, usage: null };
-    if (snapshot.qualification.status !== 'CONTRACT_QUALIFIED' || snapshot.unavailable.length) {
+    if (!isAnalysisEligible(snapshot.qualification.status) || snapshot.unavailable.length) {
       const record: AnalysisRecord = { ...base, status: 'MORE_INFORMATION_NEEDED', output: null };
       await saveAnalysisRecord(redis, userId, record, fingerprint); return NextResponse.json(record);
     }

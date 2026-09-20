@@ -3161,7 +3161,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     try {
       const response = await fetch('/api/leaps-analysis', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: analysisObjective, idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: analysisObjective, idempotencyKey: crypto.randomUUID(), deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : body?.error?.message ?? `Analysis failed (${response.status})`);
@@ -3297,6 +3297,12 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
                 <span className="text-violet-300">AI review: <b>{String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</b></span>
                 <span className={analysis.current === false ? 'text-amber-300' : th.textMuted}>{analysis.current === false ? 'Older saved snapshot' : `Snapshot ${new Date(analysis.snapshot?.createdAt).toLocaleString()}`}</span>
               </div>
+              {analysis.snapshot?.criteria && (
+                <p className={th.textMuted}>{analysis.snapshot.criteria.source === 'scan_filters' ? 'Judged against your scan filters' : 'Judged against default limits'}: Δ {Number(analysis.snapshot.criteria.deltaMin).toFixed(2)}–{Number(analysis.snapshot.criteria.deltaMax).toFixed(2)} · DTE {analysis.snapshot.criteria.dteMin}{analysis.snapshot.criteria.dteMax != null ? `–${analysis.snapshot.criteria.dteMax}` : '+'} · OI ≥ {analysis.snapshot.criteria.oiMin} · {analysis.snapshot.criteria.extrinsicPctMax == null ? 'no extrinsic ceiling set' : `Extrinsic ≤ ${analysis.snapshot.criteria.extrinsicPctMax}%`}</p>
+              )}
+              {analysis.snapshot?.qualification?.status === 'REVIEW_REQUIRED' && (
+                <p className="text-amber-300">Extrinsic ceiling not set — explaining mechanics only; contract not fully qualified. Set an extrinsic ceiling to fully qualify.</p>
+              )}
               {analysis.snapshot?.contract?.quoteBasis === 'last_session' && (
                 <p className="text-amber-300">Market closed — quotes are from the prior session{analysis.snapshot.contract.optionQuoteTimestamp ? ` (option quote ${new Date(analysis.snapshot.contract.optionQuoteTimestamp).toLocaleString()})` : ''}. Recheck pricing after the market opens.</p>
               )}
