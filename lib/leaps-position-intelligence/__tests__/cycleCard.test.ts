@@ -136,3 +136,23 @@ describe('gaps and shapes', () => {
     expect(JSON.stringify([l, s])).toBe(before);
   });
 });
+
+describe('real event callouts (LEAPS-EVENTS-0001)', () => {
+  const events = [{ id: 'ex-dividend', tone: 'watch' as const, text: 'Ex-dividend date 2026-10-08 falls before this call expires.' }];
+
+  it('are always shown when supplied, even with plenty of room, and replace the standing note', () => {
+    const c = buildCycleCard({ longCall: longCall(), short: short(), events });
+    expect(c.callouts.filter(x => x.id === 'ex-dividend')).toEqual(events);
+    expect(c.callouts.some(x => x.id === 'events')).toBe(false);
+  });
+
+  it('near the strike, the supplied callouts replace the standing note instead of adding to it', () => {
+    const c = buildCycleCard({ longCall: longCall({ stockPrice: 366 }), short: short(), events });
+    expect(c.callouts.some(x => x.id === 'events')).toBe(false);
+    expect(c.callouts.some(x => x.id === 'ex-dividend')).toBe(true);
+  });
+
+  it('an empty list suppresses the standing note', () => {
+    expect(buildCycleCard({ longCall: longCall({ stockPrice: 366 }), short: short(), events: [] }).callouts.some(x => x.id === 'events')).toBe(false);
+  });
+});

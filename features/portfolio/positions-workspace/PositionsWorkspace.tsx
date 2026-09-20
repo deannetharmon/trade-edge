@@ -17,6 +17,7 @@ import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecomm
 import { evaluateHeldPmccLiveReadiness, type HeldPmccLiveReadiness } from '@/lib/scans/pmccHeldReadinessClient';
 import { buildIncomeCard } from '@/lib/leaps-position-intelligence/incomeCard';
 import { buildCycleCard } from '@/lib/leaps-position-intelligence/cycleCard';
+import { buildEventCallouts, isNearItm, type EventCalendarDates, type EventCheckStatus } from '@/lib/leaps-position-intelligence/eventNote';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
@@ -156,15 +157,42 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   // Every number comes from the position's own facts and the live candidate (lib/leaps-position-intelligence/incomeCard.ts).
   const held = opportunity.heldPmccLong;
   const liveCandidate = live?.status === 'review-income-call' ? live.candidate : null;
-  const incomeCard = held ? buildIncomeCard({
-    longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
-    candidate: liveCandidate,
-  }) : null;
   // LEAPS-POS-0002: a held LEAPS with a short call already open shows the cycle (capture, time, room, if-assigned) instead.
   const pairedShort = held ? opportunity.pairedShort : undefined;
+  // LEAPS-EVENTS-0001: real earnings / ex-dividend dates (same /api/event-risk source the PMCC modals use) for the call's window.
+  const eventExpiration = pairedShort?.expiration ?? liveCandidate?.expiration ?? null;
+  const eventKey = eventExpiration ? `${opportunity.symbol}:${eventExpiration}` : '';
+  const [eventCheck, setEventCheck] = useState<{ key: string; status: EventCheckStatus; calendar: EventCalendarDates | null }>({ key: '', status: 'loading', calendar: null });
+  useEffect(() => {
+    if (!eventExpiration) return;
+    let active = true;
+    const key = `${opportunity.symbol}:${eventExpiration}`;
+    setEventCheck({ key, status: 'loading', calendar: null });
+    const from = new Date().toISOString().slice(0, 10);
+    Promise.resolve()
+      .then(() => fetch(`/api/event-risk?symbol=${encodeURIComponent(opportunity.symbol)}&from=${from}&to=${eventExpiration}`))
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('event request failed')))
+      .then(data => {
+        if (!active) return;
+        if (data?.verified && data?.events) setEventCheck({ key, status: 'ok', calendar: { earningsDate: data.events.earningsDate ?? null, exDividendDate: data.events.exDividendDate ?? null } });
+        else setEventCheck({ key, status: 'unavailable', calendar: null });
+      })
+      .catch(() => { if (active) setEventCheck({ key, status: 'unavailable', calendar: null }); });
+    return () => { active = false; };
+  }, [opportunity.symbol, eventExpiration]);
+  const events = eventExpiration ? buildEventCallouts({
+    status: eventCheck.key === eventKey ? eventCheck.status : 'loading', calendar: eventCheck.key === eventKey ? eventCheck.calendar : null,
+    shortExpiration: eventExpiration, mode: pairedShort ? 'open-call' : 'candidate',
+    nearItm: isNearItm(pairedShort?.strike ?? liveCandidate?.strike ?? 0, held?.stockPrice), today: new Date().toISOString().slice(0, 10),
+  }) : undefined;
+  const incomeCard = held ? buildIncomeCard({
+    longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
+    candidate: liveCandidate, events,
+  }) : null;
   const cycleCard = held && pairedShort ? buildCycleCard({
     longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
     short: { strike: pairedShort.strike, dte: pairedShort.dte, quantity: pairedShort.quantity, soldPerShare: pairedShort.soldPerShare, markPerShare: pairedShort.markPerShare, delta: pairedShort.delta },
+    events,
   }) : null;
   // The long explanatory sentence is the whole story for Monitor / Not ready; for a Review state the dashboard carries it and the sentence moves under Details.
   const reasonLine = <p className={`mt-2 ${th.textFaint}`}>{reason}</p>;

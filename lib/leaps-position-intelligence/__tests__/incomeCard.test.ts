@@ -114,3 +114,21 @@ describe('gaps and shapes', () => {
     expect(JSON.stringify([l, cand])).toBe(before);
   });
 });
+
+describe('real event callouts (LEAPS-EVENTS-0001)', () => {
+  it('replace the standing "not checked yet" note when supplied, including an empty list', () => {
+    const events = [{ id: 'events', tone: 'good' as const, text: 'No earnings or ex-dividend date before 2026-10-16.' }];
+    const c = buildIncomeCard({ longCall: longCall(), candidate: candidate(), events });
+    expect(c.callouts.filter(x => x.id === 'events')).toEqual(events);
+    expect(buildIncomeCard({ longCall: longCall(), candidate: candidate(), events: [] }).callouts.some(x => x.id === 'events')).toBe(false);
+  });
+
+  it('a red event callout leads the list', () => {
+    const c = buildIncomeCard({ longCall: longCall(), candidate: candidate(), events: [{ id: 'earnings', tone: 'bad', text: 'Earnings on 2026-10-01 fall before this call expires.' }] });
+    expect(c.callouts[0].id).toBe('earnings');
+  });
+
+  it('without a candidate there is nothing to check, so no event callout', () => {
+    expect(buildIncomeCard({ longCall: longCall(), candidate: null, events: [{ id: 'events', tone: 'good', text: 'x' }] }).callouts).toEqual([]);
+  });
+});

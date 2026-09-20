@@ -52,7 +52,10 @@ export function longBreakevenTile(l: IncomeCardLongCall): DashboardTile {
   return tile('breakeven', 'Breakeven at expiry', money(Math.round(breakeven * 100) / 100), tone, above == null ? [{ text: 'stock price unavailable', tone: 'neutral' }] : [{ text: above > 0 ? `+${pct(above)} above stock` : `${pct(Math.abs(above))} below stock`, tone }]);
 }
 
-export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate: IncomeCardCandidate | null; reviewDte?: number }): IncomeCard {
+/**
+ * `events`: callouts from buildEventCallouts (LEAPS-EVENTS-0001). When omitted the card keeps its standing "not checked yet" note.
+ */
+export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate: IncomeCardCandidate | null; reviewDte?: number; events?: DashboardCallout[] }): IncomeCard {
   const { longCall: l, candidate: c } = input;
   const reviewDte = input.reviewDte ?? EXISTING_LEAPS_REVIEW_DTE;
   const contracts = l.quantity;
@@ -100,7 +103,8 @@ export function buildIncomeCard(input: { longCall: IncomeCardLongCall; candidate
           : { id: 'extrinsic-carry', tone: 'watch', text: `Credit is ${ratio.toFixed(1)}× the LEAPS's extrinsic value per month: less than the LEAPS loses in a flat month.` });
       }
     }
-    callouts.push({ id: 'events', tone: 'watch', text: 'Earnings and ex-dividend dates are not checked here yet: check them before selling.' });
+    if (input.events === undefined) callouts.push({ id: 'events', tone: 'watch', text: 'Earnings and ex-dividend dates are not checked here yet: check them before selling.' });
+    else callouts.push(...input.events);
   }
   if (l.dte < reviewDte) callouts.push({ id: 'dte', tone: 'watch', text: `LEAPS has ${l.dte} days left: past your ${reviewDte}-day review point.` });
   if (entry == null) callouts.push({ id: 'entry', tone: 'watch', text: 'Entry cost is missing, so breakeven and the if-assigned result are unavailable.' });

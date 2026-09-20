@@ -34,7 +34,11 @@ const SHARES = 100;
 const tile = (id: string, label: string, value: string, tone: DashboardTone, parts: Array<{ text: string; tone: DashboardTone }> = []): DashboardTile => ({ id, label, value, tone, parts });
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
-export function buildCycleCard(input: { longCall: IncomeCardLongCall; short: CycleShortCall }): CycleCard {
+/**
+ * `events`: callouts from buildEventCallouts (LEAPS-EVENTS-0001). When omitted, the card falls back to the standing note shown only
+ * when the stock is close to the strike.
+ */
+export function buildCycleCard(input: { longCall: IncomeCardLongCall; short: CycleShortCall; events?: DashboardCallout[] }): CycleCard {
   const { longCall: l, short: s } = input;
   const policy = CYCLE_CARD_POLICY;
   const contracts = s.quantity;
@@ -80,7 +84,8 @@ export function buildCycleCard(input: { longCall: IncomeCardLongCall; short: Cyc
   if (windowOpen) callouts.push({ id: 'window', tone: 'watch', text: `${s.dte} days left: your roll-or-close window is open.` });
   if (room != null && room <= 0) callouts.push({ id: 'room', tone: 'bad', text: 'Stock is at or above the short strike: the call is in the money and can be assigned.' });
   else if (room != null && room < policy.nearStrikePct) callouts.push({ id: 'room', tone: 'watch', text: `Stock is only ${pct(room)} below the short strike.` });
-  if (room != null && room < policy.nearStrikePct) callouts.push({ id: 'events', tone: 'watch', text: 'Earnings and ex-dividend dates are not checked here yet: an in-the-money call can be assigned early, especially near an ex-dividend date.' });
+  if (input.events !== undefined) callouts.push(...input.events);
+  else if (room != null && room < policy.nearStrikePct) callouts.push({ id: 'events', tone: 'watch', text: 'Earnings and ex-dividend dates are not checked here yet: an in-the-money call can be assigned early, especially near an ex-dividend date.' });
   if (breakeven != null) {
     const above = (s.strike / breakeven - 1) * 100;
     callouts.push(s.strike >= breakeven
