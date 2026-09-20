@@ -82,6 +82,8 @@ import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioD
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
 import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { parseOccSymbol } from '@/lib/optionSymbol';
+import { LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
+import { buildLeapsDashboard } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
@@ -3353,31 +3355,30 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
           {analysisError && <p className="mt-3 text-[10px] text-red-400">{analysisError}</p>}
           {analysis && (
             <div className="mt-3 space-y-2 text-[10px]">
-              <div className="flex flex-wrap gap-3">
-                <span className={analysis.snapshot?.qualification?.status === 'CONTRACT_QUALIFIED' ? 'text-emerald-400' : 'text-amber-300'}>Contract status: <b>{String(analysis.snapshot?.qualification?.status ?? 'DATA UNAVAILABLE').replaceAll('_', ' ')}</b></span>
-                <span className="text-violet-300">AI review: <b>{String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</b></span>
-                <span className={analysis.current === false ? 'text-amber-300' : th.textMuted}>{analysis.current === false ? 'Older saved snapshot' : `Snapshot ${new Date(analysis.snapshot?.createdAt).toLocaleString()}`}</span>
-              </div>
-              {analysis.snapshot?.criteria && (
-                <p className={th.textMuted}>{analysis.snapshot.criteria.source === 'scan_filters' ? 'Judged against your scan filters' : 'Judged against default limits'}: Δ {Number(analysis.snapshot.criteria.deltaMin).toFixed(2)}–{Number(analysis.snapshot.criteria.deltaMax).toFixed(2)} · DTE {analysis.snapshot.criteria.dteMin}{analysis.snapshot.criteria.dteMax != null ? `–${analysis.snapshot.criteria.dteMax}` : '+'} · OI ≥ {analysis.snapshot.criteria.oiMin} · {analysis.snapshot.criteria.extrinsicPctMax == null ? 'no extrinsic ceiling set' : `Extrinsic ≤ ${analysis.snapshot.criteria.extrinsicPctMax}%`}</p>
+              {/* LEAPS-DASH-0001: tiles and callouts are computed by rule from the snapshot (lib/leaps-analysis/dashboard.ts); no AI involved. */}
+              {analysis.snapshot && (
+                <LeapsAnalysisDashboard
+                  th={th}
+                  dashboard={buildLeapsDashboard({
+                    snapshot: analysis.snapshot, current: analysis.current !== false,
+                    ivRank: candidate.ivRank, ivx: candidate.ivx, pmccStart,
+                    formatTimestamp: (iso: string) => new Date(iso).toLocaleString(),
+                  })}
+                />
               )}
-              {analysis.snapshot?.qualification?.status === 'REVIEW_REQUIRED' && (
-                <p className="text-amber-300">Extrinsic ceiling not set — explaining mechanics only; contract not fully qualified. Set an extrinsic ceiling to fully qualify.</p>
-              )}
-              {analysis.snapshot?.contract?.quoteBasis === 'last_session' && (
-                <p className="text-amber-300">Market closed — quotes are from the prior session{analysis.snapshot.contract.optionQuoteTimestamp ? ` (option quote ${new Date(analysis.snapshot.contract.optionQuoteTimestamp).toLocaleString()})` : ''}. Recheck pricing after the market opens.</p>
-              )}
-              {analysis.snapshot?.qualification?.gates?.some((gate: any) => gate.status !== 'pass') && (
-                <div className="rounded border border-amber-700/50 p-2"><b className="text-amber-300">Deterministic gates</b><ul className="mt-1 space-y-0.5">{analysis.snapshot.qualification.gates.filter((gate: any) => gate.status !== 'pass').map((gate: any) => <li key={gate.id} className={th.textMuted}>{gate.message} ({String(gate.status).replaceAll('_', ' ')})</li>)}</ul></div>
-              )}
-              {analysis.output && <>
+              {analysis.output && (
+                <details className="rounded border border-violet-500/30 p-2" data-testid="leaps-full-analysis">
+                  <summary className="cursor-pointer text-[10px] font-bold text-violet-300">Read full analysis · AI review: {String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</summary>
+                  <div className="mt-2 space-y-2">
                 <p className={th.text}><b>Mechanics:</b> {analysis.output.mechanics}</p>
                 <p className={th.text}><b>Tradeoffs:</b> {analysis.output.tradeoffs}</p>
                 {analysis.output.evidence?.length > 0 && <div><b className={th.text}>Evidence</b><ul className={`ml-4 list-disc ${th.textMuted}`}>{analysis.output.evidence.map((item: any, index: number) => <li key={index}>{item.field}: {item.fact}</li>)}</ul></div>}
                 {analysis.output.inferences?.length > 0 && <div><b className={th.text}>Bounded inferences</b><ul className={`ml-4 list-disc ${th.textMuted}`}>{analysis.output.inferences.map((item: any, index: number) => <li key={index}>{item.statement} <span className="text-amber-300">({item.uncertainty})</span></li>)}</ul></div>}
                 {analysis.output.cautions?.length > 0 && <p className="text-amber-300"><b>Cautions:</b> {analysis.output.cautions.join(' · ')}</p>}
                 {analysis.output.missing?.length > 0 && <p className={th.textMuted}><b>Missing:</b> {analysis.output.missing.join(' · ')}</p>}
-              </>}
+                  </div>
+                </details>
+              )}
             </div>
           )}
         </div>
