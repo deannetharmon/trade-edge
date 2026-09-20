@@ -50,9 +50,9 @@ export interface LeapsDashboardInput {
   formatTimestamp?: (iso: string) => string;
 }
 
-const money = (value: number): string =>
+export const money = (value: number): string =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 }).format(value);
-const pct = (value: number, digits = 1): string => `${value.toFixed(digits)}%`;
+export const pct = (value: number, digits = 1): string => `${value.toFixed(digits)}%`;
 const TONE_RANK: Record<DashboardTone, number> = { bad: 0, watch: 1, good: 2, neutral: 3 };
 
 const STATUS_TONE: Record<string, DashboardTone> = { CONTRACT_QUALIFIED: 'good', REVIEW_REQUIRED: 'watch', NOT_QUALIFIED: 'bad', DATA_UNAVAILABLE: 'watch' };

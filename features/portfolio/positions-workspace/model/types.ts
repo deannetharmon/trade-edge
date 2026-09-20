@@ -115,7 +115,12 @@ export interface ExistingIncomeOpportunity {
    * vague catch-all and gives the trader one actionable primary reason. */
   monitorReason?: IncomeMonitorReason;
   /** Exact held-long identity needed for a fresh, shared PMCC evaluation. */
-  heldPmccLong?: { expiration: string; dte: number; strike: number; quantity: number };
+  heldPmccLong?: {
+    expiration: string; dte: number; strike: number; quantity: number;
+    // LEAPS-POS-0001: portfolio-snapshot facts for the income-readiness card. Optional and null when the broker did not
+    // supply them; the card shows dashes rather than guessing.
+    entryDebitPerShare?: number | null; markPerShare?: number | null; delta?: number | null; stockPrice?: number | null;
+  };
 }
 
 export interface PositionsWorkspaceModel {

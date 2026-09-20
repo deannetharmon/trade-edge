@@ -8,7 +8,7 @@ import type { HeldPmccLongCandidate } from './pmccHeldLeaps';
 import type { PmccScanSnapshot } from './pmccTypes';
 
 export type HeldPmccLiveReadiness =
-  | { status: 'review-income-call'; reason: string; asOf: string; candidate: { delta: number; dte: number; openInterest: number; credit: number; spreadPct: number | null } }
+  | { status: 'review-income-call'; reason: string; asOf: string; candidate: { delta: number; dte: number; openInterest: number; credit: number; spreadPct: number | null; strike: number; expiration: string; occSymbol: string } }
   | { status: 'market-closed'; reason: string; asOf: string }
   | { status: 'monitor'; monitorReason: 'no-qualifying-short-call' | 'quote-quality'; reason: string; asOf: string }
   | { status: 'not-ready'; reason: string; asOf: string };
@@ -45,7 +45,7 @@ export async function evaluateHeldPmccLiveReadiness(held: HeldPmccLongCandidate)
     const result = outcome.results.find(item => item.pmccPair?.heldLongLeg?.occSymbol === held.occSymbol) ?? outcome.results[0];
     const pair = result?.pmccPair;
     if (pair && result?.pmccDecision?.action === 'HELD_PMCC_REVIEW_ONLY') {
-      return { status: 'review-income-call', reason: 'A current short-call candidate meets the PMCC review policy.', asOf: snapshot.asOf, candidate: { delta: pair.shortLeg.delta, dte: pair.shortLeg.dte, openInterest: pair.shortLeg.openInterest, credit: pair.shortLeg.executablePrice, spreadPct: pair.shortLeg.quote.spreadPct } };
+      return { status: 'review-income-call', reason: 'A current short-call candidate meets the PMCC review policy.', asOf: snapshot.asOf, candidate: { delta: pair.shortLeg.delta, dte: pair.shortLeg.dte, openInterest: pair.shortLeg.openInterest, credit: pair.shortLeg.executablePrice, spreadPct: pair.shortLeg.quote.spreadPct, strike: pair.shortLeg.strike, expiration: pair.shortLeg.expiration, occSymbol: pair.shortLeg.occSymbol } };
     }
     const gates = result?.pmccDecision?.gates ?? [];
     const quoteIssue = gates.some(gate => /QUOTE|BID_ASK|MARKET/i.test(gate.code));

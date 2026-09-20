@@ -15,6 +15,8 @@ import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, Finan
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import { evaluateHeldPmccLiveReadiness, type HeldPmccLiveReadiness } from '@/lib/scans/pmccHeldReadinessClient';
+import { buildIncomeCard } from '@/lib/leaps-position-intelligence/incomeCard';
+import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
   return value === 'true';
@@ -149,7 +151,17 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
       ? 'A short call is already open or working against this exact LEAPS.'
       : null;
   const canReview = live?.status === 'review-income-call';
-  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${tone}`}>{label}</p></div>{canReview && <button type="button" onClick={() => onFind?.(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div><p className={`mt-2 ${th.textFaint}`}>{reason}</p>{monitorMessage && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className="mt-1 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></div>;
+  // LEAPS-POS-0001: the held LEAPS as a dashboard -- your LEAPS, the income call under review, and short rule-based callouts.
+  // Every number comes from the position's own facts and the live candidate (lib/leaps-position-intelligence/incomeCard.ts).
+  const held = opportunity.heldPmccLong;
+  const liveCandidate = live?.status === 'review-income-call' ? live.candidate : null;
+  const incomeCard = held ? buildIncomeCard({
+    longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
+    candidate: liveCandidate,
+  }) : null;
+  // The long explanatory sentence is the whole story for Monitor / Not ready; for a Review state the dashboard carries it and the sentence moves under Details.
+  const reasonLine = <p className={`mt-2 ${th.textFaint}`}>{reason}</p>;
+  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${tone}`}>{label}</p></div>{canReview && <button type="button" onClick={() => onFind?.(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div>{status !== 'review-income-call' && reasonLine}{monitorMessage && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{incomeCard && (<div className="mt-3 space-y-3" data-testid="income-readiness-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={incomeCard.longTiles} th={th} /></div>{liveCandidate && incomeCard.candidateTiles.length > 0 && (<div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Income call to review · Sell {Math.abs(held!.quantity)} × ${liveCandidate.strike} C · {liveCandidate.expiration}</p><TileGrid tiles={incomeCard.candidateTiles} th={th} /></div>)}<CalloutList callouts={incomeCard.callouts} th={th} /></div>)}<p className="mt-2 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><details className="mt-2 rounded border border-white/10 p-2"><summary className="cursor-pointer text-[10px] text-neutral-400">Details</summary>{status === 'review-income-call' && reasonLine}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></details></div>;
 }
 
 interface ManagementActionProps {

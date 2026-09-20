@@ -69,7 +69,7 @@ describe('positions workspace model', () => {
     // showing up as PMCC "not-eligible" clutter). This test predates that
     // fix and previously asserted the old, incorrect behavior.
     expect(model.incomeOpportunities).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'review-income-call', exactContract: 'AAPL  270618C00150000' }),
+      expect.objectContaining({ kind: 'pmcc-short-call', positionKey: 'AAPL-long-call', status: 'review-income-call', exactContract: 'AAPL  270618C00150000', heldPmccLong: expect.objectContaining({ strike: 150, quantity: 1, entryDebitPerShare: 20, markPerShare: 22 }) }),
       expect.objectContaining({ kind: 'covered-call', symbol: 'AAPL', status: 'eligible', sharesOwned: 250, allocatedContracts: 0, reservedContracts: 0, availableContracts: 2 }),
     ]));
     expect((model.incomeOpportunities ?? []).some(o => o.positionKey === 'AAPL-long-put')).toBe(false);
