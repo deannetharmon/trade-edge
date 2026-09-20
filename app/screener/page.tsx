@@ -81,6 +81,7 @@ import type { Position } from '@/lib/portfolio-data/types';
 import { useOptionalPortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { emitCoveredCallCapacityShadow, isCcCapacityShadowEnabled } from '@/lib/portfolio-snapshot/shadowParity';
 import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
+import { parseOccSymbol } from '@/lib/optionSymbol';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
@@ -2867,10 +2868,26 @@ function LeapsAdvisorPanel({ th, candidates, filters, onClose, onVerify }: {
               <p className="text-[10px] italic text-neutral-400">Advisor compares scan-time data. Run Analyze with AI on your final pick to re-verify live quotes before trading.</p>
               {session.recommendation.map((r, i) => {
                 const stillVisible = candidates.some(c => c.occSymbol === r.occSymbol);
+                // Diane (2026-09-20): show the contract the way the result rows do ("$250 C · 2027-06-17"), not as the raw
+                // OCC code ("NFLX 271217C00050000"), with its key numbers on their own line instead of run together.
+                const parsedContract = parseOccSymbol(r.occSymbol);
+                const contractLabel = parsedContract.strikePrice != null && parsedContract.expiry != null
+                  ? `${formatMoneyDropExactZeroCents(parsedContract.strikePrice)} C · ${parsedContract.expiry}`
+                  : r.occSymbol;
+                const pick = candidates.find(c => c.occSymbol === r.occSymbol);
+                const pickFacts = pick ? [
+                  pick.score != null ? `Score ${pick.score}` : null,
+                  pick.delta != null ? `Δ ${pick.delta.toFixed(2)}` : null,
+                  `${pick.dte}d`,
+                  pick.bid != null && pick.ask != null ? `Bid ${formatMoneyDropExactZeroCents(pick.bid)} / Ask ${formatMoneyDropExactZeroCents(pick.ask)}` : null,
+                ].filter(Boolean).join(' · ') : null;
                 return (
                   <div key={i} className="rounded border border-violet-500/30 bg-violet-500/10 p-2">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="font-bold text-violet-200">{r.symbol} · {r.occSymbol}</p>
+                      <div className="min-w-0">
+                        <p className="font-bold text-violet-200">{r.symbol} · {contractLabel}</p>
+                        {pickFacts && <p className={`mt-0.5 text-[10px] ${th.textMuted}`}>{pickFacts}</p>}
+                      </div>
                       <button
                         onClick={() => stillVisible && onVerify(r.occSymbol)}
                         disabled={!stillVisible}
