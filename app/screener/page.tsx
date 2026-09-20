@@ -3297,6 +3297,9 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
                 <span className="text-violet-300">AI review: <b>{String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</b></span>
                 <span className={analysis.current === false ? 'text-amber-300' : th.textMuted}>{analysis.current === false ? 'Older saved snapshot' : `Snapshot ${new Date(analysis.snapshot?.createdAt).toLocaleString()}`}</span>
               </div>
+              {analysis.snapshot?.contract?.quoteBasis === 'last_session' && (
+                <p className="text-amber-300">Market closed — quotes are from the prior session{analysis.snapshot.contract.optionQuoteTimestamp ? ` (option quote ${new Date(analysis.snapshot.contract.optionQuoteTimestamp).toLocaleString()})` : ''}. Recheck pricing after the market opens.</p>
+              )}
               {analysis.snapshot?.qualification?.gates?.some((gate: any) => gate.status !== 'pass') && (
                 <div className="rounded border border-amber-700/50 p-2"><b className="text-amber-300">Deterministic gates</b><ul className="mt-1 space-y-0.5">{analysis.snapshot.qualification.gates.filter((gate: any) => gate.status !== 'pass').map((gate: any) => <li key={gate.id} className={th.textMuted}>{gate.message} ({String(gate.status).replaceAll('_', ' ')})</li>)}</ul></div>
               )}

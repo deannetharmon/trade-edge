@@ -10,14 +10,16 @@ import type { PmccChainLeg, PmccPairingCriteria } from '@/lib/scans/pmccTypes';
 
 const API_BASE = 'https://api.tastytrade.com';
 const QUOTE_MAX_AGE_MS = 60_000;
+// LEAPS-AI-0002: analysis-only freshness window while the regular session is open. Order paths keep QUOTE_MAX_AGE_MS.
+const ANALYSIS_QUOTE_MAX_AGE_MS = 300_000;
 export const SERVER_LEAPS_POLICY: LeapsEntryCriteria = { deltaMin: 0.70, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 20, spreadPctMax: 10, requireQuoteTimestamp: true, policyVersion: 'leaps-entry-server-v1' };
 export type BrokerContext = { accessToken: string; redis: Redis };
-export type ServerLeapsReview = { qualification: LeapsEntryQualification; occSymbol: string; symbol: string; strike: number; expiration: string; dte: number; bid: number | null; ask: number | null; spot: number | null; delta: number | null; openInterest: number | null; impliedVolatility: number | null; optionQuoteTimestamp: string | null; underlyingQuoteTimestamp: string | null; instrumentType: 'Equity Option' | 'Index Option'; multiplier: number; provider: 'tastytrade'; fetchedAt: string };
+export type ServerLeapsReview = { qualification: LeapsEntryQualification; occSymbol: string; symbol: string; strike: number; expiration: string; dte: number; bid: number | null; ask: number | null; spot: number | null; delta: number | null; openInterest: number | null; impliedVolatility: number | null; optionQuoteTimestamp: string | null; underlyingQuoteTimestamp: string | null; instrumentType: 'Equity Option' | 'Index Option'; multiplier: number; provider: 'tastytrade'; fetchedAt: string; marketSession?: string; quoteBasis?: 'live' | 'last_session' };
 
 function redisClient() { const url = process.env.REDIS_URL || process.env.KV_URL; if (!url) throw new Error('Server storage is not configured'); return new Redis(url); }
 function iso(value: unknown): string | null { if (typeof value !== 'string' && typeof value !== 'number') return null; const d = new Date(typeof value === 'number' && value < 10_000_000_000 ? value * 1000 : value); return Number.isFinite(d.getTime()) ? d.toISOString() : null; }
 function finite(value: unknown): number | null { const n = Number(value); return Number.isFinite(n) ? n : null; }
-function fresh(timestamp: string | null, now = Date.now()) { return timestamp != null && Math.abs(now - Date.parse(timestamp)) <= QUOTE_MAX_AGE_MS; }
+function fresh(timestamp: string | null, now = Date.now(), maxAgeMs = QUOTE_MAX_AGE_MS) { return timestamp != null && Math.abs(now - Date.parse(timestamp)) <= maxAgeMs; }
 
 export async function brokerContext(userId: string): Promise<BrokerContext> {
   const redis = redisClient(); const credentials = await redis.hgetall(`user:${userId}:tastytrade`); const clientId = process.env.TASTYTRADE_CLIENT_ID;
@@ -32,7 +34,7 @@ async function brokerGet(path: string, accessToken: string) { const response = a
 async function brokerGetFirst(paths: string[], accessToken: string) { for (const path of paths) { try { const data = await brokerGet(path, accessToken); if ((data?.data?.items ?? []).length > 0) return data; } catch { /* try alternate classification */ } } throw new Error('Broker market data is unavailable'); }
 export async function validatedAccount(context: BrokerContext, locator: string | null): Promise<string> { const accounts = await brokerGet('/customers/me/accounts', context.accessToken); const owned = (accounts?.data?.items ?? []).map((item: any) => String(item?.account?.['account-number'] ?? '')).filter(Boolean); const requested = locator?.trim() || null; if (requested && owned.includes(requested)) return requested; if (!requested && owned.length === 1) return owned[0]; throw new Error(requested ? 'Selected broker account is unavailable.' : 'Choose an active broker account before continuing.'); }
 
-async function resolveWithContext(context: BrokerContext, input: { underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria): Promise<ServerLeapsReview> {
+async function resolveWithContext(context: BrokerContext, input: { underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria, freshness: 'strict' | 'analysis' = 'strict'): Promise<ServerLeapsReview> {
   if (!/^[A-Z.\-]{1,12}$/.test(input.underlyingSymbol) || !/^[A-Z0-9 .]{6,40}$/.test(input.occSymbol)) throw new Error('Invalid contract locator');
   const chain = await brokerGet(`/option-chains/${encodeURIComponent(input.underlyingSymbol)}/nested`, context.accessToken);
   let contract: { strike: number; expiration: string; multiplier: number } | null = null;
@@ -45,11 +47,20 @@ async function resolveWithContext(context: BrokerContext, input: { underlyingSym
   const option = optionData?.data?.items?.find((item: any) => String(item?.symbol ?? '') === input.occSymbol) ?? optionData?.data?.items?.[0]; const underlying = underlyingData?.data?.items?.[0];
   const bid = finite(option?.bid), ask = finite(option?.ask), underlyingBid = finite(underlying?.bid), underlyingAsk = finite(underlying?.ask);
   const spot = finite(underlying?.last) ?? (underlyingBid != null && underlyingAsk != null ? (underlyingBid + underlyingAsk) / 2 : null);
-  const optionQuoteTimestamp = iso(option?.['updated-at'] ?? option?.['quote-time']); const underlyingQuoteTimestamp = iso(underlying?.['updated-at'] ?? underlying?.['quote-time']); const quotesFresh = fresh(optionQuoteTimestamp) && fresh(underlyingQuoteTimestamp);
+  const optionQuoteTimestamp = iso(option?.['updated-at'] ?? option?.['quote-time']); const underlyingQuoteTimestamp = iso(underlying?.['updated-at'] ?? underlying?.['quote-time']); 
+  // LEAPS-AI-0002: 'strict' (default; every order/review path) keeps the 60 s rule unchanged. 'analysis' (Analyze with AI only):
+  // market open -> both quotes within 300 s; market not open -> the broker's last two-sided quote is accepted as a
+  // prior-session snapshot (same principle as pmccDecision's MARKET_CLOSED_QUOTES) and is labelled quoteBasis 'last_session'.
+  // evaluateLeapsEntry still applies the marketData / spread gates, so a crossed, one-sided, or wide quote never qualifies.
+  const nowMs = Date.now(); const marketSession = derivePmccMarketSession(new Date(nowMs));
+  const priorSessionQuotes = freshness === 'analysis' && marketSession !== 'open' && marketSession !== 'unknown';
+  const maxAgeMs = freshness === 'analysis' ? ANALYSIS_QUOTE_MAX_AGE_MS : QUOTE_MAX_AGE_MS;
+  const quotesFresh = priorSessionQuotes ? optionQuoteTimestamp != null && underlyingQuoteTimestamp != null : fresh(optionQuoteTimestamp, nowMs, maxAgeMs) && fresh(underlyingQuoteTimestamp, nowMs, maxAgeMs);
+  const quoteBasis: 'live' | 'last_session' = priorSessionQuotes && quotesFresh ? 'last_session' : 'live';
   const dte = Math.ceil((Date.parse(`${contract.expiration}T00:00:00Z`) - Date.now()) / 86_400_000);
   const qualification = evaluateLeapsEntry({ occSymbol: input.occSymbol, strike: contract.strike, dte, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), bid, ask, underlyingPrice: spot, quoteTimestamp: quotesFresh ? optionQuoteTimestamp : null }, criteria);
-  if (!quotesFresh) { const gate = qualification.gates.find(item => item.id === 'freshness'); if (gate) gate.message = 'Option and underlying quotes must both be no more than 60 seconds old'; }
-  return { qualification, occSymbol: input.occSymbol, symbol: input.underlyingSymbol, strike: contract.strike, expiration: contract.expiration, dte, bid, ask, spot, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), impliedVolatility: finite(option?.volatility ?? option?.['implied-volatility'] ?? option?.iv), optionQuoteTimestamp, underlyingQuoteTimestamp, instrumentType: String(option?.['instrument-type'] ?? '').toLowerCase().includes('index') ? 'Index Option' : 'Equity Option', multiplier: contract.multiplier, provider: 'tastytrade', fetchedAt: new Date().toISOString() };
+  if (!quotesFresh) { const gate = qualification.gates.find(item => item.id === 'freshness'); if (gate) gate.message = `Option and underlying quotes must both be no more than ${maxAgeMs / 1000} seconds old${freshness === 'analysis' ? ' while the market is open' : ''}`; }
+  return { qualification, occSymbol: input.occSymbol, symbol: input.underlyingSymbol, strike: contract.strike, expiration: contract.expiration, dte, bid, ask, spot, delta: finite(option?.delta), openInterest: finite(option?.['open-interest']), impliedVolatility: finite(option?.volatility ?? option?.['implied-volatility'] ?? option?.iv), optionQuoteTimestamp, underlyingQuoteTimestamp, instrumentType: String(option?.['instrument-type'] ?? '').toLowerCase().includes('index') ? 'Index Option' : 'Equity Option', multiplier: contract.multiplier, provider: 'tastytrade', fetchedAt: new Date().toISOString(), marketSession, quoteBasis };
 }
 
 const SERVER_PMCC_CRITERIA: PmccPairingCriteria = {
@@ -154,7 +165,7 @@ export async function submitPmccOrder(userId: string, input: {
 }
 
 /** Analysis lookup intentionally has no brokerage-account input or output. */
-export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input, SERVER_LEAPS_POLICY); } finally { context.redis.disconnect(); } }
+export async function resolveLeapsContractEvidence(userId: string, input: { underlyingSymbol: string; occSymbol: string }) { const context = await brokerContext(userId); try { return await resolveWithContext(context, input, SERVER_LEAPS_POLICY, 'analysis'); } finally { context.redis.disconnect(); } }
 
 /** Account ownership and exact live contract evidence are revalidated on every call. */
 export async function reviewLeapsContract(userId: string, input: { accountLocator: string | null; underlyingSymbol: string; occSymbol: string }, criteria: LeapsEntryCriteria = SERVER_LEAPS_POLICY) { const context = await brokerContext(userId); try { const accountNumber = await validatedAccount(context, input.accountLocator); const review = await resolveWithContext(context, input, criteria); return { accountNumber, context, review }; } catch (error) { context.redis.disconnect(); throw error; } }

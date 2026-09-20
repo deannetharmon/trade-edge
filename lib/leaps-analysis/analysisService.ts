@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import Redis from 'ioredis';
 import type { ServerLeapsReview } from './serverTradeReview';
 
-export const LEAPS_ANALYSIS_SNAPSHOT_VERSION = 'leaps-analysis-snapshot-v1';
+export const LEAPS_ANALYSIS_SNAPSHOT_VERSION = 'leaps-analysis-snapshot-v2';
 export const LEAPS_ANALYSIS_TTL_SECONDS = 90 * 24 * 60 * 60;
 export type LeapsIntent = 'standalone' | 'stock_replacement' | 'future_pmcc' | 'not_specified';
 export type LeapsAnalysisStatus = 'MECHANICS_REVIEWED' | 'MORE_INFORMATION_NEEDED' | 'REVIEW_RISK_FACTORS' | 'ANALYSIS_UNAVAILABLE';
@@ -13,7 +13,7 @@ export type Snapshot = {
   intent: LeapsIntent; quantity: number; objective: string;
   contract: Omit<ServerLeapsReview, 'qualification'>; qualification: ServerLeapsReview['qualification'];
   mechanics: Record<string, number | null>; unavailable: string[];
-  provenance: { provider: 'tastytrade'; policyVersion: string; analysisLookupAt: string };
+  provenance: { provider: 'tastytrade'; policyVersion: string; analysisLookupAt: string; freshnessPolicy?: string };
 };
 export type AnalysisRecord = { id: string; requestHash: string; status: LeapsAnalysisStatus; snapshot: Snapshot; output: AnalysisOutput | null; model: string | null; attempts: number; createdAt: string; expiresAt: string; current: boolean; usage: { promptTokens: number | null; completionTokens: number | null } | null };
 
@@ -29,8 +29,8 @@ export function buildSnapshot(review: ServerLeapsReview, intent: LeapsIntent, qu
   const intrinsic = mid != null && review.spot != null ? Math.max(review.spot - review.strike, 0) : null;
   const extrinsic = mid != null && intrinsic != null ? Math.max(0, mid - intrinsic) : null;
   const mechanics = { multiplier: review.multiplier, midPerShare: mid, costPerContract: mid == null ? null : mid * review.multiplier, totalEstimatedCost: mid == null ? null : mid * review.multiplier * quantity, intrinsicPerShare: intrinsic, extrinsicPerShare: extrinsic, extrinsicPctOfMidCost: mid && extrinsic != null ? extrinsic / mid * 100 : null, breakeven: mid == null ? null : review.strike + mid, breakevenPctAboveSpot: mid != null && review.spot ? ((review.strike + mid - review.spot) / review.spot) * 100 : null, spreadPct: review.qualification.spreadPct };
-  const contract = { occSymbol: review.occSymbol, symbol: review.symbol, strike: review.strike, expiration: review.expiration, dte: review.dte, bid: review.bid, ask: review.ask, spot: review.spot, delta: review.delta, openInterest: review.openInterest, impliedVolatility: review.impliedVolatility, optionQuoteTimestamp: review.optionQuoteTimestamp, underlyingQuoteTimestamp: review.underlyingQuoteTimestamp, instrumentType: review.instrumentType, multiplier: review.multiplier, provider: review.provider, fetchedAt: review.fetchedAt };
-  const unsigned = { version: LEAPS_ANALYSIS_SNAPSHOT_VERSION, intent, quantity, objective, contract, qualification: review.qualification, mechanics, provenance: { provider: review.provider, policyVersion: review.qualification.policyVersion, analysisLookupAt: review.fetchedAt } };
+  const contract = { occSymbol: review.occSymbol, symbol: review.symbol, strike: review.strike, expiration: review.expiration, dte: review.dte, bid: review.bid, ask: review.ask, spot: review.spot, delta: review.delta, openInterest: review.openInterest, impliedVolatility: review.impliedVolatility, optionQuoteTimestamp: review.optionQuoteTimestamp, underlyingQuoteTimestamp: review.underlyingQuoteTimestamp, instrumentType: review.instrumentType, multiplier: review.multiplier, provider: review.provider, fetchedAt: review.fetchedAt, marketSession: review.marketSession ?? 'unknown', quoteBasis: review.quoteBasis ?? 'live' };
+  const unsigned = { version: LEAPS_ANALYSIS_SNAPSHOT_VERSION, intent, quantity, objective, contract, qualification: review.qualification, mechanics, provenance: { provider: review.provider, policyVersion: review.qualification.policyVersion, analysisLookupAt: review.fetchedAt, freshnessPolicy: 'analysis-market-aware-v1' } };
   const hash = requestFingerprint(unsigned); const createdAt = new Date().toISOString();
   const unavailable = review.qualification.gates.filter(gate => gate.status === 'unavailable').map(gate => gate.id);
   return { ...unsigned, id: crypto.randomUUID(), hash, createdAt, expiresAt: new Date(Date.now() + LEAPS_ANALYSIS_TTL_SECONDS * 1000).toISOString(), unavailable };
