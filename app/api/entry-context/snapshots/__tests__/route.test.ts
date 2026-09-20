@@ -25,4 +25,13 @@ describe('entry-context snapshot route', () => {
     const response = await GET({ nextUrl: new URL('http://localhost/api/entry-context/snapshots?accountId=acct') } as never);
     expect(response.status).toBe(200); expect(readEntrySnapshotsForAccount).toHaveBeenCalledWith('acct', undefined, 'user:acct');
   });
+  it('scopes every read to the authenticated user, never to the raw account id alone', async () => {
+    readEntrySnapshotsForAccount.mockResolvedValue([]);
+    getServerSession.mockResolvedValue({ user: { id: 'user-a' } });
+    await GET({ nextUrl: new URL('http://localhost/api/entry-context/snapshots?accountId=shared-acct') } as never);
+    getServerSession.mockResolvedValue({ user: { id: 'user-b' } });
+    await GET({ nextUrl: new URL('http://localhost/api/entry-context/snapshots?accountId=shared-acct') } as never);
+    const scopes = readEntrySnapshotsForAccount.mock.calls.map(call => call[2]);
+    expect(scopes).toEqual(['user-a:shared-acct', 'user-b:shared-acct']);
+  });
 });

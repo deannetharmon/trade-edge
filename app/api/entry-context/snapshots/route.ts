@@ -12,7 +12,9 @@ export async function GET(request: NextRequest) {
   const accountId = request.nextUrl.searchParams.get('accountId');
   if (!accountId) return NextResponse.json({ error: 'accountId is required' }, { status: 400 });
   try {
-    return NextResponse.json({ snapshots: await readEntrySnapshotsForAccount(accountId) });
+    // Snapshots are written under the authenticated user's owner scope (see /api/entry-context/promote and
+    // lib/entry-context/promote.ts). Read them through the same scope: never by the raw, client-supplied accountId.
+    return NextResponse.json({ snapshots: await readEntrySnapshotsForAccount(accountId, undefined, entrySnapshotOwnerScope(userId, accountId)) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Snapshot read failed' }, { status: 500 });
   }
