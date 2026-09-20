@@ -58,6 +58,7 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [CI-0001 Continuous Integration (type check + tests on every push)](./CI-0001-continuous-integration.md)
 - [LEAPS-PMCC-START-0001 PMCC Start Price on LEAPS Results](./LEAPS-PMCC-START-0001-pmcc-start-price.md)
 - [LEAPS-DASH-0001 Dashboard View for Analyze with AI](./LEAPS-DASH-0001-analyze-dashboard.md)
+- [LEAPS-DASH-0002 Facts-Only Dashboard (no AI needed)](./LEAPS-DASH-0002-facts-only-dashboard.md)
 - [AI-POLICY-0001 Deterministic-First AI Analysis (epic)](./AI-POLICY-0001-epic.md)
   - [0001A Gateway Foundation](./AI-POLICY-0001A-gateway-foundation.md)
   - [0001B Snapshot Freeze, scan_summary, grounded_chat](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md)

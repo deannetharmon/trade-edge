@@ -10,6 +10,9 @@ import { evaluateLeapsEntry, type LeapsEntryCriteria } from '@/lib/scans/leapsEn
 const getServerSession = vi.fn();
 const resolveMock = vi.fn();
 const fetchMock = vi.fn();
+const claimMock = vi.fn(async (..._args: unknown[]) => ({ cachedId: null }));
+const saveMock = vi.fn(async (..._args: unknown[]) => undefined);
+const factsCounter = { value: 0 }; // simulated Redis INCR for the facts-only hourly limit
 
 vi.mock('next-auth', () => ({ getServerSession: (...args: unknown[]) => getServerSession(...args) }));
 vi.mock('@/lib/auth', () => ({ authOptions: {} }));
@@ -19,9 +22,9 @@ vi.mock('@/lib/leaps-analysis/serverTradeReview', async importOriginal => ({
 }));
 vi.mock('@/lib/leaps-analysis/analysisService', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/leaps-analysis/analysisService')>()),
-  redisForAnalysis: () => ({ disconnect: vi.fn() }),
-  claimAnalysis: async () => ({ cachedId: null }),
-  saveAnalysisRecord: async () => undefined,
+  redisForAnalysis: () => ({ disconnect: vi.fn(), incr: vi.fn(async () => ++factsCounter.value), expire: vi.fn(async () => 1) }),
+  claimAnalysis: (...args: unknown[]) => claimMock(...args),
+  saveAnalysisRecord: (...args: unknown[]) => saveMock(...args),
 }));
 
 const OCC = 'GOOGL 270617C00250000';
@@ -50,7 +53,7 @@ function post(body: Record<string, unknown>) {
 
 beforeEach(() => {
   getServerSession.mockReset(); getServerSession.mockResolvedValue({ user: { id: 'user-1' } });
-  resolveMock.mockReset(); fetchMock.mockReset();
+  resolveMock.mockReset(); fetchMock.mockReset(); claimMock.mockClear(); saveMock.mockClear(); factsCounter.value = 0;
   resolveMock.mockImplementation(async (_user: string, _input: unknown, criteria: LeapsEntryCriteria) => review(criteria));
   fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ model: 'gpt-4o-mini', choices: [{ message: { content: JSON.stringify(modelOutput) } }], usage: { prompt_tokens: 10, completion_tokens: 10 } }) });
   vi.stubGlobal('fetch', fetchMock);
@@ -83,6 +86,66 @@ describe('POST /api/leaps-analysis criteria', () => {
     const body = await res.json();
 
     expect(body.snapshot.criteria).toMatchObject({ source: 'server_default', deltaMin: 0.7, deltaMax: 0.85, extrinsicPctMax: 20 });
+  });
+});
+
+describe('POST /api/leaps-analysis facts-only mode (LEAPS-DASH-0002)', () => {
+  it('returns the dashboard snapshot with no model call, no saved record, no AI budget use, and no OpenAI key', async () => {
+    vi.stubEnv('OPENAI_API_KEY', '');
+    const { POST } = await import('../route');
+
+    const res = await POST(post({ ...FILTERS, mode: 'facts', idempotencyKey: undefined }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ status: 'FACTS_ONLY', output: null, model: null, usage: null, current: true });
+    expect(body.snapshot.qualification.status).toBe('CONTRACT_QUALIFIED');
+    expect(body.snapshot.criteria).toMatchObject({ source: 'scan_filters', deltaMin: 0.7 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(claimMock).not.toHaveBeenCalled();
+    expect(saveMock).not.toHaveBeenCalled();
+    expect(resolveMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('is judged against the same scan filters as an AI request', async () => {
+    const { POST } = await import('../route');
+
+    await POST(post({ ...FILTERS, deltaMin: 0.6, mode: 'facts', idempotencyKey: undefined }));
+
+    expect(resolveMock.mock.calls[0][2]).toMatchObject({ deltaMin: 0.6, deltaMax: 0.85, dteMin: 180, oiMin: 100, extrinsicPctMax: 20 });
+  });
+
+  it('has its own hourly limit and answers 429 past it, without touching the broker', async () => {
+    factsCounter.value = 120;
+    const { POST } = await import('../route');
+
+    const res = await POST(post({ ...FILTERS, mode: 'facts', idempotencyKey: undefined }));
+    const body = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(body.error).toContain('Analysis limit reached');
+    expect(resolveMock).not.toHaveBeenCalled();
+  });
+
+  it('still validates the contract and quantity', async () => {
+    const { POST } = await import('../route');
+
+    const res = await POST(post({ ...FILTERS, mode: 'facts', quantity: 0, idempotencyKey: undefined }));
+
+    expect(res.status).toBe(400);
+    expect(resolveMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the normal AI path unchanged (idempotency claim, saved record, model call)', async () => {
+    const { POST } = await import('../route');
+
+    const res = await POST(post(FILTERS));
+    const body = await res.json();
+
+    expect(body.status).toBe('MECHANICS_REVIEWED');
+    expect(claimMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

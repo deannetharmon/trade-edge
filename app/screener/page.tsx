@@ -3138,6 +3138,10 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysis, setAnalysis] = useState<any>(null);
+  // LEAPS-DASH-0002: the dashboard's numbers load on open with no model call; the AI explanation is a separate button.
+  const [facts, setFacts] = useState<any>(null);
+  const [factsLoading, setFactsLoading] = useState(false);
+  const [factsError, setFactsError] = useState('');
   const [analysisIntent, setAnalysisIntent] = useState<'not_specified' | 'standalone' | 'stock_replacement' | 'future_pmcc'>('not_specified');
   const [analysisQuantity, setAnalysisQuantity] = useState(1);
   const [analysisObjective, setAnalysisObjective] = useState('');
@@ -3198,6 +3202,30 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     : candidate.score >= 70 ? 'text-emerald-400 border-emerald-600 bg-emerald-500/10'
     : candidate.score >= 45 ? 'text-yellow-400 border-yellow-600 bg-yellow-500/10'
     : 'text-red-400 border-red-600 bg-red-500/10';
+
+  const loadFacts = async () => {
+    if (!candidate.occSymbol || factsLoading) return;
+    setFactsLoading(true); setFactsError('');
+    try {
+      const response = await fetch('/api/leaps-analysis', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'facts', underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: '', deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : body?.error?.message ?? `Could not load numbers (${response.status})`);
+      setFacts(body);
+    } catch (error) { setFactsError(error instanceof Error ? error.message : 'Numbers are unavailable.'); }
+    finally { setFactsLoading(false); }
+  };
+
+  // Opening the panel loads the numbers once; nothing here calls the model.
+  useEffect(() => {
+    if (analysisOpen && !facts && !analysis) void loadFacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisOpen]);
+
+  // The dashboard shows whichever snapshot is newest (the numbers refresh, or the AI run's own snapshot).
+  const shownSnapshot = [facts?.snapshot, analysis?.snapshot].filter(Boolean).sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] ?? null;
 
   const runAnalysis = async () => {
     if (!candidate.occSymbol || analysisLoading) return;
@@ -3349,26 +3377,28 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
             <label className={`min-w-[220px] flex-1 text-[9px] ${th.textMuted}`}>Objective (optional)
               <input maxLength={240} value={analysisObjective} onChange={event => setAnalysisObjective(event.target.value)} placeholder="What mechanics should this review focus on?" className={`mt-1 block w-full rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`} />
             </label>
-            <button onClick={runAnalysis} disabled={analysisLoading} className="rounded border border-violet-500 px-3 py-1.5 text-[10px] font-bold text-violet-300 disabled:opacity-40">{analysisLoading ? 'Analyzing…' : analysis ? 'Refresh analysis' : 'Run analysis'}</button>
+            <button onClick={runAnalysis} disabled={analysisLoading} className="rounded border border-violet-500 px-3 py-1.5 text-[10px] font-bold text-violet-300 disabled:opacity-40">{analysisLoading ? 'Analyzing…' : analysis ? 'Refresh AI explanation' : 'Explain with AI'}</button>
+            <button onClick={loadFacts} disabled={factsLoading} className={`rounded border ${th.border} px-3 py-1.5 text-[10px] font-bold ${th.text} disabled:opacity-40`}>{factsLoading ? 'Loading…' : 'Refresh numbers'}</button>
             <button onClick={() => setAnalysisOpen(false)} className={`px-2 py-1.5 text-[10px] ${th.textMuted}`}>Close</button>
           </div>
           {analysisError && <p className="mt-3 text-[10px] text-red-400">{analysisError}</p>}
-          {analysis && (
+          {factsError && <p className="mt-3 text-[10px] text-red-400">{factsError}</p>}
+          {(shownSnapshot || analysis) && (
             <div className="mt-3 space-y-2 text-[10px]">
               {/* LEAPS-DASH-0001: tiles and callouts are computed by rule from the snapshot (lib/leaps-analysis/dashboard.ts); no AI involved. */}
-              {analysis.snapshot && (
+              {shownSnapshot && (
                 <LeapsAnalysisDashboard
                   th={th}
                   dashboard={buildLeapsDashboard({
-                    snapshot: analysis.snapshot, current: analysis.current !== false,
+                    snapshot: shownSnapshot, current: shownSnapshot === analysis?.snapshot ? analysis?.current !== false : true,
                     ivRank: candidate.ivRank, ivx: candidate.ivx, pmccStart,
                     formatTimestamp: (iso: string) => new Date(iso).toLocaleString(),
                   })}
                 />
               )}
-              {analysis.output && (
+              {analysis?.output && (
                 <details className="rounded border border-violet-500/30 p-2" data-testid="leaps-full-analysis">
-                  <summary className="cursor-pointer text-[10px] font-bold text-violet-300">Read full analysis · AI review: {String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}</summary>
+                  <summary className="cursor-pointer text-[10px] font-bold text-violet-300">Read full analysis · AI review: {String(analysis.output?.posture ?? analysis.status).replaceAll('_', ' ')}{analysis.snapshot?.createdAt !== shownSnapshot?.createdAt ? ' · explains an earlier snapshot' : ''}</summary>
                   <div className="mt-2 space-y-2">
                 <p className={th.text}><b>Mechanics:</b> {analysis.output.mechanics}</p>
                 <p className={th.text}><b>Tradeoffs:</b> {analysis.output.tradeoffs}</p>

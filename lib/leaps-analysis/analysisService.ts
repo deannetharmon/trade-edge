@@ -73,6 +73,18 @@ const idemKey = (userId: string, fingerprint: string) => `leaps-analysis:idem:${
 const indexKey = (userId: string) => `leaps-analysis:index:${userId}`;
 const currentKey = (userId: string, snapshot: Snapshot) => `leaps-analysis:current:${userId}:${snapshot.contract.occSymbol}:${snapshot.qualification.policyVersion}:${snapshot.intent}`;
 
+/**
+ * LEAPS-DASH-0002: facts-only requests (the dashboard's numbers, no model call) are cheap but still read the broker,
+ * so they get their own hourly limit, separate from the 10-per-hour AI budget.
+ */
+export const LEAPS_FACTS_HOURLY_LIMIT = 120;
+export async function enforceFactsLimit(redis: Redis, userId: string, limit = LEAPS_FACTS_HOURLY_LIMIT): Promise<void> {
+  const key = `leaps-analysis:facts-rate:${userId}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, 3600);
+  if (count > limit) throw new Error(`Analysis limit reached: ${limit} number refreshes per hour.`);
+}
+
 /** Atomic user rate-limit + idempotency claim. Cached requests do not consume quota. */
 export async function claimAnalysis(redis: Redis, userId: string, fingerprint: string, proposedId: string): Promise<{ cachedId: string | null }> {
   const rateKey = `leaps-analysis:rate:${userId}`; const now = Date.now();

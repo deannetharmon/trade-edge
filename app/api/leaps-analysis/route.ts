@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, isAnalysisEligible, snapshotCriteria, claimAnalysis, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
+import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, isAnalysisEligible, snapshotCriteria, claimAnalysis, enforceFactsLimit, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
 import { resolveLeapsContractEvidence } from '@/lib/leaps-analysis/serverTradeReview';
 import { isLeapsAnalysisEnabled } from '@/lib/leaps-analysis/featureFlag';
 import { resolveAnalysisCriteria } from '@/lib/leaps-analysis/criteria';
@@ -36,6 +36,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json(); const intent: LeapsIntent = intents.has(body?.intent) ? body.intent : 'not_specified'; const quantity = Number(body?.quantity); const objective = typeof body?.objective === 'string' ? body.objective.trim() : '';
     const underlyingSymbol = String(body?.underlyingSymbol ?? '').trim().toUpperCase(); const occSymbol = String(body?.occSymbol ?? '').trim();
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100 || objective.length > 240 || !underlyingSymbol || !occSymbol) throw new Error('A valid contract, quantity, and objective are required.');
+    // LEAPS-DASH-0002: facts-only mode. Returns the same server-resolved snapshot the dashboard is built from, with NO model call:
+    // nothing is saved, no AI budget is used, and no OpenAI key is needed. AI explanation is a separate, explicit request.
+    if (body?.mode === 'facts') {
+      redis = redisForAnalysis();
+      await enforceFactsLimit(redis, userId);
+      const { criteria: factsCriteria, source: factsSource } = resolveAnalysisCriteria(body);
+      const factsReview = await resolveLeapsContractEvidence(userId, { underlyingSymbol, occSymbol }, factsCriteria);
+      const factsSnapshot = buildSnapshot(factsReview, intent, quantity, objective, snapshotCriteria(factsCriteria, factsSource));
+      return NextResponse.json({ id: factsSnapshot.id, requestHash: null, snapshot: factsSnapshot, model: null, attempts: 0, createdAt: factsSnapshot.createdAt, expiresAt: factsSnapshot.expiresAt, current: true, usage: null, status: 'FACTS_ONLY', output: null });
+    }
     const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
     if (!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) throw new Error('A valid idempotency key is required.');
     const fingerprint = requestFingerprint({ userId, idempotencyKey }); redis = redisForAnalysis();
