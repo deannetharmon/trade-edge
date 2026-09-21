@@ -43,6 +43,8 @@ export interface RunAiRouteRequest {
   idempotencyKey: string;
   /** grounded_chat only; redacted and bounded here. */
   question?: string;
+  /** grounded_chat only: earlier artifact ids for the same input. The server loads them (same user); never client text. */
+  priorArtifactIds?: string[];
   /** What the user did, for provenance (e.g. 'click:explain_scan'). */
   userAction: string;
 }
@@ -59,6 +61,7 @@ export interface GatewayDeps {
 
 const USER_ACTION_RE = /^[a-z0-9_:.-]{1,64}$/;
 const MAX_PROMPT_CHARS = 200_000;
+export const MAX_PRIOR_ARTIFACTS = 4;
 
 const unavailable = (reason: ReasonCode, artifactId: string | null = null): AiRouteResult => ({ status: 'unavailable', reason, artifactId });
 
@@ -127,8 +130,25 @@ async function execute(
   const loaded = await getInput(redis, request.userId, request.inputId, env);
   if (!loaded.ok) return unavailable(loaded.reason);
   const input = loaded.input;
-  if (input.route !== request.route || input.schemaVersion !== spec.schemaVersion || !spec.allowedTrust.includes(input.trust) || Date.parse(input.expiresAt) <= now()) {
+  const inputSpec = (deps.specs ?? ROUTE_SPECS)[spec.inputKind ?? request.route];
+  if (
+    !inputSpec || input.route !== inputSpec.route || input.schemaVersion !== inputSpec.schemaVersion ||
+    !spec.allowedTrust.includes(input.trust) || Date.parse(input.expiresAt) <= now()
+  ) {
     return unavailable('INPUT_INVALID');
+  }
+
+  // Earlier artifacts for this input, loaded by the server for the acting user only (never client-supplied text).
+  const priorIds = request.priorArtifactIds ?? [];
+  if (priorIds.length > 0 && (!spec.allowsPriorArtifacts || priorIds.length > MAX_PRIOR_ARTIFACTS || new Set(priorIds).size !== priorIds.length)) {
+    return unavailable('INPUT_INVALID');
+  }
+  const priorOutputs: RenderedOutput[] = [];
+  for (const priorId of priorIds) {
+    const prior = await getArtifact(redis, request.userId, priorId, env);
+    // Missing, foreign, another input's, or without a usable output: all the same NOT_FOUND.
+    if (!prior || prior.inputId !== input.id || (prior.status !== 'ready' && prior.status !== 'stale') || !prior.output) return unavailable('NOT_FOUND');
+    priorOutputs.push(prior.output);
   }
 
   // Stage 4: source-specific freshness. Deep routes need every source fresh; summary/chat disclose what is missing.
@@ -137,13 +157,13 @@ async function execute(
 
   // Prompt and worst-case cost (needed for the budget reservation).
   const system = spec.template.system;
-  const user = spec.template.buildUserMessage(input, question);
+  const user = spec.template.buildUserMessage(input, question, priorOutputs);
   if (system.length + user.length > MAX_PROMPT_CHARS) return unavailable('INPUT_INVALID');
   const estimateMicros = estimateWorstCaseMicros(governance.model, system.length + user.length, spec.maxOutputTokens);
   if (estimateMicros == null) return unavailable('GOVERNANCE');
 
   // Stage 5: idempotency. A completed claim returns the stored artifact without spending budget.
-  const fp = idempotency.fingerprint(request.route, input.id, request.idempotencyKey, question ?? '');
+  const fp = idempotency.fingerprint(request.route, input.id, request.idempotencyKey, priorIds.length > 0 ? `${question ?? ''}\u0000${priorIds.join(',')}` : (question ?? ''));
   const claimed = await idempotency.claim(redis, request.userId, fp, request.idempotencyKey);
   if (claimed.state === 'invalid') return unavailable('INPUT_INVALID');
   if (claimed.state === 'pending' || claimed.state === 'error') return unavailable('RATE_LIMIT');
@@ -193,6 +213,8 @@ async function execute(
   cleanup.probeTier = null;
 
   const artifactId = randomUUID();
+  // A refresh supersedes earlier artifacts for the same subject; standalone routes (chat turns) never do.
+  const subject = subjectHash(request.route, spec.supersedesPrior === false ? `${input.subjectKey}\u0000${artifactId}` : input.subjectKey);
   const createdAt = new Date(now()).toISOString();
   const promptHash = sha256Hex(`${system}\u0000${user}`);
   const baseArtifact = {
@@ -218,7 +240,7 @@ async function execute(
     } as ProvenanceRecord;
     if (!(await saveProvenance(redis, request.userId, record))) return false;
     const artifact: AiArtifact = { ...baseArtifact, status, reason, output };
-    return saveArtifact(redis, artifact, subjectHash(request.route, input.subjectKey), env);
+    return saveArtifact(redis, artifact, subject, env);
   };
 
   if (!provider.ok) {
@@ -253,7 +275,11 @@ async function execute(
   // Stage 10: mandatory disclosure of omitted/stale sources (server-written, whatever the model said), then persist.
   const output: RenderedOutput = {
     ...verdict.output,
-    missingOrStaleData: [...verdict.output.missingOrStaleData, ...disclosureClaims(freshness.notFresh)],
+    missingOrStaleData: [
+      ...verdict.output.missingOrStaleData,
+      ...disclosureClaims(freshness.notFresh),
+      ...(spec.serverDisclosures?.(input) ?? []).map((text): Claim => ({ text, citationIds: [] })),
+    ],
   };
   const stored = await persist('ready', null, output, {
     ...spend, citations: verdict.citations, claimMap: verdict.claimMap, validation: { result: 'accepted', rule: null, outputHash },
@@ -262,7 +288,7 @@ async function execute(
     await freeClaim();
     return unavailable('PROVIDER_ERROR');
   }
-  await markCurrent(redis, request.userId, request.route, subjectHash(request.route, input.subjectKey), artifactId);
+  await markCurrent(redis, request.userId, request.route, subject, artifactId);
   await idempotency.complete(redis, request.userId, fp, artifactId);
   const artifact = await getArtifact(redis, request.userId, artifactId, env);
   return artifact ? { status: artifact.status === 'stale' ? 'stale' : 'ready', artifact } : unavailable('NOT_FOUND', artifactId);

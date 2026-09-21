@@ -74,8 +74,12 @@ const template = {
 export function testSpecs(): Record<AiRouteId, RouteSpec> {
   return {
     ...ROUTE_SPECS,
-    scan_summary: { ...ROUTE_SPECS.scan_summary, citableFields: TEST_REGISTRY, template },
-    grounded_chat: { ...ROUTE_SPECS.grounded_chat, citableFields: TEST_REGISTRY, template },
+    // The real 0001B scan routes are strict and share one input; these test specs keep the plain 0001A semantics.
+    scan_summary: { ...ROUTE_SPECS.scan_summary, strictFreshness: false, serverDisclosures: undefined, citableFields: TEST_REGISTRY, template },
+    grounded_chat: {
+      ...ROUTE_SPECS.grounded_chat, strictFreshness: false, inputKind: undefined, supersedesPrior: undefined, allowsPriorArtifacts: undefined,
+      serverDisclosures: undefined, citableFields: TEST_REGISTRY, template,
+    },
     leaps_deep_analysis: { ...ROUTE_SPECS.leaps_deep_analysis, citableFields: TEST_REGISTRY, template },
   };
 }

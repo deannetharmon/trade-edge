@@ -79,6 +79,7 @@ describe('RedisBudgetStore', () => {
 
   it('a Redis error propagates so the gateway fails closed', async () => {
     const redis = new FakeRedis();
+    redis.failAll = true;
     await expect(new RedisBudgetStore(redis).reserve({ ...base, limits: limits() })).rejects.toThrow();
   });
 

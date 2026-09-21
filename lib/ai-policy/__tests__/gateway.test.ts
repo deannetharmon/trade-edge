@@ -50,8 +50,8 @@ describe('acceptance 1: with no env set every route is unavailable(FLAG_OFF) and
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('a fully configured environment still cannot run a route that has no template or registry yet (0001A ships none)', async () => {
-    const s = await setup();
+  it('a fully configured environment still cannot run a route that has no template or registry yet (the deep routes)', async () => {
+    const s = await setup({ route: 'leaps_deep_analysis' });
     const result = await s.run({}, { specs: ROUTE_SPECS });
     expect(result).toMatchObject({ status: 'unavailable', reason: 'FLAG_OFF' });
     expect(s.fetchImpl).not.toHaveBeenCalled();

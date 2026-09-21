@@ -1,8 +1,10 @@
 // lib/ai-policy/fixtures/fakeRedis.ts
 //
-// In-memory stand-in for the small ioredis subset the AI policy library uses. Test-only. `eval` is not a Lua engine:
-// budget concurrency against the real Lua script is verified on real Redis (see the implementation report).
+// In-memory stand-in for the small ioredis subset the AI policy library uses. Test-only. `eval` is not a Lua engine: it
+// recognises exactly RESERVE_SCRIPT and emulates its logic in JS so route-level tests can run the full gateway. The real
+// Lua script is verified on real Redis (see the implementation reports).
 
+import { RESERVE_SCRIPT } from '../budget';
 import type { RedisLike } from '../types';
 
 export class FakeRedis implements RedisLike {
@@ -73,7 +75,23 @@ export class FakeRedis implements RedisLike {
     const members = Array.from((this.zsets.get(key) ?? new Map<string, number>()).entries()).sort((a, b) => b[1] - a[1]).map(([m]) => m);
     return members.slice(start, stop + 1);
   }
-  async eval(): Promise<unknown> {
-    throw new Error('FakeRedis does not execute Lua');
+  async eval(script: string, _numKeys: number, ...args: Array<string | number>): Promise<unknown> {
+    this.guard();
+    if (script !== RESERVE_SCRIPT) throw new Error('FakeRedis only emulates RESERVE_SCRIPT');
+    const [hourKey, monthKey, dayKey, hourly, monthly, daily, estimate, hourTtl, monthTtl, dayTtl] = args;
+    const h = Number(this.live(String(hourKey)) ?? '0');
+    const m = Number(this.live(String(monthKey)) ?? '0');
+    const d = Number(this.live(String(dayKey)) ?? '0');
+    const est = Number(estimate);
+    if (h >= Number(hourly)) return 'RATE_LIMIT';
+    if (m + est > Number(monthly)) return 'BUDGET';
+    if (d + est > Number(daily)) return 'BUDGET';
+    await this.incrby(String(hourKey), 1);
+    await this.expire(String(hourKey), Number(hourTtl));
+    await this.incrby(String(monthKey), est);
+    await this.expire(String(monthKey), Number(monthTtl));
+    await this.incrby(String(dayKey), est);
+    await this.expire(String(dayKey), Number(dayTtl));
+    return 'OK';
   }
 }
