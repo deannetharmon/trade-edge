@@ -102,8 +102,8 @@ function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
       <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span></div>
       <div className="p-3 font-mono text-white">{row.shares}{row.sharesNote && <span className={`block font-sans text-[10px] ${th.textFaint}`}>{row.sharesNote}</span>}</div>
       <div className="p-3 font-mono text-white">{row.price != null ? money(row.price) : '—'}</div>
-      <div className="p-3 font-mono text-white">{row.value != null ? (row.value < 0 ? `-${money(Math.abs(row.value))}` : money(row.value)) : '—'}</div>
       <div className="p-3 font-mono text-white">{row.avgCost != null ? <>{money(row.avgCost)}<span className={`block font-sans text-[10px] ${th.textFaint}`}>cost {money(row.costBasis ?? 0)}</span></> : <span className="text-amber-300">— <span className="block font-sans text-[10px]">basis incomplete</span></span>}</div>
+      <div className="p-3 font-mono text-white">{row.value != null ? (row.value < 0 ? `-${money(Math.abs(row.value))}` : money(row.value)) : '—'}</div>
       <div className={`p-3 font-mono font-semibold ${pnlTone}`}>
         {row.pnl != null ? <>{signedMoney(Math.round(row.pnl * 100) / 100)}{row.pnlPct != null && <span className="block font-sans text-[10px] font-normal">{row.pnlPct >= 0 ? '+' : ''}{row.pnlPct.toFixed(1)}%</span>}</>
           : <span className="font-sans text-[11px] font-normal">Unavailable<span className="block text-[10px] text-amber-300">{!row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span></span>}
@@ -152,7 +152,7 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
       <div className={`max-w-full overflow-x-auto rounded-xl border ${th.border}`} tabIndex={0} aria-label="Stock holdings, horizontally scrollable">
         <div role="table" className="min-w-[1180px] text-[11px]">
           <div role="row" className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
-            {['Holding', 'Shares', 'Price', totals.valueLabel, 'Avg cost', 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
+            {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th}
@@ -162,8 +162,8 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
           <div role="row" className={`grid ${COLUMNS} items-center border-t ${th.border} bg-white/5`} data-testid="stock-totals">
             <div className={`p-3 text-[11px] font-semibold tracking-wider ${th.textFaint}`}>STOCKS TOTAL{!totals.complete && <span className="block text-[10px] font-normal text-amber-300">partial</span>}</div>
             <div className="p-3" /><div className="p-3" />
-            <div className="p-3 font-mono font-semibold text-white">{totals.value != null ? (totals.value < 0 ? `-${money(Math.abs(totals.value))}` : money(totals.value)) : '—'}</div>
             <div className={`p-3 font-mono ${th.textFaint}`}>{totals.costBasis != null ? money(totals.costBasis) : ''}</div>
+            <div className="p-3 font-mono font-semibold text-white">{totals.value != null ? (totals.value < 0 ? `-${money(Math.abs(totals.value))}` : money(totals.value)) : '—'}</div>
             <div className={`p-3 font-mono font-semibold ${totals.pnl == null ? 'text-white/40' : totals.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {totals.pnl != null ? signedMoney(totals.pnl) : '—'}
               {totals.pnlPct != null && <span className="block font-sans text-[10px] font-normal">{totals.pnlPct >= 0 ? '+' : ''}{totals.pnlPct.toFixed(1)}%</span>}

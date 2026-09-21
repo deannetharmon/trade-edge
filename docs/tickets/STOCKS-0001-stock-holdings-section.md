@@ -9,7 +9,7 @@ Position Analysis is fed only by option positions, so stock holdings (META, SNDK
 
 ## Scope
 
-1. **A separate "Stock holdings" section under the options table** (stocks have no strikes, DTE or greeks, so it has its own columns rather than blank option columns): Holding, Shares, Price, Value, Avg cost, Unrealized P/L, Covered calls, Notes, Price alert; a totals row; short notes underneath.
+1. **A separate "Stock holdings" section under the options table** (stocks have no strikes, DTE or greeks, so it has its own columns rather than blank option columns): Holding, Shares, Price, Avg cost, Value, Unrealized P/L, Covered calls, Notes, Price alert; a totals row; short notes underneath.
 2. `model/stockHoldings.ts` (pure) reads only what the workspace model already holds (`EquityHolding` and the symbol's `CapacityViewModel`):
    - **Incomplete basis** (several lots): no average cost, no cost, no P/L, no percent; the value stays; a note says why. A broker-reported P/L is still hidden (never a partial-lot average).
    - **Short stock:** negative shares labelled "Short 100 shares", value and P/L signed as the model reports them, covered calls "Not applicable to short stock".
