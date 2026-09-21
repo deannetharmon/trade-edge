@@ -8,6 +8,9 @@ import { randomUUID } from 'crypto';
 import { getRedis } from '@/lib/jobs/redis';
 import { buildEntryRecord, type EntryLegSource, type EntryRecordKind } from './entryRecords';
 import { saveEntryRecord, type EntryRedis } from './entryRecordsStore';
+import { buildOrderDecisionEvent } from './ledger';
+import { recordLedgerEvent } from './ledgerStore';
+import type { LeapsIdentity, LeapsLedgerEvent } from './persistence/repository';
 
 export const ENTRY_CAPTURE_TIMEOUT_MS = 2000;
 
@@ -32,7 +35,7 @@ export type RecordEntryOutcome = 'saved' | 'duplicate' | 'failed' | 'timeout';
 
 export async function recordEntryBestEffort(
   input: RecordEntryInput,
-  options: { redis?: EntryRedis; timeoutMs?: number; now?: () => Date } = {},
+  options: { redis?: EntryRedis; timeoutMs?: number; now?: () => Date; ledger?: (identity: LeapsIdentity, event: LeapsLedgerEvent) => Promise<void> } = {},
 ): Promise<RecordEntryOutcome> {
   const timeoutMs = options.timeoutMs ?? ENTRY_CAPTURE_TIMEOUT_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -44,7 +47,21 @@ export async function recordEntryBestEffort(
         underlyingSymbol: input.underlyingSymbol, longOccSymbol: input.longOccSymbol, shortOccSymbol: input.shortOccSymbol,
         quantity: input.quantity, limitPrice: input.limitPrice, priceEffect: input.priceEffect, long: input.long, short: input.short, order: input.order,
       });
-      return saveEntryRecord(redis, { userId: input.userId, accountNumber: input.accountNumber }, record);
+      const outcome = await saveEntryRecord(redis, { userId: input.userId, accountNumber: input.accountNumber }, record);
+      // LEAPS-LEDGER-0001: the order is also a decision in the ledger (server-attested). Its own failure never changes the outcome or the order.
+      if (outcome === 'saved') {
+        try {
+          const identity: LeapsIdentity = { userId: input.userId, canonicalAccountId: input.accountNumber, longOccSymbol: input.longOccSymbol };
+          const event = buildOrderDecisionEvent({
+            id: randomUUID(), at: record.recordedAt, kind: input.kind, entryRecordId: record.id, brokerOrderId: record.brokerOrderId, quantity: input.quantity,
+            limitPrice: input.limitPrice, priceEffect: input.priceEffect, shortOccSymbol: input.shortOccSymbol, underlyingPrice: record.underlying.price,
+          });
+          await (options.ledger ?? ((who, what) => recordLedgerEvent(getRedis(), who, what)))(identity, event);
+        } catch {
+          console.error('LEAPS decision ledger: could not be recorded (the order was not affected)');
+        }
+      }
+      return outcome;
     })();
     const timeout = new Promise<RecordEntryOutcome>(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs); });
     // If the timeout wins, the work may still finish later; its rejection must not become an unhandled one.

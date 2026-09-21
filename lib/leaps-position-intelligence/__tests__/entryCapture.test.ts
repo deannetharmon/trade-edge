@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getRedis = vi.fn();
 vi.mock('@/lib/jobs/redis', () => ({ getRedis: () => getRedis() }));
+const recordLedger = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock('../ledgerStore', () => ({ recordLedgerEvent: (...args: unknown[]) => recordLedger(...args) }));
 
 import { ENTRY_CAPTURE_TIMEOUT_MS, recordEntryBestEffort, type RecordEntryInput } from '../entryCapture';
 import { entryRecordsKey, type EntryRedis } from '../entryRecordsStore';
@@ -30,7 +32,7 @@ function memoryRedis(overrides: Partial<EntryRedis> = {}) {
 }
 
 let errorSpy: { mockRestore: () => void; mock: { calls: unknown[][] } };
-beforeEach(() => { getRedis.mockReset(); errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined); });
+beforeEach(() => { getRedis.mockReset(); recordLedger.mockClear(); recordLedger.mockImplementation(async () => undefined); errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined); });
 afterEach(() => { errorSpy.mockRestore(); vi.useRealTimers(); });
 
 describe('recordEntryBestEffort', () => {
@@ -83,5 +85,58 @@ describe('recordEntryBestEffort', () => {
 
   it('defaults to a short timeout', () => {
     expect(ENTRY_CAPTURE_TIMEOUT_MS).toBeLessThanOrEqual(3000);
+  });
+});
+
+describe('the decision ledger (LEAPS-LEDGER-0001)', () => {
+  it('an accepted order is also recorded as a server-attested decision, with the same identity and an order-derived request id', async () => {
+    const { redis } = memoryRedis();
+    const ledger = vi.fn(async () => undefined);
+    expect(await recordEntryBestEffort(input({ kind: 'short-call-sold', shortOccSymbol: 'GOOGL 261016C00375000', priceEffect: 'Credit', limitPrice: 6.4 }), { redis, ledger, now: () => new Date('2026-08-14T15:30:00.000Z') })).toBe('saved');
+    expect(ledger).toHaveBeenCalledTimes(1);
+    const [identity, event] = ledger.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
+    expect(identity).toEqual({ userId: 'user-a', canonicalAccountId: 'ACCT-1', longOccSymbol: OCC });
+    expect(event).toMatchObject({
+      type: 'user-decision', actor: 'trader', at: '2026-08-14T15:30:00.000Z', requestId: 'order-4711', retention: 'append-only',
+      payload: { action: 'sold-short-call', attestation: 'server', brokerOrderId: '4711', quantity: 1, limitPrice: 6.4, priceEffect: 'Credit', shortOccSymbol: 'GOOGL 261016C00375000' },
+    });
+    expect((event.payload as { entryRecordId: string }).entryRecordId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('a repeated order (duplicate record) is not recorded in the ledger again', async () => {
+    const { redis } = memoryRedis();
+    const ledger = vi.fn(async () => undefined);
+    await recordEntryBestEffort(input(), { redis, ledger });
+    expect(await recordEntryBestEffort(input(), { redis, ledger })).toBe('duplicate');
+    expect(ledger).toHaveBeenCalledTimes(1);
+  });
+
+  it('a ledger failure never changes the outcome and leaks nothing', async () => {
+    const { redis } = memoryRedis();
+    const ledger = vi.fn(async () => { throw new Error('redis://user:secret@host'); });
+    await expect(recordEntryBestEffort(input(), { redis, ledger })).resolves.toBe('saved');
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('secret');
+  });
+
+  it('a Redis failure in the entry record means no ledger event and a "failed" outcome', async () => {
+    const { redis } = memoryRedis({ lpush: async () => { throw new Error('down'); } });
+    const ledger = vi.fn(async () => undefined);
+    await expect(recordEntryBestEffort(input(), { redis, ledger })).resolves.toBe('failed');
+    expect(ledger).not.toHaveBeenCalled();
+  });
+
+  it('by default it writes through the shared ledger store', async () => {
+    const { redis } = memoryRedis();
+    getRedis.mockReturnValue({ shared: 'redis' });
+    await recordEntryBestEffort(input(), { redis });
+    expect(recordLedger).toHaveBeenCalledTimes(1);
+    expect(recordLedger.mock.calls[0][0]).toEqual({ shared: 'redis' });
+    expect(recordLedger.mock.calls[0][1]).toEqual({ userId: 'user-a', canonicalAccountId: 'ACCT-1', longOccSymbol: OCC });
+  });
+
+  it('a slow ledger write is covered by the same timeout as the record', async () => {
+    const { redis } = memoryRedis();
+    const ledger = vi.fn(() => new Promise<void>(() => undefined));
+    await expect(recordEntryBestEffort(input(), { redis, ledger, timeoutMs: 30 })).resolves.toBe('timeout');
   });
 });

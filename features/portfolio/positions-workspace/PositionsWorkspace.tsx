@@ -24,6 +24,7 @@ import { applyMandateGates, describeIncomeRules } from '@/lib/leaps-position-int
 import type { LeapsMandate } from '@/lib/leaps-position-intelligence/types';
 import { MandateForm } from './MandateForm';
 import { IncomeHistory } from './IncomeHistory';
+import { DecisionHistory } from './DecisionHistory';
 import { HistoryStrip } from './HistoryStrip';
 import { buildSparklines, cleanHistory } from '@/lib/leaps-position-intelligence/sparklines';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
@@ -149,6 +150,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   // LEAPS-MANDATE-0001: the trader's saved income rules for this held LEAPS (read-only here; saved through the form below).
   const [mandate, setMandate] = useState<LeapsMandate | null>(null);
   const [editingMandate, setEditingMandate] = useState(false);
+  const [mandateLoaded, setMandateLoaded] = useState(false);
   const mandateAccount = opportunity.accountNumber;
   const mandateOcc = opportunity.exactContract;
   const hasHeldLong = Boolean(opportunity.heldPmccLong);
@@ -158,8 +160,8 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
     Promise.resolve()
       .then(() => fetch(`/api/leaps-mandate?accountNumber=${encodeURIComponent(mandateAccount)}&longOcc=${encodeURIComponent(mandateOcc)}`))
       .then(response => response.ok ? response.json() : Promise.reject(new Error('mandate request failed')))
-      .then(data => { if (active) setMandate((data?.mandate ?? null) as LeapsMandate | null); })
-      .catch(() => { /* no saved rules could be read: the defaults stay in force */ });
+      .then(data => { if (active) { setMandate((data?.mandate ?? null) as LeapsMandate | null); setMandateLoaded(true); } })
+      .catch(() => { if (active) setMandateLoaded(true); /* no saved rules could be read: the defaults stay in force */ });
     return () => { active = false; };
   }, [mandateAccount, mandateOcc, hasHeldLong]);
   // LEAPS-ENTRY-0001: the market state recorded when this position's opening order was accepted (only orders placed through TradeEdge have one).
@@ -230,6 +232,32 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   }) : null;
   const gated = gate && gate.state !== 'review-income-call' ? gate : null;
   const canReview = liveReview && !gated;
+  // LEAPS-LEDGER-0001: report what the card says to the decision ledger when its state changes. Fire-and-forget; the server records only a change
+  // of state or reason (at most every 30 minutes). Reported only after the inputs that decide the state have loaded, so a half-loaded first
+  // render is never recorded.
+  const reportLedgerEvent = (event: unknown) => {
+    if (!mandateAccount || !mandateOcc || typeof fetch !== 'function') return;
+    void Promise.resolve()
+      .then(() => fetch('/api/leaps-ledger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber: mandateAccount, longOccSymbol: mandateOcc, requestId: crypto.randomUUID().replace(/-/g, ''), event }) }))
+      .catch(() => { /* a log entry that cannot be written is not worth interrupting anything */ });
+  };
+  const eventsSettled = !eventExpiration || (eventCheck.key === eventKey && eventCheck.status !== 'loading');
+  const evaluatedState = held && !pairedShort && mandateLoaded && eventsSettled && (liveReview || gated) ? (gated ? gated.state : 'review-income-call') : null;
+  const evaluatedKey = evaluatedState ? `${evaluatedState}|${gated?.reasonCode ?? ''}` : '';
+  useEffect(() => {
+    if (!evaluatedState || !held) return;
+    reportLedgerEvent({
+      type: 'decision-evaluated',
+      payload: {
+        state: evaluatedState, reasonCode: gated?.reasonCode ?? null,
+        candidate: liveCandidate ? { strike: liveCandidate.strike, expiration: liveCandidate.expiration, credit: liveCandidate.credit, delta: liveCandidate.delta, dte: liveCandidate.dte } : null,
+        stockPrice: held.stockPrice ?? null,
+        callouts: (gate?.callouts ?? []).slice(0, 6).map(callout => ({ tone: callout.tone, text: callout.text.slice(0, 200) })),
+        rules: describeIncomeRules(mandate, held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null).slice(0, 300),
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evaluatedKey]);
   const displayLabel = gated ? (gated.state === 'hold-uncovered' ? 'Hold uncovered' : gated.state === 'reassess-thesis' ? 'Reassess thesis' : 'Monitor') : label;
   const displayTone = gated ? (gated.state === 'reassess-thesis' ? 'text-red-300' : 'text-amber-300') : tone;
   // LEAPS-SINCE-0001: where the stock, delta and IVR have gone since the entry baseline (labelled honestly: "since you opened" only when the baseline is at the real open).
@@ -252,6 +280,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   // LEAPS-CYCLES-0001: the short calls sold on this stock since the LEAPS was opened (loaded from the Trade Log only when asked for).
   const extrinsicLostDollars = held && sinceOpen?.extrinsicLostPerShare != null ? sinceOpen.extrinsicLostPerShare * 100 * Math.abs(held.quantity) : null;
   const historyBlock = held && mandateAccount ? <IncomeHistory accountNumber={mandateAccount} underlying={opportunity.symbol} longEntryDate={held.atEntry?.entryDate ?? null} extrinsicLostDollars={extrinsicLostDollars} th={th} /> : null;
+  const decisionBlock = held && mandateAccount && mandateOcc ? <DecisionHistory accountNumber={mandateAccount} longOccSymbol={mandateOcc} /> : null;
   const sinceBlock = sinceOpen && sinceOpen.tiles.length > 0 ? (<div data-testid="since-open"><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">{sinceOpen.label}</p><TileGrid tiles={sinceOpen.tiles} th={th} /></div>) : null;
   const incomeCard = held ? buildIncomeCard({
     longCall: { strike: held.strike, dte: held.dte, quantity: Math.abs(held.quantity), entryDebitPerShare: held.entryDebitPerShare ?? null, markPerShare: held.markPerShare ?? null, delta: held.delta ?? null, stockPrice: held.stockPrice ?? null },
@@ -264,7 +293,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   }) : null;
   // The long explanatory sentence is the whole story for Monitor / Not ready; for a Review state the dashboard carries it and the sentence moves under Details.
   const reasonLine = <p className={`mt-2 ${th.textFaint}`}>{reason}</p>;
-  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${displayTone}`}>{displayLabel}{cycleCard?.windowOpen && <span className="ml-2 rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">CLOSE OR ROLL WINDOW</span>}</p></div>{canReview && <button type="button" onClick={() => onFind?.(opportunity)} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div>{status !== 'review-income-call' && !cycleCard && reasonLine}{monitorMessage && !cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{cycleCard && pairedShort && (<div className="mt-3 space-y-3" data-testid="cycle-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Short call since you sold it · ${pairedShort.strike} C · {pairedShort.expiration}</p><TileGrid tiles={cycleCard.shortTiles} th={th} /></div><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={cycleCard.longTiles} th={th} /></div>{sinceBlock}{historyStrip}<CalloutList callouts={cycleCard.callouts} th={th} />{historyBlock}</div>)}{!cycleCard && incomeCard && (<div className="mt-3 space-y-3" data-testid="income-readiness-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={incomeCard.longTiles} th={th} /></div>{sinceBlock}{historyStrip}{liveCandidate && incomeCard.candidateTiles.length > 0 && (<div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Income call to review · Sell {Math.abs(held!.quantity)} × ${liveCandidate.strike} C · {liveCandidate.expiration}</p><TileGrid tiles={incomeCard.candidateTiles} th={th} /></div>)}<CalloutList callouts={incomeCard.callouts} th={th} />{historyBlock}</div>)}{held && !cycleCard && mandateAccount && mandateOcc && (<div className="mt-2 text-[10px]" data-testid="income-rules">{editingMandate ? <MandateForm underlyingSymbol={opportunity.symbol} longOccSymbol={mandateOcc} accountNumber={mandateAccount} breakeven={held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null} initial={mandate} onSaved={saved => { setMandate(saved); setEditingMandate(false); }} onCancel={() => setEditingMandate(false)} /> : <p className={th.textFaint}>{describeIncomeRules(mandate, held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null)}<button type="button" onClick={() => setEditingMandate(true)} className="ml-2 text-teal-300 underline focus:ring-2 focus:ring-teal-400">{mandate ? 'Edit rules' : 'Set your income rules'}</button></p>}</div>)}<p className="mt-2 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><details className="mt-2 rounded border border-white/10 p-2"><summary className="cursor-pointer text-[10px] text-neutral-400">Details</summary>{(status === 'review-income-call' || cycleCard) && reasonLine}{monitorMessage && cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></details></div>;
+  return <div className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · PMCC income call</b><p className={`mt-1 ${displayTone}`}>{displayLabel}{cycleCard?.windowOpen && <span className="ml-2 rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">CLOSE OR ROLL WINDOW</span>}</p></div>{canReview && <button type="button" onClick={() => { reportLedgerEvent({ type: 'user-decision', payload: { action: 'opened-review' } }); onFind?.(opportunity); }} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400">Review PMCC short calls</button>}</div>{status !== 'review-income-call' && !cycleCard && reasonLine}{monitorMessage && !cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{cycleCard && pairedShort && (<div className="mt-3 space-y-3" data-testid="cycle-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Short call since you sold it · ${pairedShort.strike} C · {pairedShort.expiration}</p><TileGrid tiles={cycleCard.shortTiles} th={th} /></div><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={cycleCard.longTiles} th={th} /></div>{sinceBlock}{historyStrip}<CalloutList callouts={cycleCard.callouts} th={th} />{historyBlock}{decisionBlock}</div>)}{!cycleCard && incomeCard && (<div className="mt-3 space-y-3" data-testid="income-readiness-dashboard"><div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Your LEAPS</p><TileGrid tiles={incomeCard.longTiles} th={th} /></div>{sinceBlock}{historyStrip}{liveCandidate && incomeCard.candidateTiles.length > 0 && (<div><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">Income call to review · Sell {Math.abs(held!.quantity)} × ${liveCandidate.strike} C · {liveCandidate.expiration}</p><TileGrid tiles={incomeCard.candidateTiles} th={th} /></div>)}<CalloutList callouts={incomeCard.callouts} th={th} />{historyBlock}{decisionBlock}</div>)}{held && !cycleCard && mandateAccount && mandateOcc && (<div className="mt-2 text-[10px]" data-testid="income-rules">{editingMandate ? <MandateForm underlyingSymbol={opportunity.symbol} longOccSymbol={mandateOcc} accountNumber={mandateAccount} breakeven={held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null} initial={mandate} onSaved={saved => { setMandate(saved); setEditingMandate(false); }} onCancel={() => setEditingMandate(false)} /> : <p className={th.textFaint}>{describeIncomeRules(mandate, held.entryDebitPerShare != null ? held.strike + held.entryDebitPerShare : null)}<button type="button" onClick={() => setEditingMandate(true)} className="ml-2 text-teal-300 underline focus:ring-2 focus:ring-teal-400">{mandate ? 'Edit rules' : 'Set your income rules'}</button></p>}</div>)}<p className="mt-2 text-[10px] text-cyan-200"><b>Next:</b> {canReview ? 'Review the exact held LEAPS in PMCC.' : opportunity.nextStep}</p><details className="mt-2 rounded border border-white/10 p-2"><summary className="cursor-pointer text-[10px] text-neutral-400">Details</summary>{(status === 'review-income-call' || cycleCard) && reasonLine}{monitorMessage && cycleCard && <p className="mt-2 text-[10px] text-amber-200"><b>Monitor:</b> {monitorMessage}</p>}{live?.status === 'review-income-call' && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Candidate: Δ {live.candidate.delta.toFixed(2)} · {live.candidate.dte} DTE · OI {live.candidate.openInterest} · credit ${live.candidate.credit.toFixed(2)}{live.candidate.spreadPct != null ? ` · spread ${live.candidate.spreadPct.toFixed(1)}%` : ''}</p>}<p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {live?.asOf ?? opportunity.freshness}</p></details></div>;
 }
 
 interface ManagementActionProps {
