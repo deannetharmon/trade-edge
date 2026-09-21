@@ -70,7 +70,7 @@ export class FakeRedis implements RedisLike {
   }
   async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
     this.guard();
-    const members = [...(this.zsets.get(key) ?? new Map<string, number>()).entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
+    const members = Array.from((this.zsets.get(key) ?? new Map<string, number>()).entries()).sort((a, b) => b[1] - a[1]).map(([m]) => m);
     return members.slice(start, stop + 1);
   }
   async eval(): Promise<unknown> {

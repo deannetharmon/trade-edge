@@ -33,7 +33,7 @@ export function extractImports(source: string): string[] {
   const text = stripComments(source);
   const out: string[] = [];
   for (const re of [/\bfrom\s+['"]([^'"]+)['"]/g, /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g, /\bimport\s+['"]([^'"]+)['"]/g]) {
-    for (const m of text.matchAll(re)) out.push(m[1]);
+    for (const m of Array.from(text.matchAll(re))) out.push(m[1]);
   }
   return out;
 }
@@ -41,7 +41,7 @@ export function extractImports(source: string): string[] {
 /** Names brought in by `import { a, b as c } from '...'` and default/namespace imports, per module. */
 export function importedNames(source: string): Array<{ module: string; names: string[] }> {
   const out: Array<{ module: string; names: string[] }> = [];
-  for (const m of stripComments(source).matchAll(/import\s+([^'";]+?)\s+from\s+['"]([^'"]+)['"]/g)) {
+  for (const m of Array.from(stripComments(source).matchAll(/import\s+([^'";]+?)\s+from\s+['"]([^'"]+)['"]/g))) {
     const names = m[1].replace(/[{}*]/g, ' ').replace(/\bas\b/g, ' ').replace(/\btype\b/g, ' ').split(/[\s,]+/).filter(Boolean);
     out.push({ module: m[2], names });
   }

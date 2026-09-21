@@ -211,7 +211,7 @@ export function validateAndRender(params: ValidateParams): ValidationResult {
   }
 
   // 4. Cited source freshness, re-checked now.
-  for (const { field } of resolved.values()) {
+  for (const { field } of Array.from(resolved.values())) {
     if (evaluateSource(field.source, params.input.sourceAsOf[field.source], params.nowMs, params.maxAgeLookup).state !== 'fresh') return fail('stale_source');
   }
 
@@ -255,7 +255,7 @@ export function validateAndRender(params: ValidateParams): ValidationResult {
     citations,
   };
 
-  const claimMap: ClaimMapEntry[] = [{ section: 'summary', index: 0, citationIds: [...new Set(summaryIds)] }];
+  const claimMap: ClaimMapEntry[] = [{ section: 'summary', index: 0, citationIds: Array.from(new Set(summaryIds)) }];
   (['observations', 'tradeoffs', 'missingOrStaleData'] as const).forEach((section) =>
     out[section].forEach((claim, index) => claimMap.push({ section, index, citationIds: claim.citationIds })),
   );
