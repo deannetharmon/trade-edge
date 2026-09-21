@@ -105,4 +105,31 @@ describe('FilteredResultControls', () => {
     renderControls({ popMin: 0, strategies: [], hiddenSymbols: [] });
     expect(screen.queryByRole('button', { name: 'Reset result filters' })).not.toBeInTheDocument();
   });
+  it('renders and clears the optional post-scan minimum-DTE filter', () => {
+    const onSetDteMin = vi.fn();
+    renderControls({ dteMin: 30, setDteMin: onSetDteMin });
+    expect(screen.getByText('DTE ≥ 30')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Remove filter: DTE ≥ 30/ }));
+    expect(onSetDteMin).toHaveBeenCalledWith(0);
+  });
+
+  it('selects a DTE minimum from the preset controls', () => {
+    const onSetDteMin = vi.fn();
+    renderControls({ dteMin: 0, setDteMin: onSetDteMin });
+    fireEvent.click(screen.getByRole('button', { name: '45d' }));
+    expect(onSetDteMin).toHaveBeenCalledWith(45);
+  });
+
+  it('selects and clears the optional post-scan delta range', () => {
+    const onSetDeltaRange = vi.fn();
+    renderControls({ deltaRange: null, setDeltaRange: onSetDeltaRange });
+    fireEvent.click(screen.getByRole('button', { name: '0.15–0.25' }));
+    expect(onSetDeltaRange).toHaveBeenCalledWith([0.15, 0.25]);
+  });
+
+  it('the DTE and delta controls are absent unless a CSP-style caller opts in', () => {
+    renderControls({});
+    expect(screen.queryByRole('button', { name: '45d' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '0.15–0.25' })).not.toBeInTheDocument();
+  });
 });

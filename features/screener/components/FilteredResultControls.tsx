@@ -55,6 +55,14 @@ export interface FilteredResultControlsProps {
   /** Exact-expiration IVX; CSP opts in because each result is one contract. */
   ivxMin?: number;
   setIvxMin?: (v: number) => void;
+  /** Optional post-scan lower DTE bound. This only narrows rendered results;
+   * it never changes the DTE range used to fetch the original scan. */
+  dteMin?: number;
+  setDteMin?: (v: number) => void;
+  /** Optional post-scan delta range. Used by CSP, where a delta range is a
+   * meaningful decision filter rather than a spread-only configuration. */
+  deltaRange?: [number, number] | null;
+  setDeltaRange?: (v: [number, number] | null) => void;
   strategies: FilterStrategy[];
   toggleStrategy: (s: FilterStrategy) => void;
 
@@ -87,6 +95,14 @@ export interface FilteredResultControlsProps {
 const POP_PRESETS = [0, 50, 60, 70, 80];
 const OTM_PRESETS = [0, 4, 8, 12, 16];
 const CREDIT_RATIO_PRESETS = [0, 15, 20, 25, 33];
+const DTE_MIN_PRESETS = [0, 14, 21, 30, 45, 60];
+const DELTA_RANGE_PRESETS: { label: string; value: [number, number] | null }[] = [
+  { label: 'Any', value: null },
+  { label: '0.10–0.16', value: [0.10, 0.16] },
+  { label: '0.15–0.25', value: [0.15, 0.25] },
+  { label: '0.20–0.35', value: [0.20, 0.35] },
+  { label: '0.30–0.45', value: [0.30, 0.45] },
+];
 // IVR-0001: anchored on Dean's own Prosper rule set floor (30% minimum,
 // "no exceptions" per the universal rules) plus the surrounding scan-rule
 // preset values (Low Vol 20 / Relaxed 25 / Course 30 / Strict 40) so these
@@ -115,6 +131,10 @@ export function FilteredResultControls({
   setIvrMin,
   ivxMin = 0,
   setIvxMin,
+  dteMin = 0,
+  setDteMin,
+  deltaRange = null,
+  setDeltaRange,
   strategies,
   toggleStrategy,
   hiddenSymbols,
@@ -135,6 +155,8 @@ export function FilteredResultControls({
   if (ivrMin > 0) activeChips.push({ key: 'ivr', label: `IVR ≥ ${ivrMin}%`, onRemove: () => setIvrMin(0) });
   if (showIvx && ivxMin > 0 && setIvxMin) activeChips.push({ key: 'ivx', label: `Expiration IVX ≥ ${ivxMin}%`, onRemove: () => setIvxMin(0) });
   if (showCreditRatio && creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
+  if (setDteMin && dteMin > 0) activeChips.push({ key: 'dte', label: `DTE ≥ ${dteMin}`, onRemove: () => setDteMin(0) });
+  if (setDeltaRange && deltaRange) activeChips.push({ key: 'delta', label: `Δ ${deltaRange[0].toFixed(2)}–${deltaRange[1].toFixed(2)}`, onRemove: () => setDeltaRange(null) });
   if (showStrategyToggle) {
     for (const s of strategies) {
       activeChips.push({ key: `strat-${s}`, label: s, onRemove: () => toggleStrategy(s) });
@@ -152,6 +174,8 @@ export function FilteredResultControls({
     setIvrMin(0);
     if (showIvx && setIvxMin) setIvxMin(0);
     if (showCreditRatio) setCreditRatioMin(0);
+    if (setDteMin) setDteMin(0);
+    if (setDeltaRange) setDeltaRange(null);
     if (showStrategyToggle) for (const s of [...strategies]) toggleStrategy(s);
     setHiddenSymbols([]);
   }
@@ -171,6 +195,43 @@ export function FilteredResultControls({
           ))}
         </div>
         <div className={`w-px h-4 ${th.border} border-l`} />
+        {setDteMin && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] ${th.textFaint} shrink-0`}>DTE ≥</span>
+              {DTE_MIN_PRESETS.map(v => (
+                <button key={v} onClick={() => setDteMin(v)}
+                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                    dteMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                  }`}>
+                  {v === 0 ? 'Any' : `${v}d`}
+                </button>
+              ))}
+            </div>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+          </>
+        )}
+        {setDeltaRange && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Delta</span>
+              {DELTA_RANGE_PRESETS.map(({ label, value }) => {
+                const selected = value === null
+                  ? deltaRange === null
+                  : deltaRange?.[0] === value[0] && deltaRange?.[1] === value[1];
+                return (
+                  <button key={label} onClick={() => setDeltaRange(value)}
+                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                      selected ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                    }`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+          </>
+        )}
         {showIvx && setIvxMin && (
           <>
             <div className="flex items-center gap-1.5">

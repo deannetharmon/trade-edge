@@ -8479,7 +8479,6 @@ export default function Home() {
     () => normalizeUniverse(tickers.filter(t => t.active).map(t => t.symbol)),
     [tickers]
   );
-  const [cspCashOverride, setCspCashOverride] = useState('');
   // PMCC-SELECT-0001: real held-LEAPS symbols discovered for the current
   // scan attempt (from discoverHeldPmccCandidates, run when FIND PMCCs is
   // clicked), plus which of those the trader has deselected. Defaults to
@@ -8914,9 +8913,11 @@ export default function Home() {
     loadExistingPositions().then(setExistingPositions).catch(() => {});
   }, []);
   useEffect(() => {
-    try {
-      setCspCashOverride(localStorage.getItem(LS_CSP_CASH) || '');
-    } catch {}
+    // Retire the legacy saved dollar override. CSP collateral must come from
+    // the freshly fetched broker balance of the active account (plus, at most,
+    // an explicit per-scan cap chosen in the launch modal); a balance typed in
+    // an earlier session can no longer replace it.
+    try { localStorage.removeItem(LS_CSP_CASH); } catch {}
   }, []);
 
   // TE-0007 corrective pass (required correction 1): one-time Opportunity
@@ -9307,7 +9308,6 @@ export default function Home() {
   // TE-0007: handlePmccChange/handleCspChange removed — there is no
   // separate PMCC/CSP ticker state left to change; both strategies read
   // `opportunityUniverse`, updated via handleTickersChange above.
-  const handleCspCashChange = (v: string) => { setCspCashOverride(v); try { localStorage.setItem(LS_CSP_CASH, v); } catch {} };
   // Hide-only toggle: can only narrow ccEligibleHoldings (verified by the
   // API), never introduce a symbol that lacks verified coverage -- the
   // ticket's "manual symbol filter must never add an uncovered symbol."
@@ -10128,10 +10128,11 @@ export default function Home() {
       const token = await getAccessToken();
 
       pushStatus('Checking available capital...');
-      // Resolve the persistent app-level account first. A manual cash
-      // override may replace affordability figures, but can never create or
+      // Resolve the persistent app-level account first. The only manual figure
+      // is the per-scan cap chosen in the launch modal (never saved between
+      // scans). It may replace affordability figures, but can never create or
       // replace broker-account identity.
-      const manualCash = request.capitalLimit ?? (cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride));
+      const manualCash = request.capitalLimit ?? null;
       const brokerCapital = await getCspCapitalContext(token);
       // A manual cash figure changes affordability only. It never invents
       // broker-account identity: the shared active account must still resolve.
@@ -10506,6 +10507,12 @@ export default function Home() {
   // Expiration IVX is candidate-specific for CSPs. It is a post-scan view
   // filter only, never a qualification or scoring gate.
   const [filterIvxMin, setFilterIvxMin] = useState<number>(0);
+  // CSP result controls: a post-scan lower DTE bound and delta range for
+  // quickly narrowing a completed CSP scan. Scan-time DTE and delta remain
+  // immutable in ruleSnapshot; these display filters cannot broaden the broker
+  // fetch or alter accounting.
+  const [filterDteMin, setFilterDteMin] = useState<number>(0);
+  const [filterCspDeltaRange, setFilterCspDeltaRange] = useState<[number, number] | null>(null);
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -10534,6 +10541,11 @@ export default function Home() {
     if (activeSession?.requestedStrategy === 'csp' && filterIvxMin > 0 && (r.ivx ?? -1) < filterIvxMin) return false;
     const c = r.bestCandidate;
     if (c) {
+      if (activeSession?.requestedStrategy === 'csp' && filterDteMin > 0 && c.dte < filterDteMin) return false;
+      if (activeSession?.requestedStrategy === 'csp' && filterCspDeltaRange) {
+        const delta = Math.abs(c.shortDelta);
+        if (delta < filterCspDeltaRange[0] || delta > filterCspDeltaRange[1]) return false;
+      }
       if ((c.pop ?? 0) < filterPopMin) return false;
       if ((c.creditRatio ?? 0) * 100 < filterCreditRatioMin) return false;
       if (filterOtmMin > 0) {
@@ -10938,21 +10950,6 @@ export default function Home() {
               </LauncherButton>
             </div>
 
-            <details className="text-[9px]">
-              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>CSP SETTINGS</summary>
-              <div className="mt-2">
-                <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1`}>AVAILABLE CASH (optional override)</p>
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Auto-detect from account"
-                  value={cspCashOverride}
-                  onChange={e => handleCspCashChange(e.target.value)}
-                  className={`w-full ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} focus:outline-none`}
-                />
-                <p className={`text-[8px] ${th.textFaint} mt-1`}>Leave blank to use your account&apos;s cash balance. Margin is never used by default.</p>
-              </div>
-            </details>
           </div>
 
           {/* CC status — compact, informational only (TE-0007C's verified-
@@ -11438,6 +11435,10 @@ export default function Home() {
                       ivxMin={filterIvxMin}
                       setIvxMin={setFilterIvxMin}
                       showIvx
+                      dteMin={filterDteMin}
+                      setDteMin={setFilterDteMin}
+                      deltaRange={filterCspDeltaRange}
+                      setDeltaRange={setFilterCspDeltaRange}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
