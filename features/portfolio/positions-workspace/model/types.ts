@@ -123,6 +123,8 @@ export interface ExistingIncomeOpportunity {
     /** LEAPS-SINCE-0001: current IVR, and the position's entry baseline (the existing position-entry-snapshot store). */
     nowIvr?: number | null;
     atEntry?: { capturedAt: string | null; entryDate: string | null; stockPrice: number | null; deltaPerShare: number | null; ivr: number | null };
+    /** LEAPS-SPARK-0001: the position's recorded daily history (newest 120 days), for the History strip. */
+    history?: Array<{ date: string; currentValue: number | null; netDelta: number | null; stockPrice: number | null }>;
   };
   /** LEAPS-POS-0002: the open short call paired to this LEAPS (single-leg short call in the same portfolio snapshot), when there is one. */
   pairedShort?: { positionKey: string; strike: number; expiration: string; dte: number; quantity: number; soldPerShare: number | null; markPerShare: number | null; delta: number | null };

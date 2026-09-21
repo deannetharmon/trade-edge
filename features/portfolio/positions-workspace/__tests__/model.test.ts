@@ -118,6 +118,20 @@ describe('positions workspace model', () => {
     ]));
   });
 
+  it('carries the position\'s recorded daily history (newest 120 days, only the fields the History strip uses)', () => {
+    const history = Array.from({ length: 130 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10), dte: 300 - i, currentValue: 1000 + i, pnl: i, pnlPct: 1, iv: 30, theta: -1, gamma: 0.01, netDelta: 0.85, stockPrice: 300 + i, ivr: 20, netVega: 1, pop: 50, buffer: 5 }));
+    const heldLongCall = position({
+      key: 'AAPL-long-call', accountNumber: 'fixture', expDate: '2027-06-18', dte: 295, snapshotHistory: history,
+      legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22, currentDelta: 0.85 }],
+    });
+    const model = buildPositionsWorkspaceModel({ snapshot: snapshot([heldLongCall]), positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: quality });
+    const held = model.incomeOpportunities!.find(item => item.positionKey === 'AAPL-long-call')!.heldPmccLong!;
+    expect(held.history).toHaveLength(120);
+    expect(held.history![0]).toEqual({ date: history[10].date, currentValue: 1010, netDelta: 0.85, stockPrice: 310 });
+    expect(held.history![119].date).toBe(history[129].date);
+    expect(Object.keys(held.history![0]).sort()).toEqual(['currentValue', 'date', 'netDelta', 'stockPrice']);
+  });
+
   it('shows unavailable income evaluation rather than treating missing snapshot evidence as empty holdings', () => {
     const heldLongCall = position({ key: 'AAPL-long-call', accountNumber: 'fixture', legs: [{ symbol: 'AAPL  270618C00150000', optionType: 'C', strikePrice: 150, direction: 'Long', quantity: 1, avgOpenPrice: 20, currentPrice: 22 , currentDelta: null}] });
     const model = buildPositionsWorkspaceModel({ snapshot: null, positions: [heldLongCall], pendingOrders: [], snapshotDataQuality: { status: 'unavailable', staleQuotes: false, warnings: [], unavailableReason: 'Portfolio snapshot unavailable' } });
