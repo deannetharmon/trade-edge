@@ -19,6 +19,8 @@ export { accountScopeId } from './scope';
 export { redactUserText, MAX_USER_TEXT_CHARS } from './redact';
 export { ROUTE_SPECS } from './routeSpecs';
 export type { PromptTemplate, RouteSpec } from './routeSpecs';
+export { LAUNCH_GATES, validateGateRecord, validateRegistry } from './launchGates';
+export type { LaunchGate, RollbackTrigger, MeasureKey } from './launchGates';
 export { LEXICON_VERSION } from './lexicon';
 export { VALIDATOR_VERSION } from './validator';
 export { AI_ROUTE_IDS, SOURCE_KINDS, SOURCE_LABELS } from './types';

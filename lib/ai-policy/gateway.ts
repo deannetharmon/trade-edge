@@ -19,6 +19,7 @@ import { RedisBudgetStore } from './budget';
 import type { BudgetReservation, BudgetStore } from './budget';
 import * as breaker from './circuitBreaker';
 import { evaluateFreshness } from './freshness';
+import type { LaunchGate } from './launchGates';
 import * as idempotency from './idempotency';
 import { getInput } from './inputStore';
 import { checkKillSwitch } from './killSwitch';
@@ -57,6 +58,8 @@ export interface GatewayDeps {
   fetchImpl?: typeof fetch;
   providerTimeoutMs?: number;
   specs?: Record<AiRouteId, RouteSpec>;
+  /** Launch-gate registry to consult (defaults to LAUNCH_GATES); injected by tests. */
+  gates?: readonly LaunchGate[];
 }
 
 const USER_ACTION_RE = /^[a-z0-9_:.-]{1,64}$/;
@@ -105,7 +108,7 @@ async function execute(
   const spec = (deps.specs ?? ROUTE_SPECS)[request.route];
 
   // Stage 1: flags, then kill switches. With no env set nothing below runs (no Redis, no network).
-  if (!spec || spec.deferred || !isGloballyEnabled(env) || !isRouteEnabled(request.route, env) || !spec.template) return unavailable('FLAG_OFF');
+  if (!spec || spec.deferred || !isGloballyEnabled(env) || !isRouteEnabled(request.route, env, { gates: deps.gates, nowMs: now() }) || !spec.template) return unavailable('FLAG_OFF');
   const redis = tryRedis(deps);
   if (!redis) return unavailable('KILL_SWITCH');
   cleanup.redis = redis;

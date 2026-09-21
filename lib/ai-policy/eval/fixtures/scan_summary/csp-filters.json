@@ -1,0 +1,156 @@
+{
+  "id": "scan_summary/csp-filters",
+  "route": "scan_summary",
+  "description": "A cash-secured-put scan with no candidates and its rule snapshot as filters. Good outputs cite the filters.",
+  "nowIso": "2026-09-21T15:00:00.000Z",
+  "sourceAsOf": {
+    "quoteGreeks": null,
+    "brokerPositionCapacity": null,
+    "earningsCalendar": null,
+    "scanCalculation": "2026-09-21T14:30:00.000Z"
+  },
+  "payload": {
+    "scan": {
+      "strategy": "csp",
+      "mode": "filter",
+      "symbolsSelected": 2,
+      "symbolsPlanned": 2,
+      "symbolsEvaluated": 2,
+      "symbolsFailed": 0,
+      "symbolsSkipped": 0,
+      "candidatesFound": 0,
+      "candidatesPassedRules": 0,
+      "candidatesFailedRules": 0,
+      "candidateRowsIncluded": 0,
+      "candidateRowsOmitted": 0
+    },
+    "filters": {
+      "preset": "Default",
+      "ivrMin": 30,
+      "ivrMax": 100,
+      "deltaMin": 0.1,
+      "deltaMax": 0.3,
+      "dteMin": 21,
+      "dteMax": 60,
+      "oiMin": 100,
+      "bidAskMax": 0.1
+    },
+    "outcomes": [
+      {
+        "symbol": "AAA",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      },
+      {
+        "symbol": "BBB",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      }
+    ],
+    "candidates": []
+  },
+  "expectFreshness": {
+    "outcome": "proceed",
+    "disclosures": 0
+  },
+  "outputs": [
+    {
+      "id": "good-01-filters",
+      "class": "good",
+      "raw": {
+        "summary": "The scan used a maximum delta of {{c:1}} and a minimum of {{c:2}} days to expiration.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/filters/deltaMax"
+          },
+          {
+            "id": 2,
+            "pointer": "/filters/dteMin"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "maximum delta of 0.3",
+          "minimum of 21 days"
+        ],
+        "mustCite": [
+          "/filters/deltaMax"
+        ]
+      }
+    },
+    {
+      "id": "good-02-none",
+      "class": "good",
+      "raw": {
+        "summary": "The scan found {{c:1}} candidates using the {{c:2}} preset.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 2,
+            "pointer": "/filters/preset"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "The scan found 0 candidates using the Default preset."
+        ]
+      }
+    },
+    {
+      "id": "border-01-iv-rank",
+      "class": "borderline",
+      "raw": {
+        "summary": "The scan required a minimum IV rank of {{c:1}}.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/filters/ivrMin"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "knownIssue": "The lexicon's rankingComparison category matches the word 'rank' inside the standard term 'IV rank', so a plain description of the IV-rank filter is rejected. Ian to decide (allow the phrase 'IV rank' or keep rejecting it)."
+      }
+    }
+  ]
+}

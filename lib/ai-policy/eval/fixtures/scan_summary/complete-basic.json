@@ -1,0 +1,632 @@
+{
+  "id": "scan_summary/complete-basic",
+  "route": "scan_summary",
+  "description": "A complete four-symbol spreads scan with two candidates, one no-candidate symbol and one failed symbol. Good and borderline (benign near-miss) outputs.",
+  "nowIso": "2026-09-21T15:00:00.000Z",
+  "sourceAsOf": {
+    "quoteGreeks": null,
+    "brokerPositionCapacity": null,
+    "earningsCalendar": null,
+    "scanCalculation": "2026-09-21T14:30:00.000Z"
+  },
+  "payload": {
+    "scan": {
+      "strategy": "spreads",
+      "mode": "filter",
+      "symbolsSelected": 4,
+      "symbolsPlanned": 4,
+      "symbolsEvaluated": 3,
+      "symbolsFailed": 1,
+      "symbolsSkipped": 0,
+      "candidatesFound": 2,
+      "candidatesPassedRules": 2,
+      "candidatesFailedRules": 0,
+      "candidateRowsIncluded": 2,
+      "candidateRowsOmitted": 0
+    },
+    "filters": {},
+    "outcomes": [
+      {
+        "symbol": "AAA",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "BBB",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "CCC",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      },
+      {
+        "symbol": "DDD",
+        "status": "failed",
+        "candidateCount": 0,
+        "reasonCode": "MARKET_DATA_REQUEST_FAILED",
+        "reasonLabel": "Market-data request failed"
+      }
+    ],
+    "candidates": [
+      {
+        "symbol": "AAA",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-11-05",
+        "dte": 45,
+        "shortStrike": 95,
+        "longStrike": 90,
+        "shortDelta": 0.22,
+        "credit": 1.25,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      },
+      {
+        "symbol": "BBB",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-10-29",
+        "dte": 38,
+        "shortStrike": 60,
+        "longStrike": 55,
+        "shortDelta": 0.22,
+        "credit": 0.9,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      }
+    ]
+  },
+  "expectFreshness": {
+    "outcome": "proceed",
+    "disclosures": 0
+  },
+  "outputs": [
+    {
+      "id": "good-01-counts",
+      "class": "good",
+      "raw": {
+        "summary": "The scan evaluated {{c:1}} symbols and found {{c:2}} candidates.",
+        "observations": [
+          {
+            "text": "The first candidate is {{c:3}} with {{c:4}} days to expiration.",
+            "citationIds": [
+              3,
+              4
+            ]
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "The scan evaluated 3 symbols and found 2 candidates.",
+          "The first candidate is AAA with 45 days to expiration."
+        ],
+        "mustCite": [
+          "/scan/symbolsEvaluated",
+          "/scan/candidatesFound",
+          "/candidates/0/dte"
+        ]
+      }
+    },
+    {
+      "id": "good-02-credit",
+      "class": "good",
+      "raw": {
+        "summary": "The scan produced {{c:2}} candidates from {{c:1}} evaluated symbols.",
+        "observations": [],
+        "tradeoffs": [
+          {
+            "text": "The credit shown for {{c:3}} is {{c:7}} per share, with expiration on {{c:8}}.",
+            "citationIds": [
+              3,
+              7,
+              8
+            ]
+          }
+        ],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "The credit shown for AAA is $1.25 per share, with expiration on Nov 5, 2026."
+        ],
+        "mustCite": [
+          "/candidates/0/credit"
+        ]
+      }
+    },
+    {
+      "id": "good-03-outcome",
+      "class": "good",
+      "raw": {
+        "summary": "Symbol {{c:5}} did not complete: {{c:6}}.",
+        "observations": [
+          {
+            "text": "The reason recorded for {{c:5}} is {{c:6}}.",
+            "citationIds": [
+              5,
+              6
+            ]
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [
+          {
+            "text": "Would you like the reason for {{c:5}} explained in plain language?"
+          }
+        ],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "Symbol DDD did not complete: Market-data request failed."
+        ],
+        "mustCite": [
+          "/outcomes/3/reasonLabel"
+        ]
+      }
+    },
+    {
+      "id": "border-01-frank",
+      "class": "borderline",
+      "raw": {
+        "summary": "A frank overview: {{c:1}} symbols were evaluated.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    },
+    {
+      "id": "border-02-safety",
+      "class": "borderline",
+      "raw": {
+        "summary": "Safety margins are not part of this snapshot, which lists {{c:2}} candidates.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    },
+    {
+      "id": "border-03-submitted",
+      "class": "borderline",
+      "raw": {
+        "summary": "The submitted-by field is absent; the snapshot lists {{c:2}} candidates.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    },
+    {
+      "id": "border-04-monitoring",
+      "class": "borderline",
+      "raw": {
+        "summary": "Monitoring data is not included; the scan evaluated {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    },
+    {
+      "id": "border-05-rows",
+      "class": "borderline",
+      "raw": {
+        "summary": "Each candidate row lists a symbol such as {{c:3}} and a date such as {{c:8}}.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    },
+    {
+      "id": "border-06-restate",
+      "class": "borderline",
+      "raw": {
+        "summary": "This restates only what the scan recorded for {{c:3}}: {{c:4}} days remain.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": []
+      }
+    }
+  ]
+}

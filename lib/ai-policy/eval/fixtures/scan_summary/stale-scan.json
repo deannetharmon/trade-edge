@@ -1,0 +1,260 @@
+{
+  "id": "scan_summary/stale-scan",
+  "route": "scan_summary",
+  "description": "The scan finished 9.5 hours ago, past the 8-hour limit. The route is blocked up front; any output that still cites the stale scan must be rejected.",
+  "nowIso": "2026-09-21T15:00:00.000Z",
+  "sourceAsOf": {
+    "quoteGreeks": null,
+    "brokerPositionCapacity": null,
+    "earningsCalendar": null,
+    "scanCalculation": "2026-09-21T05:30:00.000Z"
+  },
+  "payload": {
+    "scan": {
+      "strategy": "spreads",
+      "mode": "filter",
+      "symbolsSelected": 4,
+      "symbolsPlanned": 4,
+      "symbolsEvaluated": 3,
+      "symbolsFailed": 1,
+      "symbolsSkipped": 0,
+      "candidatesFound": 2,
+      "candidatesPassedRules": 2,
+      "candidatesFailedRules": 0,
+      "candidateRowsIncluded": 2,
+      "candidateRowsOmitted": 0
+    },
+    "filters": {},
+    "outcomes": [
+      {
+        "symbol": "AAA",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "BBB",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "CCC",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      },
+      {
+        "symbol": "DDD",
+        "status": "failed",
+        "candidateCount": 0,
+        "reasonCode": "MARKET_DATA_REQUEST_FAILED",
+        "reasonLabel": "Market-data request failed"
+      }
+    ],
+    "candidates": [
+      {
+        "symbol": "AAA",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-11-05",
+        "dte": 45,
+        "shortStrike": 95,
+        "longStrike": 90,
+        "shortDelta": 0.22,
+        "credit": 1.25,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      },
+      {
+        "symbol": "BBB",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-10-29",
+        "dte": 38,
+        "shortStrike": 60,
+        "longStrike": 55,
+        "shortDelta": 0.22,
+        "credit": 0.9,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      }
+    ]
+  },
+  "expectFreshness": {
+    "outcome": "blocked"
+  },
+  "outputs": [
+    {
+      "id": "adv-stale-1",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan evaluated {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "stale_source"
+      }
+    },
+    {
+      "id": "adv-stale-2",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan found {{c:2}} candidates.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "stale_source"
+      }
+    },
+    {
+      "id": "adv-stale-3",
+      "class": "adversarial",
+      "raw": {
+        "summary": "Symbol {{c:3}} is listed first.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "stale_source"
+      }
+    }
+  ]
+}

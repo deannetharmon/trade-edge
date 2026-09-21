@@ -44,6 +44,8 @@ export const FRESH_AS_OF: Record<SourceKind, string | null> = {
 
 export const TEST_ENV: Env = {
   AI_POLICY_ENABLED: 'true',
+  // Tests are not Production, so the ungated-preview bypass is honored; launchGates.test.ts covers the gated paths.
+  AI_POLICY_ALLOW_UNGATED_PREVIEW: 'true',
   AI_POLICY_SCAN_SUMMARY_ENABLED: 'true',
   AI_POLICY_GROUNDED_CHAT_ENABLED: 'true',
   AI_POLICY_LEAPS_DEEP_ENABLED: 'true',

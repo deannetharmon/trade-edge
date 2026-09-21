@@ -1,0 +1,271 @@
+{
+  "id": "grounded_chat/chat-basic",
+  "route": "grounded_chat",
+  "description": "A question about a failed symbol. Good and borderline outputs.",
+  "nowIso": "2026-09-21T15:00:00.000Z",
+  "sourceAsOf": {
+    "quoteGreeks": null,
+    "brokerPositionCapacity": null,
+    "earningsCalendar": null,
+    "scanCalculation": "2026-09-21T14:30:00.000Z"
+  },
+  "payload": {
+    "scan": {
+      "strategy": "spreads",
+      "mode": "filter",
+      "symbolsSelected": 4,
+      "symbolsPlanned": 4,
+      "symbolsEvaluated": 3,
+      "symbolsFailed": 1,
+      "symbolsSkipped": 0,
+      "candidatesFound": 2,
+      "candidatesPassedRules": 2,
+      "candidatesFailedRules": 0,
+      "candidateRowsIncluded": 2,
+      "candidateRowsOmitted": 0
+    },
+    "filters": {},
+    "outcomes": [
+      {
+        "symbol": "AAA",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "BBB",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "CCC",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      },
+      {
+        "symbol": "DDD",
+        "status": "failed",
+        "candidateCount": 0,
+        "reasonCode": "MARKET_DATA_REQUEST_FAILED",
+        "reasonLabel": "Market-data request failed"
+      }
+    ],
+    "candidates": [
+      {
+        "symbol": "AAA",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-11-05",
+        "dte": 45,
+        "shortStrike": 95,
+        "longStrike": 90,
+        "shortDelta": 0.22,
+        "credit": 1.25,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      },
+      {
+        "symbol": "BBB",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-10-29",
+        "dte": 38,
+        "shortStrike": 60,
+        "longStrike": 55,
+        "shortDelta": 0.22,
+        "credit": 0.9,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      }
+    ]
+  },
+  "question": "Why was DDD excluded?",
+  "expectFreshness": {
+    "outcome": "proceed",
+    "disclosures": 0
+  },
+  "outputs": [
+    {
+      "id": "good-01-reason",
+      "class": "good",
+      "raw": {
+        "summary": "Symbol {{c:1}} appears with this recorded reason: {{c:2}}.",
+        "observations": [
+          {
+            "text": "The recorded outcome for {{c:1}} is {{c:2}}.",
+            "citationIds": [
+              1,
+              2
+            ]
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 2,
+            "pointer": "/outcomes/3/reasonLabel"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "Symbol DDD appears with this recorded reason: Market-data request failed."
+        ],
+        "mustCite": [
+          "/outcomes/3/reasonLabel"
+        ]
+      }
+    },
+    {
+      "id": "good-02-count",
+      "class": "good",
+      "raw": {
+        "summary": "The snapshot lists {{c:1}} symbols that were evaluated.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true,
+        "renderedContains": [
+          "3 symbols"
+        ]
+      }
+    },
+    {
+      "id": "chat-border-01-frank",
+      "class": "borderline",
+      "raw": {
+        "summary": "A frank overview: {{c:1}} symbols were evaluated.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/3/symbol"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "chat-border-02-safety",
+      "class": "borderline",
+      "raw": {
+        "summary": "Safety margins are not part of this snapshot, which lists {{c:1}} candidates.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/3/symbol"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "chat-border-03-submitted",
+      "class": "borderline",
+      "raw": {
+        "summary": "The submitted-by field is absent; the snapshot lists {{c:1}} candidates.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/3/symbol"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "chat-border-04-monitoring",
+      "class": "borderline",
+      "raw": {
+        "summary": "Monitoring data is not included; the scan evaluated {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/3/symbol"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    }
+  ]
+}

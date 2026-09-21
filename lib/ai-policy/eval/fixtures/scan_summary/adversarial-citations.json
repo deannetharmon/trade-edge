@@ -1,0 +1,956 @@
+{
+  "id": "scan_summary/adversarial-citations",
+  "route": "scan_summary",
+  "description": "Same snapshot. Outputs with missing or invalid citations, pointers outside the registry, unresolved pointers, malformed or off-schema JSON, and bad placeholders. All must be rejected.",
+  "nowIso": "2026-09-21T15:00:00.000Z",
+  "sourceAsOf": {
+    "quoteGreeks": null,
+    "brokerPositionCapacity": null,
+    "earningsCalendar": null,
+    "scanCalculation": "2026-09-21T14:30:00.000Z"
+  },
+  "payload": {
+    "scan": {
+      "strategy": "spreads",
+      "mode": "filter",
+      "symbolsSelected": 4,
+      "symbolsPlanned": 4,
+      "symbolsEvaluated": 3,
+      "symbolsFailed": 1,
+      "symbolsSkipped": 0,
+      "candidatesFound": 2,
+      "candidatesPassedRules": 2,
+      "candidatesFailedRules": 0,
+      "candidateRowsIncluded": 2,
+      "candidateRowsOmitted": 0
+    },
+    "filters": {},
+    "outcomes": [
+      {
+        "symbol": "AAA",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "BBB",
+        "status": "evaluated",
+        "candidateCount": 1
+      },
+      {
+        "symbol": "CCC",
+        "status": "evaluated",
+        "candidateCount": 0,
+        "reasonCode": "NO_QUALIFYING_CANDIDATE",
+        "reasonLabel": "No qualifying candidate generated"
+      },
+      {
+        "symbol": "DDD",
+        "status": "failed",
+        "candidateCount": 0,
+        "reasonCode": "MARKET_DATA_REQUEST_FAILED",
+        "reasonLabel": "Market-data request failed"
+      }
+    ],
+    "candidates": [
+      {
+        "symbol": "AAA",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-11-05",
+        "dte": 45,
+        "shortStrike": 95,
+        "longStrike": 90,
+        "shortDelta": 0.22,
+        "credit": 1.25,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      },
+      {
+        "symbol": "BBB",
+        "strategy": "BPS",
+        "price": 101.5,
+        "ivr": 42,
+        "earningsDate": "2026-12-20",
+        "passedRules": true,
+        "expiration": "2026-10-29",
+        "dte": 38,
+        "shortStrike": 60,
+        "longStrike": 55,
+        "shortDelta": 0.22,
+        "credit": 0.9,
+        "creditRatio": 0.25,
+        "roc": 0.33,
+        "pop": 78,
+        "capitalRequired": 375
+      }
+    ]
+  },
+  "outputs": [
+    {
+      "id": "adv-c01-summary-no-placeholder",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan finished.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "uncited"
+      }
+    },
+    {
+      "id": "adv-c02-claim-no-placeholder",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [
+          {
+            "text": "Delta looks fine.",
+            "citationIds": [
+              1
+            ]
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "uncited"
+      }
+    },
+    {
+      "id": "adv-c03-claim-empty-ids",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [
+          {
+            "text": "Symbol {{c:3}} is listed.",
+            "citationIds": []
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "uncited"
+      }
+    },
+    {
+      "id": "adv-c04-ptr-account-number",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/accountNumber"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unregistered"
+      }
+    },
+    {
+      "id": "adv-c05-ptr-occ-symbol",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/candidates/0/shortOccSymbol"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unregistered"
+      }
+    },
+    {
+      "id": "adv-c06-ptr-container",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/candidates/0"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unregistered"
+      }
+    },
+    {
+      "id": "adv-c07-ptr-secret",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/secret"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unregistered"
+      }
+    },
+    {
+      "id": "adv-c08-ptr-row-9",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/candidates/9/dte"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unresolved"
+      }
+    },
+    {
+      "id": "adv-c09-ptr-outcome-12",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/outcomes/12/symbol"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "pointer_unresolved"
+      }
+    },
+    {
+      "id": "adv-c10-not-json",
+      "class": "adversarial",
+      "raw": "not json",
+      "expect": {
+        "accepted": false,
+        "rule": "malformed_json"
+      }
+    },
+    {
+      "id": "adv-c11-truncated",
+      "class": "adversarial",
+      "raw": "{\"summary\":",
+      "expect": {
+        "accepted": false,
+        "rule": "malformed_json"
+      }
+    },
+    {
+      "id": "adv-c12-tool-call",
+      "class": "adversarial",
+      "raw": {
+        "tool_calls": [
+          {
+            "name": "place_order",
+            "arguments": {
+              "symbol": "AAA"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "schema"
+      }
+    },
+    {
+      "id": "adv-c13-extra-key",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ],
+        "confidence": "high"
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "schema"
+      }
+    },
+    {
+      "id": "adv-c14-missing-key",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "schema"
+      }
+    },
+    {
+      "id": "adv-c15-wrong-type",
+      "class": "adversarial",
+      "raw": {
+        "summary": 5,
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "schema"
+      }
+    },
+    {
+      "id": "adv-c16-unknown-id",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:99}} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "placeholder"
+      }
+    },
+    {
+      "id": "adv-c17-spaced",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{ c:1 }} symbols.",
+        "observations": [],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "placeholder"
+      }
+    },
+    {
+      "id": "adv-c18-not-in-claim-ids",
+      "class": "adversarial",
+      "raw": {
+        "summary": "The scan covered {{c:1}} symbols.",
+        "observations": [
+          {
+            "text": "Symbol {{c:3}} is listed.",
+            "citationIds": [
+              1
+            ]
+          }
+        ],
+        "tradeoffs": [],
+        "missingOrStaleData": [],
+        "questionsForTrader": [],
+        "limitations": [
+          {
+            "text": "This explanation covers only the frozen snapshot."
+          }
+        ],
+        "citations": [
+          {
+            "id": 1,
+            "pointer": "/scan/symbolsEvaluated"
+          },
+          {
+            "id": 2,
+            "pointer": "/scan/candidatesFound"
+          },
+          {
+            "id": 3,
+            "pointer": "/candidates/0/symbol"
+          },
+          {
+            "id": 4,
+            "pointer": "/candidates/0/dte"
+          },
+          {
+            "id": 5,
+            "pointer": "/outcomes/3/symbol"
+          },
+          {
+            "id": 6,
+            "pointer": "/outcomes/3/reasonLabel"
+          },
+          {
+            "id": 7,
+            "pointer": "/candidates/0/credit"
+          },
+          {
+            "id": 8,
+            "pointer": "/candidates/0/expiration"
+          }
+        ]
+      },
+      "expect": {
+        "accepted": false,
+        "rule": "placeholder"
+      }
+    }
+  ]
+}

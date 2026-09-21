@@ -10,6 +10,7 @@ import { buildScanSessionInput } from './builders/attested/scanSession';
 import { sha256Hex } from './canonical';
 import { isGloballyEnabled, isRouteEnabled } from './config';
 import { IDEMPOTENCY_KEY_RE } from './idempotency';
+import type { LaunchGate } from './launchGates';
 import { saveInput } from './inputStore';
 import { checkKillSwitch } from './killSwitch';
 import { accountScopeId } from './scope';
@@ -41,6 +42,7 @@ export interface FreezeDeps {
   env?: Env;
   redis?: RedisLike;
   now?: () => number;
+  gates?: readonly LaunchGate[];
 }
 
 const unavailable = (reason: ReasonCode): FreezeResult => ({ status: 'unavailable', reason });
@@ -51,7 +53,8 @@ export async function freezeScanSession(request: FreezeRequest, deps: FreezeDeps
   let redis: RedisLike | null = deps.redis ?? null;
   let claimKey: string | null = null;
   try {
-    if (!isGloballyEnabled(env) || !(isRouteEnabled('scan_summary', env) || isRouteEnabled('grounded_chat', env))) return unavailable('FLAG_OFF');
+    const gate = { gates: deps.gates, nowMs: now() };
+    if (!isGloballyEnabled(env) || !(isRouteEnabled('scan_summary', env, gate) || isRouteEnabled('grounded_chat', env, gate))) return unavailable('FLAG_OFF');
     if (!redis) {
       try {
         redis = getRedis() as unknown as RedisLike;

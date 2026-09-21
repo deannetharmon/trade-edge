@@ -5,6 +5,8 @@
 // Env is read at call time (never at import) and can be injected for tests.
 
 import type { AiRouteId, AiTier, Env, ReasonCode, SourceKind } from './types';
+import { LAUNCH_GATES, hasLaunchGate } from './launchGates';
+import type { LaunchGate } from './launchGates';
 import { pricingFor } from './pricing';
 
 /** Vercel `maxDuration` for AI routes; the provider timeout must stay below it (Alan's condition). */
@@ -40,8 +42,20 @@ export function isGloballyEnabled(env: Env = process.env): boolean {
   return isTrue(env.AI_POLICY_ENABLED);
 }
 
-export function isRouteEnabled(route: AiRouteId, env: Env = process.env): boolean {
-  return isGloballyEnabled(env) && isTrue(env[ROUTE_ENV[route].flag]);
+export interface RouteEnableOptions {
+  /** Gate registry to consult (defaults to LAUNCH_GATES); injected by tests. */
+  gates?: readonly LaunchGate[];
+  nowMs?: number;
+}
+
+/**
+ * A route is enable-able only if the global flag AND its route flag are on AND (AI-POLICY-0001F) a valid, approved,
+ * unexpired launch gate exists for it. Preview/dev may skip the gate with AI_POLICY_ALLOW_UNGATED_PREVIEW=true; that
+ * bypass is ignored in Production. With an empty registry every route is unavailable in Production.
+ */
+export function isRouteEnabled(route: AiRouteId, env: Env = process.env, options: RouteEnableOptions = {}): boolean {
+  if (!(isGloballyEnabled(env) && isTrue(env[ROUTE_ENV[route].flag]))) return false;
+  return hasLaunchGate(route, env, options.gates ?? LAUNCH_GATES, options.nowMs ?? Date.now());
 }
 
 export function parsePositiveInt(value: string | undefined, max = 1_000_000): number | null {
