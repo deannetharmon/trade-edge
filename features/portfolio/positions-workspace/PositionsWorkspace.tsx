@@ -26,6 +26,7 @@ import { MandateForm } from './MandateForm';
 import { IncomeHistory } from './IncomeHistory';
 import { DecisionHistory } from './DecisionHistory';
 import { HistoryStrip } from './HistoryStrip';
+import { buildPnlReconciliation, buildPnlSecondLine, buildPositionPnlBases, describePnlReconciliation, wideMarketNote } from './model/pnlBases';
 import { buildSparklines, cleanHistory } from '@/lib/leaps-position-intelligence/sparklines';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
 
@@ -483,6 +484,16 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       <button type="button" onClick={() => { setDraftColumns(columns); setColumnsOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Customize Columns</button>
       <span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span>
     </div>
+    {(() => {
+      // PNL-BASIS-0001: reconcile this table (options only) with the Portfolio view (options + equities).
+      const perSymbol = model.symbolGroups.map(group => group.symbolUnrealizedPnl);
+      const summary = describePnlReconciliation(buildPnlReconciliation({
+        options: model.analysisRows.map(row => row.position),
+        equities: model.symbolGroups.flatMap(group => group.equities),
+        portfolioTotal: perSymbol.length > 0 && perSymbol.every(value => value != null) ? perSymbol.reduce<number>((sum, value) => sum + (value as number), 0) : null,
+      }));
+      return summary.line ? <p role="status" data-testid="pnl-reconciliation" className={`mb-2 text-[11px] ${summary.tone === 'warn' ? 'text-amber-300' : th.textFaint}`}>{summary.line}</p> : null;
+    })()}
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
     {priceAlertsLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Price alerts unavailable — {priceAlertsLoadError}</p>}
     <div className="max-w-full overflow-x-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
@@ -619,6 +630,10 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
   const capital = buildCapitalViewModel(p);
   const pnl = p.closeNowPnl ?? p.pnl;
   const pctOfTarget = profitTargetPct(p, pnl);
+  // PNL-BASIS-0001: say which basis the P/L above is on, and show the other one (display only; the rules' own inputs are unchanged).
+  const pnlBases = buildPositionPnlBases(p);
+  const pnlSecond = buildPnlSecondLine(pnlBases);
+  const pnlWide = wideMarketNote(pnlBases, p.currentValue);
   const stop = stopPresentation(p.stopLossClassification);
   const stopControl = renderStopControl?.(p) ?? null;
   const breakeven = buildBreakevenViewModel(p);
@@ -641,7 +656,7 @@ function AnalysisRow({ position: p, columns, th, actions, onExecute, renderStopC
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
     // the sign of the % itself (Ian: signed, never floored to 0).
-    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block">{profitTargetPresentation(p)}</span></>,
+    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block text-[10px] text-white/55">{pnlBases.primary === 'close-now' ? 'close now' : 'mid'}</span><span className="block">{profitTargetPresentation(p)}</span>{pnlSecond && <span className="block text-[10px] text-white/70" data-testid="pnl-other-basis">{pnlSecond.text}</span>}{pnlWide && <span className="block text-[10px] text-amber-300" data-testid="pnl-wide-market">{pnlWide}</span>}</>,
     // TELEMETRY-METRIC-DIRECTION-0001: directionalMovementTone previously
     // treated every metric identically (any movement = informational,
     // no movement = neutral) -- didn't implement the team's actual rules.
