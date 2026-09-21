@@ -50,7 +50,7 @@ describe('the honest label', () => {
 
   it('with no open date on record it is "first tracked"; with no baseline at all there is nothing to show', () => {
     expect(buildSinceOpen(input({ entry: { entryDate: null } })).basis).toBe('first-tracked');
-    expect(buildSinceOpen(input({ entry: { capturedAt: null } }))).toEqual({ basis: 'none', label: '', tiles: [] });
+    expect(buildSinceOpen(input({ entry: { capturedAt: null } }))).toEqual({ basis: 'none', label: '', tiles: [], extrinsicLostPerShare: null });
     expect(buildSinceOpen(input({ entry: { capturedAt: 'garbage' } })).basis).toBe('none');
   });
 });
@@ -136,5 +136,17 @@ describe('isBaselineAtOpen', () => {
   it.each([['2026-08-14T15:30:00.000Z', '2026-08-14', true], ['2026-08-15T09:00:00.000Z', '2026-08-14', true], ['2026-08-16T09:00:00.000Z', '2026-08-14', false], ['2026-08-13T09:00:00.000Z', '2026-08-14', true], ['2026-08-12T09:00:00.000Z', '2026-08-14', false],
     [null, '2026-08-14', false], ['2026-08-14T15:30:00.000Z', null, false], ['garbage', '2026-08-14', false], ['2026-08-14T15:30:00.000Z', '08/14/2026', false]])('%s vs %s -> %s', (captured, entry, expected) => {
     expect(isBaselineAtOpen(captured, entry)).toBe(expected);
+  });
+});
+
+describe('extrinsicLostPerShare (LEAPS-CYCLES-0001)', () => {
+  it('is the extrinsic lost since the open for a true at-open baseline: 26.89 - 19.59 = 7.30', () => {
+    expect(buildSinceOpen(input()).extrinsicLostPerShare).toBeCloseTo(7.3, 6);
+  });
+  it('is negative when extrinsic grew, and null whenever the extrinsic tile is not shown', () => {
+    expect(buildSinceOpen(input({ now: { markPerShare: 140 } })).extrinsicLostPerShare).toBeCloseTo(-12.25, 6);
+    expect(buildSinceOpen(input({ entry: { capturedAt: '2026-09-19T12:00:00.000Z' } })).extrinsicLostPerShare).toBeNull(); // first-tracked baseline
+    expect(buildSinceOpen(input({ entry: { entryPricePerShare: 60 } })).extrinsicLostPerShare).toBeNull();               // inconsistent entry data
+    expect(buildSinceOpen(input({ entry: { stockPrice: null } })).extrinsicLostPerShare).toBeNull();
   });
 });

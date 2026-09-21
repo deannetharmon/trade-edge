@@ -67,6 +67,7 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [LEAPS-DASH-0004 Covered Call and PMCC Advisor Picks as Dashboard Cards](./LEAPS-DASH-0004-cc-pmcc-advisor-cards.md)
 - [LEAPS-SINCE-0001 Since-You-Opened Tiles on the Positions Cards](./LEAPS-SINCE-0001-since-open.md)
 - [LEAPS-ENTRY-0001 True Entry Records for LEAPS and PMCC Orders](./LEAPS-ENTRY-0001-entry-records.md)
+- [LEAPS-CYCLES-0001 Income History per Held LEAPS](./LEAPS-CYCLES-0001-income-history.md)
 - [AI-POLICY-0001 Deterministic-First AI Analysis (epic)](./AI-POLICY-0001-epic.md)
   - [0001A Gateway Foundation](./AI-POLICY-0001A-gateway-foundation.md)
   - [0001B Snapshot Freeze, scan_summary, grounded_chat](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md)

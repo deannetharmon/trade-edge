@@ -43,7 +43,11 @@ export interface SinceOpenInput {
   };
 }
 
-export interface SinceOpen { basis: 'opened' | 'first-tracked' | 'none'; label: string; tiles: DashboardTile[] }
+export interface SinceOpen {
+  basis: 'opened' | 'first-tracked' | 'none'; label: string; tiles: DashboardTile[];
+  /** Extrinsic value lost per share since the open (positive = lost); null unless the baseline is a true at-open baseline with usable prices. */
+  extrinsicLostPerShare: number | null;
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const dayMs = 86_400_000;
@@ -61,12 +65,13 @@ export function isBaselineAtOpen(capturedAt: string | null, entryDate: string | 
 export function buildSinceOpen(input: SinceOpenInput): SinceOpen {
   const { entry, now, strike } = input;
   const capturedDate = entry.capturedAt && ISO_DATE.test(entry.capturedAt.slice(0, 10)) ? entry.capturedAt.slice(0, 10) : null;
-  if (!capturedDate) return { basis: 'none', label: '', tiles: [] };
+  if (!capturedDate) return { basis: 'none', label: '', tiles: [], extrinsicLostPerShare: null };
 
   const basis: SinceOpen['basis'] = isBaselineAtOpen(entry.capturedAt, entry.entryDate) ? 'opened' : 'first-tracked';
   const label = basis === 'opened' ? 'Since you opened' : entry.capturedFrom === 'order' ? `Since you placed the order ${capturedDate}` : `Since first tracked ${capturedDate}`;
   const tiles: DashboardTile[] = [];
   const flat = (text: string) => [{ text, tone: 'neutral' as const }];
+  let extrinsicLostPerShare: number | null = null;
 
   if (entry.stockPrice != null && entry.stockPrice > 0 && now.stockPrice != null && now.stockPrice > 0) {
     const change = now.stockPrice - entry.stockPrice;
@@ -102,11 +107,12 @@ export function buildSinceOpen(input: SinceOpenInput): SinceOpen {
     const nowExtrinsic = now.markPerShare - Math.max(now.stockPrice - strike, 0);
     if (entryExtrinsic >= 0 && nowExtrinsic >= 0) {
       const lost = entryExtrinsic - nowExtrinsic;
+      extrinsicLostPerShare = lost;
       const rounded = Math.round(Math.abs(lost) * 100) / 100;
       tiles.push(tile('extrinsic', 'Extrinsic', money(Math.round(nowExtrinsic * 100) / 100), 'neutral',
         rounded < 0.01 ? flat('unchanged') : [{ text: `${lost > 0 ? '▼' : '▲'} ${money(rounded)} ${lost > 0 ? 'lost' : 'gained'}`, tone: 'neutral' }, { text: `from ${money(Math.round(entryExtrinsic * 100) / 100)}`, tone: 'neutral' }]));
     }
   }
 
-  return { basis, label, tiles };
+  return { basis, label, tiles, extrinsicLostPerShare };
 }
