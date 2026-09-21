@@ -124,8 +124,8 @@ export function isPriceAlertCrossed(alert: { targetPrice: number; direction: 'ab
 export interface PricesAsOf { text: string; staleCount: number }
 
 /**
- * "Prices as of 10:45 PM · market closed" -- the OLDEST price time among the holdings (so a stale one is never hidden), with the weekday added
- * when it is not from today ("as of Fri 4:00 PM"). Null when no price time is known.
+ * "Prices refreshed 10:45 PM · market closed" -- the OLDEST refresh time among the holdings (so a stale one is never hidden), with the weekday
+ * added when it is not from today ("Prices refreshed Fri 4:00 PM"). Null when no time is known.
  */
 export function stockPricesAsOf(input: { rows: Array<Pick<StockHoldingRow, 'quoteAsOf' | 'stale'>>; fallback: string | null; nowMs: number; marketOpen: boolean; timeZone?: string }): PricesAsOf | null {
   const times = input.rows.map(r => (r.quoteAsOf ? Date.parse(r.quoteAsOf) : Number.NaN)).filter(Number.isFinite);
@@ -137,5 +137,7 @@ export function stockPricesAsOf(input: { rows: Array<Pick<StockHoldingRow, 'quot
   const clock = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(oldest));
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(new Date(oldest));
   const label = day(oldest) === day(input.nowMs) ? clock : `${weekday} ${clock}`;
-  return { text: `Prices as of ${label}${input.marketOpen ? '' : ' · market closed'}`, staleCount: input.rows.filter(r => r.stale).length };
+  // The holding's time is when the app REFRESHED the positions (not the quote's own timestamp), so the label says "refreshed"; after hours the
+  // price shown is the broker's last mark.
+  return { text: `Prices refreshed ${label}${input.marketOpen ? '' : ' · market closed'}`, staleCount: input.rows.filter(r => r.stale).length };
 }

@@ -130,32 +130,32 @@ describe('price alerts (the same rule the option rows use)', () => {
   });
 });
 
-describe('the "prices as of" label', () => {
+describe('the "prices refreshed" label', () => {
   const ET = 'America/New_York';
   const rows = (...times: Array<string | null>) => times.map(quoteAsOf => ({ quoteAsOf, stale: false }));
 
   it('same day: just the time, with "market closed" when the market is not open', () => {
     // 2026-09-21T02:45:19Z = 10:45 PM ET on Sunday 2026-09-20
     expect(stockPricesAsOf({ rows: rows('2026-09-21T02:45:19.000Z'), fallback: null, nowMs: Date.parse('2026-09-21T02:50:00.000Z'), marketOpen: false, timeZone: ET }))
-      .toEqual({ text: 'Prices as of 10:45 PM · market closed', staleCount: 0 });
+      .toEqual({ text: 'Prices refreshed 10:45 PM · market closed', staleCount: 0 });
   });
 
   it('an earlier day adds the weekday: Monday morning before the open shows Friday\'s close', () => {
     expect(stockPricesAsOf({ rows: rows('2026-09-18T20:00:00.000Z'), fallback: null, nowMs: Date.parse('2026-09-21T12:00:00.000Z'), marketOpen: false, timeZone: ET }))
-      .toEqual({ text: 'Prices as of Fri 4:00 PM · market closed', staleCount: 0 });
+      .toEqual({ text: 'Prices refreshed Fri 4:00 PM · market closed', staleCount: 0 });
   });
 
   it('while the market is open there is no "market closed"', () => {
-    expect(stockPricesAsOf({ rows: rows('2026-09-21T15:00:00.000Z'), fallback: null, nowMs: Date.parse('2026-09-21T15:00:05.000Z'), marketOpen: true, timeZone: ET })!.text).toBe('Prices as of 11:00 AM');
+    expect(stockPricesAsOf({ rows: rows('2026-09-21T15:00:00.000Z'), fallback: null, nowMs: Date.parse('2026-09-21T15:00:05.000Z'), marketOpen: true, timeZone: ET })!.text).toBe('Prices refreshed 11:00 AM');
   });
 
   it('uses the OLDEST holding price, so a stale one is not hidden, and counts stale prices', () => {
     const r = stockPricesAsOf({ rows: [{ quoteAsOf: '2026-09-21T15:00:00.000Z', stale: false }, { quoteAsOf: '2026-09-21T13:30:00.000Z', stale: true }], fallback: null, nowMs: Date.parse('2026-09-21T15:05:00.000Z'), marketOpen: true, timeZone: ET })!;
-    expect(r).toEqual({ text: 'Prices as of 9:30 AM', staleCount: 1 });
+    expect(r).toEqual({ text: 'Prices refreshed 9:30 AM', staleCount: 1 });
   });
 
   it('falls back to the snapshot time, and says nothing when no time is known', () => {
-    expect(stockPricesAsOf({ rows: rows(null), fallback: '2026-09-21T15:00:00.000Z', nowMs: Date.parse('2026-09-21T15:05:00.000Z'), marketOpen: true, timeZone: ET })!.text).toBe('Prices as of 11:00 AM');
+    expect(stockPricesAsOf({ rows: rows(null), fallback: '2026-09-21T15:00:00.000Z', nowMs: Date.parse('2026-09-21T15:05:00.000Z'), marketOpen: true, timeZone: ET })!.text).toBe('Prices refreshed 11:00 AM');
     expect(stockPricesAsOf({ rows: rows(null, 'garbage'), fallback: null, nowMs: 0, marketOpen: true, timeZone: ET })).toBeNull();
   });
 });
