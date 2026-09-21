@@ -7,6 +7,16 @@ import { DEFAULT_PMCC_LONG_DELTA_RANGE, DEFAULT_PMCC_SHORT_DELTA_RANGE, DEFAULT_
 import { evaluatePmccDecision } from '@/lib/scans/pmccDecision';
 import { derivePmccMarketSession } from '@/lib/scans/pmccProduction';
 import type { PmccChainLeg, PmccPairingCriteria } from '@/lib/scans/pmccTypes';
+import { recordEntryBestEffort, type RecordEntryInput } from '@/lib/leaps-position-intelligence/entryCapture';
+
+/**
+ * LEAPS-ENTRY-0001: records the market state at the moment the broker accepted an order. It runs only after the broker's acceptance,
+ * is best-effort with a short timeout, and can never throw or change the order's result (recordEntryBestEffort swallows every failure;
+ * this wrapper is a second guard).
+ */
+async function captureEntryAfterOrder(input: RecordEntryInput): Promise<void> {
+  try { await recordEntryBestEffort(input); } catch { /* never affects the order */ }
+}
 
 const API_BASE = 'https://api.tastytrade.com';
 const QUOTE_MAX_AGE_MS = 60_000;
@@ -161,6 +171,9 @@ export async function submitPmccOrder(userId: string, input: {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`);
+    if (input.mode === 'submit') {
+      await captureEntryAfterOrder({ kind: 'pmcc-entry', userId, accountNumber, underlyingSymbol: input.underlyingSymbol, longOccSymbol: input.longOccSymbol, shortOccSymbol: input.shortOccSymbol, quantity: input.quantity, limitPrice: input.limitPrice, priceEffect: 'Debit', long: longReview, short: shortReview, order: body?.data ?? body });
+    }
     return { decision, order: body?.data ?? body };
   } finally {
     context.redis.disconnect();
@@ -179,7 +192,10 @@ export async function submitLeapsOrder(userId: string, input: { accountLocator: 
   try {
     if (reviewed.review.qualification.status !== 'CONTRACT_QUALIFIED') return { review: reviewed.review, order: null };
     const response = await fetch(`${API_BASE}/accounts/${reviewed.accountNumber}/orders${input.mode === 'dry-run' ? '/dry-run' : ''}`, { method: 'POST', headers: { Authorization: `Bearer ${reviewed.context.accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'trade-edge/1.0' }, body: JSON.stringify({ 'time-in-force': 'GTC', 'order-type': 'Limit', price: input.limitPrice.toFixed(2), 'price-effect': 'Debit', legs: [{ 'instrument-type': reviewed.review.instrumentType, symbol: reviewed.review.occSymbol, quantity: input.quantity, action: 'Buy to Open' }] }) });
-    const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`); return { review: reviewed.review, order: body?.data ?? body };
+    const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`); if (input.mode === 'submit') {
+      await captureEntryAfterOrder({ kind: 'leaps-entry', userId, accountNumber: reviewed.accountNumber, underlyingSymbol: input.underlyingSymbol, longOccSymbol: input.occSymbol, shortOccSymbol: null, quantity: input.quantity, limitPrice: input.limitPrice, priceEffect: 'Debit', long: reviewed.review, short: null, order: body?.data ?? body });
+    }
+    return { review: reviewed.review, order: body?.data ?? body };
   } finally { reviewed.context.redis.disconnect(); }
 }
 
@@ -341,6 +357,9 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message ?? body?.errors?.[0]?.message ?? `Broker ${input.mode} failed`);
+    if (input.mode === 'submit') {
+      await captureEntryAfterOrder({ kind: 'short-call-sold', userId, accountNumber, underlyingSymbol: input.underlyingSymbol, longOccSymbol: input.longOccSymbol, shortOccSymbol: input.shortOccSymbol, quantity: input.quantity, limitPrice: input.limitPrice, priceEffect: 'Credit', long: longReview, short: shortReview, order: body?.data ?? body });
+    }
     return { decision, order: body?.data ?? body };
   } finally {
     context.redis.disconnect();

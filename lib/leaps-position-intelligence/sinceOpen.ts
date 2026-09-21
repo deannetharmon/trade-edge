@@ -28,8 +28,10 @@ export interface SinceOpenInput {
   strike: number;
   now: { stockPrice: number | null; delta: number | null; ivr: number | null; markPerShare: number | null };
   entry: {
-    /** ISO time the baseline was recorded. */
+    /** ISO time the baseline was recorded (or the order was placed, for an order record). */
     capturedAt: string | null;
+    /** Where the baseline came from: the first-seen position baseline (default), or a true record made when the order was placed. */
+    capturedFrom?: 'baseline' | 'order';
     /** Broker open date, YYYY-MM-DD. */
     entryDate: string | null;
     stockPrice: number | null;
@@ -48,15 +50,21 @@ const dayMs = 86_400_000;
 const tile = (id: string, label: string, value: string, tone: DashboardTone, parts: DashboardTile['parts']): DashboardTile => ({ id, label, value, tone, parts });
 const arrow = (change: number) => (change > 0 ? '▲' : '▼');
 
+/** True when a baseline recorded at `capturedAt` is within the at-open tolerance of the broker's open date. */
+export function isBaselineAtOpen(capturedAt: string | null, entryDate: string | null): boolean {
+  const capturedDate = capturedAt && ISO_DATE.test(capturedAt.slice(0, 10)) ? capturedAt.slice(0, 10) : null;
+  if (!capturedDate || !entryDate || !ISO_DATE.test(entryDate)) return false;
+  const entryDay = Date.parse(entryDate);
+  return Number.isFinite(entryDay) && Math.abs(Date.parse(capturedDate) - entryDay) / dayMs <= SINCE_OPEN_POLICY.atOpenMaxGapDays;
+}
+
 export function buildSinceOpen(input: SinceOpenInput): SinceOpen {
   const { entry, now, strike } = input;
   const capturedDate = entry.capturedAt && ISO_DATE.test(entry.capturedAt.slice(0, 10)) ? entry.capturedAt.slice(0, 10) : null;
   if (!capturedDate) return { basis: 'none', label: '', tiles: [] };
 
-  const entryDay = entry.entryDate && ISO_DATE.test(entry.entryDate) ? Date.parse(entry.entryDate) : Number.NaN;
-  const gapDays = Number.isFinite(entryDay) ? Math.abs(Date.parse(capturedDate) - entryDay) / dayMs : Number.POSITIVE_INFINITY;
-  const basis: SinceOpen['basis'] = gapDays <= SINCE_OPEN_POLICY.atOpenMaxGapDays ? 'opened' : 'first-tracked';
-  const label = basis === 'opened' ? 'Since you opened' : `Since first tracked ${capturedDate}`;
+  const basis: SinceOpen['basis'] = isBaselineAtOpen(entry.capturedAt, entry.entryDate) ? 'opened' : 'first-tracked';
+  const label = basis === 'opened' ? 'Since you opened' : entry.capturedFrom === 'order' ? `Since you placed the order ${capturedDate}` : `Since first tracked ${capturedDate}`;
   const tiles: DashboardTile[] = [];
   const flat = (text: string) => [{ text, tone: 'neutral' as const }];
 

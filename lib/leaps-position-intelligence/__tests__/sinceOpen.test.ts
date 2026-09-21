@@ -4,7 +4,7 @@
 // now stock $350.86, delta 0.85, IVR 20, mark $120.45.
 
 import { describe, expect, it } from 'vitest';
-import { buildSinceOpen, SINCE_OPEN_POLICY, type SinceOpenInput } from '../sinceOpen';
+import { buildSinceOpen, isBaselineAtOpen, SINCE_OPEN_POLICY, type SinceOpenInput } from '../sinceOpen';
 
 const input = (over: { now?: Partial<SinceOpenInput['now']>; entry?: Partial<SinceOpenInput['entry']> } = {}): SinceOpenInput => ({
   strike: 250,
@@ -109,5 +109,32 @@ describe('missing data leaves a tile out; nothing is estimated', () => {
     const before = JSON.stringify(i);
     buildSinceOpen(i);
     expect(JSON.stringify(i)).toBe(before);
+  });
+});
+
+describe('order records (LEAPS-ENTRY-0001)', () => {
+  it('an order placed on the open date is "Since you opened" and includes extrinsic lost', () => {
+    const s = buildSinceOpen(input({ entry: { capturedFrom: 'order' } }));
+    expect(s.basis).toBe('opened');
+    expect(s.label).toBe('Since you opened');
+    expect(s.tiles.some(t => t.id === 'extrinsic')).toBe(true);
+  });
+
+  it('a good-till-cancelled order that filled days later is labelled by the order date, and has no extrinsic (the fill price is not the order-time price)', () => {
+    const s = buildSinceOpen(input({ entry: { capturedFrom: 'order', capturedAt: '2026-08-10T15:30:00.000Z' } }));
+    expect(s.basis).toBe('first-tracked');
+    expect(s.label).toBe('Since you placed the order 2026-08-10');
+    expect(s.tiles.map(t => t.id)).toEqual(['stock', 'delta', 'ivr']);
+  });
+
+  it('a baseline keeps its own wording', () => {
+    expect(buildSinceOpen(input({ entry: { capturedFrom: 'baseline', capturedAt: '2026-09-19T12:00:00.000Z' } })).label).toBe('Since first tracked 2026-09-19');
+  });
+});
+
+describe('isBaselineAtOpen', () => {
+  it.each([['2026-08-14T15:30:00.000Z', '2026-08-14', true], ['2026-08-15T09:00:00.000Z', '2026-08-14', true], ['2026-08-16T09:00:00.000Z', '2026-08-14', false], ['2026-08-13T09:00:00.000Z', '2026-08-14', true], ['2026-08-12T09:00:00.000Z', '2026-08-14', false],
+    [null, '2026-08-14', false], ['2026-08-14T15:30:00.000Z', null, false], ['garbage', '2026-08-14', false], ['2026-08-14T15:30:00.000Z', '08/14/2026', false]])('%s vs %s -> %s', (captured, entry, expected) => {
+    expect(isBaselineAtOpen(captured, entry)).toBe(expected);
   });
 });

@@ -17,7 +17,8 @@ import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecomm
 import { evaluateHeldPmccLiveReadiness, type HeldPmccLiveReadiness } from '@/lib/scans/pmccHeldReadinessClient';
 import { buildIncomeCard } from '@/lib/leaps-position-intelligence/incomeCard';
 import { buildCycleCard } from '@/lib/leaps-position-intelligence/cycleCard';
-import { buildSinceOpen } from '@/lib/leaps-position-intelligence/sinceOpen';
+import { buildSinceOpen, isBaselineAtOpen } from '@/lib/leaps-position-intelligence/sinceOpen';
+import { selectEntryRecord, type LeapsEntryRecord } from '@/lib/leaps-position-intelligence/entryRecords';
 import { buildEventCallouts, earningsDateInWindow, isNearItm, type EventCalendarDates, type EventCheckStatus } from '@/lib/leaps-position-intelligence/eventNote';
 import { applyMandateGates, describeIncomeRules } from '@/lib/leaps-position-intelligence/mandateGates';
 import type { LeapsMandate } from '@/lib/leaps-position-intelligence/types';
@@ -158,6 +159,18 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
       .catch(() => { /* no saved rules could be read: the defaults stay in force */ });
     return () => { active = false; };
   }, [mandateAccount, mandateOcc, hasHeldLong]);
+  // LEAPS-ENTRY-0001: the market state recorded when this position's opening order was accepted (only orders placed through TradeEdge have one).
+  const [entryRecords, setEntryRecords] = useState<LeapsEntryRecord[]>([]);
+  useEffect(() => {
+    if (!mandateAccount || !mandateOcc || !hasHeldLong) return;
+    let active = true;
+    Promise.resolve()
+      .then(() => fetch(`/api/leaps-entry-records?accountNumber=${encodeURIComponent(mandateAccount)}&longOcc=${encodeURIComponent(mandateOcc)}`))
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('entry records request failed')))
+      .then(data => { if (active && Array.isArray(data?.records)) setEntryRecords(data.records as LeapsEntryRecord[]); })
+      .catch(() => { /* no entry record could be read: the first-seen baseline is used */ });
+    return () => { active = false; };
+  }, [mandateAccount, mandateOcc, hasHeldLong]);
   const requiresLiveEvaluation = opportunity.status === 'review-income-call' && Boolean(opportunity.accountNumber && opportunity.positionKey && opportunity.exactContract && opportunity.heldPmccLong);
   const missingLiveEvidence = opportunity.status === 'review-income-call' && !requiresLiveEvaluation;
   // Never flash a positive readiness label before the fresh shared evaluator
@@ -217,10 +230,18 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
   const displayLabel = gated ? (gated.state === 'hold-uncovered' ? 'Hold uncovered' : gated.state === 'reassess-thesis' ? 'Reassess thesis' : 'Monitor') : label;
   const displayTone = gated ? (gated.state === 'reassess-thesis' ? 'text-red-300' : 'text-amber-300') : tone;
   // LEAPS-SINCE-0001: where the stock, delta and IVR have gone since the entry baseline (labelled honestly: "since you opened" only when the baseline is at the real open).
-  const sinceOpen = held?.atEntry ? buildSinceOpen({
+  // LEAPS-ENTRY-0001: when an order record exists for this position's open date it is the baseline (stock, delta at order time); IVR is only
+  // available from the first-seen baseline, so it is used only when that baseline itself was taken at the open.
+  const entryMatch = held?.atEntry ? selectEntryRecord(entryRecords, held.atEntry.entryDate) : null;
+  const sinceEntry = held?.atEntry
+    ? entryMatch
+      ? { capturedAt: entryMatch.record.recordedAt, capturedFrom: 'order' as const, entryDate: held.atEntry.entryDate, stockPrice: entryMatch.record.underlying.price, deltaPerShare: entryMatch.record.long?.delta ?? null, ivr: isBaselineAtOpen(held.atEntry.capturedAt, held.atEntry.entryDate) ? held.atEntry.ivr : null }
+      : { ...held.atEntry, capturedFrom: 'baseline' as const }
+    : null;
+  const sinceOpen = held && sinceEntry ? buildSinceOpen({
     strike: held.strike,
     now: { stockPrice: held.stockPrice ?? null, delta: held.delta ?? null, ivr: held.nowIvr ?? null, markPerShare: held.markPerShare ?? null },
-    entry: { ...held.atEntry, entryPricePerShare: held.entryDebitPerShare ?? null },
+    entry: { ...sinceEntry, entryPricePerShare: held.entryDebitPerShare ?? null },
   }) : null;
   const sinceBlock = sinceOpen && sinceOpen.tiles.length > 0 ? (<div data-testid="since-open"><p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">{sinceOpen.label}</p><TileGrid tiles={sinceOpen.tiles} th={th} /></div>) : null;
   const incomeCard = held ? buildIncomeCard({
