@@ -68,10 +68,10 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     const dialog = screen.getByRole('dialog', { name: 'Filter positions' });
     await user.type(within(dialog).getByLabelText('Symbol'), 'MSFT');
-    expect(screen.getByText('1 of 1 positions')).toBeInTheDocument();
+    expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     expect(screen.getByRole('button', { name: 'Filter 1' })).toBeInTheDocument();
-    expect(screen.getByText('0 of 1 positions')).toBeInTheDocument();
+    expect(screen.getByText('0 of 1 option positions')).toBeInTheDocument();
   });
 
   it('renders all sixteen headers in Full Detail without the Greeks column', async () => {

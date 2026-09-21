@@ -129,7 +129,7 @@ export function describePnlReconciliation(r: PnlReconciliation): ReconciliationT
     parts.push(`Options in this table: mid ${mid} · close-now ${now}`);
   }
   if (r.equityCount > 0) {
-    parts.push(`${r.equityCount} equity holding${r.equityCount === 1 ? '' : 's'} not shown here: ${r.equitiesPnl != null ? signedMoney(r.equitiesPnl) : `partial (${r.equitiesUnpriced} unpriced)`}`);
+    parts.push(`Stock holdings below: ${r.equitiesPnl != null ? signedMoney(r.equitiesPnl) : `partial (${r.equitiesUnpriced} unpriced)`}`);
   }
   if (r.totalMid != null) {
     parts.push(`All positions at mid: ${signedMoney(r.totalMid)}${r.reconciles === true ? ' · matches the Portfolio view' : ''}`);

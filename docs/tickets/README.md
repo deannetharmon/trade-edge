@@ -71,6 +71,8 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 - [LEAPS-SPARK-0001 History Strip (Value, Delta, Stock) on Held LEAPS](./LEAPS-SPARK-0001-history-strip.md)
 - [LEAPS-LEDGER-0001 Decision History for Held LEAPS](./LEAPS-LEDGER-0001-decision-ledger.md)
 - [PNL-BASIS-0001 P/L Basis Made Explicit on Position Analysis](./PNL-BASIS-0001-position-analysis-pnl.md)
+- [STOCKS-0001 Stock Holdings Section on Position Analysis](./STOCKS-0001-stock-holdings-section.md)
+- [STOCKS-ORDERS-0001 Sell, Take Profit and Buy to Cover from Stock Holdings (proposed)](./STOCKS-ORDERS-0001-stock-order-actions.md)
 - [AI-POLICY-0001 Deterministic-First AI Analysis (epic)](./AI-POLICY-0001-epic.md)
   - [0001A Gateway Foundation](./AI-POLICY-0001A-gateway-foundation.md)
   - [0001B Snapshot Freeze, scan_summary, grounded_chat](./AI-POLICY-0001B-scan-summary-and-grounded-chat.md)

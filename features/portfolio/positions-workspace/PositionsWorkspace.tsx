@@ -26,6 +26,7 @@ import { MandateForm } from './MandateForm';
 import { IncomeHistory } from './IncomeHistory';
 import { DecisionHistory } from './DecisionHistory';
 import { HistoryStrip } from './HistoryStrip';
+import { StockHoldings } from './StockHoldings';
 import { buildPnlReconciliation, buildPnlSecondLine, buildPositionPnlBases, describePnlReconciliation, wideMarketNote } from './model/pnlBases';
 import { buildSparklines, cleanHistory } from '@/lib/leaps-position-intelligence/sparklines';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
@@ -352,33 +353,37 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     return () => { active = false; };
   }, []);
   const noteStorageKey = (position: Position) => `${encodeURIComponent(position.accountNumber || model.accountNumber || '')}::${encodeURIComponent(position.key)}`;
-  const saveNote = async (position: Position, note: string) => {
-    const accountNumber = position.accountNumber || model.accountNumber;
+  // STOCKS-0001: notes and alerts are stored per accountNumber + key; option rows use the position's key, stock holdings use their own key
+  // format (equity:SYMBOL:long|short), so the two can never collide in the shared store.
+  const storageKeyFor = (accountNumber: string, key: string) => `${encodeURIComponent(accountNumber)}::${encodeURIComponent(key)}`;
+  const saveNoteFor = async (accountNumber: string, positionKey: string, note: string) => {
     if (!accountNumber) throw new Error('Broker account identity is unavailable');
-    const response = await fetch('/api/position-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: position.key, note }) });
+    const response = await fetch('/api/position-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey, note }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? 'Unable to save note');
-    setNotes(current => ({ ...current, [noteStorageKey(position)]: note }));
+    setNotes(current => ({ ...current, [storageKeyFor(accountNumber, positionKey)]: note }));
   };
+  const saveNote = async (position: Position, note: string) => saveNoteFor(position.accountNumber || model.accountNumber || '', position.key, note);
   // Same accountNumber::positionKey scheme as noteStorageKey -- one storage
   // convention, two fields (Dane's consolidation principle).
   const priceAlertStorageKey = (position: Position) => `${encodeURIComponent(position.accountNumber || model.accountNumber || '')}::${encodeURIComponent(position.key)}`;
-  const savePriceAlert = async (position: Position, targetPrice: number | null, direction: 'above' | 'below') => {
-    const accountNumber = position.accountNumber || model.accountNumber;
+  const savePriceAlertFor = async (accountNumber: string, positionKey: string, targetPrice: number | null, direction: 'above' | 'below') => {
     if (!accountNumber) throw new Error('Broker account identity is unavailable');
     // Mark before the request, rather than after it resolves: the initial GET
     // may resolve while this POST is in flight with a pre-save empty store.
     priceAlertsLocallyMutated.current = true;
-    const response = await fetch('/api/position-price-alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: position.key, targetPrice, direction }) });
+    const response = await fetch('/api/position-price-alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey, targetPrice, direction }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error ?? 'Unable to save price alert');
     setPriceAlerts(current => {
       const next = { ...current };
-      if (targetPrice == null) delete next[priceAlertStorageKey(position)];
-      else next[priceAlertStorageKey(position)] = { targetPrice, direction };
+      const storageKey = storageKeyFor(accountNumber, positionKey);
+      if (targetPrice == null) delete next[storageKey];
+      else next[storageKey] = { targetPrice, direction };
       return next;
     });
   };
+  const savePriceAlert = async (position: Position, targetPrice: number | null, direction: 'above' | 'below') => savePriceAlertFor(position.accountNumber || model.accountNumber || '', position.key, targetPrice, direction);
   const analyze = async (position: Position) => {
     if (!onAnalyze || analysisLoading) return;
     setAnalysisPosition(position);
@@ -482,7 +487,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       </div>
       <button type="button" onClick={() => { setDraftFilters(preferences.filters); setFilterOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Filter{activeFilterCount(preferences.filters) ? ` ${activeFilterCount(preferences.filters)}` : ''}</button>
       <button type="button" onClick={() => { setDraftColumns(columns); setColumnsOpen(true); }} className="min-h-11 rounded border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400">Customize Columns</button>
-      <span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} positions</span>
+      <span className={`ml-auto text-xs ${th.textFaint}`}>{rows.length} of {model.analysisRows.length} option positions</span>
     </div>
     {(() => {
       // PNL-BASIS-0001: reconcile this table (options only) with the Portfolio view (options + equities).
@@ -502,6 +507,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const labelContent = column.id === 'strike' ? 'Strike / BE' : column.id === 'underlying' ? <><span className="block">Strike</span><span className="block">Gap</span></> : column.id === 'entry' ? <><span className="block">Entry</span><span className="block">Credit / Debit</span></> : column.label;
   return <th key={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : sortable ? `Sort by ${column.label}` : undefined} aria-sort={isActiveSort ? (sort!.direction === 'asc' ? 'ascending' : 'descending') : undefined} onClick={sortable ? () => toggleSort(column.id) : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${sortable ? 'cursor-pointer select-none hover:text-white/80' : ''} ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'underlying' ? 'w-20 max-w-20 whitespace-nowrap' : column.id === 'entry' ? 'w-20 max-w-20' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{labelContent}{sortable && <span aria-hidden="true" className={`ml-1 inline-block ${isActiveSort ? 'text-teal-400' : 'text-white/20'}`}>{isActiveSort ? (sort!.direction === 'asc' ? '▲' : '▼') : '⇅'}</span>}</th>;
 })}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
+    <StockHoldings groups={model.symbolGroups} quoteAsOf={model.quoteAsOf} notes={notes} alerts={priceAlerts} storageKey={storageKeyFor} onSaveNote={saveNoteFor} onSaveAlert={savePriceAlertFor} th={th} />
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
     {analysisPosition && <DialogShell title={`AI analysis — ${analysisPosition.symbol}`} onClose={() => { if (!analysisLoading) setAnalysisPosition(null); }}><div aria-live="polite">{analysisLoading ? <p>Analyzing {analysisPosition.symbol}…</p> : analysisError ? <div><p role="alert" className="text-red-400">{analysisError}</p><button type="button" onClick={() => analyze(analysisPosition)} className="mt-3 min-h-8 rounded border border-white/20 px-3 text-xs focus:ring-2 focus:ring-teal-400">Retry analysis</button></div> : analysis ? <div className="space-y-3 text-sm"><p className="text-[10px] uppercase tracking-wider text-white/50">AI interpretation · deterministic Suggested Action remains authoritative</p><p><b>{analysis.recommendation}</b> · {analysis.confidence} confidence</p><p>{analysis.summary}</p><details className="rounded border border-white/10 bg-white/[0.02] p-3 text-xs"><summary className="cursor-pointer font-semibold text-indigo-300">Position context locked for this conversation</summary><p className="mt-2 text-white/60">{analysisPosition.symbol} · {analysisPosition.strategy} · expires {analysisPosition.expDate} · {analysisPosition.dte} DTE</p><p className="mt-1 break-all font-sans text-[10px] text-white/40">Position ID: {analysisPosition.key}</p><p className="mt-1 text-white/40">Snapshot captured {new Date(analysis.generatedAt).toLocaleString()}. Follow-ups retain this snapshot and conversation history.</p></details>{renderAnalysisConversation && <section aria-label={`AI follow-up conversation for ${analysisPosition.symbol}`} className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/[0.04]"><div className="px-4 pt-3"><p className="text-xs font-semibold text-indigo-200">Continue with AI</p><p className="mt-1 text-[10px] text-white/50">Ask a follow-up or attach chart and option-chain images.</p></div>{renderAnalysisConversation(analysisPosition, analysis)}</section>}<details className="rounded border border-white/10 p-3 text-xs"><summary className="cursor-pointer font-semibold text-white/70">Show full AI reasoning and risks</summary><p className="mt-3 text-white/70">{analysis.reasoning}</p>{analysis.risks.length > 0 && <div className="mt-3"><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(risk => <li key={risk}>{risk}</li>)}</ul></div>}</details><p className="text-xs text-white/50">Advisory analysis only. No brokerage order is prepared or submitted.</p></div> : null}</div></DialogShell>}

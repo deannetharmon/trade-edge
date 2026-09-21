@@ -110,7 +110,7 @@ describe('reconciling the analysis table with the Portfolio view', () => {
   it('describes it in one line, including that the totals match', () => {
     expect(describePnlReconciliation(r)).toEqual({
       tone: 'ok',
-      line: 'Options in this table: mid -$2,473 · close-now -$2,627  ·  2 equity holdings not shown here: +$1,008  ·  All positions at mid: -$1,465 · matches the Portfolio view',
+      line: 'Options in this table: mid -$2,473 · close-now -$2,627  ·  Stock holdings below: +$1,008  ·  All positions at mid: -$1,465 · matches the Portfolio view',
     });
   });
 
@@ -144,13 +144,13 @@ describe('reconciling the analysis table with the Portfolio view', () => {
   it('with no equities the equities part is omitted and the total is the options at mid', () => {
     const none = buildPnlReconciliation({ options, equities: [], portfolioTotal: -2473 });
     expect(none).toMatchObject({ equityCount: 0, equitiesPnl: 0, totalMid: -2473, reconciles: true });
-    expect(describePnlReconciliation(none).line).not.toContain('equity');
+    expect(describePnlReconciliation(none).line).not.toContain('Stock holdings');
   });
 
   it('with only equities the line shows them and their total', () => {
     const only = buildPnlReconciliation({ options: [], equities: [META, SNDK], portfolioTotal: 1008 });
     expect(only).toMatchObject({ optionCount: 0, optionsMid: null, totalMid: 1008, reconciles: true });
-    expect(describePnlReconciliation(only).line).toBe('1 equity holding not shown here'.replace('1 equity holding', '2 equity holdings') + ': +$1,008  ·  All positions at mid: +$1,008 · matches the Portfolio view');
+    expect(describePnlReconciliation(only).line).toBe('Stock holdings below: +$1,008  ·  All positions at mid: +$1,008 · matches the Portfolio view');
   });
 
   it('with nothing at all there is nothing to say', () => {
