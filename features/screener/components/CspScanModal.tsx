@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CspRulesType } from '@/lib/scans/constants';
 import type { CspRankSort, CspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
+import { getAccessToken, getCspBrokerAccounts, type CspBrokerAccount } from '@/lib/scans/tastytrade-client';
 import { ScanModalShell, ScanModeRadioGroup, type ScanModalTheme } from './ScanModalShell';
 
 export interface CspScanRequest {
@@ -13,6 +14,9 @@ export interface CspScanRequest {
   otmMin: number | null;
   rocMin: number | null;
   rankSecondary: CspRankSort;
+  /** Account identity only. Dollar balances are fetched fresh at scan time
+   * and are deliberately never stored in the request. */
+  accountId?: string | null;
 }
 
 export type CspScanRequestsByMode = Record<CspScanRequest['mode'], CspScanRequest>;
@@ -96,7 +100,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const selectedPresetRef = useRef<HTMLButtonElement>(null);
   const defaultFor = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...PRESETS[1].rules }, popMin: null,
-    otmMin: null, rocMin: null, rankSecondary: 'none',
+    otmMin: null, rocMin: null, rankSecondary: 'none', accountId: null,
   });
   const [drafts, setDrafts] = useState<CspScanRequestsByMode>(() => requestsByMode ?? {
     filter: initial.mode === 'filter' ? initial : defaultFor('filter'),
@@ -107,6 +111,21 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const request = drafts[mode];
   const [targetedConfirmed, setTargetedConfirmed] = useState(false);
   const [error, setError] = useState('');
+  const [brokerAccounts, setBrokerAccounts] = useState<CspBrokerAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const token = await getAccessToken().catch(() => null);
+      const accounts = token ? await getCspBrokerAccounts(token) : [];
+      if (alive) {
+        setBrokerAccounts(accounts);
+        setAccountsLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   // Dialog chrome (portal, backdrop, focus trap, Escape-to-close, autofocus)
   // now lives in ScanModalShell -- no local keydown/focus effect needed here.
@@ -124,8 +143,9 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
       && (request.popMin == null || (request.popMin >= 0 && request.popMin <= 100))
       && (request.otmMin == null || request.otmMin >= 0)
       && (request.rocMin == null || request.rocMin >= 0)
-      && (mode !== 'targeted' || hasTarget);
-  }, [mode, request]);
+      && (mode !== 'targeted' || hasTarget)
+      && (brokerAccounts.length <= 1 || Boolean(request.accountId));
+  }, [brokerAccounts.length, mode, request]);
 
   const updateDraft = (updater: (current: CspScanRequest) => CspScanRequest) => {
     setDrafts(prev => ({ ...prev, [mode]: updater(prev[mode]) }));
@@ -188,6 +208,31 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
           }}
         />
 
+        <section className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3" aria-label="CSP broker account">
+          <p className="text-xs font-bold text-neutral-200">Broker account</p>
+          {accountsLoading ? (
+            <p className="mt-1 text-[10px] text-neutral-400">Loading linked accounts…</p>
+          ) : brokerAccounts.length === 0 ? (
+            <p className="mt-1 text-[10px] text-amber-300">Account availability could not be verified. Refresh your broker connection before scanning.</p>
+          ) : brokerAccounts.length === 1 ? (
+            <p className="mt-1 text-[10px] text-neutral-300">{brokerAccounts[0].label} · balances refresh when you run the scan.</p>
+          ) : (
+            <label className="mt-2 flex flex-col gap-1 text-[10px] text-neutral-300">
+              Use account for CSP collateral
+              <select
+                aria-label="Use account for CSP collateral"
+                value={request.accountId ?? ''}
+                onChange={event => updateDraft(prev => ({ ...prev, accountId: event.target.value || null }))}
+                className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs text-white"
+              >
+                <option value="">Select an account</option>
+                {brokerAccounts.map(account => <option key={account.id} value={account.id}>{account.label}</option>)}
+              </select>
+              {!request.accountId && <span className="text-amber-300">Select an account to verify CSP collateral.</span>}
+            </label>
+          )}
+        </section>
+
         {mode !== 'targeted' && <fieldset className="mt-5"><legend className="text-xs font-bold text-neutral-300">CSP preset</legend><div role="radiogroup" aria-label="Cash-Secured Put preset" className="mt-2 grid gap-2 sm:grid-cols-3">
           {PRESET_CHOICES.map((p, index) => <button ref={request.preset === p.key ? selectedPresetRef : undefined} data-csp-preset={p.key} key={p.key} role="radio" aria-checked={request.preset === p.key} tabIndex={request.preset === p.key ? 0 : -1} onKeyDown={event => onPresetKeyDown(event, index)} onClick={() => applyPreset(p.key)} className={`rounded-lg border p-3 text-left ${request.preset === p.key ? 'border-amber-400 bg-amber-400/10' : 'border-neutral-700'}`}><span className="block text-xs font-bold">{request.preset === p.key ? '✓ ' : ''}{p.label}</span>{request.preset === p.key && <span className="block text-[9px] font-bold">Selected</span>}<span className="text-[10px] text-neutral-400">{p.description}</span></button>)}
         </div></fieldset>}
@@ -205,7 +250,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
         </div>
 
         <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300" data-testid="csp-rule-preview">DTE {request.rules.DTE_MIN}–{request.rules.DTE_MAX} · Δ {request.rules.DELTA_MIN.toFixed(2)}–{request.rules.DELTA_MAX.toFixed(2)} · preferred OI {request.rules.OI_MIN} · TradeEdge-enforced liquidity policy: strong ≤ max($0.10, 10% of mid), borderline through 15% · TradeEdge earnings policy: earnings inside expiration disqualify</div>
-        <p className="mt-2 text-[10px] text-amber-300">Account capital is verified against the connected broker account. If multiple accounts are available, the scan fails closed until explicit account selection is available.</p>
+        <p className="mt-2 text-[10px] text-neutral-400">Balances are fetched fresh when you run the scan. TradeEdge does not save a dollar balance for CSP eligibility.</p>
         {mode === 'targeted' && request.popMin == null && request.otmMin == null && request.rocMin == null && <p role="alert" className="mt-2 text-xs text-amber-300">Set at least one POP, OTM, or period ROC target to narrow this scan.</p>}
         {error && <p role="alert" className="mt-2 text-xs text-red-400">{error}</p>}
         <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-neutral-700 px-4 py-2 text-xs">Cancel</button>{mode === 'targeted' && !targetedConfirmed && <button disabled={!valid} onClick={() => setTargetedConfirmed(true)} className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-bold text-amber-300 disabled:opacity-50">CONFIRM TARGETS</button>}<button disabled={!valid || (mode === 'targeted' && !targetedConfirmed)} onClick={() => { if (!valid) { setError('Correct the CSP ranges before running.'); return; } onRun(request); }} className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">RUN CSP SCAN →</button></div>

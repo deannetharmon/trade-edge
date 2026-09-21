@@ -1598,6 +1598,12 @@ function ThemeToggle({ theme, setTheme, accent, setAccent }: {
   );
 }
 
+
+
+
+
+
+
 // ── Calendar Buttons ───────────────────────────────────────────────────────
 function CalendarButton({ symbol, strategy, earningsDate, ivr, th }: { symbol: string; strategy: string; earningsDate: string; ivr: number | null; th: typeof THEMES[Theme] }) {
   const followUpDate = getPostEarningsRescreenDate(earningsDate);
@@ -6426,7 +6432,6 @@ export default function Home() {
     () => normalizeUniverse(tickers.filter(t => t.active).map(t => t.symbol)),
     [tickers]
   );
-  const [cspCashOverride, setCspCashOverride] = useState('');
   const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
   const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
   const [pmccLongDteMin, setPmccLongDteMin] = useState(PMCC_LONG_DTE_MIN);
@@ -6718,9 +6723,9 @@ export default function Home() {
     loadExistingPositions().then(setExistingPositions).catch(() => {});
   }, []);
   useEffect(() => {
-    try {
-      setCspCashOverride(localStorage.getItem(LS_CSP_CASH) || '');
-    } catch {}
+    // Retire the legacy saved dollar override. CSP collateral must come from
+    // a freshly fetched, explicitly selected broker account.
+    try { localStorage.removeItem(LS_CSP_CASH); } catch {}
   }, []);
 
   // TE-0007 corrective pass (required correction 1): one-time Opportunity
@@ -7086,7 +7091,6 @@ export default function Home() {
   // TE-0007: handlePmccChange/handleCspChange removed — there is no
   // separate PMCC/CSP ticker state left to change; both strategies read
   // `opportunityUniverse`, updated via handleTickersChange above.
-  const handleCspCashChange = (v: string) => { setCspCashOverride(v); try { localStorage.setItem(LS_CSP_CASH, v); } catch {} };
   // Hide-only toggle: can only narrow ccEligibleHoldings (verified by the
   // API), never introduce a symbol that lacks verified coverage -- the
   // ticket's "manual symbol filter must never add an uncovered symbol."
@@ -7624,21 +7628,10 @@ export default function Home() {
       const token = await getAccessToken();
 
       pushStatus('Checking available capital...');
-      // CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — the manual cash
-      // override is an explicit trader assertion (typed in, not guessed
-      // from an unvalidated accounts[0]), so it is trusted as both sides of
-      // min(optionBuyingPower, cashBalance) and marked account-selected
-      // under a synthetic 'manual-override' identifier, preserving its
-      // prior always-wins behavior. Absent an override, capital is resolved
-      // from the real account via getCspCapitalContext(), which fails
-      // closed (accountSelected: false, every figure null) whenever there
-      // isn't exactly one verifiable Tastytrade account to attribute the
-      // balance to -- never accounts[0] guessed blindly, never a fallback
-      // constant.
-      const manualCash = cspCashOverride.trim() === '' ? null : parseFloat(cspCashOverride);
-      const capital: CspCapitalContext = Number.isFinite(manualCash as number)
-        ? { accountSelected: true, accountId: 'manual-override', optionBuyingPower: manualCash as number, cashBalance: manualCash as number }
-        : await getCspCapitalContext(token);
+      // Capital is fetched immediately before every CSP scan for the
+      // account selected in the launch modal. No manual or cached dollar
+      // amount may participate in eligibility.
+      const capital: CspCapitalContext = await getCspCapitalContext(token, request.accountId);
 
       pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(loopSymbols, token);
@@ -7994,6 +7987,11 @@ export default function Home() {
   const [filterPopMin, setFilterPopMin] = useState<number>(0);
   const [filterOtmMin, setFilterOtmMin] = useState<number>(0);
   const [filterCreditRatioMin, setFilterCreditRatioMin] = useState<number>(0);
+  // CSP result control: a post-scan lower DTE bound for quickly narrowing a
+  // completed CSP scan. Scan-time DTE remains immutable in ruleSnapshot;
+  // this display filter cannot broaden the broker fetch or alter accounting.
+  const [filterDteMin, setFilterDteMin] = useState<number>(0);
+  const [filterCspDeltaRange, setFilterCspDeltaRange] = useState<[number, number] | null>(null);
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -8016,6 +8014,11 @@ export default function Home() {
     if (!filterStrategies.includes(r.strategy)) return false;
     const c = r.bestCandidate;
     if (c) {
+      if (activeSession?.requestedStrategy === 'csp' && filterDteMin > 0 && c.dte < filterDteMin) return false;
+      if (activeSession?.requestedStrategy === 'csp' && filterCspDeltaRange) {
+        const delta = Math.abs(c.shortDelta);
+        if (delta < filterCspDeltaRange[0] || delta > filterCspDeltaRange[1]) return false;
+      }
       if ((c.pop ?? 0) < filterPopMin) return false;
       if ((c.creditRatio ?? 0) * 100 < filterCreditRatioMin) return false;
       if (filterOtmMin > 0) {
@@ -8321,21 +8324,6 @@ export default function Home() {
                 PmccScanModal, which now owns these same fields (same
                 aria-labels preserved) inside the pre-scan modal FIND
                 PMCCs opens, matching CSP/CC/Spreads' pattern. */}
-            <details className="text-[9px]">
-              <summary className={`cursor-pointer ${th.textMuted} tracking-widest font-medium`}>CSP SETTINGS</summary>
-              <div className="mt-2">
-                <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1`}>AVAILABLE CASH (optional override)</p>
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Auto-detect from account"
-                  value={cspCashOverride}
-                  onChange={e => handleCspCashChange(e.target.value)}
-                  className={`w-full ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} focus:outline-none`}
-                />
-                <p className={`text-[8px] ${th.textFaint} mt-1`}>Leave blank to use your account&apos;s cash balance. Margin is never used by default.</p>
-              </div>
-            </details>
           </div>
 
           {/* CC status — compact, informational only (TE-0007C's verified-
@@ -8808,6 +8796,10 @@ export default function Home() {
                       setOtmMin={setFilterOtmMin}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
+                      dteMin={filterDteMin}
+                      setDteMin={setFilterDteMin}
+                      deltaRange={filterCspDeltaRange}
+                      setDeltaRange={setFilterCspDeltaRange}
                       strategies={filterStrategies as FilterStrategy[]}
                       toggleStrategy={toggleFilterStrategy}
                       hiddenSymbols={filterHiddenSymbols}
@@ -8819,7 +8811,7 @@ export default function Home() {
                         <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
                       }
                     />
-                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Relevant-leg OI is the short put only. A positive OI floor fails closed when OI is missing.</p>
+                    <p className={`mt-2 text-[9px] ${th.textFaint}`}>Minimum put OI applies to the short put only. A positive OI floor fails closed when OI is missing.</p>
                   </section>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
@@ -9681,10 +9673,5 @@ export default function Home() {
     </div>
   );
 }
-
-
-
-
-
 
 

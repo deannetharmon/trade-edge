@@ -10,6 +10,7 @@ import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './cons
 // that isn't populated by this app's actual login flow. That route has been
 // deleted; buildCoveredCallCapacityReport (pure, no I/O) is reused here.
 import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from './covered-call-capacity';
+import { buildPmccFoundationReport, type PmccFoundationReport } from './pmcc-foundations';
 import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
 
@@ -303,6 +304,49 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
   }
 }
 
+export interface PmccBrokerSnapshot {
+  snapshotId: string;
+  accountId: string;
+  asOf: string;
+  freshnessExpiresAt: string;
+  positionsComplete: boolean;
+  ordersComplete: boolean;
+  foundations: PmccFoundationReport;
+}
+
+/**
+ * Reads both broker scopes required for an existing-LEAP PMCC decision. A
+ * caller must reject the snapshot after freshnessExpiresAt rather than using
+ * a cached/local position record as authority to submit a short call.
+ */
+export async function getPmccBrokerSnapshot(token: string, freshnessMs = 30_000): Promise<PmccBrokerSnapshot | null> {
+  try {
+    const accountsData = await ttFetch('/customers/me/accounts', token);
+    const accountId = accountsData?.data?.items?.[0]?.account?.['account-number'];
+    if (!accountId) return null;
+    const [positionsResponse, ordersResponse] = await Promise.allSettled([
+      ttFetch(`/accounts/${accountId}/positions`, token),
+      ttFetch(`/accounts/${accountId}/orders/live`, token),
+    ]);
+    const positionsComplete = positionsResponse.status === 'fulfilled';
+    const ordersComplete = ordersResponse.status === 'fulfilled';
+    const rawPositions = positionsComplete ? positionsResponse.value?.data?.items ?? [] : null;
+    const rawOrders = ordersComplete ? ordersResponse.value?.data?.items ?? [] : null;
+    const asOf = new Date();
+    return {
+      snapshotId: `${accountId}:${asOf.getTime()}`,
+      accountId,
+      asOf: asOf.toISOString(),
+      freshnessExpiresAt: new Date(asOf.getTime() + freshnessMs).toISOString(),
+      positionsComplete,
+      ordersComplete,
+      foundations: buildPmccFoundationReport(accountId, rawPositions, rawOrders),
+    };
+  } catch {
+    return null;
+  }
+}
+
 
 /** @deprecated CSP-WORKFLOW-0001 core-correction (BLOCKER-02) — reads only
  * a single cash figure from an unvalidated `accounts[0]`, with no retained
@@ -356,22 +400,49 @@ export interface CspCapitalContext {
   cashBalance: number | null;
 }
 
+export interface CspBrokerAccount {
+  id: string;
+  label: string;
+}
+
 const UNRESOLVED_CSP_CAPITAL: CspCapitalContext = {
   accountSelected: false, accountId: null, optionBuyingPower: null, cashBalance: null,
 };
 
-export async function getCspCapitalContext(token: string): Promise<CspCapitalContext> {
+export async function getCspBrokerAccounts(token: string): Promise<CspBrokerAccount[]> {
   try {
     const accountsData = await ttFetch('/customers/me/accounts', token);
     const items = accountsData?.data?.items;
-    if (!Array.isArray(items) || items.length !== 1) {
+    if (!Array.isArray(items)) return [];
+    return items.flatMap((item: any): CspBrokerAccount[] => {
+      const account = item?.account;
+      const id = account?.['account-number'];
+      if (typeof id !== 'string' || !id) return [];
+      const name = account?.nickname ?? account?.['account-title'] ?? account?.['account-type-name'] ?? 'Broker account';
+      return [{ id, label: `${name} · ${id}` }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function getCspCapitalContext(token: string, selectedAccountId?: string | null): Promise<CspCapitalContext> {
+  try {
+    const accountsData = await ttFetch('/customers/me/accounts', token);
+    const items = accountsData?.data?.items;
+    if (!Array.isArray(items)) return UNRESOLVED_CSP_CAPITAL;
+
+    const selected = selectedAccountId
+      ? items.find((item: any) => item?.account?.['account-number'] === selectedAccountId)
+      : items.length === 1 ? items[0] : null;
+    if (!selected) {
       // Zero accounts, an API/parse failure shaped as an empty/missing
-      // list, or more than one account with no trader-driven selection
-      // mechanism yet -- never guess which one is "the" account.
+      // list, an invalid explicit account, or more than one account with no
+      // trader-driven selection -- never guess which one is "the" account.
       return UNRESOLVED_CSP_CAPITAL;
     }
 
-    const accountNumber = items[0]?.account?.['account-number'];
+    const accountNumber = selected?.account?.['account-number'];
     if (!accountNumber || typeof accountNumber !== 'string') return UNRESOLVED_CSP_CAPITAL;
 
     const balanceData = await ttFetch(`/accounts/${accountNumber}/balances`, token);
@@ -398,5 +469,3 @@ export async function getCspCapitalContext(token: string): Promise<CspCapitalCon
     return UNRESOLVED_CSP_CAPITAL;
   }
 }
-
-

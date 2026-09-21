@@ -21,6 +21,7 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
   const setPopMin = vi.fn();
   const setOtmMin = vi.fn();
   const setCreditRatioMin = vi.fn();
+  const setDteMin = vi.fn();
   const toggleStrategy = vi.fn();
   const toggleSymbol = vi.fn();
   const setHiddenSymbols = vi.fn();
@@ -45,7 +46,7 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
       {...props}
     />
   );
-  return { ...utils, setPopMin, setOtmMin, setCreditRatioMin, toggleStrategy, toggleSymbol, setHiddenSymbols };
+  return { ...utils, setPopMin, setOtmMin, setCreditRatioMin, setDteMin, toggleStrategy, toggleSymbol, setHiddenSymbols };
 }
 
 describe('FilteredResultControls', () => {
@@ -78,5 +79,27 @@ describe('FilteredResultControls', () => {
   it('does not render a reset action or chips when no filters are active', () => {
     renderControls({ popMin: 0, strategies: [], hiddenSymbols: [] });
     expect(screen.queryByRole('button', { name: 'Reset result filters' })).not.toBeInTheDocument();
+  });
+
+  it('renders and clears the optional post-scan minimum-DTE filter', () => {
+    const onSetDteMin = vi.fn();
+    renderControls({ dteMin: 30, setDteMin: onSetDteMin });
+    expect(screen.getByText('DTE ≥ 30')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Remove filter: DTE ≥ 30/ }));
+    expect(onSetDteMin).toHaveBeenCalledWith(0);
+  });
+
+  it('selects a DTE minimum from the preset controls', () => {
+    const onSetDteMin = vi.fn();
+    renderControls({ dteMin: 0, setDteMin: onSetDteMin });
+    fireEvent.click(screen.getByRole('button', { name: '45d' }));
+    expect(onSetDteMin).toHaveBeenCalledWith(45);
+  });
+
+  it('selects and clears the optional post-scan delta range', () => {
+    const onSetDeltaRange = vi.fn();
+    renderControls({ deltaRange: null, setDeltaRange: onSetDeltaRange });
+    fireEvent.click(screen.getByRole('button', { name: '0.15–0.25' }));
+    expect(onSetDeltaRange).toHaveBeenCalledWith([0.15, 0.25]);
   });
 });

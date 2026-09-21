@@ -157,7 +157,7 @@ function buildSpreadCandidate(
   const breakeven = parseFloat((c.strikePrice - c.mid).toFixed(2));
   const capitalBlocked = accountEligibility === 'INSUFFICIENT_CAPITAL';
   const capitalWarning = accountEligibility === 'INSUFFICIENT_CAPITAL'
-    ? `Insufficient cash — requires $${requiredCash.toLocaleString()}, $${Math.max(0, availableCspCapital ?? 0).toLocaleString()} available. Margin is not used by default.`
+    ? `Insufficient CSP capacity — requires $${requiredCash.toLocaleString()}, $${Math.max(0, availableCspCapital ?? 0).toLocaleString()} available. CSP capacity uses the lower of the selected account's cash balance and option buying power; margin is not used by default.`
     : accountEligibility === 'CAPITAL_UNVERIFIED'
       ? 'Capital could not be verified for the selected account.'
       : null;

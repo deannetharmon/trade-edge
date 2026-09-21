@@ -60,6 +60,21 @@ describe('getCspCapitalContext — BLOCKER-02 fail-closed production capital bri
     expect(result.accountId).not.toBe('ACCT-A');
   });
 
+  it('uses the explicitly selected account when multiple accounts are connected', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(jsonResponse({
+        data: { items: [{ account: { 'account-number': 'ACCT-A' } }, { account: { 'account-number': 'ACCT-B' } }] },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ data: { 'derivative-buying-power': '12000', 'cash-balance': '9000' } }));
+
+    const result = await getCspCapitalContext('token', 'ACCT-B');
+    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-B', optionBuyingPower: 12000, cashBalance: 9000 });
+    expect(global.fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/accounts/ACCT-B/balances'),
+      expect.any(Object),
+    );
+  });
+
   it('reordering the same two accounts in the API response does not change the (fail-closed) outcome -- order can never influence which account gets chosen', async () => {
     (global.fetch as any).mockResolvedValueOnce(jsonResponse({
       data: { items: [{ account: { 'account-number': 'ACCT-B' } }, { account: { 'account-number': 'ACCT-A' } }] },
