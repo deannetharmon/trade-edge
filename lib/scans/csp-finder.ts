@@ -194,11 +194,26 @@ function buildSpreadCandidate(
   advisoryWarnings: string[],
   search: CspSearchResult,
   searchRules: CspSearchRules,
+  underlyingPrice: number | null,
 ): SpreadCandidate {
   const premiumPerContract = parseFloat((c.mid * 100).toFixed(2));
   const totalPremium = parseFloat((premiumPerContract * contracts).toFixed(2));
   const roc = requiredCash > 0 ? (totalPremium / requiredCash) * 100 : 0;
   const annualizedRoc = c.dte > 0 ? roc * (365 / c.dte) : 0;
+  // CSP-SCORE-EXTRINSIC-0001 — a deep-ITM put's bid is mostly intrinsic value
+  // (the cost of near-certain assignment, not option income). `roc`/
+  // `annualizedRoc` above stay as the trader's true cash-flow return (shown
+  // on the card, unchanged). These extrinsic-only figures exist solely to
+  // feed the score's premium-efficiency dimension, so a contract that is
+  // effectively a synthetic assignment cannot out-score a real premium sale
+  // on the strength of intrinsic value it never actually "earned."
+  const intrinsicPerContract = underlyingPrice != null && Number.isFinite(underlyingPrice)
+    ? Math.max(0, c.strikePrice - underlyingPrice)
+    : 0;
+  const extrinsicValuePerContract = parseFloat(Math.max(0, c.mid - intrinsicPerContract).toFixed(2));
+  const extrinsicPremium = parseFloat((extrinsicValuePerContract * 100 * contracts).toFixed(2));
+  const extrinsicRoc = requiredCash > 0 ? (extrinsicPremium / requiredCash) * 100 : 0;
+  const extrinsicAnnualizedRoc = c.dte > 0 ? extrinsicRoc * (365 / c.dte) : 0;
   const breakeven = parseFloat((c.strikePrice - c.mid).toFixed(2));
   const capitalBlocked = accountEligibility === 'INSUFFICIENT_CAPITAL';
   const capitalWarning = accountEligibility === 'INSUFFICIENT_CAPITAL'
@@ -256,6 +271,9 @@ function buildSpreadCandidate(
     cspAccountEligibility: accountEligibility,
     cspAdvisoryWarnings: advisoryWarnings,
     cspAvailableCapital: availableCspCapital,
+    cspExtrinsicValuePerContract: extrinsicValuePerContract,
+    cspExtrinsicRoc: extrinsicRoc,
+    cspExtrinsicAnnualizedRoc: extrinsicAnnualizedRoc,
   };
 }
 
@@ -315,7 +333,7 @@ export function findAllCsp(
     const advisoryWarnings = buildAdvisoryWarnings(c, searchRules.oiMin, params.ivr, params.rules.IVR_MIN);
     const candidate = buildSpreadCandidate(
       c, contracts, requiredCash, availableCspCapital, accountEligibility,
-      marketQualification, advisoryWarnings, search, searchRules,
+      marketQualification, advisoryWarnings, search, searchRules, price,
     );
     return {
       candidateId: c.candidateId,

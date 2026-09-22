@@ -118,12 +118,36 @@ export function isMarketQualified(state: CspMarketQualification): boolean {
 // capital-verified. Borderline-liquidity candidates are explicitly excluded
 // from Best Opportunities by default even though they remain visible
 // elsewhere as QUALIFIED_WITH_LIQUIDITY_WARNING.
+//
+// CSP-BESTOPP-GATE-0001 (Ian) — delta-in-band is now a HARD requirement
+// here, not advisory-only. A contract outside the preferred delta band used
+// to still be eligible (surfaced only as warning text), which let a
+// near-certain-assignment contract win the #1 Best Opportunities slot on
+// score alone. It can still appear in the ordinary Qualified list with its
+// warning; it just cannot be a "Best Opportunity."
+//
+// hasOpenInterest deliberately checks for LITERAL zero open interest, not
+// "below the preferred OI_MIN." Those are different claims: OI below a
+// round preference number (e.g. 245 of a 500 target) is a real, tradeable
+// market the team has already approved as Best-Opportunities-eligible (see
+// the AMD/NKE acceptance fixtures in app/screener/__tests__/
+// CspCandidateDiscovery.test.tsx) — it stays advisory, unchanged. OI of
+// exactly 0 means no market exists at all; a contract nobody can actually
+// trade has no business being called a "top opportunity" regardless of
+// score, so that case alone is gated here.
+//
+// Both new parameters default to `true` so every existing caller not yet
+// passing them keeps its current behavior.
 export function isBestOpportunitiesEligible(
   marketQualification: CspMarketQualification,
   accountEligibility: CspAccountEligibility,
   modeQualification: CspModeQualification = 'NOT_APPLICABLE',
+  deltaTargetPassing = true,
+  hasOpenInterest = true,
 ): boolean {
   return marketQualification === 'QUALIFIED'
     && isModeQualified(modeQualification)
-    && accountEligibility === 'ELIGIBLE';
+    && accountEligibility === 'ELIGIBLE'
+    && deltaTargetPassing
+    && hasOpenInterest;
 }

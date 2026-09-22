@@ -1326,11 +1326,17 @@ function runCspChecklist(
     const otmPct = (price != null && Number.isFinite(price) && price > 0 && Number.isFinite(c.shortStrike))
       ? ((price - c.shortStrike) / price) * 100
       : null;
+    // CSP-SCORE-EXTRINSIC-0001 — the score's premium-efficiency dimension is
+    // fed extrinsic-value-only ROC, not the full cash-flow ROC shown on the
+    // card (c.roc/c.annualizedRoc are untouched everywhere else). A deep-ITM
+    // put's premium is mostly the cost of near-certain assignment, not real
+    // option income, and must not be able to out-score a genuine premium
+    // sale by looking artificially "efficient."
     c.cspScore = calculateCspScore({
       pop: c.pop ?? null,
       otmPct,
-      periodRocPct: Number.isFinite(c.roc) ? c.roc : null,
-      annualizedRocPct: c.annualizedRoc ?? null,
+      periodRocPct: Number.isFinite(c.cspExtrinsicRoc ?? NaN) ? (c.cspExtrinsicRoc as number) : null,
+      annualizedRocPct: c.cspExtrinsicAnnualizedRoc ?? null,
       liquidityClass: c.cspLiquidityClass ?? null,
       openInterest: Number.isFinite(c.shortOI) ? c.shortOI : null,
       oiMin: cspRules.OI_MIN,
@@ -5866,14 +5872,15 @@ const strategyScores = useMemo(() => {
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Extrin. </span><span className={`${th.text} font-medium`}>{c.extrinsicCapture?.toFixed(0) ?? '—'}%</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>Max P </span><span className="text-emerald-400 font-bold">${c.maxProfit?.toFixed(2) ?? '—'}</span></div>
               <div className="text-xs shrink-0 w-20"><span className={th.label}>LEAPS </span><span className={`${th.text} font-medium`}>{c.longDte}d</span></div>
-            </> : c.strategy === 'CSP' ? <>
-              {result.ivx != null && (
-                <div className="text-xs shrink-0 w-28">
-                  <div><span className={th.label}>Expiration IVX </span><span className={`${getIvxColor(result.ivx)} font-medium`}>{result.ivx.toFixed(1)}%</span></div>
-                  <div><span className={th.label}>EM </span><span className={`${th.text} font-medium`}>{c.expectedMove != null ? `±$${c.expectedMove.toFixed(2)}` : '—'}</span></div>
-                </div>
-              )}
             </> : <>
+              {/* CSP-CARD-PARITY-0001 — CSP previously short-circuited out of this
+                  block into a trimmed IVX/EM-only box, skipping the POP/ROC/Delta/
+                  OTM/OI stats every other strategy gets (this block was already
+                  fully CSP-aware — see the (c.strategy === 'CSP' || ...) checks and
+                  the dedicated single-leg CSP OI case below — it just was never
+                  reached). Falling through here gives CSP the same labeled,
+                  color-coded stat row as spreads/CC, plus the same IVX/EM box
+                  (which already existed here too, with EM-clearance %). */}
               <div className="text-xs shrink-0 w-20">
                 <div>
                   <span className={th.label}>{(c.strategy === 'CSP' || c.strategy === 'CC') ? 'Premium ' : 'Credit '}</span>
@@ -9212,6 +9219,8 @@ export default function Home() {
         c.cspMarketQualification,
         c.cspAccountEligibility ?? 'CAPITAL_UNVERIFIED',
         c.cspModeQualification ?? 'NOT_APPLICABLE',
+        c.cspDeltaTargetPassing ?? false,
+        (c.shortOI ?? 0) > 0,
       );
     });
     if (qualifiedResults.length === 0) {

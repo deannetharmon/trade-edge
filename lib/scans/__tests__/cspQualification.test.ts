@@ -171,3 +171,40 @@ describe('isBestOpportunitiesEligible — the mode-qualification parameter, defa
     expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'FAILED')).toBe(false);
   });
 });
+
+// CSP-BESTOPP-GATE-0001 (Ian) — delta-in-band and literal-zero-OI are now
+// hard requirements, not advisory-only. hasOpenInterest is deliberately
+// about LITERAL zero, not "below the preferred OI_MIN" (that stays
+// advisory-only and unchanged -- see the AMD/NKE acceptance fixtures in
+// app/screener/__tests__/CspCandidateDiscovery.test.tsx, which keep passing
+// unmodified: AMD's 405 strike has real OI of 245, below the 500 preference
+// but very much nonzero, and remains Best-Opportunities-eligible).
+describe('isBestOpportunitiesEligible — CSP-BESTOPP-GATE-0001: delta-in-band and literal-zero-OI are hard requirements', () => {
+  it('both new parameters default to true, so every existing caller/test above is unaffected', () => {
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE')).toBe(true);
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'NOT_APPLICABLE')).toBe(true);
+  });
+
+  it('QUALIFIED + ELIGIBLE + delta out of band is NOT Best-Opportunities-eligible, even though market and account both pass', () => {
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'NOT_APPLICABLE', false)).toBe(false);
+  });
+
+  it('QUALIFIED + ELIGIBLE + literally zero open interest is NOT Best-Opportunities-eligible -- a contract nobody can trade is never a "top opportunity"', () => {
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'NOT_APPLICABLE', true, false)).toBe(false);
+  });
+
+  it('QUALIFIED + ELIGIBLE + nonzero-but-below-preference OI (e.g. the AMD 405 case, OI 245 of a 500 target) IS still Best-Opportunities-eligible', () => {
+    // hasOpenInterest is a caller-computed boolean (e.g. (shortOI ?? 0) > 0);
+    // 245 > 0, so a caller passes `true` here, exactly as the app does.
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'NOT_APPLICABLE', true, true)).toBe(true);
+  });
+
+  it('delta out of band AND zero OI together is still just NOT eligible (not double-failed, not a crash)', () => {
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'ELIGIBLE', 'NOT_APPLICABLE', false, false)).toBe(false);
+  });
+
+  it('an otherwise-disqualifying market/account state stays disqualifying regardless of delta/OI', () => {
+    expect(isBestOpportunitiesEligible('QUALIFIED_WITH_LIQUIDITY_WARNING', 'ELIGIBLE', 'NOT_APPLICABLE', true, true)).toBe(false);
+    expect(isBestOpportunitiesEligible('QUALIFIED', 'INSUFFICIENT_CAPITAL', 'NOT_APPLICABLE', true, true)).toBe(false);
+  });
+});

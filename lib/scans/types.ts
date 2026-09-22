@@ -121,6 +121,19 @@ export interface SpreadCandidate {
    * for the selected account, or null when unverified. Never a fallback
    * constant. */
   cspAvailableCapital?: number | null;
+  /**
+   * CSP-SCORE-EXTRINSIC-0001 — the premium's time-value (extrinsic) portion:
+   * mid minus put intrinsic value (max(0, strike - underlying price)),
+   * floored at 0. Distinct from `credit`, which is the full premium the
+   * trader actually receives in cash (unchanged) — extrinsic value exists
+   * only to keep the score's premium-efficiency dimension from rewarding a
+   * deep-ITM put for intrinsic value that is really the cost of near-certain
+   * assignment, not option income.
+   */
+  cspExtrinsicValuePerContract?: number | null;
+  /** ROC computed from extrinsic value only — feeds the score, never shown as the trader's actual return (see `roc`). */
+  cspExtrinsicRoc?: number | null;
+  cspExtrinsicAnnualizedRoc?: number | null;
   /** CSP-specific score (lib/scans/cspScore.ts) — independent of account
    * eligibility; never influenced by capital state. Undefined until IVR/
    * technical/earnings inputs are threaded through by the caller (see

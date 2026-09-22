@@ -244,6 +244,56 @@ describe('CSP-WORKFLOW-0001: AMD required acceptance fixture (multi-candidate)',
   });
 });
 
+// CSP-CARD-PARITY-0001 — CSP result cards previously fell into a trimmed,
+// IVX/EM-only branch that skipped the labeled POP/Delta/OTM/OI stat block
+// every other strategy (spreads, CC) gets. That block was already fully
+// CSP-aware (see its `(c.strategy === 'CSP' || ...)` checks and its
+// dedicated single-leg CSP OI case) -- it just was never reached. Proves the
+// fix on the real rendered page, reusing the same AMD acceptance scan as the
+// test above (4 qualified candidates: 405 STRONG + 420/425/430 BORDERLINE).
+describe('CSP-CARD-PARITY-0001: CSP cards now render the same labeled POP/Delta/OTM/OI stats as spreads/CC', () => {
+  it('every qualified AMD CSP card shows POP, Delta, OTM and a real OI number -- not just the old IVX/EM box', async () => {
+    getChainMock.mockResolvedValue(amdChain());
+    inBandIvr(['AMD']);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
+
+    renderScreener();
+    await addToUniverse('AMD');
+    await clickCspScan();
+
+    await waitFor(() => expect(accountingText()).toMatch(/4 qualified/));
+
+    // One occurrence of each labeled stat per qualified card -- this block
+    // used to be entirely absent for CSP, so any occurrence at all is new.
+    // The stat-field block's single unique DOM anchor is the OI container's
+    // `title` attribute (unique to this one block -- the IC "OI P"/"OI C"
+    // pattern only exists for IC results, none of which exist in this
+    // AMD-only, CSP-only scan). Scope every other assertion to that same
+    // row (its parent element) so generic labels like "POP"/"Delta"/"OTM"
+    // -- which also appear elsewhere on this large page, e.g. filter chips,
+    // LEAPS cards, per-candidate ITM/OTM badges -- can never collide with
+    // an unrelated match; each qualified AMD card gets exactly one row.
+    const oiContainers = document.querySelectorAll('[title="Open interest — short leg / long leg, each colored on its own OI"]');
+    expect(oiContainers.length).toBe(4); // one per qualified AMD card (405 STRONG + 420/425/430 BORDERLINE)
+
+    const oiValues: Array<string | null | undefined> = [];
+    for (const oiContainer of Array.from(oiContainers)) {
+      const row = oiContainer.parentElement as HTMLElement;
+      // This whole block -- POP/ROC, Delta/Exposure/RSI, OTM, OI, IVX/EM --
+      // used to be entirely absent for CSP; any match here is new.
+      expect(within(row).getByText('POP')).toBeInTheDocument();
+      expect(within(row).getByText('Delta')).toBeInTheDocument();
+      expect(within(row).getByText('Exposure')).toBeInTheDocument();
+      expect(within(row).getByText('OTM')).toBeInTheDocument();
+
+      oiValues.push(within(oiContainer as HTMLElement).getByText('OI').nextSibling?.textContent);
+    }
+    // The genuine per-contract OI (csp-finder.ts's real openInterest, not a
+    // dash), matching the fixture's own strikes exactly.
+    expect(oiValues.sort()).toEqual(['107', '245', '333', '409']);
+  });
+});
+
 describe('CSP-WORKFLOW-0001: NKE required acceptance fixture (two candidates, one with an OI warning)', () => {
   it('preserves both the 39 put (low OI, warned) and the 38 put as distinct, independently scored qualified candidates -- neither hides the other', async () => {
     getChainMock.mockResolvedValue(nkeChain());

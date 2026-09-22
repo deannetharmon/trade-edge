@@ -150,7 +150,10 @@ export function buildBestOpportunityRows(
       const hasCanonicalQualification = csp?.cspMarketQualification != null
         || csp?.cspAccountEligibility != null || csp?.cspModeQualification != null;
       if (!result.qualified || (hasCanonicalQualification && (!csp?.cspMarketQualification || !csp.cspAccountEligibility
-        || !isBestOpportunitiesEligible(csp.cspMarketQualification, csp.cspAccountEligibility, csp.cspModeQualification ?? 'NOT_APPLICABLE')))) {
+        || !isBestOpportunitiesEligible(
+          csp.cspMarketQualification, csp.cspAccountEligibility, csp.cspModeQualification ?? 'NOT_APPLICABLE',
+          csp.cspDeltaTargetPassing ?? false, (csp.shortOI ?? 0) > 0,
+        )))) {
         return null;
       }
     }
