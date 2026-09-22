@@ -8654,12 +8654,8 @@ export default function Home() {
   // disappears out of the box.
   const [leapsDteMax, setLeapsDteMax] = useState(PMCC_LONG_DTE_MAX);
   const [leapsOiMin, setLeapsOiMin] = useState(DEFAULT_PMCC_LONG_OI_MIN);
-  // LEAPS-0003: extrinsic-as-%-of-cost ceiling. No default threshold --
-  // Ian: needs real candidate spread across multiple tickers before a
-  // cutoff is trustworthy (the one real example seen so far, an 0.84-delta
-  // SPX index LEAPS at 18.9%, is a deep-ITM outlier, not representative of
-  // a typical single-stock candidate at 0.70-0.75 delta). 0 = "Any",
-  // matching the same convention every other un-set-yet filter uses.
+  // LEAPS-0003: extrinsic-as-%-of-cost ceiling. The 20% default is the
+  // starting guardrail; 0 remains the explicit trader-selected "Any" value.
   const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(20);
   const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
   const [leapsSort, setLeapsSort] = useState<'score' | 'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue' | 'extrinsicPctOfCost'>('score');
@@ -12541,9 +12537,8 @@ export default function Home() {
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      {/* LEAPS-0003: extrinsic% ceiling. No default (0 =
-                          Any) -- Ian: needs real candidate spread across
-                          tickers before a cutoff is trustworthy. */}
+                      {/* LEAPS-0003: the 20% extrinsic ceiling is the
+                          default; Any remains an explicit trader choice. */}
                       <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Extrinsic ≤</span>
                       {[0, 10, 15, 20, 25, 30].map(v => (
                         <button key={v} onClick={() => setLeapsExtrinsicPctMax(v)} className={chip(leapsExtrinsicPctMax === v)}>{v === 0 ? 'Any' : `${v}%`}</button>
