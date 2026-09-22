@@ -5,6 +5,7 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 
@@ -1051,14 +1052,14 @@ function RRCard({ result, th, existingPositions }: {
                   })()}
                   {!sparkLoading && sparkData && sparkData.length === 0 && <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>}
                 </div>
-                <a href={`https://www.tradingview.com/chart/?symbol=${({'SPX':'CBOE:SPX','SPXW':'CBOE:SPX','NDX':'NASDAQ:NDX','RUT':'TVC:RUT','VIX':'CBOE:VIX','DJX':'TVC:DJI'})[profile.symbol.toUpperCase()] ?? profile.symbol}`} target="_blank" rel="noopener noreferrer"
+                <a href={buildTradingViewWidgetUrl(({'SPX':'CBOE:SPX','SPXW':'CBOE:SPX','NDX':'NASDAQ:NDX','RUT':'TVC:RUT','VIX':'CBOE:VIX','DJX':'TVC:DJI'})[profile.symbol.toUpperCase()] ?? profile.symbol)} target="_blank" rel="noopener noreferrer"
                   onClick={e => e.stopPropagation()}
                   className="flex items-center justify-center gap-2 w-full py-2 ac-bg-20 ac-hover-bg/30 border ac-border/40 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                   </svg>
-                  Open in TradingView
+                  Open chart with RSI
                 </a>
               </div>
             )}

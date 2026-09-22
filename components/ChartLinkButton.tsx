@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { THEMES, Theme } from '@/lib/theme';
+import { TradingViewChartButton } from '@/components/TradingViewChartButton';
 
 export function ChartLinkButton({ symbol, chartSymbol = symbol, instanceKey, th, showChart, setShowChart, sparkData, setSparkData, sparkLoading, setSparkLoading }: {
   symbol: string;
@@ -81,7 +82,7 @@ export function ChartLinkButton({ symbol, chartSymbol = symbol, instanceKey, th,
       return <div><div className="mb-1 flex items-center justify-between"><span className={`text-[10px] font-bold ${th.text}`}>{symbol}</span><span className="text-[10px] font-bold" style={{ color }}>${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span></span></div><svg aria-hidden="true" width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 56 }}><defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.3"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/><polygon points={`0,${height} ${points} ${width},${height}`} fill={`url(#${gradientId})`}/></svg></div>;
     })()}
     {!sparkLoading && sparkData && sparkData.length === 0 && <p role="status" className={`py-3 text-center text-[9px] ${th.textFaint}`}>Chart data unavailable</p>}
-    <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" aria-label={`Open ${symbol} in TradingView, opens in new tab`} className="flex w-full min-h-8 items-center justify-center gap-2 rounded-lg border border-blue-500/30 text-[10px] font-bold tracking-wider text-blue-400 transition-colors hover:border-blue-500/60 hover:bg-blue-500/10">Open in TradingView</a>
+    <TradingViewChartButton symbol={chartSymbol} className="flex w-full min-h-8 items-center justify-center gap-2 rounded-lg border border-blue-500/30 text-[10px] font-bold tracking-wider text-blue-400 transition-colors hover:border-blue-500/60 hover:bg-blue-500/10" />
   </div>, document.body) : null;
 
   return <><button ref={buttonRef} type="button" onClick={event => { event.stopPropagation(); toggle(); }} aria-label={`Quick chart for ${symbol}`} aria-expanded={showChart} aria-controls={popupId} title="Quick chart" className={`inline-flex min-h-8 items-center gap-0.5 text-[9px] transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 ${showChart ? 'text-blue-400' : 'text-slate-500 hover:text-blue-400'}`}><svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span className="tracking-wide">chart</span></button>{popup}</>;

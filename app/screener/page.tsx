@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
+import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 
 // ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
 // Mechanical extraction — moved, not rewritten. See docs/reviews/TE-0005A-Implementation-Report.md
@@ -5001,7 +5002,7 @@ function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSp
           </div>
 
           <a
-            href={`https://www.tradingview.com/chart/?symbol=${symbol}`}
+            href={buildTradingViewWidgetUrl(symbol)}
             target="_blank"
             rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}
@@ -5011,7 +5012,7 @@ function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSp
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
               <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
             </svg>
-            Open in TradingView
+            Open chart with RSI
           </a>
         </div>
       )}
@@ -5790,9 +5791,9 @@ const strategyScores = useMemo(() => {
                   )}
                 </div>
 
-                {/* Open in TradingView button */}
+                {/* Embedded TradingView widget: Bollinger Bands, RSI, and volume. */}
                 <a
-                  href={`https://www.tradingview.com/chart/?symbol=${result.symbol}`}
+                  href={buildTradingViewWidgetUrl(result.symbol)}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={e => e.stopPropagation()}
@@ -5802,7 +5803,7 @@ const strategyScores = useMemo(() => {
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                   </svg>
-                  Open in TradingView
+                  Open chart with RSI
                 </a>
               </div>
             )}

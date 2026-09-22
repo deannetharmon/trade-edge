@@ -7,6 +7,7 @@ import { buildTrustedChatSystemPrompt } from '@/lib/ai/trustedChatContext';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
+import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 import { recordOrderLifecycleEvent } from '@/lib/order-lifecycle/client';
 import BalancesTab from '@/components/BalancesTab';
 import {
@@ -8413,7 +8414,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                         <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
                       )}
                     <a
-                      href={`https://www.tradingview.com/chart/?symbol=${pos.symbol}`}
+                      href={buildTradingViewWidgetUrl(pos.symbol)}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -8423,7 +8424,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                         <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                       </svg>
-                      Open in TradingView
+                      Open chart with RSI
                     </a>
                   </div>
                 )}

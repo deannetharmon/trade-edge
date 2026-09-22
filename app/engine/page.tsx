@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -1526,7 +1527,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
         {!sparkLoading && sparkData && sparkData.length === 0 && (
           <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
         )}
-        <a href={`https://www.tradingview.com/chart/?symbol=${TV_SYMBOL}`}
+        <a href={buildTradingViewWidgetUrl(TV_SYMBOL)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}
@@ -1536,7 +1537,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
           </svg>
-          Open in TradingView
+          Open chart with RSI
         </a>
       </div>
     </>
