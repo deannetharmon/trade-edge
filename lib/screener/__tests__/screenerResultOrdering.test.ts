@@ -41,20 +41,16 @@ describe('canonical relevant-leg OI rules', () => {
     expect(r.relevantLegOI).toBe(300);
   });
 
-  // 1. A vertical spread whose short leg passes while its protective long
-  //    leg is below it -- remains eligible, exposes the weaker long-leg
-  //    liquidity as a warning.
-  it('BPS: short put passes, protective long put is weak -- still eligible, with a warning', () => {
+  it('BPS: both put legs must clear the OI floor', () => {
     const r = evaluateOiEligibility(legs({ strategy: 'BPS', shortPutOI: 600, longPutOI: 20 }), 500);
-    expect(r.eligible).toBe(true);
-    expect(r.relevantLegOI).toBe(600);
-    expect(r.protectiveLegWarnings).toHaveLength(1);
-    expect(r.protectiveLegWarnings[0]).toMatch(/below the selected minimum/);
+    expect(r.eligible).toBe(false);
+    expect(r.relevantLegOI).toBe(20);
   });
 
-  it('BPS: protective long leg is never required to independently meet the floor', () => {
-    const r = evaluateOiEligibility(legs({ strategy: 'BPS', shortPutOI: 500, longPutOI: 0 }), 500);
+  it('BPS: both put legs at the floor are eligible and the lower leg is relevant', () => {
+    const r = evaluateOiEligibility(legs({ strategy: 'BPS', shortPutOI: 600, longPutOI: 500 }), 500);
     expect(r.eligible).toBe(true);
+    expect(r.relevantLegOI).toBe(500);
   });
 
   it('BCS: short call OI is the relevant leg; protective long call is diagnostic only', () => {

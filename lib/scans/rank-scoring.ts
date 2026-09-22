@@ -127,17 +127,32 @@ export function calculatePmccScore(
   };
 }
 
-// OI-LIQUIDITY-CHOICE-0001: extracted for direct, pinned testing of the
-// OI-to-score curve at specific values, rather than only exercisable
-// through the full scoreCandidate call. OI weighted 35% (down from 60%,
-// see the ticket for why), creditRatio and roc split the remaining 65%
-// evenly since they were already weighted equal to each other.
+// SCREENER-LIQUIDITY-0001: OI=100 is the default execution floor, not a
+// thin-liquidity penalty. 500+ is stronger, but 100 earns meaningful credit.
+// OI remains only one execution-quality input; quote quality is gated earlier.
+export function computeOiLiquidityFactor(minOI: number): number {
+  if (!Number.isFinite(minOI) || minOI <= 0) return 0;
+  if (minOI < 100) return (minOI / 100) * 0.70;
+  if (minOI < 250) return 0.70 + ((minOI - 100) / 150) * 0.15;
+  if (minOI < 500) return 0.85 + ((minOI - 250) / 250) * 0.15;
+  return 1;
+}
+
+export type OiLiquidityLabel = 'Below OI floor' | 'Adequate liquidity' | 'Good liquidity' | 'Strong liquidity';
+
+export function getOiLiquidityLabel(minOI: number): OiLiquidityLabel {
+  if (!Number.isFinite(minOI) || minOI < 100) return 'Below OI floor';
+  if (minOI < 250) return 'Adequate liquidity';
+  if (minOI < 500) return 'Good liquidity';
+  return 'Strong liquidity';
+}
+
+// Extracted for direct, pinned testing of the OI-to-score curve at specific
+// values, rather than only exercising it through scoreCandidate. OI is 35%
+// of this dimension; credit ratio and ROC split the remaining 65% evenly.
 export function computeLiquidityScore(minOI: number, creditRatio: number, roc: number): number {
   const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-  // Steep curve: OI=0→0, OI=100→0.324, OI=300→0.699, OI=500→1.0, OI>500→1.0
-  // (verified directly via the pinned tests in __tests__/liquidityScore.test.ts --
-  // this comment previously said 0.18/0.54, which was stale/incorrect)
-  const oiScore = minOI <= 0 ? 0 : clamp(Math.pow(minOI / 500, 0.7));
+  const oiScore = computeOiLiquidityFactor(minOI);
   const creditRatioScore = clamp((creditRatio - 0.15) / 0.35);
   const rocScore = clamp(roc / 35);
   return oiScore * 0.35 + creditRatioScore * 0.325 + rocScore * 0.325;
@@ -284,16 +299,8 @@ export function scoreCandidate(result: ScreenResult, cfg: RankConfig): { score: 
   const technicalScore = clamp(technicalRaw) * cfg.weightTechnical;
 
   // ── Liquidity (10pts) ─────────────────────────────────────────────────────
-  // OI-LIQUIDITY-CHOICE-0001: reduced from 60% to 35% (Ian) -- now that low
-  // OI is a disclosed, acknowledged choice rather than a silent gate (see
-  // assessOiLiquidity / the TRADE THIS confirmation), the score no longer
-  // needs to double as a soft-block. OI still meaningfully drags a
-  // thin-liquidity candidate's rank -- it should generally lose to an
-  // equally-good setup with real depth -- but can no longer single-handedly
-  // bury an otherwise-excellent candidate. Curve shape unchanged, only the
-  // weight. Starting value, not permanently settled -- revisit after real
-  // use. The freed 25 points split evenly between creditRatio and roc,
-  // which were already weighted equal to each other.
+  // OI=100 receives adequate credit; 500+ receives full OI credit. The
+  // separate candidate pipeline is responsible for quote validity/freshness.
   let liquidityRaw = 0.4;
   if (c) {
     liquidityRaw = computeLiquidityScore(Math.min(c.shortOI, c.longOI), c.creditRatio, c.roc);

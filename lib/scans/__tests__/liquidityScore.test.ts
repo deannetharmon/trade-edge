@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeLiquidityScore } from '../rank-scoring';
+import { computeLiquidityScore, computeOiLiquidityFactor, getOiLiquidityLabel } from '../rank-scoring';
 
 // OI-LIQUIDITY-CHOICE-0001: Quinn's requirement -- pin the OI-to-score
 // curve at specific real values, so a future "helpful" tweak to the
@@ -11,28 +11,23 @@ import { computeLiquidityScore } from '../rank-scoring';
 const FULL_CREDIT_RATIO = 0.50; // clamp((0.50-0.15)/0.35) = 1.0
 const FULL_ROC = 35; // clamp(35/35) = 1.0
 
-describe('computeLiquidityScore — pinned OI curve values (Ian: 35% weight)', () => {
+describe('computeLiquidityScore — pinned OI curve values', () => {
   it('OI = 0 scores 0 for the OI component', () => {
     const result = computeLiquidityScore(0, FULL_CREDIT_RATIO, FULL_ROC);
     // oiScore(0) = 0, so liquidity = 0*0.35 + 1.0*0.325 + 1.0*0.325 = 0.65
     expect(result).toBeCloseTo(0.65, 4);
   });
 
-  it('OI = 100 scores the correct curve value (~0.324, not the stale 0.18 comment)', () => {
+  it('OI = 100 is adequate, earning 70% of the OI contribution', () => {
     const result = computeLiquidityScore(100, FULL_CREDIT_RATIO, FULL_ROC);
-    // oiScore(100) = (100/500)^0.7 ≈ 0.3241 -- verified directly, not
-    // copied from the source comment, which turned out to be stale/wrong
-    // (said 0.18; the actual formula has always computed ~0.324). Fixed
-    // the comment in rank-scoring.ts alongside this test.
-    const expectedOiScore = Math.pow(100 / 500, 0.7);
-    expect(expectedOiScore).toBeCloseTo(0.3241, 3);
+    const expectedOiScore = 0.70;
     const expected = expectedOiScore * 0.35 + 1.0 * 0.325 + 1.0 * 0.325;
     expect(result).toBeCloseTo(expected, 4);
   });
 
-  it("OI = 300 (Dean's SOXL example is 202, in this same range) scores partway up the curve", () => {
+  it('OI = 300 scores partway between good and strong liquidity', () => {
     const result = computeLiquidityScore(300, FULL_CREDIT_RATIO, FULL_ROC);
-    const expectedOiScore = Math.pow(300 / 500, 0.7);
+    const expectedOiScore = 0.88;
     const expected = expectedOiScore * 0.35 + 1.0 * 0.325 + 1.0 * 0.325;
     expect(result).toBeCloseTo(expected, 4);
     // Sanity: this must score strictly better than OI=100 and strictly
@@ -43,12 +38,12 @@ describe('computeLiquidityScore — pinned OI curve values (Ian: 35% weight)', (
     expect(result).toBeLessThan(at500);
   });
 
-  it('OI = 500 (the floor) scores full marks — exactly 1.0 overall with full credit/roc', () => {
+  it('OI = 500 earns full OI credit — exactly 1.0 overall with full credit/roc', () => {
     const result = computeLiquidityScore(500, FULL_CREDIT_RATIO, FULL_ROC);
     expect(result).toBeCloseTo(1.0, 4);
   });
 
-  it('OI = 1000 (double the floor) scores identically to OI = 500 — the curve caps at the floor', () => {
+  it('OI = 1000 scores identically to OI = 500 — the curve caps at strong liquidity', () => {
     const at500 = computeLiquidityScore(500, FULL_CREDIT_RATIO, FULL_ROC);
     const at1000 = computeLiquidityScore(1000, FULL_CREDIT_RATIO, FULL_ROC);
     expect(at1000).toBeCloseTo(at500, 6);
@@ -81,5 +76,16 @@ describe('computeLiquidityScore — pinned OI curve values (Ian: 35% weight)', (
     const creditOnly = computeLiquidityScore(500, FULL_CREDIT_RATIO, 0);
     const rocOnly = computeLiquidityScore(500, 0.15, FULL_ROC); // 0.15 clamps creditRatioScore to 0
     expect(creditOnly).toBeCloseTo(rocOnly, 4);
+  });
+
+  it('uses the documented monotonic OI boundaries and trader-facing labels', () => {
+    expect(computeOiLiquidityFactor(99)).toBeCloseTo(0.693, 3);
+    expect(computeOiLiquidityFactor(100)).toBe(0.70);
+    expect(computeOiLiquidityFactor(250)).toBe(0.85);
+    expect(computeOiLiquidityFactor(500)).toBe(1);
+    expect(getOiLiquidityLabel(99)).toBe('Below OI floor');
+    expect(getOiLiquidityLabel(100)).toBe('Adequate liquidity');
+    expect(getOiLiquidityLabel(250)).toBe('Good liquidity');
+    expect(getOiLiquidityLabel(500)).toBe('Strong liquidity');
   });
 });

@@ -49,16 +49,16 @@ interface LegOiSet {
   protective: (number | null | undefined)[];
 }
 
-// Canonical strategy-aware OI rules (ticket, verbatim):
-//   CSP: short put OI. CC: short call OI. BPS: short put OI.
+// Canonical strategy-aware OI rules:
+//   CSP: short put OI. CC: short call OI. BPS: both put legs.
 //   BCS: short call OI. BULL_CALL: short call OI (mirrors BCS's shape).
 //   IC: both short legs required independently; relevant-leg OI is the lower
 //       of the two.
 //   PMCC: both the long LEAPS call and the short call required independently.
 //   LEAPS: long call OI.
-// Protective long legs (BPS's long put, BCS/BULL_CALL's long call, IC's long
-// put and long call) are never required to meet the floor -- they're
-// diagnostic-only (see getProtectiveLegWarnings).
+// BPS requires both legs because each contract must be executable. BCS and
+// BULL_CALL retain their existing short-leg policy. Protective legs are
+// otherwise diagnostic-only (see getProtectiveLegWarnings).
 function getLegOiSet(legs: OiCandidateLegs): LegOiSet {
   switch (legs.strategy) {
     case 'CSP':
@@ -66,7 +66,7 @@ function getLegOiSet(legs: OiCandidateLegs): LegOiSet {
     case 'CC':
       return { required: [legs.shortCallOI], protective: [] };
     case 'BPS':
-      return { required: [legs.shortPutOI], protective: [legs.longPutOI] };
+      return { required: [legs.shortPutOI, legs.longPutOI], protective: [] };
     case 'BCS':
       return { required: [legs.shortCallOI], protective: [legs.longCallOI] };
     case 'BULL_CALL':

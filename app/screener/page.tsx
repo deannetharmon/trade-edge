@@ -89,7 +89,7 @@ import type { LeapsPickSummary } from '@/lib/leaps-analysis/dashboard';
 import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
-import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold } from '@/lib/scans/rank-scoring';
+import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold, getOiLiquidityLabel } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
@@ -5494,6 +5494,11 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
 
   const c = result.bestCandidate;
   const t = result.trendResult;
+  const oiStrategy = toOiStrategy(result.strategy);
+  const relevantLegOI = c && oiStrategy
+    ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(oiStrategy, c))
+    : null;
+  const oiLiquidityLabel = relevantLegOI == null ? null : getOiLiquidityLabel(relevantLegOI);
   const matchingPositions = (existingPositions ?? []).filter(p => p.symbol === result.symbol);
 
   // Plain factual sector note — only shown when there's something the "Open
@@ -5936,7 +5941,7 @@ const strategyScores = useMemo(() => {
                   </span>
                 </div>
               </div>
-              <div className={`text-xs shrink-0 ${c.strategy === 'IC' ? 'w-28' : 'w-16'}`} title="Open interest — short leg / long leg, each colored on its own OI">
+              <div className={`text-xs shrink-0 ${c.strategy === 'IC' ? 'w-28' : 'w-24'}`} title="Open interest. The lower required leg determines the liquidity label for multi-leg candidates.">
                 {c.strategy === 'IC' ? (
                   <>
                     <div>
@@ -5969,6 +5974,11 @@ const strategyScores = useMemo(() => {
                     <span className={`font-bold ${getOiColor(c.shortOI, rules.OI_MIN)}`}>{c.shortOI ?? '—'}</span>
                     <span className={`font-bold ${th.textFaint}`}>/</span>
                     <span className={`font-bold ${getOiColor(c.longOI, rules.OI_MIN)}`}>{c.longOI ?? '—'}</span>
+                  </div>
+                )}
+                {oiLiquidityLabel && (
+                  <div className={`text-[9px] font-medium ${oiLiquidityLabel === 'Below OI floor' ? 'text-red-400' : oiLiquidityLabel === 'Adequate liquidity' ? 'text-yellow-400' : oiLiquidityLabel === 'Good liquidity' ? 'text-emerald-300' : 'text-emerald-400'}`}>
+                    {oiLiquidityLabel}
                   </div>
                 )}
               </div>
