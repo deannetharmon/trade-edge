@@ -24,6 +24,7 @@ import {
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildEntryPerformanceRollup, type EntryPerformanceRollup } from '@/lib/entry-context/performance';
 import type { CreditSpreadEntrySnapshot } from '@/lib/entry-context/types';
+import { buildStrategyPerformanceReport } from '@/lib/performance/strategyPerformance';
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
@@ -944,6 +945,41 @@ function Widget({ config, trades, range, th, onToggle, onMoveUp, onMoveDown, isF
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
+function StrategyPerformanceReport({ trades, th, range }: { trades: ClosedTrade[]; th: typeof THEMES[Theme]; range: TimeRange }) {
+  const report = buildStrategyPerformanceReport(trades);
+  const dollars = (value: number) => `${value < 0 ? '−' : ''}$${Math.abs(value).toFixed(0)}`;
+  return (
+    <section className={`${th.card} border ${th.border} rounded-xl overflow-hidden`} aria-label="Strategy performance report">
+      <div className={`px-4 py-3 border-b ${th.borderLight}`}>
+        <p className="text-[10px] font-bold tracking-widest text-cyan-300">STRATEGY PERFORMANCE REPORT</p>
+        <p className={`text-[10px] ${th.textFaint} mt-1`}>Closed, complete broker-reconstructed option history · current {range} window · realized P/L only</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-left text-[10px]">
+          <thead className={`${th.textFaint} border-b ${th.borderLight} uppercase tracking-wider`}>
+            <tr><th className="px-4 py-2">Strategy</th><th className="px-3 py-2 text-right">Closed</th><th className="px-3 py-2 text-right">Realized P/L</th><th className="px-3 py-2 text-right">Win rate</th><th className="px-3 py-2 text-right">Avg win / loss</th><th className="px-3 py-2 text-right">Profit factor</th><th className="px-3 py-2 text-right">Avg hold</th></tr>
+          </thead>
+          <tbody>
+            {report.rows.map(row => <tr key={row.strategy} className={`border-b ${th.borderLight} last:border-0`}>
+              <td className={`px-4 py-3 ${th.text}`}><div className="font-semibold">{row.label}</div>{row.classificationNote && <div className="text-amber-300 text-[9px] mt-0.5 max-w-[310px]">{row.classificationNote}</div>}</td>
+              <td className={`px-3 py-3 text-right ${th.text}`}>{row.closedLifecycles || '—'}{row.insufficientHistory && <div className="text-[9px] text-amber-300">Insufficient history</div>}</td>
+              <td className={`px-3 py-3 text-right font-semibold ${row.realizedPnl > 0 ? 'text-emerald-400' : row.realizedPnl < 0 ? 'text-red-400' : th.textFaint}`}>{row.closedLifecycles ? dollars(row.realizedPnl) : '—'}</td>
+              <td className={`px-3 py-3 text-right ${th.text}`}>{row.winRate == null ? '—' : `${Math.round(row.winRate * 100)}%`}</td>
+              <td className={`px-3 py-3 text-right ${th.text}`}>{row.averageWin == null ? '—' : `${dollars(row.averageWin)} / ${row.averageLoss == null ? '—' : dollars(row.averageLoss)}`}</td>
+              <td className={`px-3 py-3 text-right ${th.text}`}>{row.profitFactor == null ? '—' : row.profitFactor.toFixed(2)}</td>
+              <td className={`px-3 py-3 text-right ${th.text}`}>{row.averageHoldDays == null ? '—' : `${row.averageHoldDays.toFixed(1)}d`}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      <div className={`px-4 py-2.5 text-[9px] ${th.textFaint} border-t ${th.borderLight}`}>
+        {report.includedTrades} complete closed record{report.includedTrades === 1 ? '' : 's'} included. {report.excludedIncompleteTrades > 0 ? `${report.excludedIncompleteTrades} incomplete record${report.excludedIncompleteTrades === 1 ? ' was' : 's were'} excluded. ` : ''}
+        CC, PMCC, and standalone LEAPS require broker lifecycle linkage and are intentionally not inferred from short-call history. Open P/L is not included.
+      </div>
+    </section>
+  );
+}
+
 export default function PerformancePage() {
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const th = THEMES[theme];
@@ -1162,6 +1198,8 @@ export default function PerformancePage() {
             <p className={`text-[9px] ${th.textFaint} mt-3`}>Window: {range}. Descriptive only. Inside expected move: {entryPerformance.insideExpectedMove.count} trades · ${entryPerformance.insideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Outside expected move: {entryPerformance.outsideExpectedMove.count} trades · ${entryPerformance.outsideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Missing or incomplete evidence is excluded.</p>
           </div>
         )}
+
+        {!loading && !error && <StrategyPerformanceReport trades={trades} th={th} range={range} />}
 
         {/* Widgets */}
         {!loading && trades.length > 0 && (
