@@ -2686,6 +2686,11 @@ function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
     legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
     legs.push({ 'instrument-type': instrType, symbol: c.shortCallOccSymbol!, quantity: 1, action: 'Sell to Open' });
     legs.push({ 'instrument-type': instrType, symbol: c.longCallOccSymbol!, quantity: 1, action: 'Buy to Open' });
+  } else if (c.strategy === 'CSP') {
+    // CSP-ORDERS-0001 -- a cash-secured put is a single leg, deliberately
+    // never more. buildCreditEntryOtoco (lib/screener/entryBracket.ts) is
+    // already leg-count-agnostic, so no change was needed there.
+    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
   }
   return legs;
 }
@@ -8676,7 +8681,17 @@ export default function Home() {
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
   });
-  const [lastCspMode, setLastCspMode] = useState<CspScanRequest['mode']>('filter');
+  // FILTER-MODE-REMOVAL-0002 left this defaulted to 'filter' when Spreads'
+  // equivalent (RunModeModal's lastMode) was coerced away from it -- CSP's
+  // own modal only offers Rank/Targeted via ScanModeRadioGroup today, so a
+  // session that opens the CSP modal before ever running a scan was silently
+  // opening in Filter with neither radio button showing as selected. Dean
+  // confirmed 2026-09-21 he does not want Filter back anywhere; this makes
+  // CSP consistent with Spreads' existing fix. Does not touch CC or the
+  // held-candidates scan, which correctly and unconditionally use 'filter'
+  // as their only mode -- they never offered Rank/Targeted in the first
+  // place, so there is nothing to default away from.
+  const [lastCspMode, setLastCspMode] = useState<CspScanRequest['mode']>('rank');
   const [cspRequestsByMode, setCspRequestsByMode] = useState<CspScanRequestsByMode>({
     filter: defaultCspRequest('filter'), rank: defaultCspRequest('rank'), targeted: defaultCspRequest('targeted'),
   });
@@ -10625,7 +10640,19 @@ export default function Home() {
   const hasCompletedScanForCurrentMode = !!(
     activeSession && activeSession.mode === screenMode && activeSession.status !== 'running'
   );
-  const cspNonFilterSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode !== 'filter';
+  // CSP-RANK-FILTER-PARITY-0002 -- this must mirror the CSP result-controls
+  // panel's own render condition (screenMode === 'filter' ||
+  // (csp && screenMode === 'rank')), not just "mode !== 'filter'". Before
+  // this fix it drifted from that condition: Rank-mode CSP sessions already
+  // rendered the POP/OTM/DTE/Delta/credit-ratio chip panel (an earlier,
+  // already-shipped parity fix), but this gate still routed those sessions
+  // around applyFilterModeChips entirely, so every chip rendered fully
+  // interactive while silently filtering nothing. Harmless while Filter was
+  // still CSP's default (nobody hit the Rank case with real filters set);
+  // exposed the moment this fix made Rank the only reachable CSP mode.
+  // Targeted is unaffected -- it never rendered this panel, since Targeted
+  // narrows the scan itself at scan time.
+  const cspNonFilterSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode !== 'filter' && activeSession.mode !== 'rank';
   const activePmccSession = activeSession?.requestedStrategy === 'pmcc';
   // TE-0007H — a fourth real, pre-existing bug found in this same
   // investigation pattern: filteredQualifiedChips/filteredDisqualified

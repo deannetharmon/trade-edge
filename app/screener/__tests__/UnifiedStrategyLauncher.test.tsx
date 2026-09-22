@@ -129,13 +129,18 @@ describe('TE-0007: launcher routing', () => {
     expect(findLeaps).toHaveAttribute('title', 'Finds new long-call candidates for the selected tickers.');
   });
 
-  it('7. confirming the default CSP modal selection switches the visible results mode to filter', async () => {
+  // Updated 2026-09-21: CSP's default was 'filter', an uncorrected leftover
+  // from FILTER-MODE-REMOVAL-0002 (Spreads' equivalent was fixed at the same
+  // time Filter was hidden; CSP's was not). Fixed to match -- see
+  // lastCspMode in app/screener/page.tsx. Dean confirmed Filter is not
+  // coming back anywhere, so 'rank' is now the correct, permanent default.
+  it('7. confirming the default CSP modal selection switches the visible results mode to rank', async () => {
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     expect(screen.getByRole('dialog', { name: 'CASH-SECURED PUT SCAN' })).toBeInTheDocument();
     await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
-    await waitFor(() => expect(localStorage.getItem('hunter-screen-mode')).toBe('filter'));
+    await waitFor(() => expect(localStorage.getItem('hunter-screen-mode')).toBe('rank'));
   });
 
   it('8. Find CSPs starts a "csp"-kind background job with the correct progressTotal', async () => {

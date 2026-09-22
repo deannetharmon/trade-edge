@@ -273,7 +273,8 @@ describe('CSP-CARD-PARITY-0001: CSP cards now render the same labeled POP/Delta/
     // -- which also appear elsewhere on this large page, e.g. filter chips,
     // LEAPS cards, per-candidate ITM/OTM badges -- can never collide with
     // an unrelated match; each qualified AMD card gets exactly one row.
-    const oiContainers = document.querySelectorAll('[title="Open interest — short leg / long leg, each colored on its own OI"]');
+    // Title wording updated by SCREENER-LIQUIDITY-0001 (b6ed7e12, separate/already-validated ticket).
+    const oiContainers = document.querySelectorAll('[title="Open interest. The lower required leg determines the liquidity label for multi-leg candidates."]');
     expect(oiContainers.length).toBe(4); // one per qualified AMD card (405 STRONG + 420/425/430 BORDERLINE)
 
     const oiValues: Array<string | null | undefined> = [];
@@ -519,9 +520,19 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toHaveAttribute('aria-busy', 'false');
   });
 
-  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from the selectable modes. Restore the Filter row below when
-  // SCREENER-CONFIG-0001 reinstates it: ['Filter', 'Filtered Cash-Secured Put Scan'].
-  it.todo('creates a canonical Filter CSP session only after confirmation -- pending SCREENER-CONFIG-0001 (Filter hidden)');
+  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from CSP's own selectable
+  // modes too, but left lastCspMode defaulted to 'filter' -- fixed 2026-09-21
+  // to match Spreads' equivalent coercion (Dean confirmed Filter is not
+  // coming back anywhere). No pending decision remains; this is no longer a
+  // .todo.
+  it('creates a canonical Rank CSP session by default (Filter mode is not offered)', async () => {
+    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
+    renderScreener();
+    await addToUniverse('AMD');
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    expect(screen.queryByRole('radio', { name: /FILTER/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /RANK scan mode, selected/i })).toBeInTheDocument();
+  });
 
   it.each([
     ['Rank', 'Ranked Cash-Secured Put Scan'],

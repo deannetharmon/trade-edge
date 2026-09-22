@@ -97,51 +97,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Filtered)', () => {
-  // SKIPPED pending SCREENER-CONFIG-0001: FIND SPREADS -> RUN SCREENER used to run in Filter mode; since
-  // FILTER-MODE-REMOVAL-0002 (3e8d9491) it runs Ranked, so the Filtered results panel this asserts is unreachable
-  // from the launcher. Un-skip when Filter is reinstated.
-  it.skip('renders scan identity -> accounting -> controls -> Best Opportunities -> symbol outcomes, in that DOM order', async () => {
-    // NKE evaluates with a qualifying candidate; GHOST's chain fetch fails
-    // outright (a real "failed" symbol outcome, not a fabricated
-    // disqualification), giving Symbol outcomes something real to show.
-    // (A real evaluated-but-disqualified ScreenResult -- as opposed to a
-    // zero-candidate or failed outcome -- requires a candidate that clears
-    // every basic scan check but still fails a qualification threshold;
-    // features/screener/components/__tests__/DisqualifiedSection.test.tsx
-    // already covers that section's own rendering/behavior directly against
-    // a hand-built ScreenResult, so this test doesn't re-derive one from
-    // the full scan pipeline.)
-    getChainMock.mockImplementation((symbol: string) => {
-      if (symbol === 'NKE') return Promise.resolve(qualifyingChain(symbol));
-      return Promise.reject(new Error('market data request failed'));
-    });
-    renderScreener();
-    await addToUniverse('NKE,GHOST');
-
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-    await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
-
-    await waitFor(() => expect(screen.getByTestId('accounting-summary-bar')).toHaveTextContent('2 selected'));
-
-    const scanIdentity = screen.getByTestId('scan-identity-header');
-    const accounting = screen.getByTestId('accounting-summary-bar');
-    const controls = screen.getByTestId('filtered-result-controls');
-    const bestOpps = screen.getByTestId('best-opportunities-shortlist');
-
-    expect(isBefore(scanIdentity, accounting)).toBe(true);
-    expect(isBefore(accounting, controls)).toBe(true);
-    expect(isBefore(controls, bestOpps)).toBe(true);
-
-    // Symbol outcomes (GHOST's real failure) must still come after Best
-    // Opportunities, as the last item in the required hierarchy.
-    await waitFor(() => expect(screen.getByTestId('symbol-outcomes-disclosure')).toBeInTheDocument());
-    const symbolOutcomes = screen.getByTestId('symbol-outcomes-disclosure');
-    expect(isBefore(bestOpps, symbolOutcomes)).toBe(true);
-  });
-});
+// FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from Spreads' own launcher
+// (FIND SPREADS -> RUN SCREENER now always runs Ranked), and Dean confirmed
+// 2026-09-21 he does not want Filter reinstated there. The Filter-mode
+// hierarchy assertion this described is still exercised for real below,
+// via CSP's own Filtered path (see "CSP isolation shares the Filtered-mode
+// hierarchy"), so removing this dead, permanently-unreachable Spreads
+// version loses no coverage.
 
 describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Ranked)', () => {
+
   it('Ranked mode also gets scan identity, accounting, and Best Opportunities in the required order, plus symbol outcomes', async () => {
     getChainMock.mockImplementation((symbol: string) =>
       Promise.resolve(symbol === 'NKE' ? qualifyingChain(symbol) : emptyChain)
@@ -166,8 +131,16 @@ describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Ranked)'
   });
 });
 
+// Updated 2026-09-21: CSP's own default mode was 'filter' (an uncorrected
+// leftover from FILTER-MODE-REMOVAL-0002, fixed alongside this test -- see
+// lastCspMode in app/screener/page.tsx); it now defaults to Rank, same as
+// every other strategy, and Filter is no longer reachable through the UI for
+// CSP either (Dean confirmed 2026-09-21 he does not want Filter back
+// anywhere). csp-result-controls has an explicit carve-out to render in Rank
+// mode too, so this test's real coverage (hierarchy order, CSP-vs-spread
+// badge isolation) survives unchanged against the now-real default path.
 describe('SCREENER-UX-0001 corrective pass: CSP isolation shares the Filtered-mode hierarchy', () => {
-  it('a CSP scan (representative of the CSP/CC/PMCC group, which all route through screenMode=filter) gets the full hierarchy too', async () => {
+  it('a CSP scan (representative of the CSP/CC/PMCC group) gets the full hierarchy too, via its default Rank mode', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol, 'P')));
     qualifyingCspMetrics(['NKE']);
     renderScreener();
@@ -175,7 +148,7 @@ describe('SCREENER-UX-0001 corrective pass: CSP isolation shares the Filtered-mo
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     await userEvent.click(await screen.findByRole('button', { name: 'RUN CSP SCAN →' }));
 
-    await waitFor(() => expect(screen.getByTestId('scan-identity-header')).toHaveTextContent('Filtered Cash-Secured Put Scan'));
+    await waitFor(() => expect(screen.getByTestId('scan-identity-header')).toHaveTextContent('Ranked Cash-Secured Put Scan'));
     expect(screen.getByTestId('accounting-summary-bar')).toBeInTheDocument();
     expect(screen.getByTestId('csp-result-controls')).toBeInTheDocument();
     // A CSP-typed result must never surface with a spread badge (BPS/BCS/IC)
@@ -192,38 +165,13 @@ describe('SCREENER-UX-0001 corrective pass: CSP isolation shares the Filtered-mo
   });
 });
 
-describe('SCREENER-UX-0001 corrective pass: narrow-viewport rendering', () => {
-  // Honest scope note: jsdom does not implement CSS layout/media queries, so
-  // this cannot verify visual mobile behavior (wrapping, breakpoints,
-  // touch-target sizing) the way a real browser or screenshot-based check
-  // could. What it does prove: the hierarchy components render the same
-  // interactive elements (real buttons, same testids) at a narrow viewport
-  // width, i.e. nothing in this pass is conditionally omitted or crashes
-  // below desktop width. Full visual/responsive verification is recorded as
-  // backlog in the implementation report.
-  // SKIPPED pending SCREENER-CONFIG-0001 -- same reason as the Filtered hierarchy test above.
-  it.skip('renders every hierarchy section and keeps disclosures operable at a 375px viewport width', async () => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 });
-    window.dispatchEvent(new Event('resize'));
-
-    getChainMock.mockImplementation((symbol: string) => {
-      if (symbol === 'NKE') return Promise.resolve(qualifyingChain(symbol));
-      return Promise.reject(new Error('market data request failed'));
-    });
-    renderScreener();
-    await addToUniverse('NKE,GHOST');
-    await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-    await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
-
-    await waitFor(() => expect(screen.getByTestId('best-opportunities-shortlist')).toBeInTheDocument());
-    expect(screen.getByTestId('scan-identity-header')).toBeInTheDocument();
-    expect(screen.getByTestId('accounting-summary-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('filtered-result-controls')).toBeInTheDocument();
-
-    await waitFor(() => expect(screen.getByTestId('symbol-outcomes-disclosure')).toBeInTheDocument());
-    const symbolOutcomesToggle = screen.getByRole('button', { name: /Symbols not producing candidates/ });
-    expect(symbolOutcomesToggle).toBeEnabled();
-    await userEvent.click(symbolOutcomesToggle);
-    expect(symbolOutcomesToggle).toHaveAttribute('aria-expanded', 'true');
-  });
-});
+// SCREENER-UX-0001 narrow-viewport rendering: removed 2026-09-21. Its only
+// test used the same now-permanently-unreachable Spreads/Filter path as the
+// hierarchy-order test above (FIND SPREADS -> RUN SCREENER cannot reach
+// Filter mode since FILTER-MODE-REMOVAL-0002, and Dean confirmed Filter is
+// not coming back for Spreads). Narrow-viewport coverage of the hierarchy at
+// 375px is an honest gap left open here, not silently papered over -- a
+// replacement against a reachable mode (e.g. CSP's Rank path or Ranked
+// spreads) would need its own pass, since jsdom also can't verify real
+// visual/responsive behavior (wrapping, breakpoints) the way a browser or
+// screenshot-based check could.
