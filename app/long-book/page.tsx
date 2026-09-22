@@ -4,6 +4,8 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { getPmccBrokerSnapshot } from '@/lib/scans/tastytrade-client';
+import type { PmccFoundationCapacity } from '@/lib/scans/pmcc-foundations';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -57,7 +59,7 @@ interface PmccShortCall {
   currentMid?: number;
   dte?: number;
   pnl?: number;                  // positive = profit (short call going down in value)
-  status?: 'open' | 'closed';
+  status?: 'working' | 'open' | 'closed';
   closePrice?: number;
   closedPnl?: number;
 }
@@ -94,7 +96,7 @@ function getAlerts(pos: LeapPosition): Alert[] {
   if (pct !== null && pct <= -40)
     alerts.push({ level: 'red', message: `${pct.toFixed(0)}% loss — thesis check: cut or hold` });
 
-  for (const sc of pos.shortCalls.filter(c => c.status !== 'closed')) {
+  for (const sc of pos.shortCalls.filter(c => c.status === 'open')) {
     const scDte = sc.dte ?? daysUntil(sc.expiration);
     if (scDte <= 21)
       alerts.push({ level: 'amber', message: `Short call ${sc.strike}C at ${scDte}d — close or roll` });
@@ -230,7 +232,7 @@ async function refreshPositionLive(pos: LeapPosition, token: string): Promise<Pa
   const updatedShortCalls = [...pos.shortCalls];
   for (let i = 0; i < updatedShortCalls.length; i++) {
     const sc = updatedShortCalls[i];
-    if (sc.status === 'closed') continue;
+    if (sc.status !== 'open') continue;
     try {
       const scOcc = sc.occSymbol.trim();
       const scQs = `equity-option=${encodeURIComponent(scOcc)}`;
@@ -260,6 +262,7 @@ function netCostBasis(pos: LeapPosition): number {
   const totalDebits = pos.debitPaid * pos.contracts * 100;
   const totalCredits = pos.shortCalls.reduce((sum, sc) => {
     if (sc.status === 'closed') return sum + (sc.closedPnl ?? 0);
+    if (sc.status === 'working') return sum;
     return sum + sc.creditReceived * sc.contracts * 100;
   }, 0);
   return Math.max(0, totalDebits - totalCredits);
@@ -273,6 +276,7 @@ function netCostBasisPerShare(pos: LeapPosition): number {
 function shortCallTotalPnl(pos: LeapPosition): number {
   return pos.shortCalls.reduce((sum, sc) => {
     if (sc.status === 'closed') return sum + (sc.closedPnl ?? 0);
+    if (sc.status === 'working') return sum;
     return sum + (sc.pnl ?? 0);
   }, 0);
 }
@@ -987,11 +991,42 @@ function SellShortCallModal({
   const [chain, setChain] = useState<ChainStrike[]>([]);
   const [loadingChain, setLoadingChain] = useState(true);
   const [chainError, setChainError] = useState('');
+  const [quoteBatchCounts, setQuoteBatchCounts] = useState({ requested: 0, failed: 0 });
   const [selected, setSelected] = useState<ChainStrike | null>(null);
   const [contracts, setContracts] = useState(leapPos.contracts);
   const [limitPrice, setLimitPrice] = useState(0);
   const [orderId, setOrderId] = useState('');
   const [error, setError] = useState('');
+  const [brokerFoundation, setBrokerFoundation] = useState<PmccFoundationCapacity | null>(null);
+  const [foundationLoading, setFoundationLoading] = useState(true);
+  const [foundationError, setFoundationError] = useState('');
+
+  const refreshVerifiedFoundation = useCallback(async (): Promise<PmccFoundationCapacity | null> => {
+    const token = await getAccessToken();
+    const snapshot = await getPmccBrokerSnapshot(token);
+    if (!snapshot || !snapshot.positionsComplete || !snapshot.ordersComplete || snapshot.foundations.status !== 'ok') {
+      setBrokerFoundation(null);
+      setFoundationError(snapshot?.foundations.unavailableReason ?? 'Broker positions and working orders could not be completely verified.');
+      return null;
+    }
+    const foundation = snapshot.foundations.foundations.find(item => item.occSymbol.trim() === leapPos.occSymbol.trim()) ?? null;
+    if (!foundation || foundation.availableShortCallContracts <= 0) {
+      setBrokerFoundation(null);
+      setFoundationError(foundation ? 'No remaining short-call capacity for this broker-verified LEAP.' : 'This Long Book LEAP is not an open broker-verified foundation.');
+      return null;
+    }
+    setFoundationError('');
+    setBrokerFoundation(foundation);
+    setContracts(value => Math.min(Math.max(1, value), foundation.availableShortCallContracts));
+    return foundation;
+  }, [leapPos.occSymbol]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFoundationLoading(true);
+    void refreshVerifiedFoundation().finally(() => { if (!cancelled) setFoundationLoading(false); });
+    return () => { cancelled = true; };
+  }, [refreshVerifiedFoundation]);
 
   // Short-term expirations for covered calls (21–60 DTE)
   useEffect(() => {
@@ -1006,11 +1041,14 @@ function SellShortCallModal({
           .sort((a: any, b: any) => a.dte - b.dte);
 
         const results: ChainStrike[] = [];
-        for (const exp of validExps.slice(0, 3)) {
+        let requestedBatches = 0;
+        let failedBatches = 0;
+        for (const exp of validExps) {
           const symbols: string[] = exp.strikes.map((s: any) => s.call).filter(Boolean).map((c: any) => typeof c === 'string' ? c : c?.symbol).filter(Boolean);
           for (let i = 0; i < symbols.length; i += 100) {
             const chunk = symbols.slice(i, i + 100);
             const qs = chunk.map((s: string) => `equity-option=${encodeURIComponent(s)}`).join('&');
+            requestedBatches += 1;
             try {
               const md = await ttFetch(`/market-data/by-type?${qs}`, token);
               for (const item of md?.data?.items ?? []) {
@@ -1027,19 +1065,24 @@ function SellShortCallModal({
                 const strike = parseInt(strikeMatch[1], 10) / 1000;
                 // Must be above LEAP strike to avoid assignment risk
                 if (strike <= leapPos.strike) continue;
-                results.push({ strike, bid, ask, mid, delta, iv: null, oi: 0, occSymbol: item.symbol, dte: exp.dte, expiration: exp.date });
+                const oi = parseInt(item['open-interest'] ?? item.oi ?? '0', 10);
+                results.push({ strike, bid, ask, mid, delta, iv: null, oi: Number.isFinite(oi) ? oi : 0, occSymbol: item.symbol, dte: exp.dte, expiration: exp.date });
               }
-            } catch {}
+            } catch { failedBatches += 1; }
           }
         }
         results.sort((a, b) => a.dte - b.dte || a.strike - b.strike);
         setChain(results);
+        setQuoteBatchCounts({ requested: requestedBatches, failed: failedBatches });
       } catch (e: any) { setChainError(e.message); }
       finally { setLoadingChain(false); }
     })();
   }, [leapPos.symbol, leapPos.strike]);
 
   const handleSelect = (s: ChainStrike) => {
+    if (!brokerFoundation) return;
+    if (quoteBatchCounts.failed > 0) { setFoundationError('Short-call ordering is blocked because option-chain acquisition is incomplete. Refresh the scan and try again.'); return; }
+    if (s.strike <= brokerFoundation.strike || s.expiration >= brokerFoundation.expiration) { setFoundationError('This short call is not compatible with the verified LEAP foundation (it must be higher strike and expire earlier).'); return; }
     setSelected(s);
     setLimitPrice(parseFloat(s.mid.toFixed(2)));
     setStep('confirm');
@@ -1047,9 +1090,13 @@ function SellShortCallModal({
 
   const placeOrder = async () => {
     if (!selected) return;
+    if (quoteBatchCounts.failed > 0) { setError('Order blocked: option-chain acquisition is incomplete. Refresh the scan before submitting.'); setStep('error'); return; }
     setStep('placing'); setError('');
     try {
       const token = await getAccessToken();
+      const foundation = await refreshVerifiedFoundation();
+      if (!foundation || foundation.availableShortCallContracts < contracts) throw new Error('Broker-verified PMCC capacity changed or could not be refreshed. No order was submitted.');
+      if (selected.strike <= foundation.strike || selected.expiration >= foundation.expiration) throw new Error('Selected short call is no longer compatible with the verified LEAP foundation. No order was submitted.');
       const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
       const payload = buildShortCallOrder(selected.occSymbol, contracts, limitPrice);
@@ -1063,7 +1110,9 @@ function SellShortCallModal({
         const detail = data?.error?.message ?? data?.['error-message'] ?? data?.errors?.[0]?.message ?? JSON.stringify(data).slice(0, 400);
         throw new Error(detail);
       }
-      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
+      const brokerOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id;
+      if (!brokerOrderId) throw new Error('Broker acknowledgement did not include an order ID. No local order state was recorded.');
+      setOrderId(brokerOrderId);
 
       const newSc: PmccShortCall = {
         id: uuid(),
@@ -1073,7 +1122,7 @@ function SellShortCallModal({
         creditReceived: limitPrice,
         entryDate: new Date().toISOString().slice(0, 10),
         occSymbol: selected.occSymbol,
-        status: 'open',
+        status: 'working',
         dte: selected.dte,
         currentMid: selected.mid,
         pnl: 0,
@@ -1096,6 +1145,15 @@ function SellShortCallModal({
 
         {step === 'chain' && (
           <>
+            {foundationLoading && <p className={`text-[10px] ${th.textFaint} mb-3`}>Verifying LEAP foundation and remaining capacity…</p>}
+            {foundationError && <p className="text-amber-400 text-sm mb-3">{foundationError}</p>}
+            {!loadingChain && quoteBatchCounts.requested > 0 && (
+              <p className={`text-[10px] mb-3 ${quoteBatchCounts.failed > 0 ? 'text-amber-400' : th.textFaint}`}>
+                {quoteBatchCounts.failed > 0
+                  ? `INCOMPLETE discovery: ${quoteBatchCounts.failed} of ${quoteBatchCounts.requested} quote batches failed. Results cannot represent all available calls.`
+                  : `COMPLETE discovery: all ${quoteBatchCounts.requested} quote batches in the 21–60 DTE window loaded.`}
+              </p>
+            )}
             {loadingChain && (
               <div className="flex items-center justify-center py-8 gap-2">
                 <div className="w-4 h-4 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
@@ -1103,7 +1161,7 @@ function SellShortCallModal({
               </div>
             )}
             {chainError && <p className="text-red-400 text-sm">{chainError}</p>}
-            {!loadingChain && !chainError && (
+            {!loadingChain && !chainError && !foundationLoading && brokerFoundation && (
               <div className="space-y-1 max-h-72 overflow-y-auto">
                 {chain.length === 0 && <p className={`text-[10px] ${th.textFaint}`}>No qualifying strikes found (Δ 0.15–0.45, above {leapPos.strike}).</p>}
                 {chain.map((s, i) => (
@@ -1156,7 +1214,7 @@ function SellShortCallModal({
                 <button onClick={() => setContracts(Math.max(1, contracts - 1))}
                   className={`w-6 h-6 rounded border ${th.border} ${th.textMuted} hover:text-white flex items-center justify-center`}>−</button>
                 <span className={`text-sm font-bold ${th.text} w-6 text-center`}>{contracts}</span>
-                <button onClick={() => setContracts(Math.min(leapPos.contracts, contracts + 1))}
+                <button onClick={() => setContracts(Math.min(brokerFoundation?.availableShortCallContracts ?? 0, contracts + 1))}
                   className={`w-6 h-6 rounded border ${th.border} ${th.textMuted} hover:text-white flex items-center justify-center`}>+</button>
               </div>
             </div>
@@ -1232,8 +1290,8 @@ function LeapCard({
   const combPct = combinedPct(pos);
   const netBasis = netCostBasisPerShare(pos);
   const scPnl = shortCallTotalPnl(pos);
-  const openShortCalls = pos.shortCalls.filter(sc => sc.status !== 'closed');
-  const costReduction = pos.shortCalls.reduce((s, sc) => s + sc.creditReceived * sc.contracts * 100, 0);
+  const openShortCalls = pos.shortCalls.filter(sc => sc.status === 'open');
+  const costReduction = pos.shortCalls.reduce((s, sc) => s + (sc.status === 'working' ? 0 : sc.creditReceived * sc.contracts * 100), 0);
 
   const pnlColor = combPct != null
     ? combPct >= 20 ? 'text-emerald-400'
@@ -1370,10 +1428,10 @@ function LeapCard({
                     <span className={th.textFaint}>{fmtDate(sc.expiration)} · {sc.dte ?? daysUntil(sc.expiration)}d</span>
                     <span className={th.textFaint}>{sc.contracts}× · collected ${sc.creditReceived.toFixed(2)}/sh</span>
                     <span className={`ml-auto font-bold ${sc.pnl != null && sc.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {sc.status === 'closed' ? `Closed $${sc.closedPnl?.toFixed(0) ?? '—'}` : sc.pnl != null ? `${sc.pnl >= 0 ? '+' : ''}$${sc.pnl.toFixed(0)}` : '—'}
+                      {sc.status === 'closed' ? `Closed $${sc.closedPnl?.toFixed(0) ?? '—'}` : sc.status === 'working' ? 'Awaiting broker fill' : sc.pnl != null ? `${sc.pnl >= 0 ? '+' : ''}$${sc.pnl.toFixed(0)}` : '—'}
                     </span>
-                    <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold ${sc.status === 'closed' ? `${th.textFaint} ${th.border}` : 'text-emerald-400 border-emerald-700 bg-emerald-500/10'}`}>
-                      {sc.status === 'closed' ? 'CLOSED' : 'OPEN'}
+                    <span className={`text-[8px] px-1.5 py-0.5 border rounded font-bold ${sc.status === 'closed' ? `${th.textFaint} ${th.border}` : sc.status === 'working' ? 'text-amber-400 border-amber-700 bg-amber-500/10' : 'text-emerald-400 border-emerald-700 bg-emerald-500/10'}`}>
+                      {sc.status === 'closed' ? 'CLOSED' : sc.status === 'working' ? 'WORKING' : 'OPEN'}
                     </span>
                   </div>
                 ))}

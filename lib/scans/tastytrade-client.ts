@@ -10,6 +10,7 @@ import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './cons
 // that isn't populated by this app's actual login flow. That route has been
 // deleted; buildCoveredCallCapacityReport (pure, no I/O) is reused here.
 import { buildCoveredCallCapacityReport, type CoveredCallCapacityReport } from './covered-call-capacity';
+import { buildPmccFoundationReport, type PmccFoundationReport } from './pmcc-foundations';
 import { daysUntil } from './scan-utils';
 import type { RulesType } from './constants';
 import { requireActiveBrokerAccount, resolveActiveBrokerAccount, type BrokerAccountResolutionStatus } from '@/lib/tastytrade/accountSelection';
@@ -371,6 +372,49 @@ export async function getCoveredCallCapacityReport(token: string): Promise<Cover
     return buildCoveredCallCapacityReport(rawPositions, rawOrders);
   } catch {
     return { status: 'unavailable', bySymbol: {}, warnings: [] };
+  }
+}
+
+export interface PmccBrokerSnapshot {
+  snapshotId: string;
+  accountId: string;
+  asOf: string;
+  freshnessExpiresAt: string;
+  positionsComplete: boolean;
+  ordersComplete: boolean;
+  foundations: PmccFoundationReport;
+}
+
+/**
+ * Reads the selected broker account's positions and working orders for an
+ * existing-LEAP PMCC decision. Consumers must refresh after the stated
+ * freshness deadline rather than treating local position records as order
+ * authority.
+ */
+export async function getPmccBrokerSnapshot(token: string, freshnessMs = 30_000): Promise<PmccBrokerSnapshot | null> {
+  try {
+    const accountId = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
+    if (!accountId) return null;
+    const [positionsResponse, ordersResponse] = await Promise.allSettled([
+      ttFetch(`/accounts/${accountId}/positions`, token),
+      ttFetch(`/accounts/${accountId}/orders/live`, token),
+    ]);
+    const positionsComplete = positionsResponse.status === 'fulfilled';
+    const ordersComplete = ordersResponse.status === 'fulfilled';
+    const rawPositions = positionsComplete ? positionsResponse.value?.data?.items ?? [] : null;
+    const rawOrders = ordersComplete ? ordersResponse.value?.data?.items ?? [] : null;
+    const asOf = new Date();
+    return {
+      snapshotId: `${accountId}:${asOf.getTime()}`,
+      accountId,
+      asOf: asOf.toISOString(),
+      freshnessExpiresAt: new Date(asOf.getTime() + freshnessMs).toISOString(),
+      positionsComplete,
+      ordersComplete,
+      foundations: buildPmccFoundationReport(accountId, rawPositions, rawOrders),
+    };
+  } catch {
+    return null;
   }
 }
 
