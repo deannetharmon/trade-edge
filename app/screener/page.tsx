@@ -8691,7 +8691,7 @@ export default function Home() {
   // qualified/IVR eligibility split (see the Filtered-mode results render
   // below). Disqualified-section ordering is unaffected -- it's already an
   // audit trail of *why* something didn't qualify, not a ranked results list.
-  const [filteredMinOi, setFilteredMinOi] = useState<number>(0);
+  const [filteredMinOi, setFilteredMinOi] = useState<number>(100);
   // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
   // percentage of strike width, same shape as filteredMinOi.
   const [filteredMinCreditRatio, setFilteredMinCreditRatio] = useState<number>(0);
