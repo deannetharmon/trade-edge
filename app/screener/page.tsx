@@ -8660,7 +8660,7 @@ export default function Home() {
   // SPX index LEAPS at 18.9%, is a deep-ITM outlier, not representative of
   // a typical single-stock candidate at 0.70-0.75 delta). 0 = "Any",
   // matching the same convention every other un-set-yet filter uses.
-  const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(0);
+  const [leapsExtrinsicPctMax, setLeapsExtrinsicPctMax] = useState(20);
   const [leapsHiddenSymbols, setLeapsHiddenSymbols] = useState<string[]>([]);
   const [leapsSort, setLeapsSort] = useState<'score' | 'delta' | 'dte' | 'openInterest' | 'spreadPct' | 'extrinsicValue' | 'extrinsicPctOfCost'>('score');
   const [leapsSortDir, setLeapsSortDir] = useState<'asc' | 'desc'>('desc');
