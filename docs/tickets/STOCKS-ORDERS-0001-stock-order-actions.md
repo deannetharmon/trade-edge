@@ -20,7 +20,8 @@ Position Analysis lets Dean close, roll and take profit on options, but there is
 4. **Take Profit for stocks** is driven by the holding's own price alert target (there is no rule for stocks), not by a 50% option rule.
 5. Tests for the gate (including a holding whose shares are fully committed, partially committed, and short), the builder, the dialog states, and that the dry-run route path is unchanged.
 
-## Open decisions for Dean / the team
+## Decisions resolved
 
-- Default time in force (Day vs GTC) and default limit price.
-- Whether "Buy to Cover" ships in the first version or only long sales.
+- **Default time in force: GTC.** Decided 2026-09-21 (Dean).
+- **"Buy to Cover" is OUT of v1** — Dean does not short stock directly; this account has no short-stock positions to cover. Long sales (Sell to Close) only. Decided 2026-09-21 (Dean). If this changes later, Buy to Cover is a separate, small addition to the same order builder — the safety gate and quantity model don't change.
+- Default limit price: at the bid for a sale (already specified above under "What is new," item 1) — no separate decision needed.
