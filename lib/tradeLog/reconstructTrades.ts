@@ -498,7 +498,10 @@ export async function fetchAndReconstructTrades(range: TimeRange): Promise<Recon
   let allTx: RawTransaction[] = [];
   let page = 1;
   while (true) {
-    const data = await ttFetch(`/accounts/${accountNumber}/transactions?start-date=${startDate}&per-page=250&page-offset=${(page - 1) * 250}`, token);
+    // page-offset is a PAGE NUMBER (0-indexed), not an item count -- confirmed
+    // against Tastytrade's docs and a live call: page-offset=250 returned 0
+    // items (past total-pages), page-offset=1 returned real data.
+    const data = await ttFetch(`/accounts/${accountNumber}/transactions?start-date=${startDate}&per-page=250&page-offset=${page - 1}`, token);
     const items: RawTransaction[] = data?.data?.items ?? [];
     allTx = [...allTx, ...items];
     if (!data?.pagination || items.length < 250 || allTx.length >= data.pagination['total-items']) break;
