@@ -10521,7 +10521,21 @@ export default function Home() {
   // immutable in ruleSnapshot; these display filters cannot broaden the broker
   // fetch or alter accounting.
   const [filterDteMin, setFilterDteMin] = useState<number>(0);
-  const [filterCspDeltaRange, setFilterCspDeltaRange] = useState<[number, number] | null>(null);
+  // CSP-DEFAULT-DELTA-0001 (Ian) — the result view previously defaulted this
+  // to "Any," so every scan's first view included every strike outside the
+  // scan's own preferred delta band (i.e. the near-certain-assignment,
+  // low-POP contracts) even though the band is already published right above
+  // the results as "ACTIVE CSP RULES." `filterCspDeltaRange` stays the raw,
+  // explicit user override (null = not yet touched this session, distinct
+  // from "Any" -- see effectiveCspDeltaRange below); `filterCspDeltaTouched`
+  // tracks whether the user has ever interacted with this control at all,
+  // including picking "Any" itself, which must still mean literal Any.
+  const [filterCspDeltaRange, setFilterCspDeltaRangeRaw] = useState<[number, number] | null>(null);
+  const [filterCspDeltaTouched, setFilterCspDeltaTouched] = useState(false);
+  const setFilterCspDeltaRange = (v: [number, number] | null) => {
+    setFilterCspDeltaRangeRaw(v);
+    setFilterCspDeltaTouched(true);
+  };
   // SCREENER-OI-0001 — this chip list previously only listed BPS/BCS/IC,
   // predating CC/CSP/PMCC (TE-0007C/TE-0007) as Filtered-mode strategies.
   // Since those strategies were never included in the default array AND had
@@ -10538,6 +10552,19 @@ export default function Home() {
   const toggleFilterSymbol = (sym: string) =>
     setFilterHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
 
+  // CSP-DEFAULT-DELTA-0001 (Ian) -- until the user explicitly touches the
+  // Delta chip (including picking "Any" itself), the result view defaults to
+  // the ACTIVE scan's own preferred delta band (ruleSnapshot.deltaMin/Max),
+  // the same band already published as "ACTIVE CSP RULES" above the results.
+  // Once touched, the user's explicit choice (including Any = null) always
+  // wins. Falls back to true Any when the session has no delta band to
+  // default to (e.g. Rank/Targeted sessions, which don't use this control).
+  const cspDefaultDeltaRange: [number, number] | null =
+    activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
+      ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
+      : null;
+  const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRange;
+
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
     if (activeSession?.requestedStrategy === 'pmcc') return true;
@@ -10551,9 +10578,9 @@ export default function Home() {
     const c = r.bestCandidate;
     if (c) {
       if (activeSession?.requestedStrategy === 'csp' && filterDteMin > 0 && c.dte < filterDteMin) return false;
-      if (activeSession?.requestedStrategy === 'csp' && filterCspDeltaRange) {
+      if (activeSession?.requestedStrategy === 'csp' && effectiveCspDeltaRange) {
         const delta = Math.abs(c.shortDelta);
-        if (delta < filterCspDeltaRange[0] || delta > filterCspDeltaRange[1]) return false;
+        if (delta < effectiveCspDeltaRange[0] || delta > effectiveCspDeltaRange[1]) return false;
       }
       if ((c.pop ?? 0) < filterPopMin) return false;
       if ((c.creditRatio ?? 0) * 100 < filterCreditRatioMin) return false;
@@ -11446,7 +11473,7 @@ export default function Home() {
                       showIvx
                       dteMin={filterDteMin}
                       setDteMin={setFilterDteMin}
-                      deltaRange={filterCspDeltaRange}
+                      deltaRange={effectiveCspDeltaRange}
                       setDeltaRange={setFilterCspDeltaRange}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
