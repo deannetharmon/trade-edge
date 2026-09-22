@@ -35,6 +35,7 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 ## Active tickets
 
 - [PERFORMANCE-STRATEGY-0001 Broker-grounded Performance by Strategy](./PERFORMANCE-STRATEGY-0001-broker-grounded-strategy-performance.md)
+- [PERFORMANCE-STRATEGY-0002 Full History and Broker-confirmed Strategy Lifecycles](./PERFORMANCE-STRATEGY-0002-full-history-and-lifecycle-linkage.md) — draft for approval
 
 - [TE-0001 Background Task Manager](./TE-0001-background-task-manager.md)
 - [TE-0002 Task Manager and Command Bus Architecture](./TE-0002-task-manager-and-command-bus-architecture.md)
