@@ -32,6 +32,7 @@ export interface CspOrderLeg {
   symbol: string;
   quantity: number;
   action: 'Sell to Open';
+  [key: string]: unknown;
 }
 
 export type BuildCspOrderLegResult = { ok: true; leg: CspOrderLeg } | { ok: false; reason: string };

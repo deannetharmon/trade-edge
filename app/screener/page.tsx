@@ -114,6 +114,8 @@ import {
 import { createReadRateLimiter, withRetry } from '@/lib/screener/rateLimitedFetch';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
+import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
+import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
@@ -2669,6 +2671,233 @@ async function getAccountNumber(): Promise<string> {
   return requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 }
 
+// CSP-ORDERS-0001 -- single-leg CSP order placement, a dedicated modal per
+// Quinn's call (matching the existing PMCC precedent of its own
+// PmccTradeModal, rather than a 12th branch in the already-dense generic
+// TradeModal, whose max-loss formula and leg-builder assume a multi-leg
+// spread and would be wrong for a CSP). Diane's mock (2026-09-22): reuses
+// TradeModal's confirm -> dry run -> placing -> done/error flow, quantity
+// stepper, entry-limit field and GTC%/stop-multiple controls unchanged;
+// differs only in the strike line (reused from the CSP result card), "Cash
+// Required" as the headline risk figure instead of "Max Loss", the card's
+// own assignment-warning sentence carried verbatim, and a freshly re-fetched
+// collateral figure shown immediately before the Place button.
+function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void }) {
+  const c = result.bestCandidate!;
+  const [quantity, setQuantity] = useState(1);
+  const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
+  const [dryRunResult, setDryRunResult] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [orderId, setOrderId] = useState<string>('');
+  const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number } | null>(null);
+  const [validationNow, setValidationNow] = useState(Date.now());
+  const [freshCapital, setFreshCapital] = useState<{ label: string; ok: boolean } | null>(null);
+
+  const [entryLimit, setEntryLimit] = useState(parseFloat((c.credit ?? 0).toFixed(2)));
+  const [gtcPct, setGtcPct] = useState(50); // Ian, 2026-09-22: same defaults as spreads -- no CSP-specific default needed.
+  const [stopMultiple, setStopMultiple] = useState(2);
+
+  useEffect(() => {
+    if (!quoteValidation) return;
+    const timer = window.setInterval(() => setValidationNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [quoteValidation]);
+  const validationFresh = quoteValidation != null && validationNow - quoteValidation.at <= 15_000;
+
+  const exitCredit = entryLimit;
+  const gtcBuyback = parseFloat((exitCredit * (1 - gtcPct / 100)).toFixed(2));
+  const stopTrigger = parseFloat((exitCredit * stopMultiple).toFixed(2));
+  const stopLimit = parseFloat((stopTrigger * 1.10).toFixed(2));
+
+  const legBuild = buildCspOrderLeg(c.shortOccSymbol, quantity, result.underlyingType === 'index');
+  const maxLoss = computeCspMaxLoss(c.shortStrike, entryLimit, quantity);
+  const requiredCash = c.shortStrike * 100 * quantity;
+
+  const buildOtocoPayload = () => {
+    if (!legBuild.ok) throw new Error(legBuild.reason);
+    return buildCreditEntryOtoco({ entryCredit: entryLimit, profitBuyback: gtcBuyback, stopTrigger, stopLimit, quantity, legs: [legBuild.leg] });
+  };
+
+  const refreshExecutionQuote = async (expectedCredit?: number) => {
+    if (derivePmccMarketSession(new Date()) !== 'open') {
+      throw new Error('Market is closed. Live executable quotes cannot be validated. Refresh during regular market hours before placing this order.');
+    }
+    if (!legBuild.ok) throw new Error(legBuild.reason);
+    const token = await getAccessToken();
+    const quotes = await getExecutableOptionQuotes([legBuild.leg.symbol], token);
+    const quote = quotes[0];
+    if (quote?.bid == null || quote.ask == null || quote.bid <= 0 || quote.ask < quote.bid || quote.ageSeconds == null || quote.ageSeconds > 15) {
+      throw new Error('Live quote is unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
+    }
+    const executableCredit = Number(quote.bid.toFixed(2));
+    if (expectedCredit != null && Math.abs(executableCredit - expectedCredit) >= 0.01) {
+      throw new Error(`Market moved from the last validation ($${expectedCredit.toFixed(2)} to $${executableCredit.toFixed(2)} executable credit). Refresh and validate again.`);
+    }
+    setQuoteValidation({ at: Date.now(), executableCredit });
+    return executableCredit;
+  };
+
+  // Diane's mock: a freshly re-fetched collateral figure shown right before
+  // Place, distinct from -- and never trusted from -- whatever the screen
+  // showed when this modal opened.
+  const refreshCapital = async (): Promise<boolean> => {
+    const token = await getAccessToken();
+    const capital = await getCspCapitalContext(token);
+    const guard = guardCspOrder(capital, { strike: c.shortStrike, creditPerContract: entryLimit, quantity });
+    setFreshCapital({ label: guard.allowed ? `$${guard.requiredCash.toLocaleString()} available and reserved` : guard.reason, ok: guard.allowed });
+    return guard.allowed;
+  };
+
+  const runDryRun = async () => {
+    setPhase('dryrun'); setError('');
+    try {
+      await refreshExecutionQuote();
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = buildOtocoPayload();
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      setDryRunResult(data?.data);
+      setPhase('confirm');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const placeOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
+      // Submit-time collateral re-check (Quinn/Ian, 2026-09-22): re-resolved
+      // fresh here, never trusted from freshCapital's earlier display state.
+      const capitalOk = await refreshCapital();
+      if (!capitalOk) throw new Error('Collateral is no longer sufficient for this order. Refresh and try a smaller quantity.');
+      await refreshExecutionQuote(quoteValidation.executableCredit);
+      const token = await getAccessToken();
+      const accountNumber = await getAccountNumber();
+      const payload = buildOtocoPayload();
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
+      setPhase('done');
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
+  const bpEffect = dryRunResult?.['buying-power-effect'];
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE CSP ORDER — {result.symbol}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        {!legBuild.ok && (
+          <div className="p-3 bg-yellow-500/10 border border-yellow-600 rounded-lg mb-4">
+            <p className="text-xs text-yellow-400">{legBuild.reason}</p>
+          </div>
+        )}
+
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
+          {/* Diane: one strike line, reusing the CSP result card's own format. */}
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Put</span>
+            <span className={th.text}>{c.shortStrike}P exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-xs items-center">
+            <span className={th.textFaint}>Entry limit / contract</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>−</button>
+              <span className="text-emerald-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
+              <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
+            </div>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Order type</span>
+            <span className={th.text}>Net Credit Limit · GTC</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Quantity</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className={`w-6 h-6 rounded border ${th.border} ${th.textMuted} text-xs`}>−</button>
+              <span className={`${th.text} font-bold text-xs w-6 text-center`}>{quantity}</span>
+              <button onClick={() => setQuantity(q => Math.min(20, q + 1))} className={`w-6 h-6 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
+            </div>
+          </div>
+          {/* Diane: "Cash Required," not "Max Loss" -- a CSP's real commitment is the full cash-secured collateral. */}
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Cash Required</span>
+            <span className={th.text}>${requiredCash.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className={th.textFaint}>Max Loss if assigned</span>
+            <span className="text-amber-300">${maxLoss.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-[10px] pt-1">
+            <span className={th.textFaint}>Execution evidence</span>
+            <span className={validationFresh ? 'text-emerald-400' : 'text-amber-300'}>
+              {validationFresh ? `Validated just now · $${quoteValidation!.executableCredit.toFixed(2)} executable credit` : 'Quotes from scan · refresh required before order'}
+            </span>
+          </div>
+        </div>
+
+        {/* Diane: the card's own assignment-warning sentence, carried verbatim. */}
+        <p className="text-[10px] text-amber-300 mb-4">
+          Cash-secured — assignment would mean buying 100 shares/contract at ${c.shortStrike}. Only enter if owning the stock at this price is acceptable.
+        </p>
+
+        <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
+          <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>GTC Profit Target</p>
+          <input type="range" min={10} max={90} step={5} value={gtcPct} onChange={e => setGtcPct(Number(e.target.value))} className="w-full" />
+          <div className="flex justify-between text-[10px]"><span className={th.textFaint}>{gtcPct}% of credit</span><span className={th.text}>Buyback ${gtcBuyback.toFixed(2)}</span></div>
+          <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider pt-2`}>Stop Loss</p>
+          <input type="range" min={1.5} max={4} step={0.5} value={stopMultiple} onChange={e => setStopMultiple(Number(e.target.value))} className="w-full" />
+          <div className="flex justify-between text-[10px]"><span className={th.textFaint}>{stopMultiple}× credit</span><span className={th.text}>Trigger ${stopTrigger.toFixed(2)} · Limit ${stopLimit.toFixed(2)}</span></div>
+        </div>
+
+        {phase === 'confirm' && dryRunResult && bpEffect && (
+          <div className={`${th.card} border ${th.border} rounded-xl p-3 mb-4 text-[10px] space-y-1`}>
+            <p className={`font-bold ${th.textMuted} uppercase tracking-wider`}>Dry Run Result</p>
+            <div className="flex justify-between"><span className={th.textFaint}>Buying power effect</span><span className={th.text}>{bpEffect['change-in-buying-power']} {bpEffect['change-in-buying-power-effect']}</span></div>
+          </div>
+        )}
+
+        {freshCapital && (
+          <p className={`text-[10px] mb-2 ${freshCapital.ok ? 'text-emerald-400' : 'text-red-400'}`}>{freshCapital.label}</p>
+        )}
+        {error && <p role="alert" className="text-xs text-red-400 mb-3">{error}</p>}
+        {phase === 'done' && (
+          <p className="text-xs text-emerald-400 mb-3" role="status">Order submitted. Broker order id: {orderId}</p>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-xs font-bold tracking-widest">
+            {phase === 'done' ? 'CLOSE' : 'CANCEL'}
+          </button>
+          {phase !== 'done' && (
+            <button
+              disabled={!legBuild.ok || phase === 'placing' || phase === 'dryrun'}
+              onClick={() => (dryRunResult ? placeOrder() : runDryRun())}
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest disabled:opacity-50"
+            >
+              {phase === 'placing' ? 'PLACING...' : phase === 'dryrun' ? 'VALIDATING...' : dryRunResult ? 'PLACE + GTC' : 'DRY RUN'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
   const instrType = result.underlyingType === 'index' ? 'Index Option' : 'Equity Option';
   const legs: any[] = [];
@@ -4897,6 +5126,9 @@ type ResultCardProps = {
   screenMode?: 'filter' | 'rank' | 'targeted' | 'leaps';
   rankConfig?: RankConfig;
   onTrade?: (result: ScreenResult) => void;
+  // CSP-ORDERS-0001 -- deliberately separate from onTrade: a CSP opens
+  // CspTradeModal (single-leg), never the multi-leg TradeModal.
+  onTradeCsp?: (result: ScreenResult) => void;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
   pmccBestFit?: {
@@ -5490,7 +5722,7 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
   </div>;
 }
 
-function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, cachedEntry, existingPositions }: ResultCardProps) {
+function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, cachedEntry, existingPositions }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
   const [showChart, setShowChart] = useState(false);
@@ -6272,6 +6504,24 @@ const strategyScores = useMemo(() => {
                 ⚡ TRADE THIS
               </button>
             )}
+            {/* CSP-ORDERS-0001 -- live order placement, via the dedicated
+                CspTradeModal (see its own comment for why it is not folded
+                into the generic multi-leg TradeModal). */}
+            {c && c.strategy === 'CSP' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (result.checks.oi.status === 'warn') {
+                    const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
+                    if (!proceed) return;
+                  }
+                  onTradeCsp?.(result);
+                }}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
+              >
+                ⚡ TRADE THIS
+              </button>
+            )}
             {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
               <button
                 onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
@@ -6280,13 +6530,14 @@ const strategyScores = useMemo(() => {
                 🔍 FIND BETTER (Similar DTE)
               </button>
             )}
+            {/* CSP-ORDERS-0001 shipped Trade placement (above); "Find Better" for
+                CSP is separate, still-unbuilt scope from the same ticket --
+                BestOpportunityFinder's logic is spread-specific (runs
+                BPS/BCS/IC checklists at different risk presets) and must not
+                be reused as-is for a single-leg CSP. */}
             {c && c.strategy === 'CSP' && (
-              // TE-0007A scope: no live order placement, and BestOpportunityFinder's
-              // "Find Better" is spread-specific (runs BPS/BCS/IC checklists at
-              // different risk presets) — not reused here to avoid misapplying
-              // spread logic to a single-leg CSP. Deferred to a follow-up ticket.
               <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
-                Manual entry only — CSP trade placement and "Find Better" are not yet wired up
+                "Find Better" for CSP is not yet wired up
               </p>
             )}
             {c && c.strategy === 'CC' && (
@@ -8696,6 +8947,7 @@ export default function Home() {
     filter: defaultCspRequest('filter'), rank: defaultCspRequest('rank'), targeted: defaultCspRequest('targeted'),
   });
   const [tradeResult, setTradeResult] = useState<ScreenResult | null>(null);
+  const [cspTradeResult, setCspTradeResult] = useState<ScreenResult | null>(null); // CSP-ORDERS-0001
   const [loadPrompt, setLoadPrompt] = useState<LoadPromptState>({ show: false, name: '', type: 'strategy' });
   const [runtimeStockRules, setRuntimeStockRules] = useState<RulesType>(getSavedRules);
   const [runtimeEtfRules, setRuntimeEtfRules] = useState<RulesType>(getSavedEtfRules);
@@ -11834,7 +12086,7 @@ export default function Home() {
                       className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
                     >
                       {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
-                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
+                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                     </div>
@@ -12056,7 +12308,7 @@ export default function Home() {
                               rules={r.isEtf ? runtimeEtfRules : runtimeStockRules}
                               screenMode={screenMode}
                               rankConfig={rankConfig}
-                              onTrade={setTradeResult}
+                              onTrade={setTradeResult} onTradeCsp={setCspTradeResult}
                               cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)}
                               existingPositions={existingPositions}
                             />
@@ -12410,7 +12662,7 @@ export default function Home() {
                             {trendAgainst && <span className="text-[8px] text-amber-400" title="Against trend">⚠</span>}
                           </div>
                           <div className="flex-1">
-                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
                             {(rankOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
                               <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
                                 ⚠ {w}
@@ -12674,6 +12926,7 @@ export default function Home() {
         />
       )}
       {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {cspTradeResult && cspTradeResult.bestCandidate && <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
