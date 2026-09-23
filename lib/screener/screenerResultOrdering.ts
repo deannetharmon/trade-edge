@@ -323,6 +323,58 @@ export function sortItems<T>(items: T[], spec: SortSpec, getMetrics: (item: T) =
   return withMetrics.map((x) => x.item);
 }
 
+// ── Spread sort metrics (SCREENER-SORT-0001) ────────────────────────────────
+//
+// One shared builder for the sortable metrics of a spread candidate, used by
+// Ranked and by Targeted so the two modes can never drift on what "Credit %",
+// "Relevant-leg OI", and the rest mean. The caller supplies the values that
+// differ by mode and by result shape (score, POP, OTM %), because Ranked
+// derives them from a ScreenResult and Targeted from a TargetedScanEntry.
+// Everything derivable from the candidate itself is derived here.
+//
+// PMCC-only fields (widthMinusDebitPct, breakevenPct, annualizedRoiPct) are
+// null: PMCC only ever runs in Filter mode, so neither Ranked nor Targeted
+// receives a PMCC result.
+export interface SpreadSortCandidate extends SpreadCandidateOiShape {
+  credit?: number | null;
+  creditRatio?: number | null;
+  roc?: number | null;
+  dte?: number | null;
+}
+
+export interface SpreadSortInput {
+  score: number | null;
+  pop: number | null;
+  otmPct: number | null;
+  strategy: OiStrategy | null;
+  candidate: SpreadSortCandidate | null | undefined;
+}
+
+// The sort fields a spread candidate can actually populate. The three PMCC-only
+// fields are always null for spreads, so offering them as sort buttons would be
+// controls that do nothing. Targeted uses this list; a test pins it to the
+// builder so the two cannot drift.
+export const SPREAD_SORT_FIELDS: readonly SortField[] = SORT_FIELDS.filter(
+  (f) => f !== 'widthMinusDebitPct' && f !== 'breakevenPct' && f !== 'annualizedRoiPct',
+);
+
+export function buildSpreadSortMetrics(input: SpreadSortInput): SortableMetrics {
+  const c = input.candidate;
+  return {
+    score: input.score ?? null,
+    pop: input.pop ?? null,
+    creditDollars: c?.credit ?? null,
+    creditPct: c?.creditRatio != null ? c.creditRatio * 100 : null,
+    rocPct: c?.roc ?? null,
+    otmPct: input.otmPct ?? null,
+    relevantLegOI: input.strategy && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(input.strategy, c)) : null,
+    dte: c?.dte ?? null,
+    widthMinusDebitPct: null,
+    breakevenPct: null,
+    annualizedRoiPct: null,
+  };
+}
+
 // ── Combined filter + sort pipeline ─────────────────────────────────────────
 //
 // One canonical entry point for "apply the minimum-OI floor, then apply the

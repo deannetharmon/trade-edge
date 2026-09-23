@@ -104,7 +104,7 @@ import {
 // lib/screener/screenerResultOrdering.ts for the full pure implementation
 // and docs/tickets/SCREENER-OI-0001-oi-and-sort.md for the ticket.
 import {
-  computeRelevantLegOI, evaluateOiEligibility, extractOiLegsFromSpreadCandidate,
+  buildSpreadSortMetrics, SPREAD_SORT_FIELDS, computeRelevantLegOI, evaluateOiEligibility, extractOiLegsFromSpreadCandidate,
   sortItems, setPrimarySortField, setSecondarySortField, OI_PRESETS, MIN_OI_LABEL,
   MIN_OI_HELPER_TEXT, SORT_FIELDS, SORT_FIELD_LABELS,
   CREDIT_RATIO_PRESETS, MIN_CREDIT_RATIO_LABEL, MIN_CREDIT_RATIO_HELPER_TEXT,
@@ -8162,6 +8162,53 @@ function toOiStrategy(strategy: string): 'CSP' | 'CC' | 'BPS' | 'BCS' | 'IC' | '
   return null;
 }
 
+// SCREENER-SORT-0001 -- the two-level sort row ("Sort <primary buttons> then
+// <secondary select>"), extracted unchanged from OiAndSortControls so Targeted
+// can render the same sort without the minimum-OI floor. OiAndSortControls
+// renders this component, so Ranked, Filtered, CC, PMCC, and CSP are unchanged.
+function SortRow({
+  th, sort, setSort, accent, sortFields = SORT_FIELDS, sortLabels,
+}: {
+  th: typeof THEMES[Theme];
+  sort: SortSpec;
+  setSort: (s: SortSpec) => void;
+  accent: 'purple' | 'teal' | 'amber';
+  sortFields?: readonly SortField[];
+  sortLabels?: Partial<Record<SortField, string>>;
+}) {
+  const activeCls = accent === 'purple' ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+    : accent === 'teal' ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+    : 'border-amber-500 text-amber-300 bg-amber-500/15';
+  const hoverCls = accent === 'purple' ? 'hover:border-purple-500/50'
+    : accent === 'teal' ? 'hover:border-teal-500/50'
+    : 'hover:border-amber-500/50';
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
+      {sortFields.map(f => (
+        <button key={f} onClick={() => setSort(setPrimarySortField(sort, f))}
+          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+            sort.primary === f ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
+          }`}>
+            {sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}
+        </button>
+      ))}
+      <span className={`text-[9px] ${th.textFaint} shrink-0 ml-1`}>then</span>
+      <select
+        aria-label="Secondary sort field"
+        value={sort.secondary}
+        onChange={e => setSort(setSecondarySortField(sort, e.target.value as SecondarySortField))}
+        className={`text-[9px] ${th.input} border ${th.inputBorder} rounded px-1.5 py-0.5 ${th.text} focus:outline-none`}
+      >
+        <option value="none">None</option>
+        {sortFields.filter(f => f !== sort.primary).map(f => (
+          <option key={f} value={f}>{sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // SCREENER-OI-0001 — one shared, reusable "Minimum relevant-leg OI" +
 // two-level sort control block, used identically by Filtered, Ranked, and
 // Targeted results panels so the OI/sort UI (and its dedup rule) lives in
@@ -8254,51 +8301,37 @@ function OiAndSortControls({
           />
         </div>
       )}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className={`text-[9px] ${th.textFaint} shrink-0`}>Sort</span>
-        {sortFields.map(f => (
-          <button key={f} onClick={() => setSort(setPrimarySortField(sort, f))}
-            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-              sort.primary === f ? activeCls : `${th.border} ${th.textFaint} ${hoverCls}`
-            }`}>
-              {sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}
-          </button>
-        ))}
-        <span className={`text-[9px] ${th.textFaint} shrink-0 ml-1`}>then</span>
-        <select
-          aria-label="Secondary sort field"
-          value={sort.secondary}
-          onChange={e => setSort(setSecondarySortField(sort, e.target.value as SecondarySortField))}
-          className={`text-[9px] ${th.input} border ${th.inputBorder} rounded px-1.5 py-0.5 ${th.text} focus:outline-none`}
-        >
-          <option value="none">None</option>
-          {sortFields.filter(f => f !== sort.primary).map(f => (
-            <option key={f} value={f}>{sortLabels?.[f] ?? SORT_FIELD_LABELS[f]}</option>
-          ))}
-        </select>
-      </div>
+      <SortRow th={th} sort={sort} setSort={setSort} accent={accent} sortFields={sortFields} sortLabels={sortLabels} />
     </div>
   );
 }
 
 // ── Targeted Scan Results Panel ────────────────────────────────────────────
-// SCREENER-OI-0001 corrective pass: Targeted mode explicitly does NOT get
-// the new canonical minimum-OI floor or two-level sort UI -- product
-// direction is that Targeted keeps its own established, strategy-specific
-// eligibility and ordering behavior unchanged. This local type/sort logic
-// is deliberately the same shape it was before SCREENER-OI-0001 (single
-// sort field, no OI floor) -- NOT a reimplementation of the canonical
-// module. The canonical module remains available in lib/screener/
-// screenerResultOrdering.ts for Targeted or a future scanner to adopt
-// later, but nothing in this panel calls it.
-type TargetedSortField = 'score' | 'pop' | 'credit' | 'creditRatio' | 'roc' | 'otm';
+// SCREENER-OI-0001 corrective pass: Targeted mode does NOT get the canonical
+// minimum-OI floor -- it keeps its own established, strategy-specific
+// eligibility and Leg OI control. SCREENER-SORT-0001 (2026-09-23) gives it the
+// canonical two-level sort (SortRow + sortItems), because Filter mode, where the
+// two-level sort was reachable for Spreads, was removed. Nothing in this panel
+// references the Ranked/Filtered OI floor state.
+// SCREENER-SORT-0001 -- sortable metrics for a Targeted entry, built through the
+// same shared builder Ranked uses. Score and POP are the entry-level values the
+// previous single-field sort used; OTM % is the entry's own calculation.
+function getTargetedSortMetrics(e: TargetedScanEntry): SortableMetrics {
+  return buildSpreadSortMetrics({
+    score: e.score,
+    pop: e.pop,
+    otmPct: calcTargetedEntryOtmPct(e),
+    strategy: toOiStrategy(e.strategy),
+    candidate: e.candidate,
+  });
+}
 
 function TargetedScanResultsPanel({
-  entries, sortBy, setSortBy, popMin, scanMinimumCreditRatio, th, rankConfig, rules, etfRules, existingPositions, onTrade,
+  entries, sort, setSort, popMin, scanMinimumCreditRatio, th, rankConfig, rules, etfRules, existingPositions, onTrade,
 }: {
   entries: TargetedScanEntry[];
-  sortBy: TargetedSortField;
-  setSortBy: (v: TargetedSortField) => void;
+  sort: SortSpec;
+  setSort: (s: SortSpec) => void;
   popMin: number;
   scanMinimumCreditRatio: number;
   th: typeof THEMES[Theme];
@@ -8338,7 +8371,7 @@ function TargetedScanResultsPanel({
   const [activeWidth, setActiveWidth]           = useState<number | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
-  const [activeSort, setActiveSort]             = useState(sortBy);
+  const [activeSort, setActiveSort]             = useState<SortSpec>(sort);
   // Track scan identity so we reset filters only on genuinely new scan
   const scanIdRef = useRef(0);
   const lastLenRef = useRef(0);
@@ -8359,7 +8392,7 @@ function TargetedScanResultsPanel({
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
-    setActiveSort(sortBy);
+    setActiveSort(sort);
     setResetKey(k => k + 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanIdRef.current, scanCreditRatioFloorPct]);
@@ -8371,7 +8404,7 @@ function TargetedScanResultsPanel({
     setHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
   const toggleStrategy = (s: string) =>
     setActiveStrategies(prev => prev.includes(s) ? (prev.length === 1 ? prev : prev.filter(x => x !== s)) : [...prev, s]);
-  const changeSort = (k: typeof activeSort) => { setActiveSort(k); setSortBy(k); };
+  const changeSort = (next: SortSpec) => { setActiveSort(next); setSort(next); };
 
   // ── Inline filter + sort — runs every render, no caching ───────────────
   const allSymbols = Array.from(new Set(entries.map(e => e.symbol))).sort();
@@ -8415,15 +8448,10 @@ function TargetedScanResultsPanel({
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
   if (activeTrendOnly) pool = pool.filter(e => e.strategy === e.primaryStrategy);
-  // 5. sort — unchanged single-field sort, pre-dating SCREENER-OI-0001.
-  pool.sort((a, b) => {
-  if (activeSort === 'pop')         return b.pop - a.pop;
-  if (activeSort === 'credit')      return (b.candidate.credit ?? 0) - (a.candidate.credit ?? 0);
-  if (activeSort === 'creditRatio') return (b.candidate.creditRatio ?? 0) - (a.candidate.creditRatio ?? 0);
-  if (activeSort === 'roc')         return b.candidate.roc - a.candidate.roc;
-  if (activeSort === 'otm')         return (calcTargetedEntryOtmPct(b) ?? -999) - (calcTargetedEntryOtmPct(a) ?? -999);
-  return b.score - a.score;
-});
+  // 5. sort -- SCREENER-SORT-0001: the canonical two-level sort (primary, then
+  // secondary), the same sortItems Ranked uses. Score-then-None reproduces the
+  // previous single-field Score order exactly (descending, stable).
+  pool = sortItems(pool, activeSort, getTargetedSortMetrics);
 
   const totalVisible  = pool.length;
   const display       = pool.slice(0, showTopN);
@@ -8435,15 +8463,6 @@ function TargetedScanResultsPanel({
     { label: '30–45 · Target Zone', min: 30, max: 45  },
     { label: '46–60 · Extended',    min: 46, max: 60  },
     { label: '> 60 · Far Out',      min: 61, max: 999 },
-  ];
-
-  const sortLabels: { key: typeof activeSort; label: string }[] = [
-    { key: 'score',       label: 'Score'    },
-    { key: 'pop',         label: 'POP %'    },
-    { key: 'credit',      label: 'Credit $' },
-    { key: 'creditRatio', label: 'Credit %' },
-    { key: 'roc',         label: 'ROC %'    },
-    { key: 'otm',         label: 'OTM %'    },
   ];
 
   return (
@@ -8465,19 +8484,7 @@ function TargetedScanResultsPanel({
           <p className="text-[9px] text-teal-400 tracking-widest font-medium shrink-0">
             {display.length} of {totalVisible} SHOWN
           </p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-[9px] ${th.textFaint}`}>Sort</span>
-            {sortLabels.map(sl => (
-              <button key={sl.key} onClick={() => changeSort(sl.key)}
-                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                  activeSort === sl.key
-                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
-                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
-                }`}>
-                {sl.label}
-              </button>
-            ))}
-          </div>
+          <SortRow th={th} sort={activeSort} setSort={changeSort} accent="teal" sortFields={SPREAD_SORT_FIELDS} sortLabels={{ pop: 'POP %' }} />
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint}`}>Show</span>
             {[25, 50, 100, 999].map(n => (
@@ -9216,7 +9223,7 @@ export default function Home() {
   // pre-existing, established single-field sort and does NOT get the new
   // canonical minimum-OI floor or secondary sort -- see the note above
   // TargetedScanResultsPanel.
-  const [targetedSortBy, setTargetedSortBy] = useState<TargetedSortField>('score');
+  const [targetedSort, setTargetedSort] = useState<SortSpec>({ primary: 'score', secondary: 'none' });
   // Targeted CSP-only display ordering. It is intentionally separate from
   // canonical score/ranking and never changes the scan request or filters.
   const [cspTargetedReturnSort, setCspTargetedReturnSort] = useState<'desc' | 'asc' | null>(null);
@@ -12070,8 +12077,8 @@ export default function Home() {
                 <>
                   <TargetedScanResultsPanel
                     entries={targetedResults}
-                    sortBy={targetedSortBy}
-                    setSortBy={setTargetedSortBy}
+                    sort={targetedSort}
+                    setSort={setTargetedSort}
                     popMin={targetedPopMin}
                     // Older cached cards predate the immutable launch field;
                     // treat their unknown floor as Any rather than borrowing
@@ -12484,28 +12491,18 @@ export default function Home() {
                   if (!strat || !r.bestCandidate) return null;
                   return evaluateOiEligibility(extractOiLegsFromSpreadCandidate(strat, r.bestCandidate), rankMinOi);
                 };
+                // SCREENER-SORT-0001: metrics come from the shared builder Targeted
+                // also uses. PMCC only ever runs in Filter mode, so Rank mode never
+                // receives a PMCC result and the PMCC-only fields stay null.
                 const getRankedMetrics = (r: ScreenResult): SortableMetrics => {
-                  const c = r.bestCandidate;
                   const strat = toOiStrategy(r.strategy);
-                  return {
+                  return buildSpreadSortMetrics({
                     score: (strat ? scoreCandidate(r, rankConfig)?.score : null) ?? null,
-                    pop: c?.pop ?? null,
-                    creditDollars: c?.credit ?? null,
-                    creditPct: c?.creditRatio != null ? c.creditRatio * 100 : null,
-                    rocPct: c?.roc ?? null,
+                    pop: r.bestCandidate?.pop ?? null,
                     otmPct: calcRankedOtmPct(r),
-                    relevantLegOI: strat && c ? computeRelevantLegOI(extractOiLegsFromSpreadCandidate(strat, c)) : null,
-                    dte: c?.dte ?? null,
-                    // TE-0007F — PMCC only ever runs in Filter mode
-                    // (confirmed: SCREENER-RESULTS-0001's 'pmcc' session
-                    // is filter-mode-only), so Rank mode structurally
-                    // never receives a PMCC result here. null, not
-                    // duplicated PMCC-specific logic this path can't
-                    // reach.
-                    widthMinusDebitPct: null,
-                    breakevenPct: null,
-                    annualizedRoiPct: null,
-                  };
+                    strategy: strat,
+                    candidate: r.bestCandidate,
+                  });
                 };
 
                 let filtered = results.filter(r => {

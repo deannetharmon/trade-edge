@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by Dean 2026-09-23 (request).** Ian confirms the sort-field list before build. Independent of `SCREENER-CONFIG-0001A`; recommended to build first (both touch `app/screener/page.tsx`).
+**Approved by Dean 2026-09-23 (request). Built 2026-09-23 (Dane); see [the implementation report](../implementation/SCREENER-SORT-0001-implementation-report.md).** Ian confirms the sort-field list before build. Independent of `SCREENER-CONFIG-0001A`; recommended to build first (both touch `app/screener/page.tsx`).
 
 ## Problem
 
@@ -14,7 +14,7 @@ Not a deletion. `SCREENER-OI-0001` (2026-08-06) deliberately kept Targeted out o
 
 ## Required behavior
 
-1. Spreads Targeted results offer the same primary and secondary sort as Ranked: same fields, same secondary "then" dropdown, same default (Score, then None).
+1. Spreads Targeted results offer the same primary and secondary sort as Ranked, limited to the fields a spread candidate can populate: Score, POP, Credit $, Credit %, ROC %, OTM %, Relevant-leg OI, and DTE. The three PMCC-only fields (Width minus debit %, Breakeven distance %, Annualized ROI %) are always empty for spreads, so Targeted does not offer them. Same secondary "then" dropdown, same default (Score, then None).
 2. Ordering comes from the canonical `sortItems` and `SortSpec` in `lib/screener/screenerResultOrdering.ts`. No new local comparator.
 3. Build the sort metrics for Targeted entries through one shared metrics builder that Ranked also uses, so the two modes cannot drift. A field with no value for an entry sorts last, as it does in Ranked.
 4. Targeted keeps its own eligibility and Leg OI control unchanged. Only the sort is added. The OI floor state (`rankMinOi`, `filteredMinOi`) must not reach Targeted.

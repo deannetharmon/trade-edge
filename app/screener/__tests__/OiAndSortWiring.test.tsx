@@ -214,6 +214,25 @@ describe('SCREENER-OI-0001: single canonical implementation, Ranked + Filtered o
     expect(panelBody).not.toMatch(/\bsecondarySort\b/);
   });
 
+  it('SCREENER-SORT-0001: Targeted renders the shared SortRow with the spread sort fields and the canonical sortItems, not a local comparator', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../page.tsx'), 'utf8');
+    // One SortRow definition, used by OiAndSortControls and by the Targeted panel.
+    expect(src.match(/function SortRow\(/g) ?? []).toHaveLength(1);
+    expect(src.match(/<SortRow\b/g) ?? []).toHaveLength(2);
+
+    const fnStart = src.indexOf('function TargetedScanResultsPanel(');
+    expect(fnStart).toBeGreaterThan(-1);
+    const panelBody = src.slice(fnStart, fnStart + 12000);
+    expect(panelBody).toMatch(/<SortRow\b/);
+    expect(panelBody).toMatch(/sortFields=\{SPREAD_SORT_FIELDS\}/);
+    expect(panelBody).toMatch(/sortItems\(pool, activeSort, getTargetedSortMetrics\)/);
+    // The previous hard-coded single-field comparator is gone.
+    expect(panelBody).not.toMatch(/pool\.sort\(/);
+    expect(panelBody).not.toMatch(/activeSort === 'creditRatio'/);
+    // Targeted and Ranked build their sort metrics through the same shared builder.
+    expect((src.match(/buildSpreadSortMetrics\(/g) ?? []).length).toBe(2);
+  });
+
   it('the canonical filter/sort functions are imported from lib/screener/screenerResultOrdering, not reimplemented locally', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../page.tsx'), 'utf8');
     expect(src).toMatch(/from '@\/lib\/screener\/screenerResultOrdering'/);
@@ -222,8 +241,8 @@ describe('SCREENER-OI-0001: single canonical implementation, Ranked + Filtered o
   });
 });
 
-describe('SCREENER-OI-0001: Targeted mode does not expose the OI/sort controls', () => {
-  it('the OI/sort control label never appears while Targeted mode is active, even with real Targeted results present', async () => {
+describe('SCREENER-OI-0001: Targeted mode does not expose the minimum-OI floor control', () => {
+  it('the OI control label never appears while Targeted mode is active, even with real Targeted results present', async () => {
     // The RunModeModal's mode picker and Targeted's own established DTE/
     // POP/OTM/sort controls remain -- just not MIN_OI_LABEL or a secondary
     // sort selector.
