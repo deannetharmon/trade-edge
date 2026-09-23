@@ -48,4 +48,18 @@ describe('findBestTargetedICWithCreditRatioFloor', () => {
     ];
     expect(findBestTargetedICWithCreditRatioFloor(chain, expiration, 100, 0)).toEqual(findBestICUnfiltered(chain, expiration, 100));
   });
+
+  it('can search five-wide IC wings even when the high-priced underlying normally steps by $25', () => {
+    const chain = [
+      leg('P', 2495, 1.5, 1.5, -0.20), leg('P', 2490, 0.5, 0.5, -0.10),
+      leg('C', 2505, 1.5, 1.5, 0.20), leg('C', 2510, 0.5, 0.5, 0.10),
+    ].map(item => ({ ...item, iv: 0.20 }));
+    const direct = findBestICUnfiltered(chain, expiration, 2500, 5);
+    const withFloor = findBestTargetedICWithCreditRatioFloor(chain, expiration, 2500, 0.20, 5);
+    expect(direct?.spreadWidth).toBe(5);
+    expect(direct?.callWidth).toBe(5);
+    expect(withFloor?.spreadWidth).toBe(5);
+    expect(withFloor?.callWidth).toBe(5);
+    expect(findBestICUnfiltered(chain, expiration, 2500)).toBeNull();
+  });
 });

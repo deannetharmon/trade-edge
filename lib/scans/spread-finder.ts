@@ -154,17 +154,16 @@ export function findBestIC(chain: any[], expDate: string, price: number | null, 
 }
 
 
-export function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null): SpreadCandidate | null {
+export function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', expDate: string, price: number | null, exactWidth?: number): SpreadCandidate | null {
   const legs = chain.filter(o =>
     o.expirationDate === expDate &&
     o.optionType === (strategy === 'BPS' ? 'P' : 'C')
   );
 
   const candidates: SpreadCandidate[] = [];
-  const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
   const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
 
-  for (let width = stepSize; width <= maxWidth; width += stepSize) {
+  for (const width of exactWidth == null ? getWidthSteps(maxWidth, price) : [exactWidth]) {
     for (const shortLeg of legs) {
       const delta = shortLeg.delta;
       if (delta == null) continue;
@@ -232,11 +231,11 @@ export function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', 
 }
 
 
-export function findBestICUnfiltered(chain: any[], expDate: string, price: number | null): SpreadCandidate | null {
+export function findBestICUnfiltered(chain: any[], expDate: string, price: number | null, exactWidth?: number): SpreadCandidate | null {
   const puts = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'P');
   const calls = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === 'C');
-  const putSpread = findBestSpreadUnfiltered([...puts.map((o: any) => ({ ...o, optionType: 'P' })), ...puts.map((o: any) => ({ ...o, optionType: 'P' }))], 'BPS', expDate, price);
-  const callSpread = findBestSpreadUnfiltered([...calls.map((o: any) => ({ ...o, optionType: 'C' })), ...calls.map((o: any) => ({ ...o, optionType: 'C' }))], 'BCS', expDate, price);
+  const putSpread = findBestSpreadUnfiltered([...puts.map((o: any) => ({ ...o, optionType: 'P' })), ...puts.map((o: any) => ({ ...o, optionType: 'P' }))], 'BPS', expDate, price, exactWidth);
+  const callSpread = findBestSpreadUnfiltered([...calls.map((o: any) => ({ ...o, optionType: 'C' })), ...calls.map((o: any) => ({ ...o, optionType: 'C' }))], 'BCS', expDate, price, exactWidth);
   if (!putSpread || !callSpread) return null;
   const totalCredit = parseFloat((putSpread.credit + callSpread.credit).toFixed(2));
   let capital;
@@ -253,11 +252,11 @@ export function findBestICUnfiltered(chain: any[], expDate: string, price: numbe
 // The public `creditRatio` on an IC is historically put-side only, so the
 // floor must be applied independently while each wing is selected.
 export function findBestTargetedICWithCreditRatioFloor(
-  chain: any[], expDate: string, price: number | null, minimumCreditRatio: number,
+  chain: any[], expDate: string, price: number | null, minimumCreditRatio: number, exactWidth?: number,
 ): SpreadCandidate | null {
   // Zero is the compatibility path: Targeted scans without the new filter
   // retain their established candidate selection exactly.
-  if (!(minimumCreditRatio > 0)) return findBestICUnfiltered(chain, expDate, price);
+  if (!(minimumCreditRatio > 0)) return findBestICUnfiltered(chain, expDate, price, exactWidth);
 
   type Wing = {
     shortStrike: number; longStrike: number; shortDelta: number; credit: number;
@@ -266,7 +265,6 @@ export function findBestTargetedICWithCreditRatioFloor(
   };
   const buildWings = (side: 'put' | 'call'): Wing[] => {
     const legs = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === (side === 'put' ? 'P' : 'C'));
-    const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
     const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
     const candidates: Wing[] = [];
     for (const shortLeg of legs) {
@@ -274,7 +272,7 @@ export function findBestTargetedICWithCreditRatioFloor(
       if (!Number.isFinite(delta)) continue;
       const shortDelta = Math.abs(delta);
       if (shortDelta < 0.05 || shortDelta > 0.60) continue;
-      for (let width = stepSize; width <= maxWidth; width += stepSize) {
+      for (const width of exactWidth == null ? getWidthSteps(maxWidth, price) : [exactWidth]) {
         const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
         const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
         if (!longLeg) continue;

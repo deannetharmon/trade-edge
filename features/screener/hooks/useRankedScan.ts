@@ -221,7 +221,7 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
   }, [rankedScanTask, screenMode]);
 
   const startRankedScan = useCallback(async (
-    sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string
+    sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, scanWidth: 5 | null = null
   ) => {
     const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
     if (!activeSymbols.length) {
@@ -258,7 +258,7 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
 
     const res = await dispatch<RankedScanInput, StartRankedScanResult>({
       type: 'START_RANKED_SCAN',
-      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig },
+      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, scanWidth },
     });
 
     if (res.handled && res.result?.taskId) {
