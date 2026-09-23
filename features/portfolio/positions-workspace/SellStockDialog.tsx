@@ -84,6 +84,8 @@ export function SellStockDialog({ row, deps, onClose }: { row: StockHoldingRow; 
 
         {phase === 'loading' && <p className="text-xs text-white/60" role="status">Checking current share availability…</p>}
 
+        {phase === 'error' && report?.status !== 'ok' && <p role="alert" className="mb-4 text-xs text-red-400">{error}</p>}
+
         {report && report.status === 'unavailable' && (
           <p role="alert" className="mb-4 rounded-lg border border-amber-600 bg-amber-500/10 p-3 text-xs text-amber-300">
             Share commitment could not be verified. Selling is blocked until it can be.

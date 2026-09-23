@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Position } from '@/lib/portfolio-data/types';
+import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 
 const acquisition = vi.hoisted(() => ({
   loadPositions: vi.fn(),
@@ -11,10 +12,11 @@ const acquisition = vi.hoisted(() => ({
   scorePortfolioRemainingOpportunity: vi.fn(() => ({ remainingOpportunityPct: null })),
 }));
 const snapshotAcquisition = vi.hoisted(() => ({ acquirePortfolioSnapshot: vi.fn() }));
+const snapshotFlag = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock('@/lib/portfolio-data/acquisition', () => acquisition);
 vi.mock('@/lib/portfolio-snapshot/acquire', () => ({
-  LCC_0001A_SNAPSHOT_ENABLED: false,
+  get LCC_0001A_SNAPSHOT_ENABLED() { return snapshotFlag.enabled; },
   acquirePortfolioSnapshot: snapshotAcquisition.acquirePortfolioSnapshot,
 }));
 vi.mock('@/lib/portfolio-intelligence/dashboardComposition', () => ({
@@ -62,6 +64,7 @@ function deferred<T>() {
 describe('PortfolioDataProvider refresh contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    snapshotFlag.enabled = false;
     acquisition.fetchSnapshotStore.mockResolvedValue({});
     acquisition.attachSnapshotHistory.mockImplementation((positions: Position[]) => positions);
     render(<PortfolioDataProvider><Harness /></PortfolioDataProvider>);
@@ -89,9 +92,26 @@ describe('PortfolioDataProvider refresh contract', () => {
     });
 
     expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, [], {});
-    expect(result).toEqual({ status: 'success', positions: [recomputed] });
+    expect(result).toEqual({ status: 'success', positions: [recomputed], snapshot: null });
     expect(screen.getByTestId('keys')).toHaveTextContent('MU');
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
+  it('returns the acquired snapshot with recomputed options before context needs to rerender', async () => {
+    snapshotFlag.enabled = true;
+    const raw = position('MU', 'verify-pricing');
+    const recomputed = position('MU', 'watch');
+    const snapshot = {
+      accountNumber: 'A1', options: [raw], dataQuality: { status: 'ok', warnings: [] },
+    } as unknown as PortfolioSnapshot;
+    snapshotAcquisition.acquirePortfolioSnapshot.mockResolvedValue({ snapshot, pendingOrders: [] });
+    acquisition.attachSnapshotHistory.mockReturnValue([recomputed]);
+
+    let result!: PortfolioRefreshResult;
+    await act(async () => { result = await context.refresh(); });
+
+    expect(result).toEqual({ status: 'success', positions: [recomputed], snapshot: { ...snapshot, options: [recomputed] } });
+    expect(context.snapshot?.options).toEqual([recomputed]);
   });
 
   it('is latest-wins and never lets an older response replace newer evidence', async () => {
@@ -165,7 +185,7 @@ describe('PortfolioDataProvider refresh contract', () => {
     await act(async () => { result = await context.refresh(); });
 
     expect(acquisition.attachSnapshotHistory).toHaveBeenCalledWith([raw], {}, [], {});
-    expect(result).toEqual({ status: 'success', positions: [recomputed] });
+    expect(result).toEqual({ status: 'success', positions: [recomputed], snapshot: null });
     expect(screen.getByTestId('loading')).toHaveTextContent('false');
   });
 
