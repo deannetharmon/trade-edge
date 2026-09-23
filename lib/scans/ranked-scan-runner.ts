@@ -12,6 +12,7 @@ import type { RankConfig, ScreenResult, TrendResult, RawScanEntry } from './type
 import { getAccessToken, getMarketMetrics, classifyUnderlying, getChain, getQuote } from './tastytrade-client';
 import { getTrend } from './trend';
 import { exploreAllCandidatesForRank, scoreCandidate } from './rank-scoring';
+import { retainFiveWideCandidates } from './retainFiveWideCandidates';
 
 export interface RankedScanInput {
   activeSymbols: string[];
@@ -20,6 +21,7 @@ export interface RankedScanInput {
   sLabel?: string;
   eLabel?: string;
   rankConfig: RankConfig;
+  scanWidth?: 5 | null;
   accessToken?: string;
 }
 
@@ -57,7 +59,7 @@ export async function runRankedScan(
   onProgress?: RankedScanProgressCallback,
   signal?: AbortSignal
 ): Promise<RankedScanResult> {
-  const { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig } = input;
+  const { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, scanWidth = null } = input;
 
   if (!activeSymbols.length) {
     throw new Error('No active tickers in watchlist. Check the box next to a ticker to include it in the scan.');
@@ -128,7 +130,9 @@ export async function runRankedScan(
       throwIfCancelled(signal);
 
       scanCache.push({ symbol, strategy: trendResult?.strategy === 'NO_TRADE' ? 'BPS' : (trendResult?.strategy ?? 'BPS'), metrics, chainData, price, trendResult, rules: sRules, etfRules: eRules });
-      screenResults.push(...exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel));
+      const find = (width?: number) => exploreAllCandidatesForRank(symbol, metrics, chainData, price, sRules, trendResult, isEtfTicker, eRules, sLabel, eLabel, width);
+      const candidates = scanWidth === 5 ? find(5) : retainFiveWideCandidates(find(), find(5));
+      screenResults.push(...candidates);
       throwIfCancelled(signal);
     } catch (e: any) {
       if (signal?.aborted || e instanceof RankedScanCancelledError) throw new RankedScanCancelledError();

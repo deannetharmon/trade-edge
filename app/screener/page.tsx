@@ -6721,7 +6721,7 @@ const FILTER_PRESETS = [
   { key: 'intermediate',label: 'Intermediate', color: 'border-amber-500 text-amber-400',    desc: '15–29 DTE — active management' },
 ];
 
-function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedIvrMin, lastTargetedCreditRatioMin, lastTargetedCreditRatioOverride, lastTargetedPreset, onRun, onClose }: {
+function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedDteMin, lastTargetedDteMax, lastTargetedPopMin, lastTargetedOtmMin, lastTargetedIvrMin, lastTargetedCreditRatioMin, lastTargetedCreditRatioOverride, lastTargetedPreset, lastScanWidth, onRun, onClose }: {
   th: typeof THEMES[Theme];
   lastMode: 'filter' | 'rank' | 'targeted';
   lastPreset: string;
@@ -6734,7 +6734,8 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   lastTargetedCreditRatioMin: number;
   lastTargetedCreditRatioOverride: boolean;
   lastTargetedPreset: string;
-  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; creditRatioMin: number; creditRatioOverride: boolean; preset: string }) => void;
+  lastScanWidth: 5 | null;
+  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; creditRatioMin: number; creditRatioOverride: boolean; preset: string }, scanWidth?: 5 | null) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode === 'filter' ? 'rank' : lastMode);
@@ -6747,6 +6748,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tCreditRatioMin, setTCreditRatioMin] = useState(lastTargetedCreditRatioMin);
   const [tCreditRatioOverride, setTCreditRatioOverride] = useState(lastTargetedCreditRatioOverride);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
+  const [scanWidth, setScanWidth] = useState<5 | null>(lastScanWidth);
 
   return (
     <ScanModalShell
@@ -6769,6 +6771,15 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
             targeted: 'Deep scan by DTE + POP',
           }}
         />
+
+        <label className={`flex flex-col gap-1 text-xs ${th.textMuted}`}>
+          Scan spread widths
+          <select aria-label="Scan spread widths" value={scanWidth ?? 'all'} onChange={e => setScanWidth(e.target.value === '5' ? 5 : null)} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
+            <option value="all">Optimize across widths and retain $5 candidates</option>
+            <option value="5">$5 only (both iron condor wings)</option>
+          </select>
+          <span className={`text-[10px] ${th.textFaint}`}>Changing this requires a new scan. Results can be narrowed to $5 afterward.</span>
+        </label>
 
         {/* Preset selection — filter mode */}
         {mode === 'filter' && (
@@ -6976,9 +6987,9 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
 
         <button onClick={() => {
           if (mode === 'targeted') {
-            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, creditRatioMin: tCreditRatioMin, creditRatioOverride: tCreditRatioOverride, preset: tPreset });
+            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, creditRatioMin: tCreditRatioMin, creditRatioOverride: tCreditRatioOverride, preset: tPreset }, scanWidth);
           } else {
-            onRun(mode, mode === 'filter' ? preset : undefined);
+            onRun(mode, mode === 'filter' ? preset : undefined, undefined, scanWidth);
           }
         }}
           className="w-full ac-btn-solid text-white py-2.5 rounded-xl text-xs font-bold tracking-widest transition-colors shadow-lg border ac-border/30">
@@ -7544,7 +7555,7 @@ function getTargetedSymbolConcurrency(): number {
 async function runTargetedScan(
   symbols: string[],
   dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number, minimumCreditRatio: number,
-  scanPreset: string, creditRatioOverride: boolean,
+  scanPreset: string, creditRatioOverride: boolean, scanWidth: 5 | null,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
@@ -7632,6 +7643,12 @@ async function runTargetedScan(
     const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
 
     const entries: TargetedScanEntry[] = [];
+    const candidateKeys = new Set<string>();
+    const addEntry = (entry: TargetedScanEntry) => {
+      const c = entry.candidate;
+      const key = `${entry.symbol}:${entry.strategy}:${entry.expiration}:${c.shortStrike}:${c.longStrike}:${c.shortCallStrike ?? ''}:${c.longCallStrike ?? ''}`;
+      if (!candidateKeys.has(key)) { candidateKeys.add(key); entries.push(entry); }
+    };
     type TargetedFetch = {
       isEtf: boolean; appliedRules: RulesType; price: number | null;
       chainData: Awaited<ReturnType<typeof getChain>>; trendResult?: TrendResult;
@@ -7749,9 +7766,10 @@ async function runTargetedScan(
 
               // For IC use the single unfiltered best — ICs are composite
               if (strat === 'IC') {
+                for (const requestedWidth of scanWidth === 5 ? [5] : [null, 5]) {
                 const candidate = minimumCreditRatio > 0
-                  ? findBestTargetedICWithCreditRatioFloor(chainItems, exp, price, minimumCreditRatio)
-                  : findBestICUnfiltered(chainItems, exp, price);
+                  ? findBestTargetedICWithCreditRatioFloor(chainItems, exp, price, minimumCreditRatio, requestedWidth ?? undefined)
+                  : findBestICUnfiltered(chainItems, exp, price, requestedWidth ?? undefined);
                 if (!candidate || (candidate.pop ?? 0) < popMin) continue;
                 if (candidate.dte < dteMin || candidate.dte > dteMax) continue;
                 // OTM floor — IC gates on the tighter (worse) side of put/call,
@@ -7770,12 +7788,13 @@ async function runTargetedScan(
                 };
                 const scored = scoreCandidate(displayResult, rankConfig);
                 const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult, rules: appliedRules, etfRules };
-                entries.push({
+                addEntry({
                   symbol, primaryStrategy: trendStrategy, expiration: exp, dte, strategy: strat,
                   candidate, screenResult: displayResult, pop: candidate.pop ?? 0,
                   score: scored?.score ?? 0, ivr: metrics.ivRank ?? null, price, isEtf, trendResult, cachedEntry,
                   allStrategies: [], scanMinimumCreditRatio: minimumCreditRatio, scanPreset, creditRatioOverride,
                 });
+                }
                 continue;
               }
 
@@ -7805,9 +7824,10 @@ async function runTargetedScan(
                 }
 
                 // Find best long leg for this short strike (best credit ratio within maxWidth)
+                for (const requestedWidth of scanWidth === 5 ? [5] : [null, 5]) {
                 let bestCandidate: SpreadCandidate | null = null;
                 let bestCreditRatio = -1;
-                for (let width = stepSize; width <= maxWidth; width += stepSize) {
+                for (const width of requestedWidth == null ? Array.from({ length: Math.floor(maxWidth / stepSize) }, (_, i) => (i + 1) * stepSize) : [requestedWidth]) {
                   const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
                   const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
                   if (!longLeg) continue;
@@ -7918,13 +7938,14 @@ async function runTargetedScan(
                 const scored = scoreCandidate(displayResult, rankConfig);
                 const cachedEntry: RawScanEntry = { symbol, strategy: strat, metrics, chainData, price, trendResult, rules: appliedRules, etfRules };
 
-                entries.push({
+                addEntry({
                   symbol, primaryStrategy: trendStrategy, expiration: exp, dte, strategy: strat,
                   candidate: bestCandidate, screenResult: displayResult,
                   pop: bestCandidate.pop ?? 0, score: scored?.score ?? 0,
                   ivr: metrics.ivRank ?? null, price, isEtf, trendResult, cachedEntry,
                   allStrategies: [], scanMinimumCreditRatio: minimumCreditRatio, scanPreset, creditRatioOverride,
                 });
+                }
               }
             } catch {}
           }
@@ -8307,6 +8328,7 @@ function TargetedScanResultsPanel({
   // scan has run, same shape extractOiLegsFromSpreadCandidate already
   // reads for every other panel.
   const [activeOiMin, setActiveOiMin]           = useState<number>(0);
+  const [activeWidth, setActiveWidth]           = useState<5 | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
   const [activeSort, setActiveSort]             = useState(sortBy);
@@ -8326,6 +8348,7 @@ function TargetedScanResultsPanel({
     setActiveCreditRatioMin(scanCreditRatioFloorPct);
     setActiveIvrMin(0);
     setActiveOiMin(0);
+    setActiveWidth(null);
     setHiddenSymbols([]);
     setActiveStrategies(['BPS', 'BCS', 'IC']);
     setActiveTrendOnly(false);
@@ -8380,6 +8403,7 @@ function TargetedScanResultsPanel({
   if (activeOiMin > 0) pool = pool.filter(e =>
     evaluateOiEligibility(extractOiLegsFromSpreadCandidate(e.strategy, e.candidate), activeOiMin).eligible,
   );
+  if (activeWidth === 5) pool = pool.filter(e => e.candidate.spreadWidth === 5 && (e.strategy !== 'IC' || e.candidate.callWidth === 5));
   // 3. strategy filter
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
@@ -8396,7 +8420,7 @@ function TargetedScanResultsPanel({
 
   const totalVisible  = pool.length;
   const display       = pool.slice(0, showTopN);
-  const globalRankMap = new Map(display.map((e, i) => [`${e.symbol}-${e.strategy}-${e.expiration}-${e.candidate.shortStrike}`, i + 1]));
+  const globalRankMap = new Map(display.map((e, i) => [`${e.symbol}-${e.strategy}-${e.expiration}-${e.candidate.shortStrike}-${e.candidate.longStrike}-${e.candidate.shortCallStrike ?? ''}-${e.candidate.longCallStrike ?? ''}`, i + 1]));
 
   const dteBuckets = [
     { label: '< 21 · Closing Zone', min: 0,  max: 20  },
@@ -8426,6 +8450,7 @@ function TargetedScanResultsPanel({
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
         <div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
           {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300">Scan minimum credit/risk: {scanCreditRatioFloorPct}%</span>}
+          <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Targeted spread width" value={activeWidth ?? 'all'} onChange={e => setActiveWidth(e.target.value === '5' ? 5 : null)} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option><option value="5">$5 only</option></select></label>
         </div>
 
         {/* Row 1: count + sort + show top */}
@@ -8633,12 +8658,12 @@ function TargetedScanResultsPanel({
               </div>
               <div className="space-y-2">
                 {bucketEntries.map(entry => {
-                  const rk = globalRankMap.get(`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}`) ?? 0;
+                  const rk = globalRankMap.get(`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}-${entry.candidate.longStrike}-${entry.candidate.shortCallStrike ?? ''}-${entry.candidate.longCallStrike ?? ''}`) ?? 0;
                   const ar = entry.isEtf ? etfRules : rules;
                   const aligned = entry.strategy === entry.primaryStrategy;
                   const against = entry.trendResult?.strategy !== 'NO_TRADE' && !aligned && entry.strategy !== 'IC';
                   return (
-                    <div key={`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}`} className="flex items-start gap-2">
+                    <div key={`${entry.symbol}-${entry.strategy}-${entry.expiration}-${entry.candidate.shortStrike}-${entry.candidate.longStrike}-${entry.candidate.shortCallStrike ?? ''}-${entry.candidate.longCallStrike ?? ''}`} className="flex items-start gap-2">
                       <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
                         <span className={`text-[9px] ${th.textFaint} w-5 text-right`}>{rk}</span>
                         <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${dteBadgeColor(entry.dte)}`}>{entry.dte}d</span>
@@ -9139,6 +9164,8 @@ export default function Home() {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET_ETF); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'ETF Custom'; } catch { return 'ETF Custom'; }
   });
   const [rankTopN, setRankTopN] = useState<number>(20);
+  const [scanWidth, setScanWidth] = useState<5 | null>(null);
+  const [rankDisplayWidth, setRankDisplayWidth] = useState<5 | null>(null);
   const [rankDteMin, setRankDteMin] = useState<number>(0);
   const [rankDteMax, setRankDteMax] = useState<number>(999);
   // Post-scan, client-side filters — consistent with Targeted mode's POP/strategy
@@ -12020,7 +12047,10 @@ export default function Home() {
                   onJumpToCard={jumpToQualifiedCard}
                 />
               )}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && (
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth === 5 && (
+                <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The $5 results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>
+              )}
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth !== 5 && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(results.filter(r => r.qualified), opportunityRecommendations)}
                   borderClassName={th.border}
@@ -12473,6 +12503,7 @@ export default function Home() {
 
                 let filtered = results.filter(r => {
                   if (rankHiddenSymbols.includes(r.symbol)) return false;
+                  if (rankDisplayWidth === 5 && (!r.bestCandidate || r.bestCandidate.spreadWidth !== 5 || (r.strategy === 'IC' && r.bestCandidate.callWidth !== 5))) return false;
                   const dte = r.bestCandidate?.dte ?? 0;
                   if (dte < rankDteMin || dte > rankDteMax) return false;
                   if (!rankStrategies.includes(r.strategy)) return false;
@@ -12545,6 +12576,7 @@ export default function Home() {
                   {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
                   <div className="mb-3">
                     <OiAndSortControls th={th} minOi={rankMinOi} setMinOi={setRankMinOi} sort={rankSort} setSort={setRankSort} accent="purple" />
+                    <label className={`ml-2 text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Ranked spread width" value={rankDisplayWidth ?? 'all'} onChange={e => setRankDisplayWidth(e.target.value === '5' ? 5 : null)} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option><option value="5">$5 only</option></select></label>
                   </div>
 
                   {/* Filter row 2 — POP / OTM / Credit Ratio / Strategy, same pattern as Targeted */}
@@ -12652,7 +12684,7 @@ export default function Home() {
                       const trendAligned = r.trendResult?.strategy === r.strategy;
                       const trendAgainst = r.trendResult != null && r.trendResult.strategy !== 'NO_TRADE' && !trendAligned && r.strategy !== 'IC' && (r.strategy === 'BPS' || r.strategy === 'BCS');
                       return (
-                        <div key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}-${r.bestCandidate?.shortStrike}`} className="flex items-start gap-2">
+                        <div key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}-${r.bestCandidate?.shortStrike}-${r.bestCandidate?.longStrike}-${r.bestCandidate?.shortCallStrike ?? ''}-${r.bestCandidate?.longCallStrike ?? ''}`} className="flex items-start gap-2">
                           <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
                             <span className={`text-[9px] ${th.textFaint} w-5 text-right`}>{i + 1}</span>
                             <span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${dteBadgeColor(r.bestCandidate?.dte ?? 0)}`}>
@@ -12949,10 +12981,13 @@ export default function Home() {
           lastTargetedCreditRatioMin={targetedCreditRatioMin}
           lastTargetedCreditRatioOverride={targetedCreditRatioOverride}
           lastTargetedPreset={targetedPreset}
+          lastScanWidth={scanWidth}
           onClose={() => setShowRunModal(false)}
-          onRun={(mode, preset, targetedOpts) => {
+          onRun={(mode, preset, targetedOpts, selectedWidth = null) => {
             setShowRunModal(false);
             setScreenMode(mode);
+            setScanWidth(selectedWidth);
+            setRankDisplayWidth(null);
             try { localStorage.setItem(LS_SCREEN_MODE, mode); } catch {}
             if (mode === 'targeted' && targetedOpts) {
               setTargetedDteMin(targetedOpts.dteMin);
@@ -12970,12 +13005,12 @@ export default function Home() {
               const tEtfRules: RulesType = foundPreset ? { ...DEFAULT_ETF_RULES, ...foundPreset.rules } : runtimeEtfRules;
               const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
               clearResultsCache();
-              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, targetedOpts.creditRatioMin / 100, targetedOpts.preset, targetedOpts.creditRatioOverride, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode, targetedSnapshot) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode, targetedSnapshot }), commitScanSession, isScanCurrent, excludeHeldPositions);
+              runTargetedScan(activeSymbols, targetedOpts.dteMin, targetedOpts.dteMax, targetedOpts.popMin, targetedOpts.otmMin, targetedOpts.ivrMin, targetedOpts.creditRatioMin / 100, targetedOpts.preset, targetedOpts.creditRatioOverride, selectedWidth, tRules, tEtfRules, rankConfig, setLoading, setStatus, setError, setTargetedResults, setTargetedResultsCachedAt, targetedCancelRef, (scope, scopeExclusionReasonCode, targetedSnapshot) => beginScanSession({ mode: 'targeted', requestedStrategy: 'spreads', scope, scopeExclusionReasonCode, targetedSnapshot }), commitScanSession, isScanCurrent, excludeHeldPositions);
             } else if (mode === 'rank') {
               // Ranked refresh intentionally retains the last valid shortlist
               // while its replacement is running. startRankedScan replaces it
               // only once the new task completes successfully.
-              startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel);
+              startRankedScan(runtimeStockRules, runtimeEtfRules, stockPresetLabel, etfPresetLabel, selectedWidth);
             } else {
               const found = FILTER_PRESETS.find(p => p.key === preset);
               if (found) {
@@ -13070,7 +13105,7 @@ export default function Home() {
           }}
         />
       )}
-      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
+      {showRulesModal && <RulesModal stockRules={runtimeStockRules} etfRules={runtimeEtfRules} rankConfig={rankConfig} onClose={() => setShowRulesModal(false)} onRun={(sRules, eRules, sLabel, eLabel, rCfg) => { setShowRulesModal(false); setRuntimeStockRules(sRules); setRuntimeEtfRules(eRules); setStockPresetLabel(sLabel); setEtfPresetLabel(eLabel); setRankConfig(rCfg); if (rawScanCache.length > 0) { applyRules(sRules, eRules, sLabel, eLabel); } else if (screenMode === 'rank') { startRankedScan(sRules, eRules, sLabel, eLabel, scanWidth); } else { runScreen(sRules, eRules, sLabel, eLabel); } }} th={th} />}
     </div>
   );
 }

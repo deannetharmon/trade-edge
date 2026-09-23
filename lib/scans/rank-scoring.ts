@@ -404,6 +404,7 @@ export function exploreAllCandidatesForRank(
   etfRules: RulesType,
   stockPresetLabel?: string,
   etfPresetLabel?: string,
+  exactWidth?: number,
 ): ScreenResult[] {
   const results: ScreenResult[] = [];
   const validExps = chainData.expirations.filter(exp => daysUntil(exp) >= RANK_SCAN_DTE_MIN && daysUntil(exp) <= RANK_SCAN_DTE_MAX);
@@ -417,7 +418,7 @@ export function exploreAllCandidatesForRank(
     for (const strat of (['BPS', 'BCS', 'IC'] as const)) {
       try {
         if (strat === 'IC') {
-          const candidate = findBestICUnfiltered(chainItems, exp, price);
+          const candidate = findBestICUnfiltered(chainItems, exp, price, exactWidth);
           if (!candidate) continue;
           const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
           // TARGETED-IC-OTM-FILTER-0001: always our specific strike from
@@ -465,7 +466,7 @@ export function exploreAllCandidatesForRank(
 
           let bestCandidate: SpreadCandidate | null = null;
           let bestCreditRatio = -1;
-          for (let width = stepSize; width <= maxWidth; width += stepSize) {
+          for (const width of exactWidth == null ? Array.from({ length: Math.floor(maxWidth / stepSize) }, (_, i) => (i + 1) * stepSize) : [exactWidth]) {
             const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
             const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
             if (!longLeg) continue;

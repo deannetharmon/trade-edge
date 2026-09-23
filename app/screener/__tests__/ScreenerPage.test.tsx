@@ -1448,6 +1448,17 @@ async function clickRunRankedScanButton(): Promise<void> {
 }
 
 describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round 3, Finding 2/3)', () => {
+  it('passes the selected $5 scan width through the real launcher to the ranked task', async () => {
+    seedWatchlist();
+    renderRankedScanScreenerPage();
+    (runRankedScan as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ results: [], rawScanCache: [] });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'FIND SPREADS' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'FIND SPREADS' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Scan spread widths' }), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: /RUN SCREENER/i }));
+    await waitFor(() => expect(runRankedScan).toHaveBeenCalled());
+    expect((runRankedScan as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0].scanWidth).toBe(5);
+  });
   it('first scan in progress: a real Ranked Scan task queued/running shows the real loading signal, and Ranked Opportunities does not render yet', async () => {
     const manager = renderRankedScanScreenerPage();
     (globalThis.fetch as any).mockImplementation((url: string) => {

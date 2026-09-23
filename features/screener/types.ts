@@ -53,6 +53,7 @@ export interface UseRankedScanResult {
     sRules: RulesType,
     eRules: RulesType,
     sLabel?: string,
-    eLabel?: string
+    eLabel?: string,
+    scanWidth?: 5 | null
   ) => Promise<void>;
 }
