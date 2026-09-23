@@ -8,7 +8,10 @@
 // negative-signed there, and are shown as they are.
 
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
-import type { SymbolGroupViewModel } from './types';
+import type { CoveredCallCapacity } from '@/lib/portfolio-snapshot/capacity';
+import { computeMaxSellableShares } from '@/lib/portfolio/stockOrderSafety';
+import type { SellableSharesResult } from '@/lib/portfolio/stockOrderSafety';
+import type { CapacityViewModel, SymbolGroupViewModel } from './types';
 
 export const SHARES_PER_CONTRACT = 100;
 
@@ -35,6 +38,38 @@ export interface StockHoldingRow {
   covered: CoveredCallCell;
   quoteAsOf: string | null;
   stale: boolean;
+  /** STOCKS-ORDERS-0001 -- shares free to sell right now without leaving a covered call uncovered. Never for a Short holding (there is nothing to Sell to Close). */
+  sellable: SellableShares;
+}
+
+export type SellableShares = SellableSharesResult;
+
+// STOCKS-ORDERS-CLEANUP-0001 (small, done alongside STOCKS-ORDERS-0001, not
+// deferred): the codebase had three independent "shares/contracts free right
+// now" computations -- this workspace's own CapacityViewModel/coveredCell,
+// lib/scans/covered-call-capacity.ts (CSP scanner, separate domain, left
+// untouched), and lib/portfolio-snapshot/capacity.ts's CoveredCallCapacity
+// (the one computeMaxSellableShares/the order-safety gate is built and
+// tested against). Adding a FOURTH here to display the same number the
+// dialog's safety gate uses would be exactly the drift risk just flagged --
+// so this bridges CapacityViewModel into the canonical CoveredCallCapacity
+// shape and reuses the one real implementation instead.
+function toCoveredCallCapacity(cap: CapacityViewModel): CoveredCallCapacity {
+  return {
+    sharesOwned: cap.sharesOwned, costBasis: null, costBasisComplete: cap.basisComplete,
+    grossCoveredContracts: Math.floor(cap.sharesOwned / SHARES_PER_CONTRACT),
+    existingShortCallContracts: cap.allocatedContracts, workingShortCallContracts: cap.reservedContracts,
+    availableCoveredContracts: cap.availableContracts, oversubscribed: cap.unallocatedShares < 0,
+    hasUnclassifiedExposure: false,
+  };
+}
+
+function sellableShares(holding: EquityHolding, group: Pick<SymbolGroupViewModel, 'capacity'>): SellableShares {
+  if (holding.direction === 'Short') return { maxSellableShares: 0, sharesOwned: 0, sharesCommitted: 0, blockedByDataQuality: false, reason: null };
+  if (group.capacity.status === 'unavailable') {
+    return { maxSellableShares: 0, sharesOwned: group.capacity.sharesOwned, sharesCommitted: 0, blockedByDataQuality: true, reason: group.capacity.blockingReason };
+  }
+  return computeMaxSellableShares(toCoveredCallCapacity(group.capacity));
 }
 
 /** `equity:META:long` -- option positions are never keyed this way. */
@@ -75,6 +110,7 @@ export function buildStockHoldingRows(groups: Array<Pick<SymbolGroupViewModel, '
         avgCost: costBasis != null ? holding.basis : null, costBasis, basisComplete: costBasis != null,
         pnl: costBasis != null ? pnl : null, pnlPct: costBasis != null && pnl != null ? (pnl / costBasis) * 100 : null,
         covered: coveredCell(holding, group), quoteAsOf: holding.quoteAsOf, stale: holding.staleQuote,
+        sellable: sellableShares(holding, group),
       });
     }
   }

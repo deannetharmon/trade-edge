@@ -11,6 +11,7 @@ import { signedMoney } from '@/lib/leaps-position-intelligence/incomeCard';
 import { derivePmccMarketSession } from '@/lib/scans/pmccProduction';
 import { buildStockHoldingRows, buildStockTotals, isPriceAlertCrossed, stockPricesAsOf, type CoveredTone, type StockHoldingRow } from './model/stockHoldings';
 import type { SymbolGroupViewModel } from './model/types';
+import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
@@ -18,7 +19,7 @@ export const STOCK_NOTE_MAX_LENGTH = 150;
 type SavedAlert = { targetPrice: number; direction: 'above' | 'below' };
 type Theme = { border: string; textFaint: string };
 
-const COLUMNS = 'grid-cols-[minmax(110px,1.1fr)_minmax(90px,0.8fr)_minmax(90px,0.9fr)_minmax(100px,0.95fr)_minmax(110px,1fr)_minmax(120px,1.15fr)_minmax(170px,1.6fr)_minmax(170px,1.8fr)_minmax(140px,1.4fr)]';
+const COLUMNS = 'grid-cols-[minmax(110px,1.1fr)_minmax(90px,0.8fr)_minmax(90px,0.9fr)_minmax(100px,0.95fr)_minmax(110px,1fr)_minmax(120px,1.15fr)_minmax(170px,1.6fr)_minmax(170px,1.8fr)_minmax(140px,1.4fr)_minmax(70px,0.6fr)]';
 const PILL: Record<CoveredTone, string> = {
   good: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   neutral: 'border-neutral-500/40 bg-neutral-500/10 text-neutral-300',
@@ -92,8 +93,8 @@ function StockAlertEditor({ id, symbol, price, savedAlert, onSave }: { id: strin
 type SaveNote = (accountNumber: string, key: string, note: string) => Promise<void>;
 type SaveAlert = (accountNumber: string, key: string, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 
-function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
-  row: StockHoldingRow; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert;
+function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
+  row: StockHoldingRow; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
 }) {
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
@@ -117,11 +118,26 @@ function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert }: {
       </div>
       <div className="p-3"><StockNoteEditor label={`Note for ${row.symbol} stock holding`} savedNote={savedNote} onSave={note => onSaveNote(row.accountNumber, row.key, note)} /></div>
       <div className="p-3"><StockAlertEditor id={row.key} symbol={row.symbol} price={row.price} savedAlert={savedAlert} onSave={(target, direction) => onSaveAlert(row.accountNumber, row.key, target, direction)} /></div>
+      <div className="p-3">
+        {row.direction === 'Long' ? (
+          row.sellable.maxSellableShares > 0 ? (
+            <button type="button" data-testid={`sell-button-${row.key}`} onClick={() => onSell(row)}
+              className="inline-flex min-h-8 items-center rounded border border-red-500/50 px-2 text-[10px] text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400">
+              Sell
+            </button>
+          ) : (
+            <span data-testid={`sell-button-${row.key}`} className={`inline-flex min-h-8 items-center rounded border border-white/10 px-2 text-[10px] ${th.textFaint}`} aria-disabled="true"
+              title={row.sellable.blockedByDataQuality ? 'Share commitment could not be verified. Selling is blocked until it can be.' : `All ${row.shares} shares are committed to an open call.`}>
+              Sell
+            </span>
+          )
+        ) : <span className={`text-[10px] ${th.textFaint}`}>—</span>}
+      </div>
     </div>
   );
 }
 
-export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert }: {
+export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
   groups: Array<Pick<SymbolGroupViewModel, 'symbol' | 'equities' | 'capacity'>>;
   quoteAsOf: string | null;
   th: Theme;
@@ -131,8 +147,11 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
   onSaveNote: SaveNote;
   alerts: Record<string, SavedAlert>;
   onSaveAlert: SaveAlert;
+  /** STOCKS-ORDERS-0001. Omit to leave the Sell action disabled everywhere (e.g. a read-only view). */
+  sellDeps?: SellStockDialogDeps;
 }) {
   const rows = buildStockHoldingRows(groups);
+  const [sellRow, setSellRow] = useState<StockHoldingRow | null>(null);
   if (rows.length === 0) return null;
   const totals = buildStockTotals(rows);
   const nowMs = Date.now();
@@ -152,12 +171,13 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
       <div className={`max-w-full overflow-x-auto rounded-xl border ${th.border}`} tabIndex={0} aria-label="Stock holdings, horizontally scrollable">
         <div role="table" className="min-w-[1180px] text-[11px]">
           <div role="row" className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
-            {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
+            {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert', 'Sell'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th}
               savedNote={notes[storageKey(row.accountNumber, row.key)] ?? ''} onSaveNote={onSaveNote}
-              savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert} />
+              savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
+              onSell={sellDeps ? setSellRow : () => {}} />
           ))}
           <div role="row" className={`grid ${COLUMNS} items-center border-t ${th.border} bg-white/5`} data-testid="stock-totals">
             <div className={`p-3 text-[11px] font-semibold tracking-wider ${th.textFaint}`}>STOCKS TOTAL{!totals.complete && <span className="block text-[10px] font-normal text-amber-300">partial</span>}</div>
@@ -177,8 +197,9 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
         {asOf && asOf.staleCount > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{asOf.staleCount} price{asOf.staleCount === 1 ? ' is' : 's are'} marked stale by the broker feed.</li>}
         {incomplete.length > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{incomplete.map(r => r.symbol).join(', ')} {incomplete.length === 1 ? 'has' : 'have'} no complete cost basis (several lots), so cost and P/L are not shown.</li>}
         {noneReach100 && <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-200">{longRows.length === 1 ? 'This holding does not reach' : 'No holding reaches'} 100 shares, so covered calls are not available on {longRows.length === 1 ? 'it' : 'them'}.</li>}
-        <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-300">No suggested action for stocks here: the recommendation engine covers options only. Placing stock orders from this screen is not available yet.</li>
+        <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-300">No suggested action for stocks here: the recommendation engine covers options only.</li>
       </ul>
+      {sellRow && sellDeps && <SellStockDialog row={sellRow} deps={sellDeps} onClose={() => setSellRow(null)} />}
     </section>
   );
 }
