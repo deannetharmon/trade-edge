@@ -7,6 +7,7 @@
 
 import type { RulesType } from '@/lib/scans/constants';
 import type { RankConfig, ScreenResult, RawScanEntry } from '@/lib/scans/types';
+import type { SpreadWidthRange } from '@/lib/scans/spreadWidthSelection';
 // SCREENER-RESULTS-0001 — canonical scan-session lifecycle entry points.
 // This is a lib import (features -> lib), not a page.tsx-local type, so it
 // doesn't violate ADR-0004's "app -> features -> lib" direction.
@@ -54,6 +55,6 @@ export interface UseRankedScanResult {
     eRules: RulesType,
     sLabel?: string,
     eLabel?: string,
-    scanWidth?: 5 | null
+    scanWidthRange?: SpreadWidthRange
   ) => Promise<void>;
 }

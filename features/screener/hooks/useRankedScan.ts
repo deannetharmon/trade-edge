@@ -16,6 +16,7 @@ import {
   updateScreenerJob,
 } from '@/lib/screener/screenerJobStore';
 import type { RulesType } from '@/lib/scans/constants';
+import { DEFAULT_SPREAD_WIDTH_RANGE, type SpreadWidthRange } from '@/lib/scans/spreadWidthSelection';
 import type { RankedScanInput, RankedScanResult } from '@/lib/scans/ranked-scan-runner';
 import type { StartRankedScanResult } from '@/lib/commands/command-handlers';
 import type { UseRankedScanParams, UseRankedScanResult } from '../types';
@@ -221,7 +222,7 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
   }, [rankedScanTask, screenMode]);
 
   const startRankedScan = useCallback(async (
-    sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, scanWidth: 5 | null = null
+    sRules: RulesType, eRules: RulesType, sLabel?: string, eLabel?: string, scanWidthRange: SpreadWidthRange = DEFAULT_SPREAD_WIDTH_RANGE
   ) => {
     const activeSymbols = tickers.filter(t => t.active).map(t => t.symbol);
     if (!activeSymbols.length) {
@@ -258,7 +259,7 @@ export function useRankedScan(params: UseRankedScanParams): UseRankedScanResult 
 
     const res = await dispatch<RankedScanInput, StartRankedScanResult>({
       type: 'START_RANKED_SCAN',
-      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, scanWidth },
+      payload: { activeSymbols, sRules, eRules, sLabel, eLabel, rankConfig, scanWidthRange },
     });
 
     if (res.handled && res.result?.taskId) {
