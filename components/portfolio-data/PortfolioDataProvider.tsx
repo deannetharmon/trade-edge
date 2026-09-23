@@ -67,7 +67,7 @@ export interface RefreshPositionsCallbacks {
 }
 
 export type PortfolioRefreshResult =
-  | { status: 'success'; positions: Position[] }
+  | { status: 'success'; positions: Position[]; snapshot: PortfolioSnapshot | null }
   | { status: 'error'; message: string }
   | { status: 'superseded' };
 
@@ -226,11 +226,13 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       const updated = attachSnapshotHistory(data, snapshotStore, positionsRef.current, trendDirectionBySymbol);
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
 
-      if (snapshotAcquisition) {
+      const nextSnapshot = snapshotAcquisition
+        ? { ...snapshotAcquisition.snapshot, options: updated }
+        : null;
+      if (nextSnapshot) {
         // Publish the canonically recomputed Position[] on the snapshot too,
         // so context.positions and snapshot.options cannot drift after the
         // existing history/health enrichment step.
-        const nextSnapshot = { ...snapshotAcquisition.snapshot, options: updated };
         setSnapshot(nextSnapshot);
         setSnapshotDataQuality(nextSnapshot.dataQuality);
       }
@@ -263,7 +265,7 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
         .catch(err => console.error('Pending order snapshot store fetch failed (non-blocking):', err));
       setLastRefresh(new Date());
       callbacks?.onSnapshotHistoryAttached?.(updated);
-      return { status: 'success', positions: updated };
+      return { status: 'success', positions: updated, snapshot: nextSnapshot };
     } catch (e: unknown) {
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
       const message = e instanceof Error ? e.message : String(e ?? 'Portfolio refresh failed');

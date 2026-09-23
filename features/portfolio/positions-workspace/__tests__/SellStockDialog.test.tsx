@@ -51,6 +51,14 @@ describe('SellStockDialog', () => {
     expect(screen.queryByText(/are committed to an open call/)).not.toBeInTheDocument();
   });
 
+  it('shows a refresh failure and keeps order entry closed', async () => {
+    const onSubmitOrder = vi.fn();
+    render(<SellStockDialog row={row} deps={{ onRefreshCapacity: vi.fn().mockRejectedValue(new Error('Broker unavailable')), onSubmitOrder }} onClose={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Broker unavailable');
+    expect(screen.queryByRole('button', { name: /All available/ })).not.toBeInTheDocument();
+    expect(onSubmitOrder).not.toHaveBeenCalled();
+  });
+
   it('Part caps the quantity input at the fresh maxSellableShares', async () => {
     render(<SellStockDialog row={row} deps={{ onRefreshCapacity: vi.fn().mockResolvedValue(report()), onSubmitOrder: vi.fn() }} onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('Part')).toBeInTheDocument());

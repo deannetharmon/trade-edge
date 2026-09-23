@@ -215,6 +215,8 @@ import { PositionCompositionCard } from '@/features/portfolio/positions/Position
 // permanent destination for the content it used to render on Positions.
 // See docs/implementation/WA-0004-Briefing-Separation-Implementation-Report.md.
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
+import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
+import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
@@ -10287,6 +10289,25 @@ export default function PortfolioPage() {
     });
   }, [refreshPortfolioData]);
 
+  const sellDeps = useMemo(() => ({
+    onRefreshCapacity: async (accountNumber: string) => {
+      const result = await fetchPositions();
+      if (result.status !== 'success') {
+        throw new Error(result.status === 'error' ? result.message : 'Portfolio refresh was superseded. Try again.');
+      }
+      if (!result.snapshot || result.snapshot.accountNumber !== accountNumber) {
+        throw new Error('Current share commitments could not be verified for this account.');
+      }
+      return buildSnapshotCapacityReport(result.snapshot);
+    },
+    onSubmitOrder: async (order: StockSellOrder, accountNumber: string) => {
+      assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'sell stock');
+      const token = await getAccessToken();
+      const data = await ttPost(`/accounts/${accountNumber}/orders`, token, order);
+      return { orderId: data?.data?.order?.id ?? data?.data?.id ?? 'submitted' };
+    },
+  }), [fetchPositions, portfolioMode.status, portfolioMode.mode]);
+
   const findPmccShortCall = useCallback((opportunity: {
     accountNumber: string | null; positionKey: string | null; symbol: string; exactContract: string | null;
   }) => {
@@ -10917,6 +10938,7 @@ export default function PortfolioPage() {
               )}
               <PositionsWorkspace
                 model={positionsWorkspaceModel}
+                sellDeps={sellDeps}
                 th={th}
                 getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
                   .filter(action => isActionRelevant(position, action))}
