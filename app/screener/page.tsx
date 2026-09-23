@@ -14,6 +14,7 @@ import type {
 } from '@/lib/scans/types';
 import type { RulesType, CspRulesType, CcRulesType } from '@/lib/scans/constants';
 import { assessOiLiquidity } from '@/lib/scans/oiLiquidity';
+import { DEFAULT_SPREAD_WIDTH_RANGE, SPREAD_WIDTH_CHOICES, scanWidths, matchesDisplayedWidth, type SpreadWidthRange } from '@/lib/scans/spreadWidthSelection';
 import { computeExpectedMove } from '@/lib/scans/expectedMove';
 import {
   INDEX_IVR_MIN, RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX,
@@ -6734,8 +6735,8 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   lastTargetedCreditRatioMin: number;
   lastTargetedCreditRatioOverride: boolean;
   lastTargetedPreset: string;
-  lastScanWidth: 5 | null;
-  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; creditRatioMin: number; creditRatioOverride: boolean; preset: string }, scanWidth?: 5 | null) => void;
+  lastScanWidth: SpreadWidthRange;
+  onRun: (mode: 'filter' | 'rank' | 'targeted', preset?: string, targetedOpts?: { dteMin: number; dteMax: number; popMin: number; otmMin: number; ivrMin: number; creditRatioMin: number; creditRatioOverride: boolean; preset: string }, scanWidth?: SpreadWidthRange) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'filter' | 'rank' | 'targeted'>(lastMode === 'filter' ? 'rank' : lastMode);
@@ -6748,7 +6749,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tCreditRatioMin, setTCreditRatioMin] = useState(lastTargetedCreditRatioMin);
   const [tCreditRatioOverride, setTCreditRatioOverride] = useState(lastTargetedCreditRatioOverride);
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
-  const [scanWidth, setScanWidth] = useState<5 | null>(lastScanWidth);
+  const [scanWidth, setScanWidth] = useState<SpreadWidthRange>(lastScanWidth);
 
   return (
     <ScanModalShell
@@ -6772,14 +6773,22 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
           }}
         />
 
-        <label className={`flex flex-col gap-1 text-xs ${th.textMuted}`}>
-          Scan spread widths
-          <select aria-label="Scan spread widths" value={scanWidth ?? 'all'} onChange={e => setScanWidth(e.target.value === '5' ? 5 : null)} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
-            <option value="all">Optimize across widths and retain $5 candidates</option>
-            <option value="5">$5 only (both iron condor wings)</option>
-          </select>
-          <span className={`text-[10px] ${th.textFaint}`}>Changing this requires a new scan. Results can be narrowed to $5 afterward.</span>
-        </label>
+        <fieldset className={`rounded-lg border ${th.border} p-3`}>
+          <legend className={`px-1 text-xs font-semibold ${th.text}`}>SPREAD WIDTHS TO SCAN (PRE-SCAN)</legend>
+          <div className="flex gap-3">
+            <label className={`flex flex-1 flex-col gap-1 text-xs ${th.textMuted}`}>Minimum width
+              <select aria-label="Minimum spread width to scan" value={scanWidth.min} onChange={e => setScanWidth(current => ({ min: Number(e.target.value), max: Math.max(current.max, Number(e.target.value)) }))} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
+                {SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width}</option>)}
+              </select>
+            </label>
+            <label className={`flex flex-1 flex-col gap-1 text-xs ${th.textMuted}`}>Maximum width
+              <select aria-label="Maximum spread width to scan" value={scanWidth.max} onChange={e => setScanWidth(current => ({ min: Math.min(current.min, Number(e.target.value)), max: Number(e.target.value) }))} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
+                {SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan ${scanWidths(scanWidth).map(width => `$${width}`).join(', ')}. Narrow the results afterward without another scan.</p>
+        </fieldset>
 
         {/* Preset selection — filter mode */}
         {mode === 'filter' && (
@@ -7555,7 +7564,7 @@ function getTargetedSymbolConcurrency(): number {
 async function runTargetedScan(
   symbols: string[],
   dteMin: number, dteMax: number, popMin: number, otmMin: number, ivrMin: number, minimumCreditRatio: number,
-  scanPreset: string, creditRatioOverride: boolean, scanWidth: 5 | null,
+  scanPreset: string, creditRatioOverride: boolean, scanWidth: SpreadWidthRange,
   rules: RulesType, etfRules: RulesType, rankConfig: RankConfig,
   setLoading: (v: boolean) => void, setStatus: (v: string) => void, setError: (v: string) => void,
   setTargetedResults: (v: TargetedScanEntry[]) => void,
@@ -7766,10 +7775,10 @@ async function runTargetedScan(
 
               // For IC use the single unfiltered best — ICs are composite
               if (strat === 'IC') {
-                for (const requestedWidth of scanWidth === 5 ? [5] : [null, 5]) {
+                for (const requestedWidth of scanWidths(scanWidth)) {
                 const candidate = minimumCreditRatio > 0
-                  ? findBestTargetedICWithCreditRatioFloor(chainItems, exp, price, minimumCreditRatio, requestedWidth ?? undefined)
-                  : findBestICUnfiltered(chainItems, exp, price, requestedWidth ?? undefined);
+                  ? findBestTargetedICWithCreditRatioFloor(chainItems, exp, price, minimumCreditRatio, requestedWidth)
+                  : findBestICUnfiltered(chainItems, exp, price, requestedWidth);
                 if (!candidate || (candidate.pop ?? 0) < popMin) continue;
                 if (candidate.dte < dteMin || candidate.dte > dteMax) continue;
                 // OTM floor — IC gates on the tighter (worse) side of put/call,
@@ -7800,8 +7809,6 @@ async function runTargetedScan(
 
               // For BPS/BCS: one entry per unique short strike that meets POP floor
               const putCallLegs = chainItems.filter((o: any) => o.expirationDate === exp && o.optionType === optType);
-              const stepSize = price == null ? 5 : price >= 2000 ? 25 : 5;
-              const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
 
               // Collect all unique qualifying short strikes
               const seenStrikes = new Set<number>();
@@ -7823,11 +7830,11 @@ async function runTargetedScan(
                   if (otmPct < otmMin) continue;
                 }
 
-                // Find best long leg for this short strike (best credit ratio within maxWidth)
-                for (const requestedWidth of scanWidth === 5 ? [5] : [null, 5]) {
+                // Evaluate each requested width for this short strike.
+                for (const requestedWidth of scanWidths(scanWidth)) {
                 let bestCandidate: SpreadCandidate | null = null;
                 let bestCreditRatio = -1;
-                for (const width of requestedWidth == null ? Array.from({ length: Math.floor(maxWidth / stepSize) }, (_, i) => (i + 1) * stepSize) : [requestedWidth]) {
+                for (const width of [requestedWidth]) {
                   const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
                   const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
                   if (!longLeg) continue;
@@ -8328,7 +8335,7 @@ function TargetedScanResultsPanel({
   // scan has run, same shape extractOiLegsFromSpreadCandidate already
   // reads for every other panel.
   const [activeOiMin, setActiveOiMin]           = useState<number>(0);
-  const [activeWidth, setActiveWidth]           = useState<5 | null>(null);
+  const [activeWidth, setActiveWidth]           = useState<number | null>(null);
   const [activeStrategies, setActiveStrategies] = useState<string[]>(['BPS', 'BCS', 'IC']);
   const [activeTrendOnly, setActiveTrendOnly]   = useState<boolean>(false);
   const [activeSort, setActiveSort]             = useState(sortBy);
@@ -8403,7 +8410,7 @@ function TargetedScanResultsPanel({
   if (activeOiMin > 0) pool = pool.filter(e =>
     evaluateOiEligibility(extractOiLegsFromSpreadCandidate(e.strategy, e.candidate), activeOiMin).eligible,
   );
-  if (activeWidth === 5) pool = pool.filter(e => e.candidate.spreadWidth === 5 && (e.strategy !== 'IC' || e.candidate.callWidth === 5));
+  if (activeWidth != null) pool = pool.filter(e => matchesDisplayedWidth(e.candidate, activeWidth));
   // 3. strategy filter
   pool = pool.filter(e => activeStrategies.includes(e.strategy));
   // 4. trend only
@@ -8450,7 +8457,7 @@ function TargetedScanResultsPanel({
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
         <div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
           {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300">Scan minimum credit/risk: {scanCreditRatioFloorPct}%</span>}
-          <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Targeted spread width" value={activeWidth ?? 'all'} onChange={e => setActiveWidth(e.target.value === '5' ? 5 : null)} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option><option value="5">$5 only</option></select></label>
+          <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Targeted spread width" value={activeWidth ?? 'all'} onChange={e => setActiveWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
         </div>
 
         {/* Row 1: count + sort + show top */}
@@ -9164,8 +9171,8 @@ export default function Home() {
     try { const k = localStorage.getItem(LS_ACTIVE_PRESET_ETF); return RULE_PRESETS.find(p => p.key === k)?.label ?? 'ETF Custom'; } catch { return 'ETF Custom'; }
   });
   const [rankTopN, setRankTopN] = useState<number>(20);
-  const [scanWidth, setScanWidth] = useState<5 | null>(null);
-  const [rankDisplayWidth, setRankDisplayWidth] = useState<5 | null>(null);
+  const [scanWidth, setScanWidth] = useState<SpreadWidthRange>(DEFAULT_SPREAD_WIDTH_RANGE);
+  const [rankDisplayWidth, setRankDisplayWidth] = useState<number | null>(null);
   const [rankDteMin, setRankDteMin] = useState<number>(0);
   const [rankDteMax, setRankDteMax] = useState<number>(999);
   // Post-scan, client-side filters — consistent with Targeted mode's POP/strategy
@@ -12047,10 +12054,10 @@ export default function Home() {
                   onJumpToCard={jumpToQualifiedCard}
                 />
               )}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth === 5 && (
-                <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The $5 results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (
+                <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The selected-width results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>
               )}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth !== 5 && (
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth == null && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(results.filter(r => r.qualified), opportunityRecommendations)}
                   borderClassName={th.border}
@@ -12503,7 +12510,7 @@ export default function Home() {
 
                 let filtered = results.filter(r => {
                   if (rankHiddenSymbols.includes(r.symbol)) return false;
-                  if (rankDisplayWidth === 5 && (!r.bestCandidate || r.bestCandidate.spreadWidth !== 5 || (r.strategy === 'IC' && r.bestCandidate.callWidth !== 5))) return false;
+                  if (!matchesDisplayedWidth(r.bestCandidate, rankDisplayWidth)) return false;
                   const dte = r.bestCandidate?.dte ?? 0;
                   if (dte < rankDteMin || dte > rankDteMax) return false;
                   if (!rankStrategies.includes(r.strategy)) return false;
@@ -12576,7 +12583,7 @@ export default function Home() {
                   {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
                   <div className="mb-3">
                     <OiAndSortControls th={th} minOi={rankMinOi} setMinOi={setRankMinOi} sort={rankSort} setSort={setRankSort} accent="purple" />
-                    <label className={`ml-2 text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Ranked spread width" value={rankDisplayWidth ?? 'all'} onChange={e => setRankDisplayWidth(e.target.value === '5' ? 5 : null)} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option><option value="5">$5 only</option></select></label>
+                    <label className={`ml-2 text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Ranked spread width" value={rankDisplayWidth ?? 'all'} onChange={e => setRankDisplayWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
                   </div>
 
                   {/* Filter row 2 — POP / OTM / Credit Ratio / Strategy, same pattern as Targeted */}
@@ -12983,7 +12990,7 @@ export default function Home() {
           lastTargetedPreset={targetedPreset}
           lastScanWidth={scanWidth}
           onClose={() => setShowRunModal(false)}
-          onRun={(mode, preset, targetedOpts, selectedWidth = null) => {
+          onRun={(mode, preset, targetedOpts, selectedWidth = DEFAULT_SPREAD_WIDTH_RANGE) => {
             setShowRunModal(false);
             setScreenMode(mode);
             setScanWidth(selectedWidth);
