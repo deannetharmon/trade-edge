@@ -1,3 +1,5 @@
+// lib/scans/pmccDecision.ts
+
 import type {
   PmccDecision,
   PmccDecisionGate,
@@ -5,7 +7,7 @@ import type {
   PmccPairingCriteria,
   PmccMarketSession,
 } from './pmccTypes';
-import { newYorkDateFromAsOf, normalizeEarningsDate, parseStrictIsoDate } from './pmccEarningsDates';
+import { classifyEarningsVsExpiry, earningsAfterExpiryTag, EARNINGS_AFTER_EXPIRY_WINDOW_BD } from './earningsExpiryZone';
 
 export const PMCC_DECISION_POLICY_VERSION = 'pmcc-decision-v1';
 
@@ -213,16 +215,16 @@ export function evaluatePmccDecision(input: {
     gates.push(gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
   }
 
-  // PMCC-EARNINGS-PAST-0001 -- fires when T <= E <= X, all validated YYYY-MM-DD
-  // strings. T is the New York date of asOf (missing/unparseable skips the
-  // lower bound only); malformed E = no date on file; missing/malformed X = no gate.
-  const earningsNormalized = normalizeEarningsDate(input.earningsDate);
-  const shortExpiryDate = parseStrictIsoDate(pair.shortLeg.expiration);
-  if (earningsNormalized && shortExpiryDate && earningsNormalized <= shortExpiryDate) {
-    const today = newYorkDateFromAsOf(input.asOf);
-    if (today === null || earningsNormalized >= today) {
-      gates.push(gate('EARNINGS_BEFORE_SHORT_EXPIRY', 'warning', 'Earnings fall before short-call expiration.', earningsNormalized, shortExpiryDate, 'event-risk-v1'));
-    }
+  // PMCC-EARNINGS-PAST-0001 / SCAN-ALIGN-0001D -- one shared zone classifier
+  // (earningsExpiryZone.ts). T <= E <= X ('exclude') is normally REMOVED before pairing, so
+  // EARNINGS_BEFORE_SHORT_EXPIRY is a defensive layer and must never fire when E < T ('past').
+  // X < E <= X + 5 business days ('warn-after') is a warning-only ambient tag: it never
+  // affects qualification or ranking. Malformed E = no date; missing/malformed X = no gate.
+  const earningsZone = classifyEarningsVsExpiry(input.earningsDate, pair.shortLeg.expiration, input.asOf);
+  if (earningsZone.zone === 'exclude') {
+    gates.push(gate('EARNINGS_BEFORE_SHORT_EXPIRY', 'warning', 'Earnings fall before short-call expiration.', earningsZone.earningsDate, earningsZone.expiration, 'event-risk-v1'));
+  } else if (earningsZone.zone === 'warn-after') {
+    gates.push(gate('EARNINGS_AFTER_SHORT_EXPIRY', 'warning', `${earningsAfterExpiryTag(earningsZone.businessDaysAfter)}. Informational; does not affect qualification.`, earningsZone.businessDaysAfter, `${EARNINGS_AFTER_EXPIRY_WINDOW_BD} bd`, 'event-risk-v1'));
   }
 
   const quotes = quoteGate(pair, input.marketSession);

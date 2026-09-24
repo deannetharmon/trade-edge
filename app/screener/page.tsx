@@ -51,7 +51,9 @@ import {
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
-import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
+import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, selectEarningsRemovedBanner, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
+import { earningsRemovalReceipt } from '@/lib/scans/pmccEarningsRemoval';
+import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
@@ -5427,15 +5429,21 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
     ? totalPremium + longIntrinsicAtCurrentPrice - pair.longLeg.executablePrice
     : null;
   if (!pair) {
+    // SCAN-ALIGN-0001D: held symbol whose shorts were all removed by earnings. The banner replaces the generic audit reasons; no action button.
+    const earningsRemovedNotice = selectEarningsRemovedBanner(result.pmccEarningsRemoval);
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{result.symbol}</span>
         <span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span>
-        <span className="text-red-400 text-xs">Audit result · Disqualified</span>
+        {earningsRemovedNotice
+          ? <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400">Held LEAP · no short call offered</span>
+          : <span className="text-red-400 text-xs">Audit result · Disqualified</span>}
       </div>
-      <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>
+      {earningsRemovedNotice
+        ? <div className="mt-2 rounded bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200" data-testid="held-earnings-removed-banner">{earningsRemovedNotice}</div>
+        : <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>}
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
@@ -5520,11 +5528,17 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
           Blocked because: {pmccDecision.gates.filter(gate => gate.status === 'fail' || gate.status === 'unavailable').map(gate => gate.explanation).join(' · ')}
         </p>
       )}
-      {pmccDecision.gates.some(gate => gate.status === 'warning') && (
+      {pmccDecision.gates.some(gate => gate.status === 'warning' && gate.code !== 'EARNINGS_AFTER_SHORT_EXPIRY') && (
         <p className="mt-2 text-[10px] text-amber-300">
-          Preference notes (does not block): {pmccDecision.gates.filter(gate => gate.status === 'warning').map(gate => gate.explanation).join(' · ')}
+          Preference notes (does not block): {pmccDecision.gates.filter(gate => gate.status === 'warning' && gate.code !== 'EARNINGS_AFTER_SHORT_EXPIRY').map(gate => gate.explanation).join(' · ')}
         </p>
       )}
+      {/* SCAN-ALIGN-0001D: ambient-tier tag only (no modal, no banner); never affects qualification or ranking. */}
+      {pmccDecision.gates.filter(gate => gate.code === 'EARNINGS_AFTER_SHORT_EXPIRY').map(gate => (
+        <span key={gate.code} className={`mt-2 inline-block rounded border border-neutral-700 px-2 py-0.5 text-[9px] ${th.textFaint}`} data-testid="earnings-after-expiry-tag">
+          {earningsAfterExpiryTag(typeof gate.observedValue === 'number' ? gate.observedValue : null)}
+        </span>
+      ))}
       {decisionStrip.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
         {decisionStrip.map(field => (
           <span key={field.label} className={field.warn ? 'text-amber-400' : ''}>
@@ -10305,7 +10319,7 @@ export default function Home() {
         } catch {}
         completeScreenerJob({
           resultCount: session.results.length,
-          status: `${session.results.length} PMCC result${session.results.length === 1 ? '' : 's'} ready`,
+          status: `${session.results.length} PMCC result${session.results.length === 1 ? '' : 's'} ready${earningsRemovalReceipt(session.results)}`,
           resultsHref: '/screener?mode=filter',
         });
       });
