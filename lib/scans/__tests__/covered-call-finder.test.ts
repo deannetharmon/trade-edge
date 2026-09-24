@@ -323,6 +323,8 @@ describe('TE-0007C corrective round: one-sided quotes and full-universe eligibil
   // -- still correctly excludes on its own after OI came out of the same
   // combined eligibility function. No prior test in this file covered this
   // condition explicitly.
+  // SCAN-ALIGN-0001C1 note: OI below OI_MIN stays eligible (warns); only missing/invalid OI
+  // (null/NaN/Infinity/negative) is excluded -- see scanAlignC1OiPolicy.test.ts.
   it('14c. bid/ask spread wider than BID_ASK_MAX is still correctly excluded', () => {
     const expDate = nearTermExpDate(30);
     const tooWide = legAt(105, { delta: 0.28, bid: 1.00, ask: 1.30, occSymbol: 'TOO_WIDE' }, expDate); // 0.30 width > 0.20 max

@@ -81,10 +81,11 @@ describe('evaluatePmccPairOnDemand', () => {
     expect(result.shortLegRejection).toBeNull();
   });
 
-  it('outcome: leg_rejected when the short leg exists but fails its own eligibility gate (OI below minimum)', () => {
-    const result = check(longLeg(), shortLeg({ openInterest: 5 }));
+  it('outcome: leg_rejected when the short leg exists but fails its own eligibility gate (OI missing)', () => {
+    // SCAN-ALIGN-0001C1: below-minimum short OI is a warning now; null OI still rejects.
+    const result = check(longLeg(), shortLeg({ openInterest: null }));
     expect(result.outcome).toBe('leg_rejected');
-    expect(result.shortLegRejection?.reasons.some(r => r.code === 'OPEN_INTEREST_BELOW_MINIMUM')).toBe(true);
+    expect(result.shortLegRejection?.reasons.some(r => r.code === 'INSUFFICIENT_DATA')).toBe(true);
   });
 
   it('outcome: pair_rejected when both legs are individually eligible but net debit is not positive', () => {

@@ -76,9 +76,9 @@ describe('PMCC production integration', () => {
     const zeroLong = run([leg('long', 720, { delta: 0.5 })], [leg('short', 1070)]);
     // PMCC-HEALTH-CHECK-0001: short-leg delta no longer rejects a leg at the
     // pairing stage (disclosed as a warning gate downstream instead) -- OI
-    // below the floor is still a genuine hard exclude and produces the
-    // same "zero eligible short legs" scenario this test needs.
-    const zeroShort = run([leg('long', 720)], [leg('short', 1070, { openInterest: 5 })]);
+    // below the floor is now a warning (SCAN-ALIGN-0001C1); missing OI is still
+    // a genuine hard exclude and produces the same "zero eligible short legs" scenario.
+    const zeroShort = run([leg('long', 720)], [leg('short', 1070, { openInterest: null })]);
     const zeroPair = run([leg('long', 720)], [leg('short', 1038, { bid: 1, ask: 1.1 })]);
     const incomplete = run([leg('long', 720), leg('long', 700, { bid: 340, ask: 342 })], [leg('short', 1060), leg('short', 1070)], { ...criteria.limits, maxCombinationsEvaluated: 1 });
     expect(pmccAuditReasons(zeroLong)).toContain('No eligible long legs');

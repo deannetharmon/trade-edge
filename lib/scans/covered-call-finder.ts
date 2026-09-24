@@ -60,9 +60,22 @@ interface CcEligibilityParams {
 // warning/downgrade. Mirrors requirement #4's exact quote-validity contract:
 // a one-sided (bid <= 0 XOR ask <= 0), crossed (ask < bid), missing, or
 // non-finite quote can never support a reliable sell premium.
+// SCAN-ALIGN-0001C1 -- open interest must be real data: finite and >= 0.
+// null/undefined/NaN/Infinity/negative is invalid data (never coerced to 0),
+// and would otherwise reach the ranking comparator as NaN. Returns the
+// rejection reason code, or null when OI is valid. OI below OI_MIN is NOT
+// invalid: it stays eligible and is disclosed by ccLiquidityWarning.
+export function ccOpenInterestRejection(openInterest: unknown): 'INSUFFICIENT_DATA' | null {
+  return typeof openInterest === 'number' && Number.isFinite(openInterest) && openInterest >= 0
+    ? null
+    : 'INSUFFICIENT_DATA';
+}
+
 function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): boolean {
   if (leg.optionType !== 'C') return false;
-  if (leg.delta == null) return false;
+  if (leg.delta == null || !Number.isFinite(leg.delta)) return false;
+  if (!Number.isFinite(leg.strikePrice)) return false; // keeps NaN out of the ranking comparator
+  if (ccOpenInterestRejection(leg.openInterest) != null) return false;
 
   const absDelta = Math.abs(leg.delta);
   if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return false;
@@ -77,8 +90,9 @@ function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams
   if (leg.ask < leg.bid) return false; // crossed market
 
   if (leg.ask - leg.bid > p.bidAskMax) return false;
-  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI deliberately removed from this
-  // gate. Every other condition above is a genuine data-integrity or
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* deliberately
+  // removed from this gate (SCAN-ALIGN-0001C1 re-added only a missing/invalid
+  // OI check, above). Every other condition above is a genuine data-integrity or
   // structural requirement (no delta at all, a crossed market, strikes
   // outside the target range) -- a leg failing one of those literally
   // cannot be evaluated. Thin OI is different: it's a real, disclosable
@@ -145,7 +159,8 @@ export function selectAllEligibleCcContracts(
     if (a.openInterest !== b.openInterest) return b.openInterest - a.openInterest; // 2. higher OI wins
     const widthA = a.ask - a.bid, widthB = b.ask - b.bid;
     if (widthA !== widthB) return widthA - widthB; // 3. narrower bid/ask width wins
-    return a.dte - b.dte; // 4. earlier expiration wins
+    if (a.dte !== b.dte) return a.dte - b.dte; // 4. earlier expiration wins
+    return a.strikePrice - b.strikePrice; // 5. lower strike wins (final deterministic tie-break)
   });
 
   return eligible;

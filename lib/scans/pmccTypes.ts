@@ -147,7 +147,11 @@ export interface PmccEligibleLeg {
   dte: number;
   strike: number;
   delta: number;
-  openInterest: number;
+  /** SCAN-ALIGN-0001C1: null ONLY for a held long (its OI is exempt from the
+   * OI check, so a missing chain value passes through). Every non-held leg
+   * (new long, every short) is guaranteed non-null and finite by filterLegs.
+   * Null-check before any arithmetic or display on this field. */
+  openInterest: number | null;
   occSymbol: string;
   quote: PmccQuoteQuality;
   executablePrice: number;

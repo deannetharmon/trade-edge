@@ -856,7 +856,9 @@ function isValidPmccLeg(value: unknown, role: 'long' | 'short', symbol: string):
     && occ.length > 0
     && typeof leg.expiration === 'string' && Number.isFinite(Date.parse(leg.expiration))
     && Number.isInteger(leg.dte) && Number(leg.dte) >= 0
-    && ['strike', 'delta', 'openInterest', 'executablePrice'].every(key => typeof leg[key] === 'number' && Number.isFinite(leg[key]))
+    && ['strike', 'delta', 'executablePrice'].every(key => typeof leg[key] === 'number' && Number.isFinite(leg[key]))
+    // SCAN-ALIGN-0001C1: openInterest is null only for a held long (OI-exempt); all other legs finite.
+    && ((role === 'long' && leg.openInterest === null) || (typeof leg.openInterest === 'number' && Number.isFinite(leg.openInterest)))
     && isValidPmccQuote(leg.quote)
     && finiteOrNull(leg.intrinsic) && finiteOrNull(leg.extrinsic);
 }

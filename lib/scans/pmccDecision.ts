@@ -104,7 +104,8 @@ export function evaluatePmccDecision(input: {
     } else {
       gates.push(gate('HELD_LONG_DELTA_PREFERENCE', 'pass', 'Held LEAPS delta is within the preferred range.', pair.longLeg.delta, `${min.toFixed(2)}–${max.toFixed(2)}`, 'snapshot.criteria.longDelta'));
     }
-    if (pair.longLeg.openInterest < criteria.longOiMin) {
+    // SCAN-ALIGN-0001C1: a held long's OI may be null (exempt); no OI gate then.
+    if (pair.longLeg.openInterest != null && pair.longLeg.openInterest < criteria.longOiMin) {
       gates.push(gate('HELD_LONG_OI_PREFERENCE', 'warning', 'Held LEAPS open interest is below the new-entry preference; ownership remains valid.', pair.longLeg.openInterest, criteria.longOiMin, 'snapshot.criteria.longOiMin'));
     }
     if (pair.longLeg.dte < criteria.dte.longMin || pair.longLeg.dte > criteria.dte.longMax) {
@@ -135,6 +136,21 @@ export function evaluatePmccDecision(input: {
       ));
     } else {
       gates.push(gate('NEW_SHORT_DELTA', 'pass', 'Short call delta is within the preferred range.', pair.shortLeg.delta, `${min.toFixed(2)}–${max.toFixed(2)}`, 'snapshot.criteria.shortDelta'));
+    }
+  }
+
+  // SCAN-ALIGN-0001C1 -- short-leg OI below the submitted minimum is a
+  // disclosed warning (OI-LIQUIDITY-CHOICE-0001), never a disqualifier.
+  // Identical in held and new modes. Missing/invalid short OI never reaches
+  // here (rejected INSUFFICIENT_DATA in pmccPairing.filterLegs).
+  {
+    const shortOi = pair.shortLeg.openInterest;
+    if (shortOi != null && shortOi < criteria.shortOiMin) {
+      gates.push(gate(
+        'NEW_SHORT_OI', 'warning',
+        `Short call open interest is ${shortOi}, below the ${criteria.shortOiMin} minimum. Fills may be slower or need a wider price; this does not disqualify the structure.`,
+        shortOi, criteria.shortOiMin, 'snapshot.criteria.shortOiMin',
+      ));
     }
   }
 

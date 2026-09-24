@@ -78,6 +78,7 @@ import {
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
+import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import type { Position } from '@/lib/portfolio-data/types';
@@ -1492,9 +1493,7 @@ function runCcChecklist(
 
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
-    : bestCandidate.shortOI >= ccRules.OI_MIN
-      ? { status: 'pass', value: `${bestCandidate.shortOI}`, reason: `≥ ${ccRules.OI_MIN} minimum` }
-      : { status: 'warn', value: `${bestCandidate.shortOI}`, reason: `Below ${ccRules.OI_MIN} — fills may be difficult` };
+    : buildCcOiCheck(bestCandidate.shortOI, ccRules.OI_MIN);
 
   const deltaCheck: CheckResult = bestCandidate
     ? { status: 'pass', value: `Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: `Target ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX}` }
@@ -5505,7 +5504,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       )}
       {heldOutcome && <p className={`mt-1 text-[10px] ${th.textFaint}`} data-testid="held-outcome-reason">{heldOutcome.reasonLine}</p>}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest ?? '—'}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
   <span> ({((metrics.longExtrinsicPerShare / pair.longLeg.executablePrice) * 100).toFixed(1)}% of cost)</span>
 )}</span></>}</div>
         {!heldOutcome?.notChecked && <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}{(result.ivr != null || result.ivx != null) && (

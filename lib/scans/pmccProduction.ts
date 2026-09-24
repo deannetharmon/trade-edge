@@ -111,7 +111,12 @@ function compatibilityCandidate(pair: PmccPairResult): SpreadCandidate | null {
     shortStrike: pair.shortLeg.strike, longStrike: pair.longLeg.strike, shortDelta: pair.shortLeg.delta,
     longDelta: pair.longLeg.delta, credit: pair.shortLeg.executablePrice, longCost: pair.longLeg.executablePrice,
     netDebit: metrics.netDebitPerShare, spreadWidth: metrics.strikeWidth, creditRatio: 0,
-    roc: metrics.shortCreditToNetDebitPct, pop: 0, shortOI: pair.shortLeg.openInterest, longOI: pair.longLeg.openInterest,
+    roc: metrics.shortCreditToNetDebitPct, pop: 0,
+    // SCAN-ALIGN-0001C1: short OI is always finite (filterLegs rejects otherwise). A held long's OI
+    // may be null (exempt); this legacy compat field is a required number that feeds
+    // Math.min(shortOI, longOI) liquidity scoring, so the exempt long borrows the short's OI (neutral
+    // in the min) rather than a fabricated 0. Canonical value stays null on pair.longLeg.openInterest.
+    shortOI: pair.shortLeg.openInterest as number, longOI: pair.longLeg.openInterest ?? (pair.shortLeg.openInterest as number),
     longExpiration: pair.longLeg.expiration, longDte: pair.longLeg.dte,
     longOccSymbolPMCC: pair.longLeg.occSymbol, shortOccSymbolPMCC: pair.shortLeg.occSymbol,
   };
@@ -129,11 +134,24 @@ export function pmccAuditReasons(session: PmccSessionResult): string[] {
   return Array.from(new Set(reasons));
 }
 
-function checksFor(pair: PmccPairResult | null): ScreenResult['checks'] {
+// SCAN-ALIGN-0001C1: a held long's OI may be null (exempt) and a short below
+// its minimum is a warning, so this never interpolates a raw null and never
+// claims "floors satisfied" when the short is under its floor.
+function pmccOiCheck(pair: PmccPairResult, held: boolean, shortOiMin: number): NonNullable<ScreenResult['checks']>['oi'] {
+  const shortOi = pair.shortLeg.openInterest;
+  const longOi = pair.longLeg.openInterest;
+  const value = `${shortOi ?? '—'}/${longOi ?? '—'}`;
+  const shortBelow = shortOi != null && shortOi < shortOiMin;
+  if (shortBelow) return { status: 'warn', value, reason: `Short call OI is below the ${shortOiMin} minimum — fills may be difficult` };
+  if (held) return { status: 'warn', value, reason: 'Held-long OI is informational; short-call entry rules still apply' };
+  return { status: 'pass', value, reason: 'Submitted OI floors satisfied' };
+}
+
+function checksFor(pair: PmccPairResult | null, shortOiMin = 0): ScreenResult['checks'] {
   const held = pair?.entryMode === 'covered-short-call-against-held-leaps';
   return {
     ivr: pending('Context only; not used by the PMCC pairing engine'), earnings: pending('Event/readiness context'),
-    oi: pair ? { status: held ? 'warn' : 'pass', value: `${pair.shortLeg.openInterest}/${pair.longLeg.openInterest}`, reason: held ? 'Held-long OI is informational; short-call entry rules still apply' : 'Submitted OI floors satisfied' } : pending('No retained pair'),
+    oi: pair ? pmccOiCheck(pair, held, shortOiMin) : pending('No retained pair'),
     delta: pair ? { status: held ? 'warn' : 'pass', value: `Long Δ${pair.longLeg.delta.toFixed(2)} / Short Δ${pair.shortLeg.delta.toFixed(2)}`, reason: held ? 'Held-long delta is a preference; short-call entry rules still apply' : 'Submitted delta ranges satisfied' } : pending('No retained pair'),
     credit: pair ? { status: 'pass', value: `$${pair.shortLeg.executablePrice.toFixed(2)} credit`, reason: 'Executable short bid' } : pending('No retained pair'),
     roc: pending('Generic spread scoring is not used for PMCC'), pop: pending('No whole-strategy POP is asserted for PMCC'),
@@ -186,7 +204,7 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
     qualified: pmccDecision.qualification === 'QUALIFIED',
     bestCandidate: compatibilityCandidate(pair), candidateId: pair.pairId, failReasons: readinessReasons,
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock',
-    underlyingType: context.underlyingType, ruleSetApplied: 'PMCC pairing engine v2', publishedOrder: order, checks: checksFor(pair),
+    underlyingType: context.underlyingType, ruleSetApplied: 'PMCC pairing engine v2', publishedOrder: order, checks: checksFor(pair, session.criteria.shortOiMin),
     pmccPair: pair, pmccDecision, pmccPairingCounts: session.counts, pmccIncompleteAnalysis: session.incompleteAnalysis,
     pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
   };
