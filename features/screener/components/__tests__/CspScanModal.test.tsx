@@ -2,11 +2,11 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { CspScanModal } from '../CspScanModal';
+import { CspScanModal, CSP_TARGETED_PRESETS } from '../CspScanModal';
 import type { ScanModalTheme } from '../ScanModalShell';
 import { DEFAULT_CSP_RULES } from '@/lib/scans/constants';
 
-const initial = { mode: 'filter' as const, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES }, popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none' as const };
+const initial = { mode: 'rank' as const, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES }, popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none' as const };
 
 // Minimal stand-in for a THEMES[Theme] entry -- only the fields ScanModalShell
 // and ScanModeRadioGroup actually read.
@@ -33,24 +33,31 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     });
   });
 
-  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from the selectable modes ("hide-first": the default CSP draft is
-  // still Filter, so the modal opens on the Filter form with no mode radio selected, and the default scan still runs
-  // in Filter mode -- UnifiedStrategyLauncher test 7 depends on that). These tests pin TODAY's behavior. When
-  // SCREENER-CONFIG-0001 reinstates Filter they fail on purpose: restore the three-mode assertions (git history
-  // before 3e8d9491) and the Filter-dependent tests in CspCandidateDiscovery, ScreenerUXHierarchy, and
-  // UnifiedStrategyLauncher.
-  it('offers Rank and Targeted while Filter is hidden, and clearly states the automatic safeguards', async () => {
+  // Filter mode was removed (FILTER-MODE-REMOVAL-0002, decided 2026-09-21). The modal offers Rank and
+  // Targeted only, and always opens on one of them.
+  it('offers Rank and Targeted only, and states the fixed liquidity and earnings policy', async () => {
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
     expect(screen.getAllByRole('radio', { name: /^(Rank|Targeted)/i })).toHaveLength(2);
     expect(screen.queryByRole('radio', { name: /^Filter/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/Liquidity and earnings checks are applied automatically/i)).toBeInTheDocument();
+    expect(screen.getByText(/A fixed policy, not a setting/i)).toBeInTheDocument();
+    expect(screen.getByText(/A candidate whose expiration spans an earnings date is disqualified/i)).toBeInTheDocument();
   });
 
-  it('opens on the hidden Filter draft with neither visible mode selected (known hide-first state)', async () => {
+  it('opens on Rank, with Targeted unselected and Run enabled', async () => {
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={vi.fn()} onRun={vi.fn()} />);
-    expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('radio', { name: /^Targeted/i })).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
+  });
+
+  it('opens a request left over from the removed Filter mode as Rank, keeping its rules', async () => {
+    const onRun = vi.fn();
+    const legacy = { ...initial, mode: 'filter' as const, rules: { ...DEFAULT_CSP_RULES, DTE_MIN: 21, DTE_MAX: 60 } };
+    render(<CspScanModal th={th} selectedTickerCount={2} initial={legacy} onClose={vi.fn()} onRun={onRun} />);
+    expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('Min DTE')).toHaveValue('21');
+    await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    expect(onRun.mock.calls[0][0]).toMatchObject({ mode: 'rank', rules: expect.objectContaining({ DTE_MIN: 21, DTE_MAX: 60 }) });
   });
 
   it('accepts a decimal typed from its leading dot without coercing the interim dot to zero', async () => {
@@ -156,8 +163,8 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     const custom = screen.getByRole('radio', { name: /Custom/i });
     expect(custom).toHaveAttribute('aria-checked', 'true');
     expect(custom).toHaveAttribute('tabindex', '0');
-    // Only the preset radio is selected: no mode radio is selected while Filter is hidden (FILTER-MODE-REMOVAL-0002).
-    expect(screen.getAllByRole('radio').filter(radio => radio.getAttribute('aria-checked') === 'true')).toHaveLength(1);
+    // Exactly two radios are selected: the Rank mode and the Custom preset. Quick-select pills are buttons, not radios.
+    expect(screen.getAllByRole('radio').filter(radio => radio.getAttribute('aria-checked') === 'true')).toHaveLength(2);
     custom.focus();
     await userEvent.keyboard('{ArrowLeft}');
     expect(screen.getByRole('radio', { name: /More opportunities/i })).toHaveFocus();

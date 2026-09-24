@@ -5,6 +5,16 @@ import type { CspRulesType } from '@/lib/scans/constants';
 import type { CspRankSort, CspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { ScanModalShell, ScanModeRadioGroup, type ScanModalTheme } from './ScanModalShell';
 import { DeferredNumberInput } from './DeferredNumberInput';
+import { CriterionInput } from './scanConfig/CriterionInput';
+import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
+import { LifecycleTag } from './scanConfig/LifecycleTag';
+import { ScanReceiptPanel } from './scanConfig/ScanReceiptPanel';
+import {
+  CSP_CARD_ORDER, CSP_CARD_TITLE, buildCspReceipt, criteriaForCard,
+  type CspConfigValues, type CspCriterion, type CspMode, type CspRuleKey,
+} from '@/lib/screener/scanConfig/cspRegistry';
+import { cspFieldErrors, hasTargetedGate, isCspConfigValid } from '@/lib/screener/scanConfig/cspValidation';
+import { matchRangePreset, sameNumber } from '@/lib/screener/scanConfig/presets';
 
 export interface CspScanRequest {
   mode: CspRuleSnapshot['mode'];
@@ -20,6 +30,7 @@ export interface CspScanRequest {
 }
 
 export type CspScanRequestsByMode = Record<CspScanRequest['mode'], CspScanRequest>;
+type CspRequestMode = CspScanRequest['mode'];
 
 interface Props {
   th: ScanModalTheme;
@@ -95,53 +106,64 @@ export const CSP_TARGETED_PRESETS: CspTargetedPreset[] = [
   },
 ];
 
+// SCREENER-CONFIG-0001A -- Rank and Targeted only (Filter was removed 2026-09-21).
+// Every control below is rendered from the CSP criterion registry
+// (lib/screener/scanConfig/cspRegistry.ts): its label, unit, lifecycle tag, quick
+// selects, and hint come from there, and the scan summary is built from the same
+// registry, so the modal and the receipts cannot disagree.
+const toValues = (request: CspScanRequest, mode: CspMode): CspConfigValues => ({
+  mode,
+  rules: request.rules,
+  popMin: request.popMin,
+  otmMin: request.otmMin,
+  rocMin: request.rocMin,
+  rankSecondary: request.rankSecondary,
+  affordableOnly: request.affordableOnly ?? false,
+  capitalLimit: request.capitalLimit ?? null,
+});
+
+const INPUT_CLASS = 'mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white';
+
 export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode, onClose, onRun }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   const selectedPresetRef = useRef<HTMLButtonElement>(null);
-  const defaultFor = (mode: CspScanRequest['mode']): CspScanRequest => ({
+  const defaultFor = (mode: CspMode): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...PRESETS[1].rules }, popMin: null,
     otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
   });
-  const normalizeRequest = (request: CspScanRequest): CspScanRequest => ({
+  const normalizeRequest = (request: CspScanRequest, mode: CspMode): CspScanRequest => ({
     ...request,
+    mode,
     capitalLimit: request.capitalLimit ?? null,
     affordableOnly: request.affordableOnly ?? false,
   });
-  const [drafts, setDrafts] = useState<CspScanRequestsByMode>(() => requestsByMode ?? {
-    filter: initial.mode === 'filter' ? normalizeRequest(initial) : defaultFor('filter'),
-    rank: initial.mode === 'rank' ? normalizeRequest(initial) : defaultFor('rank'),
-    targeted: initial.mode === 'targeted' ? normalizeRequest(initial) : defaultFor('targeted'),
-  });
-  const [mode, setMode] = useState<CspScanRequest['mode']>(initial.mode);
+  // A caller may still hand in a request from the removed Filter mode (an older
+  // cached session). It opens as a Rank draft with the same rules.
+  const seedDraft = (mode: CspMode): CspScanRequest => normalizeRequest(
+    requestsByMode?.[mode] ?? (initial.mode === mode || (mode === 'rank' && initial.mode === 'filter') ? initial : defaultFor(mode)),
+    mode,
+  );
+  const [drafts, setDrafts] = useState<Record<CspMode, CspScanRequest>>(() => ({ rank: seedDraft('rank'), targeted: seedDraft('targeted') }));
+  const [mode, setMode] = useState<CspMode>(initial.mode === 'targeted' ? 'targeted' : 'rank');
   const request = drafts[mode];
   const [targetedConfirmed, setTargetedConfirmed] = useState(false);
   const [error, setError] = useState('');
 
   // Dialog chrome (portal, backdrop, focus trap, Escape-to-close, autofocus)
-  // now lives in ScanModalShell -- no local keydown/focus effect needed here.
+  // lives in ScanModalShell -- no local keydown/focus effect needed here.
 
-  const valid = useMemo(() => {
-    const r = request.rules;
-    const optional = [request.popMin, request.otmMin, request.rocMin];
-    const hasTarget = optional.some(value => value != null);
-    return Object.values(r).every(Number.isFinite)
-      && r.IVR_MIN >= 0 && r.IVR_MAX <= 100 && r.IVR_MAX > r.IVR_MIN
-      && r.DTE_MIN >= 0 && r.DTE_MAX > r.DTE_MIN
-      && r.DELTA_MIN >= 0 && r.DELTA_MAX <= 1 && r.DELTA_MAX > r.DELTA_MIN
-      && r.OI_MIN >= 0 && r.BID_ASK_MAX >= 0
-      && optional.every(value => value == null || Number.isFinite(value))
-      && (request.popMin == null || (request.popMin >= 0 && request.popMin <= 100))
-      && (request.otmMin == null || request.otmMin >= 0)
-      && (request.rocMin == null || request.rocMin >= 0)
-      && (request.capitalLimit == null || (Number.isFinite(request.capitalLimit) && request.capitalLimit >= 0))
-      && (mode !== 'targeted' || hasTarget);
-  }, [mode, request]);
+  const values = useMemo(() => toValues(request, mode), [mode, request]);
+  const errors = useMemo(() => cspFieldErrors(values), [values]);
+  const valid = useMemo(() => isCspConfigValid(values), [values]);
+  const receipt = useMemo(() => buildCspReceipt(values), [values]);
 
   const updateDraft = (updater: (current: CspScanRequest) => CspScanRequest) => {
     setDrafts(prev => ({ ...prev, [mode]: updater(prev[mode]) }));
     if (mode === 'targeted') setTargetedConfirmed(false);
   };
-  const setRule = (key: keyof CspRulesType, value: number) => updateDraft(prev => ({ ...prev, preset: 'custom', rules: { ...prev.rules, [key]: value } }));
+  const setRule = (key: CspRuleKey, value: number) => updateDraft(prev => ({ ...prev, preset: 'custom', rules: { ...prev.rules, [key]: value } }));
+  const setRules = (patch: Partial<Record<CspRuleKey, number>>) => updateDraft(prev => ({ ...prev, preset: 'custom', rules: { ...prev.rules, ...patch } }));
+  const setTarget = (field: 'popMin' | 'otmMin' | 'rocMin', value: number | null) => updateDraft(prev => ({ ...prev, preset: 'custom', [field]: value }));
   const applyPreset = (key: string) => {
     if (key === 'custom') {
       updateDraft(prev => ({ ...prev, preset: 'custom' }));
@@ -166,7 +188,10 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
       rocMin: preset.rocMin,
     }));
   };
-  const chooseMode = (next: CspScanRequest['mode']) => { setMode(next); setError(''); if (next === 'targeted') setTargetedConfirmed(false); };
+  const chooseMode = (next: CspRequestMode) => {
+    if (next === 'filter') return; // Filter mode was removed; the radio group never offers it.
+    setMode(next); setError(''); if (next === 'targeted') setTargetedConfirmed(false);
+  };
   const onPresetKeyDown = (event: React.KeyboardEvent, index: number) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
@@ -174,6 +199,74 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
     const nextIndex = (index + delta + PRESET_CHOICES.length) % PRESET_CHOICES.length;
     applyPreset(PRESET_CHOICES[nextIndex].key);
     contentRef.current?.querySelector<HTMLButtonElement>(`[data-csp-preset="${PRESET_CHOICES[nextIndex].key}"]`)?.focus();
+  };
+
+  // Renders the control of one registry criterion. The kind decides the widget; the
+  // registry supplies every label, title, step, and quick-select value.
+  const renderControl = (criterion: CspCriterion) => {
+    const control = criterion.control;
+    switch (control.kind) {
+      case 'range': {
+        const min = request.rules[control.minKey];
+        const max = request.rules[control.maxKey];
+        const matched = matchRangePreset(min, max, control.presets);
+        const pills: CriterionPill[] = control.presets.map(p => ({
+          key: p.label, label: p.label, pressed: matched?.label === p.label,
+          onSelect: () => setRules({ [control.minKey]: p.min, [control.maxKey]: p.max }),
+        }));
+        return (
+          <>
+            <div className="flex flex-wrap gap-3">
+              <CriterionInput id={control.minKey} label={control.minLabel} title={control.minTitle} step={control.step} value={min} onValueChange={value => setRule(control.minKey, value)} error={errors[control.minKey]} />
+              <CriterionInput id={control.maxKey} label={control.maxLabel} title={control.maxTitle} step={control.step} value={max} onValueChange={value => setRule(control.maxKey, value)} error={errors[control.maxKey]} />
+            </div>
+            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
+          </>
+        );
+      }
+      case 'rule': {
+        const value = request.rules[control.key];
+        const pills: CriterionPill[] = control.presets.map(p => ({
+          key: p.label, label: p.label, pressed: sameNumber(p.value, value),
+          onSelect: () => setRule(control.key, p.value as number),
+        }));
+        return (
+          <>
+            <CriterionInput id={control.key} label={control.label} title={control.title} step={control.step} value={value} onValueChange={next => setRule(control.key, next)} unit={criterion.unit} error={errors[control.key]} />
+            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
+          </>
+        );
+      }
+      case 'target': {
+        const current = request[control.field];
+        const pills: CriterionPill[] = control.presets.map(p => ({
+          key: p.label, label: p.value == null ? `${criterion.off ?? 'Any'}` : p.label, pressed: sameNumber(p.value, current), off: p.value == null,
+          onSelect: () => setTarget(control.field, p.value),
+        }));
+        return (
+          <>
+            <CriterionInput id={control.field} label={control.label} ariaLabel={control.ariaLabel} title={control.title} step={control.step} value={current ?? 0} onValueChange={next => setTarget(control.field, next)} unit={criterion.unit} error={errors[control.field]} />
+            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
+          </>
+        );
+      }
+      case 'secondary-sort':
+        return (
+          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">{criterion.label}
+            <select aria-label={control.ariaLabel} value={request.rankSecondary} onChange={e => updateDraft(prev => ({ ...prev, rankSecondary: e.target.value as CspRankSort }))} className={INPUT_CLASS}>
+              {control.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+        );
+      case 'capital':
+        return (
+          <fieldset className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"><legend className="px-1 text-xs font-bold text-neutral-300">Capital</legend><label className="flex items-center gap-2"><input type="checkbox" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>{request.affordableOnly && <label className="mt-3 flex flex-col gap-1">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>}<span role="status" aria-live="polite" className="block min-h-0 text-[9px] text-red-400">{errors.capitalLimit ?? ''}</span><p className="mt-2 text-neutral-400">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></fieldset>
+        );
+      case 'info':
+        return null;
+      default:
+        return null;
+    }
   };
 
   return (
@@ -206,18 +299,32 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
           {CSP_TARGETED_PRESETS.map(p => <button key={p.key} data-csp-targeted-preset={p.key} role="radio" aria-checked={request.preset === p.key} aria-label={`${p.label} targeted preset${request.preset === p.key ? ', selected' : ''}`} onClick={() => applyTargetedPreset(p.key)} className={`rounded-lg border p-2 text-left ${request.preset === p.key ? `${p.color} bg-white/5` : 'border-neutral-700 text-neutral-300'}`}><span className="block text-[11px] font-bold">{request.preset === p.key ? '✓ ' : ''}{p.label}</span></button>)}
         </div></fieldset>}
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {([['DTE_MIN','Min DTE','Earliest expiration to include'],['DTE_MAX','Max DTE','Latest expiration to include'],['DELTA_MIN','Min Δ','Lower edge of the short-put delta range'],['DELTA_MAX','Max Δ','Upper edge of the short-put delta range'],['OI_MIN','OI pref.','Preferred minimum open interest'],['IVR_MIN','IVR pref.','Preferred underlying IV rank floor'],['IVR_MAX','IVR cap','Maximum underlying IV rank']] as Array<[keyof CspRulesType,string,string]>).map(([key,label,title]) => <label key={key} title={title} className="flex flex-col gap-1 text-[10px] text-neutral-400">{label}<DeferredNumberInput aria-label={label} step={key.includes('DELTA') ? '0.01' : '1'} value={request.rules[key]} onValueChange={value => setRule(key, value)} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>)}
-          {mode === 'targeted' && <><label className="flex flex-col gap-1 text-[10px] text-neutral-400" title="Estimated probability of profit minimum">POP Est. min<DeferredNumberInput aria-label="Minimum estimated POP" step="1" value={request.popMin ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, preset: 'custom', popMin: value }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>
-          <label className="flex flex-col gap-1 text-[10px] text-neutral-400" title="Minimum distance below the current stock price">OTM min<DeferredNumberInput aria-label="Minimum OTM percentage" step="0.1" value={request.otmMin ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, preset: 'custom', otmMin: value }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>
-          <label className="flex flex-col gap-1 text-[10px] text-neutral-400" title="Minimum return on collateral for this expiration">Cash return min<DeferredNumberInput aria-label="Minimum cash return" step="0.1" value={request.rocMin ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, preset: 'custom', rocMin: value }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label></>}
-          {mode === 'rank' && <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Secondary sort<select aria-label="CSP secondary sort" value={request.rankSecondary} onChange={e => updateDraft(prev => ({ ...prev, rankSecondary: e.target.value as CspRankSort }))} className="mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white"><option value="none">None</option><option value="creditDollars">Credit</option><option value="rocPct">ROC</option><option value="otmPct">OTM %</option><option value="pop">POP</option><option value="relevantLegOI">Relevant-leg OI</option><option value="dte">DTE</option></select></label>}
+        {CSP_CARD_ORDER.map(card => {
+          const criteria = criteriaForCard(mode, card);
+          if (criteria.length === 0) return null;
+          if (card === 'capital') {
+            return <div key={card} className="mt-5" data-csp-card={card}>{criteria.map(c => <div key={c.id}>{renderControl(c)}</div>)}</div>;
+          }
+          return (
+            <section key={card} data-csp-card={card} aria-label={CSP_CARD_TITLE[card]} className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-neutral-200">{CSP_CARD_TITLE[card]}</h3>
+              <div className="mt-2 flex flex-col gap-4">
+                {criteria.map(c => (
+                  <div key={c.id} data-csp-criterion={c.id}>
+                    <p className="text-[10px] font-bold text-neutral-300">{c.label}<LifecycleTag lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} /></p>
+                    <p className="mb-2 mt-1 text-[10px] text-neutral-400">{c.hint}</p>
+                    {renderControl(c)}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+        <div className="mt-4">
+          <ScanReceiptPanel th={th} receipt={receipt} heading="Scan summary" testId="csp-rule-preview" showLimits />
         </div>
-
-        <fieldset className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"><legend className="px-1 text-xs font-bold text-neutral-300">Capital</legend><label className="flex items-center gap-2"><input type="checkbox" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>{request.affordableOnly && <label className="mt-3 flex flex-col gap-1">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>}<p className="mt-2 text-neutral-400">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></fieldset>
-
-        <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300" data-testid="csp-rule-preview">Liquidity and earnings checks are applied automatically; earnings before expiration disqualify.</div>
-        {mode === 'targeted' && request.popMin == null && request.otmMin == null && request.rocMin == null && <p role="alert" className="mt-2 text-xs text-amber-300">Set at least one POP, OTM, or period ROC target to narrow this scan.</p>}
+        {mode === 'targeted' && !hasTargetedGate(values) && <p role="alert" className="mt-2 text-xs text-amber-300">Set at least one POP, OTM, or period ROC target to narrow this scan.</p>}
         {error && <p role="alert" className="mt-2 text-xs text-red-400">{error}</p>}
         <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-neutral-700 px-4 py-2 text-xs">Cancel</button>{mode === 'targeted' && !targetedConfirmed && <button disabled={!valid} onClick={() => setTargetedConfirmed(true)} className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-bold text-amber-300 disabled:opacity-50">CONFIRM TARGETS</button>}<button disabled={!valid || (mode === 'targeted' && !targetedConfirmed)} onClick={() => { if (!valid) { setError('Correct the CSP ranges before running.'); return; } onRun(request); }} className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">RUN CSP SCAN →</button></div>
       </div>

@@ -9,6 +9,6 @@ describe('ActiveCspRules Rank ordering', () => {
   it('displays Score as primary and the preserved supported secondary sort', () => {
     const snapshot = buildCspRuleSnapshot(DEFAULT_CSP_RULES, { mode: 'rank', rankSecondary: 'rocPct' });
     render(<ActiveCspRules snapshot={snapshot} onEdit={vi.fn()} />);
-    expect(screen.getByTestId('active-csp-rules')).toHaveTextContent('Order Score → rocPct');
+    expect(screen.getByTestId('active-csp-rules')).toHaveTextContent('OrderScore → ROC %');
   });
 });

@@ -186,6 +186,8 @@ import { PmccScanModal, type PmccScanRequest } from '@/features/screener/compone
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
+import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
+import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
 import { PmccTickerDisclosure } from '@/features/screener/components/PmccTickerDisclosure';
@@ -1262,14 +1264,9 @@ function runCspChecklist(
   // IVR — CSP is undefined-risk (assignment), so per the Prosper rule set it
   // has a hard upper cap at 70, unlike spreads which have no cap. This is
   // now a per-symbol MARKET-QUALIFICATION classifier, not a discovery gate.
-  const ivrCheck: CheckResult = ivrValue == null
-    ? { status: 'warn', value: 'N/A', reason: 'Not available' }
-    : ivrValue < cspRules.IVR_MIN
-      ? { status: 'warn' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Below the preferred ${cspRules.IVR_MIN}% premium environment — ranked lower` }
-      : ivrValue > cspRules.IVR_MAX
-        ? { status: 'fail' as const, value: `${ivrValue.toFixed(1)}%`, reason: `Above ${cspRules.IVR_MAX}% hard cap — undefined risk` }
-        : { status: 'pass', value: `${ivrValue.toFixed(1)}%`, reason: `Within ${cspRules.IVR_MIN}-${cspRules.IVR_MAX}% CSP range` };
-  const ivrMarketDisqualified = ivrValue != null && ivrValue > cspRules.IVR_MAX;
+  const ivrEvaluation = evaluateCspIvr(ivrValue, cspRules.IVR_MIN, cspRules.IVR_MAX);
+  const ivrCheck: CheckResult = { status: ivrEvaluation.status, value: ivrEvaluation.value, reason: ivrEvaluation.reason };
+  const ivrMarketDisqualified = ivrEvaluation.marketDisqualified;
 
   const earningsCheck: CheckResult = !earningsDate
     ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
@@ -11717,6 +11714,11 @@ export default function Home() {
               {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
                 <ActiveCspRules
                   snapshot={activeSession.ruleSnapshot}
+                  counts={summarizeCspResults(results)}
+                  capital={{
+                    affordableOnly: cspRequestsByMode[activeSession.ruleSnapshot.mode]?.affordableOnly ?? false,
+                    capitalLimit: cspRequestsByMode[activeSession.ruleSnapshot.mode]?.capitalLimit ?? null,
+                  }}
                   onEdit={() => {
                     const s = activeSession.ruleSnapshot!;
                     const restored: CspScanRequest = {

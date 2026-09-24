@@ -1,5 +1,13 @@
 # SCREENER-CONFIG-0001 — Strategy-Aware Scan Configuration
 
+> **Amended 2026-09-23.** Filter mode is removed (Dean, 2026-09-21; see
+> `SCREENER-CONFIG-0001-filter-mode-decision.md`). Spreads and CSP offer Rank
+> and Targeted only. The registry shell and the CSP migration are built together
+> under `SCREENER-CONFIG-0001A`. CC, PMCC, LEAPS, and Spreads follow in later
+> phases. The CSP notes below were checked against the engine code: DTE is the
+> only search range, short-put delta is a preference, and bid/ask liquidity is a
+> fixed policy gate.
+
 ## Problem
 
 The Screener has five different scan-configuration experiences: defined-risk
@@ -53,7 +61,7 @@ Use the common visual hierarchy:
 
 ### Defined-risk spreads
 
-- Keep Filter, Rank, and Targeted as distinct intents.
+- Keep Rank and Targeted as distinct intents (Filter was removed 2026-09-21).
 - Rename the control to **Minimum credit (% of spread width)**. Do not call it
   credit/risk unless the formula is actually changed to credit divided by
   maximum loss.
@@ -65,16 +73,26 @@ Use the common visual hierarchy:
 
 ### Cash-secured puts
 
-- Preserve Filter, Rank, and Targeted intent selection.
-- Targeted hard gates are POP, OTM, and period ROC. Current implementation
-  treats short-put delta as a preference/ranking signal, not a targeted
-  qualification failure; do not label it a gate unless engine policy changes.
-- Add an execution-level regression that proves the policy: a quote-valid CSP
-  outside the configured delta band remains available to the scan outcome,
-  while a candidate below targeted POP, OTM, or ROC is marked a targeted
-  near-miss. If the engine policy is changed instead, the registry, receipt,
-  and this test must change together.
-- OI and bid/ask remain preferences under current behavior and must say so.
+- Rank and Targeted intent selection only. Filter is removed.
+- DTE is the search range (fetch): expirations outside it are never fetched, and
+  changing it requires a rescan. Short-put delta is a preference, not a search
+  range: every quote-valid put in the DTE window is kept. A put outside the
+  preferred band is shown with a warning, ranks below puts nearer the band
+  center, and cannot be a Best Opportunity (CSP-BESTOPP-GATE-0001). Delta chips
+  after the scan are a result filter.
+- Targeted hard gates are POP, OTM, and period ROC. A fetched candidate below
+  one of them is a visible targeted near-miss.
+- Add an execution-level regression that proves the policy: a quote-valid put
+  outside the configured delta band is kept, marked, and not Best-Opportunity
+  eligible, while a candidate below targeted POP, OTM, or ROC is marked a
+  targeted near-miss. If the engine policy is changed instead, the registry,
+  receipt, and this test must change together.
+- Open interest is advisory: lower OI is kept with a warning. Literal zero OI
+  cannot be a Best Opportunity.
+- Bid/ask liquidity is a fixed relative-policy gate, not a setting: strong at
+  or under max($0.10, 10% of mid), borderline up to 15% of mid (kept, excluded
+  from Best Opportunities), poor beyond that fails. `bidAskMax` no longer
+  governs pass/fail and must not be shown as an editable control.
 - Expose the IVR hard cap in the visible scan receipt or Always Applied list.
   Keep lower-IVR guidance distinct from the cap.
 - Label return as **Minimum period return on collateral (ROC)**, with its unit
@@ -157,7 +175,7 @@ the returned candidate list.
   labelled title, initial focus, Escape-to-close, a focus trap, and returns
   focus to its launching control on close.
 - Cancel discards uncommitted edits. Run commits a validated request snapshot.
-- Filter, Rank, and Targeted retain independent drafts where those modes are
+- Rank and Targeted retain independent drafts where those modes are
   available; changing a profile updates only the fields it explicitly owns.
 - An account, holdings, universe, or eligibility change invalidates the
   affected scan receipt and displays why the saved draft can or cannot be
@@ -166,7 +184,7 @@ the returned candidate list.
 ## Non-goals
 
 - Do not create a universal economic filter matrix.
-- Do not make CC/PMCC adopt Filter/Rank/Targeted just for symmetry.
+- Do not make CC/PMCC adopt Rank/Targeted just for symmetry.
 - Do not change a policy from preference to gate, or vice versa, as a UI-only
   refactor.
 - Do not enable LEAPS extrinsic-percent filtering without a documented
