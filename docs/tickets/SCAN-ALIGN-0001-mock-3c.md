@@ -1,6 +1,6 @@
 # Mock 3c: held-LEAP outcomes on the existing held pair card (Diane, 2026-09-24)
 
-**Supersedes Mock 3b for build.** Mock 3b assumed a results container, LEAP tile row, funnel and breakdown that do not exist (Dane's pre-build check). Mock 3c redraws only the three states on the EXISTING held pair card (`page.tsx` ~5467-5640). Approved copy from Mock 3b is unchanged unless listed under "Copy changes". Tiles, em dashes, results container, "Show full breakdown", funnel, "Adjust short delta" banner, tooltips and the rejected-pairs list move to follow-on ticket 0001C (own mock and approval). Status: draft; Ian re-checks the changed copy; Paul and Dean re-approve.
+**Supersedes Mock 3b for build.** Mock 3b assumed a results container, LEAP tile row, funnel and breakdown that do not exist (Dane's pre-build check). Mock 3c redraws only the three states on the EXISTING held pair card (`page.tsx` ~5467-5640). Approved copy from Mock 3b is unchanged unless listed under "Copy changes". Tiles, em dashes, results container, "Show full breakdown", funnel, "Adjust short delta" banner, tooltips and the rejected-pairs list move to follow-on ticket 0001C (own mock and approval). Status: Ian approved the changed copy with two edits (applied, 2026-09-24); Paul recommended the split; Dean took the two decisions as recommended. Held cards with rejected states never sort above a valid result.
 
 ## Card placement (all states)
 
@@ -34,7 +34,7 @@ Caption `Multi-lot LEAP: cost unverified`; banner `Short calls were not checked.
 
 ## State 3: floor not met
 
-Caption `Floor {floor} (LEAP strike + cost)`; banner `No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: {Kl} + {avgOpen} = ${floor}.`; reason `SHORT_NOT_ABOVE_HELD_BREAKEVEN`; detail `Detail: every short had strike + bid at or below ${floor}.` (replaces the funnel). **Fallback** if `avgOpen`/floor cannot be carried from the engine as pass-through data (no logic change): caption `Floor not met`, banner `Floor not met (strike + bid at or below LEAP strike + your cost)`, reason code in the reason line. Ian confirms the fallback.
+Caption `Floor {floor} (LEAP strike + cost)`; banner `No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: {Kl} + {avgOpen} = ${floor}.`; reason `SHORT_NOT_ABOVE_HELD_BREAKEVEN`; detail `Detail: every short that reached the floor check had strike + bid at or below ${floor}.` (replaces the funnel; Ian: the plain "every short" wording is false if any short was dropped earlier for delta, DTE or liquidity, so Dane confirms against the code and otherwise uses a shorter safe line, e.g. `Detail: no short cleared the floor.`). **Fallback** if `avgOpen`/floor cannot be carried from the engine as pass-through data (no logic change): caption `Floor not met`, banner `No short calls cleared the floor. Floor not met (strike + bid at or below LEAP strike + your cost).` (Ian: keep the "No short calls cleared the floor." lead so it reads as a rejection, not a data error), reason code in the reason line. Ian confirms the fallback.
 
 ## Multi-LEAP (per symbol)
 
