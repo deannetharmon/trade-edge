@@ -15,6 +15,8 @@
 import { useMemo, useState } from 'react';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
 import { DeferredNumberInput } from './DeferredNumberInput';
+import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
+import { matchRangePreset } from '@/lib/screener/scanConfig/presets';
 
 export interface PmccScanRequest {
   shortDteMin: number;
@@ -31,6 +33,13 @@ export interface PmccHeldCandidateSummary {
   underlyingSymbol: string;
   dte: number;
 }
+
+// SCAN-ALIGN-0001 F1 (Mock 1): quick-select presets that set BOTH Min and Max delta.
+export const PMCC_DELTA_PRESETS = [
+  { label: '0.15-0.25', min: 0.15, max: 0.25 },
+  { label: '0.20-0.30', min: 0.2, max: 0.3 },
+  { label: '0.25-0.35', min: 0.25, max: 0.35 },
+] as const;
 
 export function PmccScanModal({
   th, heldCandidates, hiddenSymbols, onToggleSymbol, discoveryLoading, exclusions, initial, onClose, onRun,
@@ -69,6 +78,11 @@ export function PmccScanModal({
     && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0 && draft.widthCeiling >= 0.01
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
   const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
+  const matchedDeltaPreset = matchRangePreset(draft.shortDeltaMin, draft.shortDeltaMax, PMCC_DELTA_PRESETS);
+  const deltaPills: CriterionPill[] = PMCC_DELTA_PRESETS.map(p => ({
+    key: p.label, label: p.label, pressed: matchedDeltaPreset?.label === p.label,
+    onSelect: () => setDraft(value => ({ ...value, shortDeltaMin: p.min, shortDeltaMax: p.max })),
+  }));
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose}>
     <p className="text-[10px] text-neutral-400">Searches short calls to sell against your held LEAPS.</p>
     {discoveryLoading ? (
@@ -108,8 +122,11 @@ export function PmccScanModal({
     <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
       {field('shortDteMin', 'Min DTE', '1')}
       {field('shortDteMax', 'Max DTE', '1')}
+      <p className="col-span-full text-[10px] font-bold uppercase tracking-wide text-neutral-300" data-testid="pmcc-delta-group-label">Delta range (absolute)</p>
       {field('shortDeltaMin', 'Min Δ', '0.01')}
       {field('shortDeltaMax', 'Max Δ', '0.01')}
+      <div className="col-span-full"><CriterionPills th={th} groupLabel="Delta range quick select" pills={deltaPills} /></div>
+      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-delta-hint">Absolute delta of the short call. Lower = further OTM.</p>
       {field('shortOiMin', 'Short OI min', '1')}
       {field('maxSpreadPct', 'Max spread %', '1')}
       {field('widthCeiling', 'Width ceiling ($)', '0.01')}
