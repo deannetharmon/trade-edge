@@ -1,7 +1,7 @@
 // lib/scans/pmccPairing.ts
 
 import { isOccSymbolMatch } from './candidateIdentity';
-import { heldLongKey, type HeldLongBasisMap } from './pmccHeldBreakeven';
+import { evaluateHeldBreakevenFloor, HELD_BREAKEVEN_FLOOR_MESSAGE, heldLongKey, type HeldLongBasisMap } from './pmccHeldBreakeven';
 import { isValidPmccDteRanges } from './pmccDteRanges';
 import {
   isValidPmccDeltaRange,
@@ -46,7 +46,7 @@ const FAILURE_MESSAGES: Record<PmccFailureCode, string> = {
   INVALID_EXTRINSIC: 'Long-call extrinsic value is missing, negative, or invalid',
   INSUFFICIENT_DATA: 'Required contract data is missing or invalid',
   COST_BASIS_UNAVAILABLE: 'cost basis unavailable',
-  SHORT_NOT_ABOVE_HELD_BREAKEVEN: 'Short strike plus bid must exceed held LEAP strike plus cost basis',
+  SHORT_NOT_ABOVE_HELD_BREAKEVEN: HELD_BREAKEVEN_FLOOR_MESSAGE,
 };
 
 function reason(code: PmccFailureCode, detail?: string): PmccFailureReason {
@@ -236,6 +236,7 @@ function evaluatePair(
   shortLeg: PmccEligibleLeg,
   criteria: PmccPairingCriteria,
   heldLongOccSymbols: ReadonlySet<string> = new Set(),
+  heldFloor?: { basis: HeldLongBasisMap | undefined; spot: number },
 ): { pair: PmccPairResult; structurallyValid: boolean } {
   const failures: PmccFailureReason[] = [];
   const isHeldLong = heldLongOccSymbols.has(longLeg.candidateId);
@@ -249,6 +250,22 @@ function evaluatePair(
   else if (!isHeldLong) {
     if (!(metrics.netDebitPerShare > 0)) failures.push(reason('NET_DEBIT_NOT_POSITIVE'));
     if (criteria.requireDebitBelowWidth && !(metrics.netDebitPerShare < metrics.strikeWidth)) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
+  }
+  // PMCC-HELD-BREAKEVEN-0001: a held long has no purchase to price, but a short call whose
+  // assignment would lock in a loss must not qualify. Floor: Ks + short bid > Kl + avgOpenPrice.
+  // Deliberately inside the held branch only, so the new-entry hot path does no per-pair work.
+  // A held long with no basis entry fails closed as COST_BASIS_UNAVAILABLE.
+  if (metrics != null && isHeldLong) {
+    const held = heldFloor?.basis?.get(longLeg.candidateId);
+    const failure = evaluateHeldBreakevenFloor({
+      strikeLong: longLeg.strike,
+      strikeShort: shortLeg.strike,
+      shortBid: shortLeg.executablePrice,
+      spot: heldFloor?.spot ?? Number.NaN,
+      basis: held?.avgOpen ?? null,
+      quantity: held?.quantity,
+    });
+    if (failure) failures.push(reason(failure.code, failure.message));
   }
   const structurallyValid = failures.every(item => item.code === 'NET_DEBIT_NOT_BELOW_WIDTH');
   return {
@@ -309,10 +326,11 @@ export function pairPmccCandidates(input: {
   const allQualified: PmccPairResult[] = [];
   const allNearMisses: PmccPairResult[] = [];
 
+  const heldFloor = { basis: input.heldLongBasis, spot: input.underlyingPrice };
   outer: for (const longLeg of longs.eligible) {
     for (const shortLeg of shorts.eligible) {
       if (counts.combinationsEvaluated >= input.criteria.limits.maxCombinationsEvaluated) break outer;
-      const evaluated = evaluatePair(longLeg, shortLeg, input.criteria, input.heldLongOccSymbols);
+      const evaluated = evaluatePair(longLeg, shortLeg, input.criteria, input.heldLongOccSymbols, heldFloor);
       counts.combinationsEvaluated += 1;
       if (evaluated.structurallyValid) counts.structurallyValidPairs += 1;
       if (evaluated.pair.qualified) allQualified.push(evaluated.pair);

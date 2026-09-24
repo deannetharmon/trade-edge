@@ -11,7 +11,9 @@ import { runPmccProduction } from '../pmccProduction';
 import { pairPmccCandidates } from '../pmccPairing';
 import type { PmccChainLeg, PmccFailureCode, PmccPairingCriteria } from '../pmccTypes';
 
-// PMCC-HELD-BREAKEVEN-0001, commit 1 (plumbing). Nothing here asserts the floor itself.
+// PMCC-HELD-BREAKEVEN-0001 plumbing: allowlist exhaustiveness, session round trip, messages, key helper.
+// (Commit 1 also carried a "basis accepted but not enforced" test; commit 2 removes it, as the floor now enforces.)
+// The floor itself is tested in pmccHeldBreakeven.test.ts.
 
 // Compile-time exhaustive: adding a PmccFailureCode member without adding it here is a tsc error.
 const ALL_FAILURE_CODES: Record<PmccFailureCode, true> = {
@@ -43,7 +45,7 @@ const leg = (role: 'long' | 'short', strike: number, overrides: Partial<PmccChai
 const context = { symbol: 'GS', price: 1037.55, ivr: 35, underlyingType: 'stock' as const };
 const held: HeldPmccLongCandidate = {
   accountNumber: '5WT00001', positionKey: 'held-gs', underlyingSymbol: 'GS',
-  occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: null,
+  occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345,
 };
 
 describe('PMCC-HELD-BREAKEVEN-0001 plumbing', () => {
@@ -97,13 +99,5 @@ describe('PMCC-HELD-BREAKEVEN-0001 plumbing', () => {
   it('heldLongKey matches the identity pairing derives (space-padded OCC and case normalize)', () => {
     expect(heldLongKey('GS    270618C00720000')).toBe('occ:GS270618C00720000');
     expect(heldLongKey('gs270618c00720000')).toBe('occ:GS270618C00720000');
-  });
-
-  it('accepts heldLongBasis without enforcing it: a held pair with junk or absent basis still qualifies (no behavior change)', () => {
-    const args = { symbol: 'GS', underlyingPrice: 1037.55, longLegs: [leg('long', 720)], shortLegs: [leg('short', 1070)], criteria, asOf, marketSession: 'open' as const, heldLongOccSymbols: new Set([heldLongKey(held.occSymbol)]) };
-    const without = pairPmccCandidates(args);
-    const junk = pairPmccCandidates({ ...args, heldLongBasis: new Map([[heldLongKey(held.occSymbol), { avgOpen: null, quantity: 99 }]]) });
-    expect(without.qualifiedPairs).toHaveLength(1);
-    expect(junk).toEqual(without);
   });
 });

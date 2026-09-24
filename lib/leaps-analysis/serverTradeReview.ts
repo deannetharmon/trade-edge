@@ -1,7 +1,10 @@
+// lib/leaps-analysis/serverTradeReview.ts
+
 import Redis from 'ioredis';
 import { decrypt, encrypt } from '@/lib/crypto';
 import { evaluateLeapsEntry, type LeapsEntryCriteria, type LeapsEntryQualification } from '@/lib/scans/leapsEntryQualification';
 import { pairPmccCandidates } from '@/lib/scans/pmccPairing';
+import { heldLongKey, parseHeldQuantity, readHeldBasis, type HeldLongBasisMap } from '@/lib/scans/pmccHeldBreakeven';
 import { DEFAULT_PMCC_DTE_RANGES } from '@/lib/scans/pmccDteRanges';
 import { DEFAULT_PMCC_LONG_DELTA_RANGE, DEFAULT_PMCC_SHORT_DELTA_RANGE, DEFAULT_PMCC_LONG_OI_MIN, DEFAULT_PMCC_SHORT_OI_MIN, DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '@/lib/scans/pmccConfig';
 import { evaluatePmccDecision } from '@/lib/scans/pmccDecision';
@@ -211,6 +214,10 @@ interface HeldPmccPositionMatch {
   quantity: number;
   avgOpenPrice: number | null;
   expiration: string | null;
+  // PMCC-HELD-BREAKEVEN-0001: the broker's raw strings, for the strict floor readers. The lenient
+  // fields above stay as they were for the display snapshot and the sell-quantity check.
+  rawQuantity: unknown;
+  rawAvgOpenPrice: unknown;
 }
 
 async function findHeldPmccLongPosition(context: BrokerContext, accountNumber: string, input: { underlyingSymbol: string; longOccSymbol: string }): Promise<HeldPmccPositionMatch | null> {
@@ -226,6 +233,8 @@ async function findHeldPmccLongPosition(context: BrokerContext, accountNumber: s
   return {
     quantity: parseInt(match['quantity'] ?? '0', 10),
     avgOpenPrice: finite(match['average-open-price']),
+    rawQuantity: match['quantity'],
+    rawAvgOpenPrice: match['average-open-price'],
     expiration: iso(match['expires-at'])?.slice(0, 10) ?? (typeof match['expires-at'] === 'string' ? match['expires-at'].slice(0, 10) : null),
   };
 }
@@ -316,7 +325,14 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
         qualifyingSpreadPctMax: shortCriteriaOverride?.qualifyingSpreadPctMax ?? SERVER_PMCC_CRITERIA.quotePolicy.qualifyingSpreadPctMax,
       },
     };
-    const heldLongOccSymbols = new Set([`occ:${input.longOccSymbol.replace(/\s+/g, '').toUpperCase()}`]);
+    const heldLongKeyValue = heldLongKey(input.longOccSymbol);
+    const heldLongOccSymbols = new Set([heldLongKeyValue]);
+    // PMCC-HELD-BREAKEVEN-0001: cost and lot count come from the broker position fetched above,
+    // parsed strictly from the raw strings. Never input.quantity (that is the SELL quantity).
+    const heldLongBasis: HeldLongBasisMap = new Map([[heldLongKeyValue, {
+      avgOpen: readHeldBasis(heldPosition.rawAvgOpenPrice),
+      quantity: parseHeldQuantity(heldPosition.rawQuantity),
+    }]]);
     const pairing = pairPmccCandidates({
       symbol: input.underlyingSymbol,
       underlyingPrice: longReview.spot ?? shortReview.spot ?? NaN,
@@ -324,6 +340,7 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
       shortLegs: [pmccLeg(shortReview)],
       criteria: effectiveCriteria,
       heldLongOccSymbols,
+      heldLongBasis,
       asOf: now,
       marketSession,
     });
@@ -344,7 +361,10 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
     // Held mode's own "ready to act" action is HELD_PMCC_REVIEW_ONLY, not
     // NEW_PMCC_REVIEW_ALLOWED -- same gate Ian confirmed should still
     // block a sell-to-open exactly like it blocks a new PMCC entry.
-    if (decision.action !== 'HELD_PMCC_REVIEW_ONLY' || !pair) return { decision, order: null };
+    // A floor-failed held pair (COST_BASIS_UNAVAILABLE or SHORT_NOT_ABOVE_HELD_BREAKEVEN) still reaches
+    // `pair` via nearMissPairs; it must never become ready or build an order body. The decision gates
+    // already block it (a structural fail gate); `pair.qualified` is checked here as a second, direct guard.
+    if (decision.action !== 'HELD_PMCC_REVIEW_ONLY' || !pair || !pair.qualified) return { decision, order: null };
 
     const instrumentType = shortReview.instrumentType;
     const response = await fetch(`${API_BASE}/accounts/${accountNumber}/orders${input.mode === 'dry-run' ? '/dry-run' : ''}`, {
