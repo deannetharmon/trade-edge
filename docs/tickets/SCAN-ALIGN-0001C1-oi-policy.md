@@ -40,3 +40,33 @@ PMCC hard-rejects a short call below the OI minimum, while covered call only war
 ## Rollout notes
 
 Alan signs off on fixtures before build. Quinn's test-flip review is done (2026-09-24).
+
+## Golden fixtures (Alan, 2026-09-24) and Ian's rulings
+
+**Blockers found on main, now in scope:** (B1) `pmccPairing.ts:169-170` rejects a held long with null OI as `INSUFFICIENT_DATA` before the held floor (PR1) sees it. C1 exempts held longs (`!isHeldLong && (null || !finite)`); `PmccEligibleLeg.openInterest` may be `null` **only for held longs** (type guard or comment; non-held legs must be non-null and finite, with a test enforcing it; no consumer does arithmetic on OI without a null check). Also `:190` puts any leg with `openInterest == null` into `rejected` with EMPTY reasons: every rejection must carry a reason code (test). (B2) `isEligibleCcLeg` (`covered-call-finder.ts:63-95`) has no OI check today; null/NaN/Infinity OI is eligible and reaches the `:145` sort comparator (NaN). C1 adds a real check: OI must be finite, >= 0 and at or above the floor for eligibility; null/NaN/Infinity/negative are ineligible with an `INSUFFICIENT_DATA` reason. (Ian) Negative OI is invalid data, not zero. (Ian) Add strike ascending as the final CC sort tie-break so ranking is deterministic.
+
+M = `shortOiMin` / `longOiMin` (100 in the pairing fixtures; CC uses `OI_MIN`).
+
+| # | Leg | OI input | Expected |
+|---|---|---|---|
+| 1 | PMCC short | M | eligible, no OI warning |
+| 2 | PMCC short | M-1 (99) | eligible, OI warning (not `OPEN_INTEREST_BELOW_MINIMUM`), reaches `qualifiedPairs` |
+| 3 | PMCC short | 0 | eligible, warns (0 is data) |
+| 4 | PMCC short | null / undefined / NaN / +Inf / -Inf | rejected `INSUFFICIENT_DATA` "Open interest is missing or invalid" |
+| 5 | PMCC short | -1 | rejected `INSUFFICIENT_DATA` |
+| 6 | new LEAP | M / M-1 / 0 | pass / `OPEN_INTEREST_BELOW_MINIMUM` / same code (unchanged) |
+| 7 | new LEAP | null, NaN, Inf | `INSUFFICIENT_DATA` |
+| 8 | held long | 50, 0, null, NaN | eligible, no OI reason; with a basis entry it reaches `evaluateHeldBreakevenFloor` and passes/fails on price only |
+| 9 | held long, null OI, no basis | | `COST_BASIS_UNAVAILABLE` (proves it reached the floor, not an OI reject) |
+| 10 | CC leg | null, undefined, NaN, +Inf, -1 | excluded from `selectAllEligibleCcLeg`; a good leg in the same chain survives |
+| 11 | CC leg | M / M-1 / 0 | M passes; M-1 and 0 stay eligible and warn |
+
+Held order asserted: filterLegs (OI skipped) -> evaluatePair structural -> NET_DEBIT checks skipped -> held floor; no OI code may appear on a held long.
+
+**Display (`page.tsx:1494`, `OI_MIN` = 500):** 500 -> pass "500", "≥ 500 minimum"; 499 -> warn "499", "Below 500"; 0 -> warn "0"; null/undefined/NaN (defensive) -> value "—", reason "Open interest unavailable"; assert `not.toMatch(/NaN|null|undefined/)`. Component test with null OI required.
+
+**Ranking:** OI 500 vs 300 vs 0 at equal delta ranks 500, 300, 0; every input permutation yields the same order; no comparator returns NaN.
+
+**Tests that flip:** `pmccPairing.test.ts:149` "reports distinct leg rejections…" (repoint short OI 99 to null; `legRejections` stays 2); `pmccPairOnDemand.test.ts:84` (repoint to null OI). `ccConfigTruthfulness.test.ts` "open interest is advisory for covered calls" stays green unless it uses null OI (verify). `covered-call-finder.test.ts:326` (14c): comment only. Not grepped: `pmccHeldLeaps`, `pmccDecision`, `pmccProduction` (verify by grep for short OI below min).
+
+Ian's rulings: APPROVED as above (B1 to B3, Q4 to Q6).

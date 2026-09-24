@@ -43,3 +43,39 @@ Covered call uses a fixed $0.20 width cap: it passes 50% slippage on cheap calls
 ## Rollout notes
 
 Revertable as its own commit. The new field is additive; a revert leaves an unknown key that loaders must tolerate.
+
+## Golden fixtures (Alan, 2026-09-24) and Ian's rulings
+
+**Build to the redrawn Mock 2 (`SCAN-ALIGN-0001-mocks-1-2-redraw.md`), not the original Mock 2.**
+
+**Integer rules (no mid rounding):** convert with `Math.round(x * 10000)` (1e-4 dollar units, handles 3 to 4 decimal quotes). With w = ask - bid and S = ask + bid (= 2 x mid), in cents: reject iff `20w > max(100, S)`; warn iff `40w > max(200, S)`; ceiling (short and CC only) reject iff `w > 50`. (In 1e-4 units scale by 100: reject `20w > max(10000, S)`, warn `40w > max(20000, S)`, ceiling `w > 5000`.) The percent uses S/2 by cross-multiplication, never a mid rounded to cents.
+
+| bid/ask | w | S | Result |
+|---|---|---|---|
+| 0.28/0.33 | 5 | 61 | pass, no warn (float trap 0.05000000000000004) |
+| 5.75/6.25 | 50 | 1200 | pass + WARN (8.33%); ceiling 50 > 50 no |
+| 0.95/1.05 | 10 | 200 | pass + WARN (exactly 10%) |
+| 0.95/1.0501 | 10.01 | 200.01 | REJECT |
+| 0.30/0.30 | 0 | 60 | locked, pass, spreadPct 0 |
+| 0.31/0.30 | crossed | | reject |
+| 0.00/0.10, 0.10/0.00, 0/0 | | | reject (`finitePositive`; mid = 0 unreachable) |
+| 1.94/2.06 (mid 2.00, w 12) | 12 | 400 | **passes reject (limit max(5, 20)) and warns (limit max(5, 10))** (replaces the impossible row) |
+| 0.075/0.125 (mid 0.10) | 5 | 20 | pass, **no warn** (Ian: no warn for mid <= $1.00; the $0.05 floor is a tick-noise allowance, not a quality signal; one floor, not two) |
+| 0.06/0.14 (mid 0.10) | 8 | 20 | reject |
+| 19.00/21.00 (mid 20) | 200 | 4000 | short/CC: REJECT by the ceiling only (percent passes) |
+| 99.00/101.00 (LEAP mid 100) | 200 | 20000 | new PMCC long: eligible, no warn (ceiling not applied) |
+| 96.00/104.00 (LEAP mid 100, 8%) | 800 | 20000 | eligible + WARN (proves ceiling scope) |
+| 9.75/10.25 | 50 | 2000 | pass (ceiling 50 > 50 no) |
+| 9.74/10.26 | 52 | 2000 | short reject by the ceiling |
+
+**Old-rule flips:** 1.00/1.20 (w 20, S 220: 400 > 220 reject; the old $0.20 cap passed it); 1.00/1.21 and 1.00/1.40 reject; 0.10/0.30 (w 20, S 40: 400 > 100 reject; the old cap passed it). The old $0.20 default is gone: assert the new ceiling default 0.50 and that `DEFAULT_CC_RULES.BID_ASK_MAX` (`constants.ts:55`) no longer drives CC width; **the shared `BID_ASK_MAX` key stays untouched for CSP and rinse-repeat** (Dane renames the CC field).
+
+**Parity `it.each`:** every row through the shared function, `isEligibleCcLeg` and `evaluatePmccQuoteQuality` (short role, open session, fresh timestamp, not delayed): reject equals `!structurallyUsable`; warn equals status `wide_warning`. `evaluatePmccQuoteQuality` has no role param today; the ceiling needs one (default = no ceiling), and the parity test must neutralise the earlier status precedence (too_wide, delayed, closed, missing ts, stale).
+
+**`validateCc` does not exist on main (Alan B3): Dane creates it** with fixtures: NaN, +Inf, -Inf, -0.01, 0 and 0.004 reject; 0.01 and 0.50 accept; **a ceiling below the $0.05 floor (e.g. $0.03) is valid** (Ian: ticks are $0.01; effective limit is min(ceiling, reject rule); never clamp the ceiling up to the floor); reject ceiling <= 0, NaN or below $0.01.
+
+**Ian's rulings:** Q1 accepted as above; Q2 the PMCC modal `maxSpreadPct` still overrides the 10% reject percent for shorts (keeping the $0.05 floor) and the 5% warn stays fixed; ceiling scope confirmed (CC leg and PMCC short only, not LEAP legs). Mock items: PMCC delta chips 0.15-0.25 / 0.20-0.30 / 0.25-0.35, CC presets 5/10/15% and $0.30/$0.50/$0.75 approved (the 5% preset sits at the warn line and shows no warn-only zone); hint reads "Warns above 5% of mid (or $0.05)"; CC "Max width" becomes "% of mid" with the "$0.50 Width ceiling" as a separate control, label showing reject = the percent rule and the ceiling caps it.
+
+**Tests that flip:** `ccConfigTruthfulness.test.ts:87` both tests (1.0/1.2 now rejects; the 0.2-vs-0.5 toggle needs a wide-percent-safe row, e.g. a $20 mid with w 200); `covered-call-finder.test.ts:326` (14c) comment only; `ScreenerPage.test.tsx:682` "Max spread %" is the PMCC modal and is unrelated to the CC ceiling; `pmccQuoteQuality.test.ts` percent-band tests unchanged if the ceiling does not apply to LEAP legs.
+
+**Gate:** Mock 2 (redrawn) approved by Ian; Paul and Dean approval of the redrawn mock still needed before the C2 UI is built.
