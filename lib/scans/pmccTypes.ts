@@ -71,7 +71,6 @@ export interface PmccPairingCriteria {
   shortDelta: PmccDeltaRange;
   longOiMin: number;
   shortOiMin: number;
-  requireDebitBelowWidth: boolean;
   quotePolicy: PmccQuotePolicy;
   limits: PmccPairingLimits;
 }

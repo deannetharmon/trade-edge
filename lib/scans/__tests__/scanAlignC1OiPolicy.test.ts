@@ -21,7 +21,6 @@ const criteria: PmccPairingCriteria = {
   shortDelta: { min: 0.20, max: 0.30 },
   longOiMin: M,
   shortOiMin: M,
-  requireDebitBelowWidth: true,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
   limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };

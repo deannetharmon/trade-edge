@@ -1,3 +1,5 @@
+// lib/scans/pmccHeldReadinessClient.ts
+
 import { getAccessToken, getQuote } from './tastytrade-client';
 import { getPmccChain } from './pmccChainClient';
 import { DEFAULT_PMCC_DTE_RANGES } from './pmccDteRanges';
@@ -30,7 +32,7 @@ export async function evaluateHeldPmccLiveReadiness(held: HeldPmccLongCandidate)
       asOf: now.toISOString(), marketSession,
       criteria: {
         dte: DEFAULT_PMCC_DTE_RANGES, longDelta: DEFAULT_PMCC_LONG_DELTA_RANGE, shortDelta: DEFAULT_PMCC_SHORT_DELTA_RANGE,
-        longOiMin: DEFAULT_PMCC_LONG_OI_MIN, shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN, requireDebitBelowWidth: true,
+        longOiMin: DEFAULT_PMCC_LONG_OI_MIN, shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
         quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
       },
       decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION,

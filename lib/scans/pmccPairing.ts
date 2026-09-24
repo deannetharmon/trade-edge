@@ -264,7 +264,8 @@ function evaluatePair(
   // reject an existing covered position based on a purchase it will not make.
   else if (!isHeldLong) {
     if (!(metrics.netDebitPerShare > 0)) failures.push(reason('NET_DEBIT_NOT_POSITIVE'));
-    if (criteria.requireDebitBelowWidth && !(metrics.netDebitPerShare < metrics.strikeWidth)) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
+    // SCAN-ALIGN-0001E: always on, not a criterion.
+    if (!(metrics.netDebitPerShare < metrics.strikeWidth)) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
   }
   // PMCC-HELD-BREAKEVEN-0001: a held long has no purchase to price, but a short call whose
   // assignment would lock in a loss must not qualify. Floor: Ks + short bid > Kl + avgOpenPrice.

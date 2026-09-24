@@ -19,7 +19,7 @@ export interface PmccProductionContext {
   symbol: string; price: number; ivr: number | null; earningsDate?: string | null;
   trendResult?: TrendResult; underlyingType: 'index' | 'etf' | 'stock';
   // PMCC-TREND-GATE-0001 -- default true, same "trust the qualified realm,
-  // adjust the criterion" pattern as requireDebitBelowWidth. Session
+  // adjust the criterion" pattern as the scan controls. Session
   // scoping note (Paul/Ian's resolved call): reads context.trendResult --
   // the SAME TrendResult already attached to every ScreenResult and
   // already read by the group-header trend badge -- not a separate trend

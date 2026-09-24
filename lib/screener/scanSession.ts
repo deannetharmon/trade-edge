@@ -91,7 +91,7 @@ import type { ScreenResult } from '@/lib/scans/types';
 import { type CspRuleSnapshot, isValidCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { isOverallCspQualified } from '@/lib/scans/cspQualification';
 import type { PmccScanSnapshot } from '@/lib/scans/pmccTypes';
-import { isValidPmccScanSnapshot } from '@/lib/scans/pmccConfig';
+import { isValidPmccScanSnapshot, stripLegacyPmccCriteria } from '@/lib/scans/pmccConfig';
 
 export type ScreenerScanMode = 'filter' | 'rank' | 'targeted';
 
@@ -1357,7 +1357,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       cachedAt: (d.cachedAt ?? null) as number | null,
       schemaVersion: SCHEMA_VERSION,
       ruleSnapshot: (d.ruleSnapshot ?? null) as CspRuleSnapshot | null,
-      pmccSnapshot: (d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
+      pmccSnapshot: stripLegacyPmccCriteria(d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
       targetedSnapshot: (d.targetedSnapshot ?? null) as TargetedScanLaunchSnapshot | null,
     },
   };
