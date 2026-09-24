@@ -10109,7 +10109,11 @@ export default function Home() {
   };
 
   // PMCC-HELD-BREAKEVEN-0001B-1: refresh path shared by the card's Refresh Portfolio action.
-  const refreshHeldPortfolio = async () => { await refreshPortfolioRef.current?.(); };
+  const refreshHeldPortfolio = async () => {
+    // No refresh function wired (provider absent): that is a failure, never a "refreshed" claim.
+    if (!refreshPortfolioRef.current) throw new Error('Portfolio refresh is unavailable');
+    await refreshPortfolioRef.current();
+  };
 
   // FIND PMCCs entry point, extracted from the launcher's onClick so the pre-modal cost-basis error can
   // reopen it exactly once per click. discoverHeldPmccCandidates already refreshes the portfolio itself.

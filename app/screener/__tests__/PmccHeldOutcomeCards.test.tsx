@@ -110,12 +110,12 @@ function held(strike: number, avgOpenPrice: number | null, quantity = 1): HeldPm
 }
 
 /** Real production path: engine + annotate decide every state. Short 1070 bid 8 => Ks + bid = 1078. */
-function produce(candidates: HeldPmccLongCandidate[]): ScreenResult[] {
+function produce(candidates: HeldPmccLongCandidate[], shortLegs: PmccChainLeg[] = [leg('short', 1070)]): ScreenResult[] {
   // Ask keeps 4.45 of extrinsic over intrinsic at every strike (720 => 320 / 322, as in the pmccProduction fixtures).
   const longLegs = candidates.map(c => { const ask = Number((1037.55 - c.strike + 4.45).toFixed(2)); return leg('long', c.strike, { bid: ask - 2, ask }); });
   return runPmccProduction(
     { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
-    { adapt: () => ({ longLegs, shortLegs: [leg('short', 1070)] }), pair: pairPmccCandidates }, candidates,
+    { adapt: () => ({ longLegs, shortLegs }), pair: pairPmccCandidates }, candidates,
   );
 }
 
@@ -172,7 +172,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     const card = await screen.findByTestId('pmcc-result-card');
 
     expect(card).toHaveAttribute('data-held-outcome', 'floor-not-met');
-    expect(within(card).getByTestId('held-outcome-caption')).toHaveTextContent('Floor 1120.00 (LEAP strike + cost)');
+    expect(within(card).getByTestId('held-outcome-caption')).toHaveTextContent('Floor $1120.00 (LEAP strike + cost)');
     expect(within(card).getByTestId('held-outcome-banner')).toHaveTextContent(
       'No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: 720 + 400.00 = $1120.00.');
     expect(within(card).getByTestId('held-outcome-reason')).toHaveTextContent('Reason: SHORT_NOT_ABOVE_HELD_BREAKEVEN');
@@ -222,8 +222,10 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Refresh Portfolio' }));
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
     expect(await within(card).findByText(/Portfolio refreshed\. Run FIND PMCCs again to re-check\./)).toBeInTheDocument();
-    // Clicking the action must not toggle the card's expand button.
-    expect(refreshMock).toHaveBeenCalledTimes(1);
+    // Clicking the action must not toggle the card's expand button. openAudit expanded the card, so the
+    // label is "Collapse"; a stray toggle would flip it back to "Expand".
+    expect(within(card).getByLabelText('Collapse GS PMCC details')).toBeInTheDocument();
+    expect(within(card).queryByLabelText('Expand GS PMCC details')).toBeNull();
   });
 
   it('multi-lot: exact banner with the engine integer, no action, rejected, held contract line unchanged', async () => {
@@ -281,6 +283,55 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     expect(screen.getAllByText(/720C/).length).toBeGreaterThan(0);
   });
 
+  it('two shorts on one LEAP, one clears the floor and one does not: both render; only the failing one is rejected, with no "no short calls cleared" banner', async () => {
+    // LEAP 720 at cost 345 => floor 1065. Short 1070 bid 8 => 1078 clears. Short 1060 bid 4 => 1064 fails.
+    const results = produce([held(720, 345)], [leg('short', 1070), leg('short', 1060, { bid: 4, ask: 4.1 })]);
+    expect(results).toHaveLength(2);
+    seed(results);
+    renderScreener();
+    await openNearMissGroup();
+    const cards = await screen.findAllByTestId('pmcc-result-card');
+    expect(cards).toHaveLength(2);
+    const rejected = cards.filter(c => c.getAttribute('data-held-rejected') === 'true');
+    const passing = cards.filter(c => c.getAttribute('data-held-rejected') !== 'true');
+    expect(rejected).toHaveLength(1);
+    expect(passing).toHaveLength(1);
+    expect(within(rejected[0]).getByTestId('held-rejected-tag')).toHaveTextContent('Rejected · SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+    expect(within(rejected[0]).queryByTestId('held-outcome-banner')).toBeNull();
+    expect(rejected[0].textContent).not.toMatch(/No short calls cleared/i);
+    openAudit(rejected[0]);
+    expect(within(rejected[0]).getByTestId('held-outcome-detail')).toHaveTextContent('Detail: this short did not clear the floor.');
+    expect(passing[0]).not.toHaveAttribute('data-held-rejected');
+    expect(within(passing[0]).queryByTestId('held-rejected-tag')).toBeNull();
+    expect(within(passing[0]).queryByTestId('held-outcome-banner')).toBeNull();
+  });
+
+  it('two shorts on one LEAP that both fail the floor: exactly one card renders', async () => {
+    const results = produce([held(720, 345)], [leg('short', 1060, { bid: 4, ask: 4.1 }), leg('short', 1050, { bid: 3, ask: 3.1 })]);
+    expect(results).toHaveLength(2);
+    expect(results.every(r => r.pmccPair?.failureReasons.some(f => f.code === 'SHORT_NOT_ABOVE_HELD_BREAKEVEN'))).toBe(true);
+    seed(results);
+    renderScreener();
+    await openNearMissGroup();
+    const cards = await screen.findAllByTestId('pmcc-result-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveAttribute('data-held-outcome', 'floor-not-met');
+    expect(within(cards[0]).getByTestId('held-outcome-banner')).toHaveTextContent('No short calls cleared the floor.');
+    openAudit(cards[0]);
+    expect(within(cards[0]).getByTestId('held-outcome-detail')).toHaveTextContent('Detail: no short cleared the floor.');
+  });
+
+  it('card Refresh Portfolio with no refresh function wired shows the failure text, never "Portfolio refreshed"', async () => {
+    harness.refresh = null;
+    seed(produce([held(720, null)]));
+    renderScreener();
+    await openNearMissGroup();
+    const card = await screen.findByTestId('pmcc-result-card');
+    fireEvent.click(within(card).getByRole('button', { name: 'Refresh Portfolio' }));
+    expect(await within(card).findByText('Portfolio refresh failed. Try again.')).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/Portfolio refreshed/);
+  });
+
   it('a symbol with a single held LEAP shows no summary row', async () => {
     seed(produce([held(720, null)]));
     renderScreener();
@@ -331,6 +382,29 @@ describe('discovery-time pre-modal cost-basis block', () => {
     renderScreener();
     fireEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
     expect(await screen.findByText('Could not read cost basis. Cost basis for UBER could not be read from your broker. Refresh Portfolio and try again.', { exact: false })).toBeInTheDocument();
+  });
+
+  it('invalid held quantity adds the collapsed Details line (positive case)', async () => {
+    // Quantity 1.5 with a readable cost: candidate selection keeps it (only quantity <= 0 is dropped), the engine calls it invalid.
+    harness.positions = [position({ symbol: 'UBER', avgOpenPrice: 5, quantity: 1.5 })];
+    renderScreener();
+    fireEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    expect(await screen.findByText(/Could not read cost basis\. Cost basis for UBER/)).toBeInTheDocument();
+    expect(screen.getByText('Details: COST_BASIS_UNAVAILABLE, held quantity invalid')).toBeInTheDocument();
+  });
+
+  it('deselected symbols are excluded from the all-unreadable check', async () => {
+    // UBER unreadable, NFLX readable: the modal opens. Deselect NFLX, reopen: the only selected LEAP is unreadable, so it blocks.
+    harness.positions = [position({ symbol: 'UBER', avgOpenPrice: null }), position({ symbol: 'NFLX', strike: 90, avgOpenPrice: 20.85 })];
+    renderScreener();
+    fireEvent.click(await screen.findByRole('button', { name: 'FIND PMCCs' }));
+    await screen.findByRole('button', { name: 'RUN PMCC SCAN →' });
+    const chips = await screen.findByTestId('pmcc-held-leaps-selection');
+    fireEvent.click(within(chips).getByRole('button', { name: 'NFLX' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'FIND PMCCs' }));
+    expect(await screen.findByText('Could not read cost basis. Cost basis for UBER could not be read from your broker. Refresh Portfolio and try again.', { exact: false })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'RUN PMCC SCAN →' })).toBeNull();
   });
 
   it('does not block when any selected LEAP is readable, multi-lot, or unit-suspect: the modal opens', async () => {

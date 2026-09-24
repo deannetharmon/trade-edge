@@ -61,16 +61,16 @@ export function selectHeldOutcome(input: HeldOutcomeInput): HeldOutcomeDisplay |
 
   if (code === 'SHORT_NOT_ABOVE_HELD_BREAKEVEN') {
     const reasonLine = `Reason: ${code}`;
-    // Only "no short cleared the floor": not every short reaches the floor check (shorts dropped earlier
-    // for delta, DTE or liquidity never do), so the "every short that reached" wording is not used.
-    const detailLine = 'Detail: no short cleared the floor.';
+    // Not every short reaches the floor check (shorts dropped earlier for delta, DTE or liquidity never do),
+    // so the "every short that reached" wording is not used. With a passing sibling, only this short failed.
+    const detailLine = input.leapHasNoResults === false ? 'Detail: this short did not clear the floor.' : 'Detail: no short cleared the floor.';
     const base = { kind: 'floor-not-met' as const, code, action: null, reasonLine, detailLine, notChecked: false, isFixableReadFailure: false, rejected: true };
     if (input.leapHasNoResults === false) return { ...base, caption: 'Floor not met', banner: null };
     if (usable(input.avgOpen) && typeof input.longStrike === 'number' && Number.isFinite(input.longStrike)) {
       const floor = money(floorOf(input.longStrike, input.avgOpen));
       return {
         ...base,
-        caption: `Floor ${floor} (LEAP strike + cost)`,
+        caption: `Floor $${floor} (LEAP strike + cost)`,
         banner: `No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: ${strikeText(input.longStrike)} + ${money(input.avgOpen)} = $${floor}.`,
       };
     }
@@ -106,7 +106,7 @@ export function selectHeldOutcome(input: HeldOutcomeInput): HeldOutcomeDisplay |
       ? 'Detail: held quantity invalid.'
       : detail === HELD_BREAKEVEN_DETAIL.basisUnavailable || detail == null
         ? 'Detail: cost basis unavailable. Avg open price missing or unusable.'
-        : `Detail: ${detail}.`;
+        : `Detail: ${detail.replace(/\.+$/, '')}.`;
     return {
       kind: 'not-checked', code, action: 'refresh-portfolio', reasonLine, detailLine, notChecked: true, isFixableReadFailure: fixable, rejected: false,
       caption: 'Cost basis unavailable',

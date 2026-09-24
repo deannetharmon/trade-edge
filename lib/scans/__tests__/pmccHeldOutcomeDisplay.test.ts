@@ -61,9 +61,14 @@ describe('selectHeldOutcome', () => {
     expect(out.detailLine).toBe('Detail: something new.');
   });
 
+  it('a detail that already ends in a period does not double it', () => {
+    const out = selectHeldOutcome({ symbol: 'X', code: 'COST_BASIS_UNAVAILABLE', detail: 'something new.' })!;
+    expect(out.detailLine).toBe('Detail: something new.');
+  });
+
   it('floor not met with avgOpen: floor caption and banner with the arithmetic', () => {
     const out = selectHeldOutcome({ symbol: 'UBER', code: 'SHORT_NOT_ABOVE_HELD_BREAKEVEN', detail: HELD_BREAKEVEN_FLOOR_MESSAGE, longStrike: 60, avgOpen: 2.35 })!;
-    expect(out.caption).toBe('Floor 62.35 (LEAP strike + cost)');
+    expect(out.caption).toBe('Floor $62.35 (LEAP strike + cost)');
     expect(out.banner).toBe('No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: 60 + 2.35 = $62.35.');
     expect(out.reasonLine).toBe('Reason: SHORT_NOT_ABOVE_HELD_BREAKEVEN');
     expect(out).toMatchObject({ kind: 'floor-not-met', notChecked: false, isFixableReadFailure: false, rejected: true, action: null });
@@ -77,7 +82,7 @@ describe('selectHeldOutcome', () => {
 
   it('floor arithmetic is exact in cents (no float drift) and fractional strikes print sensibly', () => {
     const out = selectHeldOutcome({ symbol: 'X', code: 'SHORT_NOT_ABOVE_HELD_BREAKEVEN', detail: null, longStrike: 57.5, avgOpen: 0.1 + 0.2 })!;
-    expect(out.caption).toBe('Floor 57.80 (LEAP strike + cost)');
+    expect(out.caption).toBe('Floor $57.80 (LEAP strike + cost)');
     expect(out.banner).toContain('57.5 + 0.30 = $57.80.');
   });
 
@@ -94,6 +99,7 @@ describe('selectHeldOutcome', () => {
     const out = selectHeldOutcome({ symbol: 'UBER', code: 'SHORT_NOT_ABOVE_HELD_BREAKEVEN', detail: null, longStrike: 60, avgOpen: 2.35, leapHasNoResults: false })!;
     expect(out.banner).toBeNull();
     expect(out).toMatchObject({ rejected: true, caption: 'Floor not met' });
+    expect(out.detailLine).toBe('Detail: this short did not clear the floor.');
   });
 
   it('never says "no short calls found" in any state', () => {
