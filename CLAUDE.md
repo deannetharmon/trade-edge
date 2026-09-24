@@ -22,6 +22,8 @@ Options screening and portfolio management platform for premium-selling trades. 
 
 Run `git status; git branch -vv; git stash list` and flag issues in 1-2 lines.
 
+Read docs/ROADMAP.md before starting any new ticket work.
+
 ## Session end
 
 Push any branch with local commits. Never leave work only in stash or a temp worktree.
@@ -94,17 +96,7 @@ Premium-selling strategies: BPS, BCS, IC, CSP, CC, PMCC, LEAPS. Capital preserva
 
 ## Project state
 
-Merged and done (do not re-propose): screener results, CSP workflow, PM-0001/0002 position metrics, screener job progress, LCC-0001A, TT token expiry fix, recommendation/actions split, stop-dialog labeling, net-edge DTE dampen.
-
-Dead (do not build on):
-- FUNDAMENTALS-0002 (reverted at 762da02). Finviz pre-screen replaces it. Any future fundamentals gate needs a new data-source decision first.
-- `feature/autopilot-paper-mode` branch no longer exists. Autopilot code is already on main.
-
-Open:
-- LEAPS-ADVISOR-0001B: scoped, not built, awaiting team go-ahead.
-- PMCC three-stage discovery flow: partially implemented. `isPairedPmccLong` in `lib/portfolio-data/pmccPairDetection.ts` is reusable.
-- Autopilot scope is BPS/BCS/IC/CSP only. Extending to PMCC/CC is an undecided product question; do not propose implementation.
-- Paper trading parity: six phases (1 stock + CC, 2 PMCC, 3 LEAP-only, 4 rolls, 5 GTC/stop simulation via Vercel Cron, 6 assignment/expiration).
+Roadmap: see docs/ROADMAP.md (Paul maintains this — read it at session start).
 
 ## Reference docs
 
