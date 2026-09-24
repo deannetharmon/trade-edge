@@ -2,7 +2,7 @@
 
 ## Status
 
-**Team review done 2026-09-24 (Frank facilitating; Ian, Paul, Alan). Recommendations below; no slice is approved to build yet.** Raised by Dean (2026-09-23): covered calls and PMCC "should look identical, one against a stock, the other against a LEAP." Two bugs from the review are logged separately (approved by Dean 2026-09-24): `PMCC-HELD-BREAKEVEN-0001` (slice A) and `PMCC-EARNINGS-PAST-0001` (slice B).
+**Team review done 2026-09-24 (Frank facilitating; Ian, Paul, Alan). Recommendations below. Dean accepted the slices on 2026-09-24 (see "Dean's decisions"); no build has started, and F2 and the after-hours chip are held.** Raised by Dean (2026-09-23): covered calls and PMCC "should look identical, one against a stock, the other against a LEAP." Two bugs from the review are logged separately (approved by Dean 2026-09-24): `PMCC-HELD-BREAKEVEN-0001` (slice A) and `PMCC-EARNINGS-PAST-0001` (slice B).
 
 ## The layout should be identical; the rules are not
 
@@ -101,6 +101,18 @@ Recommendation only. Nothing is approved to build until the gates below clear.
 **Order:** A (`PMCC-HELD-BREAKEVEN-0001`) and B (`PMCC-EARNINGS-PAST-0001`) → C (liquidity) → D (earnings) → E (debit toggle) → F1 (delta control) → F2 (delta rule). A through E land before the PMCC registry migration; F lands before it too, or the registry records delta as a deliberate difference.
 
 **Other findings:** `LONG_NOT_ITM` and `INVALID_EXTRINSIC` (`pmccPairing.ts:167,183`) still apply to held longs, so a held LEAP that has gone OTM drops out of held review with no warning. The comment at `covered-call-finder.ts:405` says the opposite of what the code does (the code excludes a candidate when earnings fall on or before its expiry). Neither open PMCC branch (`feature/pmcc-leaps-ranked-finders`, `wip/pmcc-decision-card`) touches the affected rule files.
+
+## Dean's decisions (2026-09-24)
+
+Accepted as recommended: OI (C1), strike floor (E), earnings (D, amended below), held breakeven (A), past-earnings bug (B), F1, flagged-long (approve after F1), no-date (deferred), build order and PR split. Tickets: `SCAN-ALIGN-0001C1`, `C2`, `D`, `E`, `F` in this folder.
+
+- **Delta (F2):** direction accepted, held until after F1; timing revisited then.
+- **Bid/ask (C2):** accepted with the reject ceiling at $0.50, applied to the CC leg and PMCC short only (Quinn: a ceiling on LEAP legs would reject nearly every new-entry long). Dropping the saved $0.20 is accepted with a changelog line and UI hint. CC rules are not persisted, so nothing needs migrating.
+- **Earnings (D):** after Dean's false-positive report, Ian's rule: exclude T ≤ E ≤ X, warn (ambient tag) for X < E ≤ X + 5 business days, silent beyond, pass already-reported. The line-197 warning stays as a defensive layer that never fires on past dates. Which surface produces Dean's false warning is unconfirmed (PMCC `pmccDecision.ts:197` or the CC pre-check at `page.tsx:1468`); Alan confirms.
+- **After-hours "not ready" (row #8):** held. Dean's answer to Ian's open item 2: yes, the 21-DTE stop, 50% profit exit and 2x credit stop apply to the short leg; Ian still confirms.
+- **Assignment risk:** split as recommended. Expiry-gap investigation now (read-only); ex-dividend deferred.
+- **Quinn's review (C, D, E):** D and E are separate PRs; C and E are each two commits. See the sub-tickets for the test flips.
+- **`avgOpenPrice` units** (slice A): the held path does not read it today; the reader to reuse is `serverTradeReview.ts:228`. `parseBrokerEntryPremium` accepts 0, so A needs its own guard. Units against a real TastyTrade payload still to be checked by Dean.
 
 ## After the decisions
 
