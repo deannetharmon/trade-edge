@@ -9,7 +9,7 @@ Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip 
 1. PMCC-HELD-BREAKEVEN-0001 (A, P1, PR1): held-LEAP short calls get a breakeven floor. Fixtures, quantity guard and build plan signed off by Alan, Ian and Quinn (2026-09-24); build not started. Merge only once Dane has a committed start on PMCC-HELD-BREAKEVEN-0001B (Dean, 2026-09-24; interim silent fail-closed states on production acknowledged).
    - Permanent rule: a held LEAP with quantity > 1 fails closed (`COST_BASIS_UNAVAILABLE`), because multi-lot broker averaging is unverifiable. Dean holds single-contract LEAPs.
    - PMCC-HELD-BREAKEVEN-0001B-1 (captions, banner, discovery-time pre-modal block, rejected styling on the existing held card): re-scoped 2026-09-24 after Dane found Mock 3b's surface does not exist; build to Mock 3c (`SCAN-ALIGN-0001-mock-3c.md`), pending Ian's copy check. Unit-suspect renders in results (needs spot). Own PR; blocks PR1 merge.
-2. PMCC-EARNINGS-PAST-0001 (B, P2, PR2): PMCC earnings warning fires on past dates. Approved by Dean; fixtures signed off by Alan and Ian; may travel with A as two commits. Must land before D.
+2. PMCC-EARNINGS-PAST-0001 (B, P2, PR2): MERGED to main 2026-09-24 (`5ee2cfc`; preview passed, 4,830 tests). Unblocks slice D. Sibling earnings-date comparisons elsewhere are logged under Later.
 
 ## Next (scoped, approved, not started)
 
