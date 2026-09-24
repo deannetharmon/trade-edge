@@ -11064,13 +11064,13 @@ export default function Home() {
   // The per-symbol summary row renders once: on the symbol's first ticker group in page order (READY, then MARKET_CLOSED, then near-miss).
   const heldSummaryOwner = new Map<string, 'READY' | 'MARKET_CLOSED' | 'near-miss'>();
   if (heldPmccPlan) {
-    for (const symbol of heldPmccPlan.summaryBySymbol.keys()) {
+    heldPmccPlan.summaryBySymbol.forEach((_summary, symbol) => {
       const symbolQualified = qualificationDisplayPool.filter(r => r.symbol === symbol);
       // The flat qualified list (the default) has no per-symbol header, so the row lives on the always-grouped near-miss section.
       heldSummaryOwner.set(symbol, pmccViewMode !== 'grouped' ? 'near-miss'
         : symbolQualified.some(r => r.pmccDecision?.readiness === 'READY') ? 'READY'
         : symbolQualified.some(r => r.pmccDecision?.readiness === 'MARKET_CLOSED') ? 'MARKET_CLOSED' : 'near-miss');
-    }
+    });
   }
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
