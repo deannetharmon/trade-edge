@@ -36,6 +36,12 @@ LCC-0001A → LCC-0001B → LCC-0001C → LCC-0001D → LCC-0001E
 
 - [LEAPS-FLOW-0001 Broker-first Standalone LEAPS Discovery and Execution](./LEAPS-FLOW-0001-broker-first-standalone-leaps.md)
 - [SCREENER-CONFIG-0001 Strategy-Aware Scan Configuration](./SCREENER-CONFIG-0001-unified-scan-configuration.md)
+- [SCAN-ALIGN-0001 Align Covered-Call and PMCC Short-Call Rules](./SCAN-ALIGN-0001-covered-call-and-pmcc-rules.md)
+- [PMCC-HELD-BREAKEVEN-0001 Held-LEAP Short Calls Have No Breakeven Floor (P1)](./PMCC-HELD-BREAKEVEN-0001-held-leap-short-call-floor.md)
+- [PMCC-EARNINGS-PAST-0001 PMCC Earnings Warning Fires on Past Dates (P2)](./PMCC-EARNINGS-PAST-0001-past-earnings-false-warning.md)
+- [PMCC-HELD-LONG-FLAGGED-0001 Held LEAPs That Go OTM Should Be Flagged, Not Dropped (draft)](./PMCC-HELD-LONG-FLAGGED-0001-held-leap-dropped-silently.md)
+- [PMCC-ASSIGNMENT-RISK-0001 Ex-Dividend Assignment Risk and Short-to-LEAP Expiry Gap (draft)](./PMCC-ASSIGNMENT-RISK-0001-ex-dividend-and-expiry-gap.md)
+- [EARNINGS-NO-DATE-0001 Missing Earnings Date Caution (draft)](./EARNINGS-NO-DATE-0001-missing-earnings-date-caution.md)
 - [TE-0001 Background Task Manager](./TE-0001-background-task-manager.md)
 - [TE-0002 Task Manager and Command Bus Architecture](./TE-0002-task-manager-and-command-bus-architecture.md)
 - [TE-0003 Implement Task Manager Foundation](./TE-0003-implement-task-manager-foundation.md)
