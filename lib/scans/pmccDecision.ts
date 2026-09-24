@@ -5,6 +5,7 @@ import type {
   PmccPairingCriteria,
   PmccMarketSession,
 } from './pmccTypes';
+import { newYorkDateFromAsOf, normalizeEarningsDate, parseStrictIsoDate } from './pmccEarningsDates';
 
 export const PMCC_DECISION_POLICY_VERSION = 'pmcc-decision-v1';
 
@@ -70,6 +71,8 @@ export function evaluatePmccDecision(input: {
   marketSession: PmccMarketSession;
   trendAgainst?: boolean;
   earningsDate?: string | null;
+  /** PMCC-EARNINGS-PAST-0001 -- the scan's asOf string (snapshot.asOf). Missing or unparseable skips the earnings lower bound only. */
+  asOf?: string | null;
 }): PmccDecision {
   const { pair, criteria } = input;
   const entryMode = pair?.entryMode ?? 'new-pmcc';
@@ -194,8 +197,16 @@ export function evaluatePmccDecision(input: {
     gates.push(gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
   }
 
-  if (input.earningsDate && input.earningsDate <= pair.shortLeg.expiration) {
-    gates.push(gate('EARNINGS_BEFORE_SHORT_EXPIRY', 'warning', 'Earnings fall before short-call expiration.', input.earningsDate, pair.shortLeg.expiration, 'event-risk-v1'));
+  // PMCC-EARNINGS-PAST-0001 -- fires when T <= E <= X, all validated YYYY-MM-DD
+  // strings. T is the New York date of asOf (missing/unparseable skips the
+  // lower bound only); malformed E = no date on file; missing/malformed X = no gate.
+  const earningsNormalized = normalizeEarningsDate(input.earningsDate);
+  const shortExpiryDate = parseStrictIsoDate(pair.shortLeg.expiration);
+  if (earningsNormalized && shortExpiryDate && earningsNormalized <= shortExpiryDate) {
+    const today = newYorkDateFromAsOf(input.asOf);
+    if (today === null || earningsNormalized >= today) {
+      gates.push(gate('EARNINGS_BEFORE_SHORT_EXPIRY', 'warning', 'Earnings fall before short-call expiration.', earningsNormalized, shortExpiryDate, 'event-risk-v1'));
+    }
   }
 
   const quotes = quoteGate(pair, input.marketSession);
