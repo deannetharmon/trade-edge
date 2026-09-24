@@ -14,13 +14,14 @@ Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip 
 Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none built.
 
 - SCAN-ALIGN-0001C1 (OI policy) and C2 (hybrid bid/ask, $0.50 short-call ceiling): MERGED to main 2026-09-24 (`a44b47c`; real next build, green previews, production deploy green). Follow-ups: pmccScore held-long null-OI fix landed as part of C1; validator hardening landed; `ScreenerSessionWiring` flaky test observed once.
-- SCAN-ALIGN-0001D (slot 5, own PR): PMCC earnings removal plus after-expiry warning (Ian's amendment). After B. Needs Alan's date fixtures and Diane's tag copy.
-- SCAN-ALIGN-0001E (slots 6-7, own PR, two commits): debit below width becomes non-switchable (E1 stop reading the field, E2 hard reject). After A. Separate PR from D. Alan and Ian sign off.
+- SCAN-ALIGN-0001D (MERGED 2026-09-24, `610bdd9`; slot 5, own PR): PMCC earnings removal plus after-expiry warning (Ian's amendment). After B. Needs Alan's date fixtures and Diane's tag copy.
+- SCAN-ALIGN-0001E (MERGED 2026-09-24, `d0978b2`; slots 6-7, own PR, two commits): debit below width becomes non-switchable (E1 stop reading the field, E2 hard reject). After A. Separate PR from D. Alan and Ian sign off.
 - SCAN-ALIGN-0001F1 (slot 8): PMCC delta control polish (chips, hint, receipt row). Needs Diane's mock 1 approved.
 - PMCC-HELD-LONG-FLAGGED-0001: draft only, not approved. Paul approves after F1 lands. Needs Diane's flagged-state mock (part of mock 3).
 
 ## Later (on the horizon, not yet scoped)
 
+- Follow-ups from D and E (2026-09-24, unticketed): the CC pre-check at page.tsx ~:1468 (and CSP ~:1280) compares local-time daysUntil against the scan DTE range, not the contract expiry (likely Dean's false earnings warning); other local-time or UTC earnings comparisons in pmccScore.ts:83, pmccStopGtcPrompt.ts:27, pmccReadiness.ts:29, page.tsx:3880/:8190, portfolio/page.tsx:2341, checklist.ts, covered-call-finder.ts:212, screener.ts, rinse-repeat/page.tsx:1395, csp-finder.ts:161. Also: the PMCC "always on" debit-below-width receipt row moves to the PMCC registry migration. Ian to confirm the E test-coverage loss (breakeven-above-short-strike warning case unreachable for new-entry pairs).
 - SCAN-GUIDE-0001 (proposed by Paul 2026-09-24, Dean's request): report-only post-scan note on what the width ceiling removed, a majority-removed nudge, and plain-English help beside the width fields. After D, E, F1; item 3 (help text only) can ship early. Needs Ian wording sign-off and a rendered Diane mock.
 - PMCC-HELD-BREAKEVEN-0001C (P2): held-LEAP results tiles (Avg open and Since open with em dashes), results container, "Show full breakdown", filter funnel and engine funnel data, "Adjust short delta" banner, rejected-pairs list. Needs its own mock and approval; not tied to PR1.
 - Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
