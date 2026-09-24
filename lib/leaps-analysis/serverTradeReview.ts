@@ -116,7 +116,7 @@ export async function submitPmccOrder(userId: string, input: {
   quantity: number;
   limitPrice: number;
   mode: 'dry-run' | 'submit';
-}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number }) {
+}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number; shortWidthCeiling?: number }) {
   if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
   const context = await brokerContext(userId);
   try {
@@ -144,6 +144,7 @@ export async function submitPmccOrder(userId: string, input: {
       quotePolicy: {
         ...SERVER_PMCC_CRITERIA.quotePolicy,
         qualifyingSpreadPctMax: shortCriteriaOverride?.qualifyingSpreadPctMax ?? SERVER_PMCC_CRITERIA.quotePolicy.qualifyingSpreadPctMax,
+        shortWidthCeiling: shortCriteriaOverride?.shortWidthCeiling ?? SERVER_PMCC_CRITERIA.quotePolicy.shortWidthCeiling,
       },
     };
     const pairing = pairPmccCandidates({
@@ -284,7 +285,7 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
   quantity: number;
   limitPrice: number;
   mode: 'dry-run' | 'submit';
-}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number }) {
+}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number; shortWidthCeiling?: number }) {
   if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
   const context = await brokerContext(userId);
   try {
@@ -323,6 +324,7 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
       quotePolicy: {
         ...SERVER_PMCC_CRITERIA.quotePolicy,
         qualifyingSpreadPctMax: shortCriteriaOverride?.qualifyingSpreadPctMax ?? SERVER_PMCC_CRITERIA.quotePolicy.qualifyingSpreadPctMax,
+        shortWidthCeiling: shortCriteriaOverride?.shortWidthCeiling ?? SERVER_PMCC_CRITERIA.quotePolicy.shortWidthCeiling,
       },
     };
     const heldLongKeyValue = heldLongKey(input.longOccSymbol);

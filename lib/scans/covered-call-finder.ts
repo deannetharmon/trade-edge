@@ -26,6 +26,11 @@ import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { assessOiLiquidity } from './oiLiquidity';
+import { evaluateHybridSpread } from './hybridSpread';
+
+// SCAN-ALIGN-0001C2 -- the warn percent is unused for CC eligibility (CC has no width warning);
+// the shared function only needs it to be well-formed.
+const CC_WARN_PCT_UNUSED = 5;
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -52,7 +57,10 @@ interface CcEligibilityParams {
   dteTarget: { min: number; max: number };
   minStrike: number | null; // max(stockPrice, costBasis) — call must sit at/above this
   oiMin: number;
-  bidAskMax: number;
+  /** Reject percent of mid (hybrid rule; $0.05 floor always applies). */
+  widthPctMax: number;
+  /** Absolute reject ceiling, dollars per share. */
+  widthCeiling: number;
 }
 
 // Hard gate check for ONE chain leg. Returns false for anything that must
@@ -89,7 +97,9 @@ function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams
   if (!(leg.bid > 0) || !(leg.ask > 0)) return false;
   if (leg.ask < leg.bid) return false; // crossed market
 
-  if (leg.ask - leg.bid > p.bidAskMax) return false;
+  // SCAN-ALIGN-0001C2 -- hybrid width rule + $0.50-style ceiling via the shared function (the
+  // same one evaluatePmccQuoteQuality uses for the PMCC short leg). The old fixed dollar cap is gone.
+  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling }).reject) return false;
   // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* deliberately
   // removed from this gate (SCAN-ALIGN-0001C1 re-added only a missing/invalid
   // OI check, above). Every other condition above is a genuine data-integrity or
@@ -345,7 +355,8 @@ export function findBestCoveredCall(
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
-    bidAskMax: params.rules.BID_ASK_MAX,
+    widthPctMax: params.rules.WIDTH_PCT_MAX,
+    widthCeiling: params.rules.WIDTH_CEILING,
   });
   const best = eligible.find(c => isEarningsSafeForDte(params.earningsDate, c.dte)) ?? null;
   if (!best) return null;
@@ -424,7 +435,8 @@ export function findAllCoveredCalls(
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
-    bidAskMax: params.rules.BID_ASK_MAX,
+    widthPctMax: params.rules.WIDTH_PCT_MAX,
+    widthCeiling: params.rules.WIDTH_CEILING,
   }).filter(c => isEarningsSafeForDte(params.earningsDate, c.dte));
 
   // Computed once per symbol (per the params contract), applied uniformly

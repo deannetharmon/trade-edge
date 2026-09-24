@@ -9,7 +9,7 @@ import type { WheelChainResult, WheelChainLeg } from '@/lib/wheel/chainSearch';
 const RULES: CcRulesType = {
   DELTA_MIN: 0.20, DELTA_MAX: 0.35,
   DTE_MIN: 21, DTE_MAX: 45,
-  OI_MIN: 100, BID_ASK_MAX: 0.20,
+  OI_MIN: 100, WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.50,
 };
 
 type TestChain = { expirations: string[]; chains: Record<string, WheelChainLeg[]> };
@@ -163,10 +163,11 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     // Delta-closest to center (0.275) is the 95 strike (delta 0.30) -- but
     // 95 < stockPrice(100), so it must be excluded. The 108 strike (delta
     // 0.21) is further from center but is the only ELIGIBLE strike, and
-    // must be what gets returned.
+    // must be what gets returned. (C2: its quote is 0.05 wide -- inside the hybrid rule's floor -- so
+    // the quote does not, under the percent rule, disqualify it; the test isolates the strike gate.)
     const legs = [
       { strikePrice: 95, expirationDate: expDate, optionType: 'C' as const, delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'ITM' },
-      { strikePrice: 108, expirationDate: expDate, optionType: 'C' as const, delta: 0.21, openInterest: 500, bid: 0.80, ask: 0.90, mid: 0.85, occSymbol: 'OTM_VALID' },
+      { strikePrice: 108, expirationDate: expDate, optionType: 'C' as const, delta: 0.21, openInterest: 500, bid: 0.85, ask: 0.90, mid: 0.875, occSymbol: 'OTM_VALID' },
     ];
     const chain = { expirations: [expDate], chains: { [expDate]: legs } };
     const cand = findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 });
@@ -180,7 +181,7 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     const expDate = d.toISOString().slice(0, 10);
     const legs = [
       { strikePrice: 102, expirationDate: expDate, optionType: 'C' as const, delta: 0.30, openInterest: 500, bid: 1.50, ask: 1.60, mid: 1.55, occSymbol: 'BELOW_BASIS' },
-      { strikePrice: 115, expirationDate: expDate, optionType: 'C' as const, delta: 0.20, openInterest: 500, bid: 0.60, ask: 0.70, mid: 0.65, occSymbol: 'ABOVE_BASIS' },
+      { strikePrice: 115, expirationDate: expDate, optionType: 'C' as const, delta: 0.20, openInterest: 500, bid: 0.65, ask: 0.70, mid: 0.675, occSymbol: 'ABOVE_BASIS' },
     ];
     const chain = { expirations: [expDate], chains: { [expDate]: legs } };
     const capacityHighBasis = computeCoveredCallCapacity(500, 0, 0, 110); // cost basis 110
@@ -325,9 +326,9 @@ describe('TE-0007C corrective round: one-sided quotes and full-universe eligibil
   // condition explicitly.
   // SCAN-ALIGN-0001C1 note: OI below OI_MIN stays eligible (warns); only missing/invalid OI
   // (null/NaN/Infinity/negative) is excluded -- see scanAlignC1OiPolicy.test.ts.
-  it('14c. bid/ask spread wider than BID_ASK_MAX is still correctly excluded', () => {
+  it('14c. bid/ask spread wider than the hybrid width rule is still correctly excluded', () => {
     const expDate = nearTermExpDate(30);
-    const tooWide = legAt(105, { delta: 0.28, bid: 1.00, ask: 1.30, occSymbol: 'TOO_WIDE' }, expDate); // 0.30 width > 0.20 max
+    const tooWide = legAt(105, { delta: 0.28, bid: 1.00, ask: 1.30, occSymbol: 'TOO_WIDE' }, expDate); // 0.30 width is 26% of mid, over max(10% of mid, $0.05) (SCAN-ALIGN-0001C2; was the old $0.20 cap)
     const chain = { expirations: [expDate], chains: { [expDate]: [tooWide] } };
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: 100 })).toBeNull();
   });

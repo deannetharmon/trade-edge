@@ -9,8 +9,10 @@
 //                      outside the window is skipped (fetch boundary).
 //   Delta range        isEligibleCcLeg -- a call outside the window is never a candidate. UNLIKE CSP
 //                      (where delta is a preference) and PMCC (where short delta guides rank).
-//   Max bid/ask width  isEligibleCcLeg -- `ask - bid > BID_ASK_MAX` excludes the call. An absolute
-//                      dollar width per share, honored (unlike CSP's fixed relative policy).
+//   Max bid/ask width  isEligibleCcLeg -- SCAN-ALIGN-0001C2 hybrid rule via lib/scans/hybridSpread.ts:
+//                      excluded when width > max($0.05, WIDTH_PCT_MAX % of mid), or when width is over
+//                      the WIDTH_CEILING ($ per share). (BID_ASK_MAX is the CSP dollar key; CC no
+//                      longer uses it.)
 //   Minimum strike     findBestCoveredCall -- strike below max(stock price, cost basis) is excluded;
 //                      only the known values apply; an unknown cost basis is flagged, not enforced.
 //   Quote validity     isEligibleCcLeg -- two-sided, uncrossed, finite.
@@ -22,6 +24,7 @@
 //                      quantity never exceeds it. Read-only context.
 
 import type { CcRulesType } from '@/lib/scans/constants';
+import { validateCc } from '@/lib/scans/hybridSpread';
 import { oiPresets } from './presets';
 import { buildReceiptGroups } from './receipt';
 import type { Lifecycle, RangePreset, ReceiptGroup, ScalarPreset, SummaryGroup } from './types';
@@ -119,18 +122,34 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
   {
     id: 'width',
     label: 'Max bid/ask width',
+    unit: '% of mid',
+    lifecycle: 'fetch',
+    fixed: false,
+    rescan: true,
+    card: 'search',
+    summaryGroup: 'search',
+    hint: 'Rejects wider than max(10% of mid, $0.05), or over the ceiling.',
+    control: {
+      kind: 'rule', key: 'WIDTH_PCT_MAX', label: 'Max width', title: 'Widest bid/ask spread, as a percent of the mid price (never below $0.05)', step: '1', unit: '% of mid',
+      presets: [{ label: '5%', value: 5 }, { label: '10%', value: 10 }, { label: '15%', value: 15 }],
+    },
+    summary: (v) => `width ≤ ${num(v.rules.WIDTH_PCT_MAX)}% of mid (min $0.05)`,
+  },
+  {
+    id: 'widthCeiling',
+    label: 'Width ceiling',
     unit: '$ per share',
     lifecycle: 'fetch',
     fixed: false,
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'A call whose bid/ask is wider than this is never a candidate. A dollar width per share, not a percentage.',
+    hint: 'A call whose bid/ask is wider than this dollar amount is never a candidate, however high the price.',
     control: {
-      kind: 'rule', key: 'BID_ASK_MAX', label: 'Max width', title: 'Widest bid/ask spread, in dollars per share', step: '0.01', unit: '$ per share',
-      presets: [{ label: '$0.10', value: 0.1 }, { label: '$0.20', value: 0.2 }, { label: '$0.30', value: 0.3 }],
+      kind: 'rule', key: 'WIDTH_CEILING', label: 'Width ceiling', title: 'Widest bid/ask spread allowed, in dollars per share', step: '0.01', unit: '$ per share',
+      presets: [{ label: '$0.30', value: 0.3 }, { label: '$0.50', value: 0.5 }, { label: '$0.75', value: 0.75 }],
     },
-    summary: (v) => `width ≤ ${dollars(v.rules.BID_ASK_MAX)}`,
+    summary: (v) => `cap ${dollars(v.rules.WIDTH_CEILING)}`,
   },
   {
     id: 'oi',
@@ -269,6 +288,7 @@ export function ccFieldErrors(rules: CcRulesType): Partial<Record<string, string
   if (!(rules.DELTA_MAX <= 1)) set('DELTA_MAX', 'Max delta must be 1 or less.');
   if (!(rules.DELTA_MAX > rules.DELTA_MIN)) set('DELTA_MAX', 'Max delta must be above min delta.');
   if (!(rules.OI_MIN >= 0)) set('OI_MIN', 'Open interest must be 0 or more.');
-  if (!(rules.BID_ASK_MAX >= 0)) set('BID_ASK_MAX', 'Max width must be 0 or more.');
+  // SCAN-ALIGN-0001C2: width percent and ceiling validated by the shared validateCc.
+  for (const [key, message] of Object.entries(validateCc(rules))) if (message) set(key, message);
   return errors;
 }

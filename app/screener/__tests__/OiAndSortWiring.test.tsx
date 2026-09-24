@@ -341,7 +341,7 @@ describe('SCREENER-OI-0001: 18. no regression to Covered Call capacity protectio
 
     await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
     const receipt = await screen.findByTestId('active-cc-rules');
-    expect(receipt).toHaveTextContent('21–45 DTE · Δ 0.20–0.35 · width ≤ $0.20');
+    expect(receipt).toHaveTextContent('21–45 DTE · Δ 0.20–0.35 · width ≤ 10% of mid (min $0.05) · cap $0.50');
     expect(receipt).toHaveTextContent('strike ≥ stock price (and cost basis when known) · two-sided quotes · expires before earnings');
     expect(receipt).toHaveTextContent('1 symbol with a candidate · 0 with none');
 

@@ -79,3 +79,7 @@ Revertable as its own commit. The new field is additive; a revert leaves an unkn
 **Tests that flip:** `ccConfigTruthfulness.test.ts:87` both tests (1.0/1.2 now rejects; the 0.2-vs-0.5 toggle needs a wide-percent-safe row, e.g. a $20 mid with w 200); `covered-call-finder.test.ts:326` (14c) comment only; `ScreenerPage.test.tsx:682` "Max spread %" is the PMCC modal and is unrelated to the CC ceiling; `pmccQuoteQuality.test.ts` percent-band tests unchanged if the ceiling does not apply to LEAP legs.
 
 **Gate: cleared.** Mock 2 (redrawn) approved by Ian; Dean delegated the approval to Ian (2026-09-24).
+
+## Changelog (built)
+
+Bid/ask width filter now uses the hybrid rule: reject wider than max(10% of mid, $0.05), warn above 5%, and never over a $0.50 ceiling on the CC leg and PMCC short. The old fixed $0.20 default is retired.

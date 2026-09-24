@@ -11,6 +11,9 @@ export interface PmccQuotePolicy {
   acceptableSpreadPctMax: number;
   qualifyingSpreadPctMax: number;
   readyQuoteAgeSecondsMax: number;
+  /** SCAN-ALIGN-0001C2: absolute reject ceiling ($ per share) applied to the SHORT leg only.
+   *  Optional: an older snapshot without it means no ceiling. LEAP legs never get it. */
+  shortWidthCeiling?: number;
 }
 
 export interface PmccPairingLimits {

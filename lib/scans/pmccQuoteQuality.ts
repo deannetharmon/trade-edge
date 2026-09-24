@@ -1,5 +1,7 @@
+import { evaluateHybridSpread } from './hybridSpread';
 import type {
   PmccChainLeg,
+  PmccLegRole,
   PmccMarketSession,
   PmccQuotePolicy,
   PmccQuoteQuality,
@@ -41,6 +43,9 @@ export function evaluatePmccQuoteQuality(
   policy: PmccQuotePolicy,
   asOf: Date,
   marketSession: PmccMarketSession,
+  // SCAN-ALIGN-0001C2: only the 'short' role gets the absolute width ceiling. Omitted (or 'long')
+  // = percent-only band, so a $100 LEAP at 2% ($2.00 wide) is never rejected by the ceiling.
+  role?: PmccLegRole,
 ): PmccQuoteQuality {
   if (!Number.isFinite(asOf.getTime())) return emptyQuality(leg, 'Invalid scan as-of timestamp');
   if (!finitePositive(leg.bid) || !finitePositive(leg.ask)) {
@@ -61,7 +66,14 @@ export function evaluatePmccQuoteQuality(
   const ageSeconds = timestamp == null
     ? null
     : Math.max(0, (asOf.getTime() - timestamp.getTime()) / 1000);
-  const withinQualifyingWidth = spreadPct <= policy.qualifyingSpreadPctMax;
+  // SCAN-ALIGN-0001C2: reject/warn decisions come from the shared hybrid function (integer
+  // arithmetic, $0.05 floor, optional short-leg ceiling). spreadPct above stays display-only.
+  const hybrid = evaluateHybridSpread(leg.bid, leg.ask, {
+    rejectPct: policy.qualifyingSpreadPctMax,
+    warnPct: policy.acceptableSpreadPctMax,
+    ceiling: role === 'short' ? policy.shortWidthCeiling ?? null : null,
+  });
+  const withinQualifyingWidth = !hybrid.reject;
   const structurallyUsable = withinQualifyingWidth;
   const base = {
     bid: leg.bid,
@@ -77,7 +89,9 @@ export function evaluatePmccQuoteQuality(
   };
 
   if (!withinQualifyingWidth) {
-    return { ...base, readyInput: false, status: 'too_wide', reason: `Bid/ask spread ${spreadPct.toFixed(2)}% exceeds ${policy.qualifyingSpreadPctMax}%` };
+    return { ...base, readyInput: false, status: 'too_wide', reason: hybrid.status === 'over_ceiling'
+      ? `Bid/ask width $${width.toFixed(2)} exceeds the $${(policy.shortWidthCeiling ?? 0).toFixed(2)} ceiling`
+      : `Bid/ask spread ${spreadPct.toFixed(2)}% exceeds ${policy.qualifyingSpreadPctMax}%` };
   }
   if (leg.delayed === true) {
     return { ...base, readyInput: false, status: 'delayed', reason: 'Quote source is delayed' };
@@ -91,7 +105,7 @@ export function evaluatePmccQuoteQuality(
   if (ageSeconds! > policy.readyQuoteAgeSecondsMax) {
     return { ...base, readyInput: false, status: 'stale', reason: `Quote age ${Math.round(ageSeconds!)}s exceeds ${policy.readyQuoteAgeSecondsMax}s` };
   }
-  if (spreadPct > policy.acceptableSpreadPctMax) {
+  if (hybrid.warn) {
     return { ...base, readyInput: true, status: 'wide_warning', reason: `Bid/ask spread ${spreadPct.toFixed(2)}% is usable but wider than ${policy.acceptableSpreadPctMax}%` };
   }
   return { ...base, readyInput: true, status: 'acceptable', reason: 'Quote is actionable and fresh' };

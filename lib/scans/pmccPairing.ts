@@ -182,7 +182,7 @@ function filterLegs(
     if (role === 'long' && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
     if (role === 'short' && !(leg.strike > underlyingPrice)) reasons.push(reason('SHORT_NOT_OTM'));
 
-    const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession);
+    const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession, role);
     if (!isHeldLong && !quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));
 
     const executablePrice = role === 'long' ? quote.ask : quote.bid;

@@ -196,7 +196,7 @@ function ccChain(legs: CcLeg[], dte = 30) {
 }
 
 const CC_PARAMS = {
-  deltaTarget: { min: 0.2, max: 0.35 }, dteTarget: { min: 21, max: 45 }, minStrike: null, oiMin: 500, bidAskMax: 0.2,
+  deltaTarget: { min: 0.2, max: 0.35 }, dteTarget: { min: 21, max: 45 }, minStrike: null, oiMin: 500, widthPctMax: 10, widthCeiling: 0.5,
 };
 const pick = (chain: ReturnType<typeof ccChain>) => selectAllEligibleCcContracts(chain as never, CC_PARAMS);
 

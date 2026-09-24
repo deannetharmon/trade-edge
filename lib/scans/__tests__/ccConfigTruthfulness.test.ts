@@ -14,7 +14,7 @@ import { computeCoveredCallCapacity } from '../covered-call-capacity';
 import type { CcRulesType } from '../constants';
 import { CC_CRITERIA } from '@/lib/screener/scanConfig/ccRegistry';
 
-const RULES: CcRulesType = { DELTA_MIN: 0.2, DELTA_MAX: 0.35, DTE_MIN: 21, DTE_MAX: 45, OI_MIN: 100, BID_ASK_MAX: 0.2 };
+const RULES: CcRulesType = { DELTA_MIN: 0.2, DELTA_MAX: 0.35, DTE_MIN: 21, DTE_MAX: 45, OI_MIN: 100, WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.5 };
 
 function isoDate(daysOut: number): string {
   const d = new Date();
@@ -42,7 +42,7 @@ const good = (strike: number, over: Partial<Call> = {}): Call => ({ strike, delt
 const eligible = (chain: ReturnType<typeof chainOf>, over: Partial<Parameters<typeof selectAllEligibleCcContracts>[1]> = {}) =>
   selectAllEligibleCcContracts(chain, {
     deltaTarget: { min: RULES.DELTA_MIN, max: RULES.DELTA_MAX }, dteTarget: { min: RULES.DTE_MIN, max: RULES.DTE_MAX },
-    minStrike: 100, oiMin: RULES.OI_MIN, bidAskMax: RULES.BID_ASK_MAX, ...over,
+    minStrike: 100, oiMin: RULES.OI_MIN, widthPctMax: RULES.WIDTH_PCT_MAX, widthCeiling: RULES.WIDTH_CEILING, ...over,
   });
 const capacity = computeCoveredCallCapacity(500, 0, 0, 90);
 const find = (chain: ReturnType<typeof chainOf>, over: Record<string, unknown> = {}) =>
@@ -51,7 +51,7 @@ const find = (chain: ReturnType<typeof chainOf>, over: Record<string, unknown> =
 describe('registry lifecycles match the engine: the pinned map', () => {
   it('pins which criteria are search limits, advisory, read-only, and result filters', () => {
     const ids = (lifecycle: string) => CC_CRITERIA.filter((c) => c.lifecycle === lifecycle).map((c) => c.id).sort();
-    expect(ids('fetch')).toEqual(['delta', 'dte', 'earnings', 'minStrike', 'quoteValidity', 'width']);
+    expect(ids('fetch')).toEqual(['delta', 'dte', 'earnings', 'minStrike', 'quoteValidity', 'width', 'widthCeiling']);
     expect(ids('advisory')).toEqual(['oi']);
     expect(ids('read-only')).toEqual(['capacity']);
     expect(ids('result-filter')).toEqual(['resultChips']);
@@ -84,16 +84,24 @@ describe('delta is a hard limit for covered calls (unlike cash-secured puts)', (
   });
 });
 
-describe('max bid/ask width is a real, absolute dollar setting', () => {
-  it('excludes a call wider than the setting and keeps one at or inside it', () => {
-    const chain = chainOf([{ dte: 30, calls: [good(105, { bid: 1.0, ask: 1.21 }), good(106, { bid: 1.0, ask: 1.2 })] }]);
-    expect(eligible(chain).map((c) => c.strikePrice)).toEqual([106]);
+// SCAN-ALIGN-0001C2: the old absolute $0.20 cap is gone. Width is max($0.05, pct% of mid) plus an
+// absolute ceiling. 1.0/1.2 (w 20, S 220: 400 > 220) and 1.0/1.21 and 1.0/1.4 all reject now.
+describe('max bid/ask width is a hybrid percent-of-mid rule with a dollar ceiling', () => {
+  it('excludes a call wider than max(10% of mid, $0.05) and keeps one inside it', () => {
+    const chain = chainOf([{ dte: 30, calls: [good(105, { bid: 1.0, ask: 1.21 }), good(106, { bid: 1.0, ask: 1.2 }), good(107, { bid: 1.0, ask: 1.1 })] }]);
+    expect(eligible(chain).map((c) => c.strikePrice)).toEqual([107]);
   });
 
-  it('changing the setting changes the outcome (it is honored, unlike the CSP width)', () => {
+  it('changing the percent changes the outcome (it is honored, unlike the CSP width)', () => {
     const chain = chainOf([{ dte: 30, calls: [good(105, { bid: 1.0, ask: 1.4 })] }]);
-    expect(eligible(chain, { bidAskMax: 0.2 })).toHaveLength(0);
-    expect(eligible(chain, { bidAskMax: 0.5 })).toHaveLength(1);
+    expect(eligible(chain, { widthPctMax: 10 })).toHaveLength(0);
+    expect(eligible(chain, { widthPctMax: 50 })).toHaveLength(1);
+  });
+
+  it('changing the ceiling changes the outcome on a wide-percent-safe row ($20 mid, $2.00 width)', () => {
+    const chain = chainOf([{ dte: 30, calls: [good(105, { bid: 19, ask: 21 })] }]);
+    expect(eligible(chain, { widthCeiling: 0.5 })).toHaveLength(0);
+    expect(eligible(chain, { widthCeiling: 2.0 })).toHaveLength(1);
   });
 });
 

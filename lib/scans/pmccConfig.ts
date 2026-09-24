@@ -32,6 +32,7 @@ export const DEFAULT_PMCC_QUOTE_POLICY: PmccQuotePolicy = {
   acceptableSpreadPctMax: 5,
   qualifyingSpreadPctMax: 10,
   readyQuoteAgeSecondsMax: 120,
+  shortWidthCeiling: 0.50,
 };
 
 export const DEFAULT_PMCC_PAIRING_LIMITS: PmccPairingLimits = {
@@ -68,7 +69,9 @@ export function isValidPmccQuotePolicy(value: unknown): value is PmccQuotePolicy
     && Number.isFinite(policy.qualifyingSpreadPctMax)
     && policy.qualifyingSpreadPctMax >= policy.acceptableSpreadPctMax
     && Number.isFinite(policy.readyQuoteAgeSecondsMax)
-    && policy.readyQuoteAgeSecondsMax > 0;
+    && policy.readyQuoteAgeSecondsMax > 0
+    && (policy.shortWidthCeiling === undefined
+      || (Number.isFinite(policy.shortWidthCeiling) && policy.shortWidthCeiling >= 0.01));
 }
 
 export function isValidPmccScanSnapshot(value: unknown): value is PmccScanSnapshot {

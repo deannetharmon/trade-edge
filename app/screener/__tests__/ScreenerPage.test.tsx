@@ -687,6 +687,9 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(deltaMax.value).toBe('0.35');
     expect(oiMin.value).toBe('100');
     expect(maxSpread.value).toBe('10');
+    // SCAN-ALIGN-0001C2: the short-leg width ceiling cell and its static hint.
+    expect((screen.getByLabelText('Width ceiling ($)') as HTMLInputElement).value).toBe('0.5');
+    expect(screen.getByTestId('pmcc-width-hint')).toHaveTextContent('Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling. Warns above 5% of mid (or $0.05).');
 
     fireEvent.change(shortMin, { target: { value: '14' } });
     fireEvent.change(shortMax, { target: { value: '35' } });
@@ -709,6 +712,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
       shortDeltaMax: 0.35,
       shortOiMin: 100,
       maxSpreadPct: 10,
+      widthCeiling: 0.5,
     }));
   });
 
@@ -723,6 +727,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
       shortDeltaMax: 0.33,
       shortOiMin: 150,
       maxSpreadPct: 8,
+      widthCeiling: 0.75,
     }));
 
     renderScreenerPage();
@@ -735,6 +740,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.getByLabelText('Max Δ')).toHaveValue('0.33');
     expect(screen.getByLabelText('Short OI min')).toHaveValue('150');
     expect(screen.getByLabelText('Max spread %')).toHaveValue('8');
+    expect(screen.getByLabelText('Width ceiling ($)')).toHaveValue('0.75');
   });
 
   it('blocks a PMCC scan when a selected DTE range is invalid', async () => {
