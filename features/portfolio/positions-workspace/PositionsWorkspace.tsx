@@ -145,7 +145,7 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
     if (opportunity.status !== 'review-income-call' || !opportunity.accountNumber || !opportunity.positionKey || !opportunity.exactContract || !opportunity.heldPmccLong) return;
     let active = true;
     setLoading(true);
-    void evaluateHeldPmccLiveReadiness({ accountNumber: opportunity.accountNumber, positionKey: opportunity.positionKey, underlyingSymbol: opportunity.symbol, occSymbol: opportunity.exactContract, ...opportunity.heldPmccLong })
+    void evaluateHeldPmccLiveReadiness({ accountNumber: opportunity.accountNumber, positionKey: opportunity.positionKey, underlyingSymbol: opportunity.symbol, occSymbol: opportunity.exactContract, ...opportunity.heldPmccLong, avgOpenPrice: opportunity.heldPmccLong.entryDebitPerShare ?? null })
       .then(result => { if (active) setLive(result); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

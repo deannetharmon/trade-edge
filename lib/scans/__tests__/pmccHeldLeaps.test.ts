@@ -35,8 +35,21 @@ describe('held LEAPS PMCC candidates', () => {
       heldPosition({ key: 'spread', legs: [heldPosition().legs[0], { ...heldPosition().legs[0], direction: 'Short', strikePrice: 160 }] }),
       heldPosition({ key: 'wrong-account', accountNumber: '5WT99999' }),
     ]), dte);
-    expect(result.candidates).toEqual([expect.objectContaining({ positionKey: 'position-1', occSymbol: 'MRNA  270618C00110000', quantity: 2 })]);
+    expect(result.candidates).toEqual([expect.objectContaining({ positionKey: 'position-1', occSymbol: 'MRNA  270618C00110000', quantity: 2, avgOpenPrice: 12 })]);
     expect(result.exclusions).toHaveLength(3);
+  });
+
+  it('carries avgOpenPrice and quantity through unchanged, and null when the broker cost is missing or non-finite (the selector never drops a multi-lot LEAP)', () => {
+    const withCost = (avgOpenPrice: unknown, quantity: number) => heldPosition({ legs: [{ ...heldPosition().legs[0], avgOpenPrice: avgOpenPrice as number, quantity }] });
+    const result = selectHeldPmccLongCandidatesFromPositions([
+      withCost(20.85, 1),
+      { ...withCost(null, 3), key: 'no-cost', legs: [{ ...withCost(null, 3).legs[0], symbol: 'MRNA  270618C00111000', strikePrice: 111 }] },
+      { ...withCost(Number.NaN, 1), key: 'nan-cost', legs: [{ ...withCost(Number.NaN, 1).legs[0], symbol: 'MRNA  270618C00112000', strikePrice: 112 }] },
+    ], dte);
+    expect(result.candidates).toHaveLength(3);
+    expect(result.candidates[0]).toMatchObject({ avgOpenPrice: 20.85, quantity: 1 });
+    expect(result.candidates[1]).toMatchObject({ avgOpenPrice: null, quantity: 3 });
+    expect(result.candidates[2]).toMatchObject({ avgOpenPrice: null, quantity: 1 });
   });
 
   it('fails closed for stale or unavailable snapshots', () => {

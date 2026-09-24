@@ -1,3 +1,5 @@
+// lib/scans/pmccTypes.ts
+
 import type { PmccDteRanges } from './pmccDteRanges';
 
 export interface PmccDeltaRange {
@@ -119,7 +121,10 @@ export type PmccFailureCode =
   | 'NET_DEBIT_NOT_POSITIVE'
   | 'NET_DEBIT_NOT_BELOW_WIDTH'
   | 'INVALID_EXTRINSIC'
-  | 'INSUFFICIENT_DATA';
+  | 'INSUFFICIENT_DATA'
+  // PMCC-HELD-BREAKEVEN-0001: held-LEAP short-call floor (held mode only).
+  | 'COST_BASIS_UNAVAILABLE'
+  | 'SHORT_NOT_ABOVE_HELD_BREAKEVEN';
 
 export interface PmccFailureReason {
   code: PmccFailureCode;

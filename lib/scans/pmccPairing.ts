@@ -1,4 +1,7 @@
+// lib/scans/pmccPairing.ts
+
 import { isOccSymbolMatch } from './candidateIdentity';
+import { heldLongKey, type HeldLongBasisMap } from './pmccHeldBreakeven';
 import { isValidPmccDteRanges } from './pmccDteRanges';
 import {
   isValidPmccDeltaRange,
@@ -42,6 +45,8 @@ const FAILURE_MESSAGES: Record<PmccFailureCode, string> = {
   NET_DEBIT_NOT_BELOW_WIDTH: 'Net debit equals or exceeds strike width',
   INVALID_EXTRINSIC: 'Long-call extrinsic value is missing, negative, or invalid',
   INSUFFICIENT_DATA: 'Required contract data is missing or invalid',
+  COST_BASIS_UNAVAILABLE: 'cost basis unavailable',
+  SHORT_NOT_ABOVE_HELD_BREAKEVEN: 'Short strike plus bid must exceed held LEAP strike plus cost basis',
 };
 
 function reason(code: PmccFailureCode, detail?: string): PmccFailureReason {
@@ -108,7 +113,7 @@ function legIdentity(leg: PmccChainLeg): string | null {
     optionType: 'call',
     strike: leg.strike,
   })) return null;
-  return `occ:${leg.occSymbol!.replace(/\s+/g, '').toUpperCase()}`;
+  return heldLongKey(leg.occSymbol!);
 }
 
 function filterLegs(
@@ -283,6 +288,8 @@ export function pairPmccCandidates(input: {
   asOf: Date;
   marketSession: PmccMarketSession;
   heldLongOccSymbols?: ReadonlySet<string>;
+  /** PMCC-HELD-BREAKEVEN-0001: per-held-long cost and quantity, keyed by heldLongKey(occSymbol). */
+  heldLongBasis?: HeldLongBasisMap;
 }): PmccSessionResult {
   validateCriteria(input.criteria);
   if (!Number.isFinite(input.underlyingPrice) || input.underlyingPrice <= 0) throw new Error('Invalid PMCC underlying price');

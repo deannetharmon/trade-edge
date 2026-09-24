@@ -1,3 +1,5 @@
+// lib/scans/pmccHeldLeaps.ts
+
 import type { Position } from '@/lib/portfolio-data/types';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import type { PmccDteRanges } from './pmccDteRanges';
@@ -14,6 +16,9 @@ export interface HeldPmccLongCandidate {
   dte: number;
   strike: number;
   quantity: number;
+  /** Broker average-open-price per share (already parsed); null when missing or unusable.
+   * Required so tsc lists every construction site (PMCC-HELD-BREAKEVEN-0001). */
+  avgOpenPrice: number | null;
 }
 
 export interface HeldPmccExclusion {
@@ -60,6 +65,7 @@ function exactOneLongCall(position: Position): HeldPmccLongCandidate | null {
     dte: position.dte,
     strike: leg.strikePrice,
     quantity: leg.quantity,
+    avgOpenPrice: typeof leg.avgOpenPrice === 'number' && Number.isFinite(leg.avgOpenPrice) ? leg.avgOpenPrice : null,
   };
 }
 
