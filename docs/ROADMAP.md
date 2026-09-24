@@ -24,6 +24,10 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 
 ## Later (on the horizon, not yet scoped)
 
+- Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
+  - Earnings-date comparisons elsewhere still use raw strings, UTC or host-local dates: `pmccReadiness.ts:29`, `pmccScore.ts:76`, `pmccLifecycle.ts:14,30` (regex-only `isDate`), `covered-call-finder.ts:185`, `lib/screener.ts:245`; `page.tsx` unchecked. Owned by slice D and EARNINGS-NO-DATE-0001.
+  - `page.tsx:5685` pair lookup for a held long does not apply the breakeven floor.
+  - `pmccHeldReadinessClient.ts` labels every blocked held pair `quality: quote-quality` (its `QUOTE|BID_ASK|MARKET` match hits the always-present QUOTES_READY gate); fold into 0001B or a separate ticket.
 - Paper trading parity, six phases: (1) stock + CC, (2) PMCC, (3) LEAP-only, (4) rolls, (5) GTC/stop simulation via Vercel Cron, (6) assignment/expiration. Plan lives in `docs/paper-trading-full-parity-plan.md`. No phase ticketed or scoped yet.
 - PMCC three-stage discovery flow: partially implemented. `isPairedPmccLong` in `lib/portfolio-data/pmccPairDetection.ts` is reusable. Blocks AI-POLICY-0001E.
 - EARNINGS-NO-DATE-0001: draft (Ian, 2026-09-24). Missing-earnings-date caution. Needs Paul scope; sequenced after D.
