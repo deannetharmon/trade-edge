@@ -202,7 +202,11 @@ export function planHeldPmccDisplay(results: readonly ResultLike[]): HeldDisplay
   });
 
   const summaryBySymbol = new Map<string, string>();
-  for (const [symbol, counts] of perSymbol) if (counts.leaps >= 2) summaryBySymbol.set(symbol, formatHeldLeapSummary(symbol, counts));
+  perSymbol.forEach((counts, symbol) => {
+  if (counts.leaps >= 2) {
+    summaryBySymbol.set(symbol, formatHeldLeapSummary(symbol, counts));
+  }
+});
   return { rankById, hiddenIds, leapHasResultsIds, summaryBySymbol };
 }
 
