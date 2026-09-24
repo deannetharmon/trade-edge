@@ -5,7 +5,12 @@ import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
 import type { PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
 import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHeldLeaps';
-import { heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
+import { evaluateHeldBreakevenFloor, heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
+import { isNyseHoliday } from './nyseCalendar';
+import { classifyEarningsVsExpiry } from './earningsExpiryZone';
+import { newYorkDateFromAsOf, normalizeEarningsDate } from './pmccEarningsDates';
+import { partitionShortsByEarnings, type PmccEarningsRemoval } from './pmccEarningsRemoval';
+import { earningsRemovedBanner } from './pmccHeldOutcomeDisplay';
 // PMCC-TREND-GATE-0001 -- cross-domain import (lib/scans -> lib/portfolio)
 // is intentional: technicalAlignmentForStrategy's own doc comment already
 // declares itself "the single source of truth for both the screener's
@@ -37,55 +42,6 @@ export interface PmccProductionContext {
 }
 
 const pending = (reason: string): CheckResult => ({ status: 'pending', value: '—', reason });
-
-function observedFixedHoliday(year: number, month: number, day: number): string {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  const weekday = date.getUTCDay();
-  if (weekday === 6) date.setUTCDate(date.getUTCDate() - 1);
-  if (weekday === 0) date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
-}
-
-function nthWeekday(year: number, month: number, weekday: number, nth: number): string {
-  const date = new Date(Date.UTC(year, month - 1, 1));
-  date.setUTCDate(1 + ((weekday - date.getUTCDay() + 7) % 7) + (nth - 1) * 7);
-  return date.toISOString().slice(0, 10);
-}
-
-function lastWeekday(year: number, month: number, weekday: number): string {
-  const date = new Date(Date.UTC(year, month, 0));
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() - weekday + 7) % 7));
-  return date.toISOString().slice(0, 10);
-}
-
-function goodFriday(year: number): string {
-  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
-  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31);
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
-  const date = new Date(Date.UTC(year, month - 1, day - 2));
-  return date.toISOString().slice(0, 10);
-}
-
-function isNyseHoliday(date: string): boolean {
-  const year = Number(date.slice(0, 4));
-  const holidays = new Set([
-    observedFixedHoliday(year, 1, 1),
-    nthWeekday(year, 1, 1, 3),
-    nthWeekday(year, 2, 1, 3),
-    goodFriday(year),
-    lastWeekday(year, 5, 1),
-    observedFixedHoliday(year, 6, 19),
-    observedFixedHoliday(year, 7, 4),
-    nthWeekday(year, 9, 1, 1),
-    nthWeekday(year, 11, 4, 4),
-    observedFixedHoliday(year, 12, 25),
-  ]);
-  return holidays.has(date);
-}
 
 export function derivePmccMarketSession(asOf: Date): PmccMarketSession {
   if (!Number.isFinite(asOf.getTime())) return 'unknown';
@@ -191,7 +147,8 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
     }
   }
   const readinessReasons = pmccDecision.gates
-    .filter(item => item.status !== 'pass')
+    // EARNINGS_AFTER_SHORT_EXPIRY is an ambient tag (SCAN-ALIGN-0001D), not a reason.
+    .filter(item => item.status !== 'pass' && item.code !== 'EARNINGS_AFTER_SHORT_EXPIRY')
     .map(item => item.explanation);
   return {
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr,
@@ -210,17 +167,49 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
   };
 }
 
-export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext): ScreenResult[] {
-  const retained = [...session.qualifiedPairs, ...session.nearMissPairs];
-  if (retained.length) return retained.map((pair, index) => resultForPair(pair, session, context, index + 1));
+export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext, earningsRemoval?: PmccEarningsRemoval): ScreenResult[] {
+  // SCAN-ALIGN-0001D safety net: shorts are normally removed BEFORE pairing (runPmccProduction), so
+  // this only drops pairs when a caller paired without the filter or when the cost-basis-wins path
+  // paired unfiltered. A held pair carrying COST_BASIS_UNAVAILABLE is kept (not-checked wins).
+  const droppedShorts = new Set<string>();
+  let droppedHeld = false;
+  const survives = (pair: PmccPairResult): boolean => {
+    const zone = classifyEarningsVsExpiry(context.earningsDate, pair.shortLeg.expiration, session.asOf);
+    if (zone.zone !== 'exclude') return true;
+    if (pair.failureReasons.some(item => item.code === 'COST_BASIS_UNAVAILABLE')) return true;
+    droppedShorts.add(pair.shortLeg.candidateId);
+    if (pair.entryMode === 'covered-short-call-against-held-leaps') droppedHeld = true;
+    return false;
+  };
+  const retained = [...session.qualifiedPairs, ...session.nearMissPairs].filter(survives);
+  let removal = earningsRemoval;
+  if (!removal && droppedShorts.size > 0) {
+    removal = {
+      removedCount: droppedShorts.size,
+      earningsDate: normalizeEarningsDate(context.earningsDate) ?? '',
+      allShortsRemoved: retained.length === 0, heldMode: droppedHeld, asOfUnknown: newYorkDateFromAsOf(session.asOf) === null,
+    };
+  }
+  if (retained.length) {
+    const results = retained.map((pair, index) => resultForPair(pair, session, context, index + 1));
+    if (removal) results[0] = { ...results[0], pmccEarningsRemoval: removal };
+    return results;
+  }
   const failReasons = pmccAuditReasons(session);
+  const heldBanner = removal && removal.allShortsRemoved && removal.heldMode ? earningsRemovedBanner(removal.earningsDate) : null;
+  if (heldBanner == null && removal && removal.removedCount > 0) {
+    failReasons.push(`${removal.removedCount} short call${removal.removedCount === 1 ? '' : 's'} removed: earnings on ${removal.earningsDate} falls on or before expiry`);
+  }
   const pmccDecision = evaluatePmccDecision({ pair: null, criteria: session.criteria, marketSession: session.marketSession });
   return [{
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr, qualified: false, bestCandidate: null,
-    candidateId: `pmcc-audit:${context.symbol}:${session.asOf}`, failReasons: failReasons.length ? failReasons : ['No valid combinations'],
+    candidateId: `pmcc-audit:${context.symbol}:${session.asOf}`,
+    // Held mode with every short removed by earnings: the banner IS the reason (never "no short calls found").
+    failReasons: heldBanner != null ? [heldBanner] : failReasons.length ? failReasons : ['No valid combinations'],
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock', underlyingType: context.underlyingType,
     ruleSetApplied: `PMCC pairing engine v2 / ${PMCC_DECISION_POLICY_VERSION}`, checks: checksFor(null), pmccDecision, pmccPairingCounts: session.counts,
     pmccIncompleteAnalysis: session.incompleteAnalysis, pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
+    ...(removal ? { pmccEarningsRemoval: removal } : {}),
   }];
 }
 
@@ -267,11 +256,33 @@ export function runPmccProduction(
         'Held long call could not be matched exactly in the live option chain',
       )];
     }
+    // SCAN-ALIGN-0001D: earnings REMOVAL (a filter, not a gate). Shorts with T <= E <= X are dropped
+    // before pairing so they can never be retained, ranked or qualified. Held mode: when earnings
+    // removes every in-range short, COST_BASIS_UNAVAILABLE still wins (the cost-basis not-checked
+    // card is what the trader must see), so shorts are left unfiltered for that case and the
+    // post-pairing safety net in buildPmccScreenResults drops everything except the cost-basis pairs.
+    const heldMode = matchedHeldLongs.length > 0;
+    const partition = partitionShortsByEarnings(adapted.shortLegs, context.earningsDate, snapshot.asOf, snapshot.criteria.dte);
+    const allInRangeRemoved = partition.inRangeCount > 0 && partition.removedInRangeCount === partition.inRangeCount;
+    const sample = partition.firstRemovedInRange;
+    const costBasisWins = heldMode && allInRangeRemoved && sample != null && matchedHeldLongs.some(value => {
+      const failure = evaluateHeldBreakevenFloor({
+        strikeLong: value.leg.strike, strikeShort: sample.strike, shortBid: sample.bid ?? Number.NaN, spot: context.price,
+        basis: readHeldBasis(value.candidate.avgOpenPrice), quantity: value.candidate.quantity,
+      });
+      return failure?.code === 'COST_BASIS_UNAVAILABLE';
+    });
+    if (partition.removedInRangeCount > 0 && partition.asOfUnknown) {
+      console.warn('PMCC earnings removal ran without a valid asOf (T unknown): excluding E <= expiry without a lower bound', { symbol: context.symbol, asOf: snapshot.asOf });
+    }
+    const earningsRemoval: PmccEarningsRemoval | undefined = partition.removedInRangeCount > 0 && partition.earningsDate
+      ? { removedCount: partition.removedInRangeCount, earningsDate: partition.earningsDate, allShortsRemoved: allInRangeRemoved && !costBasisWins, heldMode, asOfUnknown: partition.asOfUnknown }
+      : undefined;
     const pairing = dependencies.pair({
       symbol: context.symbol,
       underlyingPrice: context.price,
       longLegs: matchedHeldLongs.length ? matchedHeldLongs.map(value => value.leg) : adapted.longLegs,
-      shortLegs: adapted.shortLegs,
+      shortLegs: costBasisWins ? adapted.shortLegs : partition.kept,
       // OI is an entry-liquidity criterion for a newly purchased long. The
       // held contract still exposes OI in the UI, but is not rejected solely
       // for that new-entry floor.
@@ -303,7 +314,7 @@ export function runPmccProduction(
       pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);
       pairing.nearMissPairs = pairing.nearMissPairs.map(annotate);
     }
-    return buildPmccScreenResults(pairing, context);
+    return buildPmccScreenResults(pairing, context, earningsRemoval);
   } catch (error) {
     throw new PmccProductionError('PAIRING_ENGINE_FAILURE', error);
 

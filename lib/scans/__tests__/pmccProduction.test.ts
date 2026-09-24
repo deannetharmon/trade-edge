@@ -39,20 +39,25 @@ describe('PMCC production integration', () => {
     expect(results.every(result => result.pmccPair != null)).toBe(true);
   });
 
-  it('PMCC-EARNINGS-PAST-0001: resultForPair threads session.asOf into the earnings gate', () => {
-    const gateFor = (pairAsOf: Date, quoteTs: string) => {
+  it('PMCC-EARNINGS-PAST-0001 / SCAN-ALIGN-0001D: session.asOf drives earnings removal (upcoming E excluded, past E silent)', () => {
+    const build = (pairAsOf: Date, quoteTs: string) => {
       const pairing = pairPmccCandidates({
         symbol: 'GS', underlyingPrice: 1037.55,
         longLegs: [leg('long', 720, { quoteTimestamp: quoteTs })], shortLegs: [leg('short', 1070, { quoteTimestamp: quoteTs })],
         criteria, asOf: pairAsOf, marketSession: 'open',
       });
-      const results = buildPmccScreenResults(pairing, { ...context, earningsDate: '2026-08-20' });
-      expect(results).toHaveLength(1);
-      return results[0].pmccDecision?.gates.find(g => g.code === 'EARNINGS_BEFORE_SHORT_EXPIRY');
+      return buildPmccScreenResults(pairing, { ...context, earningsDate: '2026-08-20' });
     };
-    // Earnings 2026-08-20, short expiry 2026-09-18: still upcoming on 08-14, already past on 08-25.
-    expect(gateFor(new Date('2026-08-14T15:00:00.000Z'), '2026-08-14T14:59:30.000Z')).toMatchObject({ observedValue: '2026-08-20' });
-    expect(gateFor(new Date('2026-08-25T15:00:00.000Z'), '2026-08-25T14:59:30.000Z')).toBeUndefined();
+    // Earnings 2026-08-20, short expiry 2026-09-18: upcoming on 08-14 (T <= E <= X: the pair is REMOVED),
+    // already past on 08-25 (E < T: pair kept, no earnings gate).
+    const upcoming = build(new Date('2026-08-14T15:00:00.000Z'), '2026-08-14T14:59:30.000Z');
+    expect(upcoming).toHaveLength(1);
+    expect(upcoming[0].pmccPair).toBeUndefined();
+    expect(upcoming[0].pmccEarningsRemoval).toMatchObject({ removedCount: 1, earningsDate: '2026-08-20', allShortsRemoved: true, heldMode: false });
+    const past = build(new Date('2026-08-25T15:00:00.000Z'), '2026-08-25T14:59:30.000Z');
+    expect(past).toHaveLength(1);
+    expect(past[0].pmccPair).toBeDefined();
+    expect(past[0].pmccDecision?.gates.find(g => g.code === 'EARNINGS_BEFORE_SHORT_EXPIRY')).toBeUndefined();
   });
 
   it('retains an alternate valid pair when the deterministic first combination fails', () => {

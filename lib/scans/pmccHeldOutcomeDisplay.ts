@@ -10,6 +10,7 @@
 
 import { HELD_BREAKEVEN_DETAIL, readHeldBasis } from './pmccHeldBreakeven';
 import type { PmccPairResult } from './pmccTypes';
+import type { PmccEarningsRemoval } from './pmccEarningsRemoval';
 
 export type HeldOutcomeKind = 'results' | 'floor-not-met' | 'not-checked';
 
@@ -129,6 +130,26 @@ export function heldOutcomeForPair(pair: PmccPairResult | null | undefined, symb
     quantity: pair.heldLongLeg?.quantity, longStrike: pair.longLeg.strike, avgOpen: pair.heldLongLeg?.avgOpenPrice ?? null,
     leapHasNoResults,
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// SCAN-ALIGN-0001D: earnings-removed held outcome (a symbol-level outcome, no pair failure reason)
+// ---------------------------------------------------------------------------------------------
+
+/** Ian-approved copy (SCAN-ALIGN-0001D). No action button. Never "no short calls found". */
+export function earningsRemovedBanner(earningsDate: string): string {
+  return `Short calls not offered: earnings on ${earningsDate} falls on or before every expiry in your DTE range.`;
+}
+
+/**
+ * Banner for a held symbol whose shorts were all removed by earnings, or null. COST_BASIS_UNAVAILABLE
+ * (not-checked) wins: when the symbol also has a not-checked outcome, this returns null and the
+ * not-checked banner is the one shown.
+ */
+export function selectEarningsRemovedBanner(removal: PmccEarningsRemoval | null | undefined, costBasisNotChecked = false): string | null {
+  if (!removal || costBasisNotChecked) return null;
+  if (!removal.heldMode || !removal.allShortsRemoved || removal.removedCount <= 0 || !removal.earningsDate) return null;
+  return earningsRemovedBanner(removal.earningsDate);
 }
 
 export const HELD_OUTCOME_RANK: Record<HeldOutcomeKind, number> = { results: 0, 'floor-not-met': 1, 'not-checked': 2 };

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HELD_BREAKEVEN_DETAIL, HELD_BREAKEVEN_FLOOR_MESSAGE } from '../pmccHeldBreakeven';
 import {
   buildPreModalReadFailure, classifyHeldReadFailure, formatHeldLeapSummary, heldOutcomeForPair, orderHeldGroup,
-  planHeldPmccDisplay, selectHeldOutcome,
+  earningsRemovedBanner, planHeldPmccDisplay, selectEarningsRemovedBanner, selectHeldOutcome,
 } from '../pmccHeldOutcomeDisplay';
 import type { PmccPairResult } from '../pmccTypes';
 
@@ -114,6 +114,16 @@ describe('selectHeldOutcome', () => {
       const out = selectHeldOutcome({ symbol: 'UBER', quantity: 2, longStrike: 60, avgOpen: 2.35, ...input })!;
       for (const text of [out.caption, out.banner ?? '', out.detailLine, out.reasonLine]) expect(text).not.toMatch(NEVER);
     }
+  });
+
+  it('SCAN-ALIGN-0001D: the earnings-removed banner is the approved copy and never says "no short calls found"', () => {
+    const banner = earningsRemovedBanner('2026-10-16');
+    expect(banner).toBe('Short calls not offered: earnings on 2026-10-16 falls on or before every expiry in your DTE range.');
+    expect(banner).not.toMatch(NEVER);
+    const removal = { removedCount: 2, earningsDate: '2026-10-16', allShortsRemoved: true, heldMode: true, asOfUnknown: false };
+    expect(selectEarningsRemovedBanner(removal)).toBe(banner);
+    // COST_BASIS_UNAVAILABLE (not-checked) wins over earnings-removed.
+    expect(selectEarningsRemovedBanner(removal, true)).toBeNull();
   });
 
   it('other codes are not held outcomes', () => {

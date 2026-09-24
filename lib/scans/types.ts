@@ -242,6 +242,8 @@ export interface ScreenResult {
   pmccIncompleteAnalysis?: boolean;
   pmccLegRejections?: import('./pmccTypes').PmccLegRejection[];
   pmccAsOf?: string;
+  /** SCAN-ALIGN-0001D: earnings removal report for this symbol; set on ONE result per symbol so summed counts never double-count. */
+  pmccEarningsRemoval?: import('./pmccEarningsRemoval').PmccEarningsRemoval;
   pmccAuditKind?: 'MARKET_DATA_FAILURE' | 'CHAIN_ADAPTATION_FAILURE' | 'PAIRING_ENGINE_FAILURE';
 }
 
