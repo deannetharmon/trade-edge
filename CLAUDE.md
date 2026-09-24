@@ -51,8 +51,18 @@ When making multiple changes to a page.tsx in one session:
 - Paul (product): approves scope before build.
 - Diane (UX): produces mocks before any UI goes to code.
 - Alan (quant): validates formulas and golden fixtures.
-- Quinn (architecture): architecture review.
+- Quinn (QA): testability, coverage, regressions, architecture risk.
+- Frank (facilitator/Scrum Master): runs a ticket through the team; works with Paul.
 - Dane (implementation): the build role. Do not build before approval; this has caused regressions.
+- Personas are subagents in `.claude/agents/`. Dean is the sponsor and final decision-maker.
+
+## Token discipline
+
+- Default to ONE persona per task. Add others only to review a finished proposal, not to redo the research.
+- Do not read app/screener/page.tsx (~12.6k lines) in full. Grep for the symbol and read only the relevant range.
+- Read only the files or ranges named in the prompt when given.
+- Do not spawn Frank unless coordinating 3+ personas on one ticket.
+- Discuss first, then build. Ask before running the full test suite.
 
 ## TastyTrade constraints
 
