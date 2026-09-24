@@ -186,7 +186,7 @@ export function planHeldPmccDisplay(results: readonly ResultLike[]): HeldDisplay
   const hiddenIds = new Set<string>();
   const leapHasResultsIds = new Set<string>();
   const perSymbol = new Map<string, { leaps: number; results: number; floor: number; notChecked: number }>();
-  for (const leap of leaps.values()) {
+  leaps.forEach(leap => {
     const kind: HeldOutcomeKind = leap.anyCostBasis ? 'not-checked' : leap.allFloor ? 'floor-not-met' : 'results';
     const counts = perSymbol.get(leap.symbol) ?? { leaps: 0, results: 0, floor: 0, notChecked: 0 };
     counts.leaps += 1;
@@ -199,7 +199,7 @@ export function planHeldPmccDisplay(results: readonly ResultLike[]): HeldDisplay
       if (kind === 'results') leapHasResultsIds.add(id);
       else if (index > 0) hiddenIds.add(id);
     });
-  }
+  });
 
   const summaryBySymbol = new Map<string, string>();
   for (const [symbol, counts] of perSymbol) if (counts.leaps >= 2) summaryBySymbol.set(symbol, formatHeldLeapSummary(symbol, counts));
