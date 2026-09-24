@@ -158,6 +158,7 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
     marketSession: session.marketSession,
     trendAgainst,
     earningsDate: context.earningsDate,
+    asOf: session.asOf,
   });
   if (process.env.NODE_ENV !== 'production') {
     const legacyQualified = pair.qualified && !trendAgainst;
