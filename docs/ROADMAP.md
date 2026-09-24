@@ -8,7 +8,7 @@ Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip 
 
 1. PMCC-HELD-BREAKEVEN-0001 (A, P1, PR1): held-LEAP short calls get a breakeven floor. Fixtures, quantity guard and build plan signed off by Alan, Ian and Quinn (2026-09-24); build not started. Merge only once Dane has a committed start on PMCC-HELD-BREAKEVEN-0001B (Dean, 2026-09-24; interim silent fail-closed states on production acknowledged).
    - Permanent rule: a held LEAP with quantity > 1 fails closed (`COST_BASIS_UNAVAILABLE`), because multi-lot broker averaging is unverifiable. Dean holds single-contract LEAPs.
-   - PMCC-HELD-BREAKEVEN-0001B (caption, banner and pre-modal error for held-LEAP floor outcomes): Mock 3b approved by Ian, Paul and Dean 2026-09-24; approved for build, not built. Own PR; the all-fail pre-modal wrapper ships in the same PR as the cards. Needs Dane's pre-build checks (tile names, pre-modal surface, engine funnel order).
+   - PMCC-HELD-BREAKEVEN-0001B-1 (captions, banner, discovery-time pre-modal block, rejected styling on the existing held card): re-scoped 2026-09-24 after Dane found Mock 3b's surface does not exist; build to Mock 3c (`SCAN-ALIGN-0001-mock-3c.md`), pending Ian's copy check. Unit-suspect renders in results (needs spot). Own PR; blocks PR1 merge.
 2. PMCC-EARNINGS-PAST-0001 (B, P2, PR2): PMCC earnings warning fires on past dates. Approved by Dean; fixtures signed off by Alan and Ian; may travel with A as two commits. Must land before D.
 
 ## Next (scoped, approved, not started)
@@ -24,6 +24,7 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 
 ## Later (on the horizon, not yet scoped)
 
+- PMCC-HELD-BREAKEVEN-0001C (P2): held-LEAP results tiles (Avg open and Since open with em dashes), results container, "Show full breakdown", filter funnel and engine funnel data, "Adjust short delta" banner, rejected-pairs list. Needs its own mock and approval; not tied to PR1.
 - Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
   - Earnings-date comparisons elsewhere still use raw strings, UTC or host-local dates: `pmccReadiness.ts:29`, `pmccScore.ts:76`, `pmccLifecycle.ts:14,30` (regex-only `isDate`), `covered-call-finder.ts:185`, `lib/screener.ts:245`; `page.tsx` unchecked. Owned by slice D and EARNINGS-NO-DATE-0001.
   - `page.tsx:5685` pair lookup for a held long does not apply the breakeven floor.
