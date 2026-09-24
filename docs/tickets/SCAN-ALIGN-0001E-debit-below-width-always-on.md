@@ -41,3 +41,21 @@
 ## Rollout notes
 
 E depends on A: without A, held mode has no debit rule once the toggle goes. The saved-setting strip cannot be undone but is safe to roll back; reverting only E2 is trivial after E1.
+
+## Fixtures, corrections and rulings (Alan, Ian; 2026-09-24)
+
+**Approved by Ian.** E only makes `requireDebitBelowWidth` non-switchable for NEW-entry PMCC: debit >= width is a hard reject. **Held mode is unchanged: the PR1 held floor governs it** (the debit check sits in `else if (!isHeldLong)` at `pmccPairing.ts:265-268`, so held pairs never reach it; E's held-mode acceptance rows in this ticket belong to A). Ian's rulings: compare in **cents** (round before comparing; pin 24.10 - 1.60 = 22.50 in a test with fixtures just above and below the boundary); old saved snapshots carrying `requireDebitBelowWidth` are **ignored, not rejected**, and `isValidPmccScanSnapshot` (`pmccConfig.ts:92`, currently requires `typeof requireDebitBelowWidth === 'boolean'`) stops requiring it (test: load an old snapshot with the field and one without); an unknown extra key in `validateCriteria` is ignored; a saved `false` is stripped and still rejects; near-miss counts and audit shrink honestly (debit >= width is a hard reject, not a near-miss; `structurallyValidPairs`, `nearMissPairs` change). **The "always on" receipt row is dropped** (no PMCC receipt component exists; `ScanReceiptPanel` is driven by `ccRegistry`/`cspRegistry` only); it moves to the PMCC registry migration ticket. No Diane mock.
+
+**Fixtures** (long strike 80, long ask 24.10, short bid 1.60, debit 22.50):
+
+| Case | Short strike | Width | Result |
+|---|---|---|---|
+| Debit = width - 0.01 | 102.51 | 22.51 | passes |
+| Debit = width | 102.50 | 22.50 | rejects (hard) |
+| Debit = width + 0.01 | 102.49 | 22.49 | rejects |
+| Saved `requireDebitBelowWidth:false` | any | | stripped or ignored; equality still rejects |
+| Criteria without the field | | | valid |
+| Extra unknown key | | | ignored |
+| Held long | | | unaffected by E (PR1 governs) |
+
+**Tests that flip / need field removal:** `pmccPairing.test.ts` "retains debit-at-or-above-width pairs in the near-miss audit set" (:98); "keeps all applicable pair failure reasons" (:195: primary stays `LONG_EXPIRATION_NOT_LATER`; `NET_DEBIT_NOT_BELOW_WIDTH` remains a valid hard-reject code); `pmccPairOnDemand.test.ts:110` (near_miss becomes pair_rejected); `pmccHeldBreakeven.test.ts:387` (A19 equality near-miss flips); `PmccResultCardFields.test.tsx:117` (`false`: check whether its pairs have debit >= width); remove the field from fixtures in `pmccDecision.test.ts:12`, `pmccProduction.test.ts:14`, `pmccPairing.perf.test.ts:27`, `pmccHeldBreakevenPlumbing.test.ts:23,:31`, `PmccHeldOutcomeCards.test.tsx:88`, `scanAlignC1OiPolicy.test.ts:24`, and `ScreenerPage.test.tsx` (fixtures at 323, 1004, 1136; not 998/1130).
