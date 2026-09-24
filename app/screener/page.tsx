@@ -53,6 +53,7 @@ import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejec
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
 import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, selectDeltaRemovedNotice, selectEarningsRemovedBanner, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
 import { earningsRemovalReceipt } from '@/lib/scans/pmccEarningsRemoval';
+import { pmccScanStatusSuffix } from '@/lib/scans/pmccScanStatusSuffix';
 import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
@@ -10328,7 +10329,7 @@ export default function Home() {
         } catch {}
         completeScreenerJob({
           resultCount: session.results.length,
-          status: `${session.results.length} PMCC result${session.results.length === 1 ? '' : 's'} ready${earningsRemovalReceipt(session.results)}`,
+          status: `${session.results.length} PMCC result${session.results.length === 1 ? '' : 's'} ready${earningsRemovalReceipt(session.results)}${pmccScanStatusSuffix(pmccSnapshot)}`,
           resultsHref: '/screener?mode=filter',
         });
       });
