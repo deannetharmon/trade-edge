@@ -11,7 +11,7 @@ const asOf = new Date('2026-08-14T15:00:00.000Z');
 const criteria: PmccPairingCriteria = {
   dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
   longDelta: { min: 0.70, max: 0.85 }, shortDelta: { min: 0.20, max: 0.30 },
-  longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+  longOiMin: 100, shortOiMin: 100,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
 const snapshot = { asOf: asOf.toISOString(), marketSession: 'open' as const, criteria, decisionPolicyVersion: PMCC_DECISION_POLICY_VERSION };
@@ -58,7 +58,9 @@ describe('PMCC production integration', () => {
   it('retains an alternate valid pair when the deterministic first combination fails', () => {
     const pairing = run([leg('long', 720)], [leg('short', 1038, { bid: 1, ask: 1.1 }), leg('short', 1070)]);
     const results = buildPmccScreenResults(pairing, context);
-    expect(pairing.nearMissPairs).toHaveLength(1);
+    // 1038 short: debit 321 >= width 318 is a hard reject (SCAN-ALIGN-0001E), counted but not a near-miss.
+    expect(pairing.nearMissPairs).toHaveLength(0);
+    expect(pairing.counts.debitRejectedPairs).toBe(1);
     expect(results.some(result => result.qualified && result.pmccPair?.shortLeg.strike === 1070)).toBe(true);
   });
 

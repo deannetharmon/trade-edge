@@ -1,3 +1,5 @@
+// lib/scans/pmccConfig.ts
+
 import type { PmccDeltaRange, PmccPairingLimits, PmccQuotePolicy, PmccScanSnapshot } from './pmccTypes';
 import { isValidPmccDteRanges } from './pmccDteRanges';
 import { PMCC_DECISION_POLICY_VERSION } from './pmccDecision';
@@ -74,6 +76,20 @@ export function isValidPmccQuotePolicy(value: unknown): value is PmccQuotePolicy
       || (Number.isFinite(policy.shortWidthCeiling) && policy.shortWidthCeiling >= 0.01));
 }
 
+/**
+ * SCAN-ALIGN-0001E: debit < width is always on. Older saved snapshots carry a
+ * `requireDebitBelowWidth` criterion; it is dropped on load (never read, so a
+ * saved `false` cannot survive) and never rejected.
+ */
+export function stripLegacyPmccCriteria<T>(snapshot: T): T {
+  if (snapshot == null || typeof snapshot !== 'object') return snapshot;
+  const criteria = (snapshot as { criteria?: unknown }).criteria;
+  if (criteria == null || typeof criteria !== 'object' || !('requireDebitBelowWidth' in criteria)) return snapshot;
+  const rest: Record<string, unknown> = { ...(criteria as Record<string, unknown>) };
+  delete rest.requireDebitBelowWidth;
+  return { ...snapshot, criteria: rest };
+}
+
 export function isValidPmccScanSnapshot(value: unknown): value is PmccScanSnapshot {
   if (value == null || typeof value !== 'object') return false;
   const snapshot = value as PmccScanSnapshot;
@@ -89,7 +105,6 @@ export function isValidPmccScanSnapshot(value: unknown): value is PmccScanSnapsh
     && isValidPmccDeltaRange(criteria.shortDelta, PMCC_SHORT_DELTA_BOUNDS)
     && Number.isInteger(criteria.longOiMin) && criteria.longOiMin >= 0
     && Number.isInteger(criteria.shortOiMin) && criteria.shortOiMin >= 0
-    && typeof criteria.requireDebitBelowWidth === 'boolean'
     && isValidPmccQuotePolicy(criteria.quotePolicy)
     && isValidPmccPairingLimits(criteria.limits);
 }

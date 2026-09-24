@@ -17,16 +17,16 @@
 // using clean, round inputs chosen so the arithmetic is easy to verify
 // by eye:
 //   long strike 100, executable ask $25.00, underlying $110 (10 ITM)
-//   short strike 120, executable bid $3.00
+//   short strike 125, executable bid $3.00 (SCAN-ALIGN-0001E: was 120, which made debit 22 >= width 20,
+//   a hard reject now that debit < width is always on)
 //   short DTE 30, long DTE 300 (expirations picked to land on these
 //   exact values against a fixed asOf, verified via direct date math:
 //   2026-08-14 + 30 days = 2026-09-13; + 300 days = 2027-06-10)
 //
 // netDebitPerShare = 25.00 - 3.00 = 22.00
 // breakeven = longStrike + netDebitPerShare = 100 + 22.00 = 122.00
-// (deliberately above the 120 short strike, to also exercise Ian's
-// sanity check in the first test; the second test below covers the
-// boundary case where breakeven lands exactly at the short strike.)
+// (below the 125 short strike: a new-entry pair with breakeven above the
+// short strike is now impossible, since it would mean debit >= width.)
 // rollRunway = floor((300 - 30) / 30) = 9
 // shortCreditToNetDebitPct = (3.00 / 22.00) * 100 = 13.6364%
 // annualizedRoi = 13.6364% * (365 / 30) = 165.91%
@@ -114,7 +114,7 @@ const asOf = new Date('2026-08-14T15:00:00.000Z');
 const criteria: PmccPairingCriteria = {
   dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
   longDelta: { min: 0.70, max: 0.85 }, shortDelta: { min: 0.20, max: 0.30 },
-  longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: false,
+  longOiMin: 100, shortOiMin: 100,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
 
@@ -127,7 +127,7 @@ function makeLeg(role: 'long' | 'short', overrides: Partial<PmccChainLeg> = {}):
   // inconsistent leg the pairing engine correctly rejects
   // ("OCC identity is missing, invalid, or does not match the contract").
   // Confirmed via a real, direct test failure before this fix.
-  const strike = overrides.strike ?? (role === 'long' ? 100 : 120);
+  const strike = overrides.strike ?? (role === 'long' ? 100 : 125);
   return {
     underlyingSymbol: 'ACME', optionType: 'C', expiration, strike,
     delta: role === 'long' ? 0.80 : 0.25, openInterest: 500,
@@ -277,9 +277,10 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
     // FIX: "above short strike" was never rendered as literal text -- only
     // a "⚠" appended to the Breakeven value (confirmed: no such string
     // exists anywhere in app/screener/page.tsx). The warning check below
-    // already covers this fixture's breakeven ($122.00, genuinely above
-    // the $120 short strike) via the appended ⚠.
-    expect(within(card).getByText('Breakeven').parentElement).toHaveTextContent('Breakeven$122.00 ⚠');
+    // already covers this fixture's breakeven ($122.00, below the $125
+    // short strike, so no ⚠ is appended).
+    expect(within(card).getByText('Breakeven').parentElement).toHaveTextContent('Breakeven$122.00');
+    expect(within(card).getByText('Breakeven').parentElement).not.toHaveTextContent('⚠');
     expect(within(card).getByText('Roll runway').parentElement).toHaveTextContent('Roll runway~9 rolls');
     expect(within(card).getByText('Annualized ROI').parentElement).toHaveTextContent('Annualized ROI165.9%');
   });
@@ -317,10 +318,9 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
   });
 
   it('does not flag the breakeven/short-strike warning for a healthy structure', async () => {
-    // Same fixture shape, cheaper long ask so breakeven lands exactly at
-    // the short strike: netDebit 20.00 -> breakeven 120.00. The
-    // boundary case, not just an obviously-healthy one, since Ian's
-    // check is specifically about "above," not "at or above."
+    // Same fixture shape, cheaper long ask: netDebit 20.00 -> breakeven
+    // 120.00, below the 125 short strike. (The old at-the-short-strike
+    // boundary is unreachable for a new-entry pair: it would need debit >= width.)
     const pairing = pairPmccCandidates({
       symbol: 'ACME', underlyingPrice: 110,
       longLegs: [makeLeg('long', { ask: 23.00, bid: 22.80 })],

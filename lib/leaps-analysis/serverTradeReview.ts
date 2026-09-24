@@ -85,7 +85,6 @@ const SERVER_PMCC_CRITERIA: PmccPairingCriteria = {
   shortDelta: DEFAULT_PMCC_SHORT_DELTA_RANGE,
   longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
   shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
-  requireDebitBelowWidth: true,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
   limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };

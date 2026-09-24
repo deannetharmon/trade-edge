@@ -71,7 +71,6 @@ export interface PmccPairingCriteria {
   shortDelta: PmccDeltaRange;
   longOiMin: number;
   shortOiMin: number;
-  requireDebitBelowWidth: boolean;
   quotePolicy: PmccQuotePolicy;
   limits: PmccPairingLimits;
 }
@@ -212,6 +211,8 @@ export interface PmccPairingCounts {
   nearMissPairsRetained: number;
   qualifiedPairsOmittedByRetention: number;
   nearMissPairsOmittedByRetention: number;
+  /** SCAN-ALIGN-0001E: pairs rejected solely for debit >= width; not near-misses. Absent on older sessions (treat as 0). */
+  debitRejectedPairs?: number;
 }
 
 export interface PmccSessionResult {

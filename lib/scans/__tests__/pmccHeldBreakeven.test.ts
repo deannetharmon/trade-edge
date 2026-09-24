@@ -228,7 +228,7 @@ const asOf = new Date('2026-08-14T20:00:00.000Z');
 const criteria: PmccPairingCriteria = {
   dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
   longDelta: { min: 0.70, max: 0.85 }, shortDelta: { min: 0.20, max: 0.30 },
-  longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+  longOiMin: 100, shortOiMin: 100,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
 const occ = (expiration: string, strike: number) => `GS${expiration.slice(2).replace(/-/g, '')}C${String(Math.round(strike * 1000)).padStart(8, '0')}`;
@@ -384,10 +384,12 @@ describe('new-entry pairing is unchanged (A18, A19): junk basis and quantity in 
     expect(newEntry(105, false).qualifiedPairs).toHaveLength(1);
     expect(JSON.stringify(newEntry(105, true))).toBe(JSON.stringify(newEntry(105, false)));
   });
-  it('A19 equality (22.50 = 22.50) is NET_DEBIT_NOT_BELOW_WIDTH, still a structurally valid near-miss, byte-identical with junk', () => {
+  it('A19 equality (22.50 = 22.50) is a hard reject (SCAN-ALIGN-0001E), not a near-miss, byte-identical with junk', () => {
     const plain = newEntry(102.5, false);
-    expect(plain.nearMissPairs[0].primaryFailureReason?.code).toBe('NET_DEBIT_NOT_BELOW_WIDTH');
-    expect(plain.counts.structurallyValidPairs).toBe(1);
+    expect(plain.qualifiedPairs).toHaveLength(0);
+    expect(plain.nearMissPairs).toHaveLength(0);
+    expect(plain.counts.structurallyValidPairs).toBe(0);
+    expect(plain.counts.debitRejectedPairs).toBe(1);
     expect(JSON.stringify(newEntry(102.5, true))).toBe(JSON.stringify(plain));
   });
 });

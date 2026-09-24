@@ -264,7 +264,9 @@ function evaluatePair(
   // reject an existing covered position based on a purchase it will not make.
   else if (!isHeldLong) {
     if (!(metrics.netDebitPerShare > 0)) failures.push(reason('NET_DEBIT_NOT_POSITIVE'));
-    if (criteria.requireDebitBelowWidth && !(metrics.netDebitPerShare < metrics.strikeWidth)) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
+    // SCAN-ALIGN-0001E: always on, not a criterion. Compared in cents so float noise
+    // (24.10 - 1.60 vs a 22.50 width) cannot flip the boundary. Debit >= width is a hard reject.
+    if (!(Math.round(metrics.netDebitPerShare * 100) < Math.round(metrics.strikeWidth * 100))) failures.push(reason('NET_DEBIT_NOT_BELOW_WIDTH'));
   }
   // PMCC-HELD-BREAKEVEN-0001: a held long has no purchase to price, but a short call whose
   // assignment would lock in a loss must not qualify. Floor: Ks + short bid > Kl + avgOpenPrice.
@@ -282,7 +284,8 @@ function evaluatePair(
     });
     if (failure) failures.push(reason(failure.code, failure.message));
   }
-  const structurallyValid = failures.every(item => item.code === 'NET_DEBIT_NOT_BELOW_WIDTH');
+  // Every remaining failure, including debit >= width (SCAN-ALIGN-0001E), is a hard reject.
+  const structurallyValid = failures.length === 0;
   return {
     structurallyValid,
     pair: {
@@ -300,6 +303,11 @@ function evaluatePair(
   };
 }
 
+/** A pair whose only failure is debit >= width is a hard reject, not a near-miss (SCAN-ALIGN-0001E). */
+function isDebitOnlyReject(pair: PmccPairResult): boolean {
+  return pair.failureReasons.length === 1 && pair.failureReasons[0].code === 'NET_DEBIT_NOT_BELOW_WIDTH';
+}
+
 function emptyCounts(): PmccPairingCounts {
   return {
     eligibleLongLegs: 0, eligibleShortLegs: 0, potentialCombinations: 0,
@@ -307,7 +315,7 @@ function emptyCounts(): PmccPairingCounts {
     structurallyValidPairs: 0, qualifiedPairsBeforeRetention: 0,
     nearMissPairsBeforeRetention: 0, qualifiedPairsRetained: 0,
     nearMissPairsRetained: 0, qualifiedPairsOmittedByRetention: 0,
-    nearMissPairsOmittedByRetention: 0,
+    nearMissPairsOmittedByRetention: 0, debitRejectedPairs: 0,
   };
 }
 
@@ -349,6 +357,7 @@ export function pairPmccCandidates(input: {
       counts.combinationsEvaluated += 1;
       if (evaluated.structurallyValid) counts.structurallyValidPairs += 1;
       if (evaluated.pair.qualified) allQualified.push(evaluated.pair);
+      else if (isDebitOnlyReject(evaluated.pair)) counts.debitRejectedPairs = (counts.debitRejectedPairs ?? 0) + 1;
       else allNearMisses.push(evaluated.pair);
     }
   }

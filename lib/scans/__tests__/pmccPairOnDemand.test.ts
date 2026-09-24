@@ -14,7 +14,6 @@ const criteria: PmccPairingCriteria = {
   shortDelta: { min: 0.20, max: 0.30 },
   longOiMin: 100,
   shortOiMin: 100,
-  requireDebitBelowWidth: true,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
   limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
@@ -107,12 +106,12 @@ describe('evaluatePmccPairOnDemand', () => {
     expect(result.pair?.qualified).toBe(true);
   });
 
-  it('outcome: near_miss for a structurally valid pair that fails only requireDebitBelowWidth', () => {
+  it('outcome: pair_rejected for a pair whose only failure is debit >= width (hard reject)', () => {
     const result = check(
       longLeg({ bid: 1000, ask: 1000 }), // inflates net debit above the strike width
       shortLeg(),
     );
-    expect(result.outcome).toBe('near_miss');
+    expect(result.outcome).toBe('pair_rejected');
     expect(result.pair?.qualified).toBe(false);
     expect(result.pair?.failureReasons.some(r => r.code === 'NET_DEBIT_NOT_BELOW_WIDTH')).toBe(true);
   });

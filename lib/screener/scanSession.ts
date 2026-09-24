@@ -91,7 +91,7 @@ import type { ScreenResult } from '@/lib/scans/types';
 import { type CspRuleSnapshot, isValidCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { isOverallCspQualified } from '@/lib/scans/cspQualification';
 import type { PmccScanSnapshot } from '@/lib/scans/pmccTypes';
-import { isValidPmccScanSnapshot } from '@/lib/scans/pmccConfig';
+import { isValidPmccScanSnapshot, stripLegacyPmccCriteria } from '@/lib/scans/pmccConfig';
 
 export type ScreenerScanMode = 'filter' | 'rank' | 'targeted';
 
@@ -821,7 +821,8 @@ function isValidPmccCounts(value: unknown): boolean {
   if (Number(counts.qualifiedPairsRetained) + Number(counts.qualifiedPairsOmittedByRetention) !== Number(counts.qualifiedPairsBeforeRetention)) return false;
   if (Number(counts.nearMissPairsRetained) + Number(counts.nearMissPairsOmittedByRetention) !== Number(counts.nearMissPairsBeforeRetention)) return false;
   if (Number(counts.potentialCombinations) !== Number(counts.eligibleLongLegs) * Number(counts.eligibleShortLegs)) return false;
-  if (Number(counts.qualifiedPairsBeforeRetention) + Number(counts.nearMissPairsBeforeRetention) !== Number(counts.combinationsEvaluated)) return false;
+  if (counts.debitRejectedPairs !== undefined && !(Number.isInteger(counts.debitRejectedPairs) && Number(counts.debitRejectedPairs) >= 0)) return false;
+  if (Number(counts.qualifiedPairsBeforeRetention) + Number(counts.nearMissPairsBeforeRetention) + Number(counts.debitRejectedPairs ?? 0) !== Number(counts.combinationsEvaluated)) return false;
   if (Number(counts.structurallyValidPairs) > Number(counts.combinationsEvaluated)
     || Number(counts.qualifiedPairsBeforeRetention) > Number(counts.combinationsEvaluated)
     || Number(counts.nearMissPairsBeforeRetention) > Number(counts.combinationsEvaluated)) return false;
@@ -1357,7 +1358,7 @@ export function validateSessionData(data: unknown): SessionValidationResult {
       cachedAt: (d.cachedAt ?? null) as number | null,
       schemaVersion: SCHEMA_VERSION,
       ruleSnapshot: (d.ruleSnapshot ?? null) as CspRuleSnapshot | null,
-      pmccSnapshot: (d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
+      pmccSnapshot: stripLegacyPmccCriteria(d.pmccSnapshot ?? null) as PmccScanSnapshot | null,
       targetedSnapshot: (d.targetedSnapshot ?? null) as TargetedScanLaunchSnapshot | null,
     },
   };

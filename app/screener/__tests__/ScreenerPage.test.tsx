@@ -320,7 +320,7 @@ function makeDecisionAnalysis(overrides: Partial<DecisionAnalysis> = {}): Decisi
 const TEST_PMCC_CRITERIA = {
   dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
   longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
-  longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+  longOiMin: 100, shortOiMin: 100,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
 
@@ -1001,7 +1001,7 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
       criteria: {
         dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
         longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
-        longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+        longOiMin: 100, shortOiMin: 100,
         quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
       },
     };
@@ -1133,7 +1133,7 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
       criteria: {
         dte: { shortMin: 21, shortMax: 45, longMin: 270, longMax: 730 },
         longDelta: { min: 0.7, max: 0.85 }, shortDelta: { min: 0.2, max: 0.3 },
-        longOiMin: 100, shortOiMin: 100, requireDebitBelowWidth: true,
+        longOiMin: 100, shortOiMin: 100,
         quotePolicy: DEFAULT_PMCC_QUOTE_POLICY, limits: DEFAULT_PMCC_PAIRING_LIMITS,
       },
     };

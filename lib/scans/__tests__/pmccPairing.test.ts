@@ -15,7 +15,6 @@ const criteria: PmccPairingCriteria = {
   shortDelta: { min: 0.20, max: 0.30 },
   longOiMin: 100,
   shortOiMin: 100,
-  requireDebitBelowWidth: true,
   quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
   limits: DEFAULT_PMCC_PAIRING_LIMITS,
 };
@@ -102,13 +101,14 @@ describe('pairPmccCandidates', () => {
     expect(result.qualifiedPairs[0].shortLeg.strike).toBe(1070);
   });
 
-  it('retains debit-at-or-above-width pairs in the near-miss audit set', () => {
+  it('hard-rejects debit-at-or-above-width pairs: not qualified, not a near-miss, counted separately', () => {
     const result = run([longLeg()], [shortLeg({ strike: 1050, bid: 5, ask: 5.2, occSymbol: occ('2026-09-18', 1050) })]);
     expect(result.qualifiedPairs).toHaveLength(0);
-    expect(result.nearMissPairs[0].primaryFailureReason).toEqual({
-      code: 'NET_DEBIT_NOT_BELOW_WIDTH', message: 'Net debit equals or exceeds strike width',
-    });
-    expect(result.counts.structurallyValidPairs).toBe(1);
+    expect(result.nearMissPairs).toHaveLength(0);
+    expect(result.counts.structurallyValidPairs).toBe(0);
+    expect(result.counts.combinationsEvaluated).toBe(1);
+    expect(result.counts.nearMissPairsBeforeRetention).toBe(0);
+    expect(result.counts.debitRejectedPairs).toBe(1);
   });
 
   it('does not apply new-long purchase economics to a PMCC based on an exact held LEAPS', () => {
