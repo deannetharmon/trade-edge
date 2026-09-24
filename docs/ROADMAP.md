@@ -28,6 +28,7 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 - Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
   - Earnings-date comparisons elsewhere still use raw strings, UTC or host-local dates: `pmccReadiness.ts:29`, `pmccScore.ts:76`, `pmccLifecycle.ts:14,30` (regex-only `isDate`), `covered-call-finder.ts:185`, `lib/screener.ts:245`; `page.tsx` unchecked. Owned by slice D and EARNINGS-NO-DATE-0001.
   - `page.tsx:5685` pair lookup for a held long does not apply the breakeven floor.
+  - Held pair card: the Refresh Portfolio action and banner sit inside the card's expand `<button>` (nested interactive content; screen readers may not reach Refresh, same as the existing chart button). Fix = split the header into its own toggle; changes the click target and the `Expand/Collapse … PMCC details` aria-label existing tests use (found in 0001B-1 QA, 2026-09-24).
   - `pmccHeldReadinessClient.ts` labels every blocked held pair `quality: quote-quality` (its `QUOTE|BID_ASK|MARKET` match hits the always-present QUOTES_READY gate); fold into 0001B or a separate ticket.
 - Paper trading parity, six phases: (1) stock + CC, (2) PMCC, (3) LEAP-only, (4) rolls, (5) GTC/stop simulation via Vercel Cron, (6) assignment/expiration. Plan lives in `docs/paper-trading-full-parity-plan.md`. No phase ticketed or scoped yet.
 - PMCC three-stage discovery flow: partially implemented. `isPairedPmccLong` in `lib/portfolio-data/pmccPairDetection.ts` is reusable. Blocks AI-POLICY-0001E.
