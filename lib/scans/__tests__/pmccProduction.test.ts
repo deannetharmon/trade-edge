@@ -140,6 +140,22 @@ describe('PMCC production integration', () => {
     const olderValidation = validateSessionData(olderPmccPolicy);
     expect(olderValidation).toMatchObject({ valid: false, errors: expect.arrayContaining(['INVALID_PMCC_SNAPSHOT']) });
   });
+  it('rejects a restored new-entry pair whose long leg carries null open interest', () => {
+    const results = buildPmccScreenResults(run([leg('long', 720)], [leg('short', 1070)]), context);
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot,
+    });
+    session = completeSession(recordSymbolEvaluated(session, 'GS', results));
+    const value = JSON.parse(JSON.stringify(session));
+    value.results[0].pmccPair.longLeg.openInterest = null;
+    const validation = validateSessionData(value);
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_PMCC_RESULT');
+    const shortNull = JSON.parse(JSON.stringify(session));
+    shortNull.results[0].pmccPair.shortLeg.openInterest = null;
+    expect(validateSessionData(shortNull).valid).toBe(false);
+  });
   it('rejects audit-only sessions whose retained counts claim nonexistent pairs', () => {
     const audit = buildPmccScreenResults(run([], []), context)[0];
     let session = createScanSession({
