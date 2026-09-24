@@ -64,6 +64,13 @@ When making multiple changes to a page.tsx in one session:
 - Do not spawn Frank unless coordinating 3+ personas on one ticket.
 - Discuss first, then build. Ask before running the full test suite.
 
+## Session discipline
+
+- Prefer `claude --continue` or `claude --resume` over a fresh `claude` start when picking up existing work. A fresh session re-reads CLAUDE.md and re-runs session-start checks, burning tokens on state you already have.
+- Don't restart mid-decision. Finish a review/decision cycle before ending a session; re-summarizing "where we left off" costs tokens every time.
+- Batch real-world lookups (TastyTrade, DevTools, Vercel preview) before asking for one — gather everything needed for the current gate in one pass rather than round-tripping per item.
+- Use a lighter model for routine checks (git status, session-start flags, simple file reads); reserve the strongest model for logic, scoring, and build work.
+
 ## TastyTrade constraints
 
 - Access tokens expire in about 15 minutes.
