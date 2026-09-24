@@ -2,7 +2,7 @@
 
 ## Status
 
-**Logged; approved by Dean 2026-09-24. Not built.** Bug, **P1** (Ian). Paul rated it P0; both agree it goes first. Found during the `SCAN-ALIGN-0001` review (slice A). Build needs the open decisions below settled and Alan's fixture sign-off.
+**Logged; approved by Dean 2026-09-24. Not built.** Bug, **P1** (Ian). Paul rated it P0; both agree it goes first. Found during the `SCAN-ALIGN-0001` review (slice A). Units confirmed 2026-09-24 (decision 1). Build still needs decision 4 settled, Alan's fixture sign-off and Ian's logic sign-off.
 
 ## Problem
 
@@ -29,7 +29,7 @@ Held-LEAP mode is the live income path. The screener should never recommend a sh
 
 ## Decisions (Ian, 2026-09-24) and open items
 
-1. Units: confirm `avgOpenPrice` is per share, and whether fees are included, against a real TastyTrade payload. **Still open.** Add a unit guard: a per-contract-scaled value (x 100) must not pass silently.
+1. Units: **confirmed per share (Dean, 2026-09-24), against a real TastyTrade payload (HAR capture).** NFLX Long 70C 2027-09-17, one lot: `average-open-price` = `"20.85"` (a string), `multiplier` = `"100.0"`, `close-price` = `"13.24"`. 20.85 x 100 = the $2,085 entry debit TradeEdge shows; 70 + 20.85 = the $90.85 breakeven; TastyTrade's P/L Open (-$753) agrees. Fees: assumed excluded (a clean fill-price value), observed on one payload only. Notes: the API returns a string, so fixtures should use strings; do not infer direction from `cost-effect` (it read "Credit" on this long) and use `quantity-direction`. Not covered by this payload: multi-lot averages and a zero or missing basis, so Alan's fixtures must cover those. Keep the unit guard: a per-contract-scaled value (x 100) must not pass silently.
 2. Multi-lot held LEAPs: **decided.** Quantity-weighted average only when all lots share strike and expiry and each has a valid basis; otherwise fail closed.
 3. Fail closed when `avgOpenPrice` is null, non-finite or <= 0 (a zero basis from assignment or transfer would pass trivially). **Decided.**
 4. Where the "cost basis unavailable" reason shows (rejected reason code vs. near-miss), and its copy. **Still open.** Diane's proposal: rejection reason plus a caption on the LEAP row, and a banner line when it is why a held LEAP shows zero shorts.
