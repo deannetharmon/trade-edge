@@ -44,7 +44,7 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
     renderModal();
     expect(screen.getByText('Delta range (absolute)')).toBeInTheDocument();
     expect(screen.getByText('Absolute delta of the short call. Lower = further OTM.')).toBeInTheDocument();
-    expect(screen.getByText('Delta guides rank; it does not hide an otherwise tradable short call.')).toBeInTheDocument();
+    expect(screen.queryByText(/Delta guides rank/)).not.toBeInTheDocument();
     expect(minField()).toBeInTheDocument();
     expect(maxField()).toBeInTheDocument();
   });

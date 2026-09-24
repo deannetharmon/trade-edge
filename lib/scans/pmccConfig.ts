@@ -12,8 +12,8 @@ export const DEFAULT_PMCC_LONG_DELTA_RANGE: PmccDeltaRange = {
 export const DEFAULT_PMCC_SHORT_DELTA_RANGE: PmccDeltaRange = {
   min: 0.20,
   // A 0.30 ceiling excluded otherwise liquid, conventional covered-call
-  // candidates such as UBER's 0.32-delta call.  This is a preference band,
-  // not a safety boundary; the hard validated ceiling remains 0.40.
+  // candidates such as UBER's 0.32-delta call.  SCAN-ALIGN-0001F: this window is a HARD
+  // filter on the short leg (inclusive bounds); the validated bounds stay 0.10-0.40.
   max: 0.35,
 };
 

@@ -9,7 +9,7 @@
 // without a new approval.
 
 import { HELD_BREAKEVEN_DETAIL, readHeldBasis } from './pmccHeldBreakeven';
-import type { PmccPairResult } from './pmccTypes';
+import type { PmccPairResult, PmccSessionResult } from './pmccTypes';
 import type { PmccEarningsRemoval } from './pmccEarningsRemoval';
 
 export type HeldOutcomeKind = 'results' | 'floor-not-met' | 'not-checked';
@@ -150,6 +150,65 @@ export function selectEarningsRemovedBanner(removal: PmccEarningsRemoval | null 
   if (!removal || costBasisNotChecked) return null;
   if (!removal.heldMode || !removal.allShortsRemoved || removal.removedCount <= 0 || !removal.earningsDate) return null;
   return earningsRemovedBanner(removal.earningsDate);
+}
+
+// ---------------------------------------------------------------------------------------------
+// SCAN-ALIGN-0001F (F2): delta-removed held outcome (a symbol-level outcome, no pair failure reason)
+// ---------------------------------------------------------------------------------------------
+
+/** Held-mode report of shorts the delta window removed. Set only when delta was the sole removal
+ * reason for at least one short and no short survived pairing. Window is the scan's snapshot. */
+export interface PmccDeltaRemoval {
+  /** Snapshot criteria.shortDelta at scan time (never live control state). */
+  min: number;
+  max: number;
+  /** Shorts that failed the window (with or without another reason). */
+  removedCount: number;
+  /** Shorts whose ONLY rejection reason was the delta window. */
+  deltaOnlyCount: number;
+  /** Eligible shorts plus short rejections. */
+  consideredCount: number;
+}
+
+/**
+ * Builds the delta-removal report from a pairing session, or undefined. Not shown for new-entry
+ * scans, when any short survived pairing, or when delta was never the sole reason for a removal
+ * (an empty chain, or one emptied by OI / quote / DTE, does not blame delta).
+ */
+export function computePmccDeltaRemoval(session: PmccSessionResult, heldMode: boolean): PmccDeltaRemoval | undefined {
+  if (!heldMode || session.counts.eligibleShortLegs > 0) return undefined;
+  const shorts = session.legRejections.filter(item => item.role === 'short');
+  const withDelta = shorts.filter(item => item.reasons.some(reason => reason.code === 'DELTA_OUT_OF_RANGE'));
+  const deltaOnly = withDelta.filter(item => item.reasons.every(reason => reason.code === 'DELTA_OUT_OF_RANGE'));
+  if (deltaOnly.length === 0) return undefined;
+  return {
+    min: session.criteria.shortDelta.min, max: session.criteria.shortDelta.max,
+    removedCount: withDelta.length, deltaOnlyCount: deltaOnly.length,
+    consideredCount: session.counts.eligibleShortLegs + shorts.length,
+  };
+}
+
+export function deltaRemovedBanner(min: number, max: number): string {
+  return `No short calls within your delta window (${min.toFixed(2)} to ${max.toFixed(2)}). Adjust Min/Max delta.`;
+}
+
+export interface DeltaRemovedNotice { banner: string; reasonLine: string }
+
+/**
+ * Notice for a held symbol whose shorts were all removed by the delta window, or null. Precedence:
+ * cost-basis not-checked, then earnings-removed, then delta. No action button; never "no short calls found".
+ */
+export function selectDeltaRemovedNotice(
+  removal: PmccDeltaRemoval | null | undefined,
+  costBasisNotChecked = false,
+  earningsRemoved = false,
+): DeltaRemovedNotice | null {
+  if (!removal || costBasisNotChecked || earningsRemoved) return null;
+  if (removal.deltaOnlyCount <= 0 || removal.removedCount <= 0 || !Number.isFinite(removal.min) || !Number.isFinite(removal.max)) return null;
+  return {
+    banner: deltaRemovedBanner(removal.min, removal.max),
+    reasonLine: `${removal.removedCount} short${removal.removedCount === 1 ? '' : 's'} fell outside the window`,
+  };
 }
 
 export const HELD_OUTCOME_RANK: Record<HeldOutcomeKind, number> = { results: 0, 'floor-not-met': 1, 'not-checked': 2 };

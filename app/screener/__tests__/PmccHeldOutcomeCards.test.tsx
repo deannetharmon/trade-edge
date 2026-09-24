@@ -199,6 +199,17 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     expect(card.textContent).not.toMatch(NEVER);
   });
 
+  it('SCAN-ALIGN-0001F: every short outside the delta window shows the one-line delta outcome and a real reason, no action button', async () => {
+    seed(produce([held(720, 345)], [leg('short', 1070, { delta: 0.45 }), leg('short', 1080, { delta: 0.5 })]));
+    renderScreener();
+    fireEvent.click(await screen.findByRole('button', { name: /GS.*audit result/i }));
+    const card = await screen.findByTestId('pmcc-audit-card');
+    expect(within(card).getByTestId('held-delta-removed-banner')).toHaveTextContent('No short calls within your delta window (0.20 to 0.30). Adjust Min/Max delta.');
+    expect(within(card).getByTestId('held-delta-removed-reason')).toHaveTextContent('2 shorts fell outside the window');
+    expect(within(card).queryByRole('button', { name: /Adjust|Refresh Portfolio|SELL SHORT CALL/i })).toBeNull();
+    expect(card.textContent).not.toMatch(NEVER);
+  });
+
   it('cost basis unavailable: not checked, no SELL column, Refresh Portfolio works, never "no short calls found"', async () => {
     seed(produce([held(720, null)]));
     renderScreener();

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { HELD_BREAKEVEN_DETAIL, HELD_BREAKEVEN_FLOOR_MESSAGE } from '../pmccHeldBreakeven';
 import {
   buildPreModalReadFailure, classifyHeldReadFailure, formatHeldLeapSummary, heldOutcomeForPair, orderHeldGroup,
-  earningsRemovedBanner, planHeldPmccDisplay, selectEarningsRemovedBanner, selectHeldOutcome,
+  earningsRemovedBanner, planHeldPmccDisplay, selectDeltaRemovedNotice, selectEarningsRemovedBanner, selectHeldOutcome,
 } from '../pmccHeldOutcomeDisplay';
 import type { PmccPairResult } from '../pmccTypes';
 
@@ -124,6 +124,17 @@ describe('selectHeldOutcome', () => {
     expect(selectEarningsRemovedBanner(removal)).toBe(banner);
     // COST_BASIS_UNAVAILABLE (not-checked) wins over earnings-removed.
     expect(selectEarningsRemovedBanner(removal, true)).toBeNull();
+  });
+
+  it('SCAN-ALIGN-0001F: the delta-removed notice is the approved copy, wins below cost-basis and earnings, and never says "no short calls found"', () => {
+    const removal = { min: 0.2, max: 0.35, removedCount: 2, deltaOnlyCount: 1, consideredCount: 4 };
+    const notice = selectDeltaRemovedNotice(removal)!;
+    expect(notice.banner).toBe('No short calls within your delta window (0.20 to 0.35). Adjust Min/Max delta.');
+    expect(notice.reasonLine).toBe('2 shorts fell outside the window');
+    expect(notice.banner).not.toMatch(NEVER);
+    expect(notice.reasonLine).not.toMatch(NEVER);
+    expect(selectDeltaRemovedNotice(removal, true)).toBeNull();
+    expect(selectDeltaRemovedNotice(removal, false, true)).toBeNull();
   });
 
   it('other codes are not held outcomes', () => {

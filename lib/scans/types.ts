@@ -244,6 +244,8 @@ export interface ScreenResult {
   pmccAsOf?: string;
   /** SCAN-ALIGN-0001D: earnings removal report for this symbol; set on ONE result per symbol so summed counts never double-count. */
   pmccEarningsRemoval?: import('./pmccEarningsRemoval').PmccEarningsRemoval;
+  /** SCAN-ALIGN-0001F: held-mode delta-window removal report; set only on a held audit card whose shorts the window emptied. */
+  pmccDeltaRemoval?: import('./pmccHeldOutcomeDisplay').PmccDeltaRemoval;
   pmccAuditKind?: 'MARKET_DATA_FAILURE' | 'CHAIN_ADAPTATION_FAILURE' | 'PAIRING_ENGINE_FAILURE';
 }
 

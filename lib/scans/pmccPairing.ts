@@ -49,6 +49,9 @@ const FAILURE_MESSAGES: Record<PmccFailureCode, string> = {
   SHORT_NOT_ABOVE_HELD_BREAKEVEN: HELD_BREAKEVEN_FLOOR_MESSAGE,
 };
 
+/** Tolerance on the inclusive delta bounds (SCAN-ALIGN-0001F). */
+const DELTA_EPS = 1e-9;
+
 function reason(code: PmccFailureCode, detail?: string): PmccFailureReason {
   return { code, message: detail ?? FAILURE_MESSAGES[code] };
 }
@@ -154,17 +157,15 @@ function filterLegs(
 
     const delta = leg.delta == null ? null : Math.abs(leg.delta);
     if (delta == null || !Number.isFinite(delta)) reasons.push(reason('INSUFFICIENT_DATA', 'Delta is missing or invalid'));
-    // OI-LIQUIDITY-CHOICE-0001 / PMCC-HEALTH-CHECK-0001 -- short-leg delta
-    // no longer silently rejects a candidate here, regardless of held or
-    // new entry mode. Team's corrected position (Ian, after reconsidering):
-    // an off-target short delta is a real risk-tolerance trade-off, the
-    // same category as OI -- not a data-integrity problem the way a
-    // missing delta or a crossed quote is. It's now disclosed as a
-    // warning gate in pmccDecision.ts (NEW_SHORT_DELTA) instead, so the
-    // trader sees the real numbers and makes the choice, rather than the
-    // candidate silently never existing. Long-leg delta behavior is
-    // completely unchanged below -- this only touches the short role.
-    else if (role !== 'short' && !isHeldLong && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
+    // SCAN-ALIGN-0001F (F2): delta is a hard filter for BOTH roles. The bounds are inclusive
+    // (EPS absorbs float noise such as 0.2 + 0.15 vs 0.35). Only a held long is exempt (it is an
+    // owned contract); shorts are never exempt. A short rejection carries the observed value and
+    // the window so the per-symbol reject reason and the held card can state them.
+    else if (!isHeldLong && (delta < deltaRange.min - DELTA_EPS || delta > deltaRange.max + DELTA_EPS)) {
+      reasons.push(role === 'short'
+        ? reason('DELTA_OUT_OF_RANGE', `Short delta ${delta.toFixed(2)} outside ${deltaRange.min.toFixed(2)}-${deltaRange.max.toFixed(2)}`)
+        : reason('DELTA_OUT_OF_RANGE'));
+    }
 
     // SCAN-ALIGN-0001C1 OI policy:
     //  - held long: OI check skipped entirely (missing OI must reach the held
