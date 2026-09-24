@@ -1,6 +1,6 @@
 # Mock 1 and Mock 2 redrawn onto the real UI (Diane, 2026-09-24)
 
-**Supersedes Mock 1 and Mock 2 in `SCAN-ALIGN-0001-mocks.md` for build.** Dane's read-only check found both drew controls that do not exist as drawn (see below). Draft; Ian signs off on the items at the end; Paul and Dean approve. Diane drew this from Dane's findings and did not open the repo.
+**Supersedes Mock 1 and Mock 2 in `SCAN-ALIGN-0001-mocks.md` for build.** Dane's read-only check found both drew controls that do not exist as drawn (see below). **Approved by Ian 2026-09-24. Dean delegated approval of these two mocks to Ian (2026-09-24: "I trust Ian to approve").** These were drawn as ASCII and text, which Dean cannot review; future mocks must be rendered visually for him (see memory), or, as here, he may delegate to Ian. Diane drew this from Dane's findings and did not open the repo.
 
 ## Mock 2 (gates C2)
 
