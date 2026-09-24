@@ -51,3 +51,10 @@ Spreads `RunModeModal`, CC, PMCC, LEAPS modals, `scanPreferences.ts` and the sca
 ## Check on the Vercel preview
 
 Open FIND CSPs. In Rank and in Targeted confirm: the lifecycle tags (DTE SEARCH RANGE · RESCAN, delta PREFERENCE, bid/ask GATE · FIXED, OI ADVISORY); the pills; the live Scan summary; no bid/ask control. Run a CSP scan and check the "Active CSP rules" receipt shows the counts and, if any symbol has no IV rank, the IVR warning.
+
+## Update, 2026-09-23 (after this build)
+
+Two follow-ups changed statements above; see [CSP-IVR-0001 and the CSP OI default](CSP-IVR-0001-and-csp-oi-default-implementation-report.md).
+- A symbol with no IV rank now fails the IVR cap closed (`DISQUALIFIED_IVR_UNAVAILABLE`). The build above passed such symbols and said so on the receipt.
+- The CSP results view starts with Put OI at Any. Separately, the receipt's "Adjustable after the scan" line named "credit-ratio" chips, which the CSP results view does not have (`showCreditRatio={false}`). It now lists the chips that exist: POP, OTM, DTE, delta, Exp. IVX, IVR, and Put OI.
+

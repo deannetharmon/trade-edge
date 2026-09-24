@@ -248,6 +248,8 @@ describe('SCREENER-RESULTS-0001: real failure handling (3)', () => {
 describe('SCREENER-RESULTS-0001: strategy isolation (6, 8)', () => {
   it('a CSP scan renders only CSP-typed results and highlights FIND CSPs, never FIND SPREADS', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingChain(symbol, 'P')));
+    // CSP-IVR-0001: an unavailable IV rank now fails the cap closed, so a qualifying CSP needs an in-band one.
+    qualifyingCspMetrics(['NKE', 'MU']);
     renderScreener();
     await addToUniverse('NKE,MU');
     await clickCspScan();

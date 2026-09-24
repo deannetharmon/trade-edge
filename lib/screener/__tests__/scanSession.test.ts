@@ -811,6 +811,25 @@ describe('CSP-WORKFLOW-0001 core-correction (BLOCKER-06): canonical rule-snapsho
     if (!validation.valid) expect(validation.errors).toContain('INVALID_CSP_QUALIFICATION');
   });
 
+  it('CSP-IVR-0001: a cached result classified DISQUALIFIED_IVR_UNAVAILABLE validates; an unknown market state does not', () => {
+    const build = (market: string) => {
+      let session = createScanSession({
+        mode: 'rank', requestedStrategy: 'csp',
+        scope: { universeSymbols: ['AMD'], eligibleSymbols: ['AMD'] },
+        ruleSnapshot: { ...validSnapshot, mode: 'rank', rankSecondary: 'none' as const },
+      });
+      const result = makeCspResult('AMD', true, 'ELIGIBLE', 'QUALIFIED');
+      result.qualified = false;
+      result.bestCandidate = { ...result.bestCandidate!, cspMarketQualification: market as any, cspModeQualification: 'NOT_APPLICABLE', cspModeQualificationReasons: [] };
+      result.failReasons = ['IV rank is unavailable, so the IVR cap cannot be verified (undefined risk)'];
+      session = recordSymbolEvaluated(session, 'AMD', [result]);
+      return validateSessionData(completeSession(session));
+    };
+    expect(build('DISQUALIFIED_IVR_UNAVAILABLE').valid).toBe(true);
+    const unknown = build('DISQUALIFIED_NOT_A_REAL_STATE');
+    expect(unknown.valid).toBe(false);
+  });
+
   it('rejects a Targeted cache result whose mode qualification is NOT_APPLICABLE', () => {
     const snapshot = { ...validSnapshot, mode: 'targeted' as const, popMin: 70 };
     let session = createScanSession({

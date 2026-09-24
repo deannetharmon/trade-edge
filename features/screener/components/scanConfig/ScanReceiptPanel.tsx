@@ -1,5 +1,5 @@
 import type { CspReceipt } from '@/lib/screener/scanConfig/cspRegistry';
-import { MISSING_IVR_NOTE } from '@/lib/screener/scanConfig/cspRegistry';
+import { IVR_UNAVAILABLE_NOTE } from '@/lib/screener/scanConfig/cspRegistry';
 import type { ScanModalTheme } from '../ScanModalShell';
 
 /**
@@ -11,7 +11,7 @@ export function ScanReceiptPanel({ th, receipt, heading, testId, showLimits = fa
   receipt: CspReceipt;
   heading: string;
   testId?: string;
-  /** True before a run: state the missing-IVR limit up front. */
+  /** True before a run: state the unavailable-IVR rule up front. */
   showLimits?: boolean;
   /** Render only the rows, with no border, padding, or heading (the caller supplies them). */
   bare?: boolean;
@@ -36,10 +36,10 @@ export function ScanReceiptPanel({ th, receipt, heading, testId, showLimits = fa
           </div>
         )}
       </dl>
-      {showLimits && <p className="mt-2 text-amber-300">{MISSING_IVR_NOTE}</p>}
+      {showLimits && <p className="mt-2 text-amber-300">{IVR_UNAVAILABLE_NOTE}</p>}
       {counts && counts.symbolsIvrUnavailable > 0 && (
         <p className="mt-2 text-amber-300">
-          IVR unavailable for {counts.symbolsIvrUnavailable} symbol{counts.symbolsIvrUnavailable === 1 ? '' : 's'}: the IVR cap could not be checked for these. They are kept with an N/A warning.
+          IVR unavailable for {counts.symbolsIvrUnavailable} symbol{counts.symbolsIvrUnavailable === 1 ? '' : 's'}: the IVR cap could not be verified, so they are disqualified.
         </p>
       )}
     </section>

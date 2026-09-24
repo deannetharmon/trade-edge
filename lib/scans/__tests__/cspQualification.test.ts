@@ -26,7 +26,7 @@ describe('isMarketQualified — market qualification alone, independent of accou
 
   it('every DISQUALIFIED_* state is not market-qualified', () => {
     const disqualified: CspMarketQualification[] = [
-      'DISQUALIFIED_INVALID_QUOTE', 'DISQUALIFIED_POOR_LIQUIDITY', 'DISQUALIFIED_IVR', 'DISQUALIFIED_EARNINGS',
+      'DISQUALIFIED_INVALID_QUOTE', 'DISQUALIFIED_POOR_LIQUIDITY', 'DISQUALIFIED_IVR', 'DISQUALIFIED_IVR_UNAVAILABLE', 'DISQUALIFIED_EARNINGS',
       // CSP-WORKFLOW-RECONCILE-0002 — the two SQ-0001A foundation-gate states.
       'DISQUALIFIED_FOUNDATION_INELIGIBLE', 'DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE',
     ];
@@ -147,7 +147,7 @@ describe('isOverallCspQualified — market-qualified AND mode-qualified, the two
 
   it('market-disqualified is NEVER overall qualified regardless of mode result -- market disqualification always wins', () => {
     const disqualified: CspMarketQualification[] = [
-      'DISQUALIFIED_INVALID_QUOTE', 'DISQUALIFIED_POOR_LIQUIDITY', 'DISQUALIFIED_IVR', 'DISQUALIFIED_EARNINGS',
+      'DISQUALIFIED_INVALID_QUOTE', 'DISQUALIFIED_POOR_LIQUIDITY', 'DISQUALIFIED_IVR', 'DISQUALIFIED_IVR_UNAVAILABLE', 'DISQUALIFIED_EARNINGS',
     ];
     const modeStates: CspModeQualification[] = ['NOT_APPLICABLE', 'PASSED', 'FAILED'];
     for (const market of disqualified) {

@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_CSP_RULES } from '@/lib/scans/constants';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import {
-  CSP_CARD_ORDER, CSP_CRITERIA, MISSING_IVR_NOTE, buildCspReceipt, criteriaForCard, criteriaForMode, getCriterion,
+  CSP_CARD_ORDER, CSP_CRITERIA, IVR_UNAVAILABLE_NOTE, buildCspReceipt, criteriaForCard, criteriaForMode, getCriterion,
   summarizeCspResults, valuesFromSnapshot, type CspConfigValues, type CspCountableResult,
 } from '@/lib/screener/scanConfig/cspRegistry';
 import { LIFECYCLES, LIFECYCLE_TAG_LABEL, RETENTION } from '@/lib/screener/scanConfig/types';
@@ -135,7 +135,7 @@ describe('receipts are built from the registry', () => {
   it('a Rank receipt shows the order and what can be adjusted after the scan, with no Targeted gates', () => {
     const groups = byKey(buildCspReceipt(values({ mode: 'rank', popMin: null, otmMin: null, rocMin: null, rankSecondary: 'rocPct' })));
     expect(groups.order.items).toEqual(['Score → ROC %']);
-    expect(groups.adjustable.items).toEqual(['POP · OTM · DTE · delta · credit-ratio chips']);
+    expect(groups.adjustable.items).toEqual(['POP · OTM · DTE · delta · Exp. IVX · IVR · Put OI chips']);
     expect(groups.gates.items).toEqual(['IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings inside expiration']);
     expect(groups.adjustable.rescan).toBe(false);
     expect(groups.order.rescan).toBe(false);
@@ -160,9 +160,16 @@ describe('receipts are built from the registry', () => {
     expect(byKey(buildCspReceipt(values({ affordableOnly: true, capitalLimit: 8000 }))).capital.items).toEqual(['Affordable only on · cash cap $8000']);
   });
 
-  it('always states the missing-IVR limit', () => {
-    expect(buildCspReceipt(values()).notes).toEqual([MISSING_IVR_NOTE]);
-    expect(MISSING_IVR_NOTE).toContain('not enforced when IVR is unavailable');
+  it('always states the unavailable-IVR rule', () => {
+    expect(buildCspReceipt(values()).notes).toEqual([IVR_UNAVAILABLE_NOTE]);
+    expect(IVR_UNAVAILABLE_NOTE).toBe('A symbol with no IV rank is disqualified: the IVR cap cannot be verified.');
+  });
+
+  it('the result-chip line names the chips the CSP results view actually has, and says the OI chip defaults to Any', () => {
+    const chips = getCriterion('resultChips');
+    expect(chips.summary(values({ mode: 'rank' }))).toContain('Put OI');
+    expect(chips.summary(values({ mode: 'rank' }))).not.toContain('credit-ratio');
+    expect(getCriterion('oi').hint).toContain('Put OI: Any');
   });
 
   it('the modal summary and the result receipt agree for the same configuration', () => {

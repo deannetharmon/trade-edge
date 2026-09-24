@@ -153,7 +153,7 @@ describe('the scan summary is built from the registry and updates as you edit', 
     expect(summary).toHaveTextContent('bid/ask tiers (fixed)');
     expect(summary).toHaveTextContent('Δ 0.15–0.25 preferred (outside it: not a Best Opportunity)');
     expect(summary).toHaveTextContent('Affordable only off');
-    expect(summary).toHaveTextContent(/IVR cap not enforced when IVR is unavailable/);
+    expect(summary).toHaveTextContent(/A symbol with no IV rank is disqualified: the IVR cap cannot be verified/);
     await userEvent.click(pressed('DTE range quick select', '21–60 DTE'));
     expect(summary).toHaveTextContent('21–60 DTE');
   });

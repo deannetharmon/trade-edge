@@ -10,8 +10,8 @@
 2. Rank and Targeted only for CSP and Spreads. Filter is not restored.
 3. **DTE is the only CSP search range** (fetch; rescan to change). **Short-put delta is a preference, not a search range.** `cspSearch.ts` keeps every quote-valid put in the DTE window and sets `deltaTargetPassing`. Outside the band a put is kept, shown with a warning, ranks below puts nearer the band center, and cannot be a Best Opportunity (`isBestOpportunitiesEligible`, CSP-BESTOPP-GATE-0001). *Correction, 2026-09-23:* the first version of this decision, and the v5 mock's tag, called delta a search range. That came from a stale comment at the top of `cspSearch.ts`. The code, and the original ticket text, were right. Ian approved the corrected label and asked that the receipt line carry the consequence.
 4. Bid/ask liquidity is a fixed gate, not a setting: strong at or under max($0.10, 10% of mid); borderline up to 15% of mid is kept but excluded from Best Opportunities; poor fails (`classifyCspLiquidity`). `rules.bidAskMax` no longer governs pass/fail. No editable bid/ask control exists, in the modal or the registry.
-5. IVR cap is enforced per symbol (`DISQUALIFIED_IVR`). A missing IVR does not fail closed today. This build labels that truthfully and does not change it. Fail-closed is CSP-IVR-0001.
-6. No engine policy change in this build. The IVR check moved unchanged from `app/screener/page.tsx` to `lib/scans/cspIvrPolicy.ts` so a test can pin it.
+5. IVR cap is enforced per symbol (`DISQUALIFIED_IVR`). *This build shipped with an unavailable IVR passing the cap, and said so on the receipt. CSP-IVR-0001 (built 2026-09-23, after this build) changed it: an unavailable IVR now fails closed as `DISQUALIFIED_IVR_UNAVAILABLE`.*
+6. No engine policy change in this build. The IVR check moved unchanged from `app/screener/page.tsx` to `lib/scans/cspIvrPolicy.ts` so a test can pin it. (CSP-IVR-0001 then changed the unavailable case there.)
 
 ## Scope
 
@@ -42,15 +42,15 @@ Out: Spreads (inline `RunModeModal` in `app/screener/page.tsx`), CC, PMCC, LEAPS
 | OTM at least | gate | Targeted | Any | Below = targeted near-miss |
 | Minimum period return on collateral (ROC) | gate | Targeted | Any | % of collateral over the option period |
 | Then order by | rank | Rank | None | Score is always primary |
-| After the scan (POP, OTM, DTE, delta, credit-ratio chips) | result-filter | Rank | n/a | No rescan |
+| After the scan (POP, OTM, DTE, delta, Exp. IVX, IVR, Put OI chips) | result-filter | Rank | n/a | No rescan. Put OI starts at Any |
 | Bid/ask liquidity | gate (fixed) | both | not adjustable | Strong, borderline, poor tiers |
-| Open interest | advisory | both | n/a | Lower OI kept with a warning; zero OI cannot be a Best Opportunity |
-| IVR cap | gate | both | n/a | Above the cap disqualifies the symbol |
+| Open interest | advisory | both | n/a | Lower OI kept with a warning; the results view shows every put by default (Put OI: Any); zero OI cannot be a Best Opportunity |
+| IVR cap | gate | both | n/a | Above the cap disqualifies the symbol; so does an unavailable IVR (CSP-IVR-0001) |
 | IVR floor | rank | both | n/a | Below the floor ranks lower |
 | Earnings inside expiration | gate (fixed) | both | n/a | Disqualifies the candidate |
 | Affordable only / per-put cash ceiling | gate (optional) | both | Off / blank | Collateral shown when off |
 
-**Missing IVR:** the summary and receipt state "IVR cap not enforced when IVR is unavailable," and the result receipt shows how many symbols were affected. Copy only; no engine change.
+**Missing IVR:** as first built, the summary and receipt said "IVR cap not enforced when IVR is unavailable" and showed how many symbols were affected. CSP-IVR-0001 replaced that: the receipt now says "A symbol with no IV rank is disqualified: the IVR cap cannot be verified," and shows how many symbols were affected.
 
 ## Modes and types
 
@@ -76,6 +76,6 @@ Spreads `RunModeModal`, CC, PMCC, and LEAPS modals; `scanPreferences.ts` and the
 
 ## Follow-ups
 
-- `CSP-IVR-0001` — missing IVR fails closed (Ian, engine policy).
+- `CSP-IVR-0001` — missing IVR fails closed. **Built 2026-09-23.**
 - `SCREENER-VISUAL-0001` — cross-strategy visual alignment.
 - Next phases of `SCREENER-CONFIG-0001`: CC, PMCC, LEAPS, then Spreads. Check the v4 Spreads mock for a Filter pill first.

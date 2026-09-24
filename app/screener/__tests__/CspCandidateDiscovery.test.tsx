@@ -578,3 +578,62 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.getByLabelText('Cash cap per CSP')).toHaveValue('8000');
   });
 });
+
+describe('CSP-IVR-0001: a symbol with no IV rank fails the IVR cap closed, and stays visible with its reason', () => {
+  it('disqualifies every candidate of an unavailable-IVR symbol and shows why', async () => {
+    getChainMock.mockResolvedValue(nkeChain());
+    getMarketMetricsMock.mockResolvedValue([{ symbol: 'NKE', ivRank: null, earningsExpectedDate: null }]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCspScan();
+
+    await waitFor(() => expect(accountingText()).toMatch(/0 qualified/));
+    expect(accountingText()).toMatch(/2 disqualified/);
+    // The exclusion is on screen with its category and the receipt says why, not silently dropped.
+    await waitFor(() => expect(document.body.textContent).toMatch(/Volatility-risk exclusion: NKE/));
+    expect(document.body.textContent).toMatch(/IVR unavailable for 1 symbol: the IVR cap could not be verified, so they are disqualified/);
+    // Drilling into a contract shows the specific reason.
+    await userEvent.click(screen.getByRole('button', { name: /35 DTE, 2 excluded contracts/ }));
+    await waitFor(() => expect(document.body.textContent).toMatch(/IV rank (is )?unavailable/));
+  });
+
+  it('a known in-band IVR still qualifies (the rule is about unavailable data, not IVR in general)', async () => {
+    getChainMock.mockResolvedValue(nkeChain());
+    inBandIvr(['NKE']);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCspScan();
+    await waitFor(() => expect(accountingText()).toMatch(/2 qualified/));
+    expect(accountingText()).toMatch(/0 disqualified/);
+  });
+});
+
+describe('CSP results view: open interest is advisory, so the Put OI chip defaults to Any', () => {
+  it('shows every qualified put by default, including the OI 78 one, and the chip still narrows on request', async () => {
+    getChainMock.mockResolvedValue(nkeChain());
+    inBandIvr(['NKE']);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
+
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCspScan();
+    await waitFor(() => expect(accountingText()).toMatch(/2 qualified/));
+
+    // Both puts are visible and nothing says candidates are hidden.
+    expect(await screen.findByText(/Showing 2 of 2 qualified candidates/)).toBeInTheDocument();
+    expect(document.body.textContent).toContain('Put 39');
+    expect(document.body.textContent).toContain('Put 38');
+
+    // Choosing a floor is still the trader's call, and it is announced.
+    const controls = screen.getByTestId('csp-result-controls');
+    const putOi = within(controls).getByTitle(/Open interest on the short put/).parentElement as HTMLElement;
+    await userEvent.click(within(putOi).getByRole('button', { name: '100' }));
+    expect(await screen.findByText(/Showing 1 of 2 qualified candidates/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('Put 39');
+    expect(document.body.textContent).toContain('Put 38');
+  });
+});

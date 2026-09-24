@@ -52,6 +52,9 @@ export interface CspFindParams {
   /** True only for the hard upper-IVR risk cap. IVR below the preferred
    * minimum is advisory and is carried in advisoryWarnings instead. */
   ivrMarketDisqualified?: boolean;
+  /** CSP-IVR-0001 -- true when the symbol's IV rank is unavailable, so the IVR cap cannot be verified. Fails closed:
+   * every candidate is DISQUALIFIED_IVR_UNAVAILABLE. Off by default; the Screener turns it on. */
+  ivrUnavailableDisqualified?: boolean;
   /** @deprecated Candidate-specific earnings classification uses
    * earningsDate. Retained temporarily for callers/tests that explicitly
    * supply the legacy symbol-wide hard block. */
@@ -160,7 +163,7 @@ export function earningsWithinCspExpiration(
 
 function marketQualificationFor(
   c: CspRawCandidate,
-  params: Pick<CspFindParams, 'ivrMarketDisqualified' | 'earningsMarketDisqualified' | 'foundationEligibility'>,
+  params: Pick<CspFindParams, 'ivrMarketDisqualified' | 'ivrUnavailableDisqualified' | 'earningsMarketDisqualified' | 'foundationEligibility'>,
   earningsWithinExpiration: boolean | null,
 ): CspMarketQualification {
   // SQ-0001A foundation gate is checked first — it is the most fundamental,
@@ -179,6 +182,7 @@ function marketQualificationFor(
   // is a harder, more specific reason than a generic IVR-band miss.
   if (params.earningsMarketDisqualified || earningsWithinExpiration === true) return 'DISQUALIFIED_EARNINGS';
   if (params.ivrMarketDisqualified) return 'DISQUALIFIED_IVR';
+  if (params.ivrUnavailableDisqualified) return 'DISQUALIFIED_IVR_UNAVAILABLE';
   if (c.liquidityClass === 'POOR') return 'DISQUALIFIED_POOR_LIQUIDITY';
   if (c.liquidityClass === 'BORDERLINE') return 'QUALIFIED_WITH_LIQUIDITY_WARNING';
   return 'QUALIFIED';

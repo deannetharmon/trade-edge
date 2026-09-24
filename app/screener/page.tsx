@@ -1289,7 +1289,7 @@ function runCspChecklist(
       cashBalance: capital.cashBalance,
     },
     underlyingSymbol: symbol,
-    ivrMarketDisqualified, earningsDate, ivr: ivrValue,
+    ivrMarketDisqualified, ivrUnavailableDisqualified: ivrEvaluation.unavailable, earningsDate, ivr: ivrValue,
   });
 
   if (cspFindAll.results.length === 0) {
@@ -1353,6 +1353,7 @@ function runCspChecklist(
       failReasons.push(`Delta ${Math.abs(c.shortDelta).toFixed(2)} is outside the preferred ${cspRules.DELTA_MIN.toFixed(2)}-${cspRules.DELTA_MAX.toFixed(2)} range`);
     }
     if (r.marketQualification === 'DISQUALIFIED_IVR') failReasons.push(`IVR ${ivrValue?.toFixed?.(1) ?? '—'}% exceeds the ${cspRules.IVR_MAX}% CSP risk cap`);
+    if (r.marketQualification === 'DISQUALIFIED_IVR_UNAVAILABLE') failReasons.push('IV rank is unavailable, so the IVR cap cannot be verified (undefined risk)');
     if (r.marketQualification === 'DISQUALIFIED_EARNINGS') failReasons.push('Earnings within expiry window — assignment risk into a binary event');
     if (r.marketQualification === 'DISQUALIFIED_POOR_LIQUIDITY') failReasons.push(c.cspLiquidityReason ?? 'Poor liquidity');
     if (r.marketQualification === 'DISQUALIFIED_FOUNDATION_INELIGIBLE') failReasons.push('Underlying market-state evidence contradicts a cash-secured put thesis for this horizon.');
@@ -9002,6 +9003,9 @@ export default function Home() {
   // below). Disqualified-section ordering is unaffected -- it's already an
   // audit trail of *why* something didn't qualify, not a ranked results list.
   const [filteredMinOi, setFilteredMinOi] = useState<number>(100);
+  // CSP results default to Any: open interest is advisory for CSP (low OI is warned about, never a reason to hide a put by
+  // default). Kept apart from filteredMinOi so CC, PMCC, and spreads keep their own default.
+  const [cspMinOi, setCspMinOi] = useState<number>(0);
   // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
   // percentage of strike width, same shape as filteredMinOi.
   const [filteredMinCreditRatio, setFilteredMinCreditRatio] = useState<number>(0);
@@ -10980,7 +10984,7 @@ export default function Home() {
   // not inherit the mutable Filter/Rank result controls that happen to live
   // in this page component.
   const cspTargetedSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode === 'targeted';
-  const effectiveFilteredMinOi = cspTargetedSession ? 0 : filteredMinOi;
+  const effectiveFilteredMinOi = cspTargetedSession ? 0 : activeSession?.requestedStrategy === 'csp' ? cspMinOi : filteredMinOi;
   const effectiveFilteredSort = cspTargetedSession
     ? ({ primary: 'score', secondary: 'none' } as SortSpec)
     : filteredSort;
@@ -11816,7 +11820,7 @@ export default function Home() {
                       showCreditRatio={false}
                       popLabel="POP Est."
                       oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Put OI" oiHelper="Open interest on the short put. Missing OI does not pass a positive floor." sortLabels={{ rocPct: 'Cash Return', creditDollars: 'Premium $', relevantLegOI: 'Put OI', pop: 'POP Est.' }} sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                        <OiAndSortControls th={th} minOi={cspMinOi} setMinOi={setCspMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Put OI" oiHelper="Open interest on the short put. Missing OI does not pass a positive floor." sortLabels={{ rocPct: 'Cash Return', creditDollars: 'Premium $', relevantLegOI: 'Put OI', pop: 'POP Est.' }} sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
                       }
                     />
                     {cspTargetedSession && <div className="mt-2 flex items-center gap-2">

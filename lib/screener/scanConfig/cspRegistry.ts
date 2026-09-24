@@ -19,8 +19,9 @@
 //                                                   `bidAskMax` no longer governs pass/fail.
 //   Open interest        csp-finder.ts           -- advisory warning; literal zero OI cannot be a
 //                                                   Best Opportunity.
-//   IVR cap / floor      lib/scans/cspIvrPolicy.ts -- above the cap disqualifies; below the floor
-//                                                   ranks lower; unavailable IVR is NOT enforced.
+//   IVR cap / floor      lib/scans/cspIvrPolicy.ts -- above the cap disqualifies; an unavailable IVR
+//                                                   disqualifies too (CSP-IVR-0001); below the floor
+//                                                   ranks lower.
 //   Earnings             csp-finder.ts           -- DISQUALIFIED_EARNINGS.
 //   Affordable only      page.tsx runCspScan     -- optional display filter on account eligibility.
 
@@ -117,7 +118,7 @@ const targetPresets = (values: Array<number>, suffix = '%'): ScalarPreset[] => [
   ...values.map((value) => ({ label: `${value}${suffix}`, value })),
 ];
 
-export const MISSING_IVR_NOTE = 'IVR cap not enforced when IVR is unavailable: the symbol is kept with an N/A warning.';
+export const IVR_UNAVAILABLE_NOTE = 'A symbol with no IV rank is disqualified: the IVR cap cannot be verified.';
 
 export const CSP_CRITERIA: readonly CspCriterion[] = [
   {
@@ -253,10 +254,10 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     rescan: false,
     card: 'ordering',
     summaryGroup: 'adjustable',
-    hint: 'Rank has no POP, OTM, or ROC gates. Once results return, the POP, OTM, DTE, delta, and credit-ratio chips narrow the fetched candidates. No rescan.',
+    hint: 'Rank has no POP, OTM, or ROC gates. Once results return, the POP, OTM, DTE, delta, expected-IV, IVR, and put-OI chips narrow the fetched candidates. No rescan.',
     off: null,
     control: { kind: 'info' },
-    summary: () => 'POP · OTM · DTE · delta · credit-ratio chips',
+    summary: () => 'POP · OTM · DTE · delta · Exp. IVX · IVR · Put OI chips',
   },
   {
     id: 'oi',
@@ -268,7 +269,7 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     rescan: true,
     card: 'advisory',
     summaryGroup: 'advisory',
-    hint: 'Lower open interest is kept and shown with a warning. Zero open interest cannot be a Best Opportunity.',
+    hint: 'Lower open interest is kept and shown with a warning, and the results view shows every put by default (Put OI: Any). Zero open interest cannot be a Best Opportunity.',
     off: null,
     control: {
       kind: 'rule', key: 'OI_MIN', label: 'OI pref.', title: 'Preferred minimum open interest', step: '1', presets: oiPresets(),
@@ -285,7 +286,7 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     rescan: true,
     card: 'always',
     summaryGroup: 'gates',
-    hint: 'A symbol whose IV rank is above the cap is disqualified (undefined risk). A symbol with no IV rank is kept with an N/A warning.',
+    hint: 'A symbol whose IV rank is above the cap is disqualified (undefined risk). A symbol with no IV rank is disqualified too, because the cap cannot be verified.',
     off: null,
     control: { kind: 'rule', key: 'IVR_MAX', label: 'IVR cap', title: 'Maximum underlying IV rank', step: '1', presets: [] },
     summary: (v) => `IVR ≤ ${num(v.rules.IVR_MAX)}%`,
@@ -406,7 +407,7 @@ export function buildCspReceipt(values: CspConfigValues, counts: CspResultCounts
     const label = key === 'search' ? `${SUMMARY_GROUP_LABEL[key]} · rescan to change` : SUMMARY_GROUP_LABEL[key];
     return [{ key, label, rescan: entry.rescan, items: entry.items }];
   });
-  return { mode: values.mode, groups, counts, notes: [MISSING_IVR_NOTE] };
+  return { mode: values.mode, groups, counts, notes: [IVR_UNAVAILABLE_NOTE] };
 }
 
 /** Rebuilds the configured values from a stored rule snapshot (older sessions may be Filter mode). */

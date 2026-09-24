@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { findAllCsp } from '../csp-finder';
 import { searchCspCandidates } from '../cspSearch';
-import { classifyCspLiquidity, isBestOpportunitiesEligible, isOverallCspQualified } from '../cspQualification';
+import { classifyCspLiquidity, isBestOpportunitiesEligible, isMarketQualified, isOverallCspQualified } from '../cspQualification';
 import { evaluateCspIvr } from '../cspIvrPolicy';
 import { DEFAULT_CSP_RULES } from '../constants';
 import { CSP_CRITERIA } from '@/lib/screener/scanConfig/cspRegistry';
@@ -158,7 +158,7 @@ describe('open interest is advisory', () => {
   });
 });
 
-describe('IVR: cap is a gate, floor is guidance, unavailable IVR is not enforced', () => {
+describe('IVR: cap is a gate, floor is guidance, unavailable IVR fails closed (CSP-IVR-0001)', () => {
   it('above the cap disqualifies the symbol, in the finder and in the policy check', () => {
     const chain = chainOf([{ dte: 35, puts: [tight(90, -0.2)] }]);
     const check = evaluateCspIvr(75, 30, 70);
@@ -178,12 +178,38 @@ describe('IVR: cap is a gate, floor is guidance, unavailable IVR is not enforced
     expect(check.reason).toBe('Below the preferred 30% premium environment — ranked lower');
   });
 
-  it('PINNED CURRENT BEHAVIOR (see CSP-IVR-0001): an unavailable IVR warns and the symbol is NOT disqualified', () => {
+  it('CSP-IVR-0001: an unavailable IVR fails closed, because the cap cannot be verified', () => {
     const check = evaluateCspIvr(null, 30, 70);
-    expect(check).toEqual({ status: 'warn', value: 'N/A', reason: 'Not available', marketDisqualified: false });
-    expect(evaluateCspIvr(undefined, 30, 70).marketDisqualified).toBe(false);
-    const result = run(chainOf([{ dte: 35, puts: [tight(90, -0.2)] }]), { ivrMarketDisqualified: check.marketDisqualified });
-    expect(result.results[0].marketQualification).toBe('QUALIFIED');
+    expect(check).toEqual({
+      status: 'fail', value: 'N/A', reason: 'IV rank unavailable — the IVR cap cannot be verified (undefined risk)',
+      marketDisqualified: false, unavailable: true,
+    });
+    expect(evaluateCspIvr(undefined, 30, 70).unavailable).toBe(true);
+    // A known IVR is never "unavailable".
+    for (const ivr of [0, 20, 45, 70, 80]) expect(evaluateCspIvr(ivr, 30, 70).unavailable).toBe(false);
+  });
+
+  it('the finder disqualifies every candidate of an unavailable-IVR symbol, with its own state, and shows it rather than dropping it', () => {
+    const chain = chainOf([{ dte: 35, puts: [tight(90, -0.2), tight(91, -0.2)] }]);
+    const result = run(chain, { ivrUnavailableDisqualified: true });
+    expect(result.results).toHaveLength(2);
+    for (const r of result.results) {
+      expect(r.marketQualification).toBe('DISQUALIFIED_IVR_UNAVAILABLE');
+      expect(isMarketQualified(r.marketQualification)).toBe(false);
+      expect(isOverallCspQualified(r.marketQualification, 'NOT_APPLICABLE')).toBe(false);
+    }
+  });
+
+  it('is kept distinct from the above-cap state, and earnings still wins over both', () => {
+    const chain = chainOf([{ dte: 35, puts: [tight(90, -0.2)] }]);
+    expect(run(chain, { ivrMarketDisqualified: true }).results[0].marketQualification).toBe('DISQUALIFIED_IVR');
+    expect(run(chain, { ivrUnavailableDisqualified: true }).results[0].marketQualification).toBe('DISQUALIFIED_IVR_UNAVAILABLE');
+    expect(run(chain, { ivrUnavailableDisqualified: true, earningsDate: isoDate(10) }).results[0].marketQualification).toBe('DISQUALIFIED_EARNINGS');
+  });
+
+  it('the flag is off by default, so a caller that does not pass it keeps the previous behavior', () => {
+    const chain = chainOf([{ dte: 35, puts: [tight(90, -0.2)] }]);
+    expect(run(chain).results[0].marketQualification).toBe('QUALIFIED');
   });
 
   it('keeps the exact wording the page showed before the check was extracted', () => {

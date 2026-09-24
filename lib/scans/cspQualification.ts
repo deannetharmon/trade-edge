@@ -15,6 +15,10 @@ export type CspMarketQualification =
   | 'DISQUALIFIED_INVALID_QUOTE'
   | 'DISQUALIFIED_POOR_LIQUIDITY'
   | 'DISQUALIFIED_IVR'
+  // CSP-IVR-0001 -- IV rank could not be determined, so the hard IVR cap cannot be verified. CSP is undefined-risk,
+  // so an unverifiable cap fails closed. Kept distinct from DISQUALIFIED_IVR (the rank is known and above the cap):
+  // "above the cap" and "could not be checked" are different claims and must stay separate through to the screen.
+  | 'DISQUALIFIED_IVR_UNAVAILABLE'
   | 'DISQUALIFIED_EARNINGS'
   // CSP-WORKFLOW-RECONCILE-0002 — SQ-0001A foundation gate outcomes. Kept as
   // two distinct states (never collapsed into one another or into
