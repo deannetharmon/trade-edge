@@ -26,6 +26,11 @@ import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { assessOiLiquidity } from './oiLiquidity';
+import { evaluateHybridSpread } from './hybridSpread';
+
+// SCAN-ALIGN-0001C2 -- the warn percent is unused for CC eligibility (CC has no width warning);
+// the shared function only needs it to be well-formed.
+const CC_WARN_PCT_UNUSED = 5;
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -52,7 +57,10 @@ interface CcEligibilityParams {
   dteTarget: { min: number; max: number };
   minStrike: number | null; // max(stockPrice, costBasis) — call must sit at/above this
   oiMin: number;
-  bidAskMax: number;
+  /** Reject percent of mid (hybrid rule; $0.05 floor always applies). */
+  widthPctMax: number;
+  /** Absolute reject ceiling, dollars per share. */
+  widthCeiling: number;
 }
 
 // Hard gate check for ONE chain leg. Returns false for anything that must
@@ -60,9 +68,22 @@ interface CcEligibilityParams {
 // warning/downgrade. Mirrors requirement #4's exact quote-validity contract:
 // a one-sided (bid <= 0 XOR ask <= 0), crossed (ask < bid), missing, or
 // non-finite quote can never support a reliable sell premium.
+// SCAN-ALIGN-0001C1 -- open interest must be real data: finite and >= 0.
+// null/undefined/NaN/Infinity/negative is invalid data (never coerced to 0),
+// and would otherwise reach the ranking comparator as NaN. Returns the
+// rejection reason code, or null when OI is valid. OI below OI_MIN is NOT
+// invalid: it stays eligible and is disclosed by ccLiquidityWarning.
+export function ccOpenInterestRejection(openInterest: unknown): 'INSUFFICIENT_DATA' | null {
+  return typeof openInterest === 'number' && Number.isFinite(openInterest) && openInterest >= 0
+    ? null
+    : 'INSUFFICIENT_DATA';
+}
+
 function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): boolean {
   if (leg.optionType !== 'C') return false;
-  if (leg.delta == null) return false;
+  if (leg.delta == null || !Number.isFinite(leg.delta)) return false;
+  if (!Number.isFinite(leg.strikePrice)) return false; // keeps NaN out of the ranking comparator
+  if (ccOpenInterestRejection(leg.openInterest) != null) return false;
 
   const absDelta = Math.abs(leg.delta);
   if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return false;
@@ -76,9 +97,12 @@ function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams
   if (!(leg.bid > 0) || !(leg.ask > 0)) return false;
   if (leg.ask < leg.bid) return false; // crossed market
 
-  if (leg.ask - leg.bid > p.bidAskMax) return false;
-  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI deliberately removed from this
-  // gate. Every other condition above is a genuine data-integrity or
+  // SCAN-ALIGN-0001C2 -- hybrid width rule + $0.50-style ceiling via the shared function (the
+  // same one evaluatePmccQuoteQuality uses for the PMCC short leg). The old fixed dollar cap is gone.
+  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling }).reject) return false;
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* deliberately
+  // removed from this gate (SCAN-ALIGN-0001C1 re-added only a missing/invalid
+  // OI check, above). Every other condition above is a genuine data-integrity or
   // structural requirement (no delta at all, a crossed market, strikes
   // outside the target range) -- a leg failing one of those literally
   // cannot be evaluated. Thin OI is different: it's a real, disclosable
@@ -145,7 +169,8 @@ export function selectAllEligibleCcContracts(
     if (a.openInterest !== b.openInterest) return b.openInterest - a.openInterest; // 2. higher OI wins
     const widthA = a.ask - a.bid, widthB = b.ask - b.bid;
     if (widthA !== widthB) return widthA - widthB; // 3. narrower bid/ask width wins
-    return a.dte - b.dte; // 4. earlier expiration wins
+    if (a.dte !== b.dte) return a.dte - b.dte; // 4. earlier expiration wins
+    return a.strikePrice - b.strikePrice; // 5. lower strike wins (final deterministic tie-break)
   });
 
   return eligible;
@@ -330,7 +355,8 @@ export function findBestCoveredCall(
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
-    bidAskMax: params.rules.BID_ASK_MAX,
+    widthPctMax: params.rules.WIDTH_PCT_MAX,
+    widthCeiling: params.rules.WIDTH_CEILING,
   });
   const best = eligible.find(c => isEarningsSafeForDte(params.earningsDate, c.dte)) ?? null;
   if (!best) return null;
@@ -409,7 +435,8 @@ export function findAllCoveredCalls(
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
     minStrike,
     oiMin: params.rules.OI_MIN,
-    bidAskMax: params.rules.BID_ASK_MAX,
+    widthPctMax: params.rules.WIDTH_PCT_MAX,
+    widthCeiling: params.rules.WIDTH_CEILING,
   }).filter(c => isEarningsSafeForDte(params.earningsDate, c.dte));
 
   // Computed once per symbol (per the params contract), applied uniformly

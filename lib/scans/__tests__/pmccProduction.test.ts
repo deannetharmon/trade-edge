@@ -76,9 +76,9 @@ describe('PMCC production integration', () => {
     const zeroLong = run([leg('long', 720, { delta: 0.5 })], [leg('short', 1070)]);
     // PMCC-HEALTH-CHECK-0001: short-leg delta no longer rejects a leg at the
     // pairing stage (disclosed as a warning gate downstream instead) -- OI
-    // below the floor is still a genuine hard exclude and produces the
-    // same "zero eligible short legs" scenario this test needs.
-    const zeroShort = run([leg('long', 720)], [leg('short', 1070, { openInterest: 5 })]);
+    // below the floor is now a warning (SCAN-ALIGN-0001C1); missing OI is still
+    // a genuine hard exclude and produces the same "zero eligible short legs" scenario.
+    const zeroShort = run([leg('long', 720)], [leg('short', 1070, { openInterest: null })]);
     const zeroPair = run([leg('long', 720)], [leg('short', 1038, { bid: 1, ask: 1.1 })]);
     const incomplete = run([leg('long', 720), leg('long', 700, { bid: 340, ask: 342 })], [leg('short', 1060), leg('short', 1070)], { ...criteria.limits, maxCombinationsEvaluated: 1 });
     expect(pmccAuditReasons(zeroLong)).toContain('No eligible long legs');
@@ -139,6 +139,22 @@ describe('PMCC production integration', () => {
     olderPmccPolicy.pmccSnapshot.decisionPolicyVersion = 'pmcc-decision-v0';
     const olderValidation = validateSessionData(olderPmccPolicy);
     expect(olderValidation).toMatchObject({ valid: false, errors: expect.arrayContaining(['INVALID_PMCC_SNAPSHOT']) });
+  });
+  it('rejects a restored new-entry pair whose long leg carries null open interest', () => {
+    const results = buildPmccScreenResults(run([leg('long', 720)], [leg('short', 1070)]), context);
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot,
+    });
+    session = completeSession(recordSymbolEvaluated(session, 'GS', results));
+    const value = JSON.parse(JSON.stringify(session));
+    value.results[0].pmccPair.longLeg.openInterest = null;
+    const validation = validateSessionData(value);
+    expect(validation.valid).toBe(false);
+    if (!validation.valid) expect(validation.errors).toContain('INVALID_PMCC_RESULT');
+    const shortNull = JSON.parse(JSON.stringify(session));
+    shortNull.results[0].pmccPair.shortLeg.openInterest = null;
+    expect(validateSessionData(shortNull).valid).toBe(false);
   });
   it('rejects audit-only sessions whose retained counts claim nonexistent pairs', () => {
     const audit = buildPmccScreenResults(run([], []), context)[0];

@@ -20,12 +20,15 @@ function resolveShortCriteriaOverride(body: any) {
   const shortDeltaMax = finiteInRange(body?.shortDeltaMax, 0, 1);
   const shortOiMin = finiteInRange(body?.shortOiMin, 0, 1_000_000);
   const maxSpreadPct = finiteInRange(body?.maxSpreadPct, 0, 100);
-  const override: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number } = {};
+  // SCAN-ALIGN-0001C2: the short-leg width ceiling ($ per share, one tick minimum) set in the PMCC scan modal.
+  const shortWidthCeiling = finiteInRange(body?.shortWidthCeiling, 0.01, 1_000);
+  const override: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number; shortWidthCeiling?: number } = {};
   if (shortDeltaMin != null && shortDeltaMax != null && shortDeltaMax >= shortDeltaMin) {
     override.shortDelta = { min: shortDeltaMin, max: shortDeltaMax };
   }
   if (shortOiMin != null) override.shortOiMin = shortOiMin;
   if (maxSpreadPct != null) override.qualifyingSpreadPctMax = maxSpreadPct;
+  if (shortWidthCeiling != null) override.shortWidthCeiling = shortWidthCeiling;
   return override;
 }
 

@@ -63,7 +63,8 @@ describe('controls keep their accessible names and behavior', () => {
   it('shows the six original inputs, by their original names', () => {
     open();
     for (const name of ['Min DTE', 'Max DTE', 'Min Δ', 'Max Δ', 'OI min', 'Max width']) expect(screen.getByLabelText(name)).toBeInTheDocument();
-    expect(screen.getByLabelText('Max width')).toHaveValue('0.2');
+    expect(screen.getByLabelText('Max width')).toHaveValue('10');
+    expect(screen.getByLabelText('Width ceiling')).toHaveValue('0.5');
   });
 
   it('Run is enabled by default and hands back every rule, unchanged', async () => {
@@ -99,22 +100,25 @@ describe('quick-select pills follow the shared pill and input contract', () => {
     expect(onRun.mock.calls[0][0].rules).toMatchObject({ DELTA_MIN: 0.3, DELTA_MAX: 0.4 });
   });
 
-  it('a width pill sets the dollar width and an OI pill sets the OI preference', async () => {
+  it('a width pill sets the percent, a ceiling pill sets the dollar ceiling, and an OI pill sets the OI preference', async () => {
     const onRun = vi.fn();
     open({ onRun });
-    await userEvent.click(pill('Max bid/ask width quick select', '$0.30'));
-    expect(screen.getByLabelText('Max width')).toHaveValue('0.3');
+    await userEvent.click(pill('Max bid/ask width quick select', '15%'));
+    expect(screen.getByLabelText('Max width')).toHaveValue('15');
+    await userEvent.click(pill('Width ceiling quick select', '$0.75'));
+    expect(screen.getByLabelText('Width ceiling')).toHaveValue('0.75');
     await userEvent.click(pill('OI min quick select', '300'));
     expect(screen.getByLabelText('OI min')).toHaveValue('300');
     await userEvent.click(screen.getByRole('button', { name: 'RUN CC SCAN →' }));
-    expect(onRun.mock.calls[0][0].rules).toMatchObject({ BID_ASK_MAX: 0.3, OI_MIN: 300 });
+    expect(onRun.mock.calls[0][0].rules).toMatchObject({ WIDTH_PCT_MAX: 15, WIDTH_CEILING: 0.75, OI_MIN: 300 });
   });
 
   it('a click in one group never changes the pressed state of another', async () => {
     open();
     await userEvent.click(pill('OI min quick select', '500'));
     expect(pill('DTE range quick select', '21–45')).toHaveAttribute('aria-pressed', 'true');
-    expect(pill('Max bid/ask width quick select', '$0.20')).toHaveAttribute('aria-pressed', 'true');
+    expect(pill('Max bid/ask width quick select', '10%')).toHaveAttribute('aria-pressed', 'true');
+    expect(pill('Width ceiling quick select', '$0.50')).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
@@ -124,7 +128,7 @@ describe('the scan summary is built from the registry and updates as you edit', 
     const summary = screen.getByTestId('cc-rule-preview');
     expect(summary).toHaveTextContent('21–45 DTE');
     expect(summary).toHaveTextContent('Δ 0.20–0.35');
-    expect(summary).toHaveTextContent('width ≤ $0.20');
+    expect(summary).toHaveTextContent('width ≤ 10% of mid (min $0.05) · cap $0.50');
     expect(summary).toHaveTextContent('strike ≥ stock price (and cost basis when known)');
     expect(summary).toHaveTextContent('OI 100');
     // Two positions with capacity (AAA 4 + BBB 2 = 6); the fully covered one is not counted.

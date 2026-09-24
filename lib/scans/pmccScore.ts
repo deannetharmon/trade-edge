@@ -94,8 +94,16 @@ export function computePmccScore(inputs: PmccScoreInputs): PmccScoreBreakdown {
     : 0;
   const roiScore = Math.round(roiFraction * ROI_MAX_POINTS);
 
-  const longLiquidity = legLiquidityFraction(inputs.longLegSpreadPct, inputs.longLegOpenInterest);
   const shortLiquidity = legLiquidityFraction(inputs.shortLegSpreadPct, inputs.shortLegOpenInterest);
+  // SCAN-ALIGN-0001C1 (Alan): a null long OI means an OI-exempt held long
+  // (non-held null-OI longs are hard-rejected upstream by pmccPairing.filterLegs
+  // as INSUFFICIENT_DATA, so they never reach scoring). Only the long's OI half
+  // borrows the short's OI; the long's own spread still counts. If the short's OI
+  // is also null the borrowed term is 0 and the score stays capped as before.
+  const longLiquidity = legLiquidityFraction(
+    inputs.longLegSpreadPct,
+    inputs.longLegOpenInterest ?? inputs.shortLegOpenInterest,
+  );
   const liquidityScore = Math.round(Math.min(longLiquidity, shortLiquidity) * LIQUIDITY_MAX_POINTS);
 
   const earningsFlagged = earningsFallsBeforeShortExpiration(inputs.earningsDate, inputs.shortLegExpiration);

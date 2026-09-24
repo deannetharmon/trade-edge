@@ -149,12 +149,13 @@ describe('pairPmccCandidates', () => {
   it('reports distinct leg rejections when no long or short is eligible', () => {
     const result = run(
       [longLeg({ delta: 0.60 })],
-      [shortLeg({ openInterest: 99 })],
+      // SCAN-ALIGN-0001C1: short OI below minimum is now a warning; missing OI is what rejects.
+      [shortLeg({ openInterest: null })],
     );
     expect(result.counts.potentialCombinations).toBe(0);
     expect(result.legRejections).toHaveLength(2);
     expect(result.legRejections[0].reasons.map(item => item.code)).toContain('DELTA_OUT_OF_RANGE');
-    expect(result.legRejections[1].reasons.map(item => item.code)).toContain('OPEN_INTEREST_BELOW_MINIMUM');
+    expect(result.legRejections[1].reasons.map(item => item.code)).toContain('INSUFFICIENT_DATA');
   });
 
   // PMCC-HEALTH-CHECK-0001 / OI-LIQUIDITY-CHOICE-0001: short-leg delta no

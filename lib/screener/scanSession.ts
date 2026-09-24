@@ -846,7 +846,7 @@ function isValidPmccQuote(value: unknown): boolean {
     && typeof quote.reason === 'string';
 }
 
-function isValidPmccLeg(value: unknown, role: 'long' | 'short', symbol: string): boolean {
+function isValidPmccLeg(value: unknown, role: 'long' | 'short', symbol: string, heldLong = false): boolean {
   if (value == null || typeof value !== 'object') return false;
   const leg = value as Record<string, unknown>;
   const occ = typeof leg.occSymbol === 'string' ? leg.occSymbol.replace(/\s+/g, '').toUpperCase() : '';
@@ -856,7 +856,9 @@ function isValidPmccLeg(value: unknown, role: 'long' | 'short', symbol: string):
     && occ.length > 0
     && typeof leg.expiration === 'string' && Number.isFinite(Date.parse(leg.expiration))
     && Number.isInteger(leg.dte) && Number(leg.dte) >= 0
-    && ['strike', 'delta', 'openInterest', 'executablePrice'].every(key => typeof leg[key] === 'number' && Number.isFinite(leg[key]))
+    && ['strike', 'delta', 'executablePrice'].every(key => typeof leg[key] === 'number' && Number.isFinite(leg[key]))
+    // SCAN-ALIGN-0001C1: openInterest is null only for the long of a held-LEAPS pair (OI-exempt); a new-entry long and every short must be finite.
+    && ((role === 'long' && heldLong && leg.openInterest === null) || (typeof leg.openInterest === 'number' && Number.isFinite(leg.openInterest)))
     && isValidPmccQuote(leg.quote)
     && finiteOrNull(leg.intrinsic) && finiteOrNull(leg.extrinsic);
 }
@@ -935,7 +937,8 @@ function isValidPmccResult(value: Record<string, unknown>, snapshot: PmccScanSna
     const primary = pair.primaryFailureReason as Record<string, unknown>;
     if (primary.code !== first.code || primary.message !== first.message) return false;
   }
-  if (!isValidPmccLeg(pair.longLeg, 'long', value.symbol) || !isValidPmccLeg(pair.shortLeg, 'short', value.symbol)) return false;
+  const isHeldPair = pair.entryMode === 'covered-short-call-against-held-leaps' && pair.heldLongLeg != null;
+  if (!isValidPmccLeg(pair.longLeg, 'long', value.symbol, isHeldPair) || !isValidPmccLeg(pair.shortLeg, 'short', value.symbol)) return false;
   const longLeg = pair.longLeg as Record<string, unknown>;
   const shortLeg = pair.shortLeg as Record<string, unknown>;
   const canonicalPairId = `${longLeg.candidateId}::${shortLeg.candidateId}`;

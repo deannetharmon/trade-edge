@@ -28,7 +28,7 @@ import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 const RULES: CcRulesType = {
   DELTA_MIN: 0.20, DELTA_MAX: 0.35,
   DTE_MIN: 21, DTE_MAX: 45,
-  OI_MIN: 100, BID_ASK_MAX: 0.20,
+  OI_MIN: 100, WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.50,
 };
 
 type TestChain = { expirations: string[]; chains: Record<string, WheelChainLeg[]> };

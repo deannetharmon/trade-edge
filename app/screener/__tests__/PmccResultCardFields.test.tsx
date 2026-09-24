@@ -230,7 +230,8 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
       longLegs: [makeLeg('long')],
       shortLegs: [
         makeLeg('short'),
-        makeLeg('short', { strike: 105, openInterest: 50 }),
+        // SCAN-ALIGN-0001C1: below-minimum short OI now warns; missing OI is what excludes the contract.
+        makeLeg('short', { strike: 105, openInterest: null }),
       ],
       criteria, asOf, marketSession: 'open',
     });
@@ -244,7 +245,9 @@ describe('PmccResultCard — new fields (breakeven, extrinsic, roll runway, annu
 
     expect(within(card).getByLabelText('Option-chain exclusions')).toHaveTextContent('Option-chain exclusions (1 excluded contract)');
     expect(within(card).getAllByText(/Short call is not out of the money/)).toHaveLength(2);
-    expect(within(card).getAllByText(/Open interest is below the submitted minimum/)).toHaveLength(2);
+    // The grouped summary uses the code's generic INSUFFICIENT_DATA text; the per-contract audit list carries the OI-specific detail.
+    expect(within(card).getAllByText(/Required contract data is missing or invalid/)).toHaveLength(1);
+    expect(within(card).getAllByText(/Open interest is missing or invalid/)).toHaveLength(1);
     expect(within(card).getByText(/do not equal rejected PMCC structures/i)).toBeInTheDocument();
     expect(within(card).getByText(/View individual excluded contracts \(1\)/)).toBeInTheDocument();
   });

@@ -90,7 +90,7 @@ function heldPmccPairOrder(criteria: PmccPairingCriteria) {
   return (a: PmccPairResult, b: PmccPairResult): number =>
     Math.abs(a.shortLeg.delta - targetDelta) - Math.abs(b.shortLeg.delta - targetDelta)
     || (a.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY) - (b.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY)
-    || b.shortLeg.openInterest - a.shortLeg.openInterest
+    || (b.shortLeg.openInterest ?? 0) - (a.shortLeg.openInterest ?? 0)
     || b.shortLeg.executablePrice - a.shortLeg.executablePrice
     || stablePairOrder(a, b);
 }
@@ -166,13 +166,23 @@ function filterLegs(
     // completely unchanged below -- this only touches the short role.
     else if (role !== 'short' && !isHeldLong && (delta < deltaRange.min || delta > deltaRange.max)) reasons.push(reason('DELTA_OUT_OF_RANGE'));
 
-    if (leg.openInterest == null || !Number.isFinite(leg.openInterest)) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
-    else if (!isHeldLong && leg.openInterest < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
+    // SCAN-ALIGN-0001C1 OI policy:
+    //  - held long: OI check skipped entirely (missing OI must reach the held
+    //    breakeven floor, not die here);
+    //  - short: missing/non-finite/negative OI rejects INSUFFICIENT_DATA; OI
+    //    below the minimum is eligible and disclosed as a NEW_SHORT_OI warning
+    //    gate in pmccDecision.ts (0 is data and warns);
+    //  - new long: hard reject (fill risk), null/invalid = INSUFFICIENT_DATA.
+    if (!isHeldLong) {
+      const oi = leg.openInterest;
+      if (oi == null || !Number.isFinite(oi) || oi < 0) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
+      else if (role === 'long' && oi < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
+    }
 
     if (role === 'long' && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
     if (role === 'short' && !(leg.strike > underlyingPrice)) reasons.push(reason('SHORT_NOT_OTM'));
 
-    const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession);
+    const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession, role);
     if (!isHeldLong && !quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));
 
     const executablePrice = role === 'long' ? quote.ask : quote.bid;
@@ -187,7 +197,11 @@ function filterLegs(
     const extrinsic = executablePrice != null && intrinsic != null ? executablePrice - intrinsic : null;
     if (role === 'long' && (extrinsic == null || !Number.isFinite(extrinsic) || extrinsic < 0)) reasons.push(reason('INVALID_EXTRINSIC'));
 
-    if (reasons.length > 0 || identity == null || dte == null || delta == null || leg.openInterest == null || executablePrice == null) {
+    const openInterest = leg.openInterest != null && Number.isFinite(leg.openInterest) ? leg.openInterest : null;
+    if (reasons.length > 0 || identity == null || dte == null || delta == null || (openInterest == null && !isHeldLong) || executablePrice == null) {
+      // Every rejection must carry a reason code: a fall-through with none
+      // recorded (previously openInterest == null) was a silent rejection.
+      if (reasons.length === 0) reasons.push(reason('INSUFFICIENT_DATA'));
       rejected.push({ role, occSymbol: leg.occSymbol, strike: leg.strike, expiration: leg.expiration, reasons });
       continue;
     }
@@ -200,7 +214,8 @@ function filterLegs(
       dte,
       strike: leg.strike,
       delta,
-      openInterest: leg.openInterest,
+      // null only for a held long (OI-exempt); all other legs are finite here.
+      openInterest,
       occSymbol: leg.occSymbol!,
       quote,
       executablePrice,

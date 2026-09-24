@@ -11,6 +11,9 @@ export interface PmccQuotePolicy {
   acceptableSpreadPctMax: number;
   qualifyingSpreadPctMax: number;
   readyQuoteAgeSecondsMax: number;
+  /** SCAN-ALIGN-0001C2: absolute reject ceiling ($ per share) applied to the SHORT leg only.
+   *  Optional: an older snapshot without it means no ceiling. LEAP legs never get it. */
+  shortWidthCeiling?: number;
 }
 
 export interface PmccPairingLimits {
@@ -147,7 +150,11 @@ export interface PmccEligibleLeg {
   dte: number;
   strike: number;
   delta: number;
-  openInterest: number;
+  /** SCAN-ALIGN-0001C1: null ONLY for a held long (its OI is exempt from the
+   * OI check, so a missing chain value passes through). Every non-held leg
+   * (new long, every short) is guaranteed non-null and finite by filterLegs.
+   * Null-check before any arithmetic or display on this field. */
+  openInterest: number | null;
   occSymbol: string;
   quote: PmccQuoteQuality;
   executablePrice: number;

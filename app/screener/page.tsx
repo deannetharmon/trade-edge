@@ -78,6 +78,7 @@ import {
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
+import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import type { Position } from '@/lib/portfolio-data/types';
@@ -1492,9 +1493,7 @@ function runCcChecklist(
 
   const oiCheck: CheckResult = !bestCandidate
     ? { status: 'fail', value: 'None', reason: failReasons[failReasons.length - 1] || 'No candidate' }
-    : bestCandidate.shortOI >= ccRules.OI_MIN
-      ? { status: 'pass', value: `${bestCandidate.shortOI}`, reason: `≥ ${ccRules.OI_MIN} minimum` }
-      : { status: 'warn', value: `${bestCandidate.shortOI}`, reason: `Below ${ccRules.OI_MIN} — fills may be difficult` };
+    : buildCcOiCheck(bestCandidate.shortOI, ccRules.OI_MIN);
 
   const deltaCheck: CheckResult = bestCandidate
     ? { status: 'pass', value: `Δ${bestCandidate.shortDelta.toFixed(2)}`, reason: `Target ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX}` }
@@ -4522,12 +4521,14 @@ function HeldPmccOrderModal({ result, th, onClose }: {
 // LEAPS is thesis-driven and never gets a mechanical stop, and there is no
 // single "close the whole diagonal" automation since that's a manual,
 // two-leg decision when the trader decides it's time.
-function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }: {
+function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct, shortWidthCeiling }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
   // PMCC-ORDER-GATE-LIVE-FILTERS-0001: the live short-call filters from
   // the PMCC scan modal, sent with the order review so the gate that
   // can block an order matches what's actually shown on screen.
   shortDeltaMin: number; shortDeltaMax: number; shortOiMin: number; maxSpreadPct: number;
+  // SCAN-ALIGN-0001C2: short-leg width ceiling from the PMCC scan modal, so the order gate matches the scan.
+  shortWidthCeiling: number;
 }) {
   const pair = result.pmccPair!;
   if (pair.entryMode === 'covered-short-call-against-held-leaps') {
@@ -4640,7 +4641,7 @@ function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, sho
       const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }),
+        body: JSON.stringify({ mode: 'dry-run', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct, shortWidthCeiling }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Dry run failed (${res.status})`);
@@ -4660,7 +4661,7 @@ function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, sho
       const res = await fetch('/api/pmcc-trade-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct }),
+        body: JSON.stringify({ mode: 'submit', accountLocator: accountNumber, underlyingSymbol: result.symbol, longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol, quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct, shortWidthCeiling }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : data?.error?.message ?? `Order failed (${res.status})`);
@@ -5505,7 +5506,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       )}
       {heldOutcome && <p className={`mt-1 text-[10px] ${th.textFaint}`} data-testid="held-outcome-reason">{heldOutcome.reasonLine}</p>}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
+        <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest ?? '—'}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
   <span> ({((metrics.longExtrinsicPerShare / pair.longLeg.executablePrice) * 100).toFixed(1)}% of cost)</span>
 )}</span></>}</div>
         {!heldOutcome?.notChecked && <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}{(result.ivr != null || result.ivx != null) && (
@@ -8854,6 +8855,8 @@ export default function Home() {
   const [pmccShortDeltaMax, setPmccShortDeltaMax] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.max);
   const [pmccShortOiMin, setPmccShortOiMin] = useState(DEFAULT_PMCC_SHORT_OI_MIN);
   const [pmccMaxSpreadPct, setPmccMaxSpreadPct] = useState(DEFAULT_PMCC_QUOTE_POLICY.qualifyingSpreadPctMax);
+  // SCAN-ALIGN-0001C2: short-leg absolute width ceiling ($ per share), persisted with the other PMCC modal settings.
+  const [pmccWidthCeiling, setPmccWidthCeiling] = useState<number>(DEFAULT_PMCC_QUOTE_POLICY.shortWidthCeiling ?? 0.5);
   // PMCC discovery always starts with every eligible long call the account
   // already owns. Long-call DTE and delta are not finder inputs here: those
   // belong to the separate Find LEAPS workflow.
@@ -8868,6 +8871,7 @@ export default function Home() {
       if (Number.isFinite(parsed.shortDeltaMax)) setPmccShortDeltaMax(parsed.shortDeltaMax);
       if (Number.isFinite(parsed.shortOiMin)) setPmccShortOiMin(parsed.shortOiMin);
       if (Number.isFinite(parsed.maxSpreadPct)) setPmccMaxSpreadPct(parsed.maxSpreadPct);
+      if (Number.isFinite(parsed.widthCeiling) && parsed.widthCeiling >= 0.01) setPmccWidthCeiling(parsed.widthCeiling);
     } catch {}
   }, []);
   // TE-0007C — CC's scan universe comes from verified account holdings, not
@@ -10215,7 +10219,7 @@ export default function Home() {
       longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
       shortOiMin: request?.shortOiMin ?? pmccShortOiMin,
       requireDebitBelowWidth: true,
-      quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY, qualifyingSpreadPctMax: request?.maxSpreadPct ?? pmccMaxSpreadPct },
+      quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY, qualifyingSpreadPctMax: request?.maxSpreadPct ?? pmccMaxSpreadPct, shortWidthCeiling: request?.widthCeiling ?? pmccWidthCeiling },
       limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
     };
     const pmccSnapshot: PmccScanSnapshot = {
@@ -13071,7 +13075,7 @@ export default function Home() {
         <PmccTradeModal
           result={tradeResult} th={th} onClose={() => setTradeResult(null)}
           shortDeltaMin={pmccShortDeltaMin} shortDeltaMax={pmccShortDeltaMax}
-          shortOiMin={pmccShortOiMin} maxSpreadPct={pmccMaxSpreadPct}
+          shortOiMin={pmccShortOiMin} maxSpreadPct={pmccMaxSpreadPct} shortWidthCeiling={pmccWidthCeiling}
         />
       )}
       {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
@@ -13173,19 +13177,19 @@ export default function Home() {
           onToggleSymbol={togglePmccLeapsSymbol}
           discoveryLoading={pmccDiscoveryLoading}
           exclusions={pmccDiscoveryExclusions}
-          initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct }}
+          initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct, widthCeiling: pmccWidthCeiling }}
           onClose={() => setShowPmccScanModal(false)}
           onRun={(request: PmccScanRequest) => {
             setPmccShortDteMin(request.shortDteMin); setPmccShortDteMax(request.shortDteMax);
             setPmccShortDeltaMin(request.shortDeltaMin); setPmccShortDeltaMax(request.shortDeltaMax);
-            setPmccShortOiMin(request.shortOiMin); setPmccMaxSpreadPct(request.maxSpreadPct);
+            setPmccShortOiMin(request.shortOiMin); setPmccMaxSpreadPct(request.maxSpreadPct); setPmccWidthCeiling(request.widthCeiling);
             // PMCC-OI-DEFAULT-0001 -- Dean's request: the post-scan "Leg OI"
             // filter was always defaulting to "Any" regardless of what OI
             // floor was actually configured in the scan itself, which read
             // as the scan's own filter silently not applying. Sync it to
             // match what was just run.
             setFilteredMinOi(request.shortOiMin);
-            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct })); } catch {}
+            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct, widthCeiling: request.widthCeiling })); } catch {}
             setShowPmccScanModal(false); void runPMCCScan(request);
           }}
         />

@@ -23,6 +23,8 @@ export interface PmccScanRequest {
   shortDeltaMax: number;
   shortOiMin: number;
   maxSpreadPct: number;
+  /** SCAN-ALIGN-0001C2: absolute width ceiling ($ per share), applied to the short call only. */
+  widthCeiling: number;
 }
 
 export interface PmccHeldCandidateSummary {
@@ -64,7 +66,7 @@ export function PmccScanModal({
   const valid = useMemo(() => Object.values(draft).every(Number.isFinite)
     && draft.shortDteMin >= 0 && draft.shortDteMax >= draft.shortDteMin
     && draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
-    && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0
+    && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0 && draft.widthCeiling >= 0.01
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
   const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose}>
@@ -110,6 +112,8 @@ export function PmccScanModal({
       {field('shortDeltaMax', 'Max Δ', '0.01')}
       {field('shortOiMin', 'Short OI min', '1')}
       {field('maxSpreadPct', 'Max spread %', '1')}
+      {field('widthCeiling', 'Width ceiling ($)', '0.01')}
+      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-width-hint">Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling. Warns above 5% of mid (or $0.05).</p>
     </div>
     <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">Delta guides rank; it does not hide an otherwise tradable short call.</p>
     {!discoveryLoading && symbols.length > 0 && selectedCount === 0 && (

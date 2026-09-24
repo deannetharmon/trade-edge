@@ -7,10 +7,10 @@ import { DEFAULT_CC_RULES } from '@/lib/scans/constants';
 
 describe('ActiveCcRules: the covered-call result receipt', () => {
   it('shows the rules the scan ran with, from the same registry as the modal summary', () => {
-    render(<ActiveCcRules values={{ rules: { ...DEFAULT_CC_RULES, DTE_MIN: 30, DTE_MAX: 45, BID_ASK_MAX: 0.1 } }} onEdit={vi.fn()} />);
+    render(<ActiveCcRules values={{ rules: { ...DEFAULT_CC_RULES, DTE_MIN: 30, DTE_MAX: 45, WIDTH_PCT_MAX: 5, WIDTH_CEILING: 0.3 } }} onEdit={vi.fn()} />);
     const receipt = screen.getByTestId('active-cc-rules');
     expect(receipt).toHaveTextContent('Search range · rescan to change');
-    expect(receipt).toHaveTextContent('30–45 DTE · Δ 0.20–0.35 · width ≤ $0.10');
+    expect(receipt).toHaveTextContent('30–45 DTE · Δ 0.20–0.35 · width ≤ 5% of mid (min $0.05) · cap $0.30');
     expect(receipt).toHaveTextContent('strike ≥ stock price (and cost basis when known) · two-sided quotes · expires before earnings');
     expect(receipt).toHaveTextContent('OI 100');
     expect(receipt).toHaveTextContent('POP · OTM · IVR · Call OI chips · sort');
