@@ -215,7 +215,8 @@ describe('PositionsWorkspace', () => {
     expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith('/api/chart'))).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Quick chart for AAPL' }));
     expect(await screen.findByRole('dialog', { name: 'Quick chart for AAPL' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open AAPL in TradingView, opens in new tab' })).toHaveAttribute('href', 'https://www.tradingview.com/chart/?symbol=AAPL');
+    // 35da4de replaced the new-tab TradingView link with an embedded chart (Bollinger Bands, RSI, volume) opened from a button.
+    expect(screen.getByRole('button', { name: 'Open AAPL chart with Bollinger Bands, RSI, and volume' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/\+2.0% 30d/)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Quick chart for MSFT' }));
     expect(await screen.findByRole('dialog', { name: 'Quick chart for MSFT' })).toBeInTheDocument();

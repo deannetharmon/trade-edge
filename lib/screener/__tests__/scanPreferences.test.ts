@@ -1,10 +1,25 @@
 // lib/screener/__tests__/scanPreferences.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { FakeRedis } from '@/lib/ai-policy/fixtures/fakeRedis';
 import {
   EMPTY_SCAN_PREFERENCES, parseScanPreferences, readScanPreferences, saveScanPreferences, scanPrefsKey,
 } from '../scanPreferences';
+
+// A minimal in-memory store for the two calls scan preferences make. Local on purpose: deterministic code and its tests
+// never import @/lib/ai-policy (see lib/ai-policy/__tests__/importBoundary.test.ts).
+class FakeRedis {
+  readonly store = new Map<string, string>();
+  failAll = false;
+  async get(key: string): Promise<string | null> {
+    if (this.failAll) throw new Error('redis down');
+    return this.store.get(key) ?? null;
+  }
+  async set(key: string, value: string): Promise<string> {
+    if (this.failAll) throw new Error('redis down');
+    this.store.set(key, value);
+    return 'OK';
+  }
+}
 
 describe('parseScanPreferences', () => {
   it('a missing or malformed record yields the empty defaults (acceptance criterion 1: identical to today)', () => {

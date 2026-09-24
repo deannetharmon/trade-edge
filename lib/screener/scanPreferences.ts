@@ -15,7 +15,12 @@
 //     genuinely offer Rank/Targeted; cc and pmcc always use 'filter' by
 //     design and have no mode preference to set, see SCREENER-CONFIG-0001).
 
-import type { RedisLike } from '@/lib/ai-policy/types';
+// Deterministic code never imports @/lib/ai-policy (enforced by lib/ai-policy/__tests__/importBoundary.test.ts), so the
+// two Redis calls this module makes are described here. ioredis, and the AI library's RedisLike, satisfy it structurally.
+export interface ScanPreferencesStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<unknown>;
+}
 
 export type DeltaStrategy = 'csp' | 'ic' | 'spreads';
 export type ModeStrategy = 'csp' | 'spreads';
@@ -106,7 +111,7 @@ export function parseScanPreferences(value: unknown): ScanPreferences {
   return out;
 }
 
-export async function readScanPreferences(redis: RedisLike, userId: string): Promise<ScanPreferences> {
+export async function readScanPreferences(redis: ScanPreferencesStore, userId: string): Promise<ScanPreferences> {
   try {
     const raw = await redis.get(scanPrefsKey(userId));
     if (raw == null) return { ...EMPTY_SCAN_PREFERENCES, delta: {}, defaultMode: {} };
@@ -125,7 +130,7 @@ export type SaveScanPreferencesResult = { ok: true; preferences: ScanPreferences
  * set to `null` in the patch clears that preference back to the app default;
  * a field simply absent from the patch is left unchanged.
  */
-export async function saveScanPreferences(redis: RedisLike, userId: string, patch: unknown): Promise<SaveScanPreferencesResult> {
+export async function saveScanPreferences(redis: ScanPreferencesStore, userId: string, patch: unknown): Promise<SaveScanPreferencesResult> {
   if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) return { ok: false, reason: 'A preferences object is required.' };
   const existing = await readScanPreferences(redis, userId);
   const merged: Record<string, unknown> = { ...existing };
