@@ -5476,10 +5476,10 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         {score && !heldRejected && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">PMCC Structure Quality {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
-        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAPS PMCC' : 'PMCC'}</span>
+        <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAP · SHORT-CALL CANDIDATE' : 'PMCC'}</span>
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
         {heldOutcome && <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-outcome-caption">{heldOutcome.caption}</span>}
-        {heldRejected && <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400" data-testid="held-rejected-tag">Rejected · {heldOutcome!.code}</span>}
+        {heldRejected && <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400" data-testid="held-rejected-tag">Short call not eligible · {heldOutcome!.code}</span>}
         <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold ${heldRejected ? 'text-neutral-400' : readiness.text}`}>
           <span className={`inline-block w-2 h-2 rounded-full ${heldRejected ? 'bg-neutral-500' : readiness.dot}`} />
           {readiness.label} {expanded ? '▴' : '▾'}
@@ -5557,7 +5557,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
           {runnerUpPair && <span className="block mt-1 text-cyan-200">Versus runner-up {pmccBestFit.runnerUp!.symbol} {runnerUpPair.shortLeg.strike}C{runnerUpComparison ? `: ${runnerUpComparison}` : '.'}</span>}
         </div>
       ))}
-      {heldLong && <p className="mt-2 text-[10px] text-cyan-300">Portfolio-derived candidate · proposed short call only · no order ticket is available.</p>}
+      {heldLong && <p className="mt-2 text-[10px] text-cyan-300">Held LEAP · proposed short call only — not an existing PMCC. No order ticket is available.</p>}
     </button>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
       <p className={`rounded border ${readiness.border} ${readiness.text} px-3 py-2`}>
@@ -12515,15 +12515,16 @@ export default function Home() {
                               roiPcts.length > 0 ? Math.max(...roiPcts) : null,
                             ];
                           });
+                        const heldLeapCandidatesOnly = nearMissResults.length > 0 && nearMissResults.every(result => result.pmccPair?.entryMode === 'covered-short-call-against-held-leaps');
                         return nearMissResults.length > 0 && (
                           <div>
-                            <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">PMCC NEAR-MISS STRUCTURES</p>
+                            <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">{heldLeapCandidatesOnly ? 'HELD LEAP SHORT-CALL CANDIDATES' : 'PMCC NEAR-MISS STRUCTURES'}</p>
                             <div className="space-y-2">
                               {nearMissTickerGroups.map(([symbol, group, bestWidth, bestRoi]) => (
                                 <PmccTickerDisclosure key={symbol} symbol={symbol}
                                   price={group[0]?.price ?? null} candidateCount={group.length}
                                   bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
-                                  itemLabel="near-miss structure"
+                                  itemLabel={heldLeapCandidatesOnly ? 'short-call candidate' : 'near-miss structure'}
                                   summaryLine={heldSummaryOwner.get(symbol) === 'near-miss' ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
                                   defaultOpen={false} borderClassName={th.border}>
                                   {group.map(result => (

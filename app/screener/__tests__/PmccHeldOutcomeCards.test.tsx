@@ -135,7 +135,7 @@ function renderScreener() {
 
 /** Held floor-failed and not-checked cards are DISQUALIFIED, so they live in the collapsed near-miss group. */
 async function openNearMissGroup() {
-  const toggle = await screen.findByRole('button', { name: /GS.*near-miss structure/i });
+  const toggle = await screen.findByRole('button', { name: /GS.*short-call candidate/i });
   fireEvent.click(toggle);
 }
 
@@ -179,7 +179,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     expect(within(card).queryByRole('button', { name: /Refresh Portfolio/i })).toBeNull();
 
     // Rejected styling: neutral grey tag with the reason code, neutral border, no score, no near-miss colors.
-    expect(within(card).getByTestId('held-rejected-tag')).toHaveTextContent('Rejected · SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+    expect(within(card).getByTestId('held-rejected-tag')).toHaveTextContent('Short call not eligible · SHORT_NOT_ABOVE_HELD_BREAKEVEN');
     expect(within(card).getByTestId('held-rejected-tag').className).toContain('border-neutral-700');
     expect(card.className).toContain('border-neutral-700');
     expect(card.className).not.toMatch(/border-(amber|red|emerald)/);
@@ -239,7 +239,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
       'Short calls were not checked. This LEAP has 2 contracts, and cost averaging across lots is unverified.');
     expect(within(card).getByTestId('held-outcome-reason')).toHaveTextContent('Reason: COST_BASIS_UNAVAILABLE');
     expect(within(card).queryByRole('button', { name: /Refresh Portfolio/i })).toBeNull();
-    expect(within(card).getByTestId('held-rejected-tag')).toHaveTextContent('Rejected');
+    expect(within(card).getByTestId('held-rejected-tag')).toHaveTextContent('Short call not eligible · COST_BASIS_UNAVAILABLE');
     expect(within(card).getByText(/Held contract · 2 contract\(s\)/)).toBeInTheDocument();
     expect(within(card).queryByText('SELL')).toBeNull();
     expectNoOrderOrPromote(card);
@@ -273,7 +273,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toHaveTextContent('GS · 3 held LEAPs · 1 with results · 1 no shorts cleared · 1 not checked');
 
-    const nearMiss = screen.queryByRole('button', { name: /GS.*near-miss structure/i });
+    const nearMiss = screen.queryByRole('button', { name: /GS.*short-call candidate/i });
     if (nearMiss) fireEvent.click(nearMiss);
     const cards = await screen.findAllByTestId('pmcc-result-card');
     const outcomes = cards.map(c => c.getAttribute('data-held-outcome')).filter(Boolean);
@@ -296,7 +296,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     const passing = cards.filter(c => c.getAttribute('data-held-rejected') !== 'true');
     expect(rejected).toHaveLength(1);
     expect(passing).toHaveLength(1);
-    expect(within(rejected[0]).getByTestId('held-rejected-tag')).toHaveTextContent('Rejected · SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+    expect(within(rejected[0]).getByTestId('held-rejected-tag')).toHaveTextContent('Short call not eligible · SHORT_NOT_ABOVE_HELD_BREAKEVEN');
     expect(within(rejected[0]).queryByTestId('held-outcome-banner')).toBeNull();
     expect(rejected[0].textContent).not.toMatch(/No short calls cleared/i);
     openAudit(rejected[0]);
