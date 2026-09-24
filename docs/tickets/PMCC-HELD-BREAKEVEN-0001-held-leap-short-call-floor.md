@@ -2,7 +2,7 @@
 
 ## Status
 
-**Logged; approved by Dean 2026-09-24. Not built.** Bug, **P1** (Ian). Paul rated it P0; both agree it goes first. Found during the `SCAN-ALIGN-0001` review (slice A). Units confirmed 2026-09-24 (decision 1). Decision 4 closed by Dean 2026-09-24. Build is blocked until a real `quantity > 1` payload confirms the broker's `average-open-price` is the weighted average. If it cannot be confirmed, a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`. Fixtures drafted by Alan and reviewed by Ian 2026-09-24 (below); Ian signs off on the floor logic and codes with the loosened unit guard. Build still needs Alan's confirmation of the revised fixtures.
+**Logged; approved by Dean 2026-09-24. Not built.** Bug, **P1** (Ian). Paul rated it P0; both agree it goes first. Found during the `SCAN-ALIGN-0001` review (slice A). Units confirmed 2026-09-24 (decision 1). Decision 4 closed by Dean 2026-09-24. **Permanent rule (Dean, 2026-09-24): a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`.** The broker-side averaging across lots has **not been tested against a real multi-lot payload**: Dean holds only single-contract LEAPs (UBER, NFLX), so it is **unverifiable for now and does not block build**. Revisit if Dean ever holds a multi-lot LEAP; only then can the rule be relaxed. Fixtures drafted by Alan and reviewed by Ian 2026-09-24 (below); Ian signs off on the floor logic and codes with the loosened unit guard. Build still needs Alan's confirmation of the revised fixtures.
 
 ## Problem
 
@@ -90,13 +90,22 @@ Units are confirmed per share, so the guard only catches a gross x100 error, and
 
 ### Multi-lot (decision 2): parse-boundary test only
 
-Weighted average only when all lots share strike and expiry and each has a valid basis. **The multi-lot path cannot occur in the app today** (checked 2026-09-24): `exactOneLongCall` (`pmccHeldLeaps.ts`) accepts only a position with exactly one leg and not `structureAmbiguous`, a leg has one strike and one expiry, and the broker's `average-open-price` on that row is assumed to be the weighted average across lots. **This is an unverified assumption** (Dean, 2026-09-24): the only real payload seen is a single-lot NFLX position. **Before build, confirm it against a real `quantity > 1` payload** (one row for several contracts opened at different prices, and separate rows for one symbol if the broker ever returns them). Until confirmed, fail closed on anything not verified: If it cannot be confirmed, a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`. Raw rows are bucketed by underlying and expiry (`acquisition.ts:1281`) and go through `analyzePositionStructure`; anything that is not exactly one long call never reaches pairing. So A15 to A17 are a **unit test of a small pure helper at the parse boundary** (Dean, 2026-09-24), not a pairing-path test. They exist only if the build adds a helper that takes a list of lots; if the build reads the single leg's `avgOpenPrice` directly, there is nothing to test and decision 2 is satisfied by construction.
+Weighted average only when all lots share strike and expiry and each has a valid basis. **The multi-lot path cannot occur in the app today** (checked 2026-09-24): `exactOneLongCall` (`pmccHeldLeaps.ts`) accepts only a position with exactly one leg and not `structureAmbiguous`, a leg has one strike and one expiry, and the broker's `average-open-price` on that row is assumed to be the weighted average across lots. **This is untested against a real multi-lot payload** (Dean, 2026-09-24): the only real payload seen is a single-lot NFLX position, and Dean holds no multi-lot LEAP to check. It is closed as unverifiable, not confirmed. **Permanent rule (Dean, 2026-09-24): a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`.** The broker-side averaging across lots has **not been tested against a real multi-lot payload**: Dean holds only single-contract LEAPs (UBER, NFLX), so it is **unverifiable for now and does not block build**. Revisit if Dean ever holds a multi-lot LEAP; only then can the rule be relaxed. Raw rows are bucketed by underlying and expiry (`acquisition.ts:1281`) and go through `analyzePositionStructure`; anything that is not exactly one long call never reaches pairing. So A15 to A17 are a **unit test of a small pure helper at the parse boundary** (Dean, 2026-09-24), not a pairing-path test. They exist only if the build adds a helper that takes a list of lots; if the build reads the single leg's `avgOpenPrice` directly, there is nothing to test and decision 2 is satisfied by construction.
 
 | # | Case | Kl | Lots | Ks / bid | Expected |
 |---|---|---|---|---|---|
 | A15 | Same strike and expiry | 70 | 2 @ "20.00", 1 @ "23.00" | 90 / 1.00 | weighted 21.00, floor 91.00; 91.00 > 91.00 false → reject. Bid 1.01 qualifies |
 | A16 | One lot invalid | 70 | "20.00" and `null` | 90 / 5.00 | `COST_BASIS_UNAVAILABLE` |
 | A17 | Mixed strike or expiry | 70 and 75 | valid on both | 100 / 5.00 | fail closed (`COST_BASIS_UNAVAILABLE`); never blend across LEAPs |
+
+### Quantity guard (permanent)
+
+| # | Case | Expected |
+|---|---|---|
+| A23 | Held long with `quantity` = 2 (or any > 1), otherwise valid basis and a short that clears the floor | `COST_BASIS_UNAVAILABLE`, not qualified |
+| A24 | Held long with `quantity` = 1, valid basis | judged by the floor (A1 to A5) |
+
+A23 and A24 were added after Alan's and Ian's sign-offs and need their confirmation. Consequence to note: this blocks every held LEAP of 2 or more contracts, including 2 contracts filled at one price, because averaging cannot be verified. Relax it only after a real multi-lot payload is checked.
 
 ### New entry (unchanged)
 
@@ -119,7 +128,7 @@ Weighted average only when all lots share strike and expiry and each has a valid
 
 1. **Fees:** `avgOpenPrice` is assumed to exclude fees, seen on one payload. A 0.01 to 0.05 difference could flip an equality case at the boundary. Known limit.
 2. **Parser scope: closed (Dean, 2026-09-24).** `"1e2"` and `"0x10"` reject (fail closed); see A12.
-3. **Multi-lot: assumption unverified; confirm before build.** The path cannot occur in the app per the code (above), so A15 to A17 are a parse-boundary unit test, but the broker-side averaging is unverified until a real `quantity > 1` payload is checked. Fail closed on anything not verified. Build is blocked until a real `quantity > 1` payload confirms the broker's `average-open-price` is the weighted average. If it cannot be confirmed, a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`.
+3. **Multi-lot: closed as unverifiable (Dean, 2026-09-24); not a build blocker.** The path cannot occur in the app per the code (above), so A15 to A17 are a parse-boundary unit test. The broker-side averaging is untested against a real multi-lot payload. **Permanent rule (Dean, 2026-09-24): a held LEAP with `quantity > 1` fails closed as `COST_BASIS_UNAVAILABLE`.** The broker-side averaging across lots has **not been tested against a real multi-lot payload**: Dean holds only single-contract LEAPs (UBER, NFLX), so it is **unverifiable for now and does not block build**. Revisit if Dean ever holds a multi-lot LEAP; only then can the rule be relaxed.
 4. **Where the tests live:** `HeldPmccLongCandidate` has no cost field yet; it should carry the already-parsed number, so string cases (A7 to A13) belong at the parse boundary and the floor cases at pairing.
 
 ## Validation
