@@ -58,7 +58,9 @@ describe('PMCC production integration', () => {
   it('retains an alternate valid pair when the deterministic first combination fails', () => {
     const pairing = run([leg('long', 720)], [leg('short', 1038, { bid: 1, ask: 1.1 }), leg('short', 1070)]);
     const results = buildPmccScreenResults(pairing, context);
-    expect(pairing.nearMissPairs).toHaveLength(1);
+    // 1038 short: debit 321 >= width 318 is a hard reject (SCAN-ALIGN-0001E), counted but not a near-miss.
+    expect(pairing.nearMissPairs).toHaveLength(0);
+    expect(pairing.counts.debitRejectedPairs).toBe(1);
     expect(results.some(result => result.qualified && result.pmccPair?.shortLeg.strike === 1070)).toBe(true);
   });
 

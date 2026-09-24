@@ -821,7 +821,8 @@ function isValidPmccCounts(value: unknown): boolean {
   if (Number(counts.qualifiedPairsRetained) + Number(counts.qualifiedPairsOmittedByRetention) !== Number(counts.qualifiedPairsBeforeRetention)) return false;
   if (Number(counts.nearMissPairsRetained) + Number(counts.nearMissPairsOmittedByRetention) !== Number(counts.nearMissPairsBeforeRetention)) return false;
   if (Number(counts.potentialCombinations) !== Number(counts.eligibleLongLegs) * Number(counts.eligibleShortLegs)) return false;
-  if (Number(counts.qualifiedPairsBeforeRetention) + Number(counts.nearMissPairsBeforeRetention) !== Number(counts.combinationsEvaluated)) return false;
+  if (counts.debitRejectedPairs !== undefined && !(Number.isInteger(counts.debitRejectedPairs) && Number(counts.debitRejectedPairs) >= 0)) return false;
+  if (Number(counts.qualifiedPairsBeforeRetention) + Number(counts.nearMissPairsBeforeRetention) + Number(counts.debitRejectedPairs ?? 0) !== Number(counts.combinationsEvaluated)) return false;
   if (Number(counts.structurallyValidPairs) > Number(counts.combinationsEvaluated)
     || Number(counts.qualifiedPairsBeforeRetention) > Number(counts.combinationsEvaluated)
     || Number(counts.nearMissPairsBeforeRetention) > Number(counts.combinationsEvaluated)) return false;

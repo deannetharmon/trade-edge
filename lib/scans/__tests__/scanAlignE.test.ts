@@ -7,7 +7,8 @@ import {
 } from '../pmccConfig';
 import { PMCC_DECISION_POLICY_VERSION } from '../pmccDecision';
 import { DEFAULT_PMCC_DTE_RANGES } from '../pmccDteRanges';
-import { pairPmccCandidates } from '../pmccPairing';
+import { pairPmccCandidates, evaluatePmccPairOnDemand } from '../pmccPairing';
+import { heldLongKey } from '../pmccHeldBreakeven';
 import type { PmccChainLeg, PmccPairingCriteria } from '../pmccTypes';
 
 // SCAN-ALIGN-0001E fixtures: long strike 80, long ask 24.10, short bid 1.60, debit 22.50.
@@ -73,5 +74,46 @@ describe('SCAN-ALIGN-0001E E1: requireDebitBelowWidth is no longer a criterion',
     const clean = snapshot();
     expect(stripLegacyPmccCriteria(clean)).toBe(clean);
     expect(stripLegacyPmccCriteria(null)).toBeNull();
+  });
+});
+
+describe('SCAN-ALIGN-0001E E2: debit >= width is a hard reject', () => {
+  it('24.10 - 1.60 = 22.50 compared in cents: width 22.51 passes, 22.50 and 22.49 hard-reject', () => {
+    const pass = pair(102.51);
+    expect(pass.qualifiedPairs).toHaveLength(1);
+    expect(pass.counts.structurallyValidPairs).toBe(1);
+    expect(pass.counts.debitRejectedPairs).toBe(0);
+    for (const strike of [102.5, 102.49]) {
+      const result = pair(strike);
+      expect(result.qualifiedPairs).toHaveLength(0);
+      expect(result.nearMissPairs).toHaveLength(0);
+      expect(result.counts.structurallyValidPairs).toBe(0);
+      expect(result.counts.nearMissPairsBeforeRetention).toBe(0);
+      expect(result.counts.combinationsEvaluated).toBe(1);
+      expect(result.counts.debitRejectedPairs).toBe(1);
+    }
+  });
+  it('a saved requireDebitBelowWidth:false still hard-rejects equality', () => {
+    const result = pair(102.5, { ...criteria, requireDebitBelowWidth: false });
+    expect(result.nearMissPairs).toHaveLength(0);
+    expect(result.counts.debitRejectedPairs).toBe(1);
+  });
+  it('held pairs never reach the debit check: a held long with debit >= width is governed by the held floor only', () => {
+    const held = longLeg();
+    const result = pairPmccCandidates({
+      symbol: 'GS', underlyingPrice: 92.5, longLegs: [held], shortLegs: [shortLeg(102.5)],
+      criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([heldLongKey(held.occSymbol!)]),
+      heldLongBasis: new Map([[heldLongKey(held.occSymbol!), { avgOpen: 20, quantity: 1 }]]),
+    });
+    expect(result.counts.debitRejectedPairs).toBe(0);
+    expect(result.qualifiedPairs).toHaveLength(1);
+  });
+  it('on-demand check reports pair_rejected for equality and qualified just below', () => {
+    const run = (strike: number) => evaluatePmccPairOnDemand({
+      symbol: 'GS', underlyingPrice: 92.5, longChainLeg: longLeg(), shortChainLeg: shortLeg(strike),
+      criteria, asOf, marketSession: 'open',
+    });
+    expect(run(102.5).outcome).toBe('pair_rejected');
+    expect(run(102.51).outcome).toBe('qualified');
   });
 });
