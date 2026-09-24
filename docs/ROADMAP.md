@@ -13,8 +13,7 @@ Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip 
 
 Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none built.
 
-- SCAN-ALIGN-0001C1 (slot 3, PR3 commit 1): OI policy. Follows A and B. Touches `page.tsx:1494`, so full suite and Vercel preview are required.
-- SCAN-ALIGN-0001C2 (slot 4, PR3 commit 2): hybrid bid/ask with a $0.50 ceiling, scoped to short calls. Follows C1. Needs Diane's mock 2 approved and Alan's integer-cents pass.
+- SCAN-ALIGN-0001C1 (OI policy) and C2 (hybrid bid/ask, $0.50 short-call ceiling): MERGED to main 2026-09-24 (`a44b47c`; real next build, green previews, production deploy green). Follow-ups: pmccScore held-long null-OI fix landed as part of C1; validator hardening landed; `ScreenerSessionWiring` flaky test observed once.
 - SCAN-ALIGN-0001D (slot 5, own PR): PMCC earnings removal plus after-expiry warning (Ian's amendment). After B. Needs Alan's date fixtures and Diane's tag copy.
 - SCAN-ALIGN-0001E (slots 6-7, own PR, two commits): debit below width becomes non-switchable (E1 stop reading the field, E2 hard reject). After A. Separate PR from D. Alan and Ian sign off.
 - SCAN-ALIGN-0001F1 (slot 8): PMCC delta control polish (chips, hint, receipt row). Needs Diane's mock 1 approved.
