@@ -21,6 +21,7 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 
 ## Later (on the horizon, not yet scoped)
 
+- SCAN-GUIDE-0001 (proposed by Paul 2026-09-24, Dean's request): report-only post-scan note on what the width ceiling removed, a majority-removed nudge, and plain-English help beside the width fields. After D, E, F1; item 3 (help text only) can ship early. Needs Ian wording sign-off and a rendered Diane mock.
 - PMCC-HELD-BREAKEVEN-0001C (P2): held-LEAP results tiles (Avg open and Since open with em dashes), results container, "Show full breakdown", filter funnel and engine funnel data, "Adjust short delta" banner, rejected-pairs list. Needs its own mock and approval; not tied to PR1.
 - Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
   - Earnings-date comparisons elsewhere still use raw strings, UTC or host-local dates: `pmccReadiness.ts:29`, `pmccScore.ts:76`, `pmccLifecycle.ts:14,30` (regex-only `isDate`), `covered-call-finder.ts:185`, `lib/screener.ts:245`; `page.tsx` unchecked. Owned by slice D and EARNINGS-NO-DATE-0001.
