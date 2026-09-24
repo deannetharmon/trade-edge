@@ -51,7 +51,7 @@ import {
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
-import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, selectEarningsRemovedBanner, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
+import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, selectDeltaRemovedNotice, selectEarningsRemovedBanner, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
 import { earningsRemovalReceipt } from '@/lib/scans/pmccEarningsRemoval';
 import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
@@ -4272,8 +4272,10 @@ function buildPmccOrderLegs(pair: PmccPairResult): any[] {
 // different enough risk profiles that guarding one component against
 // firing the wrong pricing model is more dangerous than two small,
 // independently-correct components.
-function HeldPmccOrderModal({ result, th, onClose }: {
+function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  // SCAN-ALIGN-0001F: the scan's short-delta window, so the order-time re-check applies the same hard filter the scan did.
+  shortDeltaMin: number; shortDeltaMax: number;
 }) {
   const pair = result.pmccPair!;
   const [quantity, setQuantity] = useState(1);
@@ -4361,7 +4363,7 @@ function HeldPmccOrderModal({ result, th, onClose }: {
     return JSON.stringify({
       mode, accountLocator: accountNumber, underlyingSymbol: result.symbol,
       longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol,
-      quantity, limitPrice: entryLimit,
+      quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax,
     });
   };
 
@@ -4534,7 +4536,7 @@ function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, sho
 }) {
   const pair = result.pmccPair!;
   if (pair.entryMode === 'covered-short-call-against-held-leaps') {
-    return <HeldPmccOrderModal result={result} th={th} onClose={onClose} />;
+    return <HeldPmccOrderModal result={result} th={th} onClose={onClose} shortDeltaMin={shortDeltaMin} shortDeltaMax={shortDeltaMax} />;
   }
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
@@ -5431,19 +5433,26 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
   if (!pair) {
     // SCAN-ALIGN-0001D: held symbol whose shorts were all removed by earnings. The banner replaces the generic audit reasons; no action button.
     const earningsRemovedNotice = selectEarningsRemovedBanner(result.pmccEarningsRemoval);
+    // SCAN-ALIGN-0001F: held symbol whose shorts were all removed by the delta window (earnings wins). One line plus a real reason; no action button.
+    const deltaRemovedNotice = selectDeltaRemovedNotice(result.pmccDeltaRemoval, false, earningsRemovedNotice != null);
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{result.symbol}</span>
         <span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span>
-        {earningsRemovedNotice
+        {earningsRemovedNotice || deltaRemovedNotice
           ? <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400">Held LEAP · no short call offered</span>
           : <span className="text-red-400 text-xs">Audit result · Disqualified</span>}
       </div>
       {earningsRemovedNotice
         ? <div className="mt-2 rounded bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200" data-testid="held-earnings-removed-banner">{earningsRemovedNotice}</div>
-        : <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>}
+        : deltaRemovedNotice
+          ? <>
+              <div className="mt-2 rounded bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200" data-testid="held-delta-removed-banner">{deltaRemovedNotice.banner}</div>
+              <p className={`mt-2 text-xs ${th.textMuted}`} data-testid="held-delta-removed-reason">{deltaRemovedNotice.reasonLine}</p>
+            </>
+          : <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>}
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}

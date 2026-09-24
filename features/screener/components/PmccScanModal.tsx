@@ -132,7 +132,6 @@ export function PmccScanModal({
       {field('widthCeiling', 'Width ceiling ($)', '0.01')}
       <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-width-hint">Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling. Warns above 5% of mid (or $0.05).</p>
     </div>
-    <p className="mt-3 rounded border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300">Delta guides rank; it does not hide an otherwise tradable short call.</p>
     {!discoveryLoading && symbols.length > 0 && selectedCount === 0 && (
       <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
         ⚠ Select at least one held LEAPS position before running.

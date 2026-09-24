@@ -10,7 +10,7 @@ import { isNyseHoliday } from './nyseCalendar';
 import { classifyEarningsVsExpiry } from './earningsExpiryZone';
 import { newYorkDateFromAsOf, normalizeEarningsDate } from './pmccEarningsDates';
 import { partitionShortsByEarnings, type PmccEarningsRemoval } from './pmccEarningsRemoval';
-import { earningsRemovedBanner } from './pmccHeldOutcomeDisplay';
+import { computePmccDeltaRemoval, earningsRemovedBanner, selectDeltaRemovedNotice } from './pmccHeldOutcomeDisplay';
 // PMCC-TREND-GATE-0001 -- cross-domain import (lib/scans -> lib/portfolio)
 // is intentional: technicalAlignmentForStrategy's own doc comment already
 // declares itself "the single source of truth for both the screener's
@@ -167,7 +167,7 @@ function resultForPair(pair: PmccPairResult, session: PmccSessionResult, context
   };
 }
 
-export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext, earningsRemoval?: PmccEarningsRemoval): ScreenResult[] {
+export function buildPmccScreenResults(session: PmccSessionResult, context: PmccProductionContext, earningsRemoval?: PmccEarningsRemoval, heldMode = false, heldCostBasisUnavailable = false): ScreenResult[] {
   // SCAN-ALIGN-0001D safety net: shorts are normally removed BEFORE pairing (runPmccProduction), so
   // this only drops pairs when a caller paired without the filter or when the cost-basis-wins path
   // paired unfiltered. A held pair carrying COST_BASIS_UNAVAILABLE is kept (not-checked wins).
@@ -197,6 +197,10 @@ export function buildPmccScreenResults(session: PmccSessionResult, context: Pmcc
   }
   const failReasons = pmccAuditReasons(session);
   const heldBanner = removal && removal.allShortsRemoved && removal.heldMode ? earningsRemovedBanner(removal.earningsDate) : null;
+  // SCAN-ALIGN-0001F: precedence cost-basis, then earnings, then delta. With no pair to carry a
+  // cost-basis reason, an unusable held cost basis suppresses the delta line explicitly.
+  const deltaRemoval = heldBanner == null && !heldCostBasisUnavailable ? computePmccDeltaRemoval(session, heldMode) : undefined;
+  const deltaNotice = selectDeltaRemovedNotice(deltaRemoval);
   if (heldBanner == null && removal && removal.removedCount > 0) {
     failReasons.push(`${removal.removedCount} short call${removal.removedCount === 1 ? '' : 's'} removed: earnings on ${removal.earningsDate} falls on or before expiry`);
   }
@@ -205,11 +209,12 @@ export function buildPmccScreenResults(session: PmccSessionResult, context: Pmcc
     symbol: context.symbol, strategy: 'PMCC', price: context.price, ivr: context.ivr, qualified: false, bestCandidate: null,
     candidateId: `pmcc-audit:${context.symbol}:${session.asOf}`,
     // Held mode with every short removed by earnings: the banner IS the reason (never "no short calls found").
-    failReasons: heldBanner != null ? [heldBanner] : failReasons.length ? failReasons : ['No valid combinations'],
+    failReasons: heldBanner != null ? [heldBanner] : deltaNotice != null ? [deltaNotice.banner, deltaNotice.reasonLine] : failReasons.length ? failReasons : ['No valid combinations'],
     earningsDate: context.earningsDate, trendResult: context.trendResult, isEtf: context.underlyingType !== 'stock', underlyingType: context.underlyingType,
     ruleSetApplied: `PMCC pairing engine v2 / ${PMCC_DECISION_POLICY_VERSION}`, checks: checksFor(null), pmccDecision, pmccPairingCounts: session.counts,
     pmccIncompleteAnalysis: session.incompleteAnalysis, pmccLegRejections: session.legRejections, pmccAsOf: session.asOf,
     ...(removal ? { pmccEarningsRemoval: removal } : {}),
+    ...(deltaNotice != null && deltaRemoval ? { pmccDeltaRemoval: deltaRemoval } : {}),
   }];
 }
 
@@ -314,7 +319,11 @@ export function runPmccProduction(
       pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);
       pairing.nearMissPairs = pairing.nearMissPairs.map(annotate);
     }
-    return buildPmccScreenResults(pairing, context, earningsRemoval);
+    const heldCostBasisUnavailable = heldMode && matchedHeldLongs.some(value => evaluateHeldBreakevenFloor({
+      strikeLong: value.leg.strike, strikeShort: 1e9, shortBid: 1, spot: context.price,
+      basis: readHeldBasis(value.candidate.avgOpenPrice), quantity: value.candidate.quantity,
+    })?.code === 'COST_BASIS_UNAVAILABLE');
+    return buildPmccScreenResults(pairing, context, earningsRemoval, heldMode, heldCostBasisUnavailable);
   } catch (error) {
     throw new PmccProductionError('PAIRING_ENGINE_FAILURE', error);
 

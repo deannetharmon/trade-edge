@@ -134,7 +134,7 @@ describe('pairPmccCandidates', () => {
     expect(result.legRejections.flatMap(item => item.reasons.map(reason => reason.code))).not.toContain('DTE_OUT_OF_RANGE');
   });
 
-  it('ranks OTM short strikes in the requested DTE range instead of rejecting a held PMCC for delta preference', () => {
+  it('SCAN-ALIGN-0001F: a held PMCC ranks in-window shorts and rejects an out-of-window short (0.32 vs window 0.20-0.30)', () => {
     const held = longLeg();
     const outsidePreferredDelta = shortLeg({ delta: 0.32, strike: 1080, occSymbol: occ('2026-09-18', 1080) });
     const nearerPreferredDelta = shortLeg({ delta: 0.27, strike: 1090, occSymbol: occ('2026-09-18', 1090) });
@@ -143,7 +143,8 @@ describe('pairPmccCandidates', () => {
       criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
       heldLongBasis: heldBasisFor(held),
     });
-    expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([1090, 1080]);
+    expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([1090]);
+    expect(result.legRejections.find(item => item.strike === 1080)?.reasons.map(reason => reason.code)).toEqual(['DELTA_OUT_OF_RANGE']);
   });
 
   it('reports distinct leg rejections when no long or short is eligible', () => {
@@ -158,30 +159,27 @@ describe('pairPmccCandidates', () => {
     expect(result.legRejections[1].reasons.map(item => item.code)).toContain('INSUFFICIENT_DATA');
   });
 
-  // PMCC-HEALTH-CHECK-0001 / OI-LIQUIDITY-CHOICE-0001: short-leg delta no
-  // longer silently rejects a candidate here -- it's now disclosed as a
-  // warning gate in evaluatePmccDecision instead. This is the direct
-  // regression proof: before this ticket, a short leg at delta 0.45
-  // (outside the 0.20-0.30 test criteria) would never have become
-  // eligible or reached qualifiedPairs at all.
-  it('an off-target short-leg delta no longer rejects the leg -- it survives to become a qualified pair', () => {
+  // SCAN-ALIGN-0001F (F2): short-leg delta is a hard filter. Before F2 a 0.45 short (outside the
+  // 0.20-0.30 test window) survived to a qualified pair with a disclosed warning; now it rejects.
+  it('an off-window short-leg delta rejects the leg with DELTA_OUT_OF_RANGE (new-entry mode)', () => {
     const result = run([longLeg()], [shortLeg({ delta: 0.45 })]);
-    expect(result.qualifiedPairs).toHaveLength(1);
-    expect(result.qualifiedPairs[0].shortLeg.delta).toBeCloseTo(0.45, 5);
-    expect(result.legRejections.some(r => r.reasons.some(reason => reason.code === 'DELTA_OUT_OF_RANGE'))).toBe(false);
+    expect(result.qualifiedPairs).toHaveLength(0);
+    expect(result.counts.eligibleShortLegs).toBe(0);
+    const rejection = result.legRejections.find(r => r.role === 'short');
+    expect(rejection?.reasons.map(reason => reason.code)).toEqual(['DELTA_OUT_OF_RANGE']);
+    expect(rejection?.reasons[0].message).toBe('Short delta 0.45 outside 0.20-0.30');
   });
 
-  it('an off-target short-leg delta survives identically in held mode too, not just new-entry mode', () => {
+  it('an off-window short-leg delta rejects identically in held mode', () => {
     const held = longLeg();
     const result = pairPmccCandidates({
       symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg({ delta: 0.45 })],
       criteria: { ...criteria }, asOf, marketSession: 'open',
-      // Was `new Set([held.occSymbol!])` (no `occ:` prefix), which silently ran the NEW-ENTRY path.
       heldLongOccSymbols: new Set([heldLongKey(held.occSymbol!)]),
       heldLongBasis: heldBasisFor(held),
     });
-    expect(result.qualifiedPairs).toHaveLength(1);
-    expect(result.qualifiedPairs[0].shortLeg.delta).toBeCloseTo(0.45, 5);
+    expect(result.qualifiedPairs).toHaveLength(0);
+    expect(result.legRejections.find(r => r.role === 'short')?.reasons.map(reason => reason.code)).toContain('DELTA_OUT_OF_RANGE');
   });
 
   it('deduplicates matching OCC contracts before pairing', () => {
