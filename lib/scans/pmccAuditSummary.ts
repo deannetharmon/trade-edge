@@ -1,3 +1,5 @@
+// lib/scans/pmccAuditSummary.ts
+
 import type { PmccFailureCode, PmccLegRejection } from './pmccTypes';
 
 export interface PmccRejectionSummaryItem {
@@ -13,6 +15,8 @@ const SUMMARY_MESSAGES: Partial<Record<PmccFailureCode, string>> = {
   BID_ASK_TOO_WIDE: 'Bid/ask spread exceeds the qualifying maximum',
   INVALID_QUOTE: 'A valid positive two-sided quote is required',
   INSUFFICIENT_DATA: 'Required contract data is missing or invalid',
+  COST_BASIS_UNAVAILABLE: 'Held LEAP cost basis is missing or unusable',
+  SHORT_NOT_ABOVE_HELD_BREAKEVEN: 'Short strike plus bid does not exceed held LEAP strike plus cost basis',
 };
 
 /**

@@ -777,12 +777,15 @@ export function shouldGenerateRecommendationsForSession(
 
 const PMCC_AUDIT_KINDS = new Set(['MARKET_DATA_FAILURE', 'CHAIN_ADAPTATION_FAILURE', 'PAIRING_ENGINE_FAILURE']);
 const PMCC_QUOTE_STATES = new Set(['acceptable', 'wide_warning', 'too_wide', 'stale', 'delayed', 'market_closed', 'timestamp_missing', 'insufficient']);
-const PMCC_FAILURE_CODES = new Set([
+// Exported so a test can prove every PmccFailureCode member is listed here (a code missing from
+// this allowlist makes a stored session fail INVALID_PMCC_RESULT on validate or restore).
+export const PMCC_FAILURE_CODES = new Set([
   'INVALID_OPTION_TYPE', 'UNDERLYING_MISMATCH', 'INVALID_OCC_IDENTITY', 'DUPLICATE_CONTRACT',
   'DELTA_OUT_OF_RANGE', 'DTE_OUT_OF_RANGE', 'OPEN_INTEREST_BELOW_MINIMUM', 'INVALID_QUOTE',
   'BID_ASK_TOO_WIDE', 'LONG_NOT_ITM', 'SHORT_NOT_OTM', 'LONG_EXPIRATION_NOT_LATER',
   'LONG_STRIKE_NOT_BELOW_SHORT', 'NET_DEBIT_NOT_POSITIVE', 'NET_DEBIT_NOT_BELOW_WIDTH',
   'INVALID_EXTRINSIC', 'INSUFFICIENT_DATA',
+  'COST_BASIS_UNAVAILABLE', 'SHORT_NOT_ABOVE_HELD_BREAKEVEN',
 ]);
 const PMCC_QUALIFICATIONS = new Set(['QUALIFIED', 'DISQUALIFIED']);
 const PMCC_READINESS_STATES = new Set(['READY', 'MARKET_CLOSED', 'WAIT_MONITOR']);

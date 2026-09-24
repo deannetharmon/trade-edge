@@ -1,8 +1,11 @@
+// lib/scans/pmccProduction.ts
+
 import type { CheckResult, ScreenResult, SpreadCandidate, TrendResult } from './types';
 import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
 import type { PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
 import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHeldLeaps';
+import { heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
 // PMCC-TREND-GATE-0001 -- cross-domain import (lib/scans -> lib/portfolio)
 // is intentional: technicalAlignmentForStrategy's own doc comment already
 // declares itself "the single source of truth for both the screener's
@@ -255,7 +258,13 @@ export function runPmccProduction(
       // held contract still exposes OI in the UI, but is not rejected solely
       // for that new-entry floor.
       criteria: matchedHeldLongs.length ? { ...snapshot.criteria, longOiMin: 0 } : snapshot.criteria,
-      heldLongOccSymbols: new Set(matchedHeldLongs.map(value => `occ:${value.leg.occSymbol?.replace(/\s+/g, '').toUpperCase()}`)),
+      heldLongOccSymbols: new Set(matchedHeldLongs.map(value => heldLongKey(value.leg.occSymbol ?? ''))),
+      // PMCC-HELD-BREAKEVEN-0001: the held long's broker cost and lot count, for the short-call floor.
+      // Client path: avgOpenPrice is already a number (parseBrokerEntryPremium), so the reader's number branch applies.
+      heldLongBasis: new Map<string, HeldLongBasis>(matchedHeldLongs.map(value => [
+        heldLongKey(value.leg.occSymbol ?? ''),
+        { avgOpen: readHeldBasis(value.candidate.avgOpenPrice), quantity: value.candidate.quantity },
+      ])),
       asOf: new Date(snapshot.asOf),
       marketSession: snapshot.marketSession,
     });
@@ -268,7 +277,9 @@ export function runPmccProduction(
           ...pair,
           pairId: `${pair.pairId}:held:${held.positionKey}`,
           entryMode: 'covered-short-call-against-held-leaps',
-          heldLongLeg: { accountNumber: held.accountNumber, positionKey: held.positionKey, quantity: held.quantity, occSymbol: held.occSymbol },
+          // PMCC-HELD-BREAKEVEN-0001B-1: avgOpenPrice is pass-through DATA for the card's floor caption and
+          // banner (the same readHeldBasis value the floor used above). No engine logic reads it.
+          heldLongLeg: { accountNumber: held.accountNumber, positionKey: held.positionKey, quantity: held.quantity, occSymbol: held.occSymbol, avgOpenPrice: readHeldBasis(held.avgOpenPrice) },
         };
       };
       pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);

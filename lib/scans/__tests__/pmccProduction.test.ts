@@ -181,7 +181,7 @@ describe('PMCC production integration', () => {
   it('uses an exact held long as the only long candidate and marks the result review-only', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'held-gs', underlyingSymbol: 'GS',
-      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 2,
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -191,7 +191,7 @@ describe('PMCC production integration', () => {
     expect(results).toHaveLength(1);
     expect(results[0].pmccPair).toMatchObject({
       entryMode: 'covered-short-call-against-held-leaps',
-      heldLongLeg: { accountNumber: '5WT00001', positionKey: 'held-gs', quantity: 2 },
+      heldLongLeg: { accountNumber: '5WT00001', positionKey: 'held-gs', quantity: 1 },
       longLeg: { occSymbol: held.occSymbol },
     });
     expect(results[0].candidateId).toContain(':held:held-gs');
@@ -200,7 +200,7 @@ describe('PMCC production integration', () => {
   it('retains a held-LEAPS PMCC even when the held long fails new-entry delta and quote rules', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'held-gs-exception', underlyingSymbol: 'GS',
-      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -220,7 +220,7 @@ describe('PMCC production integration', () => {
   it('does not substitute a new long entry when the held contract is absent', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',
-      occSymbol: 'missing', expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
+      occSymbol: 'missing', expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: null,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -235,7 +235,7 @@ describe('PMCC production integration', () => {
   it('persists held-long identity and rejects a corrupted held contract binding', () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'persisted-held', underlyingSymbol: 'GS',
-      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1,
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345,
     };
     const results = runPmccProduction(
       { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
@@ -247,6 +247,55 @@ describe('PMCC production integration', () => {
     const corrupted = JSON.parse(JSON.stringify(session));
     corrupted.results[0].pmccPair.heldLongLeg.occSymbol = 'wrong';
     expect(validateSessionData(corrupted)).toMatchObject({ valid: false, errors: expect.arrayContaining(['INVALID_PMCC_RESULT']) });
+  });
+
+  // PMCC-HELD-BREAKEVEN-0001 W1: the production scan entry point (runPmccProduction) enforces the held floor.
+  describe('held-LEAP breakeven floor (W1)', () => {
+    const heldBase: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'held-floor', underlyingSymbol: 'GS',
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345,
+    };
+    // Short 1070 bid 8: Ks + bid = 1078. Floor is 720 + avgOpen.
+    const runHeld = (held: HeldPmccLongCandidate) => runPmccProduction(
+      { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+      { adapt: vi.fn(() => ({ longLegs: [leg('long', 720)], shortLegs: [leg('short', 1070)] })), pair: pairPmccCandidates }, [held],
+    );
+    const persist = (results: ReturnType<typeof runHeld>) => {
+      let session = createScanSession({ mode: 'filter', requestedStrategy: 'pmcc', scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot });
+      session = completeSession(recordSymbolEvaluated(session, 'GS', results));
+      return validateSessionData(JSON.parse(JSON.stringify(session)));
+    };
+
+    it('W1: a multi-lot held LEAP (quantity 2, valid cost, short clears the floor) has no qualified pair and reports the multi-lot detail', () => {
+      const results = runHeld({ ...heldBase, quantity: 2 });
+      expect(results.some(result => result.qualified)).toBe(false);
+      expect(results[0].pmccPair?.qualified).toBe(false);
+      expect(results[0].pmccPair?.failureReasons).toEqual([{ code: 'COST_BASIS_UNAVAILABLE', message: 'multi-lot LEAP: cost averaging unverified' }]);
+      expect(results[0].pmccDecision?.action).toBe('BLOCKED');
+      expect(persist(results)).toMatchObject({ valid: true });
+    });
+
+    it('a held LEAP with no usable cost fails closed as COST_BASIS_UNAVAILABLE, and survives session validation', () => {
+      const results = runHeld({ ...heldBase, avgOpenPrice: null });
+      expect(results[0].qualified).toBe(false);
+      expect(results[0].pmccPair?.failureReasons[0]).toEqual({ code: 'COST_BASIS_UNAVAILABLE', message: 'cost basis unavailable' });
+      expect(persist(results)).toMatchObject({ valid: true });
+    });
+
+    it('a floor-failed held result (equality at 1078) is retained as data, blocked, and round-trips through validateSessionData', () => {
+      const results = runHeld({ ...heldBase, avgOpenPrice: 358 });
+      expect(results[0].qualified).toBe(false);
+      expect(results[0].pmccPair?.primaryFailureReason?.code).toBe('SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+      expect(results[0].pmccDecision?.action).toBe('BLOCKED');
+      expect(persist(results)).toMatchObject({ valid: true });
+      // +0.01 on the short clears it (A2-style boundary, end to end).
+      const clears = runPmccProduction(
+        { shortExpirations: [], longExpirations: [], chains: {} }, context, snapshot,
+        { adapt: vi.fn(() => ({ longLegs: [leg('long', 720)], shortLegs: [leg('short', 1070, { bid: 8.01, ask: 8.2 })] })), pair: pairPmccCandidates },
+        [{ ...heldBase, avgOpenPrice: 358 }],
+      );
+      expect(clears[0].qualified).toBe(true);
+    });
   });
 
   it('derives deterministic NYSE session state including holidays', () => {

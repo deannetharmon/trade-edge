@@ -19,7 +19,8 @@ const recordMock = vi.fn(async (..._args: unknown[]): Promise<string> => { event
 vi.mock('@/lib/leaps-position-intelligence/entryCapture', () => ({ recordEntryBestEffort: (...args: unknown[]) => recordMock(...args) }));
 
 let pmccAction = 'NEW_PMCC_REVIEW_ALLOWED';
-vi.mock('@/lib/scans/pmccPairing', () => ({ pairPmccCandidates: () => ({ qualifiedPairs: [{ id: 'pair' }], nearMissPairs: [] }) }));
+// PMCC-HELD-BREAKEVEN-0001: the held order path also checks pair.qualified directly, so the mocked (qualified) pair carries it.
+vi.mock('@/lib/scans/pmccPairing', () => ({ pairPmccCandidates: () => ({ qualifiedPairs: [{ id: 'pair', qualified: true }], nearMissPairs: [] }) }));
 vi.mock('@/lib/scans/pmccDecision', () => ({ evaluatePmccDecision: () => ({ action: pmccAction, qualification: 'QUALIFIED', readiness: 'READY', gates: [] }) }));
 
 import { submitHeldPmccShortCallOrder, submitLeapsOrder, submitPmccOrder } from '../serverTradeReview';

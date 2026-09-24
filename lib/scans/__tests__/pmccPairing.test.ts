@@ -4,6 +4,7 @@ import {
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '../pmccConfig';
 import { pairPmccCandidates, pmccDte } from '../pmccPairing';
+import { heldLongKey } from '../pmccHeldBreakeven';
 import type { PmccChainLeg, PmccPairingCriteria } from '../pmccTypes';
 
 const asOf = new Date('2026-08-14T20:00:00.000Z');
@@ -44,6 +45,12 @@ function shortLeg(overrides: Partial<PmccChainLeg> = {}): PmccChainLeg {
     occSymbol: occ(expiration, strike), quoteTimestamp: '2026-08-14T19:59:30.000Z', delayed: false,
     ...overrides,
   };
+}
+
+// PMCC-HELD-BREAKEVEN-0001: a held pair now needs a valid cost basis and quantity 1 to qualify.
+// avgOpen 345 (per share) keeps the floor cleared for the 1070/1080/1090 shorts against the 720 LEAP.
+function heldBasisFor(leg: PmccChainLeg, avgOpen: number | null = 345, quantity: unknown = 1) {
+  return new Map([[heldLongKey(leg.occSymbol!), { avgOpen, quantity }]]);
 }
 
 function run(longLegs: PmccChainLeg[], shortLegs: PmccChainLeg[], overrides: Partial<PmccPairingCriteria> = {}) {
@@ -109,6 +116,7 @@ describe('pairPmccCandidates', () => {
     const result = pairPmccCandidates({
       symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg()],
       criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+      heldLongBasis: heldBasisFor(held),
     });
     expect(result.qualifiedPairs).toHaveLength(1);
     expect(result.qualifiedPairs[0].longLeg.occSymbol).toBe(held.occSymbol);
@@ -120,6 +128,7 @@ describe('pairPmccCandidates', () => {
       symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg()],
       criteria: { ...criteria, dte: { ...criteria.dte, longMax: 300 } },
       asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+      heldLongBasis: heldBasisFor(held),
     });
     expect(result.qualifiedPairs).toHaveLength(1);
     expect(result.legRejections.flatMap(item => item.reasons.map(reason => reason.code))).not.toContain('DTE_OUT_OF_RANGE');
@@ -132,6 +141,7 @@ describe('pairPmccCandidates', () => {
     const result = pairPmccCandidates({
       symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [outsidePreferredDelta, nearerPreferredDelta],
       criteria, asOf, marketSession: 'open', heldLongOccSymbols: new Set([`occ:${held.occSymbol}`]),
+      heldLongBasis: heldBasisFor(held),
     });
     expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([1090, 1080]);
   });
@@ -165,7 +175,9 @@ describe('pairPmccCandidates', () => {
     const result = pairPmccCandidates({
       symbol: 'GS', underlyingPrice: 1037.55, longLegs: [held], shortLegs: [shortLeg({ delta: 0.45 })],
       criteria: { ...criteria }, asOf, marketSession: 'open',
-      heldLongOccSymbols: new Set([held.occSymbol!]),
+      // Was `new Set([held.occSymbol!])` (no `occ:` prefix), which silently ran the NEW-ENTRY path.
+      heldLongOccSymbols: new Set([heldLongKey(held.occSymbol!)]),
+      heldLongBasis: heldBasisFor(held),
     });
     expect(result.qualifiedPairs).toHaveLength(1);
     expect(result.qualifiedPairs[0].shortLeg.delta).toBeCloseTo(0.45, 5);
