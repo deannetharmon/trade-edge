@@ -316,6 +316,39 @@ describe('SCREENER-OI-0001: 18. no regression to Covered Call capacity protectio
     await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
   });
 
+  it('SCREENER-CONFIG-0001B: CC results start with Call OI at Any, so a thin-OI call is shown with its warning, and the chip still narrows on request', async () => {
+    mockHoldingsAndChain();
+    mockEligibleChain(50); // below the preferred minimum of 100: advisory for covered calls, never a reason to hide the call by default
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCcScan();
+
+    await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
+    const oiLabel = screen.getAllByText('Call OI').find(el => within(el.closest('div') as HTMLElement).queryByRole('button', { name: '250' })) as HTMLElement;
+    const oiRow = oiLabel.closest('div') as HTMLElement;
+
+    await userEvent.click(within(oiRow).getByRole('button', { name: '100' }));
+    await waitFor(() => expect(screen.getByText('0 of 1 QUALIFIED')).toBeInTheDocument());
+    await userEvent.click(within(oiRow).getByRole('button', { name: 'Any' }));
+    await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
+  });
+
+  it('SCREENER-CONFIG-0001B: a CC scan shows an Active CC rules receipt with the rules it ran with and the counts, and Edit / Run Again reopens the configuration', async () => {
+    mockHoldingsAndChain();
+    renderScreener();
+    await addToUniverse('NKE');
+    await clickCcScan();
+
+    await waitFor(() => expect(screen.getByText('1 of 1 QUALIFIED')).toBeInTheDocument());
+    const receipt = await screen.findByTestId('active-cc-rules');
+    expect(receipt).toHaveTextContent('21–45 DTE · Δ 0.20–0.35 · width ≤ $0.20');
+    expect(receipt).toHaveTextContent('strike ≥ stock price (and cost basis when known) · two-sided quotes · expires before earnings');
+    expect(receipt).toHaveTextContent('1 symbol with a candidate · 0 with none');
+
+    await userEvent.click(within(receipt).getByRole('button', { name: 'Edit / Run Again' }));
+    expect(await screen.findByRole('dialog', { name: 'COVERED CALL SCAN' })).toBeInTheDocument();
+  });
+
   function mockHoldingsAndChain() {
     getCoveredCallCapacityReportMock.mockResolvedValue({
       status: 'ok',

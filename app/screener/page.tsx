@@ -182,12 +182,14 @@ import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolO
 import { LauncherButton, type LauncherStrategyId } from '@/features/screener/components/LauncherButton';
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
+import { ActiveCcRules } from '@/features/screener/components/ActiveCcRules';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
+import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
 import { PmccTickerDisclosure } from '@/features/screener/components/PmccTickerDisclosure';
@@ -8912,6 +8914,9 @@ export default function Home() {
   // changes what the scan actually uses" pattern from CspScanModal, minus
   // the persisted-defaults/preset layer CC intentionally doesn't have yet.
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
+  // SCREENER-CONFIG-0001B: the rules a covered-call scan ran with, tied to that scan's session. A CC session carries no rule
+  // snapshot, so a session restored from cache has none and shows no rules receipt rather than a guess.
+  const [ccReceipt, setCcReceipt] = useState<{ sessionId: string; rules: CcRulesType } | null>(null);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
   const [leapsResults, setLeapsResults] = useState<Array<{
@@ -9006,6 +9011,9 @@ export default function Home() {
   // CSP results default to Any: open interest is advisory for CSP (low OI is warned about, never a reason to hide a put by
   // default). Kept apart from filteredMinOi so CC, PMCC, and spreads keep their own default.
   const [cspMinOi, setCspMinOi] = useState<number>(0);
+  // Covered calls follow the same rule: OI is advisory for CC (OI-LIQUIDITY-CHOICE-0001 removed it from the gate), so the
+  // Call OI chip starts at Any.
+  const [ccMinOi, setCcMinOi] = useState<number>(0);
   // PMCC-CREDIT-FILTER-0001 (Ian/Paul-approved) -- credit floor as a
   // percentage of strike width, same shape as filteredMinOi.
   const [filteredMinCreditRatio, setFilteredMinCreditRatio] = useState<number>(0);
@@ -10739,6 +10747,7 @@ export default function Home() {
         scopeExclusionReasonCode,
       });
       session = s;
+      setCcReceipt({ sessionId: s.sessionId, rules });
       const loopSymbols = s.plannedScanSymbols;
 
       pushStatus('Fetching market metrics...');
@@ -10984,7 +10993,10 @@ export default function Home() {
   // not inherit the mutable Filter/Rank result controls that happen to live
   // in this page component.
   const cspTargetedSession = activeSession?.requestedStrategy === 'csp' && activeSession.mode === 'targeted';
-  const effectiveFilteredMinOi = cspTargetedSession ? 0 : activeSession?.requestedStrategy === 'csp' ? cspMinOi : filteredMinOi;
+  const effectiveFilteredMinOi = cspTargetedSession ? 0
+    : activeSession?.requestedStrategy === 'csp' ? cspMinOi
+    : activeSession?.requestedStrategy === 'cc' ? ccMinOi
+    : filteredMinOi;
   const effectiveFilteredSort = cspTargetedSession
     ? ({ primary: 'score', secondary: 'none' } as SortSpec)
     : filteredSort;
@@ -11715,6 +11727,14 @@ export default function Home() {
                 </div>
               </div>
 
+              {activeSession?.requestedStrategy === 'cc' && ccReceipt?.sessionId === activeSession.sessionId && (
+                <ActiveCcRules
+                  values={{ rules: ccReceipt.rules }}
+                  counts={summarizeCcResults(results)}
+                  onEdit={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
+                />
+              )}
+
               {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
                 <ActiveCspRules
                   snapshot={activeSession.ruleSnapshot}
@@ -11850,7 +11870,7 @@ export default function Home() {
                         th={th}
                         strategy="cc"
                         resultIdentifiers={filteredQualified.filter(r => r.bestCandidate).map(r => `${r.symbol}-${r.bestCandidate!.shortStrike}-${r.bestCandidate!.expiration}`)}
-                        filters={{ minOi: filteredMinOi }}
+                        filters={{ minOi: ccMinOi }}
                         onClose={() => setShowCcAdvisorPanel(false)}
                         describePick={identifier => {
                           const r = filteredQualified.find(item => item.bestCandidate && `${item.symbol}-${item.bestCandidate.shortStrike}-${item.bestCandidate.expiration}` === identifier);
@@ -11900,7 +11920,7 @@ export default function Home() {
                       showStrategyToggle={false}
                       showCreditRatio={false}
                       oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
+                        <OiAndSortControls th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
                       }
                     />
                   </section>

@@ -15,8 +15,10 @@ const TAG_CLASS: Record<Lifecycle, string> = {
  */
 export function LifecycleTag({ lifecycle, fixed = false, rescan = false }: { lifecycle: Lifecycle; fixed?: boolean; rescan?: boolean }) {
   const parts = [LIFECYCLE_TAG_LABEL[lifecycle]];
-  if (fixed && lifecycle !== 'result-filter') parts.push('FIXED');
-  if (lifecycle === 'fetch' && rescan) parts.push('RESCAN');
+  // Read-only and result-filter rows are not settings, so "fixed" would say nothing.
+  if (fixed && lifecycle !== 'result-filter' && lifecycle !== 'read-only') parts.push('FIXED');
+  // A fixed limit cannot be changed, so it never asks for a rescan.
+  if (lifecycle === 'fetch' && rescan && !fixed) parts.push('RESCAN');
   return (
     <span data-lifecycle={lifecycle} className={`ml-2 inline-block whitespace-nowrap rounded-full border px-2 py-0.5 align-middle text-[9px] font-bold tracking-wider ${TAG_CLASS[lifecycle]}`}>
       {parts.join(' · ')}

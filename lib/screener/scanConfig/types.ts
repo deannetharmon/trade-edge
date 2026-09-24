@@ -69,15 +69,17 @@ export interface RangePreset {
 }
 
 /** Where a criterion appears in the scan summary and the result receipt. */
-export type SummaryGroup = 'search' | 'gates' | 'advisory' | 'order' | 'adjustable' | 'capital';
+export type SummaryGroup = 'search' | 'gates' | 'always' | 'advisory' | 'order' | 'adjustable' | 'capital' | 'capacity';
 
 export const SUMMARY_GROUP_LABEL: Record<SummaryGroup, string> = {
   search: 'Search range',
   gates: 'Gates',
+  always: 'Always applied',
   advisory: 'Advisory and preferences',
   order: 'Order',
   adjustable: 'Adjustable after the scan',
   capital: 'Capital',
+  capacity: 'Capacity',
 };
 
 /** A rendered receipt group. `rescan` is true when the group needs a new scan to change. */
