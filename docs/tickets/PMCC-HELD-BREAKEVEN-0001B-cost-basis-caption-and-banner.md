@@ -2,7 +2,7 @@
 
 ## Status
 
-**Drafted by Paul 2026-09-24. Not approved. Not built.** This is the deferred UI follow-up to `PMCC-HELD-BREAKEVEN-0001` (decision 4, closed by Dean 2026-09-24: rejection reason, plus a caption on the LEAP row, plus a banner line when it is why a held LEAP shows zero shorts).
+**Drafted by Paul 2026-09-24. Mock 3b approved by Ian, Paul and Dean 2026-09-24. Dean accepted all of Paul's recommendations (routing, build path, PR1 timing, scope drops). Approved for build; not built.** This is the deferred UI follow-up to `PMCC-HELD-BREAKEVEN-0001` (decision 4, closed by Dean 2026-09-24: rejection reason, plus a caption on the LEAP row, plus a banner line when it is why a held LEAP shows zero shorts).
 
 **Blocked on Diane's Mock 3b and its approval.** No approved mock exists. Mock 3 in `SCAN-ALIGN-0001-mocks.md` is "Draft mocks, not approved". It covers the zero-shorts banner. It does not cover the LEAP-row caption or multi-lot.
 
@@ -36,9 +36,9 @@ Without UI, a trader whose held LEAP has no eligible short sees an empty or gene
     - Detail: "Reason: COST_BASIS_UNAVAILABLE. Detail: multi-lot LEAP: cost averaging unverified."
   - **Floor not met (every short fails).**
     - Caption: "Floor {floor} (LEAP strike + cost basis)".
-    - Banner: "No short calls cleared the floor. Floor is LEAP strike + cost basis: {Kl} + {avgOpen} = ${floor}."
+    - Banner (Ian): "No short calls cleared the floor. A short must satisfy strike + bid > LEAP strike + your cost: {Kl} + {avgOpen} = ${floor}."
     - No action.
-    - Funnel row: "N -> 0 floor (all at or below ${floor})", then reason `SHORT_NOT_ABOVE_HELD_BREAKEVEN`.
+    - Funnel row: "N -> 0 floor (strike + bid at or below LEAP strike + cost, ${floor})", then reason `SHORT_NOT_ABOVE_HELD_BREAKEVEN`.
 - **Not-checked causes never enter the funnel.** For the first two outcomes the funnel breakdown must not render, and the copy never says "no short calls found".
 - **Avg open tile** shows an em dash when cost basis is unavailable or multi-lot.
 - **Mock 3 rename.** The breakeven row and copy become "Floor" and state Ks + short bid vs Kl + cost.
@@ -46,7 +46,9 @@ Without UI, a trader whose held LEAP has no eligible short sees an empty or gene
   - Decision: banner headline and action.
   - Risk-context: amber caption under the LEAP tiles.
   - Ambient: collapsed detail behind "Show full breakdown".
-- **Per-LEAP captions** when several LEAPs are held (see Decision 2).
+- **Per-LEAP captions** when several LEAPs are held (see Decision 2). Card order: results, then floor-not-met, then not-checked; header `{n} held LEAPs · {a} with results · {b} not checked · {c} no shorts cleared`, omitting zero segments so the counts sum to n (Paul, Mock 3b).
+- **Rejected pairs:** minimal collapsed, inert list inside "Show full breakdown", capped at 20, floor-failed pairs only, from existing `nearMissPairs` data; OUT (separate ticket) if it needs new engine data (Paul, Ian; Mock 3b section d).
+- **Since open tile** shows `—` when cost basis is unavailable or multi-lot.
 
 ## Non-goals
 
@@ -56,19 +58,24 @@ Without UI, a trader whose held LEAP has no eligible short sees an empty or gene
 - Warnings that override a disqualification ("trust the qualified realm").
 - Netting prior roll credits into cost basis (separate product question).
 - Changing `pmccStartPrice`.
+- Tooltips on the em dash (Paul: dropped; the banner and collapsed detail already explain the state).
 
-## Decisions needed from Dean
+## Decisions (Dean, 2026-09-24: both accepted as recommended)
 
-1. **Routing of cost-basis-unavailable.**
+1. **Routing of cost-basis-unavailable. DECIDED: split by cause, as recommended.**
    - Conflict: Mock 3 says it blocks before the modal (technical failure). Decision 4 says a banner line.
    - **Recommendation: split by cause**, as Diane proposes.
      - A fixable technical read failure (null, zero, unparseable or mis-scaled basis) blocks before the modal with an error. Action: Refresh Portfolio. This follows the CLAUDE.md principle "technical failures block before a modal".
      - Multi-lot and floor-not-met are verified results, not read failures. They open the modal with an in-modal banner and caption.
    - This refines decision 4 and does not contradict it. Dean's ruling is needed because decision 4 was closed with a banner line.
-2. **Multiple held LEAPs.**
+2. **Multiple held LEAPs. DECIDED: as recommended (per-LEAP results; a block for one LEAP never stops the others).**
    - Question: does a block for one LEAP stop results for the others?
    - **Recommendation: no.** Results are per LEAP. A LEAP with a fixable read failure shows a caption card with the error and Refresh Portfolio. The other LEAPs still show results.
-   - A pre-modal block applies only when every selected LEAP has a fixable read failure. If that is too complex, the fallback is to show the caption card in-modal for all causes. Diane should say which is simpler in Mock 3b.
+   - A pre-modal block applies only when every selected LEAP has a fixable read failure. If that is too complex, the fallback is to show the caption card in-modal for all causes (superseded by the build-path decision below). Diane should say which is simpler in Mock 3b.
+
+## Build path: DECIDED (Dean, 2026-09-24): wrapper in the same PR as the cards (Mock 3b open question 10)
+
+Paul recommends the **all-fail pre-modal wrapper ships in the same PR as the cards** (small: `every(isFixableReadFailure)` over the selector output, the pre-modal error, refresh-then-reopen-once). It includes the single-LEAP case, which is Dean's real usage. Dean accepted the recommendation, so no deviation is taken. (Had he preferred in-modal-only first, he would have had to accept in writing:) (i) fixable failures on a single-LEAP scan open the modal with an error card instead of blocking before it, departing from his 2026-09-24 ruling and CLAUDE.md; (ii) the wrapper is a named follow-on ticket with an owner and merge-by date; (iii) the deviation applies only to the all-fail case; (iv) it ships to production.
 
 ## Acceptance criteria
 
@@ -105,6 +112,7 @@ Without UI, a trader whose held LEAP has no eligible short sees an empty or gene
   - PR1 (slice A, engine-only) is safe to merge only if Mock 3b is approved within 1-2 working sessions of 2026-09-24. If not, **hold the PR1 merge**. Without this UI the new fail-closed states are silent and misleading.
   - After approval: Diane's Mock 3b, then Ian, Paul and Dean approve, then Dane builds, then Vercel preview, then merge.
   - Dane must not build UI before the mock is approved.
-- Approvals needed before build: Diane's Mock 3b; Ian, Paul and Dean approve the mock; Dean's rulings on Decisions 1 and 2. Alan is not needed unless the floor display value needs a fixture.
+- **Sequencing decided (Dean, 2026-09-24):** PR1 (slice A) merges only once Dane has a committed start on this ticket; the interim exposure (silent fail-closed states on production until this ships) is acknowledged by Dean.
+- Approvals needed before build (all given 2026-09-24 except Dane's pre-build checks): Diane's Mock 3b (drawn to the two rulings above; she also says whether "block only if every LEAP fails" or "always in-modal" is simpler to build, which decides the fallback in Decision 2); Ian, Paul and Dean approve the mock. Alan is not needed unless the floor display value needs a fixture.
 - Ships revertable on its own commit.
-- The parent ticket's decision 4 line should be updated to point here once Dean rules on Decision 1.
+- The parent ticket's decision 4 line points here (updated 2026-09-24).

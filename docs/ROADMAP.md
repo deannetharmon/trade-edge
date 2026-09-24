@@ -6,8 +6,9 @@ Last updated: 2026-09-24
 
 Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip gets its own revertable test flip; do not bundle engine flips.
 
-1. PMCC-HELD-BREAKEVEN-0001 (A, P1, PR1): held-LEAP short calls get a breakeven floor. Fixtures, quantity guard and build plan signed off by Alan, Ian and Quinn (2026-09-24); build not started. Merge holds if Diane's Mock 3b is not approved within 1-2 working sessions.
+1. PMCC-HELD-BREAKEVEN-0001 (A, P1, PR1): held-LEAP short calls get a breakeven floor. Fixtures, quantity guard and build plan signed off by Alan, Ian and Quinn (2026-09-24); build not started. Merge only once Dane has a committed start on PMCC-HELD-BREAKEVEN-0001B (Dean, 2026-09-24; interim silent fail-closed states on production acknowledged).
    - Permanent rule: a held LEAP with quantity > 1 fails closed (`COST_BASIS_UNAVAILABLE`), because multi-lot broker averaging is unverifiable. Dean holds single-contract LEAPs.
+   - PMCC-HELD-BREAKEVEN-0001B (caption, banner and pre-modal error for held-LEAP floor outcomes): Mock 3b approved by Ian, Paul and Dean 2026-09-24; approved for build, not built. Own PR; the all-fail pre-modal wrapper ships in the same PR as the cards. Needs Dane's pre-build checks (tile names, pre-modal surface, engine funnel order).
 2. PMCC-EARNINGS-PAST-0001 (B, P2, PR2): PMCC earnings warning fires on past dates. Approved by Dean; fixtures signed off by Alan and Ian; may travel with A as two commits. Must land before D.
 
 ## Next (scoped, approved, not started)
@@ -35,7 +36,6 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 
 - SCAN-ALIGN-0001F2 (delta rule flip: PMCC delta becomes a hard filter): direction accepted, held. Unstick: F1 built, LEAPS-ADVISOR-0001B built or re-scoped, mock 3 approved, and Dean's timing decision. If still held at PMCC registry migration, the registry records delta as a deliberate CC-vs-PMCC difference.
 - LEAPS-ADVISOR-0001B: scoped, not built; no ticket file in docs/tickets/. Unstick: team go-ahead, or a re-scope decision. Gates F2.
-- PMCC-HELD-BREAKEVEN-0001B (caption on the LEAP row and banner line, UI follow-up to A): drafted by Paul 2026-09-24, not approved. Blocked on Diane's Mock 3b and Dean's two routing rulings. If Mock 3b is not approved within 1-2 working sessions, PR1 (A) merge holds.
 - PMCC-ASSIGNMENT-RISK-0001: draft. Short-to-LEAP expiry-gap investigation goes now. Ex-dividend part is deferred. Unstick: Dean's ex-dividend data-source decision.
 - After-hours CC "not ready" chip: rides with C as a display state only, held. Unstick: Ian's confirmation (his open item 2, management rules and "not ready").
 - Autopilot extension to PMCC/CC: undecided product question, Dean's open decision. Current scope is BPS/BCS/IC/CSP only. Do not propose implementation.
