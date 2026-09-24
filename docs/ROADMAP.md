@@ -39,7 +39,7 @@ Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none bu
 
 ## Parked / deferred (with why, and what would unstick it)
 
-- SCAN-ALIGN-0001F2 (delta rule flip: PMCC delta becomes a hard filter): direction accepted, held. Unstick: F1 built, LEAPS-ADVISOR-0001B built or re-scoped, mock 3 approved, and Dean's timing decision. If still held at PMCC registry migration, the registry records delta as a deliberate CC-vs-PMCC difference.
+- (moved to build 2026-09-24) SCAN-ALIGN-0001F2: Dean approved building now ("Do F2 now"), reduced held-card reason accepted, LEAPS-ADVISOR-0001B waived (not a dependency). Building to the F ticket's F2 rulings.
 - LEAPS-ADVISOR-0001B: scoped, not built; no ticket file in docs/tickets/. Unstick: team go-ahead, or a re-scope decision. Gates F2.
 - PMCC-ASSIGNMENT-RISK-0001: draft. Short-to-LEAP expiry-gap investigation goes now. Ex-dividend part is deferred. Unstick: Dean's ex-dividend data-source decision.
 - After-hours CC "not ready" chip: rides with C as a display state only, held. Unstick: Ian's confirmation (his open item 2, management rules and "not ready").
