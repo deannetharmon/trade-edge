@@ -51,6 +51,7 @@ import {
 } from '@/lib/scans/pmccConfig';
 import type { PmccScanSnapshot, PmccPairResult, PmccOnDemandResult, PmccLegRejection } from '@/lib/scans/pmccTypes';
 import { selectHeldPmccLongCandidates, selectHeldPmccLongCandidatesFromPositions } from '@/lib/scans/pmccHeldLeaps';
+import { buildPreModalReadFailure, heldOutcomeForPair, orderHeldGroup, planHeldPmccDisplay, type HeldDisplayPlan, type PreModalReadFailure } from '@/lib/scans/pmccHeldOutcomeDisplay';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
@@ -5130,6 +5131,10 @@ type ResultCardProps = {
   // CSP-ORDERS-0001 -- deliberately separate from onTrade: a CSP opens
   // CspTradeModal (single-leg), never the multi-leg TradeModal.
   onTradeCsp?: (result: ScreenResult) => void;
+  // PMCC-HELD-BREAKEVEN-0001B-1: held-LEAP outcome card. False/undefined = this pair's LEAP has no short
+  // that cleared the floor. Refresh action reuses the page's existing refreshPortfolioRef path.
+  heldLeapHasResults?: boolean;
+  onRefreshPortfolio?: () => Promise<unknown>;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
   pmccBestFit?: {
@@ -5322,8 +5327,9 @@ function PmccComparisonRow({ rank, result, th, isBest, children }: {
   );
 }
 
-function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
+function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, onRefreshPortfolio }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [heldRefreshState, setHeldRefreshState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const [showPairLookup, setShowPairLookup] = useState(false);
   const [showQuoteDetail, setShowQuoteDetail] = useState(false);
   const [showAuditDetail, setShowAuditDetail] = useState(false);
@@ -5339,6 +5345,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
   const [sparkLoading, setSparkLoading] = useState(false);
   const pair = result.pmccPair;
   const heldLong = pair?.entryMode === 'covered-short-call-against-held-leaps';
+  // PMCC-HELD-BREAKEVEN-0001B-1 (Mock 3c): caption, banner, reason and detail for the held-LEAP floor outcomes.
+  const heldOutcome = heldLong ? heldOutcomeForPair(pair, result.symbol, heldLeapHasResults !== true) : null;
+  const heldRejected = heldOutcome?.rejected === true;
   const metrics = pair?.metrics;
   const pmccDecision = result.pmccDecision ?? unavailablePmccDecision('PMCC decision is unavailable — rescan required.');
   const disqualified = pmccDecision.qualification === 'DISQUALIFIED';
@@ -5461,28 +5470,49 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
     { label: 'Roll runway', value: rollRunway == null ? '—' : `~${rollRunway} roll${rollRunway === 1 ? '' : 's'} (at this cycle's DTE)` },
     { label: 'Net delta', value: metrics.netDelta.toFixed(2), warn: disqualified },
   ] : [];
-  return <article className={`rounded-xl border ${readiness.border} overflow-hidden`} data-testid="pmcc-result-card">
+  return <article className={`rounded-xl border ${heldRejected ? 'border-neutral-700' : readiness.border} overflow-hidden`} data-testid="pmcc-result-card" data-held-outcome={heldOutcome?.kind} data-held-rejected={heldRejected ? 'true' : undefined}>
     <button className="w-full p-4 text-left" onClick={() => setExpanded(value => !value)} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${result.symbol} PMCC details`}>
       <div className="flex flex-wrap items-center gap-2">
-        {score && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">PMCC Structure Quality {score.total}</span>}
+        {score && !heldRejected && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">PMCC Structure Quality {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAPS PMCC' : 'PMCC'}</span>
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
-        <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold ${readiness.text}`}>
-          <span className={`inline-block w-2 h-2 rounded-full ${readiness.dot}`} />
+        {heldOutcome && <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-outcome-caption">{heldOutcome.caption}</span>}
+        {heldRejected && <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400" data-testid="held-rejected-tag">Rejected · {heldOutcome!.code}</span>}
+        <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold ${heldRejected ? 'text-neutral-400' : readiness.text}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${heldRejected ? 'bg-neutral-500' : readiness.dot}`} />
           {readiness.label} {expanded ? '▴' : '▾'}
         </span>
       </div>
+      {heldOutcome && (heldOutcome.banner != null || heldOutcome.action) && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200" data-testid="held-outcome-banner">
+          {heldOutcome.banner != null && <span>{heldOutcome.banner}</span>}
+          {/* span role=button, not <button>: this banner sits inside the card's expand <button>, and a nested button is invalid HTML. */}
+          {heldOutcome.action === 'refresh-portfolio' && onRefreshPortfolio && (
+            <span
+              role="button" tabIndex={0} aria-disabled={heldRefreshState === 'busy'}
+              className="ml-auto cursor-pointer rounded border border-amber-600 px-2 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/10"
+              onClick={(e) => { e.stopPropagation(); if (heldRefreshState === 'busy') return; setHeldRefreshState('busy'); void onRefreshPortfolio().then(() => setHeldRefreshState('done'), () => setHeldRefreshState('error')); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLElement).click(); } }}
+            >
+              {heldRefreshState === 'busy' ? 'Refreshing…' : 'Refresh Portfolio'}
+            </span>
+          )}
+          {heldRefreshState === 'done' && <span className="basis-full text-[10px] text-amber-300">Portfolio refreshed. Run FIND PMCCs again to re-check.</span>}
+          {heldRefreshState === 'error' && <span className="basis-full text-[10px] text-red-300">Portfolio refresh failed. Try again.</span>}
+        </div>
+      )}
+      {heldOutcome && <p className={`mt-1 text-[10px] ${th.textFaint}`} data-testid="held-outcome-reason">{heldOutcome.reasonLine}</p>}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded-lg bg-emerald-500/5 p-3"><b className="text-emerald-400">{heldLong ? 'HELD' : 'BUY'}</b> {pair.longLeg.strike}C · {pair.longLeg.expiration} · {pair.longLeg.dte} DTE · Δ{pair.longLeg.delta.toFixed(2)}<br/><span className="text-xs">{heldLong ? `Held contract · ${pair.heldLongLeg?.quantity ?? 0} contract(s)` : `Executable cost (ask) ${money(pair.longLeg.executablePrice)}`} · OI {pair.longLeg.openInterest}</span>{metrics && <><br/><span className="text-xs text-neutral-400">Extrinsic {money(metrics.longExtrinsicPerShare)}{pair.longLeg.executablePrice > 0 && metrics.longExtrinsicPerShare != null && (
   <span> ({((metrics.longExtrinsicPerShare / pair.longLeg.executablePrice) * 100).toFixed(1)}% of cost)</span>
 )}</span></>}</div>
-        <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}{(result.ivr != null || result.ivx != null) && (
+        {!heldOutcome?.notChecked && <div className="rounded-lg bg-amber-500/5 p-3"><b className="text-amber-400">SELL</b> {pair.shortLeg.strike}C · {pair.shortLeg.expiration} · {pair.shortLeg.dte} DTE · Δ{pair.shortLeg.delta.toFixed(2)}<br/><span className="text-xs">Executable credit (bid) <span className="font-semibold text-emerald-400">{money(pair.shortLeg.executablePrice)}</span> · OI {pair.shortLeg.openInterest}{(result.ivr != null || result.ivx != null) && (
   <span className="text-neutral-400">
     {' '}· IVR {result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} · IVx {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}
   </span>
-)}</span></div>
+)}</span></div>}
       </div>
       {pmccDecision.gates.some(gate => gate.status === 'fail' || gate.status === 'unavailable') && (
         <p className="mt-2 text-[10px] text-red-300">
@@ -5631,7 +5661,8 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
         <span>Show qualification and audit detail</span><span>{showAuditDetail ? '▴' : '▾'}</span>
       </button>
       {showAuditDetail && <div className={`border-t ${th.border} pt-3 space-y-3`}>
-        {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>Qualification and near-miss reasons:</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
+        {heldOutcome && <div data-testid="held-outcome-detail">{heldOutcome.detailLine}</div>}
+        {(pair.failureReasons.length > 0 || result.failReasons.length > 0) && <div><b>{heldRejected ? 'Rejection reasons:' : 'Qualification and near-miss reasons:'}</b> {Array.from(new Set([...pair.failureReasons.map(reason => reason.message), ...result.failReasons])).join(' · ')}</div>}
         {counts && <div><b>Pairing/accounting:</b> {counts.eligibleLongLegs} eligible long · {counts.eligibleShortLegs} eligible short · {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations evaluated · {counts.qualifiedPairsRetained} qualified retained · {counts.nearMissPairsRetained} near-miss retained · {counts.combinationsOmittedBySafetyLimit + counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention} omitted</div>}
         {result.pmccIncompleteAnalysis && <p className="font-bold text-amber-400">Incomplete analysis: the safety limit prevented some combinations from being evaluated.</p>}
         {rejectedLegCount > 0 && <PmccLegRejectionAudit rejections={result.pmccLegRejections!} summary={rejectionSummary} />}
@@ -5658,7 +5689,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit }: ResultCardProps) {
           SELL SHORT CALL
         </button>
       )}
-      {heldLong && !heldTradeAllowed && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
+      {heldLong && !heldTradeAllowed && !heldOutcome && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
       <button
         onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
         className="w-full py-1.5 rounded-lg border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:border-neutral-500 transition-colors"
@@ -8806,6 +8837,9 @@ export default function Home() {
   // discovery in the background, show a loading state inside the modal
   // meanwhile.
   const [pmccDiscoveryLoading, setPmccDiscoveryLoading] = useState(false);
+  // PMCC-HELD-BREAKEVEN-0001B-1: discovery-time cost-basis read failure (every selected held LEAP).
+  // Rendered under the page error; cleared whenever a new discovery starts.
+  const [pmccReadFailure, setPmccReadFailure] = useState<PreModalReadFailure | null>(null);
   // PMCC-EXCLUSIONS-0001: the real, per-position reason each held call
   // was excluded, surfaced so "0 eligible" is never a dead end when the
   // trader can see actual positions in Portfolio -- see Alan's near-miss
@@ -10074,6 +10108,59 @@ export default function Home() {
     return { ok: true as const, dte, heldCandidates, heldSelection, scanSymbols };
   };
 
+  // PMCC-HELD-BREAKEVEN-0001B-1: refresh path shared by the card's Refresh Portfolio action.
+  const refreshHeldPortfolio = async () => { await refreshPortfolioRef.current?.(); };
+
+  // FIND PMCCs entry point, extracted from the launcher's onClick so the pre-modal cost-basis error can
+  // reopen it exactly once per click. discoverHeldPmccCandidates already refreshes the portfolio itself.
+  const launchPmccDiscovery = () => {
+    // PMCC-DISCOVERY-ASYNC-0001: open immediately, discover
+    // in the background -- see the state comment above for
+    // why this was previously a 5-10 second blocking wait.
+    setError('');
+    setPmccReadFailure(null);
+    setPmccHandoffOccSymbol(null);
+    setPmccHeldCandidates([]);
+    setPmccDiscoveryLoading(true);
+    setShowPmccScanModal(true);
+    void (async () => {
+      const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
+      setPmccDiscoveryLoading(false);
+      if (!discovery.ok) {
+        if (discovery.reason === 'technical') {
+          // A real technical failure (bad DTE input, broker
+          // refresh error) still closes the modal and shows
+          // the page-level error -- Ian: this isn't a scan
+          // outcome, it's a reason not to trust the data at
+          // all, so it shouldn't sit inside a modal that
+          // implies a normal, verified result.
+          setShowPmccScanModal(false);
+          setError(discovery.error);
+          return;
+        }
+        // reason === 'empty': genuinely verified zero-eligible
+        // -- stays open, modal's own empty-state banner shows
+        // the real per-position reasons.
+        setPmccHeldCandidates([]);
+        setPmccDiscoveryExclusions(discovery.exclusions ?? []);
+        return;
+      }
+      // PMCC-HELD-BREAKEVEN-0001B-1 (Mock 3c): technical block, not a scan outcome. Only when EVERY selected held
+      // LEAP has a fixable read failure (basis null/zero/unparseable, or held quantity invalid). Multi-lot,
+      // unit-suspect (needs spot) and floor-not-met never block here; they render on the card.
+      const selectedForBlock = discovery.heldCandidates.filter(c => !pmccHiddenLeapsSymbols.includes(c.underlyingSymbol));
+      const readFailure = buildPreModalReadFailure(selectedForBlock);
+      if (readFailure) {
+        setShowPmccScanModal(false);
+        setPmccReadFailure(readFailure);
+        setError(readFailure.message);
+        return;
+      }
+      setPmccDiscoveryExclusions([]);
+      setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
+    })();
+  };
+
   const runPMCCScan = async (request?: PmccScanRequest) => {
     clearResultsCache();
     // FIND PMCCs manages existing long calls. Selected tickers narrow the
@@ -10968,6 +11055,19 @@ export default function Home() {
   const filteredQualifiedChips = cspNonFilterSession ? qualificationDisplayPool : applyFilterModeChips(qualificationDisplayPool);
   const filteredDisqualified = cspNonFilterSession ? disqualified : applyFilterModeChips(disqualified);
   const filteredPmccWaitMonitor = applyFilterModeChips(pmccWaitMonitor);
+  // PMCC-HELD-BREAKEVEN-0001B-1: held-LEAP display plan over the FULL result list (chips must not change a LEAP's state).
+  const heldPmccPlan: HeldDisplayPlan | null = activePmccSession ? planHeldPmccDisplay(results) : null;
+  // The per-symbol summary row renders once: on the symbol's first ticker group in page order (READY, then MARKET_CLOSED, then near-miss).
+  const heldSummaryOwner = new Map<string, 'READY' | 'MARKET_CLOSED' | 'near-miss'>();
+  if (heldPmccPlan) {
+    for (const symbol of heldPmccPlan.summaryBySymbol.keys()) {
+      const symbolQualified = qualificationDisplayPool.filter(r => r.symbol === symbol);
+      // The flat qualified list (the default) has no per-symbol header, so the row lives on the always-grouped near-miss section.
+      heldSummaryOwner.set(symbol, pmccViewMode !== 'grouped' ? 'near-miss'
+        : symbolQualified.some(r => r.pmccDecision?.readiness === 'READY') ? 'READY'
+        : symbolQualified.some(r => r.pmccDecision?.readiness === 'MARKET_CLOSED') ? 'MARKET_CLOSED' : 'near-miss');
+    }
+  }
 
   // SCREENER-OI-0001 — canonical minimum relevant-leg OI floor + two-level
   // sort, applied to the QUALIFIED section only. Eligibility filters
@@ -11273,41 +11373,7 @@ export default function Home() {
                 label="FIND PMCCs"
                 isSelected={activeSession?.requestedStrategy === 'pmcc'}
                 isRunning={runningLauncher === 'pmcc'}
-                onClick={() => {
-                  // PMCC-DISCOVERY-ASYNC-0001: open immediately, discover
-                  // in the background -- see the state comment above for
-                  // why this was previously a 5-10 second blocking wait.
-                  setError('');
-                  setPmccHandoffOccSymbol(null);
-                  setPmccHeldCandidates([]);
-                  setPmccDiscoveryLoading(true);
-                  setShowPmccScanModal(true);
-                  void (async () => {
-                    const discovery = await discoverHeldPmccCandidates(pmccShortDteMin, pmccShortDteMax);
-                    setPmccDiscoveryLoading(false);
-                    if (!discovery.ok) {
-                      if (discovery.reason === 'technical') {
-                        // A real technical failure (bad DTE input, broker
-                        // refresh error) still closes the modal and shows
-                        // the page-level error -- Ian: this isn't a scan
-                        // outcome, it's a reason not to trust the data at
-                        // all, so it shouldn't sit inside a modal that
-                        // implies a normal, verified result.
-                        setShowPmccScanModal(false);
-                        setError(discovery.error);
-                        return;
-                      }
-                      // reason === 'empty': genuinely verified zero-eligible
-                      // -- stays open, modal's own empty-state banner shows
-                      // the real per-position reasons.
-                      setPmccHeldCandidates([]);
-                      setPmccDiscoveryExclusions(discovery.exclusions ?? []);
-                      return;
-                    }
-                    setPmccDiscoveryExclusions([]);
-                    setPmccHeldCandidates(discovery.heldCandidates.map(c => ({ underlyingSymbol: c.underlyingSymbol, dte: c.dte })));
-                  })();
-                }}
+                onClick={launchPmccDiscovery}
                 disabled={loading}
                 title="Scans short calls against eligible long calls already held in your portfolio. Selected tickers only narrow those holdings."
               >
@@ -11440,7 +11506,16 @@ export default function Home() {
           </div>
 
           {/* Transient alerts — not boxed, so they read as messages rather than a fixed section */}
-          {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">{error}</div>}
+          {error && <div className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2 leading-relaxed font-medium">
+            {error}
+            {pmccReadFailure && error === pmccReadFailure.message && (
+              <>
+                {pmccReadFailure.details && <details className="mt-1 font-normal text-red-300"><summary className="cursor-pointer">Details</summary>{pmccReadFailure.details}</details>}
+                {/* Reopens FIND PMCCs once per click (discovery refreshes the portfolio itself); no auto-loop. */}
+                <button type="button" onClick={launchPmccDiscovery} className="mt-2 rounded border border-red-500/60 px-2 py-0.5 text-[10px] font-bold text-red-300 hover:bg-red-500/10">Refresh Portfolio</button>
+              </>
+            )}
+          </div>}
           {loading && screenMode === 'targeted' && (
             <button onClick={() => { targetedCancelRef.current = true; }}
               className="w-full py-2 rounded-lg text-xs font-bold tracking-widest border border-red-600 text-red-400 hover:bg-red-600/20 transition-colors">
@@ -12251,6 +12326,7 @@ export default function Home() {
                       {pmccViewMode === 'grouped' ? grouped.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                         <PmccTickerDisclosure key={`${readiness}-${symbol}`} symbol={symbol} price={group[0]?.price ?? null} candidateCount={group.length}
                           bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore} bestScoreLabel="Best Fit"
+                          summaryLine={heldSummaryOwner.get(symbol) === readiness ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
                           defaultOpen={grouped.length === 1} borderClassName={th.border}>
                           {group.map(renderQualifiedCandidate)}
                         </PmccTickerDisclosure>
@@ -12423,6 +12499,9 @@ export default function Home() {
                           const group = groups.get(result.symbol) ?? [];
                           group.push(result); groups.set(result.symbol, group); return groups;
                         }, new Map<string, ScreenResult[]>()).entries())
+                          // PMCC-HELD-BREAKEVEN-0001B-1: results, then floor-not-met, then not-checked (stable);
+                          // one card per LEAP that has no results.
+                          .map(([symbol, group]): [string, ScreenResult[]] => [symbol, heldPmccPlan ? orderHeldGroup(group, heldPmccPlan) : group])
                           .map(([symbol, group]): [string, ScreenResult[], number | null, number | null] => {
                             const widthPcts = group.map(r => r.pmccPair?.metrics?.widthMinusDebitPctOfDebit).filter((v): v is number => v != null);
                             const roiPcts = group.map(r => pmccAnnualizedRoi(r)).filter((v): v is number => v != null);
@@ -12441,9 +12520,12 @@ export default function Home() {
                                   price={group[0]?.price ?? null} candidateCount={group.length}
                                   bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
                                   itemLabel="near-miss structure"
+                                  summaryLine={heldSummaryOwner.get(symbol) === 'near-miss' ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
                                   defaultOpen={false} borderClassName={th.border}>
                                   {group.map(result => (
-                                    <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules} />
+                                    <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules}
+                                      heldLeapHasResults={result.candidateId != null && heldPmccPlan?.leapHasResultsIds.has(result.candidateId) === true}
+                                      onRefreshPortfolio={refreshHeldPortfolio} />
                                   ))}
                                 </PmccTickerDisclosure>
                               ))}

@@ -13,7 +13,7 @@ import { useId, type ReactNode } from 'react';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 
 export function PmccTickerDisclosure({
-  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, bestScore, bestScoreLabel = 'Score', itemLabel = 'qualified structure', defaultOpen, borderClassName, children,
+  symbol, price, candidateCount, bestWidthMinusDebitPct, bestAnnualizedRoiPct, bestScore, bestScoreLabel = 'Score', itemLabel = 'qualified structure', summaryLine, defaultOpen, borderClassName, children,
 }: {
   symbol: string;
   price: number | null;
@@ -35,6 +35,9 @@ export function PmccTickerDisclosure({
   // "qualified structures." Defaults to the original wording so the
   // existing qualified-section call site needs no change.
   itemLabel?: string;
+  // PMCC-HELD-BREAKEVEN-0001B-1: optional one-line ambient row for symbols with 2+ held LEAPs
+  // ("{SYM} · {n} held LEAPs · ..."). Visible whether the group is open or collapsed.
+  summaryLine?: string | null;
   defaultOpen: boolean;
   borderClassName: string;
   children: ReactNode;
@@ -63,6 +66,7 @@ export function PmccTickerDisclosure({
         </span>
         <span aria-hidden="true">{open ? '▾ Expanded' : '▸ Collapsed'}</span>
       </button>
+      {summaryLine && <p className="mt-1 text-[10px] font-normal text-white/50" data-testid="held-leap-summary">{summaryLine}</p>}
       <span role="status" aria-live="polite" className="sr-only">{liveMessage}</span>
       {open && <div id={panelId} className="mt-2 space-y-2">{children}</div>}
     </section>

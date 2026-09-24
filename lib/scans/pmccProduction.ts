@@ -276,7 +276,9 @@ export function runPmccProduction(
           ...pair,
           pairId: `${pair.pairId}:held:${held.positionKey}`,
           entryMode: 'covered-short-call-against-held-leaps',
-          heldLongLeg: { accountNumber: held.accountNumber, positionKey: held.positionKey, quantity: held.quantity, occSymbol: held.occSymbol },
+          // PMCC-HELD-BREAKEVEN-0001B-1: avgOpenPrice is pass-through DATA for the card's floor caption and
+          // banner (the same readHeldBasis value the floor used above). No engine logic reads it.
+          heldLongLeg: { accountNumber: held.accountNumber, positionKey: held.positionKey, quantity: held.quantity, occSymbol: held.occSymbol, avgOpenPrice: readHeldBasis(held.avgOpenPrice) },
         };
       };
       pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);

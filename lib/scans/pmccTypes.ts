@@ -186,6 +186,9 @@ export interface PmccPairResult {
     positionKey: string;
     quantity: number;
     occSymbol: string;
+    /** PMCC-HELD-BREAKEVEN-0001B-1: per-share cost the held-LEAP floor used (null when missing or
+     * unusable). Display pass-through only; optional so older restored sessions still validate. */
+    avgOpenPrice?: number | null;
   };
 }
 
