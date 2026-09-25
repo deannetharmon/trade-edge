@@ -557,7 +557,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     renderScreenerPage();
 
     await waitFor(() => expect(screen.getByText('LEAPS CANDIDATES')).toBeInTheDocument());
-    expect(screen.getByText(/1 of 1 candidates match current filters/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 QUALIFIED/)).toBeInTheDocument();
     expect(screen.queryByText(/ADD TICKERS AND RUN HUNTER/)).not.toBeInTheDocument();
   });
 

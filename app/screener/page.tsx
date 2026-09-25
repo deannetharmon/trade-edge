@@ -102,6 +102,7 @@ import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarning
 import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
+import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/components/ScanHeaderParts';
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
   getScreenerJobState, useScreenerJobState,
@@ -11261,6 +11262,17 @@ export default function Home() {
     const visible = [...filteredQualified, ...filteredPmccWaitMonitor, ...filteredDisqualified];
     return visible.filter((result, index) => visible.indexOf(result) === index);
   })();
+  // SCAN-HEADER-0001: the decision-tier counts every scan header leads with. Taken from the
+  // canonical session accounting when it matches the displayed mode, so the header and the
+  // accounting strip below it can never disagree.
+  const scanHeaderCounts = (() => {
+    if (activeSession && activeSession.mode === screenMode) {
+      const accounting = computeSessionAccounting(activeSession);
+      return { qualified: accounting.qualifiedCandidateCount, disqualified: accounting.disqualifiedCandidateCount };
+    }
+    const list = screenMode === 'targeted' ? targetedResults.map(entry => entry.screenResult) : results;
+    return { qualified: list.filter(r => r.qualified).length, disqualified: list.filter(r => !r.qualified).length };
+  })();
   const exportPdf = (scope: ScanExportScope) => {
     if (!canExportPdf) return;
     const visibleLeaps = leapsResults.filter(row => {
@@ -11822,11 +11834,15 @@ export default function Home() {
                     </>
                   ) : screenMode === 'targeted' ? (
                     <>
+                      <QualificationCounts qualified={scanHeaderCounts.qualified} disqualified={scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
                       <span className="text-teal-400">{targetedResults.length} SETUPS</span>
                       <span className={th.textFaint}>{Array.from(new Set(targetedResults.map(e => e.symbol))).length} SYMBOLS</span>
                     </>
                   ) : (
-                    <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
+                    <>
+                      <QualificationCounts qualified={scanHeaderCounts.qualified} disqualified={scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
+                      <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
+                    </>
                   )}
                   {/* SCREENER-UX-0001 corrective pass: the non-targeted
                       "${results.length} SCANNED" label reintroduced the
@@ -11839,9 +11855,6 @@ export default function Home() {
                       ENTRIES count is not a scanned/attempted conflation
                       (targetedResults is genuinely a count of setups) and
                       is kept. */}
-                  {screenMode === 'targeted' && activeSession?.requestedStrategy !== 'csp' && (
-                    <span className={th.textFaint}>{targetedResults.length} ENTRIES</span>
-                  )}
                   {/* SCREENER-RESULTS-0001 — canonical accounting summary,
                       reconciling every selected symbol (never labeling
                       attemptedCount as "scanned," never showing a fraction
@@ -11854,16 +11867,10 @@ export default function Home() {
                     <AccountingSummaryBar session={activeSession} borderClassName={th.border} textFaintClassName={th.textFaint} />
                   )}
                   {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
-                    <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
-                      ↺ restored{' '}
-                      <span className="text-purple-500/70">{(() => { const mins = Math.round((Date.now() - targetedResultsCachedAt) / 60000); return mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()}</span>
-                    </span>
+                    <ScanProvenanceChip completedAt={targetedResultsCachedAt} restored />
                   )}
                   {mounted && screenMode !== 'targeted' && results.length > 0 && resultsCachedAt && (
-                    <span className="text-purple-400 border border-purple-700 rounded px-1.5 py-0.5 text-[9px]" title="Results restored from last scan — click RUN HUNTER to rescan">
-                      {rawScanCache.length > 0 ? '⚡ cached' : '↺ restored'}{' '}
-                      <span className="text-purple-500/70">{(() => { const mins = Math.round((Date.now() - resultsCachedAt) / 60000); return mins < 60 ? `${mins}m ago` : `${Math.round(mins/60)}h ago`; })()}</span>
-                    </span>
+                    <ScanProvenanceChip completedAt={resultsCachedAt} restored={rawScanCache.length === 0} />
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -13182,7 +13189,12 @@ export default function Home() {
                   />
                 )}
 
-                <p className={`mb-2 text-[10px] ${th.textMuted}`}>{sorted.length} of {okCandidates.length} candidates match current filters{insufficientCandidates.length > 0 ? ` · ${insufficientCandidates.length} excluded for insufficient data` : ''}</p>
+                <div className="mb-2 flex flex-wrap items-center gap-4 text-[10px] font-medium tracking-wider" data-testid="leaps-scan-summary">
+                  <span className="text-emerald-500">{sorted.length} of {okCandidates.length} QUALIFIED</span>
+                  {insufficientCandidates.length > 0 && <span className={th.textFaint}>{insufficientCandidates.length} INSUFFICIENT DATA</span>}
+                  <span className={th.textFaint}>{opportunityUniverse.length} SYMBOLS</span>
+                  {mounted && leapsScanCompletedAt && <ScanProvenanceChip completedAt={leapsScanCompletedAt} restored={false} />}
+                </div>
 
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}

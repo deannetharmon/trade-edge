@@ -817,9 +817,9 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     renderScreener();
 
     await waitFor(() => {
-      expect(screen.getByText(/↺ restored/)).toBeInTheDocument();
+      expect(screen.getByText(/↺ scan/)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/⚡ cached/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/⚡ scan/)).not.toBeInTheDocument();
   });
 
   it('rawScanCache restores and is adopted when its stored sessionId matches the restored session', async () => {
@@ -853,7 +853,7 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     renderScreener();
 
     await waitFor(() => {
-      expect(screen.getByText(/⚡ cached/)).toBeInTheDocument();
+      expect(screen.getByText(/⚡ scan/)).toBeInTheDocument();
     });
   });
 
@@ -966,7 +966,7 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
   // whether the guard is correct. rawScanCache is written only by runScreen
   // (Filtered/Ranked spreads); a CSP scan (session B here) never touches it,
   // so the seeded stale record survives to be raced against. The same
-  // '⚡ cached' / '↺ restored' badge used in the earlier (non-race)
+  // '⚡ scan' / '↺ scan' badge used in the earlier (non-race)
   // rawScanCache tests reflects rawScanCache.length directly, independent
   // of screenMode, making it a reliable observation point.
   it("a superseded session's late-resolving rawScanCache read is not adopted, even though its sessionId matches", async () => {
@@ -1053,10 +1053,10 @@ describe('SCREENER-RESULTS-0001: session cache module (14, 15)', () => {
     // Even though its sessionId matched the session that was active when
     // the read started, that session is no longer the active one by the
     // time it resolves -- rawScanCache must still be empty, so the badge
-    // must read '↺ restored', never '⚡ cached'.
+    // must read '↺ scan', never '⚡ scan'.
     await waitFor(() => {
-      expect(screen.getByText(/↺ restored/)).toBeInTheDocument();
+      expect(screen.getByText(/↺ scan/)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/⚡ cached/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/⚡ scan/)).not.toBeInTheDocument();
   });
 });
