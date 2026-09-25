@@ -33,8 +33,8 @@
 // SingleCoveredCallLaunchAction.test.tsx, and the full existing suite run
 // (207/207 passing) documented in the implementation report — rather than
 // duplicated here.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, within, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
@@ -164,6 +164,37 @@ function deferred<T>() {
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+// CI-FLAKY-0001: root cause of the load-flake in 'accounting reconciliation'
+// (the first test in this file) is a cold start, not a slow readiness
+// signal. The first render of the 12.6k-line ScreenerPage plus the first CC
+// scan pays one-time JIT and lazy-init cost that is 2-3x a warm run's, all
+// of it inside that test's 1000ms findBy/waitFor budgets; under full-suite
+// CPU contention that exceeds the budget while every later (warm) test
+// passes. Absorb the cold cost once, up front, in a hook with its own
+// generous timeout, by driving the same CC-scan flow that test uses. No
+// test timeout is raised.
+beforeAll(async () => {
+  window.localStorage.clear();
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+  getMarketMetricsMock.mockReset().mockResolvedValue([]);
+  getQuoteMock.mockReset().mockResolvedValue(100);
+  getCoveredCallCapacityReportMock.mockReset().mockResolvedValue({
+    status: 'ok',
+    bySymbol: { NKE: holding(), MU: holding() },
+    warnings: [],
+  });
+  getChainMock.mockReset().mockImplementation((symbol: string) =>
+    Promise.resolve(symbol === 'NKE' ? qualifyingChain(symbol) : emptyChain),
+  );
+  renderScreener();
+  await addToUniverse('NKE,MU');
+  await clickCcScan();
+  await screen.findByTestId('accounting-summary-bar', undefined, { timeout: 15_000 });
+  cleanup();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+}, 30_000);
 
 beforeEach(() => {
   window.localStorage.clear();

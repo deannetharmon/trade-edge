@@ -10,8 +10,8 @@
 //     eligible bases from the account and use supplied tickers only to narrow.
 //   - Covered Call intersection (8): the universe can narrow CC's eligible
 //     holdings but can never create eligibility.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, within, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
@@ -54,6 +54,29 @@ async function addToUniverse(symbols: string) {
   const addBtn = screen.getByRole('button', { name: 'Add' });
   await userEvent.click(addBtn);
 }
+
+// CI-FLAKY-0001 (same class, seen failing in a full-suite run): the first
+// test in this file ('1. Find Spreads opens the existing config modal') hit
+// `Unable to find role="radio" and name /RANK/` because the first render of
+// the 12.6k-line ScreenerPage plus its first modal open pays one-time JIT and
+// lazy-init cost that is 2-3x a warm run's, all inside that test's 1000ms
+// findBy budget; under full-suite CPU contention that exceeds it while later
+// (warm) tests pass. Absorb the cold cost once, up front, in a hook with its
+// own generous timeout, by driving the same open-modal flow. No test timeout
+// is raised.
+beforeAll(async () => {
+  window.localStorage.clear();
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+  getCoveredCallCapacityReportMock.mockReset().mockResolvedValue({ status: 'ok', bySymbol: {}, warnings: [] });
+  getMarketMetricsMock.mockReset().mockResolvedValue([]);
+  renderScreener();
+  await addToUniverse('NVDA');
+  await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
+  await screen.findByRole('radio', { name: /RANK/ }, { timeout: 15_000 });
+  cleanup();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+}, 30_000);
 
 beforeEach(() => {
   window.localStorage.clear();

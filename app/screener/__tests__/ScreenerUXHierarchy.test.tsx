@@ -12,8 +12,8 @@
 // see the corrective-pass implementation report for why one representative
 // case is sufficient rather than three near-identical copies).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
@@ -84,6 +84,33 @@ function qualifyingCspMetrics(symbols: string[]) {
 function isBefore(a: Element, b: Element): boolean {
   return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
+
+// CI-FLAKY-0001: root cause of the load-flake in the first test of this file
+// is a cold start, not a slow readiness signal. The first render of the
+// 12.6k-line ScreenerPage plus the first Ranked scan pays one-time JIT and
+// lazy-init cost that is 2-3x a warm run's, all of it inside the first
+// test's 1000ms findBy/waitFor budgets; under full-suite CPU contention that
+// exceeds the budget while every later (warm) test passes. Absorb the cold
+// cost once, up front, in a hook with its own generous timeout, by driving the
+// same Ranked flow the first test uses. No test timeout is raised.
+beforeAll(async () => {
+  window.localStorage.clear();
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+  getMarketMetricsMock.mockReset().mockResolvedValue([]);
+  getQuoteMock.mockReset().mockResolvedValue(100);
+  getChainMock.mockReset().mockImplementation((symbol: string) =>
+    Promise.resolve(symbol === 'NKE' ? qualifyingChain(symbol) : emptyChain),
+  );
+  renderScreener();
+  await addToUniverse('NKE,GHOST');
+  await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
+  await userEvent.click(await screen.findByRole('radio', { name: /RANK/ }));
+  await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
+  await screen.findByTestId('best-opportunities-shortlist', undefined, { timeout: 15_000 });
+  cleanup();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+}, 30_000);
 
 beforeEach(() => {
   window.localStorage.clear();
