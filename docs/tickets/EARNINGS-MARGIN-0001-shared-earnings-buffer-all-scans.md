@@ -56,3 +56,7 @@ Other PMCC call sites still on the old one-day rule: `pmccScore.ts:83`, `pmccRea
 
 **Decision (Dean, 2026-09-25): option 1.** PMCC keeps the SCAN-ALIGN-0001D model unchanged: earnings on or before the short call's expiry removes the call; earnings up to 5 NYSE business days after expiry is an ambient, warning-only tag that never affects qualification or ranking. Reason: a PMCC short call is covered by the long LEAP, so a gap through earnings costs less than on a CSP, and the existing tag already flags it. No PMCC code changes. Revisit only if the earnings-date accuracy problem shows up in PMCC results.
 
+## CORRECTION (2026-09-25): phase 2a did not reach the main Ranked scan
+
+Found while planning QUAL-STATES-0001. The main Ranked scan builds its rows in `exploreAllCandidatesForRank` (`lib/scans/rank-scoring.ts` ~396-560), which calls `runChecklist` in strict mode and then **recomputes earnings locally** with the old rule (`earnings <= dte` warns, otherwise passes; no 10-day buffer, old day-count basis). Phase 2a changed only the non-strict branch inside `checklist.ts`, which those rows do not use. A probe confirmed it: earnings 6 days after expiry shows "Outside this trade's 27d expiry" (pass) in the Ranked scan. So **Ranked spreads do not yet have the buffer.** Targeted (which uses `runChecklist` strict directly), CSP and covered call do. Fix is tracked in QUAL-STATES-0001 (phase 0).
+
