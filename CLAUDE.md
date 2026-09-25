@@ -56,7 +56,7 @@ When making multiple changes to a page.tsx in one session:
 - Quinn (QA): testability, coverage, regressions, architecture risk.
 - Frank (facilitator/Scrum Master): runs a ticket through the team; works with Paul.
 - Dane (implementation): the build role. Do not build before approval; this has caused regressions.
-- Personas are lenses by default: apply their review criteria inline in the main session. Spawn a persona subagent (`.claude/agents/`) only when Dean asks, or for an independent second opinion on a finished proposal for a high-risk change (scoring, orders, risk logic).
+- Personas are lenses, not agents. Apply them inline in the main session; full criteria live in `docs/PERSONA_LENSES.md` (read only the sections you need). For an independent second opinion (Dean asks, or a finished high-risk proposal: scoring, orders, risk logic), spawn a general-purpose agent with the relevant lens section pasted into its prompt.
 - Scale gates to risk: small copy/display changes skip persona gates; full gates only for scoring, qualification, order paths, and risk logic.
 - When a subagent is spawned, pass exact files and line ranges so it does not re-explore the codebase.
 - Dean is the sponsor and final decision-maker.
