@@ -1,4 +1,5 @@
 import { buildCreditSpreadEntryFacts, buildIronCondorEntryFacts } from './analysis';
+import type { EntryQualificationRecord } from './entryQualification';
 
 export const ENTRY_SNAPSHOT_SCHEMA_VERSION = '1' as const;
 
@@ -76,6 +77,11 @@ export interface CreditSpreadEntrySnapshot {
   // position's own pre-set stop can be compared directly against its
   // current pnlPct, without needing the credit amount at all.
   stopLossPct: Evidence<number>;
+  // QUAL-STATES-0001 phase 2 -- what the screener said at order time (Qualified / Caution /
+  // Disqualified, with the reasons) and whether the trader acknowledged and overrode it.
+  // Optional: snapshots captured before this field, or from scans without the three states,
+  // simply do not have it.
+  entryQualification?: EntryQualificationRecord;
 }
 
 export type CreditSpreadEntrySnapshotInput = Omit<CreditSpreadEntrySnapshot, 'schemaVersion' | 'entrySnapshotId' | 'analysis'>;
@@ -201,6 +207,11 @@ export interface IronCondorEntrySnapshot {
   // EXIT-PRESSURE-0001 -- see the matching field on CreditSpreadEntrySnapshot
   // for why this is needed alongside the dollar-value stopLoss above.
   stopLossPct: Evidence<number>;
+  // QUAL-STATES-0001 phase 2 -- what the screener said at order time (Qualified / Caution /
+  // Disqualified, with the reasons) and whether the trader acknowledged and overrode it.
+  // Optional: snapshots captured before this field, or from scans without the three states,
+  // simply do not have it.
+  entryQualification?: EntryQualificationRecord;
   analysis: {
     otmBufferPct: Evidence<number>;
     expectedMoveClearancePct: Evidence<number>;

@@ -1,4 +1,5 @@
 import type { ConfirmedOpeningExecution, ConfirmedOpeningIronCondorExecution } from './capture';
+import { sanitizeEntryQualification } from './entryQualification';
 
 /** Entry evidence captured at submission, deliberately not yet a trade snapshot. */
 export interface PendingCreditSpreadEntry extends Omit<ConfirmedOpeningExecution, 'transactionId' | 'executedAt'> {
@@ -17,7 +18,9 @@ export function createPendingCreditSpreadEntry(input: PendingCreditSpreadEntry):
     || !Number.isFinite(input.quantity) || input.quantity <= 0) {
     throw new Error('Valid credit-spread structure is required for pending entry evidence');
   }
-  return Object.freeze({ ...input });
+  const { entryQualification, ...rest } = input;
+  const qualification = sanitizeEntryQualification(entryQualification);
+  return Object.freeze({ ...rest, ...(qualification ? { entryQualification: qualification } : {}) });
 }
 
 // TRADE-ENTRY-SNAPSHOT-0001 -- Iron Condor's own pending-entry type,
@@ -38,5 +41,7 @@ export function createPendingIronCondorEntry(input: PendingIronCondorEntry): Pen
     || !Number.isFinite(input.quantity) || input.quantity <= 0) {
     throw new Error('Valid iron-condor structure is required for pending entry evidence');
   }
-  return Object.freeze({ ...input });
+  const { entryQualification, ...rest } = input;
+  const qualification = sanitizeEntryQualification(entryQualification);
+  return Object.freeze({ ...rest, ...(qualification ? { entryQualification: qualification } : {}) });
 }

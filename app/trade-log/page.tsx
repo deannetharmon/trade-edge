@@ -2,7 +2,7 @@
 
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 // PI-0008E: reconstruction (fetch, transaction matching, partial-close and
@@ -15,6 +15,7 @@ import { fetchAndReconstructTrades, readCache, writeCache, getDeviceId } from '@
 import type { OrderLifecycleEvent } from '@/lib/order-lifecycle/types';
 import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from '@/lib/entry-context/types';
 import { buildSnapshotIndex, findSnapshotForTrade } from '@/lib/entry-context/performance';
+import { EntryOverrideChip, entryQualificationCsv } from '@/features/entry-context/EntryOverrideChip';
 
 type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
@@ -542,7 +543,7 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
     'Remaining Quantity', 'Source Transaction IDs', 'ID',
     'Score Momentum', 'Score IVR', 'Score EM Clearance', 'Score Range', 'Score Technical',
     'Score Liquidity', 'Score Buffer', 'Score Strategy Alignment', 'Score Delta Quality',
-    'Score Composite', 'Profit Target', 'Stop Loss',
+    'Score Composite', 'Profit Target', 'Stop Loss', 'Entry State', 'Entry Overrides',
   ];
   const rows = trades.map(t => {
     const snapshot = findSnapshotForTrade(t, byTransaction);
@@ -559,6 +560,7 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
       evidenceValue(snapshot?.scoreBuffer), evidenceValue(snapshot?.scoreStrategyAlignment),
       evidenceValue(snapshot?.scoreDeltaQuality), evidenceValue(snapshot?.scoreComposite),
       evidenceValue(snapshot?.profitTarget), evidenceValue(snapshot?.stopLoss),
+      entryQualificationCsv(snapshot).state, entryQualificationCsv(snapshot).overrides,
     ];
   });
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -587,6 +589,7 @@ export default function TradeLogPage() {
   const [lifecycleEvents, setLifecycleEvents] = useState<OrderLifecycleEvent[]>([]);
   const [lifecycleError, setLifecycleError] = useState('');
   const [entrySnapshots, setEntrySnapshots] = useState<EntrySnapshot[]>([]);
+  const snapshotIndex = useMemo(() => buildSnapshotIndex(entrySnapshots), [entrySnapshots]);
 
   const loadLifecycleEvents = useCallback(async () => {
     try {
@@ -951,7 +954,7 @@ export default function TradeLogPage() {
                   {groupBy === 'none' ? sorted.map(trade => (
                     <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
                       <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
-                      <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span></td>
+                      <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip snapshot={findSnapshotForTrade(trade, snapshotIndex)} /></td>
                       <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                       <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
                       <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>
@@ -1011,7 +1014,7 @@ export default function TradeLogPage() {
                         rows.push(
                           <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
                             <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
-                            <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span></td>
+                            <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip snapshot={findSnapshotForTrade(trade, snapshotIndex)} /></td>
                             <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                             <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
                             <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>

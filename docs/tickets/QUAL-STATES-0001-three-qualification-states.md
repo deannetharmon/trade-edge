@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by Dean 2026-09-25 (all lenses). Phases 0 and 1 built and pushed to `main` (full suite 369 files / 5449 tests, real `next build` pass). Phases 2-3 not built.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
+**Approved by Dean 2026-09-25 (all lenses). Phases 0, 1 and 2 built and pushed to `main` (full suite 372 files / 5468 tests, real `next build` pass). Phase 3 (CSP) not built.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
 
 ## Problem
 
@@ -43,4 +43,19 @@ Display only; nothing about what qualifies, and no order path, changed.
 - Tests: `QualificationBadge.test.tsx` (gate descriptions, state text, "+N more", tooltip, spread-only derivation, counts ignoring a stale flag, header and strip caution).
 
 Still true after phase 1: a green TRADE THIS button still appears on Disqualified rows until phase 2; the acknowledgment, the override record and the trade-log link are phase 2. Saved Ranked scans keep their old stored checks (old OI fail, no earnings buffer) until rescanned; their state is derived from those stored checks, so they may read more disqualified than a fresh scan.
+
+## Phase 2: what was built (2026-09-25)
+
+Order path for Ranked and Targeted spread orders (BPS, BCS, IC). CSP and PMCC order windows are unchanged (CSP is phase 3).
+
+- **Card buttons** (`GenericResultCard`): Qualified rows keep the solid green "TRADE THIS"; Caution rows get an amber outlined "TRADE THIS (CAUTION)"; Disqualified rows get a quiet outlined "Trade anyway (override)". Rows with a three-state verdict no longer show the old OI `window.confirm`; the acknowledgment moves into the order window. Rows without a verdict (other modes) keep the old behavior.
+- **Order window** (`TradeModal`): a non-Qualified trade shows `OrderOverrideAcknowledgment`: a red or amber block listing every failed rule and warning with its real numbers, and a checkbox "I understand and want to place this order anyway." "REFRESH & VALIDATE", the re-validate button and "PLACE + GTC" stay locked (label "ACKNOWLEDGE TO CONTINUE") until it is ticked, and `placeOrder` refuses independently. Qualified trades and trades with no verdict are never locked. Pure lock rule: `qualificationGateBlocking`.
+- **Record** (`lib/entry-context/entryQualification.ts`): `{ state, failing[], warning[], overridden, acknowledgedAt, scanMode }` is sent with the pending entry (`/api/entry-context/pending` and `-ic`), sanitized on the server (malformed records are dropped, never thrown, since the order is already placed), stored with the pending entry, copied into the immutable entry snapshot when the fill is confirmed (`capture.ts`), and read back by the existing snapshots API. Optional on both snapshot types, so older orders and snapshots are unaffected.
+- **Trade Log** (`app/trade-log/page.tsx`, `features/entry-context/EntryOverrideChip.tsx`): a red "Overrode scan" or amber "Entered on caution" chip beside the strategy badge on every trade whose entry snapshot carries an override, with every reason in the tooltip; the full-detail CSV gains "Entry State" and "Entry Overrides" columns.
+- **Tests**: record build and sanitize, pending entry, promotion (credit spread and iron condor), chip and CSV, acknowledgment component and the lock rule.
+
+Limits, stated plainly:
+- The chip only appears once the entry snapshot exists, which happens after the broker confirms the fill (the same as every other snapshot-driven feature). A trade whose snapshot could not be saved has no override record.
+- The Trade Log joins on the existing snapshot matching, so a trade that cannot be matched to a snapshot shows no chip.
+- `TradeModal` itself is not unit-tested at page level (it lives in `page.tsx`); its behavior rests on the tested pure pieces above plus tsc and the build.
 

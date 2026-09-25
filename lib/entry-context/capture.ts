@@ -6,6 +6,7 @@ import {
   type IronCondorEntrySnapshot,
   type Evidence,
 } from './types';
+import type { EntryQualificationRecord } from './entryQualification';
 
 export interface ConfirmedOpeningExecution {
   accountId: string;
@@ -44,6 +45,7 @@ export interface ConfirmedOpeningExecution {
   stopLoss: Evidence<number>;
   stopLossPct: Evidence<number>;
   tradeGroupId?: string | null;
+  entryQualification?: EntryQualificationRecord;
 }
 
 /**
@@ -63,6 +65,7 @@ export function captureConfirmedCreditSpreadEntry(
     executionId: execution.transactionId,
     sourceTransactionIds: execution.sourceTransactionIds ?? [execution.transactionId],
     tradeGroupId: execution.tradeGroupId ?? null,
+    ...(execution.entryQualification ? { entryQualification: execution.entryQualification } : {}),
     capturedAt: execution.executedAt,
     policyVersion,
     strategy: execution.strategy,
@@ -147,6 +150,7 @@ export interface ConfirmedOpeningIronCondorExecution {
   stopLoss: Evidence<number>;
   stopLossPct: Evidence<number>;
   tradeGroupId?: string | null;
+  entryQualification?: EntryQualificationRecord;
 }
 
 export function captureConfirmedIronCondorEntry(
@@ -161,6 +165,7 @@ export function captureConfirmedIronCondorEntry(
     executionId: execution.transactionId,
     sourceTransactionIds: execution.sourceTransactionIds ?? [execution.transactionId],
     tradeGroupId: execution.tradeGroupId ?? null,
+    ...(execution.entryQualification ? { entryQualification: execution.entryQualification } : {}),
     capturedAt: execution.executedAt,
     policyVersion,
     strategy: execution.strategy,

@@ -104,6 +104,9 @@ import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/components/ScanHeaderParts';
 import { QualificationBadge } from '@/features/screener/components/QualificationBadge';
+import { OrderOverrideAcknowledgment, qualificationGateBlocking, reasonText } from '@/features/screener/components/OrderOverrideAcknowledgment';
+import { buildEntryQualification } from '@/lib/entry-context/entryQualification';
+import type { QualificationDerivation } from '@/lib/scans/qualificationState';
 import { countQualificationStates, deriveSpreadQualification } from '@/lib/scans/qualificationState';
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
@@ -3838,10 +3841,25 @@ function LeapsTradeModal({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oi
   );
 }
 
-function TradeModal({ result, th, onClose }: {
+function TradeModal({ result, th, onClose, qualification }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  /** QUAL-STATES-0001: the scan's verdict on this trade (Ranked and Targeted spreads); anything but Qualified must be acknowledged. */
+  qualification?: { derivation: QualificationDerivation; checks: ScreenResult['checks']; scanMode: 'rank' | 'targeted' } | null;
 }) {
   const c = result.bestCandidate!;
+  const [qualAcknowledged, setQualAcknowledged] = useState(false);
+  const qualGateBlocking = qualificationGateBlocking(qualification?.derivation, qualAcknowledged);
+  const entryQualificationRecord = () => qualification
+    ? buildEntryQualification({
+        state: qualification.derivation.state,
+        failing: qualification.derivation.failing,
+        warning: qualification.derivation.warning,
+        reasonFor: key => reasonText(key, qualification.checks),
+        acknowledged: qualAcknowledged,
+        at: new Date().toISOString(),
+        scanMode: qualification.scanMode,
+      })
+    : undefined;
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
   const [dryRunResult, setDryRunResult] = useState<any>(null);
@@ -3996,6 +4014,7 @@ function TradeModal({ result, th, onClose }: {
         profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
         stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
         stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
+        entryQualification: entryQualificationRecord(),
       }),
     });
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
@@ -4040,6 +4059,7 @@ function TradeModal({ result, th, onClose }: {
         profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
         stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
         stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
+        entryQualification: entryQualificationRecord(),
       }),
     });
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
@@ -4069,6 +4089,7 @@ function TradeModal({ result, th, onClose }: {
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
+      if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
       if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
       await refreshExecutionQuotes(quoteValidation.executableCredit);
       const token = await getAccessToken();
@@ -4221,6 +4242,10 @@ function TradeModal({ result, th, onClose }: {
           <p className={`text-[9px] ${th.textFaint} mt-2`}>Stop-limit buy to close: triggers at ${stopTrigger.toFixed(2)} debit ({stopCreditPct}% of credit / {stopPnlPct}% P/L), then permits a limit up to ${stopLimit.toFixed(2)} debit.</p>
         </div>
 
+        {qualification && phase !== 'done' && (
+          <OrderOverrideAcknowledgment derivation={qualification.derivation} checks={qualification.checks} acknowledged={qualAcknowledged} onChange={setQualAcknowledged} />
+        )}
+
         {/* Dry run result */}
         {dryRunResult && (
           <div className="p-3 bg-emerald-500/10 border border-emerald-600 rounded-lg mb-4 space-y-1">
@@ -4247,19 +4272,19 @@ function TradeModal({ result, th, onClose }: {
         {phase !== 'done' && (
           <div className="flex gap-2">
             {!dryRunResult ? (
-              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun' || otmGateBlocking}
+              <button onClick={runDryRun} disabled={!hasOccSymbols || phase === 'dryrun' || otmGateBlocking || qualGateBlocking}
                 className="flex-1 py-2.5 border ac-btn rounded-xl text-xs font-bold tracking-widest hover:ac-bg-10 transition-colors disabled:opacity-40">
-                {phase === 'dryrun' ? 'REFRESHING & VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : 'REFRESH & VALIDATE'}
+                {phase === 'dryrun' ? 'REFRESHING & VALIDATING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : qualGateBlocking ? 'ACKNOWLEDGE TO CONTINUE' : 'REFRESH & VALIDATE'}
               </button>
             ) : (
               <>
-                <button onClick={runDryRun} disabled={phase === 'dryrun' || otmGateBlocking}
+                <button onClick={runDryRun} disabled={phase === 'dryrun' || otmGateBlocking || qualGateBlocking}
                   className={`py-2.5 px-3 border ${th.border} ${th.textFaint} rounded-xl text-xs ac-hover-border transition-colors disabled:opacity-40`}>
                   ↺
                 </button>
-                <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking}
+                <button onClick={placeOrder} disabled={phase === 'placing' || otmGateBlocking || qualGateBlocking}
                   className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors disabled:opacity-40">
-                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : `PLACE + GTC`}
+                  {phase === 'placing' ? 'PLACING...' : otmGateBlocking ? 'ACKNOWLEDGE OTM WARNING TO CONTINUE' : qualGateBlocking ? 'ACKNOWLEDGE TO CONTINUE' : `PLACE + GTC`}
                 </button>
               </>
             )}
@@ -6586,15 +6611,21 @@ const strategyScores = useMemo(() => {
                   // all. Now it's disclosed and requires acknowledgment,
                   // stating the real numbers, before proceeding -- Dean's
                   // own choice to make, not a silent gate either way.
-                  if (result.checks.oi.status === 'warn') {
+                  // QUAL-STATES-0001: rows with a three-state verdict acknowledge inside the order window instead.
+                  if (!qualDerivation && result.checks.oi.status === 'warn') {
                     const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
                     if (!proceed) return;
                   }
                   onTrade?.(result);
                 }}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
+                className={`flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors ${
+                  qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10 font-medium'
+                  : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10 font-bold'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold'}`}
               >
-                ⚡ TRADE THIS
+                {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
+                  : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
+                  : '⚡ TRADE THIS'}
               </button>
             )}
             {/* CSP-ORDERS-0001 -- live order placement, via the dedicated
@@ -13248,7 +13279,11 @@ export default function Home() {
           shortOiMin={pmccShortOiMin} maxSpreadPct={pmccMaxSpreadPct} shortWidthCeiling={pmccWidthCeiling}
         />
       )}
-      {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)} />}
+      {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && (() => {
+        const derivation = (screenMode === 'rank' || screenMode === 'targeted') ? deriveSpreadQualification(tradeResult) : null;
+        return <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)}
+          qualification={derivation ? { derivation, checks: tradeResult.checks, scanMode: screenMode as 'rank' | 'targeted' } : null} />;
+      })()}
       {cspTradeResult && cspTradeResult.bestCandidate && <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
