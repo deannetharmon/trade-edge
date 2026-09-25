@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PmccScanModal, type PmccScanRequest } from '../PmccScanModal';
 import type { ScanModalTheme } from '../ScanModalShell';
@@ -84,6 +84,26 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
   it('existing validation is unchanged: Max below Min disables Run', () => {
     renderModal({ shortDeltaMin: 0.3, shortDeltaMax: 0.2 });
     expect(screen.getByRole('button', { name: /RUN PMCC SCAN/ })).toBeDisabled();
+  });
+});
+
+describe('PMCC delta validation message', () => {
+  const msg = 'Delta must be between 0.10 and 0.40, and Max at least Min.';
+  it('is not shown for a valid range', () => {
+    renderModal();
+    expect(screen.queryByText(msg)).not.toBeInTheDocument();
+  });
+  it('shows when Max is below Min, and Run is disabled', () => {
+    renderModal({ shortDeltaMin: 0.3, shortDeltaMax: 0.2 });
+    expect(screen.getByText(msg)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run/i, hidden: false })).toBeDisabled();
+  });
+  it('shows when a value is outside 0.10-0.40', () => {
+    renderModal({ shortDeltaMin: 0.05, shortDeltaMax: 0.3 });
+    expect(screen.getByText(msg)).toBeInTheDocument();
+    cleanup();
+    renderModal({ shortDeltaMin: 0.15, shortDeltaMax: 0.45 });
+    expect(screen.getByText(msg)).toBeInTheDocument();
   });
 });
 
