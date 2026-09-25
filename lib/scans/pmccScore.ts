@@ -23,6 +23,9 @@
 // there -- a separate, still-undecided product question per standing
 // project notes, not assumed here).
 
+import { earningsOnOrBeforeExpiration } from './earningsPrecheck';
+import { newYorkDateFromAsOf } from './pmccEarningsDates';
+
 export interface PmccScoreInputs {
   annualizedRoiPct: number | null;
   longLegSpreadPct: number | null;
@@ -73,14 +76,11 @@ function legLiquidityFraction(spreadPct: number | null, openInterest: number | n
  *  not the position as a whole (matches how the short-leg-scoped GTC/
  *  stop logic in pmccStopGtcPrompt.ts already treats this leg-specific
  *  boundary). */
-function earningsFallsBeforeShortExpiration(earningsDate: string | null, shortExpiration: string): boolean {
+function earningsFallsBeforeShortExpiration(earningsDate: string | null, shortExpiration: string, now: Date): boolean {
   if (!earningsDate) return false;
-  const earnings = new Date(`${earningsDate}T00:00:00`);
-  const expiry = new Date(`${shortExpiration}T23:59:59`);
-  if (Number.isNaN(earnings.getTime()) || Number.isNaN(expiry.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return earnings >= today && earnings <= expiry;
+  // EARNINGS-DATEBASIS-0001: New York calendar basis (ISO compare), injectable clock.
+  // Bad data (null) stays false; a timestamp-suffixed earnings value uses its leading date.
+  return earningsOnOrBeforeExpiration(earningsDate, shortExpiration, newYorkDateFromAsOf(Number.isFinite(now.getTime()) ? now.toISOString() : null) ?? undefined) === true;
 }
 
 /**
@@ -88,7 +88,7 @@ function earningsFallsBeforeShortExpiration(earningsDate: string | null, shortEx
  * a total, so the card can decompose the number into its inputs -- per
  * Paul's explicit requirement that the score never be a mystery number.
  */
-export function computePmccScore(inputs: PmccScoreInputs): PmccScoreBreakdown {
+export function computePmccScore(inputs: PmccScoreInputs, now: Date = new Date()): PmccScoreBreakdown {
   const roiFraction = inputs.annualizedRoiPct != null
     ? clamp01(inputs.annualizedRoiPct / ROI_FULL_MARKS_BENCHMARK_PCT)
     : 0;
@@ -106,7 +106,7 @@ export function computePmccScore(inputs: PmccScoreInputs): PmccScoreBreakdown {
   );
   const liquidityScore = Math.round(Math.min(longLiquidity, shortLiquidity) * LIQUIDITY_MAX_POINTS);
 
-  const earningsFlagged = earningsFallsBeforeShortExpiration(inputs.earningsDate, inputs.shortLegExpiration);
+  const earningsFlagged = earningsFallsBeforeShortExpiration(inputs.earningsDate, inputs.shortLegExpiration, now);
   const earningsDeduction = inputs.earningsDeductionEnabled && earningsFlagged ? -EARNINGS_DEDUCTION_POINTS : 0;
 
   const total = Math.max(0, roiScore + liquidityScore + earningsDeduction);

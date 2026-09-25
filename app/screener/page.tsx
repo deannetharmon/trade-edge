@@ -73,7 +73,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
-import { earningsOnOrBeforeExpiration, evaluateEarningsPrecheck } from '@/lib/scans/earningsPrecheck';
+import { daysUntilNy, earningsOnOrBeforeExpiration, evaluateEarningsPrecheck } from '@/lib/scans/earningsPrecheck';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
 // (normalized, deduped, ordered ticker list) replaces the separate CSP and
 // PMCC ticker boxes; every strategy launcher button reads this same array.
@@ -1676,7 +1676,7 @@ function CalendarButton({ symbol, strategy, earningsDate, ivr, th }: { symbol: s
 // earnings precede every in-window expiry is an earnings block; its collapsed disqualified row offers the
 // same post-earnings re-screen as the card path. Scoped to CC.
 function renderCcEarningsRescreen(result: ScreenResult, th: typeof THEMES[Theme]) {
-  if (result.strategy !== 'CC' || !result.earningsDate || daysUntil(result.earningsDate) < 0) return null;
+  if (result.strategy !== 'CC' || !result.earningsDate || earningsIsPastNy(result.earningsDate)) return null;
   if (!result.failReasons.some(f => f.includes('Earnings'))) return null;
   return <CalendarButton symbol={result.symbol} strategy={result.strategy} earningsDate={result.earningsDate} ivr={result.ivr} th={th} />;
 }
@@ -1689,7 +1689,7 @@ function EntryCalendarButton({ result, th }: { result: ScreenResult; th: typeof 
   const btnRef = useRef<HTMLButtonElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
-  const postEarningsDate = result.earningsDate && daysUntil(result.earningsDate) < 0
+  const postEarningsDate = result.earningsDate && earningsIsPastNy(result.earningsDate)
     ? getPostEarningsRescreenDate(result.earningsDate)
     : null;
 
@@ -3884,10 +3884,8 @@ function TradeModal({ result, th, onClose }: {
   const emClearancePct = calcEmClearancePct(result);
   const earningsWithinExpiry = (() => {
     if (!result.earningsDate || !c.expiration) return false;
-    const earnings = new Date(`${result.earningsDate}T00:00:00`);
-    const expiry = new Date(`${c.expiration}T23:59:59`);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    return Number.isFinite(earnings.getTime()) && Number.isFinite(expiry.getTime()) && earnings >= today && earnings <= expiry;
+    // EARNINGS-DATEBASIS-0001: New York calendar basis (bad data stays false).
+    return earningsOnOrBeforeExpiration(result.earningsDate, c.expiration) === true;
   })();
 
   const hasOccSymbols = isPMCC 
@@ -5977,8 +5975,8 @@ const strategyScores = useMemo(() => {
   const isApproaching = c && c.dte <= dteAlertThreshold;
   const hasEarningsBlock = result.failReasons.some(f => f.includes('Earnings'))
       && result.earningsDate
-      && daysUntil(result.earningsDate) >= 0;
-  const hasPastEarnings = result.earningsDate && daysUntil(result.earningsDate) < 0;
+      && earningsIsUpcomingNy(result.earningsDate);
+  const hasPastEarnings = result.earningsDate && earningsIsPastNy(result.earningsDate);
   const rsi14 =
     result.trendResult?.metrics?.rsi14 ??
     cachedEntry?.trendResult?.metrics?.rsi14 ??
@@ -6422,10 +6420,10 @@ const strategyScores = useMemo(() => {
       pop: 'POP',
       earnings: 'Earnings',
     };
-    const postDate = isEarnings && result.earningsDate && daysUntil(result.earningsDate) < 0
+    const postDate = isEarnings && result.earningsDate && earningsIsPastNy(result.earningsDate)
       ? getPostEarningsRescreenDate(result.earningsDate)
       : null;
-    const nextEst = isEarnings && result.earningsDate && daysUntil(result.earningsDate) < 0
+    const nextEst = isEarnings && result.earningsDate && earningsIsPastNy(result.earningsDate)
       ? estimateNextEarningsDate(result.earningsDate)
       : null;
 
@@ -6453,7 +6451,7 @@ const strategyScores = useMemo(() => {
             );
           })()}
 
-          {isEarnings && result.earningsDate && daysUntil(result.earningsDate) < 0 ? (
+          {isEarnings && result.earningsDate && earningsIsPastNy(result.earningsDate) ? (
             <>
               <p className={`text-xs ${th.text} font-medium`}>Reported: {formatDisplayDate(result.earningsDate)}</p>
               <p className={`text-[10px] ${th.textMuted}`}>Next Est: {nextEst ? formatDisplayDate(nextEst) : '—'}</p>
@@ -8208,14 +8206,15 @@ function pmccBestFitScore(result: ScreenResult, profile: PmccBestFitProfile): nu
   });
 }
 
+// EARNINGS-DATEBASIS-0001: earnings-sign helpers on the New York calendar basis.
+// An unparseable date is neither past nor upcoming (same as the old NaN comparisons).
+function earningsIsPastNy(earningsDate: string): boolean { return (daysUntilNy(earningsDate) ?? 0) < 0; }
+function earningsIsUpcomingNy(earningsDate: string): boolean { return (daysUntilNy(earningsDate) ?? -1) >= 0; }
+
 function pmccEarningsBlocksBestFit(result: ScreenResult): boolean {
   const expiration = result.pmccPair?.shortLeg.expiration;
   if (!result.earningsDate || !expiration) return false;
-  const earnings = new Date(`${result.earningsDate}T00:00:00`);
-  const expiry = new Date(`${expiration}T23:59:59`);
-  if (!Number.isFinite(earnings.getTime()) || !Number.isFinite(expiry.getTime())) return false;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return earnings >= today && earnings <= expiry;
+  return earningsOnOrBeforeExpiration(result.earningsDate, expiration) === true;
 }
 
 function pmccBestFitReason(profile: PmccBestFitProfile): string {
@@ -11860,9 +11859,9 @@ export default function Home() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {results.some(r => !r.qualified && r.earningsDate && daysUntil(r.earningsDate) >= 0 && r.failReasons.some(f => f.includes('Earnings'))) && (
+                  {results.some(r => !r.qualified && r.earningsDate && earningsIsUpcomingNy(r.earningsDate) && r.failReasons.some(f => f.includes('Earnings'))) && (
                     <button onClick={() => {
-                      const toSchedule = results.filter(r => !r.qualified && r.earningsDate && daysUntil(r.earningsDate) >= 0 && r.failReasons.some(f => f.includes('Earnings')));
+                      const toSchedule = results.filter(r => !r.qualified && r.earningsDate && earningsIsUpcomingNy(r.earningsDate) && r.failReasons.some(f => f.includes('Earnings')));
                       const stored = (() => { try { const s = localStorage.getItem(LS_CAL); return s ? JSON.parse(s) : {}; } catch { return {}; } })();
                       toSchedule.forEach((r, i) => {
                         const followUpIso = toIsoDate(getPostEarningsRescreenDate(r.earningsDate!));

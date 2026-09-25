@@ -67,6 +67,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { DEBIT_STOP_OBSERVE_ENABLED, evaluateDebitStop, type StopAcquisitionCompleteness } from '@/lib/portfolio/debitStopEvaluation';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
+import { earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
 import {
   CONTRACT_MULTIPLIER,
   computeCreditPerContract,
@@ -2032,12 +2033,10 @@ export async function loadPositions(
     // Tastytrade market-metrics can return the next earnings date within ~60 days;
     // that is NOT the same as "earnings within expiry."
     const rawEarningsDate = earningsMap[symbol] ?? null;
-    // Use string comparison (YYYY-MM-DD) — avoids UTC midnight timezone shifts
-    // that cause new Date() comparisons to misclassify same-day or next-day earnings
+    // EARNINGS-DATEBASIS-0001: New York calendar date via the shared helper (was the UTC date,
+    // which dropped earnings-day risk from 20:00 ET). Bad data yields null.
     const earningsWithinExpiry =
-      rawEarningsDate &&
-      rawEarningsDate >= new Date().toISOString().slice(0, 10) &&
-      rawEarningsDate <= expDate
+      rawEarningsDate && earningsOnOrBeforeExpiration(rawEarningsDate, expDate) === true
         ? rawEarningsDate
         : null;
 
