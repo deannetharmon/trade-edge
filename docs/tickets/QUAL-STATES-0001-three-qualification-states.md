@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by Dean 2026-09-25 (all lenses). Phases 0, 1 and 2 built and pushed to `main` (full suite 372 files / 5468 tests, real `next build` pass). Phase 3 (CSP) not built.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
+**Approved by Dean 2026-09-25 (all lenses). All phases built and pushed to `main` (phase 3: full suite 375 files / 5491 tests, real `next build` pass). Covered call, PMCC and LEAPS remain out of scope until asked.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
 
 ## Problem
 
@@ -58,4 +58,25 @@ Limits, stated plainly:
 - The chip only appears once the entry snapshot exists, which happens after the broker confirms the fill (the same as every other snapshot-driven feature). A trade whose snapshot could not be saved has no override record.
 - The Trade Log joins on the existing snapshot matching, so a trade that cannot be matched to a snapshot shows no chip.
 - `TradeModal` itself is not unit-tested at page level (it lives in `page.tsx`); its behavior rests on the tested pure pieces above plus tsc and the build.
+
+## Phase 3: what was built (2026-09-25)
+
+CSP cards and CSP order window, plus the recording path for CSP orders.
+
+- **State** (`lib/scans/qualificationState.ts` `deriveCspQualification`): from the candidate's own states. Disqualified: any `DISQUALIFIED_*` market state (IVR above the cap, IVR unavailable, earnings inside the 10-day buffer, poor liquidity, invalid quote, foundation ineligible or insufficient evidence) or a failed targeted minimum. Caution: `QUALIFIED_WITH_LIQUIDITY_WARNING`, or market-qualified but outside the preferred delta range (not a Best Opportunity). Qualified otherwise. **Account capital is a separate axis** (shown on the card, enforced by the order window's collateral guard) and does not change the state.
+- **Cards and buttons**: the state badge, red or amber left border, "Score N · not eligible" on Disqualified, and the same three TRADE THIS variants as spreads. The Qualified and Disqualified sections, the section counts, Best Opportunities and the CSP header ("N of M QUALIFIED") are unchanged; a CSP in the Qualified section can now carry a Caution badge (liquidity or delta).
+- **Order window** (`CspTradeModal`): the same acknowledgment block, and DRY RUN / PLACE stay locked ("ACKNOWLEDGE TO CONTINUE") until it is ticked; `placeOrder` refuses independently. The existing capital re-check is untouched.
+- **Recording**: cash-secured puts had no entry-snapshot pipeline, so they get entry notes: `lib/entry-context/entryNote.ts` (validated pending note, promotion on confirmed fills, exact transaction matching), `entryNoteStore.ts` (Redis, owner-scoped, idempotent), `/api/entry-context/notes` (save and list) and `/api/entry-context/notes/promote`. Deliberately separate from the spread snapshots so their score fields and rollups are untouched. The order window saves the note after the order is placed (a failure is only a warning). The Trade Log promotes pending notes on load, loads notes, and shows the same chip and CSV columns, matching by exact broker transaction ids like a snapshot.
+- **Shared**: the broker-transaction reader moved to `lib/entry-context/brokerTransactions.ts` and is used by all promote routes.
+
+### Correction to phase 2, and the fix
+
+Phase 2 said the override record reaches the Trade Log for BPS, BCS and IC. It did for BPS and BCS. **Iron condor pending entries were saved but nothing ever promoted them to snapshots** (`persistPromotedPendingIronCondorEntry` had no caller), so an IC override stopped at the pending stage. Fixed here: `/api/entry-context/promote-ic`, called by the Trade Log on load. Side effect to know: iron condor trades now get entry snapshots, so the Performance rollups (which read snapshots) will start including them.
+
+### Tests and limits
+
+- Tests: `cspQualificationState.test.ts` (every CSP market state, targeted failure, delta, capital separate, null cases), `entryNote.test.ts` (validation, promotion, exact matching), chip and `qualificationForTrade` tests.
+- `CspTradeModal` is not unit-tested at page level (it lives in `page.tsx`); it rests on the tested pure pieces plus tsc and the build.
+- Pending entries and notes are never removed after promotion, and the Trade Log tries to promote every one on each load (each attempt reads broker transactions). That was already true for spreads; notes and iron condors add to it. Candidate follow-up: skip pending entries already promoted.
+- The chip appears only after the fill is confirmed and promoted.
 

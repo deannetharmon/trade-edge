@@ -15,7 +15,8 @@ import { fetchAndReconstructTrades, readCache, writeCache, getDeviceId } from '@
 import type { OrderLifecycleEvent } from '@/lib/order-lifecycle/types';
 import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from '@/lib/entry-context/types';
 import { buildSnapshotIndex, findSnapshotForTrade } from '@/lib/entry-context/performance';
-import { EntryOverrideChip, entryQualificationCsv } from '@/features/entry-context/EntryOverrideChip';
+import { EntryOverrideChip, entryQualificationCsv, qualificationForTrade } from '@/features/entry-context/EntryOverrideChip';
+import { buildEntryNoteIndex, type EntryNote } from '@/lib/entry-context/entryNote';
 
 type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
@@ -532,9 +533,10 @@ function evidenceValue(evidence: { state: string; value: unknown } | undefined):
   return String(evidence.value ?? '');
 }
 
-function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<string>, snapshots: EntrySnapshot[]) {
+function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<string>, snapshots: EntrySnapshot[], notes: EntryNote[]) {
   if (trades.length === 0) return;
   const byTransaction = buildSnapshotIndex(snapshots);
+  const noteIndex = buildEntryNoteIndex(notes);
   const headers = [
     'Symbol', 'Strategy', 'Open Date', 'Close Date', 'Expiry', 'DTE at Entry', 'DTE at Close',
     'Hold Days', 'Open Time', 'Open Day of Week', 'Strikes', 'Credit Received', 'Close Price',
@@ -560,7 +562,7 @@ function exportTradeLogFullDetailCsv(trades: ClosedTrade[], excludedIds: Set<str
       evidenceValue(snapshot?.scoreBuffer), evidenceValue(snapshot?.scoreStrategyAlignment),
       evidenceValue(snapshot?.scoreDeltaQuality), evidenceValue(snapshot?.scoreComposite),
       evidenceValue(snapshot?.profitTarget), evidenceValue(snapshot?.stopLoss),
-      entryQualificationCsv(snapshot).state, entryQualificationCsv(snapshot).overrides,
+      entryQualificationCsv(qualificationForTrade(t, byTransaction, noteIndex)).state, entryQualificationCsv(qualificationForTrade(t, byTransaction, noteIndex)).overrides,
     ];
   });
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -589,7 +591,9 @@ export default function TradeLogPage() {
   const [lifecycleEvents, setLifecycleEvents] = useState<OrderLifecycleEvent[]>([]);
   const [lifecycleError, setLifecycleError] = useState('');
   const [entrySnapshots, setEntrySnapshots] = useState<EntrySnapshot[]>([]);
+  const [entryNotes, setEntryNotes] = useState<EntryNote[]>([]);
   const snapshotIndex = useMemo(() => buildSnapshotIndex(entrySnapshots), [entrySnapshots]);
+  const entryNoteIndex = useMemo(() => buildEntryNoteIndex(entryNotes), [entryNotes]);
 
   const loadLifecycleEvents = useCallback(async () => {
     try {
@@ -655,6 +659,27 @@ export default function TradeLogPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId, brokerOrderId: pending.brokerOrderId }),
         })));
+        // QUAL-STATES-0001: iron condor entries were saved as pending but never promoted; promote them the
+        // same way, then promote cash-secured put entry notes (which have no evidence snapshot).
+        try {
+          const pendingIcResponse = await fetch(`/api/entry-context/pending-ic?accountId=${encodeURIComponent(accountId)}`);
+          const pendingIcBody = pendingIcResponse.ok ? await pendingIcResponse.json() : null;
+          await Promise.all((pendingIcBody?.pending ?? []).map((pending: { brokerOrderId?: string }) => fetch('/api/entry-context/promote-ic', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accountId, brokerOrderId: pending.brokerOrderId }),
+          })));
+        } catch { /* promotion is best effort; the next load retries */ }
+        try {
+          const pendingNotesResponse = await fetch(`/api/entry-context/notes?accountId=${encodeURIComponent(accountId)}&kind=pending`);
+          const pendingNotesBody = pendingNotesResponse.ok ? await pendingNotesResponse.json() : null;
+          await Promise.all((pendingNotesBody?.pending ?? []).map((pending: { brokerOrderId?: string }) => fetch('/api/entry-context/notes/promote', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accountId, brokerOrderId: pending.brokerOrderId }),
+          })));
+          const notesResponse = await fetch(`/api/entry-context/notes?accountId=${encodeURIComponent(accountId)}`);
+          const notesBody = notesResponse.ok ? await notesResponse.json() : null;
+          setEntryNotes(notesBody?.notes ?? []);
+        } catch { setEntryNotes([]); }
         // TRADE-ENTRY-SNAPSHOT-0001 -- fetch confirmed snapshots for the row
         // indicator and full-detail export, right after reconciling any
         // pending entries above (so freshly-promoted ones are included).
@@ -870,7 +895,7 @@ export default function TradeLogPage() {
               className={`text-[10px] px-3 py-1.5 border ${th.border} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-50 tracking-wider`}>
               ⬇ Export CSV
             </button>
-            <button onClick={() => exportTradeLogFullDetailCsv(sorted, excludedIds, entrySnapshots)} disabled={sorted.length === 0}
+            <button onClick={() => exportTradeLogFullDetailCsv(sorted, excludedIds, entrySnapshots, entryNotes)} disabled={sorted.length === 0}
               className={`text-[10px] px-3 py-1.5 border border-teal-600 rounded text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50 tracking-wider`}>
               ⬇ Export full detail
             </button>
@@ -954,7 +979,7 @@ export default function TradeLogPage() {
                   {groupBy === 'none' ? sorted.map(trade => (
                     <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
                       <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
-                      <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip snapshot={findSnapshotForTrade(trade, snapshotIndex)} /></td>
+                      <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip qualification={qualificationForTrade(trade, snapshotIndex, entryNoteIndex)} /></td>
                       <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                       <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
                       <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>
@@ -1014,7 +1039,7 @@ export default function TradeLogPage() {
                         rows.push(
                           <tr key={trade.id} className={`border-b ${th.borderLight} hover:bg-white/5 transition-colors ${excludedIds.has(trade.id) ? 'opacity-40' : ''}`}>
                             <td className={`px-3 py-2.5 font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.symbol}</td>
-                            <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip snapshot={findSnapshotForTrade(trade, snapshotIndex)} /></td>
+                            <td className="px-3 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 border rounded font-bold ${stratColor(trade.strategy)}`}>{trade.strategy}</span><EntryOverrideChip qualification={qualificationForTrade(trade, snapshotIndex, entryNoteIndex)} /></td>
                             <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.strikes}</td>
                             <td className={`px-3 py-2.5 ${th.textMuted}`}>{fmtDate(trade.openDate)}</td>
                             <td className={`px-3 py-2.5 ${th.textFaint} text-[10px]`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{trade.openTime || '—'}</td>

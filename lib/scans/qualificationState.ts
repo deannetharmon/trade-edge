@@ -8,6 +8,7 @@
 // Which checks are gates differs by scan; each scan passes its own gate keys.
 
 import type { CheckResult, ScreenResult } from './types';
+import { EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 
 export type QualificationState = 'qualified' | 'caution' | 'disqualified';
 
@@ -59,4 +60,51 @@ export function countQualificationStates(results: readonly ScreenResult[]): Qual
     counts[state] += 1;
   }
   return counts;
+}
+
+export interface DerivedQualification {
+  derivation: QualificationDerivation;
+  checks: Record<string, CheckResult>;
+}
+
+const CSP_GATE_KEYS = ['csp-market', 'csp-mode', 'csp-delta'] as const;
+
+const CSP_MARKET_LABELS: Record<string, string> = {
+  DISQUALIFIED_IVR: 'IVR above the CSP risk cap',
+  DISQUALIFIED_IVR_UNAVAILABLE: 'IV rank unavailable, so the IVR cap cannot be verified',
+  DISQUALIFIED_EARNINGS: `earnings on or within ${EARNINGS_MIN_DAYS_AFTER_EXPIRY} days after expiry`,
+  DISQUALIFIED_POOR_LIQUIDITY: 'poor liquidity',
+  DISQUALIFIED_INVALID_QUOTE: 'no valid quote',
+  DISQUALIFIED_FOUNDATION_INELIGIBLE: 'market-state evidence contradicts a cash-secured put thesis',
+  DISQUALIFIED_FOUNDATION_INSUFFICIENT_EVIDENCE: 'not enough market-state evidence for a cash-secured put thesis',
+};
+
+const cspPass = (label: string): CheckResult => ({ status: 'pass', value: label, reason: label });
+
+/**
+ * Three-state derivation for a CSP result, from the candidate's own qualification states.
+ * Disqualified: any DISQUALIFIED_* market state, or a failed targeted minimum. Caution: qualified with a
+ * liquidity warning, or market-qualified but outside the preferred delta range (not a Best Opportunity).
+ * Account capital is a separate axis (shown on the card, enforced by the order guard) and not part of this.
+ * Null for anything that is not a CSP with a market qualification.
+ */
+export function deriveCspQualification(result: ScreenResult): DerivedQualification | null {
+  const c = result.bestCandidate;
+  if (!c || c.strategy !== 'CSP' || !c.cspMarketQualification) return null;
+  const market = c.cspMarketQualification;
+  const marketQualified = market === 'QUALIFIED' || market === 'QUALIFIED_WITH_LIQUIDITY_WARNING';
+  const checks: Record<string, CheckResult> = {
+    'csp-market': market === 'QUALIFIED'
+      ? cspPass('market qualified')
+      : market === 'QUALIFIED_WITH_LIQUIDITY_WARNING'
+        ? { status: 'warn', value: c.cspLiquidityReason ?? 'borderline liquidity', reason: c.cspLiquidityReason ?? 'Liquidity is borderline: kept, but excluded from Best Opportunities.' }
+        : { status: 'fail', value: CSP_MARKET_LABELS[market] ?? 'not market qualified', reason: CSP_MARKET_LABELS[market] ?? market },
+    'csp-mode': c.cspModeQualification === 'FAILED'
+      ? { status: 'fail', value: 'below your targeted minimums', reason: (c.cspModeQualificationReasons ?? []).join('; ') || 'Below the targeted scan minimums.' }
+      : cspPass('targeted minimums met'),
+    'csp-delta': marketQualified && c.cspDeltaTargetPassing === false
+      ? { status: 'warn', value: 'delta outside the preferred range', reason: 'Only deltas in the preferred range are listed as Best Opportunities.' }
+      : cspPass('delta in the preferred range'),
+  };
+  return { derivation: deriveQualificationState(checks, CSP_GATE_KEYS), checks };
 }

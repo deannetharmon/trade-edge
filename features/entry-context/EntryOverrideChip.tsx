@@ -1,14 +1,28 @@
 // features/entry-context/EntryOverrideChip.tsx
 //
-// QUAL-STATES-0001 phase 2: the Trade Log's marker for a trade that was entered against the
-// scan's verdict. Only Caution and Disqualified entries show a chip; Qualified entries and
-// trades with no record show nothing.
+// QUAL-STATES-0001: the Trade Log's marker for a trade that was entered against the scan's verdict.
+// Only Caution and Disqualified entries show a chip; Qualified entries and trades with no record show
+// nothing. The record comes from the trade's entry snapshot (spreads) or entry note (cash-secured puts).
 
 'use client';
 
+import type { EntryQualificationRecord } from '@/lib/entry-context/entryQualification';
 import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from '@/lib/entry-context/types';
+import type { EntryNote } from '@/lib/entry-context/entryNote';
+import { findEntryNoteForTrade } from '@/lib/entry-context/entryNote';
+import { findSnapshotForTrade } from '@/lib/entry-context/performance';
+import type { ClosedTrade } from '@/lib/tradeLog/types';
 
 type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
+
+/** The screener's verdict at entry for a closed trade, from its snapshot or its note. */
+export function qualificationForTrade(
+  trade: ClosedTrade,
+  snapshotIndex: Map<string, EntrySnapshot>,
+  noteIndex: Map<string, EntryNote>,
+): EntryQualificationRecord | undefined {
+  return findSnapshotForTrade(trade, snapshotIndex)?.entryQualification ?? findEntryNoteForTrade(trade, noteIndex)?.entryQualification;
+}
 
 export interface EntryOverrideSummary {
   label: string;
@@ -16,8 +30,7 @@ export interface EntryOverrideSummary {
   tone: 'amber' | 'red';
 }
 
-export function summarizeEntryQualification(snapshot: EntrySnapshot | null | undefined): EntryOverrideSummary | null {
-  const q = snapshot?.entryQualification;
+export function summarizeEntryQualification(q: EntryQualificationRecord | null | undefined): EntryOverrideSummary | null {
   if (!q || q.state === 'qualified') return null;
   const reasons = [...q.failing.map(r => `✕ ${r.text}`), ...q.warning.map(r => `⚠ ${r.text}`)];
   const when = q.acknowledgedAt ? `\nAcknowledged ${q.acknowledgedAt}` : '';
@@ -27,15 +40,14 @@ export function summarizeEntryQualification(snapshot: EntrySnapshot | null | und
 }
 
 /** One line for spreadsheets: the entry state plus each reason. */
-export function entryQualificationCsv(snapshot: EntrySnapshot | null | undefined): { state: string; overrides: string } {
-  const q = snapshot?.entryQualification;
+export function entryQualificationCsv(q: EntryQualificationRecord | null | undefined): { state: string; overrides: string } {
   if (!q) return { state: '', overrides: '' };
   const parts = [...q.failing.map(r => `FAIL ${r.text}`), ...q.warning.map(r => `WARN ${r.text}`)];
   return { state: q.state, overrides: q.overridden ? parts.join(' | ') : '' };
 }
 
-export function EntryOverrideChip({ snapshot }: { snapshot: EntrySnapshot | null | undefined }) {
-  const summary = summarizeEntryQualification(snapshot);
+export function EntryOverrideChip({ qualification }: { qualification: EntryQualificationRecord | null | undefined }) {
+  const summary = summarizeEntryQualification(qualification);
   if (!summary) return null;
   const tone = summary.tone === 'red' ? 'border-red-600 text-red-400 bg-red-500/10' : 'border-amber-500 text-amber-400 bg-amber-500/10';
   return (

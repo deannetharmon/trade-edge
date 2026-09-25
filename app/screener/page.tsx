@@ -108,7 +108,7 @@ import { QualificationBadge } from '@/features/screener/components/Qualification
 import { OrderOverrideAcknowledgment, qualificationGateBlocking, reasonText } from '@/features/screener/components/OrderOverrideAcknowledgment';
 import { buildEntryQualification } from '@/lib/entry-context/entryQualification';
 import type { QualificationDerivation } from '@/lib/scans/qualificationState';
-import { countQualificationStates, deriveSpreadQualification } from '@/lib/scans/qualificationState';
+import { countQualificationStates, deriveCspQualification, deriveSpreadQualification } from '@/lib/scans/qualificationState';
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
   getScreenerJobState, useScreenerJobState,
@@ -2708,8 +2708,15 @@ async function getAccountNumber(): Promise<string> {
 // Required" as the headline risk figure instead of "Max Loss", the card's
 // own assignment-warning sentence carried verbatim, and a freshly re-fetched
 // collateral figure shown immediately before the Place button.
-function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void }) {
+function CspTradeModal({ result, th, onClose, qualification }: {
+  result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  /** QUAL-STATES-0001 phase 3: the scan's verdict on this CSP; anything but Qualified must be acknowledged. */
+  qualification?: { derivation: QualificationDerivation; checks: Record<string, CheckResult> } | null;
+}) {
   const c = result.bestCandidate!;
+  const [qualAcknowledged, setQualAcknowledged] = useState(false);
+  const qualGateBlocking = qualificationGateBlocking(qualification?.derivation, qualAcknowledged);
+  const [entryNoteWarning, setEntryNoteWarning] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
   const [dryRunResult, setDryRunResult] = useState<any>(null);
@@ -2796,6 +2803,7 @@ function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: type
   const placeOrder = async () => {
     setPhase('placing'); setError('');
     try {
+      if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
       if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
       // Submit-time collateral re-check (Quinn/Ian, 2026-09-22): re-resolved
       // fresh here, never trusted from freshCapital's earlier display state.
@@ -2810,7 +2818,38 @@ function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: type
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
-      setOrderId(data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted');
+      const submittedOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted';
+      setOrderId(submittedOrderId);
+      // QUAL-STATES-0001 phase 3: record what the screener said about this put and whether the trader
+      // overrode it, so the Trade Log can show it once the broker confirms the fill. The order is already
+      // placed, so a failure here is only a warning.
+      if (qualification) {
+        try {
+          const triggerOrderId = data?.data?.['complex-order']?.['trigger-order']?.id;
+          const openingOrderIds = triggerOrderId == null ? [] : [String(triggerOrderId)];
+          if (openingOrderIds.length === 0) throw new Error('no opening order id');
+          const noteResponse = await fetch('/api/entry-context/notes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accountId: accountNumber, brokerOrderId: String(submittedOrderId), openingOrderIds, submittedAt: new Date().toISOString(),
+              strategy: 'CSP', symbol: result.symbol, expiration: c.expiration, strike: c.shortStrike, quantity,
+              entryQualification: buildEntryQualification({
+                state: qualification.derivation.state,
+                failing: qualification.derivation.failing,
+                warning: qualification.derivation.warning,
+                reasonFor: key => reasonText(key, qualification.checks),
+                acknowledged: qualAcknowledged,
+                at: new Date().toISOString(),
+                scanMode: null,
+              }),
+            }),
+          });
+          if (!noteResponse.ok) throw new Error(`entry note save failed (${noteResponse.status})`);
+        } catch (noteError) {
+          console.warn(noteError);
+          setEntryNoteWarning('Order submitted, but the scan verdict could not be saved for the Trade Log.');
+        }
+      }
       setPhase('done');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -2897,6 +2936,9 @@ function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: type
           </div>
         )}
 
+        {qualification && phase !== 'done' && (
+          <OrderOverrideAcknowledgment derivation={qualification.derivation} checks={qualification.checks} acknowledged={qualAcknowledged} onChange={setQualAcknowledged} />
+        )}
         {freshCapital && (
           <p className={`text-[10px] mb-2 ${freshCapital.ok ? 'text-emerald-400' : 'text-red-400'}`}>{freshCapital.label}</p>
         )}
@@ -2904,6 +2946,7 @@ function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: type
         {phase === 'done' && (
           <p className="text-xs text-emerald-400 mb-3" role="status">Order submitted. Broker order id: {orderId}</p>
         )}
+        {phase === 'done' && entryNoteWarning && <p className="text-[10px] text-amber-300 mb-3">{entryNoteWarning}</p>}
 
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-xs font-bold tracking-widest">
@@ -2911,11 +2954,11 @@ function CspTradeModal({ result, th, onClose }: { result: ScreenResult; th: type
           </button>
           {phase !== 'done' && (
             <button
-              disabled={!legBuild.ok || phase === 'placing' || phase === 'dryrun'}
+              disabled={!legBuild.ok || phase === 'placing' || phase === 'dryrun' || qualGateBlocking}
               onClick={() => (dryRunResult ? placeOrder() : runDryRun())}
               className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest disabled:opacity-50"
             >
-              {phase === 'placing' ? 'PLACING...' : phase === 'dryrun' ? 'VALIDATING...' : dryRunResult ? 'PLACE + GTC' : 'DRY RUN'}
+              {phase === 'placing' ? 'PLACING...' : phase === 'dryrun' ? 'VALIDATING...' : qualGateBlocking ? 'ACKNOWLEDGE TO CONTINUE' : dryRunResult ? 'PLACE + GTC' : 'DRY RUN'}
             </button>
           )}
         </div>
@@ -5915,7 +5958,9 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   const light = scored ? trafficLight(scored.score, rankConfig!) : null;
   // QUAL-STATES-0001: spread cards in Ranked and Targeted lead with Qualified / Caution / Disqualified.
   // A disqualified row keeps its score as supporting detail but never wears a tier word like "Strong".
-  const qualDerivation = (screenMode === 'rank' || screenMode === 'targeted') ? deriveSpreadQualification(result) : null;
+  const cspQualification = c?.strategy === 'CSP' ? deriveCspQualification(result) : null;
+  const qualDerivation = ((screenMode === 'rank' || screenMode === 'targeted') ? deriveSpreadQualification(result) : null) ?? cspQualification?.derivation ?? null;
+  const qualChecks = cspQualification?.checks ?? result.checks;
   const disqualifiedHere = qualDerivation?.state === 'disqualified';
   const tierLight = light && disqualifiedHere
     ? { ...light, emoji: '⚪', label: 'not eligible', color: 'text-slate-400', border: 'border-slate-600', bg: 'bg-slate-500/5' }
@@ -6166,7 +6211,7 @@ const strategyScores = useMemo(() => {
         </div>
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
-          {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={result.checks} />}
+          {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={qualChecks} />}
           {isRankMode && scored && tierLight && (
             <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${tierLight.color} ${tierLight.border} ${tierLight.bg}`}>
               {disqualifiedHere ? `Score ${scored.score} · not eligible` : `${tierLight.emoji} ${scored.score} — ${tierLight.label}`}
@@ -6635,15 +6680,21 @@ const strategyScores = useMemo(() => {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (result.checks.oi.status === 'warn') {
+                  // QUAL-STATES-0001 phase 3: a CSP with a three-state verdict acknowledges inside the order window.
+                  if (!qualDerivation && result.checks.oi.status === 'warn') {
                     const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
                     if (!proceed) return;
                   }
                   onTradeCsp?.(result);
                 }}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest transition-colors"
+                className={`flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors ${
+                  qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10 font-medium'
+                  : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10 font-bold'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold'}`}
               >
-                ⚡ TRADE THIS
+                {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
+                  : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
+                  : '⚡ TRADE THIS'}
               </button>
             )}
             {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
@@ -13283,7 +13334,10 @@ export default function Home() {
         return <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)}
           qualification={derivation ? { derivation, checks: tradeResult.checks, scanMode: screenMode as 'rank' | 'targeted' } : null} />;
       })()}
-      {cspTradeResult && cspTradeResult.bestCandidate && <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} />}
+      {cspTradeResult && cspTradeResult.bestCandidate && (() => {
+        const q = deriveCspQualification(cspTradeResult);
+        return <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} qualification={q ? { derivation: q.derivation, checks: q.checks } : null} />;
+      })()}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
