@@ -186,6 +186,11 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByRole('columnheader', { name: 'Price Change' })).toBeInTheDocument();
+    // One line: a plain label, not stacked spans, and not width-capped.
+    const priceChangeHeader = screen.getByRole('columnheader', { name: 'Price Change' });
+    expect(priceChangeHeader.querySelectorAll('span.block')).toHaveLength(0);
+    expect(priceChangeHeader).toHaveClass('whitespace-nowrap');
+    expect(priceChangeHeader).not.toHaveClass('max-w-20');
     expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
