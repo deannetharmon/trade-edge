@@ -129,4 +129,13 @@ describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earning
     expect(screen.queryByText(/falls on or before this/)).not.toBeInTheDocument();
     expect(redFailureText()).not.toMatch(/arnings/);
   });
+
+  // The guard from the same ruling: a plain advisory while an eligible expiry remains must NOT count as an
+  // earnings fail, so no post-earnings re-screen is offered.
+  it('earnings inside the window with an eligible earlier expiry: no earnings block, no re-screen offer', async () => {
+    const earnings = dayOut(30);
+    await scanCc(earnings, ccChain([25, 40], 0.28));
+    await waitFor(() => expect(getChainMock).toHaveBeenCalled());
+    expect(screen.queryByTitle(/Schedule re-screen \d+ trading days after earnings/)).not.toBeInTheDocument();
+  });
 });

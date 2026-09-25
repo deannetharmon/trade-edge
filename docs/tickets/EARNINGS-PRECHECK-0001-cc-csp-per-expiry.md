@@ -10,6 +10,7 @@ Dean: "if my earnings date is beyond the expiration, it still warns me." The CC 
 
 ## Scope
 
+- **Ian ruling 2026-09-24 (wording):** the earnings pre-check alone never adds to `failReasons`. When every in-window expiry is on or after earnings, the result is a qualification outcome, "no eligible expiration", and it counts as an earnings fail (it feeds `hasEarningsBlock`, the SmartSuggestions earnings count and the post-earnings calendar button, all of which match the substring "Earnings" in `failReasons`, which is fragile). Open follow-up: a whole-page test that a card in that outcome offers the post-earnings re-screen did not pass (button not found in the rendered CC scan), so the coupling is unverified; check whether the advisory reaches `failReasons` in that scenario. Ian also asks Diane to make the row severity consistent with the fail count (amber row vs counted fail).
 - The pre-check becomes **advisory** and never disqualifies. Earnings inside the window excludes later expirations; earlier ones remain.
 - Only the **per-contract test** disqualifies: earnings on or before that contract's expiry.
 - If every expiry in the DTE_MIN-DTE_MAX window is on or after earnings, the result is a clear qualification outcome, "no eligible expiration".
