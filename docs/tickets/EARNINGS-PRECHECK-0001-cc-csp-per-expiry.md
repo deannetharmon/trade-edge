@@ -2,7 +2,7 @@
 
 ## Status
 
-**Scoped by Paul, Ian approved 2026-09-24. Approved to build. Not built.** CC and CSP ship as one small ticket. Full suite required. Real `next build` required (touches `app/screener/page.tsx`). It is a user-reported false warning, and it is small because PMCC slices B and D already established the date basis.
+**Implemented 2026-09-24; awaiting clean-environment build and Quinn review.** CC and CSP ship as one small ticket. Focused CC/CSP/date tests and type checking pass. The local `next build` reached only the external Google Fonts fetch and could not resolve it in this environment; Vercel remains the release gate. Full suite and Quinn review of the CSP classification path remain required for acceptance.
 
 ## Problem
 

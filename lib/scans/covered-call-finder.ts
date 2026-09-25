@@ -27,6 +27,7 @@ import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { assessOiLiquidity } from './oiLiquidity';
 import { evaluateHybridSpread } from './hybridSpread';
+import { earningsOnOrBeforeExpiration } from './earningsPrecheck';
 
 // SCAN-ALIGN-0001C2 -- the warn percent is unused for CC eligibility (CC has no width warning);
 // the shared function only needs it to be well-formed.
@@ -207,11 +208,8 @@ export interface CcFindParams {
 // inside the rule's DTE range — even when a specific, safe expiration
 // existed before earnings. Mirrors the pattern already used by CSP/spread
 // checklists and the CC checklist's own post-selection re-check.
-function isEarningsSafeForDte(earningsDate: string | null | undefined, dte: number): boolean {
-  if (!earningsDate) return true;
-  const d = daysUntil(earningsDate);
-  if (d < 0) return true; // already reported
-  return d > dte; // safe only if earnings falls strictly after THIS candidate's own expiry
+function isEarningsSafeForExpiration(earningsDate: string | null | undefined, expirationDate: string): boolean {
+  return earningsOnOrBeforeExpiration(earningsDate, expirationDate) === false;
 }
 
 // Returns the single best CC candidate across the DTE window in
@@ -358,7 +356,7 @@ export function findBestCoveredCall(
     widthPctMax: params.rules.WIDTH_PCT_MAX,
     widthCeiling: params.rules.WIDTH_CEILING,
   });
-  const best = eligible.find(c => isEarningsSafeForDte(params.earningsDate, c.dte)) ?? null;
+  const best = eligible.find(c => isEarningsSafeForExpiration(params.earningsDate, c.expirationDate)) ?? null;
   if (!best) return null;
 
   return buildCcSpreadCandidate(best, params, price, costBasis);
@@ -437,7 +435,7 @@ export function findAllCoveredCalls(
     oiMin: params.rules.OI_MIN,
     widthPctMax: params.rules.WIDTH_PCT_MAX,
     widthCeiling: params.rules.WIDTH_CEILING,
-  }).filter(c => isEarningsSafeForDte(params.earningsDate, c.dte));
+  }).filter(c => isEarningsSafeForExpiration(params.earningsDate, c.expirationDate));
 
   // Computed once per symbol (per the params contract), applied uniformly
   // to every candidate discovered for that symbol — mirrors csp-finder.ts's

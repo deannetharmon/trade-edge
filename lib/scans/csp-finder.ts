@@ -23,6 +23,7 @@ import { classifyAccountEligibility, isMarketQualified, type CspAccountEligibili
 import type { SpreadCandidate } from './types';
 import type { CspRulesType } from './constants';
 import type { EligibilityDecision } from '@/lib/decision/types';
+import { currentNewYorkDate, earningsOnOrBeforeExpiration } from './earningsPrecheck';
 
 export interface CspFindParams {
   rules: CspRulesType;
@@ -62,8 +63,8 @@ export interface CspFindParams {
   /** Date-only earnings estimate (YYYY-MM-DD). Each discovered contract is
    * compared with its own expiration; an event on expiration is blocking. */
   earningsDate?: string | null;
-  /** Date-only deterministic scan date. Defaults to today's local calendar
-   * date. Primarily injected by tests and persisted scan replays. */
+  /** Date-only deterministic scan date. Defaults to today's New York market
+   * calendar date. Primarily injected by tests and persisted scan replays. */
   asOfDate?: string;
   /** Current IVR, used only to produce a low-premium advisory warning. */
   ivr?: number | null;
@@ -137,28 +138,13 @@ function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number, ivr: number | 
   return warnings;
 }
 
-function localDateOnly(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function isDateOnly(value: string | null | undefined): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
-}
-
-/** Candidate-specific, date-only event classification. */
+/** Candidate-specific earnings classification on the New York date basis. */
 export function earningsWithinCspExpiration(
   earningsDate: string | null | undefined,
   expirationDate: string,
-  asOfDate = localDateOnly(),
+  asOfDate = currentNewYorkDate(),
 ): boolean | null {
-  if (!earningsDate) return false;
-  if (!isDateOnly(earningsDate) || !isDateOnly(expirationDate) || !isDateOnly(asOfDate)) return null;
-  if (earningsDate < asOfDate) return false;
-  return earningsDate <= expirationDate;
+  return earningsOnOrBeforeExpiration(earningsDate, expirationDate, asOfDate);
 }
 
 function marketQualificationFor(

@@ -72,6 +72,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
+import { earningsOnOrBeforeExpiration, evaluateEarningsPrecheck } from '@/lib/scans/earningsPrecheck';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
 // (normalized, deduped, ordered ticker list) replaces the separate CSP and
 // PMCC ticker boxes; every strategy launcher button reads this same array.
@@ -1252,6 +1253,20 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 // ── Rank Mode — Unfiltered Spread Finder ──────────────────────────────────
 // In rank mode we always want to show the best available spread regardless
 // of rules. Only gates: delta must exist, long leg must exist, credit > 0.
+function buildEarningsPrecheckCheck(
+  earningsInput: unknown,
+  expirations: string[],
+  rules: Pick<RulesType, 'DTE_MIN' | 'DTE_MAX'>,
+): CheckResult {
+  const result = evaluateEarningsPrecheck({ earningsInput, expirations, dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX });
+  if (result.kind === 'none') return { status: 'pass', value: 'None found', reason: 'Safe to trade' };
+  if (result.kind === 'past') return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate!))}` };
+  if (result.kind === 'outside-window') return { status: 'pass', value: `${result.daysUntil}d (${result.earningsDate})`, reason: 'Outside earnings window' };
+  if (result.kind === 'no-eligible-expiration') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}) fall before every expiry in the ${rules.DTE_MIN}-${rules.DTE_MAX}d window: no eligible expiration.` };
+  if (result.kind === 'advisory') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}): expirations on or after ${result.earningsDate} are excluded; earlier expirations remain.` };
+  return { status: 'warn', value: 'Unavailable', reason: 'Could not compare earnings and expiration dates' };
+}
+
 function runCspChecklist(
   symbol: string,
   chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex: boolean; classification?: 'index' | 'etf' | 'stock' },
@@ -1277,14 +1292,7 @@ function runCspChecklist(
   const ivrCheck: CheckResult = { status: ivrEvaluation.status, value: ivrEvaluation.value, reason: ivrEvaluation.reason };
   const ivrMarketDisqualified = ivrEvaluation.marketDisqualified;
 
-  const earningsCheck: CheckResult = !earningsDate
-    ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
-    : (() => {
-        const d = daysUntil(earningsDate);
-        if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-        if (d <= cspRules.DTE_MAX) return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' };
-        return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
-      })();
+  const earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, cspRules);
   // CSP-WORKFLOW-0001 — the search ALWAYS runs now (discovery before
   // classification); IVR/earnings gates are passed in so every discovered
   // candidate is correctly classified DISQUALIFIED_IVR / DISQUALIFIED_EARNINGS
@@ -1411,7 +1419,7 @@ function runCspChecklist(
     // callers) — never by this field alone.
     const qualified = isMarketQualified(r.marketQualification) && c.cspDeltaTargetPassing === true;
     const candidateEarningsCheck: CheckResult = r.earningsWithinExpiration === true
-      ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: 'Earnings on or before this contract expires' }
+      ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: `Earnings ${earningsDate ?? '—'} falls on or before this ${c.dte}d expiry: assignment risk into a binary event.` }
       : r.earningsWithinExpiration === false
         ? { status: 'pass', value: earningsDate ? `${earningsDate} · expires ${c.expiration}` : 'None found', reason: earningsDate ? 'Earnings after this contract expires' : 'Safe to trade' }
         : { status: 'warn', value: earningsDate ?? '—', reason: 'Could not compare earnings and expiration dates' };
@@ -1467,33 +1475,21 @@ function runCcChecklist(
   // candidate's own dte). It also no longer pushes a failReason here —
   // the real, corrected failReason (if any) is pushed below once the
   // actual selected contract's DTE is known.
-  let earningsCheck: CheckResult = !earningsDate
-    ? { status: 'pass', value: 'None found', reason: 'Safe to trade' }
-    : (() => {
-        const d = daysUntil(earningsDate);
-        if (d < 0) return { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-        if (d <= ccRules.DTE_MAX) return { status: 'fail' as const, value: `${d}d (${earningsDate})`, reason: 'Earnings within expiry window' };
-        return { status: 'pass', value: `${d}d (${earningsDate})`, reason: 'Outside earnings window' };
-      })();
+  let earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, ccRules);
 
   const bestCandidate = capacityCheck.status !== 'fail'
     ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
     : null;
 
-  // Re-check earnings against the ACTUAL selected contract's DTE rather
-  // than the ccRules.DTE_MAX ceiling used above — that pre-check ran
-  // before a candidate existed, so it could flag earnings falling safely
-  // AFTER this contract's own expiry as a false positive. Mirrors the
-  // pattern already used in runChecklist (spreads) and runCspChecklist.
+  // Contract eligibility is determined only against this selected expiry.
   if (bestCandidate && earningsDate) {
-    const d = daysUntil(earningsDate);
-    earningsCheck = d < 0
-      ? { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` }
-      : d <= bestCandidate.dte
-        ? { status: 'fail', value: `${d}d (${earningsDate})`, reason: `Falls before this contract's ${bestCandidate.dte}d expiry` }
-        : { status: 'pass', value: `${d}d (${earningsDate})`, reason: `Outside this contract's ${bestCandidate.dte}d expiry` };
+    if (earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration) === true) {
+      earningsCheck = { status: 'fail', value: `${earningsDate} · expires ${bestCandidate.expiration}`, reason: `Earnings ${earningsDate} falls on or before this ${bestCandidate.dte}d expiry: assignment risk into a binary event.` };
+    }
   }
-  if (!bestCandidate && !failReasons.length) failReasons.push(`No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
+  if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
+    ? earningsCheck.reason
+    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
@@ -1517,7 +1513,7 @@ function runCcChecklist(
     : { status: 'pending', value: '—', reason: 'No candidate' };
 
   const qualified = capacityCheck.status === 'pass'
-    && earningsCheck.status === 'pass'
+    && earningsCheck.status !== 'fail'
     && oiCheck.status !== 'fail'
     && bestCandidate !== null;
 
