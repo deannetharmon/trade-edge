@@ -3,10 +3,12 @@
 import type { ScreenResult, SpreadCandidate, TrendResult, RankConfig, DimensionScore, CheckResult } from './types';
 import type { RulesType } from './constants';
 import { RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX } from './constants';
-import { daysUntil, formatDisplayDate, estimateNextEarningsDate, calcSpreadPop, normalizeIv } from './scan-utils';
+import { daysUntil, calcSpreadPop, normalizeIv } from './scan-utils';
 import { findBestICUnfiltered } from './spread-finder';
 import { computeExpectedMove } from './expectedMove';
 import { runChecklist } from './checklist';
+import { buildRankChecks, buildRankEarningsCheck, buildRankFailReasons } from './rankChecks';
+import { deriveQualificationState, RANKED_SPREAD_GATE_KEYS } from './qualificationState';
 
 // Shared with the order-entry warning gate (TradeModal) so the hard-block
 // threshold stays in lockstep with the score instead of drifting.
@@ -430,23 +432,14 @@ export function exploreAllCandidatesForRank(
           // this, Rank mode could silently substitute a different strike
           // than the one its own search actually found.
           const icBestCandidate = candidate;
-          // Recompute earnings against THIS candidate's actual dte -- the
-          // strictOnly call into runChecklist above never set its internal
-          // bestCandidate, so its earnings check is still the generic
-          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
-          const icEarningsCheck: CheckResult = (() => {
-            if (isEtf || !result.earningsDate) return result.checks.earnings;
-            const ed = daysUntil(result.earningsDate);
-            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
-            if (ed <= icBestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${icBestCandidate.dte}d expiry — scored lower in rank mode` };
-            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${icBestCandidate.dte}d expiry` };
-          })();
+          const icEarnings = buildRankEarningsCheck(result.earningsDate, icBestCandidate.expiration, isEtf, result.checks.earnings);
+          const icChecks = buildRankChecks(result.checks, icBestCandidate, appliedRules, icEarnings.check);
           results.push({
             ...result,
             bestCandidate: icBestCandidate,
-            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
-            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
-            checks: { ...result.checks, earnings: icEarningsCheck },
+            qualified: deriveQualificationState(icChecks, RANKED_SPREAD_GATE_KEYS).state === 'qualified',
+            failReasons: buildRankFailReasons(result.failReasons, icEarnings.failReason),
+            checks: icChecks,
           });
           continue;
         }
@@ -514,45 +507,14 @@ export function exploreAllCandidatesForRank(
 
           const syntheticChain = { ...chainData, expirations: [exp], chains: { [exp]: chainItems } };
           const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
-          // Recompute earnings against THIS candidate's actual dte -- the
-          // strictOnly call into runChecklist above never set its internal
-          // bestCandidate, so its earnings check is still the generic
-          // DTE_MAX + 5 buffer text rather than this trade's real expiry.
-          const spreadEarningsCheck: CheckResult = (() => {
-            if (isEtf || !result.earningsDate) return result.checks.earnings;
-            const ed = daysUntil(result.earningsDate);
-            if (ed < 0) return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate))}` };
-            if (ed <= bestCandidate.dte) return { status: 'warn', value: `${ed}d (${result.earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
-            return { status: 'pass', value: `${ed}d (${result.earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
-          })();
+          const spreadEarnings = buildRankEarningsCheck(result.earningsDate, bestCandidate.expiration, isEtf, result.checks.earnings);
+          const spreadChecks = buildRankChecks(result.checks, bestCandidate, appliedRules, spreadEarnings.check);
           results.push({
             ...result,
             bestCandidate,
-            qualified: result.checks.roc.status === 'pass' && result.checks.oi.status !== 'fail',
-            failReasons: result.failReasons.filter(r => !r.includes('qualifying strikes') && !r.includes('No 30-45 DTE')),
-            checks: {
-              ...result.checks,
-              earnings: spreadEarningsCheck,
-              credit: { status: 'pass', value: `$${bestCandidate.credit.toFixed(2)}`, reason: `${(bestCandidate.creditRatio * 100).toFixed(0)}% of width` },
-              delta: { status: 'pass', value: bestCandidate.shortDelta.toFixed(2), reason: 'Short leg delta' },
-              pop: { status: 'pass', value: `${(bestCandidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
-              roc: { status: bestCandidate.roc >= appliedRules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${bestCandidate.roc.toFixed(0)}%`, reason: `Min ${appliedRules.ROC_MIN_SPREAD}%` },
-              oi: (() => {
-              // Gate on the SHORT leg only -- it's the one traded twice
-              // (open + close) and the one carrying assignment risk. The
-              // long leg is protection that typically only transacts as
-              // part of the same combo order, so its OI alone rarely
-              // blocks a clean fill the way thin short-leg OI does.
-              const shortLegOi = bestCandidate.shortOI;
-              return {
-                status: shortLegOi >= appliedRules.OI_MIN ? 'pass' as const : 'fail' as const,
-                value: `${bestCandidate.shortOI}/${bestCandidate.longOI}`,
-                reason: shortLegOi >= appliedRules.OI_MIN
-                  ? `Short leg ≥ ${appliedRules.OI_MIN}`
-                  : `Below OI floor ${appliedRules.OI_MIN} on short leg`,
-              };
-            })(),
-            },
+            qualified: deriveQualificationState(spreadChecks, RANKED_SPREAD_GATE_KEYS).state === 'qualified',
+            failReasons: buildRankFailReasons(result.failReasons, spreadEarnings.failReason),
+            checks: spreadChecks,
           });
         }
       } catch {}
