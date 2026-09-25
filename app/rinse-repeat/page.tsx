@@ -248,17 +248,6 @@ function formatTTReject(data: any): string {
     (Array.isArray(data?.error?.errors) ? data.error.errors.map((e: any) => e.reason ?? e.message ?? JSON.stringify(e)).join('; ') : null) ??
     JSON.stringify(data).slice(0, 300);
 }
-async function ttPost(path: string, token: string, body: unknown) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (res.status === 401) { sessionStorage.removeItem('tt_access_token'); window.location.href = '/login?redirect=/rinse-repeat'; throw new Error('Session expired'); }
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Order rejected (${res.status}): ${formatTTReject(data)}`);
-  return data;
-}
 async function ttPostComplex(path: string, token: string, body: unknown) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -269,23 +258,6 @@ async function ttPostComplex(path: string, token: string, body: unknown) {
   const data = await res.json();
   if (!res.ok) throw new Error(`Complex order rejected (${res.status}): ${formatTTReject(data)}`);
   return data;
-}
-function buildOpenSpreadOrder(
-  underlying: string, expiry: string, optType: 'P' | 'C',
-  shortStrike: number, longStrike: number, quantity: number, credit: number,
-  shortSymbolOverride?: string, longSymbolOverride?: string
-) {
-  const itype = instrType(underlying);
-  const shortSym = shortSymbolOverride ?? buildOccSymbol(underlying, expiry, optType, shortStrike);
-  const longSym  = longSymbolOverride  ?? buildOccSymbol(underlying, expiry, optType, longStrike);
-  return {
-    'order-type': 'Limit', 'time-in-force': 'GTC',
-    price: Math.abs(credit).toFixed(2), 'price-effect': 'Credit',
-    legs: [
-      { symbol: shortSym, quantity, action: 'Sell to Open', 'instrument-type': itype },
-      { symbol: longSym,  quantity, action: 'Buy to Open',  'instrument-type': itype },
-    ],
-  };
 }
 
 
