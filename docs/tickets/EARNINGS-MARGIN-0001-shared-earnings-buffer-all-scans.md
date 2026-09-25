@@ -2,7 +2,7 @@
 
 ## Status
 
-**Decided 2026-09-25 (Ian and Paul lenses, accepted by Dean): CSP and covered call first (phase 1), then Ranked spreads and PMCC (phase 2). Buffer fixed at 10 days for now; a scan control (0 = off) is a later follow-up. **Phase 1 (CSP and covered call) and phase 2a (Ranked spreads) built 2026-09-25 and pushed to `main`. Phase 2b (PMCC) is held: it conflicts with the SCAN-ALIGN-0001D ruling and needs Dean's decision.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25.
+**Decided 2026-09-25 (Ian and Paul lenses, accepted by Dean): CSP and covered call first (phase 1), then Ranked spreads and PMCC (phase 2). Buffer fixed at 10 days for now; a scan control (0 = off) is a later follow-up. **Phase 1 (CSP and covered call) and phase 2a (Ranked spreads) built 2026-09-25 and pushed to `main`. Phase 2b (PMCC): decided 2026-09-25 (Dean, option 1) to leave PMCC as designed. Ticket complete.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25.
 
 ## Problem
 
@@ -44,7 +44,7 @@ The 21-DTE management-date cutoff, the FMP plan gap, and the stale past-date han
 - Test `checklistEarningsBasis.test.ts` updated: 1 and 9 days after expiry warn; 10 days passes.
 - Left unchanged on purpose: `page.tsx` `earningsWithinExpiry` (position-card advisory text about "this position's expiration window"), portfolio position-management call sites, and the `lib/screener.ts` duplicate (follow-up ticket).
 
-## Phase 2b: PMCC (held, needs a ruling)
+## Phase 2b: PMCC (decided: leave as designed)
 
 PMCC already has a designed earnings model (SCAN-ALIGN-0001D, Ian): earnings on or before the short call's expiry removes the call from results; earnings up to 5 NYSE business days after expiry is a **warning-only ambient tag that never affects qualification or ranking** (`lib/scans/earningsExpiryZone.ts`, `EARNINGS_AFTER_EXPIRY_WINDOW_BD = 5`, used by `pmccDecision.ts` and `pmccEarningsRemoval.ts`). A hard 10-day rule would reverse that ruling. Options:
 
@@ -53,4 +53,6 @@ PMCC already has a designed earnings model (SCAN-ALIGN-0001D, Ian): earnings on 
 3. Make the 10 days after expiry a removal like the on-or-before case, reversing the ambient-only ruling.
 
 Other PMCC call sites still on the old one-day rule: `pmccScore.ts:83`, `pmccReadiness.ts:31`, `page.tsx` `pmccEarningsBlocksBestFit`.
+
+**Decision (Dean, 2026-09-25): option 1.** PMCC keeps the SCAN-ALIGN-0001D model unchanged: earnings on or before the short call's expiry removes the call; earnings up to 5 NYSE business days after expiry is an ambient, warning-only tag that never affects qualification or ranking. Reason: a PMCC short call is covered by the long LEAP, so a gap through earnings costs less than on a CSP, and the existing tag already flags it. No PMCC code changes. Revisit only if the earnings-date accuracy problem shows up in PMCC results.
 
