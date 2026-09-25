@@ -8,7 +8,7 @@ export interface EarningsPrecheck {
   daysUntil: number | null;
 }
 
-function calendarDaysBetween(start: string, end: string): number {
+export function calendarDaysBetween(start: string, end: string): number {
   const [startYear, startMonth, startDay] = start.split('-').map(Number);
   const [endYear, endMonth, endDay] = end.split('-').map(Number);
   return Math.round((Date.UTC(endYear, endMonth - 1, endDay) - Date.UTC(startYear, startMonth - 1, startDay)) / 86_400_000);
@@ -18,6 +18,19 @@ function calendarDaysBetween(start: string, end: string): number {
 export function currentNewYorkDate(): string {
   // A zoned ISO string is always accepted by newYorkDateFromAsOf().
   return newYorkDateFromAsOf(new Date().toISOString())!;
+}
+
+/**
+ * Whole New York calendar days from the asOf NY date to dateStr (leading date
+ * of a timestamp-suffixed value). Positive = future, 0 = the NY today,
+ * negative = past. Null when the date or asOf is missing/invalid (a zoneless
+ * asOf datetime is invalid). asOf accepts a NY date string or a zoned instant.
+ */
+export function daysUntilNy(dateStr: unknown, asOf: unknown = currentNewYorkDate()): number | null {
+  const e = normalizeEarningsDate(dateStr);
+  const t = newYorkDateFromAsOf(asOf);
+  if (!e || !t) return null;
+  return calendarDaysBetween(t, e);
 }
 
 /**
