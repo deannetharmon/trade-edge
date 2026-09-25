@@ -14,6 +14,7 @@ import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import { evaluatePmccLifecycle } from '@/lib/scans/pmccLifecycle';
+import { formatStrategyMix } from '@/lib/portfolioReview/strategyMix';
 import { earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
 import {
   resolvePositionStrategyFilterKey,
@@ -2265,7 +2266,7 @@ POSITIONS:
 ${lines.join('\n')}
 
 STRATEGY MIX:
-BPS: ${positions.filter(p => p.strategy === 'BPS').length} | BCS: ${positions.filter(p => p.strategy === 'BCS').length} | IC: ${positions.filter(p => p.strategy === 'IC').length} | Other: ${positions.filter(p => !['BPS','BCS','IC'].includes(p.strategy)).length}
+${formatStrategyMix(positions.map(p => p.strategy))}
 
 SYMBOLS: ${positions.map(p => p.symbol).filter((v, i, a) => a.indexOf(v) === i).join(', ')}
 
