@@ -1419,6 +1419,7 @@ export async function loadPositions(
   const hv30Map: Record<string, number | null> = {};
   const betaMap: Record<string, number | null> = {};
   const earningsMap: Record<string, string | null> = {};
+  const earningsEstimatedMap: Record<string, boolean | null> = {};
   try {
     const underlyingSymbols: string[] = (optionPositions as any[]).map((p: any) => String(p['underlying-symbol'])).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
     const metricsData = await ttFetch(`/market-metrics?symbols=${encodeURIComponent(underlyingSymbols.join(','))}`, token);
@@ -1444,7 +1445,12 @@ export async function loadPositions(
       const earningsRaw = item['earnings'] ?? item['next-earnings-date'] ?? null;
       if (earningsRaw) {
         const eDate = String(earningsRaw?.['expected-report-date'] ?? earningsRaw ?? '');
-        if (eDate && eDate.match(/\d{4}-\d{2}-\d{2}/)) earningsMap[sym] = eDate;
+        if (eDate && eDate.match(/\d{4}-\d{2}-\d{2}/)) {
+          earningsMap[sym] = eDate;
+          // The provider marks a date it has projected rather than confirmed; keep that when it says so.
+          const flag = earningsRaw?.['estimated'];
+          earningsEstimatedMap[sym] = typeof flag === 'boolean' ? flag : null;
+        }
       }
     }
   } catch {}
@@ -2108,6 +2114,9 @@ export async function loadPositions(
       // where one shows and the other doesn't.
       popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
+      // Display only: the next earnings date whether or not it falls inside this position's life (earningsDate above stays the risk input).
+      nextEarningsDate: rawEarningsDate,
+      nextEarningsEstimated: earningsEstimatedMap[symbol] ?? null,
       // GTC-SCOPE-0001: all four gtc* fields now derive from ONE
       // position-scoped, profit-target-only match instead of two
       // independent (and differently-scoped) lookups. Previously hasGtc

@@ -255,6 +255,10 @@ export interface Position {
   theta: number | null;
   gamma: number | null;
   earningsDate: string | null; // next earnings only if on/before option expiration
+  /** Display only: the underlying's next earnings date (known or provider-estimated), whether or not it is before expiration. */
+  nextEarningsDate?: string | null;
+  /** True when the provider marks that date as estimated; null when it does not say. */
+  nextEarningsEstimated?: boolean | null;
   healthScore?: PositionHealthScore;
   // PI-0014: purely observational mid vs. marketable valuation evidence
   // (slippage cost, liquidity tier). Null when currentValue or closeValue is
