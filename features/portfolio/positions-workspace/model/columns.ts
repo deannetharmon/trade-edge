@@ -3,7 +3,7 @@ import type { AnalysisColumnId, AnalysisViewId } from './types';
 export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: string; group: string }> = [
   { id: 'identity', label: 'Position', group: 'Position' },
   { id: 'dates', label: 'Dates', group: 'Position' },
-  { id: 'underlying', label: 'Price vs Strike', group: 'Position' },
+  { id: 'underlying', label: 'Price Change', group: 'Position' },
   { id: 'strike', label: 'Strike / BE', group: 'Position' },
   { id: 'capital', label: 'Capital', group: 'Economics' },
   { id: 'entry', label: 'Entry Credit / Debit', group: 'Economics' },
