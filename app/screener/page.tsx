@@ -13102,12 +13102,12 @@ export default function Home() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     {canExportPdf && (
-                      <div className="relative">
-                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${th.border} ${th.textMuted} hover:border-emerald-500/50`}>
-                          Export PDF
+                      <div className="relative order-last ml-auto">
+                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className="text-[11px] px-4 py-1.5 rounded-md border font-bold tracking-wide transition-colors border-emerald-400 bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                          ↓ Export PDF
                         </button>
                         {showPdfExportMenu && (
-                          <div role="menu" aria-label="PDF export scope" className={`absolute left-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
+                          <div role="menu" aria-label="PDF export scope" className={`absolute right-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
                             <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Full completed scan</span><span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span></button>
                             <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Current filtered view</span><span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span></button>
                             <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
