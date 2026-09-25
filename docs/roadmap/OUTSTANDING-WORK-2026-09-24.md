@@ -63,6 +63,13 @@ equity holdings the prerequisite for coverage, capacity, PMCC, and scanner
 work. That foundation is already implemented on `main`; it must be accepted
 from evidence before downstream work begins.
 
+**Deployment status (2026-09-24):** The snapshot, equity-display, and
+Covered Call shadow-parity configuration are deployed to Production at
+`https://options-screener-dun.vercel.app`. The legacy Covered Call capacity
+path remains authoritative. Gate A is still pending because the active account
+has no stock holdings and therefore cannot generate a genuine Covered Call
+shadow-parity sample; no synthetic production evidence will be used.
+
 Complete Gate A with the existing technical specification, implementation
 reports, tests, and a production shadow-parity review:
 
