@@ -144,6 +144,9 @@ function qualifyingCspChain(symbol: string) {
 }
 
 beforeEach(() => {
+  // Freeze only Date (timers stay real for waitFor/userEvent) so fixture expirations
+  // and the app's DTE math agree regardless of when the suite runs (UTC rollover).
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-06-15T12:00:00Z') });
   window.localStorage.clear();
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
   getMarketMetricsMock.mockReset().mockResolvedValue([]);
@@ -153,6 +156,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
