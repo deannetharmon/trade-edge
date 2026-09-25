@@ -409,8 +409,14 @@ export function evaluatePmccPairOnDemand(input: {
   criteria: PmccPairingCriteria;
   asOf: Date;
   marketSession: PmccMarketSession;
+  /** Held-long lookup (same rules as the production scan): keys built with heldLongKey(). When the
+   * long leg is in heldLongOccSymbols, the held breakeven floor applies (fails closed without a basis).
+   * Omitted for new-entry lookups, which are unchanged. */
+  heldLongOccSymbols?: ReadonlySet<string>;
+  heldLongBasis?: HeldLongBasisMap;
 }): PmccOnDemandResult {
   const { symbol, underlyingPrice, longChainLeg, shortChainLeg, criteria, asOf, marketSession } = input;
+  const heldLongOccSymbols = input.heldLongOccSymbols ?? new Set<string>();
   validateCriteria(criteria);
 
   const chainMissing = { long: longChainLeg == null, short: shortChainLeg == null };
@@ -419,7 +425,7 @@ export function evaluatePmccPairOnDemand(input: {
   }
 
   const { eligible: eligibleLong, rejected: rejectedLong } =
-    filterLegs('long', [longChainLeg!], symbol, underlyingPrice, criteria, asOf, marketSession);
+    filterLegs('long', [longChainLeg!], symbol, underlyingPrice, criteria, asOf, marketSession, heldLongOccSymbols);
   const { eligible: eligibleShort, rejected: rejectedShort } =
     filterLegs('short', [shortChainLeg!], symbol, underlyingPrice, criteria, asOf, marketSession);
 
@@ -433,7 +439,7 @@ export function evaluatePmccPairOnDemand(input: {
     };
   }
 
-  const { pair, structurallyValid } = evaluatePair(eligibleLong[0], eligibleShort[0], criteria);
+  const { pair, structurallyValid } = evaluatePair(eligibleLong[0], eligibleShort[0], criteria, heldLongOccSymbols, { basis: input.heldLongBasis, spot: underlyingPrice });
   if (pair.qualified) {
     return { outcome: 'qualified', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
   }

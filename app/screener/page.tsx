@@ -58,6 +58,7 @@ import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
+import { heldLongKey as pmccHeldLongKey, readHeldBasis as readPmccHeldBasis } from '@/lib/scans/pmccHeldBreakeven';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
@@ -5746,15 +5747,25 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
             const longChainLeg = adapted.longLegs.find(l => l.expiration === longExpiration && l.strike === longStrike) ?? null;
             const shortChainLeg = adapted.shortLegs.find(l => l.expiration === shortExpiration && l.strike === shortStrike) ?? null;
             const price = await getQuote(result.symbol, token);
+            // Held-long lookup: when the requested long IS this card's held contract, apply the held
+            // breakeven floor exactly as the production scan does (held basis + quantity; fail closed when
+            // missing) and skip the new-entry long-OI floor. Any other long is a new-entry check, unchanged.
+            const heldOcc = heldLong ? pair?.heldLongLeg?.occSymbol : undefined;
+            const heldKey = heldOcc && longChainLeg?.occSymbol && pmccHeldLongKey(longChainLeg.occSymbol) === pmccHeldLongKey(heldOcc)
+              ? pmccHeldLongKey(heldOcc) : null;
             return evaluatePmccPairOnDemand({
               symbol: result.symbol,
               underlyingPrice: price ?? 0,
               longChainLeg, shortChainLeg,
+              ...(heldKey ? {
+                heldLongOccSymbols: new Set([heldKey]),
+                heldLongBasis: new Map([[heldKey, { avgOpen: readPmccHeldBasis(pair?.heldLongLeg?.avgOpenPrice), quantity: pair?.heldLongLeg?.quantity }]]),
+              } : {}),
               criteria: {
                 dte: { shortMin: 0, shortMax: shortDte + 5, longMin: 0, longMax: longDte + 5 },
                 longDelta: DEFAULT_PMCC_LONG_DELTA_RANGE,
                 shortDelta: DEFAULT_PMCC_SHORT_DELTA_RANGE,
-                longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+                longOiMin: heldKey ? 0 : DEFAULT_PMCC_LONG_OI_MIN,
                 shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
                 quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
                 limits: DEFAULT_PMCC_PAIRING_LIMITS,
