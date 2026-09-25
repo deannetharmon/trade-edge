@@ -115,3 +115,34 @@ describe('Stock holdings intent', () => {
     expect(screen.queryByRole('combobox', { name: /Intent for/ })).not.toBeInTheDocument();
   });
 });
+
+describe('Stock holdings symbol cell order and earnings', () => {
+  it('reads: symbol, intent, chart link, then the next earnings date (the same order as the options table)', async () => {
+    const future = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => (
+      String(url).startsWith('/api/tastytrade/proxy')
+        ? { json: async () => ({ data: { items: [{ symbol: 'MRVL', earnings: { 'expected-report-date': future, estimated: true } }] } }) }
+        : { json: async () => ({ intents: {}, bars: [] }) }
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<StockHoldings {...props(holding({}))} intentEnabled earningsEnabled />);
+    const earnings = await screen.findByTestId('stock-next-earnings');
+    expect(earnings).toHaveTextContent(/^Earnings [A-Z][a-z]{2} \d{1,2} \(est\.\) · in 30d$/);
+    const cell = earnings.parentElement!.parentElement!;
+    const intent = screen.getByRole('combobox', { name: 'Intent for MRVL shares' });
+    const chart = screen.getByRole('button', { name: 'Quick chart for MRVL' });
+    const order = [intent, chart, earnings].map(el => Array.from(cell.querySelectorAll('*')).indexOf(el));
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+    expect(fetchMock).toHaveBeenCalledWith('/api/tastytrade/proxy?path=%2Fmarket-metrics%3Fsymbols%3DMRVL', expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it('shows no earnings line when the provider has no date for the symbol', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ data: { items: [{ symbol: 'MRVL' }] }, intents: {} }) }));
+    render(<StockHoldings {...props(holding({}))} intentEnabled earningsEnabled />);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByTestId('stock-next-earnings')).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+});
