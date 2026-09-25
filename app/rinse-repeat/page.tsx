@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { submitRinseRepeatOtocoIfSafe } from '@/lib/rinse-repeat/otocoEntrySafety';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const BASE       = 'https://api.tastytrade.com';
@@ -742,24 +743,17 @@ function EnterTradeModal({ result, th, onClose }: {
 
   const submit = async () => {
     if (!accountNum) { setResult2('error'); setResultMsg('Account not found — try refreshing'); return; }
-    // Pre-flight validation — none of this existed before, and a bad value here
-    // would otherwise only surface as an opaque TastyTrade rejection.
-    if (!(creditNum > 0)) { setResult2('error'); setResultMsg('Entry credit must be greater than $0.00.'); return; }
-    if (!(gtcNum > 0)) { setResult2('error'); setResultMsg('GTC profit price must be greater than $0.00.'); return; }
-    if (!(stopNum > 0)) { setResult2('error'); setResultMsg('Stop price must be greater than $0.00.'); return; }
-    if (gtcNum >= creditNum) { setResult2('error'); setResultMsg(`GTC profit price $${gtcNum.toFixed(2)} must be less than entry credit $${creditNum.toFixed(2)} — it isn't a profit target otherwise.`); return; }
-    if (!(qty > 0)) { setResult2('error'); setResultMsg('Quantity must be at least 1.'); return; }
     setLoading(true); setResult2(null); setResultMsg('');
 
     try {
       const token = await getAccessToken();
       const itype = instrType(profile.symbol);
-
-      // Floor prices at $0.01 — TastyTrade rejects $0.00 limit orders, and thin
-      // spreads combined with tight profit targets can round down to zero.
-      const safeCreditNum = Math.max(parseFloat(creditNum.toFixed(2)), 0.01);
-      const safeGtcNum = Math.max(parseFloat(gtcNum.toFixed(2)), 0.01);
-      const safeStopNum = Math.max(parseFloat(stopNum.toFixed(2)), 0.01);
+      // ES-0003: use the literal user-entered values here. The broker boundary
+      // rejects invalid precision/relationships rather than silently replacing
+      // an invalid value with a candidate default or rounding it into validity.
+      const entryCreditPoints = Number(credit);
+      const profitTargetDebitPoints = Number(gtcPrice);
+      const stopTriggerDebitPoints = Number(stopPrice);
 
       const openLegs = isIC
         ? [
@@ -772,35 +766,23 @@ function EnterTradeModal({ result, th, onClose }: {
             { symbol: c.shortOccSymbol ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.shortStrike), quantity: qty, action: 'Sell to Open' as const, 'instrument-type': itype },
             { symbol: c.longOccSymbol  ?? buildOccSymbol(profile.symbol, c.expiration, optType, c.longStrike),  quantity: qty, action: 'Buy to Open'  as const, 'instrument-type': itype },
           ];
-      const closeLegs = openLegs.map(l => ({
-        ...l,
-        action: l.action === 'Sell to Open' ? 'Buy to Close' as const : 'Sell to Close' as const,
-      }));
-
       // Single atomic OTOCO order — entry (trigger-order) plus the OCO profit/stop
       // bracket (child orders) submitted together in one request. This replaces the
       // previous two-call sequence (separate entry POST, then separate OCO POST),
       // which left a window where the entry could fill with no protection attached
       // if the second call failed for any reason (network blip, rate limit, rejection).
       setPhase('Submitting entry + OCO bracket...');
-      const otocoBody = {
-        type: 'OTOCO',
-        source: 'options-screener',
-        'trigger-order': {
-          'order-type': 'Limit', 'time-in-force': 'GTC',
-          price: safeCreditNum.toFixed(2), 'price-effect': 'Credit',
-          legs: openLegs,
-        },
-        orders: [
-          { 'order-type': 'Limit', 'time-in-force': 'GTC', price: safeGtcNum.toFixed(2), 'price-effect': 'Debit', legs: closeLegs },
-          { 'order-type': 'Stop',  'time-in-force': 'GTC', 'stop-trigger': safeStopNum.toFixed(2), legs: closeLegs },
-        ],
-      };
-      const otocoRes = await ttPostComplex(`/accounts/${accountNum}/complex-orders`, token, otocoBody);
+      const submission = await submitRinseRepeatOtocoIfSafe(
+        { quantity: qty, entryCreditPoints, profitTargetDebitPoints, stopTriggerDebitPoints, openingLegs: openLegs },
+        // The literal broker call must stay inside this gate callback.
+        async otocoBody => ttPostComplex(`/accounts/${accountNum}/complex-orders`, token, otocoBody),
+      );
+      if (!submission.submitted) throw new Error(submission.reason);
+      const otocoRes = submission.result;
       const otocoId = String(otocoRes?.data?.['complex-order']?.id ?? otocoRes?.data?.id ?? 'submitted');
 
       setResult2('success');
-      setResultMsg(`OTOCO #${otocoId} submitted — entry $${safeCreditNum.toFixed(2)} credit, profit target $${safeGtcNum.toFixed(2)}, stop $${safeStopNum.toFixed(2)}`);
+      setResultMsg(`OTOCO #${otocoId} submitted — entry $${entryCreditPoints.toFixed(2)} credit, profit target $${profitTargetDebitPoints.toFixed(2)}, stop $${stopTriggerDebitPoints.toFixed(2)}`);
     } catch (e: any) {
       setResult2('error');
       setResultMsg(e.message ?? 'Failed');

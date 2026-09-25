@@ -32,3 +32,13 @@ Complete inventory of every repository call to `ttPost`, `ttPostComplex`, `ttVal
 - **Item 11** is a newly-discovered, out-of-scope live submission path in an unrelated feature (`app/rinse-repeat/page.tsx`). It is **not fixed by this ticket** and is flagged here for an explicit Product Owner scoping decision (candidate: a future ES-0003, or folded into whatever ticket next touches that page) rather than silently expanded into ES-0002's scope.
 
 No other `ttPost`/`ttPostComplex`/`ttValidateOrder`/`ttDelete` call sites exist in the repository outside of `app/portfolio/page.tsx` and `app/rinse-repeat/page.tsx` (confirmed by a repository-wide `grep -rn` across `*.ts*`, re-run at the time of this report).
+
+## ES-0003 follow-up (2026-09-24)
+
+Inventory item 11 is now guarded by the dedicated
+`submitRinseRepeatOtocoIfSafe` broker boundary. The Rinse & Repeat page passes
+the literal `ttPostComplex` call only as that boundary's callback; the boundary
+validates and constructs the final OTOCO payload, so the page cannot submit a
+separately constructed payload after an independent check. See
+`docs/tickets/ES-0003-rinse-repeat-otoco-entry-safety.md` and
+`lib/rinse-repeat/__tests__/otocoEntrySafety.test.ts`.
