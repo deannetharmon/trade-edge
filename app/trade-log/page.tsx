@@ -17,6 +17,7 @@ import type { CreditSpreadEntrySnapshot, IronCondorEntrySnapshot } from '@/lib/e
 import { buildSnapshotIndex, findSnapshotForTrade } from '@/lib/entry-context/performance';
 import { EntryOverrideChip, entryQualificationCsv, qualificationForTrade } from '@/features/entry-context/EntryOverrideChip';
 import { buildEntryNoteIndex, type EntryNote } from '@/lib/entry-context/entryNote';
+import { TRADE_STRATEGY_FILTER_OPTIONS, TRADE_STRATEGY_ORDER } from '@/lib/tradeLog/strategyOptions';
 
 type EntrySnapshot = CreditSpreadEntrySnapshot | IronCondorEntrySnapshot;
 type SortField = 'closeDate' | 'openDate' | 'symbol' | 'strategy' | 'pnl' | 'pnlPct' | 'holdDays';
@@ -45,7 +46,7 @@ function buildTradeAnalysisPrompt(trades: ClosedTrade[], range: TimeRange): stri
   const avgHold = Math.round(trades.reduce((s, t) => s + t.holdDays, 0) / total);
 
   // By strategy
-  const strategies = ['BPS','BCS','IC','SPREAD','OTHER'] as const;
+  const strategies = TRADE_STRATEGY_ORDER;
   const byStrategy = strategies.map(s => {
     const g = trades.filter(t => t.strategy === s);
     if (g.length === 0) return null;
@@ -823,12 +824,7 @@ export default function TradeLogPage() {
             </div>
             <MultiSelect
               label="Strategies"
-              options={[
-                { value: 'BPS', label: 'BPS' },
-                { value: 'BCS', label: 'BCS' },
-                { value: 'IC',  label: 'IC' },
-                { value: 'OTHER', label: 'Other' },
-              ]}
+              options={TRADE_STRATEGY_FILTER_OPTIONS}
               selected={filterStrategy}
               onChange={v => { setFilterStrategy(v); saveFilter('hunter-tl-f-strategy', v); }}
               th={th}
