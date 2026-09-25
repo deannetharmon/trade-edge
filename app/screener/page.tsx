@@ -103,6 +103,8 @@ import { getTrend } from '@/lib/scans/trend';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/components/ScanHeaderParts';
+import { QualificationBadge } from '@/features/screener/components/QualificationBadge';
+import { countQualificationStates, deriveSpreadQualification } from '@/lib/scans/qualificationState';
 import {
   startScreenerJob, updateScreenerJob, completeScreenerJob, failScreenerJob,
   getScreenerJobState, useScreenerJobState,
@@ -5886,6 +5888,13 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   // Ranking
   const scored = rankConfig ? scoreCandidate(result, rankConfig) : null;
   const light = scored ? trafficLight(scored.score, rankConfig!) : null;
+  // QUAL-STATES-0001: spread cards in Ranked and Targeted lead with Qualified / Caution / Disqualified.
+  // A disqualified row keeps its score as supporting detail but never wears a tier word like "Strong".
+  const qualDerivation = (screenMode === 'rank' || screenMode === 'targeted') ? deriveSpreadQualification(result) : null;
+  const disqualifiedHere = qualDerivation?.state === 'disqualified';
+  const tierLight = light && disqualifiedHere
+    ? { ...light, emoji: '⚪', label: 'not eligible', color: 'text-slate-400', border: 'border-slate-600', bg: 'bg-slate-500/5' }
+    : light;
   // CSP has its own strategy-specific scoring model. The generic rank score
   // remains useful to other strategies, but must never be presented as the
   // CSP score alongside the authoritative value.
@@ -5991,7 +6000,9 @@ const strategyScores = useMemo(() => {
     (cachedEntry as any)?.metrics?.rsi14 ??
     null;
 
-  const scoreBorderL = light
+  const scoreBorderL = qualDerivation?.state === 'disqualified' ? 'border-l-4 border-l-red-500'
+    : qualDerivation?.state === 'caution' ? 'border-l-4 border-l-amber-500'
+    : light
     ? light.emoji === '🟢' ? 'border-l-4 border-l-emerald-500'
     : light.emoji === '🟡' ? 'border-l-4 border-l-yellow-400'
     : light.emoji === '🟠' ? 'border-l-4 border-l-orange-400'
@@ -6130,9 +6141,10 @@ const strategyScores = useMemo(() => {
         </div>
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
-          {isRankMode && scored && light && (
-            <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${light.color} ${light.border} ${light.bg}`}>
-              {light.emoji} {scored.score} — {light.label}
+          {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={result.checks} />}
+          {isRankMode && scored && tierLight && (
+            <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${tierLight.color} ${tierLight.border} ${tierLight.bg}`}>
+              {disqualifiedHere ? `Score ${scored.score} · not eligible` : `${tierLight.emoji} ${scored.score} — ${tierLight.label}`}
             </span>
           )}
           {strategyScores.length > 0 ? (() => {
@@ -6370,10 +6382,10 @@ const strategyScores = useMemo(() => {
           {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{t.reason}</div>}
 
 {/* Score breakdown in rank mode */}
-          {isRankMode && c?.strategy !== 'CSP' && scored && light && (
-            <div className={`border ${light.border} ${light.bg} rounded-lg p-3`}>
+          {isRankMode && c?.strategy !== 'CSP' && scored && tierLight && (
+            <div className={`border ${tierLight.border} ${tierLight.bg} rounded-lg p-3`}>
               <div className="flex items-center justify-between mb-2">
-                <p className={`text-[10px] font-bold ${light.color}`}>{light.emoji} Score {scored.score}/100 — {light.label}</p>
+                <p className={`text-[10px] font-bold ${tierLight.color}`}>{tierLight.emoji} Score {scored.score}/100 — {tierLight.label}</p>
               </div>
               <div className={`grid ${c?.strategy === 'PMCC' ? 'grid-cols-4' : 'grid-cols-7'} gap-2`}>
                 {(c?.strategy === 'PMCC' ? [
@@ -6393,7 +6405,7 @@ const strategyScores = useMemo(() => {
                   <div key={d.label} className="text-center">
                     <p className={`text-[8px] ${th.textFaint} mb-1`}>{d.label}</p>
                     <div className={`h-1 rounded-full bg-slate-700 mb-1`}>
-                      <div className={`h-full rounded-full ${light!.color.replace('text-', 'bg-')}`}
+                      <div className={`h-full rounded-full ${tierLight!.color.replace('text-', 'bg-')}`}
                         style={{ width: `${d.max > 0 ? (d.val / d.max) * 100 : 0}%` }} />
                     </div>
                     <p className={`text-[9px] font-bold ${th.text}`}>{d.val}<span className={`${th.textFaint} font-normal`}>/{d.max}</span></p>
@@ -11273,6 +11285,13 @@ export default function Home() {
     const list = screenMode === 'targeted' ? targetedResults.map(entry => entry.screenResult) : results;
     return { qualified: list.filter(r => r.qualified).length, disqualified: list.filter(r => !r.qualified).length };
   })();
+  // QUAL-STATES-0001: Ranked and Targeted spread scans show three states, always derived from each
+  // row's checks so saved and fresh scans agree.
+  const spreadStateCounts = (() => {
+    if (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') return null;
+    const list = screenMode === 'targeted' ? targetedResults.map(entry => entry.screenResult) : results;
+    return list.length > 0 ? countQualificationStates(list) : null;
+  })();
   const exportPdf = (scope: ScanExportScope) => {
     if (!canExportPdf) return;
     const visibleLeaps = leapsResults.filter(row => {
@@ -11834,13 +11853,13 @@ export default function Home() {
                     </>
                   ) : screenMode === 'targeted' ? (
                     <>
-                      <QualificationCounts qualified={scanHeaderCounts.qualified} disqualified={scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
+                      <QualificationCounts qualified={spreadStateCounts?.qualified ?? scanHeaderCounts.qualified} caution={spreadStateCounts?.caution} disqualified={spreadStateCounts?.disqualified ?? scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
                       <span className="text-teal-400">{targetedResults.length} SETUPS</span>
                       <span className={th.textFaint}>{Array.from(new Set(targetedResults.map(e => e.symbol))).length} SYMBOLS</span>
                     </>
                   ) : (
                     <>
-                      <QualificationCounts qualified={scanHeaderCounts.qualified} disqualified={scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
+                      <QualificationCounts qualified={spreadStateCounts?.qualified ?? scanHeaderCounts.qualified} caution={spreadStateCounts?.caution} disqualified={spreadStateCounts?.disqualified ?? scanHeaderCounts.disqualified} textFaintClassName={th.textFaint} />
                       <RankedScoreTierSummary results={results} rankConfig={rankConfig} />
                     </>
                   )}
@@ -11864,7 +11883,7 @@ export default function Home() {
                       Ranked, Targeted, CSP, CC, PMCC alike) — see
                       lib/screener/scanSession.ts's formatSessionAccountingSummary. */}
                   {activeSession && activeSession.mode === screenMode && (
-                    <AccountingSummaryBar session={activeSession} borderClassName={th.border} textFaintClassName={th.textFaint} />
+                    <AccountingSummaryBar session={activeSession} borderClassName={th.border} textFaintClassName={th.textFaint} stateCounts={spreadStateCounts ?? undefined} />
                   )}
                   {mounted && screenMode === 'targeted' && targetedResults.length > 0 && targetedResultsCachedAt && (
                     <ScanProvenanceChip completedAt={targetedResultsCachedAt} restored />

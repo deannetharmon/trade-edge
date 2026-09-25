@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by Dean 2026-09-25 (all lenses). Phase 0 built and pushed to `main` (full suite 368 files / 5442 tests, real `next build` pass). Phases 1-3 not built.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
+**Approved by Dean 2026-09-25 (all lenses). Phases 0 and 1 built and pushed to `main` (full suite 369 files / 5449 tests, real `next build` pass). Phases 2-3 not built.** Rendered plan: https://claude.ai/artifact/PASofUNTQYxgfYrL78eWKo
 
 ## Problem
 
@@ -31,3 +31,16 @@ Dean's screenshots showed green "Strong" badges and a solid green TRADE THIS on 
 - The override record needs a destination: trade log path not yet traced (phase 2).
 - `page.tsx` `findRankModeCandidatesForSymbol` appears to be unused dead code that still holds the old `qualified: true` and old earnings text; remove in a cleanup ticket after confirming.
 - Quinn: add a caution field to session accounting without changing existing meanings; test the acknowledgment (submit locked until checked, every fail and warning listed); both spread and CSP buttons change together.
+
+## Phase 1: what was built (2026-09-25)
+
+Display only; nothing about what qualifies, and no order path, changed.
+
+- `lib/scans/qualificationState.ts`: `deriveSpreadQualification(result)` (Ranked and Targeted spread rows; null for other strategies) and `countQualificationStates(results)` (always derived from each row's checks, so saved and fresh scans agree; non-spread rows fall back to their qualified flag).
+- `features/screener/components/QualificationBadge.tsx`: the state badge ("Qualified", "Caution: low OI 208/371", "Disqualified: IVR 3.7% below the floor +1 more"); tooltip lists every reason with its check text.
+- Spread cards in Ranked and Targeted (`GenericResultCard`): the state badge leads the badge column; the left border is red for Disqualified and amber for Caution; on a Disqualified row the tier badge becomes "Score 76 · not eligible" (no tier word) in a neutral style, in both the header badge and the expanded score box. Qualified rows keep the tier badge as before.
+- Header counts for Ranked and Targeted: "N QUALIFIED · N CAUTION · N DISQUALIFIED" (`QualificationCounts` shows caution only when given one). The accounting strip shows the same three states for those scans (`AccountingSummaryBar` `stateCounts`); every other scan is unchanged.
+- Tests: `QualificationBadge.test.tsx` (gate descriptions, state text, "+N more", tooltip, spread-only derivation, counts ignoring a stale flag, header and strip caution).
+
+Still true after phase 1: a green TRADE THIS button still appears on Disqualified rows until phase 2; the acknowledgment, the override record and the trade-log link are phase 2. Saved Ranked scans keep their old stored checks (old OI fail, no earnings buffer) until rescanned; their state is derived from those stored checks, so they may read more disqualified than a fresh scan.
+

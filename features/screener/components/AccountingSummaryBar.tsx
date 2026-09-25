@@ -17,6 +17,8 @@ export interface AccountingSummaryBarProps {
   session: ScreenerScanSession;
   borderClassName?: string;
   textFaintClassName?: string;
+  /** QUAL-STATES-0001: when given (Ranked and Targeted spread scans), the bar shows the three states instead of qualified / disqualified. */
+  stateCounts?: { qualified: number; caution: number; disqualified: number };
 }
 
 interface Segment {
@@ -30,6 +32,7 @@ export function AccountingSummaryBar({
   session,
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
+  stateCounts,
 }: AccountingSummaryBarProps) {
   const a = computeSessionAccounting(session);
 
@@ -48,10 +51,18 @@ export function AccountingSummaryBar({
   if (a.skippedCount > 0) {
     segments.push({ key: 'skipped', label: 'skipped', value: a.skippedCount, tooltip: 'Skipped: Selected but not Planned (excluded from scope), or left unresolved after a stop.' });
   }
-  segments.push(
-    { key: 'qualified', label: 'qualified', value: a.qualifiedCandidateCount, tooltip: 'Qualified: candidates that passed every scan-time qualification rule.' },
-    { key: 'disqualified', label: 'disqualified', value: a.disqualifiedCandidateCount, tooltip: 'Disqualified: evaluated candidates that failed one or more scan-time qualification rules.' },
-  );
+  if (stateCounts) {
+    segments.push(
+      { key: 'qualified', label: 'qualified', value: stateCounts.qualified, tooltip: 'Qualified: candidates whose every gate check passed.' },
+      { key: 'caution', label: 'caution', value: stateCounts.caution, tooltip: 'Caution: no failed gate check, at least one warning (for example low open interest).' },
+      { key: 'disqualified', label: 'disqualified', value: stateCounts.disqualified, tooltip: 'Disqualified: candidates with at least one failed gate check.' },
+    );
+  } else {
+    segments.push(
+      { key: 'qualified', label: 'qualified', value: a.qualifiedCandidateCount, tooltip: 'Qualified: candidates that passed every scan-time qualification rule.' },
+      { key: 'disqualified', label: 'disqualified', value: a.disqualifiedCandidateCount, tooltip: 'Disqualified: evaluated candidates that failed one or more scan-time qualification rules.' },
+    );
+  }
   // CSP-WORKFLOW-0001 core correction (BLOCKER-01) — only shown when it
   // diverges from qualifiedCandidateCount (i.e. at least one market-
   // qualified candidate is not account-actionable, today only possible for

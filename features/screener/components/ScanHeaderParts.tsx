@@ -32,16 +32,19 @@ export function ScanProvenanceChip({ completedAt, restored }: ScanProvenanceChip
 
 export interface QualificationCountsProps {
   qualified: number;
+  /** Shown only when provided (scans that have a Caution state). */
+  caution?: number;
   disqualified: number;
   disqualifiedLabel?: string;
   textFaintClassName?: string;
 }
 
 /** The decision-tier lead of every scan header: how many qualified, how many did not. */
-export function QualificationCounts({ qualified, disqualified, disqualifiedLabel = 'DISQUALIFIED', textFaintClassName = 'text-slate-500' }: QualificationCountsProps) {
+export function QualificationCounts({ qualified, caution, disqualified, disqualifiedLabel = 'DISQUALIFIED', textFaintClassName = 'text-slate-500' }: QualificationCountsProps) {
   return (
     <>
       <span className="text-emerald-500">{qualified} QUALIFIED</span>
+      {caution != null && <span className="text-amber-500">{caution} CAUTION</span>}
       <span className={textFaintClassName}>{disqualified} {disqualifiedLabel}</span>
     </>
   );

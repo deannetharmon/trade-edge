@@ -7,7 +7,7 @@
 //   qualified:    every gate check passed
 // Which checks are gates differs by scan; each scan passes its own gate keys.
 
-import type { CheckResult } from './types';
+import type { CheckResult, ScreenResult } from './types';
 
 export type QualificationState = 'qualified' | 'caution' | 'disqualified';
 
@@ -34,4 +34,29 @@ export function deriveQualificationState(
   }
   const state: QualificationState = failing.length > 0 ? 'disqualified' : warning.length > 0 ? 'caution' : 'qualified';
   return { state, failing, warning };
+}
+
+const SPREAD_STRATEGIES = new Set(['BPS', 'BCS', 'IC']);
+
+/** Three-state derivation for a Ranked or Targeted spread result; null for anything else (those scans keep their own model). */
+export function deriveSpreadQualification(result: ScreenResult): QualificationDerivation | null {
+  const strategy = result.bestCandidate?.strategy ?? result.strategy;
+  if (!SPREAD_STRATEGIES.has(strategy) || !result.checks) return null;
+  return deriveQualificationState(result.checks, RANKED_SPREAD_GATE_KEYS);
+}
+
+export interface QualificationStateCounts {
+  qualified: number;
+  caution: number;
+  disqualified: number;
+}
+
+/** Counts by state, always derived from each row's checks so saved and fresh scans agree. Non-spread rows fall back to their qualified flag. */
+export function countQualificationStates(results: readonly ScreenResult[]): QualificationStateCounts {
+  const counts: QualificationStateCounts = { qualified: 0, caution: 0, disqualified: 0 };
+  for (const result of results) {
+    const state = deriveSpreadQualification(result)?.state ?? (result.qualified ? 'qualified' : 'disqualified');
+    counts[state] += 1;
+  }
+  return counts;
 }
