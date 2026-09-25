@@ -8,6 +8,42 @@ import { findBestIC, findBestSpread, findBestICUnfiltered, findBestSpreadUnfilte
 import { assessOiLiquidity } from './oiLiquidity';
 import { daysUntilNy, earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 
+/**
+ * Expected-move context for a short strike. INFORMATION ONLY: it never fails or warns, and it is not part
+ * of qualification. Reasons: at the 0.15-0.25 delta a premium seller normally trades, the short strike is
+ * always inside the 1-SD expected move (a short put only clears it at about 0.11-0.13 delta), so treating
+ * "inside" as a failure or a warning flags every normal trade. `pass` means the strike is outside the
+ * expected move; `pending` (shown as a dash) covers both "inside" and "unavailable", and the text says which.
+ * A short strike exactly at the 1-SD boundary has about 85% probability of expiring worthless, not the
+ * 68% that the two-sided +/-1 SD range suggests.
+ */
+export function evaluateEmClearance(
+  bestCandidate: Pick<SpreadCandidate, 'strategy' | 'expectedMove' | 'shortStrike'> | null,
+  price: number | null,
+): CheckResult {
+  if (!bestCandidate || bestCandidate.expectedMove == null || !(bestCandidate.expectedMove > 0) || price == null || !(price > 0)) {
+    return { status: 'pending', value: '—', reason: 'IVx unavailable for this expiration' };
+  }
+  const em = bestCandidate.expectedMove;
+  const shortStrike = bestCandidate.shortStrike;
+  const emBoundary = bestCandidate.strategy === 'BPS' ? price - em : price + em;
+  const clearancePct = bestCandidate.strategy === 'BPS'
+    ? (emBoundary - shortStrike) / price * 100
+    : (shortStrike - emBoundary) / price * 100;
+  const distance = Math.abs(emBoundary - shortStrike).toFixed(2);
+  const emSign = bestCandidate.strategy === 'BPS' ? '-' : '+';
+  const emLabel = `EM ${emSign}$${em.toFixed(2)} → boundary ${emBoundary.toFixed(2)}`;
+  if (clearancePct >= 0) {
+    return { status: 'pass', value: `$${distance} beyond EM`, reason: `${emLabel}: the short strike is outside the expected move` };
+  }
+  return {
+    status: 'pending',
+    value: `$${distance} inside EM`,
+    reason: `${emLabel}: the short strike is inside the 1-SD expected move, which is normal at 0.15-0.25 delta (probability of profit is under about 85%, not 68%). Information only; it does not affect qualification.`,
+  };
+}
+
+
 export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
   const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
   const isIndex = chainData.isEtfOrIndex ?? false;
@@ -233,31 +269,8 @@ bestCandidate = strategy === 'IC'
         };
       })();
   
-  // ── Expected Move Clearance check ─────────────────────────────────────────
-  const emClearanceCheck: CheckResult = (() => {
-    if (!bestCandidate || bestCandidate.expectedMove == null || price == null) {
-      return { status: 'pending' as const, value: '—', reason: 'IVx unavailable for this expiration' };
-    }
-    const em = bestCandidate.expectedMove;
-    const shortStrike = bestCandidate.shortStrike;
-    const emBoundary = bestCandidate.strategy === 'BPS' ? price - em : price + em;
-    const clearancePct = bestCandidate.strategy === 'BPS'
-      ? (emBoundary - shortStrike) / price * 100
-      : (shortStrike - emBoundary) / price * 100;
-    const clearanceDollar = Math.abs(emBoundary - shortStrike).toFixed(2);
-    const emSign = bestCandidate.strategy === 'BPS' ? '-' : '+';
-    const emLabel = `EM ${emSign}$${em.toFixed(2)} → boundary ${emBoundary.toFixed(2)}`;
-
-    if (clearancePct >= 15) {
-      return { status: 'pass' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — strike well outside expected move` };
-    } else if (clearancePct >= 5) {
-      return { status: 'warn' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — outside but close, one bad day tests this strike` };
-    } else if (clearancePct >= 0) {
-      return { status: 'warn' as const, value: `+$${clearanceDollar} beyond EM`, reason: `${emLabel} — barely outside expected move, high risk` };
-    } else {
-      return { status: 'fail' as const, value: `$${Math.abs(parseFloat(clearanceDollar)).toFixed(2)} INSIDE EM`, reason: `${emLabel} — strike is within the expected move, POP below 68%` };
-    }
-  })();
+  // Expected-move context: information only, never a gate (see evaluateEmClearance).
+  const emClearanceCheck: CheckResult = evaluateEmClearance(bestCandidate, price);
 
   const qualified = ivrCheck.status === 'pass' && earningsCheck.status === 'pass' && oiCheck.status === 'pass' && deltaCheck.status === 'pass' && creditCheck.status === 'pass' && rocCheck.status === 'pass' && popCheck.status === 'pass' && bestCandidate !== null;
 

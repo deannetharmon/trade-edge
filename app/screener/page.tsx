@@ -446,14 +446,6 @@ function getIvxColor(ivx: number | null | undefined): string {
   return 'text-slate-500';                     // quiet — thin premium
 }
 
-function getEmClearanceColor(clearancePct: number | null): string {
-  if (clearancePct == null) return 'text-slate-500';
-  if (clearancePct >= 15) return 'text-emerald-400';   // well outside EM
-  if (clearancePct >= 5)  return 'text-yellow-400';    // outside but close
-  if (clearancePct >= 0)  return 'text-orange-400';    // barely outside
-  return 'text-red-400';                                // inside EM — danger
-}
-
 function calcEmClearancePct(result: { price: number | null; bestCandidate: SpreadCandidate | null }): number | null {
   const c = result.bestCandidate;
   if (!c || (c.strategy !== 'BPS' && c.strategy !== 'BCS')) return null;
@@ -4224,12 +4216,11 @@ function TradeModal({ result, th, onClose, qualification }: {
           <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
             <p className="text-[10px] font-bold tracking-widest text-cyan-300">ENTRY CONTEXT · ADVISORY</p>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Short-strike cushion</span><span className={otmPct == null ? th.textFaint : getOtmColor(otmPct, result.ivr, result.underlyingType === 'etf' || result.underlyingType === 'index')}>{otmPct == null ? 'Unavailable' : `${otmPct.toFixed(1)}% OTM`}</span></div>
-            <div className="flex justify-between text-xs"><span className={th.textFaint}>Expected-move clearance</span><span className={getEmClearanceColor(emClearancePct)}>{emClearancePct == null ? 'Unavailable' : `${emClearancePct >= 0 ? '+' : ''}${emClearancePct.toFixed(1)}% vs EM`}</span></div>
+            <div className="flex justify-between text-xs"><span className={th.textFaint}>Expected move (1 SD)</span><span className={th.textMuted}>{c.expectedMove == null || result.price == null || result.price <= 0 ? 'Unavailable' : `±${(c.expectedMove / result.price * 100).toFixed(1)}%${emClearancePct == null ? '' : ` · strike ${Math.abs(emClearancePct).toFixed(1)}% ${emClearancePct >= 0 ? 'outside' : 'inside'}`}`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Short delta / DTE</span><span className={th.text}>{c.shortDelta != null ? `${Math.abs(c.shortDelta).toFixed(2)} / ${c.dte}d` : `Unavailable / ${c.dte}d`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>IVR</span><span className={result.ivr == null ? th.textFaint : th.text}>{result.ivr == null ? 'Unavailable' : `${result.ivr.toFixed(0)}%`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Earnings</span><span className={result.checks?.earnings && result.checks.earnings.status !== 'pass' ? 'text-amber-300' : th.textFaint}>{result.checks?.earnings?.value ?? (result.earningsDate ?? 'Unavailable')}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Quote evidence</span><span className={c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? th.text : th.textFaint}>{c.shortBid != null && c.shortAsk != null && c.longBid != null && c.longAsk != null ? 'Both legs quoted' : 'Unavailable'}</span></div>
-            {emClearancePct != null && emClearancePct < 0 && <p className="text-[9px] text-red-300">Advisory: the short strike sits inside the modelled expected move.</p>}
             {earningsWithinExpiry && <p className="text-[9px] text-amber-300">Advisory: earnings falls within this position’s expiration window.</p>}
             <p className={`text-[9px] ${th.textFaint}`}>Context informs the entry; it does not predict outcome or block the order.</p>
           </div>
@@ -6395,12 +6386,11 @@ const strategyScores = useMemo(() => {
                       {c.expectedMove != null ? `±$${c.expectedMove.toFixed(2)}` : '—'}
                     </span>
                     {(() => {
+                      // Neutral context: the expected move as a percent of price, to compare with the OTM% in this row.
+                      if (c.expectedMove == null || result.price == null || result.price <= 0) return null;
                       const cp = calcEmClearancePct({ price: result.price, bestCandidate: c });
-                      return cp != null ? (
-                        <span className={`ml-1 text-[10px] font-bold ${getEmClearanceColor(cp)}`}>
-                          {cp >= 0 ? `+${cp.toFixed(1)}%` : `${cp.toFixed(1)}%`}
-                        </span>
-                      ) : null;
+                      const title = cp == null ? undefined : `The short strike is ${Math.abs(cp).toFixed(1)}% of the stock price ${cp >= 0 ? 'outside' : 'inside'} the 1-SD expected move. Compare the move with the OTM% in this row.`;
+                      return <span className={`ml-1 text-[10px] ${th.textMuted}`} title={title}>(±{(c.expectedMove / result.price * 100).toFixed(1)}%)</span>;
                     })()}
                   </div>
                 </div>
@@ -6535,7 +6525,7 @@ const strategyScores = useMemo(() => {
                   <InfoTooltip th={th} text="Compares Implied Volatility (what the market prices in) vs Historical Volatility (what the stock actually moved). When IV > HV you have statistical edge — you are being paid more than the stock historically moves. The bigger the gap, the stronger the sell edge." />
                 )}
                 {key === 'emClearance' && (
-                  <InfoTooltip th={th} text="How far your short strike sits outside the market's expected move. Formula: Price × (IVx/100) × √(DTE/365). Strikes inside the EM have less than 68% POP by definition. Green = 15%+ beyond EM. Yellow = 5–15%. Orange = barely outside. Red = inside EM." />
+                  <InfoTooltip th={th} text="The market's expected move (one standard deviation): Price × IVx × √(DTE/365). A short strike inside it is normal at 0.15–0.25 delta; a short put exactly at the boundary has about 85% probability of expiring worthless. Information only: it never affects qualification." />
                 )}
               </div>
             );
