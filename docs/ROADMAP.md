@@ -8,7 +8,7 @@ SCAN-ALIGN-0001 slices A `PMCC-HELD-BREAKEVEN-0001` and 0001B-1 held-card outcom
 
 ## Now (in build)
 
-- EARNINGS-PRECHECK-0001 (CC and CSP earnings pre-check becomes advisory and per-expiry; Dean's false earnings warning): implemented locally; focused CC/CSP/date tests and type check pass. Local `next build` is blocked only because this environment cannot resolve Google Fonts; Vercel production build remains the release gate. Full-suite completion and Quinn review of the CSP classification path remain required before acceptance.
+- EARNINGS-PRECHECK-0001 (CC and CSP earnings pre-check becomes advisory and per-expiry; Dean's false earnings warning): merged as `1abbcbdf` and live in Production. Focused CC/CSP/date tests and type check pass; Vercel's clean production build passed in 56s (39s post-build). The local font-fetch limitation is therefore not a release blocker. Quinn review of the CSP classification path remains required before ticket acceptance.
 - Otherwise nothing building. Last merged: CSP test made date-independent (`f2806c0`; Date frozen in `CspCandidateDiscovery.test.tsx`; still fails under `TZ=Pacific/Auckland` from a fixture that mixes local `setDate` with UTC `toISOString`, not the UTC-midnight bug; three other tests hardcode a day count next to fixed dates and are only a risk if the code recomputes days from the clock, unchecked).
 
 ## Next (recommended order; scoped or ready to scope)

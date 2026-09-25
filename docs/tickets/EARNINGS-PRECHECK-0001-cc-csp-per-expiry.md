@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implemented 2026-09-24; awaiting clean-environment build and Quinn review.** CC and CSP ship as one small ticket. Focused CC/CSP/date tests and type checking pass. The local `next build` reached only the external Google Fonts fetch and could not resolve it in this environment; Vercel remains the release gate. Full suite and Quinn review of the CSP classification path remain required for acceptance.
+**Implemented and deployed to Production 2026-09-24; awaiting Quinn review.** CC and CSP ship as one small ticket. Focused CC/CSP/date tests and type checking pass. The local `next build` reached only the external Google Fonts fetch and could not resolve it in this environment; Vercel's clean Production build passed in 56s, so the release gate is satisfied. Quinn review of the CSP classification path remains required for ticket acceptance.
 
 ## Problem
 
