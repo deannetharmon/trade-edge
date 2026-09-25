@@ -125,7 +125,7 @@ describe('receipts are built from the registry', () => {
     const groups = byKey(buildCspReceipt(values()));
     expect(groups.search.items).toEqual(['30–45 DTE']);
     expect(groups.search.label).toContain('rescan to change');
-    expect(groups.gates.items).toEqual(['POP ≥ 70%', 'OTM ≥ 8%', 'ROC ≥ 1.5%', 'IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings inside expiration']);
+    expect(groups.gates.items).toEqual(['POP ≥ 70%', 'OTM ≥ 8%', 'ROC ≥ 1.5%', 'IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings buffer after expiry: 10 days']);
     expect(groups.advisory.items).toEqual(['Δ 0.15–0.25 preferred (outside it: not a Best Opportunity)', 'OI 500', 'IVR floor 30%']);
     expect(groups.capital.items).toEqual(['Affordable only off']);
     expect(groups.order).toBeUndefined();
@@ -136,7 +136,7 @@ describe('receipts are built from the registry', () => {
     const groups = byKey(buildCspReceipt(values({ mode: 'rank', popMin: null, otmMin: null, rocMin: null, rankSecondary: 'rocPct' })));
     expect(groups.order.items).toEqual(['Score → ROC %']);
     expect(groups.adjustable.items).toEqual(['POP · OTM · DTE · delta · Exp. IVX · IVR · Put OI chips']);
-    expect(groups.gates.items).toEqual(['IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings inside expiration']);
+    expect(groups.gates.items).toEqual(['IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings buffer after expiry: 10 days']);
     expect(groups.adjustable.rescan).toBe(false);
     expect(groups.order.rescan).toBe(false);
   });

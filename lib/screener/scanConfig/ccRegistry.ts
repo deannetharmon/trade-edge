@@ -199,9 +199,9 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'always',
     summaryGroup: 'always',
-    hint: 'A call that expires on or after the earnings date is excluded, so only calls expiring before earnings qualify. If no earnings date is on file, the check cannot apply.',
+    hint: 'A call that expires within 10 days before the earnings date, or on or after it, is excluded, so only calls expiring at least 10 days before earnings qualify. Earnings dates are estimates that can move earlier. If no earnings date is on file, the check cannot apply.',
     control: { kind: 'info' },
-    summary: () => 'expires before earnings',
+    summary: () => 'expires 10+ days before earnings',
   },
   {
     id: 'capacity',

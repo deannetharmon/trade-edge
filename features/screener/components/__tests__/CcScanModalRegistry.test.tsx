@@ -53,7 +53,7 @@ describe('lifecycle tags say what the engine does', () => {
 
   it('states the earnings rule the right way round, and the cost-basis caveat', () => {
     open();
-    expect(criterion('earnings')).toHaveTextContent(/only calls expiring before earnings qualify/);
+    expect(criterion('earnings')).toHaveTextContent(/only calls expiring at least 10 days before earnings qualify/);
     expect(criterion('earnings')).not.toHaveTextContent(/Later expirations still qualify/);
     expect(criterion('minStrike')).toHaveTextContent(/at or above your cost basis when it is known/);
   });

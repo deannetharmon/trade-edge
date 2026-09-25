@@ -27,7 +27,7 @@ import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { assessOiLiquidity } from './oiLiquidity';
 import { evaluateHybridSpread } from './hybridSpread';
-import { earningsOnOrBeforeExpiration } from './earningsPrecheck';
+import { earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 
 // SCAN-ALIGN-0001C2 -- the warn percent is unused for CC eligibility (CC has no width warning);
 // the shared function only needs it to be well-formed.
@@ -209,7 +209,7 @@ export interface CcFindParams {
 // existed before earnings. Mirrors the pattern already used by CSP/spread
 // checklists and the CC checklist's own post-selection re-check.
 function isEarningsSafeForExpiration(earningsDate: string | null | undefined, expirationDate: string): boolean {
-  return earningsOnOrBeforeExpiration(earningsDate, expirationDate) === false;
+  return earningsOnOrBeforeExpiration(earningsDate, expirationDate, undefined, EARNINGS_MIN_DAYS_AFTER_EXPIRY) === false;
 }
 
 // Returns the single best CC candidate across the DTE window in

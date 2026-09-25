@@ -40,7 +40,7 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.getAllByRole('radio', { name: /^(Rank|Targeted)/i })).toHaveLength(2);
     expect(screen.queryByRole('radio', { name: /^Filter/i })).not.toBeInTheDocument();
     expect(screen.getByText(/A fixed policy, not a setting/i)).toBeInTheDocument();
-    expect(screen.getByText(/A candidate whose expiration spans an earnings date is disqualified/i)).toBeInTheDocument();
+    expect(screen.getByText(/A candidate whose expiration spans an earnings date, or expires within 10 days before it, is disqualified/i)).toBeInTheDocument();
   });
 
   it('opens on Rank, with Targeted unselected and Run enabled', async () => {

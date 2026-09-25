@@ -80,7 +80,7 @@ describe('receipts are built from the registry', () => {
     const groups = byKey(buildCcReceipt(values()));
     expect(groups.search.items).toEqual(['21–45 DTE', 'Δ 0.20–0.35', 'width ≤ 10% of mid (min $0.05)', 'cap $0.50']);
     expect(groups.search.label).toContain('rescan to change');
-    expect(groups.always.items).toEqual(['strike ≥ stock price (and cost basis when known)', 'two-sided quotes', 'expires before earnings']);
+    expect(groups.always.items).toEqual(['strike ≥ stock price (and cost basis when known)', 'two-sided quotes', 'expires 10+ days before earnings']);
     expect(groups.advisory.items).toEqual(['OI 100']);
     expect(groups.adjustable.items).toEqual(['POP · OTM · IVR · Call OI chips · sort']);
     expect(groups.capacity.items).toEqual(['3 positions selected · up to 7 contracts']);

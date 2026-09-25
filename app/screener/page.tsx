@@ -73,7 +73,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
-import { daysUntilNy, earningsOnOrBeforeExpiration, evaluateEarningsPrecheck } from '@/lib/scans/earningsPrecheck';
+import { daysUntilNy, earningsOnOrBeforeExpiration, evaluateEarningsPrecheck, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from '@/lib/scans/earningsPrecheck';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
 // (normalized, deduped, ordered ticker list) replaces the separate CSP and
 // PMCC ticker boxes; every strategy launcher button reads this same array.
@@ -1256,17 +1256,24 @@ async function loadExistingPositions(): Promise<ExistingPosition[]> {
 // ── Rank Mode — Unfiltered Spread Finder ──────────────────────────────────
 // In rank mode we always want to show the best available spread regardless
 // of rules. Only gates: delta must exist, long leg must exist, credit > 0.
+// Whole New York calendar days from an expiration to the earnings date (positive = earnings after expiry).
+function earningsGapAfterExpiry(earningsDate: unknown, expiration: string): number {
+  const e = daysUntilNy(earningsDate);
+  const x = daysUntilNy(expiration);
+  return e == null || x == null ? 0 : e - x;
+}
+
 function buildEarningsPrecheckCheck(
   earningsInput: unknown,
   expirations: string[],
   rules: Pick<RulesType, 'DTE_MIN' | 'DTE_MAX'>,
 ): CheckResult {
-  const result = evaluateEarningsPrecheck({ earningsInput, expirations, dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX });
+  const result = evaluateEarningsPrecheck({ earningsInput, expirations, dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX, minDaysAfterExpiry: EARNINGS_MIN_DAYS_AFTER_EXPIRY });
   if (result.kind === 'none') return { status: 'pass', value: 'None found', reason: 'Safe to trade' };
   if (result.kind === 'past') return { status: 'pass', value: `${result.earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(result.earningsDate!))}` };
   if (result.kind === 'outside-window') return { status: 'pass', value: `${result.daysUntil}d (${result.earningsDate})`, reason: 'Outside earnings window' };
-  if (result.kind === 'no-eligible-expiration') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}) fall before every expiry in the ${rules.DTE_MIN}-${rules.DTE_MAX}d window: no eligible expiration.` };
-  if (result.kind === 'advisory') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}): expirations on or after ${result.earningsDate} are excluded; earlier expirations remain.` };
+  if (result.kind === 'no-eligible-expiration') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}) leave no expiry in the ${rules.DTE_MIN}-${rules.DTE_MAX}d window at least ${EARNINGS_MIN_DAYS_AFTER_EXPIRY} days before the report: no eligible expiration.` };
+  if (result.kind === 'advisory') return { status: 'warn', value: `${result.daysUntil}d (${result.earningsDate})`, reason: `Earnings in ${result.daysUntil}d (${result.earningsDate}): expirations within ${EARNINGS_MIN_DAYS_AFTER_EXPIRY} days before ${result.earningsDate}, or after it, are excluded; earlier expirations remain.` };
   return { status: 'warn', value: 'Unavailable', reason: 'Could not compare earnings and expiration dates' };
 }
 
@@ -1422,7 +1429,7 @@ function runCspChecklist(
     // callers) — never by this field alone.
     const qualified = isMarketQualified(r.marketQualification) && c.cspDeltaTargetPassing === true;
     const candidateEarningsCheck: CheckResult = r.earningsWithinExpiration === true
-      ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: `Earnings ${earningsDate ?? '—'} falls on or before this ${c.dte}d expiry: assignment risk into a binary event.` }
+      ? { status: 'fail', value: `${earningsDate ?? '—'} · expires ${c.expiration}`, reason: earningsGapAfterExpiry(earningsDate, c.expiration) > 0 ? `Earnings ${earningsDate ?? '—'} is only ${earningsGapAfterExpiry(earningsDate, c.expiration)}d after this ${c.dte}d expiry, inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer (earnings dates are estimates and can move earlier).` : `Earnings ${earningsDate ?? '—'} falls on or before this ${c.dte}d expiry: assignment risk into a binary event.` }
       : r.earningsWithinExpiration === false
         ? { status: 'pass', value: earningsDate ? `${earningsDate} · expires ${c.expiration}` : 'None found', reason: earningsDate ? 'Earnings after this contract expires' : 'Safe to trade' }
         : { status: 'warn', value: earningsDate ?? '—', reason: 'Could not compare earnings and expiration dates' };
@@ -1486,8 +1493,8 @@ function runCcChecklist(
 
   // Contract eligibility is determined only against this selected expiry.
   if (bestCandidate && earningsDate) {
-    if (earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration) === true) {
-      earningsCheck = { status: 'fail', value: `${earningsDate} · expires ${bestCandidate.expiration}`, reason: `Earnings ${earningsDate} falls on or before this ${bestCandidate.dte}d expiry: assignment risk into a binary event.` };
+    if (earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration, undefined, EARNINGS_MIN_DAYS_AFTER_EXPIRY) === true) {
+      earningsCheck = { status: 'fail', value: `${earningsDate} · expires ${bestCandidate.expiration}`, reason: earningsGapAfterExpiry(earningsDate, bestCandidate.expiration) > 0 ? `Earnings ${earningsDate} is only ${earningsGapAfterExpiry(earningsDate, bestCandidate.expiration)}d after this ${bestCandidate.dte}d expiry, inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer (earnings dates are estimates and can move earlier).` : `Earnings ${earningsDate} falls on or before this ${bestCandidate.dte}d expiry: assignment risk into a binary event.` };
     }
   }
   if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')

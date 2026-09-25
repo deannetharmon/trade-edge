@@ -104,7 +104,7 @@ function redFailureText(): string {
 
 describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earnings advisory, not an earnings failure', () => {
   it('earnings inside the window, nothing in the delta band: advisory copy, generic no-candidate reason, no earnings failure', async () => {
-    const earnings = dayOut(30);
+    const earnings = dayOut(37);
     await scanCc(earnings, ccChain([25, 40], 0.60)); // delta 0.60 is outside 0.20-0.35: nothing qualifies
     // Summary row reason is the generic no-candidate reason, not an earnings reason.
     expect((await screen.findAllByText(/^No qualifying call found in delta 0\.2-0\.35/)).length).toBeGreaterThan(0);
@@ -112,7 +112,7 @@ describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earning
 
     // The earnings row is the advisory: earlier expirations remain.
     expect(await screen.findByText(
-      new RegExp(`Earnings in 30d \\(${earnings}\\): expirations on or after ${earnings} are excluded; earlier expirations remain\\.`),
+      new RegExp(`Earnings in 37d \\(${earnings}\\): expirations within 10 days before ${earnings}, or after it, are excluded; earlier expirations remain\\.`),
     )).toBeInTheDocument();
     // Not an earnings failure: no contract-level failure copy, and nothing earnings-related in any red line.
     expect(screen.queryByText(/falls on or before this/)).not.toBeInTheDocument();
@@ -122,7 +122,7 @@ describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earning
   it('every expiry on or after earnings: the summary row carries the no-eligible-expiration advisory (amber), never the contract-level failure copy', async () => {
     const earnings = dayOut(22);
     await scanCc(earnings, ccChain([25, 40], 0.28));
-    const advisory = `Earnings in 22d (${earnings}) fall before every expiry in the 21-45d window: no eligible expiration.`;
+    const advisory = `Earnings in 22d (${earnings}) leave no expiry in the 21-45d window at least 10 days before the report: no eligible expiration.`;
     const summary = await screen.findByTitle(advisory);
     expect(summary).toHaveTextContent(advisory);
     expect(summary.className).toMatch(/amber/);
@@ -133,7 +133,7 @@ describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earning
   // The guard from the same ruling: a plain advisory while an eligible expiry remains must NOT count as an
   // earnings fail, so no post-earnings re-screen is offered.
   it('earnings inside the window with an eligible earlier expiry: no earnings block, no re-screen offer', async () => {
-    const earnings = dayOut(30);
+    const earnings = dayOut(37);
     await scanCc(earnings, ccChain([25, 40], 0.28));
     await waitFor(() => expect(getChainMock).toHaveBeenCalled());
     expect(screen.queryByTitle(/Schedule re-screen \d+ trading days after earnings/)).not.toBeInTheDocument();

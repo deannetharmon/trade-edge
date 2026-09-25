@@ -2,13 +2,13 @@
 
 // SCAN-EARNINGS-TARGETED-0001: in strict (Targeted) mode the earnings check is decided
 // against the expirations actually evaluated, and earnings must fall at least
-// STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY (10) calendar days after the expiration to clear it.
+// EARNINGS_MIN_DAYS_AFTER_EXPIRY (10) calendar days after the expiration to clear it.
 // Fixed "today" is 2026-09-25 (New York), DTE range 21-45, so the generic buffer is 50 days.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runChecklist } from '../checklist';
 import { DEFAULT_RULES } from '../constants';
-import { earningsOnOrBeforeExpiration, STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY } from '../earningsPrecheck';
+import { earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from '../earningsPrecheck';
 
 const RULES = { ...DEFAULT_RULES, DTE_MIN: 21, DTE_MAX: 45 };
 const TODAY = '2026-09-25';
@@ -31,7 +31,7 @@ describe('strict-mode earnings margin (Targeted)', () => {
   afterEach(() => { vi.useRealTimers(); });
 
   it('uses a 10-day margin', () => {
-    expect(STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY).toBe(10);
+    expect(EARNINGS_MIN_DAYS_AFTER_EXPIRY).toBe(10);
   });
 
   describe('single expiry 2026-10-23', () => {

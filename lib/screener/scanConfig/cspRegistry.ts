@@ -323,7 +323,7 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
   },
   {
     id: 'earnings',
-    label: 'Earnings inside expiration',
+    label: 'Earnings buffer after expiry',
     unit: '',
     lifecycle: 'gate',
     fixed: true,
@@ -331,10 +331,10 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     rescan: true,
     card: 'always',
     summaryGroup: 'gates',
-    hint: 'A candidate whose expiration spans an earnings date is disqualified.',
+    hint: 'A candidate whose expiration spans an earnings date, or expires within 10 days before it, is disqualified. Earnings dates are estimates that can move earlier.',
     off: null,
     control: { kind: 'info' },
-    summary: () => 'earnings inside expiration',
+    summary: () => 'earnings buffer after expiry: 10 days',
   },
   {
     id: 'capital',

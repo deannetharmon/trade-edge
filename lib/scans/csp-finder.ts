@@ -23,7 +23,7 @@ import { classifyAccountEligibility, isMarketQualified, type CspAccountEligibili
 import type { SpreadCandidate } from './types';
 import type { CspRulesType } from './constants';
 import type { EligibilityDecision } from '@/lib/decision/types';
-import { currentNewYorkDate, earningsOnOrBeforeExpiration } from './earningsPrecheck';
+import { currentNewYorkDate, earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 
 export interface CspFindParams {
   rules: CspRulesType;
@@ -138,13 +138,14 @@ function buildAdvisoryWarnings(c: CspRawCandidate, oiMin: number, ivr: number | 
   return warnings;
 }
 
-/** Candidate-specific earnings classification on the New York date basis. */
+/** Candidate-specific earnings classification on the New York date basis. True when earnings
+ * falls on or before the expiration or within EARNINGS_MIN_DAYS_AFTER_EXPIRY days after it. */
 export function earningsWithinCspExpiration(
   earningsDate: string | null | undefined,
   expirationDate: string,
   asOfDate = currentNewYorkDate(),
 ): boolean | null {
-  return earningsOnOrBeforeExpiration(earningsDate, expirationDate, asOfDate);
+  return earningsOnOrBeforeExpiration(earningsDate, expirationDate, asOfDate, EARNINGS_MIN_DAYS_AFTER_EXPIRY);
 }
 
 function marketQualificationFor(

@@ -72,9 +72,9 @@ describe('findAllCsp — NKE required acceptance fixture (multi-candidate)', () 
 
 describe('findAllCsp — candidate-specific earnings and low-IVR policy', () => {
   it('qualifies an expiry before earnings and disqualifies an expiry on/after earnings for the same ticker', () => {
-    const earlier = futureExpiration(35);
-    const earnings = futureExpiration(38);
-    const later = futureExpiration(42);
+    const earlier = futureExpiration(31);
+    const earnings = futureExpiration(42);
+    const later = futureExpiration(44);
     const chain = {
       expirations: [earlier, later],
       chains: {
@@ -91,9 +91,11 @@ describe('findAllCsp — candidate-specific earnings and low-IVR policy', () => 
     expect(lateResult.marketQualification).toBe('DISQUALIFIED_EARNINGS');
   });
 
-  it('treats earnings on expiration as blocking and the day after expiration as clear', () => {
+  it('treats earnings on expiration and inside the 10-day buffer after it as blocking, and 10+ days after as clear', () => {
     expect(earningsWithinCspExpiration('2026-10-02', '2026-10-02', '2026-08-28')).toBe(true);
-    expect(earningsWithinCspExpiration('2026-10-03', '2026-10-02', '2026-08-28')).toBe(false);
+    expect(earningsWithinCspExpiration('2026-10-03', '2026-10-02', '2026-08-28')).toBe(true);
+    expect(earningsWithinCspExpiration('2026-10-11', '2026-10-02', '2026-08-28')).toBe(true);
+    expect(earningsWithinCspExpiration('2026-10-12', '2026-10-02', '2026-08-28')).toBe(false);
     expect(earningsWithinCspExpiration('2026-08-27', '2026-10-02', '2026-08-28')).toBe(false);
     expect(earningsWithinCspExpiration(null, '2026-10-02', '2026-08-28')).toBe(false);
   });

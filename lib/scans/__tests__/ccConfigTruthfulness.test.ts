@@ -151,9 +151,14 @@ describe('earnings excludes a call that expires on or after the earnings date', 
     expect(find(chain(), { earningsDate: isoDate(-5) })?.shortStrike).toBe(105);
   });
 
-  it('excludes only the calls that span earnings, not the whole symbol', () => {
+  it('excludes only the calls that span earnings or fall inside the 10-day buffer, not the whole symbol', () => {
     const two = chainOf([{ dte: 25, calls: [good(105)] }, { dte: 40, calls: [good(110)] }]);
-    expect(find(two, { earningsDate: isoDate(30) })?.shortStrike).toBe(105);
+    expect(find(two, { earningsDate: isoDate(37) })?.shortStrike).toBe(105);
+  });
+
+  it('a call that expires 1 to 9 days before earnings is inside the 10-day buffer and excluded', () => {
+    expect(find(chain(), { earningsDate: isoDate(31) })).toBeNull();
+    expect(find(chain(), { earningsDate: isoDate(39) })).toBeNull();
   });
 
   it('PINNED CURRENT BEHAVIOR: with no earnings date on file the check cannot apply, so the call qualifies', () => {

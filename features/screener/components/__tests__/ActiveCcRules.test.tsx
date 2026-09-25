@@ -11,7 +11,7 @@ describe('ActiveCcRules: the covered-call result receipt', () => {
     const receipt = screen.getByTestId('active-cc-rules');
     expect(receipt).toHaveTextContent('Search range · rescan to change');
     expect(receipt).toHaveTextContent('30–45 DTE · Δ 0.20–0.35 · width ≤ 5% of mid (min $0.05) · cap $0.30');
-    expect(receipt).toHaveTextContent('strike ≥ stock price (and cost basis when known) · two-sided quotes · expires before earnings');
+    expect(receipt).toHaveTextContent('strike ≥ stock price (and cost basis when known) · two-sided quotes · expires 10+ days before earnings');
     expect(receipt).toHaveTextContent('OI 100');
     expect(receipt).toHaveTextContent('POP · OTM · IVR · Call OI chips · sort');
   });

@@ -55,10 +55,12 @@ export function earningsOnOrBeforeExpiration(
   return calendarDaysBetween(expirationDate, earningsDate) < minDaysAfterExpiry;
 }
 
-/** SCAN-EARNINGS-TARGETED-0001: Targeted (strict) scans require earnings to
- * fall at least this many calendar days after the trade's expiration, because
- * upstream earnings dates are estimates that can move earlier by about a week. */
-export const STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY = 10;
+/** SCAN-EARNINGS-TARGETED-0001 / EARNINGS-MARGIN-0001: earnings must fall at least
+ * this many calendar days after a trade's expiration to be clear of it, because
+ * upstream earnings dates are estimates that can move earlier by about a week.
+ * Applied by Targeted spreads, CSP and covered call; other scans still use the
+ * default of 1 (earnings on or before expiry) until phase 2. */
+export const EARNINGS_MIN_DAYS_AFTER_EXPIRY = 10;
 
 /**
  * Symbol-level context only. It is advisory: contract eligibility is decided
@@ -70,12 +72,14 @@ export function evaluateEarningsPrecheck({
   dteMin,
   dteMax,
   asOfDate = currentNewYorkDate(),
+  minDaysAfterExpiry = 1,
 }: {
   earningsInput: unknown;
   expirations: string[];
   dteMin: number;
   dteMax: number;
   asOfDate?: string;
+  minDaysAfterExpiry?: number;
 }): EarningsPrecheck {
   if (earningsInput == null || earningsInput === '') return { kind: 'none', earningsDate: null, daysUntil: null };
   const earningsDate = normalizeEarningsDate(earningsInput);
@@ -84,7 +88,7 @@ export function evaluateEarningsPrecheck({
 
   const daysUntil = calendarDaysBetween(asOf, earningsDate);
   if (daysUntil < 0) return { kind: 'past', earningsDate, daysUntil };
-  if (daysUntil > dteMax) return { kind: 'outside-window', earningsDate, daysUntil };
+  if (daysUntil > dteMax + minDaysAfterExpiry - 1) return { kind: 'outside-window', earningsDate, daysUntil };
 
   const windowExpirations = expirations.filter((expiration) => {
     const validExpiration = parseStrictIsoDate(expiration);
@@ -93,6 +97,6 @@ export function evaluateEarningsPrecheck({
     return dte >= dteMin && dte <= dteMax;
   });
   const allWindowExpirationsBlocked = windowExpirations.length > 0
-    && windowExpirations.every((expiration) => earningsDate <= expiration);
+    && windowExpirations.every((expiration) => calendarDaysBetween(expiration, earningsDate) < minDaysAfterExpiry);
   return { kind: allWindowExpirationsBlocked ? 'no-eligible-expiration' : 'advisory', earningsDate, daysUntil };
 }
