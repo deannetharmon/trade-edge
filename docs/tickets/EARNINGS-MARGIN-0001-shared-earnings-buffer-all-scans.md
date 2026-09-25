@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft. Needs Dean's ruling and Diane's copy. Not approved, not built.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25 (Ian and Paul lenses).
+**Decided 2026-09-25 (Ian and Paul lenses, accepted by Dean): CSP and covered call first (phase 1), then Ranked spreads and PMCC (phase 2). Buffer fixed at 10 days for now; a scan control (0 = off) is a later follow-up. Not built.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25.
 
 ## Problem
 
@@ -18,12 +18,12 @@
 
 Tightens those scans versus today: about 10 days of each roughly 90-day earnings cycle stop qualifying for a given symbol. Ranked currently only warns on earnings inside expiry, so the margin zone should get the same treatment as inside-expiry (warn in Rank mode, fail in strict).
 
-## Open questions
+## Decisions
 
-- Dean: default 10 for all, or per strategy?
-- Dean: user-adjustable setting now or later?
-- Diane: rules-panel copy and the pass/fail reason wording ("Earnings 12d after expiry").
-- Ian: rollout order and whether PMCC short calls use the same margin.
+- Rollout order: CSP, then covered call (phase 1); Ranked spreads and PMCC (phase 2).
+- The buffer is fixed at 10 days for now, shown in each Active Rules panel as "Earnings buffer after expiry: 10 days". An adjustable control is a separate later ticket.
+- Ranked currently only warns on earnings inside expiry; the buffer zone gets the same treatment as inside-expiry (warn in Rank mode, fail in strict).
+- Rules-panel copy is small display text; Diane's lens applies inline, no separate mock.
 
 ## Not in this ticket
 
