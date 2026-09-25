@@ -58,6 +58,7 @@ import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
+import { heldLongKey as pmccHeldLongKey, readHeldBasis as readPmccHeldBasis } from '@/lib/scans/pmccHeldBreakeven';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
@@ -1670,6 +1671,14 @@ function CalendarButton({ symbol, strategy, earningsDate, ivr, th }: { symbol: s
   };
   if (scheduled) return <span className="text-[9px] text-emerald-500 border border-emerald-600 rounded px-1.5 py-0.5 font-medium">✓ scheduled {formatDisplayDate(followUpDate)}</span>;
   return <button onClick={handleClick} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium`} title={`Schedule re-screen ${POST_EARNINGS_RESCREEN_DAYS} trading days after earnings (${followUpIso})`}>📅 +{POST_EARNINGS_RESCREEN_DAYS}D post earnings · {formatDisplayDate(followUpDate)}</button>;
+}
+// EARNINGS-PRECHECK-0001 close-out (Ian, 2026-09-24): a covered call with no eligible expiration because
+// earnings precede every in-window expiry is an earnings block; its collapsed disqualified row offers the
+// same post-earnings re-screen as the card path. Scoped to CC.
+function renderCcEarningsRescreen(result: ScreenResult, th: typeof THEMES[Theme]) {
+  if (result.strategy !== 'CC' || !result.earningsDate || daysUntil(result.earningsDate) < 0) return null;
+  if (!result.failReasons.some(f => f.includes('Earnings'))) return null;
+  return <CalendarButton symbol={result.symbol} strategy={result.strategy} earningsDate={result.earningsDate} ivr={result.ivr} th={th} />;
 }
 function EntryCalendarButton({ result, th }: { result: ScreenResult; th: typeof THEMES[Theme]; rules: RulesType; }) {
   const key = `entry-${result.symbol}-${result.bestCandidate?.expiration}`;
@@ -5738,15 +5747,25 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
             const longChainLeg = adapted.longLegs.find(l => l.expiration === longExpiration && l.strike === longStrike) ?? null;
             const shortChainLeg = adapted.shortLegs.find(l => l.expiration === shortExpiration && l.strike === shortStrike) ?? null;
             const price = await getQuote(result.symbol, token);
+            // Held-long lookup: when the requested long IS this card's held contract, apply the held
+            // breakeven floor exactly as the production scan does (held basis + quantity; fail closed when
+            // missing) and skip the new-entry long-OI floor. Any other long is a new-entry check, unchanged.
+            const heldOcc = heldLong ? pair?.heldLongLeg?.occSymbol : undefined;
+            const heldKey = heldOcc && longChainLeg?.occSymbol && pmccHeldLongKey(longChainLeg.occSymbol) === pmccHeldLongKey(heldOcc)
+              ? pmccHeldLongKey(heldOcc) : null;
             return evaluatePmccPairOnDemand({
               symbol: result.symbol,
               underlyingPrice: price ?? 0,
               longChainLeg, shortChainLeg,
+              ...(heldKey ? {
+                heldLongOccSymbols: new Set([heldKey]),
+                heldLongBasis: new Map([[heldKey, { avgOpen: readPmccHeldBasis(pair?.heldLongLeg?.avgOpenPrice), quantity: pair?.heldLongLeg?.quantity }]]),
+              } : {}),
               criteria: {
                 dte: { shortMin: 0, shortMax: shortDte + 5, longMin: 0, longMax: longDte + 5 },
                 longDelta: DEFAULT_PMCC_LONG_DELTA_RANGE,
                 shortDelta: DEFAULT_PMCC_SHORT_DELTA_RANGE,
-                longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
+                longOiMin: heldKey ? 0 : DEFAULT_PMCC_LONG_OI_MIN,
                 shortOiMin: DEFAULT_PMCC_SHORT_OI_MIN,
                 quotePolicy: DEFAULT_PMCC_QUOTE_POLICY,
                 limits: DEFAULT_PMCC_PAIRING_LIMITS,
@@ -12668,6 +12687,7 @@ export default function Home() {
                       borderClassName={th.border}
                       textFaintClassName={th.textFaint}
                       textMutedClassName={th.textMuted}
+                      renderRowAction={r => renderCcEarningsRescreen(r, th)}
                     />
                   )}
                   {activeSession && (activeSession.requestedStrategy === 'csp' || activeSession.mode === 'filter') ? (
@@ -12932,6 +12952,7 @@ export default function Home() {
                     borderClassName={th.border}
                     textFaintClassName={th.textFaint}
                     textMutedClassName={th.textMuted}
+                    renderRowAction={r => renderCcEarningsRescreen(r, th)}
                   />
                   {activeSession && activeSession.mode === 'rank' && (
                     <SymbolOutcomesDisclosure

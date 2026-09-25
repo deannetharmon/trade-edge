@@ -138,4 +138,15 @@ describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earning
     await waitFor(() => expect(getChainMock).toHaveBeenCalled());
     expect(screen.queryByTitle(/Schedule re-screen \d+ trading days after earnings/)).not.toBeInTheDocument();
   });
+
+  // Ian's ruling (2026-09-24): every in-window expiry on or after earnings IS an earnings fail, so the
+  // post-earnings re-screen is offered.
+  it('every expiry on or after earnings: counts as an earnings block and offers the post-earnings re-screen', async () => {
+    const earnings = dayOut(22);
+    await scanCc(earnings, ccChain([25, 40], 0.28));
+    expect((await screen.findAllByTitle(/Schedule re-screen \d+ trading days after earnings/)).length).toBeGreaterThan(0);
+    // The advisory is in failReasons (the field SmartSuggestions earningsFails and hasEarningsBlock read).
+    await userEvent.click(await screen.findByLabelText('Show checks for NKE'));
+    expect(await screen.findByText(/✕ Earnings in 22d/)).toBeInTheDocument();
+  });
 });

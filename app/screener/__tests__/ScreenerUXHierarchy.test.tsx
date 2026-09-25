@@ -19,6 +19,7 @@ import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
+import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS, WARM_FLOW_TIMEOUT_MS } from './helpers/warmScreenerPage';
 
 const getMarketMetricsMock = vi.fn();
 const getChainMock = vi.fn();
@@ -93,9 +94,7 @@ function isBefore(a: Element, b: Element): boolean {
 // exceeds the budget while every later (warm) test passes. Absorb the cold
 // cost once, up front, in a hook with its own generous timeout, by driving the
 // same Ranked flow the first test uses. No test timeout is raised.
-beforeAll(async () => {
-  window.localStorage.clear();
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+beforeAll(() => warmScreenerPage(async () => {
   getMarketMetricsMock.mockReset().mockResolvedValue([]);
   getQuoteMock.mockReset().mockResolvedValue(100);
   getChainMock.mockReset().mockImplementation((symbol: string) =>
@@ -106,11 +105,8 @@ beforeAll(async () => {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
   await userEvent.click(await screen.findByRole('radio', { name: /RANK/ }));
   await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
-  await screen.findByTestId('best-opportunities-shortlist', undefined, { timeout: 15_000 });
-  cleanup();
-  vi.unstubAllGlobals();
-  window.localStorage.clear();
-}, 30_000);
+  await screen.findByTestId('best-opportunities-shortlist', undefined, { timeout: WARM_FLOW_TIMEOUT_MS });
+}), WARM_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
   window.localStorage.clear();

@@ -77,6 +77,8 @@ export function PmccScanModal({
     && draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
     && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0 && draft.widthCeiling >= 0.01
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
+  // Same delta predicate as `valid` above; surfaced so a disabled Run is never silent.
+  const deltaInvalid = !(draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin);
   const field = (key: keyof PmccScanRequest, label: string, step: string) => <label className="flex flex-col gap-1 text-[10px] text-neutral-400"><span>{label}</span><DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>;
   const matchedDeltaPreset = matchRangePreset(draft.shortDeltaMin, draft.shortDeltaMax, PMCC_DELTA_PRESETS);
   const deltaPills: CriterionPill[] = PMCC_DELTA_PRESETS.map(p => ({
@@ -127,6 +129,7 @@ export function PmccScanModal({
       {field('shortDeltaMax', 'Max Δ', '0.01')}
       <div className="col-span-full"><CriterionPills th={th} groupLabel="Delta range quick select" pills={deltaPills} /></div>
       <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-delta-hint">Absolute delta of the short call. Lower = further OTM.</p>
+      {deltaInvalid && <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-delta-invalid">Delta must be between 0.10 and 0.40, and Max at least Min.</p>}
       {field('shortOiMin', 'Short OI min', '1')}
       {field('maxSpreadPct', 'Max spread %', '1')}
       <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-spread-help">Calls with a wider bid/ask gap than this are removed (minimum allowance $0.05).</p>

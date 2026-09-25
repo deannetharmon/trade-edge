@@ -24,7 +24,8 @@ vi.mock('../pmccChainClient', () => ({
   }),
 }));
 
-import { evaluateHeldPmccLiveReadiness } from '../pmccHeldReadinessClient';
+import { evaluateHeldPmccLiveReadiness, hasFailingQuoteGate } from '../pmccHeldReadinessClient';
+import type { PmccDecisionGate } from '../pmccTypes';
 import type { HeldPmccLongCandidate } from '../pmccHeldLeaps';
 
 const OCC = 'GS270618C00720000';
@@ -46,10 +47,8 @@ describe('evaluateHeldPmccLiveReadiness: held floor (W3)', () => {
   it('W3: a quantity 2 LEAP is not review-income-call, and the reason surfaces the multi-lot detail, not the generic no-candidate copy', async () => {
     const result = await evaluateHeldPmccLiveReadiness(held({ quantity: 2 }));
     expect(result.status).not.toBe('review-income-call');
-    // monitorReason is not asserted: the client's /QUOTE|BID_ASK|MARKET/ gate-code regex also matches the
-    // passing QUOTES_READY gate, so any blocked held pair reads 'quote-quality' today (pre-existing, logged
-    // as a finding for 0001B; the reason string below is what the trader sees).
-    expect(result).toMatchObject({ status: 'monitor', reason: 'multi-lot LEAP: cost averaging unverified' });
+    // The passing QUOTES_READY gate must not turn a floor block into a quote-quality label.
+    expect(result).toMatchObject({ status: 'monitor', monitorReason: 'no-qualifying-short-call', reason: 'multi-lot LEAP: cost averaging unverified' });
     expect(result.reason).not.toContain('No qualifying short-call candidate');
   });
 
@@ -63,5 +62,19 @@ describe('evaluateHeldPmccLiveReadiness: held floor (W3)', () => {
     const result = await evaluateHeldPmccLiveReadiness(held({ avgOpenPrice: 358 }));
     expect(result.status).not.toBe('review-income-call');
     expect(result.reason).toBe('Short strike plus bid must exceed held LEAP strike plus cost basis');
+  });
+});
+
+describe('hasFailingQuoteGate (monitorReason classification)', () => {
+  const g = (code: string, status: PmccDecisionGate['status']): PmccDecisionGate => ({ code, status, explanation: '', observedValue: null, threshold: null, policySource: 'test' });
+  it('a passing QUOTES_READY gate is not a quote issue', () => {
+    expect(hasFailingQuoteGate([g('QUOTES_READY', 'pass'), g('SOME_OTHER', 'fail')])).toBe(false);
+  });
+  it('a non-passing quote gate is a quote issue', () => {
+    expect(hasFailingQuoteGate([g('QUOTES_READY', 'pass'), g('QUOTES_NOT_ACTIONABLE', 'unavailable')])).toBe(true);
+    expect(hasFailingQuoteGate([g('BID_ASK_TOO_WIDE', 'fail')])).toBe(true);
+  });
+  it('no gates is not a quote issue', () => {
+    expect(hasFailingQuoteGate([])).toBe(false);
   });
 });

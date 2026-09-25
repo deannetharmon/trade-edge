@@ -7,13 +7,19 @@ import { DEFAULT_PMCC_LONG_DELTA_RANGE, DEFAULT_PMCC_LONG_OI_MIN, DEFAULT_PMCC_P
 import { PMCC_DECISION_POLICY_VERSION } from './pmccDecision';
 import { derivePmccMarketSession, runPmccSymbolProduction } from './pmccProduction';
 import type { HeldPmccLongCandidate } from './pmccHeldLeaps';
-import type { PmccScanSnapshot } from './pmccTypes';
+import type { PmccDecisionGate, PmccScanSnapshot } from './pmccTypes';
 
 export type HeldPmccLiveReadiness =
   | { status: 'review-income-call'; reason: string; asOf: string; candidate: { delta: number; dte: number; openInterest: number; credit: number; spreadPct: number | null; strike: number; expiration: string; occSymbol: string } }
   | { status: 'market-closed'; reason: string; asOf: string }
   | { status: 'monitor'; monitorReason: 'no-qualifying-short-call' | 'quote-quality'; reason: string; asOf: string }
   | { status: 'not-ready'; reason: string; asOf: string };
+
+/** True only when a quote/market gate is NOT passing. A passing QUOTES_READY gate is present on every
+ * decision, so matching gate codes alone would label every blocked held pair as a quote-quality problem. */
+export function hasFailingQuoteGate(gates: readonly PmccDecisionGate[]): boolean {
+  return gates.some(gate => gate.status !== 'pass' && /QUOTE|BID_ASK|MARKET/i.test(gate.code));
+}
 
 /** Runs the same production PMCC evaluator used by the Screener against one
  * exact broker-held LEAPS. It is read-only and intentionally returns a
@@ -50,7 +56,7 @@ export async function evaluateHeldPmccLiveReadiness(held: HeldPmccLongCandidate)
       return { status: 'review-income-call', reason: 'A current short-call candidate meets the PMCC review policy.', asOf: snapshot.asOf, candidate: { delta: pair.shortLeg.delta, dte: pair.shortLeg.dte, openInterest: pair.shortLeg.openInterest as number /* short OI is always finite (SCAN-ALIGN-0001C1) */, credit: pair.shortLeg.executablePrice, spreadPct: pair.shortLeg.quote.spreadPct, strike: pair.shortLeg.strike, expiration: pair.shortLeg.expiration, occSymbol: pair.shortLeg.occSymbol } };
     }
     const gates = result?.pmccDecision?.gates ?? [];
-    const quoteIssue = gates.some(gate => /QUOTE|BID_ASK|MARKET/i.test(gate.code));
+    const quoteIssue = hasFailingQuoteGate(gates);
     return { status: 'monitor', monitorReason: quoteIssue ? 'quote-quality' : 'no-qualifying-short-call', reason: result?.failReasons?.[0] ?? (quoteIssue ? 'Current quote quality is outside the review policy.' : 'No qualifying short-call candidate is currently available.'), asOf: snapshot.asOf };
   } catch (error) {
     return { status: 'not-ready', reason: error instanceof Error ? error.message : 'Market data is unavailable.', asOf: now.toISOString() };

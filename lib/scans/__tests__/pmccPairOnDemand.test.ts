@@ -4,6 +4,7 @@ import {
   DEFAULT_PMCC_QUOTE_POLICY,
 } from '../pmccConfig';
 import { evaluatePmccPairOnDemand, pairPmccCandidates } from '../pmccPairing';
+import { heldLongKey, type HeldLongBasis } from '../pmccHeldBreakeven';
 import type { PmccChainLeg, PmccPairingCriteria } from '../pmccTypes';
 
 const asOf = new Date('2026-08-14T20:00:00.000Z');
@@ -164,5 +165,44 @@ describe('evaluatePmccPairOnDemand', () => {
     // criteria carried over from the prior call.
     const normal = check(longLeg(), shortLeg());
     expect(normal.outcome).toBe('qualified');
+  });
+
+  describe('held long: breakeven floor (PMCC-HELD-BREAKEVEN-0001, on-demand parity)', () => {
+    const heldCheck = (basis: HeldLongBasis | undefined, short: PmccChainLeg = shortLeg()) => {
+      const long = longLeg();
+      const key = heldLongKey(long.occSymbol!);
+      return evaluatePmccPairOnDemand({
+        symbol: 'GS', underlyingPrice: 1037.55,
+        longChainLeg: long, shortChainLeg: short,
+        criteria, asOf, marketSession: 'open',
+        heldLongOccSymbols: new Set([key]),
+        heldLongBasis: basis ? new Map([[key, basis]]) : new Map(),
+      });
+    };
+    const codes = (r: ReturnType<typeof heldCheck>) => (r.pair?.failureReasons ?? []).map(f => f.code);
+
+    it('qualifies when short strike plus bid clears held strike plus basis', () => {
+      const result = heldCheck({ avgOpen: 300, quantity: 1 });
+      expect(codes(result)).not.toContain('SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+      expect(codes(result)).not.toContain('COST_BASIS_UNAVAILABLE');
+    });
+    it('rejects SHORT_NOT_ABOVE_HELD_BREAKEVEN when the short would lock in a loss', () => {
+      const result = heldCheck({ avgOpen: 400, quantity: 1 }); // 720 + 400 = 1120 > 1070 + 22
+      expect(result.outcome).not.toBe('qualified');
+      expect(codes(result)).toContain('SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+    });
+    it('fails closed with COST_BASIS_UNAVAILABLE when the held long has no basis', () => {
+      const result = heldCheck(undefined);
+      expect(result.outcome).not.toBe('qualified');
+      expect(codes(result)).toContain('COST_BASIS_UNAVAILABLE');
+    });
+    it('fails closed with COST_BASIS_UNAVAILABLE for a multi-lot held long', () => {
+      expect(codes(heldCheck({ avgOpen: 300, quantity: 2 }))).toContain('COST_BASIS_UNAVAILABLE');
+    });
+    it('new-entry lookup (no held inputs) applies no held floor', () => {
+      const result = check(longLeg(), shortLeg());
+      expect(result.pair?.failureReasons.map(f => f.code) ?? []).not.toContain('COST_BASIS_UNAVAILABLE');
+      expect(result.pair?.failureReasons.map(f => f.code) ?? []).not.toContain('SHORT_NOT_ABOVE_HELD_BREAKEVEN');
+    });
   });
 });
