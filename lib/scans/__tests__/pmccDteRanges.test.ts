@@ -8,7 +8,7 @@ import {
 describe('PMCC DTE ranges', () => {
   it('uses the product defaults', () => {
     expect(DEFAULT_PMCC_DTE_RANGES).toEqual({
-      shortMin: 21,
+      shortMin: 30,
       shortMax: 45,
       longMin: 180,
       longMax: 730,

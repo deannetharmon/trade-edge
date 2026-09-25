@@ -681,7 +681,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     const oiMin = screen.getByLabelText('Short OI min') as HTMLInputElement;
     const maxSpread = screen.getByLabelText('Max spread %') as HTMLInputElement;
 
-    expect(shortMin.value).toBe('21');
+    expect(shortMin.value).toBe('30');
     expect(shortMax.value).toBe('45');
     expect(deltaMin.value).toBe('0.2');
     expect(deltaMax.value).toBe('0.35');

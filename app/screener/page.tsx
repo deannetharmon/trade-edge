@@ -37,6 +37,7 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
 import { getPmccChain } from '@/lib/scans/pmccChainClient';
 import { buildCreditSpreadEntryFacts } from '@/lib/entry-context/analysis';
 import { availableEvidence, unavailableEvidence } from '@/lib/entry-context/types';
@@ -885,11 +886,10 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
 const PMCC_SHORT_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.shortMin;
 const PMCC_SHORT_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.shortMax;
 
-const PMCC_LONG_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.longMin;
-const PMCC_LONG_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.longMax;
-
-const PMCC_LONG_DTE_SWEET_MIN = 300;
-const PMCC_LONG_DTE_SWEET_MAX = 540;
+// The LEAPS screen's starting filter is the new-entry target (12 to 18 months), not the wide bounds
+// used to evaluate LEAPS already held (DEFAULT_PMCC_DTE_RANGES.longMin/longMax).
+const PMCC_LONG_DTE_MIN = LEAP_ENTRY_DTE_TARGET.min;
+const PMCC_LONG_DTE_MAX = LEAP_ENTRY_DTE_TARGET.max;
 
 
 const RULE_PRESETS = [
@@ -9092,9 +9092,8 @@ export default function Home() {
   const [leapsDteMin, setLeapsDteMin] = useState(PMCC_LONG_DTE_MIN);
   // Ian: min-only DTE let a 280-day and a 900+-day contract sit in the
   // same bucket despite very different theta/roll characteristics.
-  // Default ceiling matches PMCC_LONG_DTE_MAX, the same bound the
-  // broker fetch itself already uses -- nothing previously visible
-  // disappears out of the box.
+  // The defaults are the new-entry target window (LEAP_ENTRY_DTE_TARGET, 12 to 18 months). Contracts
+  // outside it are hidden until the trader widens the DTE chips.
   const [leapsDteMax, setLeapsDteMax] = useState(PMCC_LONG_DTE_MAX);
   const [leapsOiMin, setLeapsOiMin] = useState(DEFAULT_PMCC_LONG_OI_MIN);
   // LEAPS-0003: extrinsic-as-%-of-cost ceiling. The 20% default is the
@@ -13136,7 +13135,7 @@ export default function Home() {
                         since there's no dataset yet to constrain against. */}
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] font-bold ${th.text} shrink-0`}>DTE ≥</span>
-                      {[90, 120, 180, 270, 365]
+                      {LEAPS_DTE_MIN_CHIPS
                         .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
                         .map(v => (
                         <button key={v} onClick={() => setLeapsDteMin(v)} className={chip(leapsDteMin === v)}>{v}</button>
@@ -13144,7 +13143,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] font-bold ${th.text} shrink-0`}>DTE ≤</span>
-                      {[365, 455, 545, 640, 730]
+                      {LEAPS_DTE_MAX_CHIPS
                         .filter(v => !leapsScanBounds || (v >= leapsScanBounds.dteMin && v <= leapsScanBounds.dteMax))
                         .map(v => (
                         <button key={v} onClick={() => setLeapsDteMax(v)} className={chip(leapsDteMax === v)}>{v}</button>

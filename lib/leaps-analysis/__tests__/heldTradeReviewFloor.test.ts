@@ -20,7 +20,7 @@ vi.mock('@/lib/leaps-position-intelligence/entryCapture', () => ({ recordEntryBe
 import { submitHeldPmccShortCallOrder } from '../serverTradeReview';
 
 const LONG_OCC = 'GOOGL 270617C00250000';
-const SHORT_OCC = 'GOOGL 261016C00375000';
+const SHORT_OCC = 'GOOGL 261023C00375000';
 const NOW = '2026-09-21T15:00:00.000Z'; // 11:00 ET, regular session
 const secondsBefore = (seconds: number) => new Date(Date.parse(NOW) - seconds * 1000).toISOString();
 const fetchMock = vi.fn();
@@ -40,7 +40,7 @@ function stubBroker() {
     if (url.includes('/option-chains/')) {
       return json({ data: { items: [{ expirations: [
         { 'expiration-date': '2027-06-17', strikes: [{ 'strike-price': '250', call: LONG_OCC }] },
-        { 'expiration-date': '2026-10-16', strikes: [{ 'strike-price': '375', call: SHORT_OCC }] },
+        { 'expiration-date': '2026-10-23', strikes: [{ 'strike-price': '375', call: SHORT_OCC }] },
       ] }] } });
     }
     if (url.includes('equity-option=')) {

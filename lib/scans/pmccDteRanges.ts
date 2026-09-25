@@ -5,8 +5,11 @@ export interface PmccDteRanges {
   longMax: number;
 }
 
+// shortMin is 30, not 21: a short call opened at 21 DTE is already at the 21-DTE management stop
+// on day one. longMin/longMax are the wide bounds for recognizing and evaluating LEAPS already
+// held; the narrower default for NEW LEAPS entries lives in leapsEntryTargets.ts.
 export const DEFAULT_PMCC_DTE_RANGES: PmccDteRanges = {
-  shortMin: 21,
+  shortMin: 30,
   shortMax: 45,
   longMin: 180,
   longMax: 730,

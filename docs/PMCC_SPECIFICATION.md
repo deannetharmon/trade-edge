@@ -1,5 +1,7 @@
 # Technical Specification: PMCC Scoring Engine
 
+> **Superseded in part (2026-09-25, Dean).** The ranges in this spec are historical. Current defaults: new LEAPS entries 12 to 18 months (365 to 545 days), configured in `lib/scans/leapsEntryTargets.ts`; LEAP delta 0.70 to 0.85 (`DEFAULT_PMCC_LONG_DELTA_RANGE`); short call 30 to 45 DTE (`DEFAULT_PMCC_DTE_RANGES`). The wide 180 to 730 day bounds in `DEFAULT_PMCC_DTE_RANGES` are for evaluating LEAPS already held. The scoring framework below is otherwise unchanged. The LEAPS long-leg line below (delta 0.78 to 0.88, DTE 270 to 400) and the short-call line (delta 0.20 to 0.30, 21 to 45 DTE) do not match the code.
+
 ## Overview & Objective
 Replace the legacy, yield-focused PMCC ranking model with an institutional-grade, multi-dimensional risk-adjusted scoring engine. The primary goal is prioritizing capital preservation and structural safety. All logic must reside in a dedicated module: `lib/scans/pmccScore.ts`.
 
