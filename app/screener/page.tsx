@@ -216,6 +216,7 @@ import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/sc
 // CES-0001 (OE-0002B): this page is a producer, not the owner, of the
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations, failRecommendationsEvaluation, evaluateScreenResultsInBatches } from '@/lib/recommendations';
+import { RsiLine } from '@/components/RsiLine';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -2871,6 +2872,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
             <span className={th.textFaint}>Put</span>
             <span className={th.text}>{c.shortStrike}P exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span>
           </div>
+          <RsiLine symbol={result.symbol} th={th} />
           <div className="flex justify-between text-xs items-center">
             <span className={th.textFaint}>Entry limit / contract</span>
             <div className="flex items-center gap-1">
@@ -4216,6 +4218,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
             <p className="text-[10px] font-bold tracking-widest text-cyan-300">ENTRY CONTEXT · ADVISORY</p>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Short-strike cushion</span><span className={otmPct == null ? th.textFaint : getOtmColor(otmPct, result.ivr, result.underlyingType === 'etf' || result.underlyingType === 'index')}>{otmPct == null ? 'Unavailable' : `${otmPct.toFixed(1)}% OTM`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Expected move (1 SD)</span><span className={th.textMuted}>{c.expectedMove == null || result.price == null || result.price <= 0 ? 'Unavailable' : `±${(c.expectedMove / result.price * 100).toFixed(1)}%${emClearancePct == null ? '' : ` · strike ${Math.abs(emClearancePct).toFixed(1)}% ${emClearancePct >= 0 ? 'outside' : 'inside'}`}`}</span></div>
+            <RsiLine symbol={result.symbol} th={th} />
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Short delta / DTE</span><span className={th.text}>{c.shortDelta != null ? `${Math.abs(c.shortDelta).toFixed(2)} / ${c.dte}d` : `Unavailable / ${c.dte}d`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>IVR</span><span className={result.ivr == null ? th.textFaint : th.text}>{result.ivr == null ? 'Unavailable' : `${result.ivr.toFixed(0)}%`}</span></div>
             <div className="flex justify-between text-xs"><span className={th.textFaint}>Earnings</span><span className={result.checks?.earnings && result.checks.earnings.status !== 'pass' ? 'text-amber-300' : th.textFaint}>{result.checks?.earnings?.value ?? (result.earningsDate ?? 'Unavailable')}</span></div>

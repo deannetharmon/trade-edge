@@ -185,7 +185,7 @@ describe('PositionsWorkspace', () => {
     const next = { ...model, analysisRows: [{ id: withLeg.key, position: withLeg, symbol: withLeg.symbol, strategy: withLeg.strategy, needsAttention: false }] };
     render(<PositionsWorkspace model={next} th={THEMES.dark} getManagementActions={() => ['TAKE_PROFIT']} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    expect(screen.getByRole('columnheader', { name: 'Strike Gap' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Price vs Strike' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
@@ -195,12 +195,12 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();
     expect(screen.getByText('AT-EXP B/E $165.65')).toBeInTheDocument();
     const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
-    // The chart link is the last line of the Position cell, below the contract count, and no longer in Strike Gap.
+    // The chart link is the last line of the Position cell, below the contract count, and no longer in Price vs Strike.
     const positionCellText = chartButton.closest('td')?.textContent ?? '';
     expect(positionCellText).toMatch(/contracts?\s*chart$/);
     expect(positionCellText).not.toContain('OTM');
     const headerTexts = screen.getAllByRole('columnheader').map(header => header.textContent);
-    const strikeGapCell = screen.getByRole('columnheader', { name: 'Strike Gap' }).closest('table')?.querySelectorAll('tbody tr')[0]?.querySelectorAll('td')[headerTexts.indexOf('Strike Gap')];
+    const strikeGapCell = screen.getByRole('columnheader', { name: 'Price vs Strike' }).closest('table')?.querySelectorAll('tbody tr')[0]?.querySelectorAll('td')[headerTexts.indexOf('Price vs Strike')];
     expect(strikeGapCell?.textContent ?? '').not.toContain('chart');
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
     expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested Action'));
