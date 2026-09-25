@@ -1,6 +1,6 @@
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-09-24 (end of day, after `f2806c0`)
+Last updated: 2026-09-25 (after `76da9cb`)
 
 ## Done this session (2026-09-24; all merged to main, production deploys green)
 
