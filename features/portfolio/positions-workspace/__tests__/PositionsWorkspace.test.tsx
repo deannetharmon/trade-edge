@@ -287,6 +287,28 @@ describe('PositionsWorkspace', () => {
     expect(cell).not.toHaveClass('bg-[#171717]');
   });
 
+  it('a bought call shows its extrinsic value and how it moved since entry, in the Strike / BE cell and in Metric Movement (Full Detail)', async () => {
+    const user = userEvent.setup();
+    const leap = { ...position, strategy: 'CALL', quantity: 1, dte: 356, stockPrice: 78.67, stockPriceAtEntry: 69.66, legs: [{ symbol: 'c', optionType: 'C', strikePrice: 67.5, direction: 'Long', quantity: 1, avgOpenPrice: 14.4, currentPrice: 13.63 }] } as unknown as Position;
+    const next = { ...model, analysisRows: [{ id: leap.key, position: leap, symbol: leap.symbol, strategy: leap.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByTestId('extrinsic-now')).toHaveTextContent('Extrinsic $2.46 (18%)');
+    expect(screen.getByTestId('extrinsic-was')).toHaveTextContent('was $12.24 at entry (−$9.78)');
+    await user.click(screen.getByRole('tab', { name: 'Full Detail' }));
+    expect(screen.getByText('Ext')).toBeInTheDocument();
+    expect(screen.getByTestId('extrinsic-now')).toBeInTheDocument();
+  });
+
+  it('shows no extrinsic for a short put or a spread', async () => {
+    const user = userEvent.setup();
+    const put = { ...position, strategy: 'PUT', stockPrice: 200, legs: [{ symbol: 'p', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 9.1 }] } as unknown as Position;
+    const next = { ...model, analysisRows: [{ id: put.key, position: put, symbol: put.symbol, strategy: put.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.queryByTestId('extrinsic-now')).not.toBeInTheDocument();
+  });
+
   it('shows no earnings line when the date is unknown', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
