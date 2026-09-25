@@ -14,7 +14,7 @@ export function describeGate(key: string, check: CheckResult | undefined): strin
   if (!check) return `${key} unavailable`;
   switch (key) {
     case 'ivr': return check.status === 'warn' ? 'IVR unavailable' : `IVR ${check.value} below the floor`;
-    case 'earnings': return check.reason.includes('buffer') ? `earnings inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer` : 'earnings before expiry';
+    case 'earnings': return /buffer|\d+\+ days/.test(check.reason) ? `earnings inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer` : 'earnings before expiry';
     case 'oi': return `low OI ${check.value}`;
     case 'csp-market':
     case 'csp-mode':

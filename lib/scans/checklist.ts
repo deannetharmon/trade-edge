@@ -46,7 +46,15 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
         earningsCheck = { status: 'pass', value: `${d}d (${earningsDate})`, reason: `Earnings ${margin}d after expiry` };
       } else {
         failReasons.push(`Earnings in ${d}d`);
-        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason: `No qualifying ${RULES.DTE_MIN}-${RULES.DTE_MAX}d expiration is ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}+ days before earnings` };
+        // One expiry (every Targeted card): say exactly how far after expiry earnings falls.
+        const onlyExpiryDays = inRangeExpirations.length === 1 ? daysUntilNy(inRangeExpirations[0]) : null;
+        const gap = onlyExpiryDays == null ? null : d - onlyExpiryDays;
+        const reason = gap == null
+          ? `No qualifying ${RULES.DTE_MIN}-${RULES.DTE_MAX}d expiration is ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}+ days before earnings`
+          : gap > 0
+            ? `Earnings ${gap}d after expiry, inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer`
+            : "Earnings on or before this trade's expiry";
+        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason };
       }
     } else if (d < earningsBuffer) {
       if (strictOnly) {

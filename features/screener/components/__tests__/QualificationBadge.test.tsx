@@ -26,6 +26,9 @@ describe('QUAL-STATES-0001 phase 1: state badge', () => {
     expect(describeGate('roc', ck('fail', '6%'))).toBe('ROC 6% below the minimum');
     expect(describeGate('earnings', ck('fail', '34d', 'Earnings 6d after expiry, inside the 10-day buffer'))).toBe('earnings inside the 10-day buffer');
     expect(describeGate('earnings', ck('fail', '20d', "Earnings on or before this trade's expiry"))).toBe('earnings before expiry');
+    // Targeted wording: earnings AFTER expiry but inside the buffer must not read as "before expiry".
+    expect(describeGate('earnings', ck('fail', '40d', 'Earnings 5d after expiry, inside the 10-day buffer'))).toBe('earnings inside the 10-day buffer');
+    expect(describeGate('earnings', ck('fail', '40d', 'No qualifying 21-45d expiration is 10+ days before earnings'))).toBe('earnings inside the 10-day buffer');
   });
 
   it('qualified, caution and disqualified read differently, with "+N more" when several apply', () => {

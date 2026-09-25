@@ -73,8 +73,19 @@ describe('strict-mode earnings margin (Targeted)', () => {
     expect(r.checks.earnings.reason).toBe('Earnings 11d after expiry');
   });
 
-  it('a lone expiry that does not clear earnings fails', () => {
+  it('a lone expiry that does not clear earnings fails and says how far after expiry earnings falls', () => {
     const r = run('2026-11-03', ['2026-10-30']);
+    expect(r.checks.earnings.status).toBe('fail');
+    expect(r.checks.earnings.reason).toBe('Earnings 4d after expiry, inside the 10-day buffer');
+  });
+
+  it('a lone expiry on or after earnings says so plainly', () => {
+    expect(run('2026-10-30', ['2026-10-30']).checks.earnings.reason).toBe("Earnings on or before this trade's expiry");
+    expect(run('2026-10-20', ['2026-10-30']).checks.earnings.reason).toBe("Earnings on or before this trade's expiry");
+  });
+
+  it('several expirations, none clearing: the general reason is kept', () => {
+    const r = run('2026-11-03', ['2026-10-30', '2026-11-02']);
     expect(r.checks.earnings.status).toBe('fail');
     expect(r.checks.earnings.reason).toContain('10+ days before earnings');
   });
