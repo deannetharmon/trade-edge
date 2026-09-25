@@ -1,6 +1,6 @@
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-09-24 (end of day)
+Last updated: 2026-09-24 (end of day, after `f2806c0`)
 
 ## Done this session (2026-09-24; all merged to main, production deploys green)
 
@@ -8,7 +8,7 @@ SCAN-ALIGN-0001 slices A `PMCC-HELD-BREAKEVEN-0001` and 0001B-1 held-card outcom
 
 ## Now (in build)
 
-- Test hygiene: `CspCandidateDiscovery.test.tsx` "CSP-IVR-0001 ... disqualifies every candidate of an unavailable-IVR symbol" looks up a "35 DTE" button and fails after UTC midnight; Dane is freezing the clock in the test (branch `feature/csp-test-date-independent`, test-only). Also scanning for other date-dependent tests.
+- Nothing building. Last merged: CSP test made date-independent (`f2806c0`; Date frozen in `CspCandidateDiscovery.test.tsx`; still fails under `TZ=Pacific/Auckland` from a fixture that mixes local `setDate` with UTC `toISOString`, not the UTC-midnight bug; three other tests hardcode a day count next to fixed dates and are only a risk if the code recomputes days from the clock, unchecked). Ian is ruling on the CC/CSP earnings pre-check (Next #1) before Paul drafts its ticket.
 
 ## Next (recommended order; scoped or ready to scope)
 
