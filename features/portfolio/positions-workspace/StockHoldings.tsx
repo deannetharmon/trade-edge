@@ -15,6 +15,8 @@ import { buildStockHoldingRows, buildStockTotals, isPriceAlertCrossed, stockPric
 import type { SymbolGroupViewModel } from './model/types';
 import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
 import { alignedStockColumns } from './model/stockColumnAlignment';
+import { IntentSelectControl } from './IntentSelect';
+import type { PositionIntent } from '@/lib/portfolio-data/types';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
@@ -98,14 +100,14 @@ function StockAlertEditor({ id, symbol, price, savedAlert, onSave }: { id: strin
 type SaveNote = (accountNumber: string, key: string, note: string) => Promise<void>;
 type SaveAlert = (accountNumber: string, key: string, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 
-function Row({ row, th, chart, gridStyle, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
-  row: StockHoldingRow; chart: ReactNode; gridStyle?: { gridTemplateColumns: string }; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
+function Row({ row, th, chart, intentControl, gridStyle, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
+  row: StockHoldingRow; chart: ReactNode; intentControl: ReactNode; gridStyle?: { gridTemplateColumns: string }; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
 }) {
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
   return (
     <div role="row" style={gridStyle} className={`grid ${COLUMNS} items-start border-t ${th.border}`} data-testid={`stock-row-${row.key}`}>
-      <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span><span className="mt-1 block">{chart}</span></div>
+      <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span><span className="mt-1 block">{chart}</span>{intentControl && <span className="mt-1 block">{intentControl}</span>}</div>
       <div className="p-3 font-mono text-white">{row.shares}{row.sharesNote && <span className={`block font-sans text-[10px] ${th.textFaint}`}>{row.sharesNote}</span>}</div>
       <div className="p-3 font-mono text-white">{row.price != null ? money(row.price) : '—'}</div>
       <div className="p-3 font-mono text-white">{row.avgCost != null ? <>{money(row.avgCost)}<span className={`block font-sans text-[10px] ${th.textFaint}`}>cost {money(row.costBasis ?? 0)}</span></> : <span className="text-amber-300">— <span className="block font-sans text-[10px]">basis incomplete</span></span>}</div>
@@ -142,7 +144,9 @@ function Row({ row, th, chart, gridStyle, savedNote, onSaveNote, savedAlert, onS
   );
 }
 
-export function StockHoldings({ columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
+export function StockHoldings({ intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
+  /** POSITION-INTENT-0001: show the Hold / Wheel / Undecided control on each holding (saved in the same store as option intents). */
+  intentEnabled?: boolean;
   /** Measured widths of the options table above (by column id); when complete, this table lines up with it. */
   columnWidths?: Record<string, number> | null;
   groups: Array<Pick<SymbolGroupViewModel, 'symbol' | 'equities' | 'capacity'>>;
@@ -158,6 +162,19 @@ export function StockHoldings({ columnWidths, groups, quoteAsOf, th, storageKey,
   sellDeps?: SellStockDialogDeps;
 }) {
   const rows = buildStockHoldingRows(groups);
+  // Shares are not option positions, so their intent is saved under the account and holding key in the same store.
+  const [intents, setIntents] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!intentEnabled || typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-intent').then(response => response.json()).then(payload => { if (active && payload?.intents) setIntents(payload.intents); }).catch(() => {});
+    return () => { active = false; };
+  }, [intentEnabled]);
+  const saveIntent = (id: string, intent: PositionIntent) => {
+    setIntents(current => ({ ...current, [id]: intent }));
+    if (typeof fetch !== 'function') return;
+    fetch('/api/position-intent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionKey: id, intent }) }).catch(() => {});
+  };
   const aligned = alignedStockColumns(columnWidths);
   const gridStyle = aligned ? { gridTemplateColumns: aligned.template } : undefined;
   const [sellRow, setSellRow] = useState<StockHoldingRow | null>(null);
@@ -188,6 +205,7 @@ export function StockHoldings({ columnWidths, groups, quoteAsOf, th, storageKey,
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th} gridStyle={gridStyle}
+              intentControl={intentEnabled ? <IntentSelectControl family="STOCK" stored={intents[`${row.accountNumber}::${row.key}`]} ariaLabel={`Intent for ${row.symbol} shares`} onChange={intent => saveIntent(`${row.accountNumber}::${row.key}`, intent)} /> : null}
               chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
                 showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
                 sparkData={chartData[row.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.symbol]: data }))}

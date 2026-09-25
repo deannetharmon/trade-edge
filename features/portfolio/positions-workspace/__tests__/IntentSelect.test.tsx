@@ -27,12 +27,18 @@ describe('IntentSelect', () => {
     expect(optionLabels()).toEqual(['Income', 'Neutral']);
   });
 
-  it('shows nothing for a bought put, a short-dated bought call, or when there is no handler', () => {
-    const { container, rerender } = render(<IntentSelect position={make({ legs: [{ direction: 'Long', optionType: 'P' }] as never })} onIntentChange={() => {}} />);
+  it('a bought put or a short-dated bought call shows Directional / Hedge / Undecided, defaulting to Undecided', () => {
+    const { rerender } = render(<IntentSelect position={make({ intent: 'acquisition', legs: [{ direction: 'Long', optionType: 'P' }] as never })} onIntentChange={() => {}} />);
+    expect(optionLabels()).toEqual(['Directional', 'Hedge', 'Undecided']);
+    expect(screen.getByRole('combobox')).toHaveValue('undecided');
+    rerender(<IntentSelect position={make({ strategy: 'CALL', dte: 60, intent: 'hedge', legs: [{ direction: 'Long', optionType: 'C' }] as never })} onIntentChange={() => {}} />);
+    expect(screen.getByRole('combobox')).toHaveValue('hedge');
+  });
+
+  it('shows nothing without a handler, or for a structure it does not recognize', () => {
+    const { container, rerender } = render(<IntentSelect position={make({})} />);
     expect(container).toBeEmptyDOMElement();
-    rerender(<IntentSelect position={make({ strategy: 'CALL', dte: 60, legs: [{ direction: 'Long', optionType: 'C' }] as never })} onIntentChange={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
-    rerender(<IntentSelect position={make({})} />);
+    rerender(<IntentSelect position={make({ strategy: 'UNKNOWN', legs: [] as never })} onIntentChange={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
 

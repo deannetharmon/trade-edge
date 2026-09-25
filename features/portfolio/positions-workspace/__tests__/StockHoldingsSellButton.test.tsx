@@ -93,3 +93,25 @@ describe('Stock holdings column widths', () => {
     expect(screen.getAllByRole('row')[0].getAttribute('style') ?? '').not.toContain('grid-template-columns');
   });
 });
+
+describe('Stock holdings intent', () => {
+  it('shows Hold / Wheel / Undecided on each holding, loads the saved value, and saves a change under the account and holding key', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: { method?: string }) => (
+      init?.method === 'POST' ? { json: async () => ({ ok: true }) } : { json: async () => ({ intents: { 'ACCT-1::equity:MRVL:long': 'wheel' }, bars: [] }) }
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<StockHoldings {...props(holding({}))} intentEnabled />);
+    const select = screen.getByRole('combobox', { name: 'Intent for MRVL shares' });
+    expect(Array.from(select.querySelectorAll('option')).map(o => o.textContent)).toEqual(['Hold', 'Wheel', 'Undecided']);
+    await vi.waitFor(() => expect(select).toHaveValue('wheel'));
+    await userEvent.selectOptions(select, 'hold');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/position-intent', expect.objectContaining({ method: 'POST', body: JSON.stringify({ positionKey: 'ACCT-1::equity:MRVL:long', intent: 'hold' }) }));
+    expect(select).toHaveValue('hold');
+    vi.unstubAllGlobals();
+  });
+
+  it('shows no intent control unless the workspace turns it on', () => {
+    render(<StockHoldings {...props(holding({}))} />);
+    expect(screen.queryByRole('combobox', { name: /Intent for/ })).not.toBeInTheDocument();
+  });
+});

@@ -41,8 +41,9 @@ export interface PositionLeg {
 // (lone short put -> acquisition, everything else -> income) and overridable
 // per position; persisted in Redis via /api/position-intent.
 // POSITION-INTENT-0001: each strategy shows its own words (see lib/positionIntent/vocabulary.ts): a LEAP uses
-// hold / pmcc / undecided, a lone short put or call uses income / acquisition / wheel / neutral, a spread income / neutral.
-export type PositionIntent = 'income' | 'acquisition' | 'neutral' | 'wheel' | 'hold' | 'pmcc' | 'undecided';
+// hold / pmcc / undecided, a lone short put or call uses income / acquisition / wheel / neutral, a spread income / neutral,
+// a bought put or short-dated bought call directional / hedge / undecided, and shares hold / wheel / undecided.
+export type PositionIntent = 'income' | 'acquisition' | 'neutral' | 'wheel' | 'hold' | 'pmcc' | 'undecided' | 'directional' | 'hedge';
 
 
 export interface Position {

@@ -278,6 +278,15 @@ describe('PositionsWorkspace', () => {
     expect(chart.closest('td')!.textContent!.indexOf('chart')).toBeLessThan(chart.closest('td')!.textContent!.indexOf('Earnings'));
   });
 
+  it('the sticky Position cell uses the page background (black), not the grey card color', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const cell = screen.getByRole('button', { name: 'Quick chart for AAPL' }).closest('td')!;
+    expect(cell).toHaveClass('sticky', 'bg-[#0a0a0a]');
+    expect(cell).not.toHaveClass('bg-[#171717]');
+  });
+
   it('shows no earnings line when the date is unknown', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);

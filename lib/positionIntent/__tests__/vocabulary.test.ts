@@ -11,10 +11,10 @@ describe('intentFamilyFor', () => {
     expect(intentFamilyFor({ strategy: 'CALL', dte: 356, legs: [leg('Long', 'C')] })).toBe('LEAP');
     expect(intentFamilyFor({ strategy: 'CALL', dte: 392, legs: [leg('Long', 'C')] })).toBe('LEAP');
   });
-  it('a bought call with 120 days or fewer left, and any bought put, has no intent to choose', () => {
-    expect(intentFamilyFor({ strategy: 'CALL', dte: 120, legs: [leg('Long', 'C')] })).toBeNull();
-    expect(intentFamilyFor({ strategy: 'PUT', dte: 55, legs: [leg('Long', 'P')] })).toBeNull();
-    expect(intentFamilyFor({ strategy: 'PUT', dte: 500, legs: [leg('Long', 'P')] })).toBeNull();
+  it('a bought call with 120 days or fewer left, and any bought put, uses the directional / hedge words', () => {
+    expect(intentFamilyFor({ strategy: 'CALL', dte: 120, legs: [leg('Long', 'C')] })).toBe('LONG_OPTION');
+    expect(intentFamilyFor({ strategy: 'PUT', dte: 55, legs: [leg('Long', 'P')] })).toBe('LONG_OPTION');
+    expect(intentFamilyFor({ strategy: 'PUT', dte: 500, legs: [leg('Long', 'P')] })).toBe('LONG_OPTION');
   });
   it('a lone short put or short call uses the income / acquire / wheel words', () => {
     expect(intentFamilyFor({ strategy: 'PUT', dte: 30, legs: [leg('Short', 'P')] })).toBe('SHORT_OPTION');
@@ -35,7 +35,9 @@ describe('vocabularies never mix', () => {
     expect(intentOptionsFor('LEAP')).toEqual(['hold', 'pmcc', 'undecided']);
     expect(intentOptionsFor('SHORT_OPTION')).toEqual(['income', 'acquisition', 'wheel', 'neutral']);
     expect(intentOptionsFor('SPREAD')).toEqual(['income', 'neutral']);
-    for (const family of ['LEAP', 'SHORT_OPTION', 'SPREAD'] as const) {
+    expect(intentOptionsFor('LONG_OPTION')).toEqual(['directional', 'hedge', 'undecided']);
+    expect(intentOptionsFor('STOCK')).toEqual(['hold', 'wheel', 'undecided']);
+    for (const family of ['LEAP', 'SHORT_OPTION', 'SPREAD', 'LONG_OPTION', 'STOCK'] as const) {
       for (const option of intentOptionsFor(family)) expect(INTENT_LABELS[option].length).toBeGreaterThan(0);
     }
   });
@@ -54,6 +56,9 @@ describe('normalizeIntentForFamily', () => {
     expect(normalizeIntentForFamily('wheel', 'SPREAD')).toBe('income');
     expect(normalizeIntentForFamily(null, 'LEAP')).toBe('undecided');
     expect(normalizeIntentForFamily(undefined, 'SHORT_OPTION')).toBe('income');
+    expect(normalizeIntentForFamily('acquisition', 'LONG_OPTION')).toBe('undecided');
+    expect(normalizeIntentForFamily('income', 'STOCK')).toBe('undecided');
+    expect(normalizeIntentForFamily('hedge', 'LONG_OPTION')).toBe('hedge');
   });
 });
 
