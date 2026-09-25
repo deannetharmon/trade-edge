@@ -11,7 +11,8 @@ SCAN-ALIGN-0001 slices A `PMCC-HELD-BREAKEVEN-0001` and 0001B-1 held-card outcom
 Merged since the last update (all production deploys green): small-ready bundle (`d63801a`: CC earnings re-screen button on disqualified rows, held pair lookup applies the breakeven floor, shared `warmScreenerPage` helper, readiness label from failing gates only, inline invalid-delta message); **EARNINGS-DATEBASIS-0001** (`50fab51`: New York basis for earnings/expiry-inclusion math at every earnings site; `scan-utils.daysUntil` untouched, so expiration-window DTE stays on the old basis: known temporary split, needs its own ticket); tiny hardening (`48649e0`: warm-up for `CspDefaultDeltaFilter`, strict-expiry boundary tests, 30 OTOCO guard tests, deleted the dead `ttPost` and `buildOpenSpreadOrder`). EARNINGS-PRECHECK-0001 is accepted (Ian ruled, coupling proven, Quinn CSP path confirmed).
 
 Open items:
-- **P1 ES-0003 OTOCO stop child (Ian ruled 2026-09-25: REJECT the plain `Stop` on a multi-leg close; proof first).** Do NOT run Rinse & Repeat live until Dean records the current-shape accept/reject response (dry-run/cert/paper order; broker calls are browser-side). Then a small ticket to switch to Stop Limit (trigger 2x credit, limit trigger x 1.10 capped at width minus credit, `price-effect: Debit`) with fail-closed tests. Details in the ES-0003 ticket. Tests and dead-code removal already merged (`48649e0`).
+- **DEPRIORITIZED by Dean 2026-09-25:** Rinse & Repeat is not a priority feature and the wheel feature is not needed yet (both parked). Do not run Rinse & Repeat live meanwhile (see ES-0003). Focus: verify the core scan, portfolio and order flows work first.
+- **ES-0003 OTOCO stop child (Ian ruled 2026-09-25: REJECT the plain `Stop` on a multi-leg close; proof first).** Do NOT run Rinse & Repeat live until Dean records the current-shape accept/reject response (dry-run/cert/paper order; broker calls are browser-side). Then a small ticket to switch to Stop Limit (trigger 2x credit, limit trigger x 1.10 capped at width minus credit, `price-effect: Debit`) with fail-closed tests. Details in the ES-0003 ticket. Tests and dead-code removal already merged (`48649e0`).
 - **LCC-0001A Gate A:** blocked on a real Covered Call shadow-parity sample; do not start LCC-0001B before it.
 - **EARNINGS-NO-DATE-0001** (Ian ruling 2026-09-24): a missing earnings date is NOT at-risk (passes with "Earnings date unavailable", so ETFs and indices stay clean); a present-but-unparseable date should be labeled distinctly ("Earnings date unparseable") or fail toward at-risk (log first if it currently shows the same text as the ETF case; not worth a hotfix); a missing `asOf` fails toward at-risk; any caution tag is ambient weight, never a decision-tier fail.
 
@@ -44,6 +45,7 @@ Open items:
 
 ## Parked / deferred (with why, and what would unstick it)
 
+- Rinse & Repeat OTOCO stop proof and the wheel / wheel-simulator features: parked by Dean 2026-09-25 (not needed yet). Unstick: Dean decides to use Rinse & Repeat live (then: dry-run proof of the multi-leg stop shape per ES-0003, then the Stop Limit ticket).
 - SCAN-ALIGN-0001F2: DONE (moved out of Parked; merged `a34098d`).
 - LEAPS-ADVISOR-0001B: scoped, not built; no ticket file in docs/tickets/. Unstick: team go-ahead, or a re-scope decision. Gates F2.
 - PMCC-ASSIGNMENT-RISK-0001: draft. Short-to-LEAP expiry-gap investigation goes now. Ex-dividend part is deferred. Unstick: Dean's ex-dividend data-source decision.
