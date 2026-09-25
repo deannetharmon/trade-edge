@@ -188,6 +188,8 @@ import { LauncherButton, type LauncherStrategyId } from '@/features/screener/com
 import { CspScanModal, type CspScanRequest, type CspScanRequestsByMode } from '@/features/screener/components/CspScanModal';
 import { CcScanModal, type CcScanRequest } from '@/features/screener/components/CcScanModal';
 import { ActiveCcRules } from '@/features/screener/components/ActiveCcRules';
+import { ActivePmccRules } from '@/features/screener/components/ActivePmccRules';
+import { pmccScanEntryMode } from '@/lib/scans/pmccActiveRules';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
@@ -11838,6 +11840,10 @@ export default function Home() {
                   counts={summarizeCcResults(results)}
                   onEdit={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
                 />
+              )}
+
+              {activePmccSession && activeSession?.pmccSnapshot && (
+                <ActivePmccRules snapshot={activeSession.pmccSnapshot} entryMode={pmccScanEntryMode(results)} />
               )}
 
               {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
