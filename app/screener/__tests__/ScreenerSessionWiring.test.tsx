@@ -41,6 +41,7 @@ import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider, useTaskManagerContext } from '@/components/tasks/TaskProvider';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
+import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS, WARM_FLOW_TIMEOUT_MS } from './helpers/warmScreenerPage';
 
 const getCoveredCallCapacityReportMock = vi.fn<[], Promise<CoveredCallCapacityReport>>();
 const getMarketMetricsMock = vi.fn();
@@ -174,9 +175,7 @@ function deferred<T>() {
 // passes. Absorb the cold cost once, up front, in a hook with its own
 // generous timeout, by driving the same CC-scan flow that test uses. No
 // test timeout is raised.
-beforeAll(async () => {
-  window.localStorage.clear();
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+beforeAll(() => warmScreenerPage(async () => {
   getMarketMetricsMock.mockReset().mockResolvedValue([]);
   getQuoteMock.mockReset().mockResolvedValue(100);
   getCoveredCallCapacityReportMock.mockReset().mockResolvedValue({
@@ -190,11 +189,8 @@ beforeAll(async () => {
   renderScreener();
   await addToUniverse('NKE,MU');
   await clickCcScan();
-  await screen.findByTestId('accounting-summary-bar', undefined, { timeout: 15_000 });
-  cleanup();
-  vi.unstubAllGlobals();
-  window.localStorage.clear();
-}, 30_000);
+  await screen.findByTestId('accounting-summary-bar', undefined, { timeout: WARM_FLOW_TIMEOUT_MS });
+}), WARM_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
   window.localStorage.clear();

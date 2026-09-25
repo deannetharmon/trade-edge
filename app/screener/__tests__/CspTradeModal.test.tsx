@@ -7,13 +7,14 @@
 // calls (covered instead by the pure unit tests in
 // lib/scans/__tests__/cspOrderMath.test.ts and cspOrderSubmission.test.ts).
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
+import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS } from './helpers/warmScreenerPage';
 
 const getMarketMetricsMock = vi.fn();
 const getChainMock = vi.fn();
@@ -69,6 +70,9 @@ async function runCspScan() {
   await userEvent.click(cards[cards.length - 1]);
   await waitFor(() => expect(screen.getByRole('button', { name: /TRADE THIS/ })).toBeInTheDocument());
 }
+
+// CI-FLAKY-0001 follow-up: the first test flaked under load on the ScreenerPage cold start; warm it once here.
+beforeAll(() => warmScreenerPage(async () => { await runCspScan(); }), WARM_HOOK_TIMEOUT_MS);
 
 describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () => {
   it('shows a real "TRADE THIS" button for CSP, not the old "not yet wired up" message', async () => {

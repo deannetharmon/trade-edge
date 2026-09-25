@@ -19,6 +19,7 @@ import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
 import * as screenerJobStore from '@/lib/screener/screenerJobStore';
+import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS, WARM_FLOW_TIMEOUT_MS } from './helpers/warmScreenerPage';
 
 const getCoveredCallCapacityReportMock = vi.fn<[], Promise<CoveredCallCapacityReport>>();
 const getMarketMetricsMock = vi.fn();
@@ -64,19 +65,14 @@ async function addToUniverse(symbols: string) {
 // (warm) tests pass. Absorb the cold cost once, up front, in a hook with its
 // own generous timeout, by driving the same open-modal flow. No test timeout
 // is raised.
-beforeAll(async () => {
-  window.localStorage.clear();
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+beforeAll(() => warmScreenerPage(async () => {
   getCoveredCallCapacityReportMock.mockReset().mockResolvedValue({ status: 'ok', bySymbol: {}, warnings: [] });
   getMarketMetricsMock.mockReset().mockResolvedValue([]);
   renderScreener();
   await addToUniverse('NVDA');
   await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
-  await screen.findByRole('radio', { name: /RANK/ }, { timeout: 15_000 });
-  cleanup();
-  vi.unstubAllGlobals();
-  window.localStorage.clear();
-}, 30_000);
+  await screen.findByRole('radio', { name: /RANK/ }, { timeout: WARM_FLOW_TIMEOUT_MS });
+}), WARM_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
   window.localStorage.clear();
