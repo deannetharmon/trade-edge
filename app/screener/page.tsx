@@ -199,6 +199,8 @@ import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
+import { buildLeapsExportReport, buildScanExportReport, type ScanExportScope } from '@/features/screener/lib/scanPdfExport';
+import { printScanPdfReport } from '@/features/screener/lib/printScanPdfReport';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
 import { PmccTickerDisclosure } from '@/features/screener/components/PmccTickerDisclosure';
 import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/screener/components/ScanModalShell';
@@ -8943,6 +8945,7 @@ export default function Home() {
   const [showLeapsAdvisorPanel, setShowLeapsAdvisorPanel] = useState(false);
   const [showPmccAdvisorPanel, setShowPmccAdvisorPanel] = useState(false);
   const [showCcAdvisorPanel, setShowCcAdvisorPanel] = useState(false);
+  const [showPdfExportMenu, setShowPdfExportMenu] = useState(false);
   // BEST-OPP-JUMP-LINK-0001: ref registry (keyed by the same resultKey
   // already used to match a Qualified card to its Best Opportunities
   // row) so "Jump to full card" can scroll to the exact card, plus a
@@ -9003,6 +9006,8 @@ export default function Home() {
     score: number | null;
     scoreIncomplete: boolean;
   }>>([]);
+  const [leapsScanCompletedAt, setLeapsScanCompletedAt] = useState<number | null>(null);
+  const [leapsScanComplete, setLeapsScanComplete] = useState(false);
   // LEAPS-0001 -- result filters, same preset-chip pattern as
   // FilteredResultControls. Delta range default 0.70-0.85 per Ian's
   // reasoning (below 0.70 too much of the price is time value, not real
@@ -9510,6 +9515,7 @@ export default function Home() {
     restoreLeapsSession().then(session => {
       if (!session) return;
       setLeapsResults(session.results as typeof leapsResults);
+      setLeapsScanComplete(true);
       setLeapsDeltaMin(session.filters.deltaMin);
       setLeapsDeltaMax(session.filters.deltaMax);
       setLeapsDteMin(session.filters.dteMin);
@@ -9679,7 +9685,7 @@ export default function Home() {
   }, [activeSession]);
 
   const clearResultsCache = () => {
-    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null); setLeapsResults([]);
+    setResults([]); setRawScanCache([]); setResultsCachedAt(null); setTargetedResults([]); setTargetedResultsCachedAt(null); setLeapsResults([]); setLeapsScanCompletedAt(null); setLeapsScanComplete(false);
     // SCREENER-RESULTS-0001 corrective — this used to clear every OTHER
     // cache key (raw scan, legacy results, targeted results) but never the
     // canonical session cache itself, and never the in-memory
@@ -10484,6 +10490,8 @@ export default function Home() {
           });
       }))).flat().sort((a, b) => a.symbol.localeCompare(b.symbol) || a.dte - b.dte || a.strike - b.strike);
       setLeapsResults(found);
+      setLeapsScanCompletedAt(Date.now());
+      setLeapsScanComplete(true);
       setScreenMode('leaps');
       try { localStorage.setItem(LS_SCREEN_MODE, 'leaps'); } catch {}
       // LEAPS-SCAN-MODAL-0001: the modal's chosen values become the new
@@ -11217,6 +11225,40 @@ export default function Home() {
     filteredQualified = sortCspByThirtyDayEquivalent(sortable, cspTargetedReturnSort).map(item => item.result);
   }
 
+  // SCAN-EXPORT-0001 — the report always starts from the immutable terminal
+  // session. The alternate scope merely narrows the already-rendered cards;
+  // it never re-runs a scan or requests fresh pricing.
+  const canExportPdf = (!!activeSession && activeSession.status !== 'running' && activeSession.mode === screenMode)
+    || (screenMode === 'leaps' && leapsScanComplete && !loading);
+  const currentPdfViewResults = (() => {
+    if (activeSession?.mode === 'targeted') return targetedResults.map(entry => entry.screenResult);
+    const visible = [...filteredQualified, ...filteredPmccWaitMonitor, ...filteredDisqualified];
+    return visible.filter((result, index) => visible.indexOf(result) === index);
+  })();
+  const exportPdf = (scope: ScanExportScope) => {
+    if (!canExportPdf) return;
+    const visibleLeaps = leapsResults.filter(row => {
+      if (leapsHiddenSymbols.includes(row.symbol)) return false;
+      if (row.dataQuality === 'insufficient') return true;
+      if ((row.delta ?? -1) < leapsDeltaMin || (row.delta ?? 2) > leapsDeltaMax) return false;
+      if (row.dte < leapsDteMin || row.dte > leapsDteMax) return false;
+      if ((row.openInterest ?? 0) < leapsOiMin) return false;
+      if (leapsExtrinsicPctMax > 0) {
+        const mid = row.bid != null && row.ask != null ? (row.bid + row.ask) / 2 : null;
+        const cost = mid != null ? mid * 100 : null;
+        const extrinsicPct = row.extrinsicValue != null && cost != null && cost > 0 ? (row.extrinsicValue * 100 / cost) * 100 : null;
+        if (extrinsicPct == null || extrinsicPct > leapsExtrinsicPctMax) return false;
+      }
+      return true;
+    });
+    const report = screenMode === 'leaps'
+      ? buildLeapsExportReport(scope === 'full' ? leapsResults : visibleLeaps, scope, leapsScanCompletedAt, opportunityUniverse)
+      : activeSession ? buildScanExportReport(activeSession, scope, currentPdfViewResults) : null;
+    if (!report) return;
+    if (!printScanPdfReport(report)) setError('Your browser blocked the print window. Allow pop-ups for TradeEdge and try Export PDF again.');
+    setShowPdfExportMenu(false);
+  };
+
   // SCREENER-LAUNCHER-0001 corrective pass — identifies the ONE launcher
   // whose own scan invocation is currently in flight, replacing the
   // page-wide `loading` Boolean that previously made every launcher render
@@ -11818,6 +11860,32 @@ export default function Home() {
                     </button>
                   )}
                   <button onClick={downloadCSV} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>↓ CSV</button>
+                  {canExportPdf && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={showPdfExportMenu}
+                        onClick={() => setShowPdfExportMenu(open => !open)}
+                        className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}
+                      >
+                        ↓ Export PDF
+                      </button>
+                      {showPdfExportMenu && (
+                        <div role="menu" aria-label="PDF export scope" className={`absolute right-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
+                          <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}>
+                            <span className="block text-xs font-bold">Full completed scan</span>
+                            <span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span>
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}>
+                            <span className="block text-xs font-bold">Current filtered view</span>
+                            <span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span>
+                          </button>
+                          <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {activeSession?.requestedStrategy === 'pmcc' ? (
                     <button onClick={() => void runPMCCScan()} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg text-cyan-300 hover:border-cyan-500 transition-colors tracking-wider`}>
                       RESCAN PMCC ↺
@@ -13013,6 +13081,20 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
+                    {canExportPdf && (
+                      <div className="relative">
+                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${th.border} ${th.textMuted} hover:border-emerald-500/50`}>
+                          Export PDF
+                        </button>
+                        {showPdfExportMenu && (
+                          <div role="menu" aria-label="PDF export scope" className={`absolute left-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
+                            <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Full completed scan</span><span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span></button>
+                            <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Current filtered view</span><span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span></button>
+                            <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <button
                       onClick={() => setShowLeapsAdvisorPanel(v => !v)}
                       disabled={opportunityUniverse.length < 2}
