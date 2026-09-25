@@ -1671,6 +1671,14 @@ function CalendarButton({ symbol, strategy, earningsDate, ivr, th }: { symbol: s
   if (scheduled) return <span className="text-[9px] text-emerald-500 border border-emerald-600 rounded px-1.5 py-0.5 font-medium">✓ scheduled {formatDisplayDate(followUpDate)}</span>;
   return <button onClick={handleClick} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors font-medium`} title={`Schedule re-screen ${POST_EARNINGS_RESCREEN_DAYS} trading days after earnings (${followUpIso})`}>📅 +{POST_EARNINGS_RESCREEN_DAYS}D post earnings · {formatDisplayDate(followUpDate)}</button>;
 }
+// EARNINGS-PRECHECK-0001 close-out (Ian, 2026-09-24): a covered call with no eligible expiration because
+// earnings precede every in-window expiry is an earnings block; its collapsed disqualified row offers the
+// same post-earnings re-screen as the card path. Scoped to CC.
+function renderCcEarningsRescreen(result: ScreenResult, th: typeof THEMES[Theme]) {
+  if (result.strategy !== 'CC' || !result.earningsDate || daysUntil(result.earningsDate) < 0) return null;
+  if (!result.failReasons.some(f => f.includes('Earnings'))) return null;
+  return <CalendarButton symbol={result.symbol} strategy={result.strategy} earningsDate={result.earningsDate} ivr={result.ivr} th={th} />;
+}
 function EntryCalendarButton({ result, th }: { result: ScreenResult; th: typeof THEMES[Theme]; rules: RulesType; }) {
   const key = `entry-${result.symbol}-${result.bestCandidate?.expiration}`;
   const [scheduled, setScheduled] = useState<string | null>(() => {
@@ -12668,6 +12676,7 @@ export default function Home() {
                       borderClassName={th.border}
                       textFaintClassName={th.textFaint}
                       textMutedClassName={th.textMuted}
+                      renderRowAction={r => renderCcEarningsRescreen(r, th)}
                     />
                   )}
                   {activeSession && (activeSession.requestedStrategy === 'csp' || activeSession.mode === 'filter') ? (
@@ -12932,6 +12941,7 @@ export default function Home() {
                     borderClassName={th.border}
                     textFaintClassName={th.textFaint}
                     textMutedClassName={th.textMuted}
+                    renderRowAction={r => renderCcEarningsRescreen(r, th)}
                   />
                   {activeSession && activeSession.mode === 'rank' && (
                     <SymbolOutcomesDisclosure

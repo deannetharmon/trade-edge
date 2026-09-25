@@ -15,7 +15,7 @@
 // new state and returns focus to the trigger button on collapse (see that
 // module's header for why).
 
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 import { CspFundamentalsRow } from './CspFundamentalsRow';
@@ -30,6 +30,8 @@ export interface DisqualifiedSectionProps {
   textFaintClassName?: string;
   textMutedClassName?: string;
   groupByExpiration?: boolean;
+  /** Optional per-row action (e.g. the post-earnings re-screen button), rendered in the collapsed row. */
+  renderRowAction?: (result: ScreenResult) => ReactNode;
 }
 
 function essentialStructure(result: ScreenResult): string {
@@ -73,9 +75,11 @@ export function summarizeDisqualifiedCspResults(results: ScreenResult[]): Blocke
 function DisqualifiedCard({
   result,
   th,
+  renderRowAction,
 }: {
   result: ScreenResult;
   th: { border: string; textFaint: string; textMuted: string };
+  renderRowAction?: (result: ScreenResult) => ReactNode;
 }) {
   const panelId = useId();
   const candidateLabel = result.bestCandidate
@@ -103,6 +107,7 @@ function DisqualifiedCard({
         {additional.length > 0 && (
           <span className={`shrink-0 ${th.textFaint}`}>+{additional.length} more</span>
         )}
+        {renderRowAction ? <span className="shrink-0">{renderRowAction(result)}</span> : null}
         <button
           ref={buttonRef}
           type="button"
@@ -147,6 +152,7 @@ export function DisqualifiedSection({
   textFaintClassName = 'text-slate-500',
   textMutedClassName = 'text-slate-300',
   groupByExpiration = false,
+  renderRowAction,
 }: DisqualifiedSectionProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
   const panelId = useId();
@@ -202,7 +208,7 @@ export function DisqualifiedSection({
             <ExpirationDisclosure key={expiration} expiration={expiration}
               dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
               kind="disqualified" defaultOpen={false} borderClassName={th.border}>
-              {group.map(r => <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} />)}
+              {group.map(r => <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />)}
             </ExpirationDisclosure>
           )) : results.map(r => (
             // CSP-WORKFLOW-0001 — candidateId (present for CSP results)
@@ -210,7 +216,7 @@ export function DisqualifiedSection({
             // symbol; other strategies fall back to symbol+strategy exactly
             // as before, since they still produce at most one disqualified
             // ScreenResult per symbol. Closes IMPORTANT-04.
-            <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} />
+            <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />
           ))}
         </div>
       )}
