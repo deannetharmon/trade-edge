@@ -107,6 +107,7 @@ import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/com
 import { QualificationBadge } from '@/features/screener/components/QualificationBadge';
 import { OrderOverrideAcknowledgment, qualificationGateBlocking, reasonText } from '@/features/screener/components/OrderOverrideAcknowledgment';
 import { buildEntryQualification } from '@/lib/entry-context/entryQualification';
+import { entryEvidenceAsOf } from '@/lib/entry-context/evidenceAsOf';
 import type { QualificationDerivation } from '@/lib/scans/qualificationState';
 import { countQualificationStates, deriveCspQualification, deriveSpreadQualification } from '@/lib/scans/qualificationState';
 import {
@@ -3876,8 +3877,10 @@ function LeapsTradeModal({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oi
   );
 }
 
-function TradeModal({ result, th, onClose, qualification }: {
+function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  /** When the scan that produced this result completed; the entry snapshot's evidence time when the candidate has no quote time. */
+  scanCompletedAt?: number | null;
   /** QUAL-STATES-0001: the scan's verdict on this trade (Ranked and Targeted spreads); anything but Qualified must be acknowledged. */
   qualification?: { derivation: QualificationDerivation; checks: ScreenResult['checks']; scanMode: 'rank' | 'targeted' } | null;
 }) {
@@ -4017,9 +4020,7 @@ function TradeModal({ result, th, onClose, qualification }: {
   const persistPendingIronCondorEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
     if (c.strategy !== 'IC') return;
     const at = new Date().toISOString();
-    const quoteAt = typeof c.quoteFetchedAt === 'number' && Number.isFinite(c.quoteFetchedAt)
-      ? new Date(c.quoteFetchedAt).toISOString()
-      : null;
+    const quoteAt = entryEvidenceAsOf(c.quoteFetchedAt, scanCompletedAt);
     const evidence = (value: number | null | undefined, source: string, asOf: string | null = quoteAt) => value == null || !asOf ? unavailableEvidence<number>('Entry quote timestamp unavailable') : availableEvidence(value, source, asOf);
     const scored = scoreCandidate(result, getSavedRankConfig());
     const scoreEvidence = (value: number | undefined) => scored && value != null ? availableEvidence(value, 'scoreCandidate at entry', at) : unavailableEvidence<number>('Score could not be computed at entry');
@@ -4058,9 +4059,7 @@ function TradeModal({ result, th, onClose, qualification }: {
   const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
     if (c.strategy !== 'BPS' && c.strategy !== 'BCS') return;
     const at = new Date().toISOString();
-    const quoteAt = typeof c.quoteFetchedAt === 'number' && Number.isFinite(c.quoteFetchedAt)
-      ? new Date(c.quoteFetchedAt).toISOString()
-      : null;
+    const quoteAt = entryEvidenceAsOf(c.quoteFetchedAt, scanCompletedAt);
     const evidence = (value: number | null | undefined, source: string, asOf: string | null = quoteAt) => value == null || !asOf ? unavailableEvidence<number>('Entry quote timestamp unavailable') : availableEvidence(value, source, asOf);
     // TRADE-ENTRY-SNAPSHOT-0001 -- compute the engine's own score breakdown
     // at the moment of entry, regardless of which scan mode the trade was
@@ -13322,6 +13321,7 @@ export default function Home() {
       {tradeResult && tradeResult.strategy !== 'PMCC' && tradeResult.bestCandidate && (() => {
         const derivation = (screenMode === 'rank' || screenMode === 'targeted') ? deriveSpreadQualification(tradeResult) : null;
         return <TradeModal result={tradeResult} th={th} onClose={() => setTradeResult(null)}
+          scanCompletedAt={activeSession?.completedAt ?? (screenMode === 'targeted' ? targetedResultsCachedAt : resultsCachedAt) ?? null}
           qualification={derivation ? { derivation, checks: tradeResult.checks, scanMode: screenMode as 'rank' | 'targeted' } : null} />;
       })()}
       {cspTradeResult && cspTradeResult.bestCandidate && (() => {

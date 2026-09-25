@@ -34,3 +34,12 @@ Do not gate; do not make inside-EM Disqualified or a Caution; keep it out of `qu
 - Ranked 15-point EM score dimension: it has a cliff at 0% (delta 0.12 and 0.16 score almost the same); a gradual score by distance, and a multiple-of-EM measure, are a separate ticket for Ian and Alan with data.
 - Whether the delta bands themselves should move is a methodology decision, not a UI change.
 - Alan's note: the app's clearance (-3.7%) differs from a flat-vol model (-4.6%) because EM uses the expiration IVx while delta comes from the strike's own IV.
+
+## Follow-up: calibrating an amber highlight (2026-09-25)
+
+Dean asked whether amber should mark strikes near the expected move, and questioned a proposed 0.70x line (it was chosen to split his delta band, not derived from evidence). Findings:
+
+- His OTM% coloring is already type-aware (`getOtmColor`: 4% target for index/ETF, 7% for stocks, plus 1-2 points at high IVR). In expected-move terms those flat targets mean different distances (illustrative: SPY 0.72x, QQQ 0.54x, AAPL 0.81x, NVDA 0.50-0.65x, AMD 0.41-0.53x at 35 DTE), so one multiple for everything is wrong: 0.70x fits SPY but would flag AMD and NVDA trades that pass his own OTM% targets. Any amber should be set per underlying type.
+- Moving averages: the app has the 20-, 50- and 200-day averages (`lib/scans/trend.ts`), no 30-day. Structural support is a different question from the statistical expected move; a compound rule (well inside the expected move and above the 50-day average) is a later ticket for Ian and Alan.
+- Calibration from his own entries was attempted with a console query of entry snapshots: 1 snapshot (BPS AAPL, 35 DTE, score only), every measurement blank. Cause: snapshot evidence is recorded only when the candidate carries a quote time (`quoteFetchedAt`), which only `spread-finder` sets; Ranked and Targeted candidates never do, so those entries recorded score and DTE only. Fixed 2026-09-25 (`lib/entry-context/evidenceAsOf.ts`): the scan's completion time is the fallback, so new entries record OTM%, expected move, delta, IVR and quotes. Earlier entries cannot be back-filled. CSPs have no snapshots (notes only). Decision: hold the amber and calibrate after roughly 20-30 new entries (per type), then set the threshold where a candidate is more aggressive than what he actually enters.
+
