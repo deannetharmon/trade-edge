@@ -1,8 +1,16 @@
 # LCC-0001A — Unified Portfolio Snapshot and Equity Holdings
 
-**Status:** Ready for technical specification
+**Status:** Implemented on `main`; pending Gate A acceptance and production shadow-parity review
 **Depends on:** None
-**Blocks:** LCC-0001B, LCC-0001C, LCC-0001D, LCC-0001E
+**Blocks:** LCC-0001B, LCC-0001C, LCC-0001D, LCC-0001E until Gate A is accepted
+
+> Implementation exists in `lib/portfolio-snapshot/`,
+> `PortfolioDataProvider`, and the Portfolio equity-holdings surface. The
+> current Covered Call scanner remains legacy-authoritative while the snapshot
+> report runs in shadow mode. See
+> `docs/implementation/LCC-0001A-PR2-implementation-report.md`,
+> `docs/implementation/LCC-0001A-PR3-implementation-report.md`, and
+> `docs/implementation/LCC-0001A-PR4-implementation-report.md`.
 
 ## Objective
 
