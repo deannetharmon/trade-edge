@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { THEMES, Theme } from '@/lib/theme';
 import { TradingViewChartButton } from '@/components/TradingViewChartButton';
+import { RsiStrip } from '@/components/RsiStrip';
 
 export function ChartLinkButton({ symbol, chartSymbol = symbol, instanceKey, th, showChart, setShowChart, sparkData, setSparkData, sparkLoading, setSparkLoading }: {
   symbol: string;
@@ -31,7 +32,7 @@ export function ChartLinkButton({ symbol, chartSymbol = symbol, instanceKey, th,
       if (!rect) return;
       const width = Math.min(280, window.innerWidth - 24);
       const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-      const estimatedHeight = 155;
+      const estimatedHeight = 300; // price line, RSI strip and the chart button
       const top = rect.bottom + 6 + estimatedHeight <= window.innerHeight
         ? rect.bottom + 6
         : Math.max(12, rect.top - estimatedHeight - 6);
@@ -82,6 +83,7 @@ export function ChartLinkButton({ symbol, chartSymbol = symbol, instanceKey, th,
       return <div><div className="mb-1 flex items-center justify-between"><span className={`text-[10px] font-bold ${th.text}`}>{symbol}</span><span className="text-[10px] font-bold" style={{ color }}>${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span></span></div><svg aria-hidden="true" width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 56 }}><defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.3"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/><polygon points={`0,${height} ${points} ${width},${height}`} fill={`url(#${gradientId})`}/></svg></div>;
     })()}
     {!sparkLoading && sparkData && sparkData.length === 0 && <p role="status" className={`py-3 text-center text-[9px] ${th.textFaint}`}>Chart data unavailable</p>}
+    {!sparkLoading && sparkData && sparkData.length > 1 && <div className="mt-2"><RsiStrip closes={sparkData} th={th} /></div>}
     <TradingViewChartButton symbol={chartSymbol} className="flex w-full min-h-8 items-center justify-center gap-2 rounded-lg border border-blue-500/30 text-[10px] font-bold tracking-wider text-blue-400 transition-colors hover:border-blue-500/60 hover:bg-blue-500/10" />
   </div>, document.body) : null;
 

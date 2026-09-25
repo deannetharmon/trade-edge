@@ -228,6 +228,20 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('button', { name: /^MSFT/ })).toHaveAttribute('aria-current', 'true');
   });
 
+  it('the quick-chart popup shows the RSI strip once enough daily closes are loaded, and RSI n/a when there are too few', async () => {
+    const user = userEvent.setup();
+    const base = [...Array.from({ length: 11 }, () => [100, 101]).flat(), 100];
+    const closes = [...base, 99, 98, 97, 96, 95, 94, 93, 94, 95.5];
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (String(input).startsWith('/api/chart')) return { ok: true, json: async () => ({ bars: closes.map(c => ({ c })) }) } as Response;
+      return { ok: true, json: async () => ({ notes: {} }) } as Response;
+    });
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('button', { name: 'Quick chart for AAPL' }));
+    expect(await screen.findByTestId('rsi-strip')).toHaveAttribute('data-state', 'TURNING_UP');
+    expect(screen.getByTestId('rsi-caption')).toHaveTextContent('turned up from');
+  });
+
   it('lazy-loads one underlying chart at a time and links to TradingView', async () => {
     vi.mocked(fetch).mockImplementation(async input => {
       if (String(input).startsWith('/api/chart')) return { ok: true, json: async () => ({ bars: [{ c: 100 }, { c: 102 }] }) } as Response;
