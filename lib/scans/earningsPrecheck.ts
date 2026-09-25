@@ -41,6 +41,7 @@ export function earningsOnOrBeforeExpiration(
   earningsInput: unknown,
   expirationInput: unknown,
   asOfDate = currentNewYorkDate(),
+  minDaysAfterExpiry = 1,
 ): boolean | null {
   if (earningsInput == null || earningsInput === '') return false;
   const earningsDate = normalizeEarningsDate(earningsInput);
@@ -48,8 +49,16 @@ export function earningsOnOrBeforeExpiration(
   const asOf = parseStrictIsoDate(asOfDate);
   if (!earningsDate || !expirationDate || !asOf) return null;
   if (earningsDate < asOf) return false;
-  return earningsDate <= expirationDate;
+  // Earnings must fall at least minDaysAfterExpiry calendar days after the
+  // expiration to be clear of it. The default of 1 is exactly "earnings on or
+  // before expiration", the behavior every existing caller relies on.
+  return calendarDaysBetween(expirationDate, earningsDate) < minDaysAfterExpiry;
 }
+
+/** SCAN-EARNINGS-TARGETED-0001: Targeted (strict) scans require earnings to
+ * fall at least this many calendar days after the trade's expiration, because
+ * upstream earnings dates are estimates that can move earlier by about a week. */
+export const STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY = 10;
 
 /**
  * Symbol-level context only. It is advisory: contract eligibility is decided

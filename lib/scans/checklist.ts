@@ -6,7 +6,7 @@ import { DEFAULT_ETF_RULES, INDEX_IVR_MIN } from './constants';
 import { daysUntil, formatDisplayDate, estimateNextEarningsDate, normalizeIv } from './scan-utils';
 import { findBestIC, findBestSpread, findBestICUnfiltered, findBestSpreadUnfiltered } from './spread-finder';
 import { assessOiLiquidity } from './oiLiquidity';
-import { daysUntilNy, earningsOnOrBeforeExpiration } from './earningsPrecheck';
+import { daysUntilNy, earningsOnOrBeforeExpiration, STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 
 export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
   const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
@@ -22,6 +22,7 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
 
   // Earnings buffer auto-derived: DTE_MAX + 5 days cushion
   const earningsBuffer = RULES.DTE_MAX + 5;
+  const inRangeExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); return dte >= RULES.DTE_MIN && dte <= RULES.DTE_MAX; });
   let earningsCheck: CheckResult;
   if (isIndex) {
     earningsCheck = { status: 'pass', value: 'N/A (index/ETF)', reason: 'No earnings events' };
@@ -35,6 +36,18 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
       earningsCheck = { status: 'pass', value: `${earningsDate}`, reason: 'Earnings date unavailable' };
     } else if (d < 0) {
       earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
+    } else if (strictOnly && inRangeExpirations.length > 0) {
+      // SCAN-EARNINGS-TARGETED-0001: strict mode decides against the expirations
+      // actually being evaluated, not the generic buffer, because bestCandidate is
+      // never set inside strict mode so the per-trade re-check below cannot run.
+      const clearing = inRangeExpirations.filter(exp => earningsOnOrBeforeExpiration(earningsDate, exp, undefined, STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY) !== true);
+      if (clearing.length > 0) {
+        const margin = Math.min(...clearing.map(exp => d - (daysUntilNy(exp) ?? d)));
+        earningsCheck = { status: 'pass', value: `${d}d (${earningsDate})`, reason: `Earnings ${margin}d after expiry` };
+      } else {
+        failReasons.push(`Earnings in ${d}d`);
+        earningsCheck = { status: 'fail', value: `${d}d (${earningsDate})`, reason: `No qualifying ${RULES.DTE_MIN}-${RULES.DTE_MAX}d expiration is ${STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY}+ days before earnings` };
+      }
     } else if (d < earningsBuffer) {
       if (strictOnly) {
         failReasons.push(`Earnings in ${d}d`);
@@ -47,7 +60,7 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
     }
   }
 
-  const validExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); if (dte < effectiveRules.DTE_MIN || dte > effectiveRules.DTE_MAX) return false; if (strictOnly && !isIndex && earningsDate) { if (earningsOnOrBeforeExpiration(earningsDate, exp) === true) return false; } return true; });
+  const validExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); if (dte < effectiveRules.DTE_MIN || dte > effectiveRules.DTE_MAX) return false; if (strictOnly && !isIndex && earningsDate) { if (earningsOnOrBeforeExpiration(earningsDate, exp, undefined, STRICT_EARNINGS_MIN_DAYS_AFTER_EXPIRY) === true) return false; } return true; });
   let bestCandidate: SpreadCandidate | null = null;
   
   // Rank mode fallback: if strict rules found nothing, try relaxed rules first, then fully unfiltered

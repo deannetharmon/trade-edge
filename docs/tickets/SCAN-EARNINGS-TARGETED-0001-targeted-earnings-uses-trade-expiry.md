@@ -2,7 +2,7 @@
 
 ## Status
 
-**Ian approved with a 10-day margin (Dean chose 10, 2026-09-25, after an independent second review and two data checks). Alan fixtures written (below). Awaiting Dean's go to build. Not built.** Found 2026-09-25 from a Targeted AMD spread scan screenshot.
+**Ian approved with a 10-day margin (Dean chose 10, 2026-09-25, after an independent second review and two data checks). Alan fixtures written (below). **Built 2026-09-25 (Dane role, inline): `lib/scans/checklist.ts`, `lib/scans/earningsPrecheck.ts`, new `lib/scans/__tests__/checklistStrictEarningsMargin.test.ts`. Full suite 366 files / 5416 tests pass; real `next build` passes; pushed to `main`.** Found 2026-09-25 from a Targeted AMD spread scan screenshot.
 
 ## Problem
 
@@ -31,7 +31,7 @@ In strict mode only, decide the earnings result from the expirations actually be
 |---|---|
 | At least one in-range expiration expires at least **10 calendar days before** earnings | pass; the reason shows the margin in days, e.g. "Earnings 12d after expiry" (final wording for Diane) |
 | In-range expirations exist and none clears earnings by 10 days | fail, existing reason "no qualifying <min>-<max>d expiration clears it" (wording may mention the 10-day margin; Diane) |
-| No in-range expirations at all | not an earnings failure; existing "No DTE expirations" path |
+| No in-range expirations at all | unchanged: the previous generic result is kept (no candidate either way; the existing "No DTE expirations" reasoning is untouched). Kept as-is on purpose so page-level reason filters that match "No 30-45 DTE" are not disturbed |
 | Past date, missing date, unparseable date, ETF/index | unchanged |
 
 Rank mode (`strictOnly = false`) is unchanged.
@@ -103,7 +103,7 @@ Rank mode parity: same inputs with `strictOnly = false` give identical results b
 ## Sibling paths checked
 
 - `lib/screener.ts:222` has a second `runChecklist` with the same generic "Within expiry window" fail. Only `/api/screen` imports it. Same class of bug; log it, do not change it in this ticket unless Paul agrees.
-- The strict call at `page.tsx:1602` must be traced before build to confirm the change is correct for it. Build is blocked until this is done.
+- The strict call at `page.tsx:1602` was traced (2026-09-25): it is `runChecklistAllExpirations`, which calls `runChecklist` once per expiry with a one-expiry chain, and its `strictOnly` comes from the rank-mode helper (default false) and the "strict" preset at `page.tsx:7418`. All strict callers pass one-expiry chains, so the fix behaves the same everywhere.
 - Ranked mode passes earnings after expiry with any margin (shown in the Ranked scan above). Applying the 10-day margin there would tighten Ranked, CC and CSP, so it is out of scope here; see open question.
 - CC and CSP already check earnings per expiry.
 
