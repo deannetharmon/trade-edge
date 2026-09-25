@@ -1,4 +1,5 @@
 import { OptionChainItem, MarketMetrics } from './tastytrade';
+import { daysUntilNy, earningsOnOrBeforeExpiration } from './scans/earningsPrecheck';
 
 export const RULES = {
   IVR_MIN: 30,
@@ -247,8 +248,11 @@ export function runChecklist(
   if (!earningsDate) {
     earningsCheck = { status: 'pass', value: 'None found', reason: 'Safe to trade' };
   } else {
-    const daysAway = daysUntil(earningsDate);
-    if (daysAway < 0) {
+    // EARNINGS-DATEBASIS-0001: New York calendar basis; a bad date keeps the old fall-through (pass).
+    const daysAway = daysUntilNy(earningsDate);
+    if (daysAway == null) {
+      earningsCheck = { status: 'pass', value: `${earningsDate}`, reason: 'Earnings date unavailable' };
+    } else if (daysAway < 0) {
       earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: 'Already reported' };
     } else if (daysAway <= RULES.DTE_MAX) {
       earningsCheck = { status: 'fail', value: `${daysAway}d (${earningsDate})`, reason: 'Within expiry window' };
@@ -262,10 +266,7 @@ export function runChecklist(
   const validExpirations = chainData.expirations.filter(exp => {
     const dte = daysUntil(exp);
     if (dte < RULES.DTE_MIN || dte > RULES.DTE_MAX) return false;
-    if (earningsDate) {
-      const earningsDTE = daysUntil(earningsDate);
-      if (earningsDTE >= 0 && earningsDTE <= dte) return false;
-    }
+    if (earningsDate && earningsOnOrBeforeExpiration(earningsDate, exp) === true) return false;
     return true;
   });
 

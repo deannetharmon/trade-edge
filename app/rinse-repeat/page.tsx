@@ -9,6 +9,7 @@ import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { submitRinseRepeatOtocoIfSafe } from '@/lib/rinse-repeat/otocoEntrySafety';
+import { daysUntilNy } from '@/lib/scans/earningsPrecheck';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const BASE       = 'https://api.tastytrade.com';
@@ -1374,8 +1375,9 @@ export default function RinseRepeatPage() {
 
           // Earnings check
           if (earnings) {
-            const eDate = daysUntil(earnings);
-            if (eDate >= 0 && eDate <= rules.DTE_MAX + 5) {
+            // EARNINGS-DATEBASIS-0001: earnings on the NY calendar basis (DTE window below stays on daysUntil).
+            const eDate = daysUntilNy(earnings);
+            if (eDate != null && eDate >= 0 && eDate <= rules.DTE_MAX + 5) {
               scanResults.push({ profile, candidate: null, currentIvr: ivr, currentPrice: price, earningsDate: earnings, rrScore: 0, qualified: false, failReason: `Earnings in ${eDate}d — wait until after` });
               continue;
             }

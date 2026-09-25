@@ -55,6 +55,8 @@ import type {
 } from '../types';
 import type { PositionHealthScore } from '../health/types';
 import { DEFAULT_POSITION_MANAGEMENT_POLICY } from '../policies';
+import { daysUntilNy } from '@/lib/scans/earningsPrecheck';
+import { normalizeEarningsDate, parseStrictIsoDate } from '@/lib/scans/pmccEarningsDates';
 import { defaultActionabilityForPriority } from '../actionability';
 // PI-0014 follow-up (Product Owner review): the Decision Engine is the
 // correct owner of "did execution reality invalidate this recommendation,"
@@ -284,12 +286,9 @@ function hasHealthFactor(input: PositionObjectiveInput, key: string): boolean {
 // exporting it changes nothing about how this module's own branches behave.
 export function daysUntil(dateString: string | null | undefined, now: Date = new Date()): number | null {
   if (!dateString) return null;
-  const target = new Date(`${dateString}T00:00:00`);
-  if (Number.isNaN(target.getTime())) return null;
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  target.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  // EARNINGS-DATEBASIS-0001: New York calendar days (was host-local midnight math).
+  if (!Number.isFinite(now.getTime())) return null;
+  return daysUntilNy(dateString, now.toISOString());
 }
 
 // PI-0008A: exported alongside daysUntil() above, for the same reason.
@@ -301,9 +300,9 @@ export function isUpcomingBeforeExpiration(
   const days = daysUntil(dateString, now);
   if (days == null || days < 0) return false;
   if (!expDate) return true;
-  const date = new Date(`${dateString}T00:00:00`);
-  const expiry = new Date(`${expDate}T23:59:59`);
-  if (Number.isNaN(date.getTime()) || Number.isNaN(expiry.getTime())) return false;
+  const date = normalizeEarningsDate(dateString);
+  const expiry = parseStrictIsoDate(expDate);
+  if (date == null || expiry == null) return false;
   return date <= expiry;
 }
 

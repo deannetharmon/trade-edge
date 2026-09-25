@@ -14,6 +14,7 @@ import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
 import { evaluatePmccLifecycle } from '@/lib/scans/pmccLifecycle';
+import { earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
 import {
   resolvePositionStrategyFilterKey,
   POSITION_STRATEGY_FILTER_KEYS,
@@ -2328,17 +2329,8 @@ OUTPUT FORMAT — JSON only, nothing else:
 }`;
 
 function isUpcomingEarningsRisk(earningsDate: string | null, expDate: string): boolean {
-  if (!earningsDate) return false;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const earnings = new Date(`${earningsDate}T00:00:00`);
-  const expiry = new Date(`${expDate}T23:59:59`);
-
-  if (Number.isNaN(earnings.getTime()) || Number.isNaN(expiry.getTime())) return false;
-
-  return earnings >= today && earnings <= expiry;
+  // EARNINGS-DATEBASIS-0001: New York calendar basis via the shared helper (bad data stays false).
+  return earningsOnOrBeforeExpiration(earningsDate, expDate) === true;
 }
 function buildVerdictPrompt(pos: Position, action: EvaluatedAction, detail?: string): string {
   const entryCredit = canonicalEntryCredit(pos);
