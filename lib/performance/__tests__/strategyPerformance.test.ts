@@ -14,4 +14,15 @@ describe('strategy performance report', () => {
     const report = buildStrategyPerformanceReport([trade(), trade({ id: 'incomplete', pnl: -999, reconstructionStatus: 'INCOMPLETE' })]);
     expect(report.includedTrades).toBe(1); expect(report.excludedIncompleteTrades).toBe(1);
   });
+  it('every strategy a closed trade can have lands in exactly one report row, so the rows add up to the included trades', () => {
+    const strategies: ClosedTrade['strategy'][] = ['BPS', 'BCS', 'IC', 'SPREAD', 'CSP', 'SHORT_CALL', 'OTHER'];
+    const trades = strategies.flatMap((strategy, i) => [trade({ id: `a${i}`, strategy, pnl: 10 * (i + 1) }), trade({ id: `b${i}`, strategy, pnl: -5 })]);
+    const report = buildStrategyPerformanceReport(trades);
+    expect(report.includedTrades).toBe(trades.length);
+    expect(report.rows.reduce((sum, row) => sum + row.closedLifecycles, 0)).toBe(trades.length);
+    expect(report.rows.reduce((sum, row) => sum + row.realizedPnl, 0)).toBeCloseTo(trades.reduce((sum, t) => sum + t.pnl, 0));
+    // CSP has its own row; generic spreads, short calls and other trades land in the classification row, not nowhere.
+    expect(report.rows.find(r => r.strategy === 'CSP')?.closedLifecycles).toBe(2);
+    expect(report.rows.find(r => r.strategy === 'UNCLASSIFIED')?.closedLifecycles).toBe(6);
+  });
 });

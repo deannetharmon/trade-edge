@@ -25,6 +25,7 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildEntryPerformanceRollup, type EntryPerformanceRollup } from '@/lib/entry-context/performance';
 import type { CreditSpreadEntrySnapshot } from '@/lib/entry-context/types';
 import { buildStrategyPerformanceReport } from '@/lib/performance/strategyPerformance';
+import { buildStrategyBreakdown } from '@/lib/tradeLog/strategyBreakdown';
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
@@ -88,14 +89,8 @@ function buildPerformanceAnalysisPrompt(trades: ClosedTrade[], range: TimeRange)
   const avgWin  = wins.length   > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
   const avgLoss = losses.length > 0 ? losses.reduce((s, t) => s + t.pnl, 0) / losses.length : 0;
   const avgHold = Math.round(trades.reduce((s, t) => s + t.holdDays, 0) / total);
-  const strategies = ['BPS','BCS','IC','SPREAD','OTHER'] as const;
-  const byStrategy = strategies.map(s => {
-    const g = trades.filter(t => t.strategy === s);
-    if (g.length === 0) return null;
-    const w = g.filter(t => t.outcome === 'WIN').length;
-    const pnl = g.reduce((sum, t) => sum + t.pnl, 0);
-    return `${s}: ${g.length} trades, ${Math.round(w/g.length*100)}% win, $${pnl.toFixed(0)} total, avg ${(g.reduce((sum, t) => sum + t.pnlPct, 0)/g.length).toFixed(1)}%`;
-  }).filter(Boolean);
+  const byStrategy = buildStrategyBreakdown(trades).map(r =>
+    `${r.strategy}: ${r.total} trades, ${Math.round(r.winRate * 100)}% win, $${r.pnl.toFixed(0)} total, avg ${r.avgPnlPct.toFixed(1)}%`);
   const symMap: Record<string, { count: number; wins: number; pnl: number }> = {};
   for (const t of trades) {
     if (!symMap[t.symbol]) symMap[t.symbol] = { count: 0, wins: 0, pnl: 0 };
@@ -592,15 +587,7 @@ function OverviewWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEM
 }
 
 function ByStrategyWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof THEMES[Theme] }) {
-  const strategies = ['BPS', 'BCS', 'IC', 'SPREAD', 'OTHER'] as const;
-  const rows = strategies.map(s => {
-    const group = trades.filter(t => t.strategy === s);
-    const wins = group.filter(t => t.outcome === 'WIN').length;
-    const total = group.length;
-    const pnl = group.reduce((sum, t) => sum + t.pnl, 0);
-    const avgPct = total > 0 ? group.reduce((sum, t) => sum + t.pnlPct, 0) / total : 0;
-    return { strategy: s, total, wins, winRate: total > 0 ? wins / total : 0, pnl, avgPct };
-  }).filter(r => r.total > 0);
+  const rows = buildStrategyBreakdown(trades).map(r => ({ strategy: r.strategy, label: r.label, total: r.total, wins: r.wins, winRate: r.winRate, pnl: r.pnl, avgPct: r.avgPnlPct }));
 
   if (rows.length === 0) return <p className={`text-xs ${th.textFaint} text-center py-4`}>No data</p>;
   const maxPnl = Math.max(...rows.map(r => Math.abs(r.pnl)), 1);
@@ -615,8 +602,10 @@ function ByStrategyWidget({ trades, th }: { trades: ClosedTrade[]; th: typeof TH
                 r.strategy === 'BPS' ? 'border-emerald-600 text-emerald-400'
                 : r.strategy === 'BCS' ? 'border-red-600 text-red-400'
                 : r.strategy === 'IC' ? 'ac-btn'
+                : r.strategy === 'CSP' ? 'border-amber-600 text-amber-400'
+                : r.strategy === 'SHORT_CALL' ? 'border-orange-600 text-orange-400'
                 : 'border-slate-600 text-slate-400'
-              }`}>{r.strategy}</span>
+              }`}>{r.label}</span>
               <span className={`text-[10px] ${th.textFaint}`}>{r.total} trades · {Math.round(r.winRate * 100)}% win rate</span>
             </div>
             <span className={`text-[10px] font-bold ${r.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
