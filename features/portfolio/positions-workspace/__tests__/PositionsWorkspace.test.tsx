@@ -247,6 +247,28 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByTestId('rsi-caption')).toHaveTextContent('turned up from');
   });
 
+  it('POSITION-INTENT-0001: the intent control is on each Position Analysis row and each Portfolio instrument card, and saves through the handler', async () => {
+    const user = userEvent.setup();
+    const put = { ...position, strategy: 'PUT', intent: 'acquisition', legs: [{ symbol: 'p', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 9.1 }] } as unknown as Position;
+    const withPut = { ...model, symbolGroups: [{ ...model.symbolGroups[0], optionInstruments: [{ ...model.symbolGroups[0].optionInstruments[0], position: put }] }], analysisRows: [{ id: put.key, position: put, symbol: put.symbol, strategy: put.strategy, needsAttention: false }] };
+    const onIntentChange = vi.fn();
+    render(<PositionsWorkspace model={withPut} th={THEMES.dark} onIntentChange={onIntentChange} />);
+    // Portfolio tab: the instrument card in the symbol details
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Intent for AAPL' }), 'wheel');
+    expect(onIntentChange).toHaveBeenCalledWith(put.key, 'wheel');
+    // Position Analysis tab: the Position cell
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const select = screen.getByRole('combobox', { name: 'Intent for AAPL' });
+    expect(select.closest('td')).toBe(screen.getByRole('button', { name: 'Quick chart for AAPL' }).closest('td'));
+    await user.selectOptions(select, 'income');
+    expect(onIntentChange).toHaveBeenLastCalledWith(put.key, 'income');
+  });
+
+  it('without an intent handler the workspace shows no intent control', () => {
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    expect(screen.queryByRole('combobox', { name: /Intent for/ })).not.toBeInTheDocument();
+  });
+
   it('lazy-loads one underlying chart at a time and links to TradingView', async () => {
     vi.mocked(fetch).mockImplementation(async input => {
       if (String(input).startsWith('/api/chart')) return { ok: true, json: async () => ({ bars: [{ c: 100 }, { c: 102 }] }) } as Response;

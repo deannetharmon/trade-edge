@@ -26,6 +26,7 @@ export function deriveAssignmentPreferenceFromIntent(
 ): AssignmentPreference {
   switch (intent) {
     case 'acquisition':
+    case 'wheel': // POSITION-INTENT-0001: a wheel expects assignment; only the assignment weight changes, no stop or exit rule does
       return 'PREFER';
     case 'income':
       return 'AVOID';

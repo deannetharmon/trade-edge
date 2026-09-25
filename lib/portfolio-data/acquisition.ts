@@ -2311,10 +2311,12 @@ export function getRecommendation(pos: Position, trend: TrendResult | null): Rec
 
   // Acquisition-intent CSP: ITM / paper loss is the plan working, not a risk signal.
   // Skip all breach/stop/loss-based hard exits — hold to expiration for assignment.
-  const isAcquisitionCsp = pos.strategy === 'PUT' && pos.intent === 'acquisition';
+  // POSITION-INTENT-0001 (Dean, 2026-09-25): a put meant to be assigned, either to own the shares (Acquire) or to
+  // start a wheel, gets no strong close or cut action from paper losses.
+  const isAcquisitionCsp = pos.strategy === 'PUT' && (pos.intent === 'acquisition' || pos.intent === 'wheel');
   if (isAcquisitionCsp) {
     if (breached) return { action: 'HOLD', detail: `ITM — on track for assignment, holding to expiration` };
-    return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% paper — acquisition intent, hold for assignment or expiry` };
+    return { action: 'HOLD', detail: `${pnlPct.toFixed(0)}% paper — ${pos.intent === 'wheel' ? 'wheel' : 'acquisition'} intent, hold for assignment or expiry` };
   }
 
   // Hard exits: breached strike, confirmed stop breach, or very large loss.

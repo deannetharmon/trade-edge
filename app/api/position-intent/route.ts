@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import Redis from 'ioredis';
+import type { PositionIntent } from '@/lib/portfolio-data/types';
+import { isPositionIntent } from '@/lib/positionIntent/vocabulary';
 
 const redis = new Redis(process.env.REDIS_URL!);
 
@@ -15,7 +17,7 @@ function redisKey(userId: string) {
 // decide whether assignment is success (acquisition) or failure (income), and to
 // weigh hold/close/roll honestly. Auto-defaulted client-side (CSP -> acquisition,
 // spreads -> income) and only persisted here when the trader overrides.
-export type PositionIntent = 'income' | 'acquisition' | 'neutral';
+export type { PositionIntent };
 
 type IntentStore = Record<string, PositionIntent>; // keyed by position.key
 
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!positionKey) {
       return NextResponse.json({ error: 'positionKey required' }, { status: 400 });
     }
-    if (intent !== null && !['income', 'acquisition', 'neutral'].includes(intent)) {
+    if (intent !== null && !isPositionIntent(intent)) {
       return NextResponse.json({ error: 'invalid intent' }, { status: 400 });
     }
 

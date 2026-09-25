@@ -465,6 +465,38 @@ describe('getRecommendation: canonical stop-loss integration', () => {
     expect(rec.action).toBe('HOLD');
   });
 
+  // POSITION-INTENT-0001 (Dean, 2026-09-25): a put meant to be assigned for a wheel is treated like Acquire:
+  // no strong close or cut action. An Income put is unchanged and still gets its hard exits.
+  it('keeps a wheel-intent CSP on HOLD even with a broker-confirmed stop fill', () => {
+    const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
+    const pos = makePosition({
+      strategy: 'PUT',
+      intent: 'wheel',
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
+      stopLossPrice: policy.triggerPrice,
+      stopLossOrderStatus: 'Filled',
+      currentValue: 999999,
+      closeValue: 999999,
+    });
+    const rec = getRecommendation(pos, null);
+    expect(rec.action).toBe('HOLD');
+    expect(rec.detail).toContain('wheel intent');
+  });
+
+  it('an income-intent put with the same broker-confirmed stop fill is NOT held: the wheel and acquire exemption does not leak', () => {
+    const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
+    const pos = makePosition({
+      strategy: 'PUT',
+      intent: 'income',
+      stopLossPolicy: policy, stopLossDisplayPolicy: policy,
+      stopLossPrice: policy.triggerPrice,
+      stopLossOrderStatus: 'Filled',
+      currentValue: 999999,
+      closeValue: 999999,
+    });
+    expect(getRecommendation(pos, null).action).not.toBe('HOLD');
+  });
+
   it('returns MANAGE (not CUT_LOSSES) for a wide-market marketable-only breach with no confirmation history', () => {
     const policy = buildOriginalCreditDefaultPolicy(2.52, { brokerOrderId: 'ord-1' });
     const thresholdTotal = policy.triggerPrice * 100 * 5;

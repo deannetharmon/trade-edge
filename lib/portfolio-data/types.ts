@@ -40,7 +40,9 @@ export interface PositionLeg {
 // Trader's reference point for AI analysis. Auto-defaulted from strategy
 // (lone short put -> acquisition, everything else -> income) and overridable
 // per position; persisted in Redis via /api/position-intent.
-export type PositionIntent = 'income' | 'acquisition' | 'neutral';
+// POSITION-INTENT-0001: each strategy shows its own words (see lib/positionIntent/vocabulary.ts): a LEAP uses
+// hold / pmcc / undecided, a lone short put or call uses income / acquisition / wheel / neutral, a spread income / neutral.
+export type PositionIntent = 'income' | 'acquisition' | 'neutral' | 'wheel' | 'hold' | 'pmcc' | 'undecided';
 
 
 export interface Position {
