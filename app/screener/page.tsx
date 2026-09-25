@@ -95,8 +95,8 @@ import { parseOccSymbol } from '@/lib/optionSymbol';
 import { CalloutList, LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
 import { LeapsAdvisorPickCard } from '@/features/screener/components/LeapsAdvisorPickCard';
 import { buildCcPickSummary, buildPmccPickSummary } from '@/lib/scans/advisorCards';
-import type { LeapsPickSummary } from '@/lib/leaps-analysis/dashboard';
-import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
+import type { LeapsPickSummary, LeapsPlan } from '@/lib/leaps-analysis/dashboard';
+import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, LEAPS_PLAN_LABELS, leapsPlanToServerIntent, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold, getOiLiquidityLabel } from '@/lib/scans/rank-scoring';
@@ -3461,7 +3461,8 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
   const [facts, setFacts] = useState<any>(null);
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState('');
-  const [analysisIntent, setAnalysisIntent] = useState<'not_specified' | 'standalone' | 'stock_replacement' | 'future_pmcc'>('not_specified');
+  // POSITION-INTENT-0001: the plan for this LEAP (Hold / PMCC / Undecided). It decides which notes the dashboard shows and is sent with the review.
+  const [analysisPlan, setAnalysisPlan] = useState<LeapsPlan>('undecided');
   const [analysisQuantity, setAnalysisQuantity] = useState(1);
   const [analysisObjective, setAnalysisObjective] = useState('');
   const analysisEnabled = process.env.NEXT_PUBLIC_LEAPS_ANALYSIS_ENABLED !== 'false';
@@ -3528,7 +3529,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     try {
       const response = await fetch('/api/leaps-analysis', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'facts', underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: '', deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
+        body: JSON.stringify({ mode: 'facts', underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: leapsPlanToServerIntent(analysisPlan), quantity: analysisQuantity, objective: '', deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : body?.error?.message ?? `Could not load numbers (${response.status})`);
@@ -3552,7 +3553,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
     try {
       const response = await fetch('/api/leaps-analysis', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: analysisIntent, quantity: analysisQuantity, objective: analysisObjective, idempotencyKey: crypto.randomUUID(), deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
+        body: JSON.stringify({ underlyingSymbol: candidate.symbol, occSymbol: candidate.occSymbol, intent: leapsPlanToServerIntent(analysisPlan), quantity: analysisQuantity, objective: analysisObjective, idempotencyKey: crypto.randomUUID(), deltaMin, deltaMax, dteMin, dteMax, oiMin, extrinsicPctMax }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : body?.error?.message ?? `Analysis failed (${response.status})`);
@@ -3685,11 +3686,15 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
       {analysisOpen && (
         <div className="mt-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3" data-testid="leaps-ai-analysis-panel">
           <div className="flex flex-wrap items-end gap-3">
-            <label className={`text-[9px] ${th.textMuted}`}>Intended use
-              <select value={analysisIntent} onChange={event => setAnalysisIntent(event.target.value as typeof analysisIntent)} className={`mt-1 block rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`}>
-                <option value="not_specified">Not specified</option><option value="standalone">Standalone long call</option><option value="stock_replacement">Stock replacement</option><option value="future_pmcc">Future PMCC long leg</option>
-              </select>
-            </label>
+            <div role="radiogroup" aria-label="Intent for this LEAP" className={`text-[9px] ${th.textMuted}`} data-testid="leaps-plan">
+              Intent
+              <div className={`mt-1 flex overflow-hidden rounded border ${th.inputBorder}`}>
+                {(['hold', 'pmcc', 'undecided'] as const).map(plan => (
+                  <button key={plan} type="button" role="radio" aria-checked={analysisPlan === plan} onClick={() => setAnalysisPlan(plan)}
+                    className={`px-3 py-1 text-[10px] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-teal-400 ${analysisPlan === plan ? 'bg-teal-500/20 font-bold text-teal-300' : th.textMuted}`}>{LEAPS_PLAN_LABELS[plan]}</button>
+                ))}
+              </div>
+            </div>
             <label className={`text-[9px] ${th.textMuted}`}>Contracts
               <input type="number" min={1} max={100} value={analysisQuantity} onChange={event => setAnalysisQuantity(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} className={`mt-1 block w-20 rounded border ${th.inputBorder} ${th.input} px-2 py-1 text-[10px] ${th.text}`} />
             </label>
@@ -3710,7 +3715,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
                   th={th}
                   dashboard={buildLeapsDashboard({
                     snapshot: shownSnapshot, current: shownSnapshot === analysis?.snapshot ? analysis?.current !== false : true,
-                    ivRank: candidate.ivRank, ivx: candidate.ivx, pmccStart,
+                    ivRank: candidate.ivRank, ivx: candidate.ivx, pmccStart, intent: analysisPlan,
                     formatTimestamp: (iso: string) => new Date(iso).toLocaleString(),
                   })}
                 />

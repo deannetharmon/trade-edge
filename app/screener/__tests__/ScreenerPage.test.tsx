@@ -644,6 +644,24 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(start).not.toHaveTextContent('est.');
   });
 
+  it('the LEAP review card has a Hold / PMCC / Undecided intent control that defaults to Undecided and is sent with the request', async () => {
+    seedLeaps(leapsRow({ ivx: 30, ivRank: 25 }));
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchSpy);
+    renderScreenerPage();
+    const analyze = await screen.findByRole('button', { name: 'Analyze with AI' });
+    expect(analyze).toBeEnabled();
+    fireEvent.click(analyze);
+    const group = await screen.findByRole('radiogroup', { name: 'Intent for this LEAP' });
+    const radios = within(group).getAllByRole('radio');
+    expect(radios.map(r => r.textContent)).toEqual(['Hold', 'PMCC', 'Undecided']);
+    expect(within(group).getByRole('radio', { name: 'Undecided' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(group).getByRole('radio', { name: 'PMCC' }));
+    expect(within(group).getByRole('radio', { name: 'PMCC' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(group).getByRole('radio', { name: 'Undecided' })).toHaveAttribute('aria-checked', 'false');
+    vi.unstubAllGlobals();
+  });
+
   it('Rank mode preview shows the active saved rules', async () => {
     seedWatchlist();
     renderScreenerPage();

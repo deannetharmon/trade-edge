@@ -28,7 +28,21 @@ export const LEAPS_DASHBOARD_POLICY = {
   spreadWatchPct: 5,
   /** Advisor cards: at or above this delta the contract "moves closely with the stock". */
   highDeltaMin: 0.8,
+  /** POSITION-INTENT-0001: a breakeven move above this % of the price is amber; at or below it is plain information. */
+  breakevenWatchPct: 10,
+  /** POSITION-INTENT-0001: for a PMCC, a stock within this % of its estimated start price is not called short of it. */
+  pmccStartTolerancePct: 2,
 } as const;
+
+/** What the trader plans to do with the LEAP. Chosen on the review card and saved with the position. */
+export type LeapsPlan = 'hold' | 'pmcc' | 'undecided';
+
+export const LEAPS_PLAN_LABELS: Record<LeapsPlan, string> = { hold: 'Hold', pmcc: 'PMCC', undecided: 'Undecided' };
+
+/** The analysis route still takes its four original intent words; the three plans map onto them (stock replacement is a kind of hold). */
+export function leapsPlanToServerIntent(plan: LeapsPlan): 'standalone' | 'future_pmcc' | 'not_specified' {
+  return plan === 'hold' ? 'standalone' : plan === 'pmcc' ? 'future_pmcc' : 'not_specified';
+}
 
 /** The parts of the analysis snapshot the dashboard reads (a structural subset of the stored snapshot). */
 export interface DashboardSnapshot {
@@ -46,6 +60,8 @@ export interface LeapsDashboardInput {
   ivRank: number | null;
   ivx: number | null;
   pmccStart: PmccStartPrice;
+  /** The trader's plan for this LEAP; it decides which notes appear (IVR and the PMCC start note are PMCC notes). Default undecided. */
+  intent?: LeapsPlan;
   /** Formats an ISO time for display (locale-specific, so supplied by the caller). */
   formatTimestamp?: (iso: string) => string;
 }
@@ -59,6 +75,8 @@ const STATUS_TONE: Record<string, DashboardTone> = { CONTRACT_QUALIFIED: 'good',
 
 export function buildLeapsDashboard(input: LeapsDashboardInput): LeapsDashboard {
   const { snapshot, current, ivRank, ivx, pmccStart } = input;
+  const intent: LeapsPlan = input.intent ?? 'undecided';
+  const isPmcc = intent === 'pmcc';
   const formatTimestamp = input.formatTimestamp ?? ((iso: string) => iso);
   const policy = LEAPS_DASHBOARD_POLICY;
   const { contract, criteria, qualification, mechanics } = snapshot;
@@ -105,26 +123,28 @@ export function buildLeapsDashboard(input: LeapsDashboardInput): LeapsDashboard 
 
   const breakeven = mechanics.breakeven;
   const breakevenPct = mechanics.breakevenPctAboveSpot;
-  const breakevenTone: DashboardTone = breakevenPct == null ? 'neutral' : breakevenPct > 0 ? 'watch' : 'good';
+  const breakevenTone: DashboardTone = breakevenPct == null ? 'neutral' : breakevenPct > policy.breakevenWatchPct ? 'watch' : breakevenPct > 0 ? 'neutral' : 'good';
   tiles.push({
     id: 'breakeven', label: 'Breakeven at expiry', value: breakeven == null ? '—' : money(breakeven), tone: breakevenTone,
     parts: breakevenPct == null ? [] : [{ text: breakevenPct > 0 ? `+${pct(breakevenPct)} above price` : `${pct(Math.abs(breakevenPct))} below price`, tone: breakevenTone }],
   });
 
-  const pmccTone: DashboardTone = pmccStart.status === 'above' ? 'good' : pmccStart.status === 'below' ? 'watch' : 'neutral';
+  const pmccShort = pmccStart.status === 'below' && (pmccStart.pctToStart ?? 0) > policy.pmccStartTolerancePct;
+  const pmccTone: DashboardTone = !isPmcc ? 'neutral' : pmccStart.status === 'above' ? 'good' : pmccShort ? 'watch' : 'neutral';
   tiles.push({
     id: 'pmcc-start', label: 'PMCC start ≥', value: pmccStart.startPrice == null ? '—' : money(pmccStart.startPrice), tone: pmccTone,
-    parts: pmccStart.status === 'above' ? [{ text: 'stock above · est.', tone: 'good' }]
-      : pmccStart.status === 'below' ? [{ text: `needs +${pct(pmccStart.pctToStart ?? 0)} · est.`, tone: 'watch' }]
+    parts: pmccStart.status === 'above' ? [{ text: 'stock above · est.', tone: isPmcc ? 'good' : 'neutral' }]
+      : pmccStart.status === 'below' ? [{ text: `needs +${pct(pmccStart.pctToStart ?? 0)} · est.`, tone: pmccTone }]
       : [{ text: 'needs IVx', tone: 'neutral' }],
   });
 
+  // IVR is information, never a warning: it is grey for every plan, and the "sell calls against it" side appears only for a PMCC.
   const ivrParts: DashboardPart[] = ivRank == null ? [] : ivRank < policy.ivrLow
-    ? [{ text: 'cheap to buy', tone: 'good' }, { text: 'thin to sell', tone: 'watch' }]
+    ? [{ text: 'cheap to buy', tone: 'neutral' }, ...(isPmcc ? [{ text: 'thin to sell', tone: 'neutral' as DashboardTone }] : [])]
     : ivRank >= policy.ivrHigh
-      ? [{ text: 'pricey to buy', tone: 'watch' }, { text: 'rich to sell', tone: 'good' }]
+      ? [{ text: 'pricey to buy', tone: 'neutral' }, ...(isPmcc ? [{ text: 'rich to sell', tone: 'neutral' as DashboardTone }] : [])]
       : [{ text: ivx != null ? `IVx ${pct(ivx)}` : 'mid range', tone: 'neutral' }];
-  tiles.push({ id: 'ivr', label: 'IVR', value: ivRank == null ? '—' : `${ivRank.toFixed(0)}%`, tone: ivRank == null ? 'neutral' : ivRank < policy.ivrLow || ivRank >= policy.ivrHigh ? 'watch' : 'neutral', parts: ivrParts });
+  tiles.push({ id: 'ivr', label: 'IVR', value: ivRank == null ? '—' : `${ivRank.toFixed(0)}%`, tone: 'neutral', parts: ivrParts });
 
   // ---- callouts ------------------------------------------------------------
   const callouts: DashboardCallout[] = [];
@@ -139,19 +159,31 @@ export function buildLeapsDashboard(input: LeapsDashboardInput): LeapsDashboard 
     callouts.push({ id: 'prior-session', tone: 'watch', text: `Quotes are from the prior session${contract.optionQuoteTimestamp ? ` (option quote ${formatTimestamp(contract.optionQuoteTimestamp)})` : ''}. Re-check pricing after the market opens.` });
   }
   if (extrinsicPct != null) {
-    callouts.push(extrinsicPct <= policy.mostlyIntrinsicMaxExtrinsicPct
-      ? { id: 'extrinsic', tone: 'good', text: 'Mostly intrinsic value: little extrinsic value at risk.' }
-      : { id: 'extrinsic', tone: 'watch', text: `Extrinsic value is ${pct(extrinsicPct)} of cost: some time value at risk.` });
+    if (cap != null) {
+      // Judged against the trader's own cap. An extrinsic value over the cap already has a failed-gate callout above, so it is not repeated.
+      if (extrinsicPct <= cap) callouts.push({ id: 'extrinsic', tone: 'good', text: `Extrinsic value is ${pct(extrinsicPct)} of cost, within your ${cap}% cap.` });
+    } else {
+      callouts.push(extrinsicPct <= policy.mostlyIntrinsicMaxExtrinsicPct
+        ? { id: 'extrinsic', tone: 'good', text: 'Mostly intrinsic value: little extrinsic value at risk.' }
+        : { id: 'extrinsic', tone: 'neutral', text: `Extrinsic value is ${pct(extrinsicPct)} of cost (no cap set).` });
+    }
   }
   if (breakevenPct != null) {
-    callouts.push(breakevenPct > 0
+    callouts.push(breakevenPct > policy.breakevenWatchPct
       ? { id: 'breakeven', tone: 'watch', text: `Stock needs to rise ${pct(breakevenPct)} to break even at expiration.` }
-      : { id: 'breakeven', tone: 'good', text: `Stock is already ${pct(Math.abs(breakevenPct))} above breakeven at expiration.` });
+      : breakevenPct > 0
+        ? { id: 'breakeven', tone: 'neutral', text: `Stock needs to rise ${pct(breakevenPct)} to break even at expiration.` }
+        : { id: 'breakeven', tone: 'good', text: `Stock is already ${pct(Math.abs(breakevenPct))} above breakeven at expiration.` });
   }
-  if (ivRank != null && ivRank < policy.ivrLow) callouts.push({ id: 'ivr', tone: 'watch', text: `IVR ${ivRank.toFixed(0)}%: cheap to buy, but thin premium to sell calls against it.` });
-  if (ivRank != null && ivRank >= policy.ivrHigh) callouts.push({ id: 'ivr', tone: 'watch', text: `IVR ${ivRank.toFixed(0)}%: expensive to buy, but calls you sell against it pay well.` });
-  if (pmccStart.status === 'below') callouts.push({ id: 'pmcc-start', tone: 'watch', text: `Stock is ${pct(pmccStart.pctToStart ?? 0)} below its PMCC start price (estimate).` });
-  if (pmccStart.status === 'above') callouts.push({ id: 'pmcc-start', tone: 'good', text: 'Stock is above its PMCC start price (estimate): a first call can clear breakeven.' });
+  // IVR and the PMCC start price only mean something for a PMCC, so only a PMCC plan gets a note. Both are grey information.
+  if (isPmcc && ivRank != null && ivRank < policy.ivrLow) callouts.push({ id: 'ivr', tone: 'neutral', text: `IVR ${ivRank.toFixed(0)}%: low, so calls you sell against it pay less.` });
+  if (isPmcc && ivRank != null && ivRank >= policy.ivrHigh) callouts.push({ id: 'ivr', tone: 'neutral', text: `IVR ${ivRank.toFixed(0)}%: high, so calls you sell against it pay well, and the LEAP costs more.` });
+  if (isPmcc && pmccStart.status === 'below') {
+    callouts.push(pmccShort
+      ? { id: 'pmcc-start', tone: 'watch', text: `Stock is ${pct(pmccStart.pctToStart ?? 0)} below its PMCC start price (estimate).` }
+      : { id: 'pmcc-start', tone: 'neutral', text: `Stock is ${pct(pmccStart.pctToStart ?? 0)} below its PMCC start price (estimate), within ${policy.pmccStartTolerancePct}% of it.` });
+  }
+  if (isPmcc && pmccStart.status === 'above') callouts.push({ id: 'pmcc-start', tone: 'good', text: 'Stock is above its PMCC start price (estimate): a first call can clear breakeven.' });
   if (spreadPct != null && spreadPct > policy.spreadWatchPct && !(spreadLimit != null && spreadPct > spreadLimit)) {
     callouts.push({ id: 'spread', tone: 'watch', text: `Spread is ${pct(spreadPct)}${spreadDollars != null ? `: about ${money(Math.round(spreadDollars))} per contract to cross` : ''}.` });
   }

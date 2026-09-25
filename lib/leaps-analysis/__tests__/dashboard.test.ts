@@ -4,7 +4,7 @@
 // pinned here so a change to a threshold is a deliberate, visible decision.
 
 import { describe, expect, it } from 'vitest';
-import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, LEAPS_DASHBOARD_POLICY, sortPicksByScore, type DashboardSnapshot, type LeapsDashboardInput, type LeapsPickCandidate } from '../dashboard';
+import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, LEAPS_DASHBOARD_POLICY, LEAPS_PLAN_LABELS, leapsPlanToServerIntent, sortPicksByScore, type DashboardSnapshot, type LeapsDashboardInput, type LeapsPickCandidate } from '../dashboard';
 
 const snapshot = (over: Partial<DashboardSnapshot> = {}): DashboardSnapshot => ({
   createdAt: '2026-09-20T07:54:58.000Z',
@@ -28,20 +28,33 @@ describe('the GOOGL 250C example', () => {
   it('builds the six tiles with their values and tones', () => {
     expect(d.tiles.map(t => [t.id, t.value, t.tone])).toEqual([
       ['delta', '0.85', 'good'], ['extrinsic', '11.2%', 'good'], ['spread', '2.4%', 'good'],
-      ['breakeven', '$363.55', 'watch'], ['pmcc-start', '$349.38', 'good'], ['ivr', '20%', 'watch'],
+      ['breakeven', '$363.55', 'neutral'], ['pmcc-start', '$349.38', 'neutral'], ['ivr', '20%', 'neutral'],
     ]);
     expect(tile(d, 'delta').parts[0].text).toBe('in your 0.70–0.85');
     expect(tile(d, 'extrinsic').parts[0].text).toBe('$12.69 · under your 20% cap');
     expect(tile(d, 'spread').parts[0].text).toBe('$270 / contract · under 10% limit');
     expect(tile(d, 'breakeven').parts[0].text).toBe('+3.6% above price');
     expect(tile(d, 'pmcc-start').parts[0].text).toBe('stock above · est.');
-    expect(tile(d, 'ivr').parts.map(p => p.text)).toEqual(['cheap to buy', 'thin to sell']);
+    expect(tile(d, 'ivr').parts.map(p => p.text)).toEqual(['cheap to buy']);
+    expect(tile(buildLeapsDashboard(input({ intent: 'pmcc' })), 'ivr').parts.map(p => p.text)).toEqual(['cheap to buy', 'thin to sell']);
   });
 
-  it('builds the callouts, watch items before good ones', () => {
-    expect(d.callouts.map(c => [c.id, c.tone])).toEqual([['breakeven', 'watch'], ['ivr', 'watch'], ['extrinsic', 'good'], ['pmcc-start', 'good']]);
+  it('with no plan chosen the callouts are the extrinsic check against your cap and a plain breakeven line: no IVR or PMCC notes', () => {
+    expect(d.callouts.map(c => [c.id, c.tone])).toEqual([['extrinsic', 'good'], ['breakeven', 'neutral']]);
+    expect(callout(d, 'extrinsic')!.text).toBe('Extrinsic value is 11.2% of cost, within your 20% cap.');
     expect(callout(d, 'breakeven')!.text).toBe('Stock needs to rise 3.6% to break even at expiration.');
-    expect(callout(d, 'ivr')!.text).toBe('IVR 20%: cheap to buy, but thin premium to sell calls against it.');
+  });
+
+  it('a Hold plan reads the same as no plan: no IVR or PMCC notes', () => {
+    const hold = buildLeapsDashboard(input({ intent: 'hold', ivRank: 20 }));
+    expect(hold.callouts.map(c => c.id)).toEqual(['extrinsic', 'breakeven']);
+  });
+
+  it('a PMCC plan adds a grey IVR note and the PMCC start note', () => {
+    const pmcc = buildLeapsDashboard(input({ intent: 'pmcc' }));
+    expect(pmcc.callouts.map(c => [c.id, c.tone])).toEqual([['extrinsic', 'good'], ['pmcc-start', 'good'], ['breakeven', 'neutral'], ['ivr', 'neutral']]);
+    expect(callout(pmcc, 'ivr')!.text).toBe('IVR 20%: low, so calls you sell against it pay less.');
+    expect(tile(pmcc, 'pmcc-start').tone).toBe('good');
   });
 
   it('builds the chips and the rule line', () => {
@@ -52,20 +65,45 @@ describe('the GOOGL 250C example', () => {
 
 describe('thresholds (Ian)', () => {
   it('pins the policy values', () => {
-    expect(LEAPS_DASHBOARD_POLICY).toEqual({ mostlyIntrinsicMaxExtrinsicPct: 15, ivrLow: 30, ivrHigh: 50, spreadWatchPct: 5, highDeltaMin: 0.8 });
+    expect(LEAPS_DASHBOARD_POLICY).toEqual({ mostlyIntrinsicMaxExtrinsicPct: 15, ivrLow: 30, ivrHigh: 50, spreadWatchPct: 5, highDeltaMin: 0.8, breakevenWatchPct: 10, pmccStartTolerancePct: 2 });
   });
 
-  it.each([[15, 'good'], [15.01, 'watch']])('extrinsic %s%% of cost is a %s callout', (extrinsic, tone) => {
-    const d = buildLeapsDashboard(input({ snapshot: withQual({ extrinsicPctOfCost: extrinsic }) }));
-    expect(callout(d, 'extrinsic')!.tone).toBe(tone);
+  const noCap = (extrinsic: number) => buildLeapsDashboard(input({ snapshot: snapshot({ criteria: { ...snapshot().criteria!, extrinsicPctMax: null }, qualification: { ...snapshot().qualification, extrinsicPctOfCost: extrinsic } }) }));
+
+  it.each([[15, 'good'], [15.01, 'neutral']])('with no cap set, extrinsic %s%% of cost is a %s callout (the 15% rule of thumb applies only then)', (extrinsic, tone) => {
+    expect(callout(noCap(extrinsic), 'extrinsic')!.tone).toBe(tone);
   });
 
-  it.each([[29.9, 'low'], [30, null], [49.9, null], [50, 'high']])('IVR %s gives the %s callout', (ivRank, kind) => {
-    const d = buildLeapsDashboard(input({ ivRank }));
+  it('with a cap set, the extrinsic callout is judged against YOUR cap: 19.9% is within a 20% cap even though it is over 15%', () => {
+    const d = buildLeapsDashboard(input({ snapshot: withQual({ extrinsicPctOfCost: 19.9 }) }));
+    expect(callout(d, 'extrinsic')).toMatchObject({ tone: 'good', text: 'Extrinsic value is 19.9% of cost, within your 20% cap.' });
+  });
+
+  it('over your cap there is no amber extrinsic callout: the failed gate already says so once', () => {
+    const d = buildLeapsDashboard(input({ snapshot: snapshot({ qualification: { ...snapshot().qualification, status: 'NOT_QUALIFIED', extrinsicPctOfCost: 25, gates: [{ id: 'extrinsic', status: 'fail', message: 'Extrinsic must be 20% of cost or less' }] } }) }));
+    expect(callout(d, 'extrinsic')).toBeUndefined();
+    expect(callout(d, 'gate-extrinsic')).toMatchObject({ tone: 'bad' });
+  });
+
+  it.each([[10, 'neutral'], [10.01, 'watch'], [3.6, 'neutral']])('breakeven %s%% above the price is a %s line: amber only above 10%', (breakevenPct, tone) => {
+    const d = buildLeapsDashboard(input({ snapshot: snapshot({ mechanics: { extrinsicPerShare: 12.69, breakeven: 363.55, breakevenPctAboveSpot: breakevenPct } }) }));
+    expect(callout(d, 'breakeven')!.tone).toBe(tone);
+    expect(tile(d, 'breakeven').tone).toBe(tone);
+  });
+
+  it.each([[29.9, 'low'], [30, null], [49.9, null], [50, 'high']])('PMCC plan: IVR %s gives the %s note, always grey', (ivRank, kind) => {
+    const d = buildLeapsDashboard(input({ ivRank, intent: 'pmcc' }));
     const c = callout(d, 'ivr');
-    if (kind === 'low') expect(c!.text).toContain('cheap to buy');
-    else if (kind === 'high') expect(c!.text).toContain('expensive to buy');
+    if (kind === 'low') expect(c).toMatchObject({ tone: 'neutral', text: expect.stringContaining('low, so calls you sell') });
+    else if (kind === 'high') expect(c).toMatchObject({ tone: 'neutral', text: expect.stringContaining('high, so calls you sell') });
     else expect(c).toBeUndefined();
+  });
+
+  it.each([[10, 'hold'], [10, 'undecided'], [80, 'hold'], [80, 'undecided']] as const)('IVR %s under a %s plan gives no IVR note, and the IVR tile is never amber', (ivRank, intent) => {
+    const d = buildLeapsDashboard(input({ ivRank, intent }));
+    expect(callout(d, 'ivr')).toBeUndefined();
+    expect(tile(d, 'ivr').tone).toBe('neutral');
+    expect(tile(d, 'ivr').parts.every(p => p.tone === 'neutral')).toBe(true);
   });
 
   it.each([[5, false], [5.1, true]])('spread %s%% %s a spread callout', (spreadPct, shown) => {
@@ -115,7 +153,7 @@ describe('failures, gaps and modes', () => {
   });
 
   it('a stock below its PMCC start price, and one with no IVx, read honestly', () => {
-    const below = buildLeapsDashboard(input({ pmccStart: { status: 'below', startPrice: 362.1, pctToStart: 3.2 } }));
+    const below = buildLeapsDashboard(input({ intent: 'pmcc', pmccStart: { status: 'below', startPrice: 362.1, pctToStart: 3.2 } }));
     expect(tile(below, 'pmcc-start')).toMatchObject({ value: '$362.10', tone: 'watch' });
     expect(callout(below, 'pmcc-start')!.text).toBe('Stock is 3.2% below its PMCC start price (estimate).');
     const none = buildLeapsDashboard(input({ pmccStart: { status: 'unavailable', startPrice: null, pctToStart: null }, ivRank: null, ivx: null }));
@@ -123,6 +161,18 @@ describe('failures, gaps and modes', () => {
     expect(tile(none, 'ivr')).toMatchObject({ value: '—', tone: 'neutral' });
     expect(callout(none, 'pmcc-start')).toBeUndefined();
     expect(callout(none, 'ivr')).toBeUndefined();
+  });
+
+  it.each([[2, 'neutral'], [2.01, 'watch']])('PMCC plan: a stock %s%% below its start price is a %s note (2%% tolerance)', (pctToStart, tone) => {
+    const d = buildLeapsDashboard(input({ intent: 'pmcc', pmccStart: { status: 'below', startPrice: 362.1, pctToStart } }));
+    expect(callout(d, 'pmcc-start')!.tone).toBe(tone);
+    expect(tile(d, 'pmcc-start').tone).toBe(tone);
+  });
+
+  it.each(['hold', 'undecided'] as const)('a %s plan gets no PMCC start note, and the tile is grey even when the stock is below it', intent => {
+    const d = buildLeapsDashboard(input({ intent, pmccStart: { status: 'below', startPrice: 362.1, pctToStart: 9 } }));
+    expect(callout(d, 'pmcc-start')).toBeUndefined();
+    expect(tile(d, 'pmcc-start').tone).toBe('neutral');
   });
 
   it('a breakeven already below the price is good news, not a warning', () => {
@@ -229,5 +279,16 @@ describe('advisor ordering and concentration', () => {
     expect(buildConcentrationCallout(['A', 'B', 'C'])).toBeNull();
     expect(buildConcentrationCallout(['A'])).toBeNull();
     expect(buildConcentrationCallout([])).toBeNull();
+  });
+});
+
+describe('the LEAP plan', () => {
+  it('maps onto the review route\'s intent words: Hold is standalone, PMCC is a future PMCC long leg, Undecided is not specified', () => {
+    expect(leapsPlanToServerIntent('hold')).toBe('standalone');
+    expect(leapsPlanToServerIntent('pmcc')).toBe('future_pmcc');
+    expect(leapsPlanToServerIntent('undecided')).toBe('not_specified');
+  });
+  it('has a label for each plan', () => {
+    expect(LEAPS_PLAN_LABELS).toEqual({ hold: 'Hold', pmcc: 'PMCC', undecided: 'Undecided' });
   });
 });
