@@ -1,48 +1,43 @@
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-09-24
+Last updated: 2026-09-24 (end of day)
 
-## Now (in build or next up)
+## Done this session (2026-09-24; all merged to main, production deploys green)
 
-Build order for SCAN-ALIGN-0001 (accepted by Dean 2026-09-24). Each engine flip gets its own revertable test flip; do not bundle engine flips.
+SCAN-ALIGN-0001 slices A `PMCC-HELD-BREAKEVEN-0001` and 0001B-1 held-card outcomes (`c26c1b1`), B `PMCC-EARNINGS-PAST-0001` (`5ee2cfc`), C1 OI policy and C2 hybrid bid/ask with the $0.50 short-call ceiling (`a44b47c`), D earnings removal and after-expiry warning (`610bdd9`), E debit below width always on (`d0978b2`), F1 delta chips (`133c842`), F2 PMCC short delta hard filter, LEAPS-ADVISOR-0001B waived (`a34098d`); PMCC-RECEIPT-0001 part 2 (delta window on the status line, `bd49f63`) and part 1 (Active PMCC rules line, `116f47e`); SCAN-GUIDE-0001 part 3 (PMCC width help lines, `116f47e`). Permanent rule: a held LEAP with quantity != 1 fails closed (multi-lot broker averaging unverifiable; Dean holds single-contract LEAPs). All of SCAN-ALIGN-0001 is complete; the PMCC registry migration's prerequisites (A through F) are met.
 
-1. PMCC-HELD-BREAKEVEN-0001 (A, P1, PR1) and PMCC-HELD-BREAKEVEN-0001B-1 (held-card captions, banner, rejected styling, discovery-time pre-modal block): MERGED to main 2026-09-24 (`c26c1b1`; previews green, combined tree 5,001 tests pass, tsc clean). Permanent rule: a held LEAP with quantity != 1 fails closed (`COST_BASIS_UNAVAILABLE`); multi-lot broker averaging is unverifiable (Dean holds single-contract LEAPs). Next: eyeball the held card on production (see 0001B-1 report) and start slice C1.
-2. PMCC-EARNINGS-PAST-0001 (B, P2, PR2): MERGED to main 2026-09-24 (`5ee2cfc`; preview passed, 4,830 tests). Unblocks slice D. Sibling earnings-date comparisons elsewhere are logged under Later.
+## Now (in build)
 
-## Next (scoped, approved, not started)
+- Test hygiene: `CspCandidateDiscovery.test.tsx` "CSP-IVR-0001 ... disqualifies every candidate of an unavailable-IVR symbol" looks up a "35 DTE" button and fails after UTC midnight; Dane is freezing the clock in the test (branch `feature/csp-test-date-independent`, test-only). Also scanning for other date-dependent tests.
 
-Slots 3-8 of the SCAN-ALIGN-0001 order. All accepted by Dean 2026-09-24, none built.
+## Next (recommended order; scoped or ready to scope)
 
-- SCAN-ALIGN-0001C1 (OI policy) and C2 (hybrid bid/ask, $0.50 short-call ceiling): MERGED to main 2026-09-24 (`a44b47c`; real next build, green previews, production deploy green). Follow-ups: pmccScore held-long null-OI fix landed as part of C1; validator hardening landed; `ScreenerSessionWiring` flaky test observed once.
-- SCAN-ALIGN-0001D (MERGED 2026-09-24, `610bdd9`; slot 5, own PR): PMCC earnings removal plus after-expiry warning (Ian's amendment). After B. Needs Alan's date fixtures and Diane's tag copy.
-- SCAN-ALIGN-0001E (MERGED 2026-09-24, `d0978b2`; slots 6-7, own PR, two commits): debit below width becomes non-switchable (E1 stop reading the field, E2 hard reject). After A. Separate PR from D. Alan and Ian sign off.
-- SCAN-ALIGN-0001F1 (slot 8): PMCC delta control polish (chips, hint, receipt row). Needs Diane's mock 1 approved.
-- PMCC-HELD-LONG-FLAGGED-0001: draft only, not approved. Paul approves after F1 lands. Needs Diane's flagged-state mock (part of mock 3).
+1. **CC and CSP earnings pre-check** (likely Dean's false earnings warning): `page.tsx` ~:1468 (CC) and ~:1280 (CSP) compare local-time `daysUntil` against the scan DTE range, not the contract's own expiry, and the fail stays visible when no candidate exists. Changes CC/CSP behavior, so Ian rules first; small ticket (Paul drafts). Bundle with the other local-time or UTC earnings comparisons: `pmccReadiness.ts:29`, `pmccScore.ts:83`, `pmccStopGtcPrompt.ts:27`, `page.tsx:3880/:8190`, `portfolio/page.tsx:2341`, `checklist.ts`, `covered-call-finder.ts:212`, `screener.ts`, `rinse-repeat/page.tsx:1395`, `csp-finder.ts:161`; the New York date helper `lib/scans/pmccEarningsDates.ts` (from B) is the model.
+2. **`page.tsx:5685` held pair lookup** does not apply the breakeven floor (correctness gap in slice A's area): small ticket to Frank/Paul.
+3. **SCAN-GUIDE-0001 parts 1-2** (after-scan "Width rule removed N of M short calls (ceiling: X, percent rule: Y)" line and a muted pointer when the rule removed most of a symbol's candidates; the "K more would qualify at $0.75" clause was removed by Ian). Paul holds them until the pointer's own weight check on a rendered mock. Needs CC rejection tagging at the width gate (engine data).
+4. **PMCC-HELD-BREAKEVEN-0001C** (P2): held-LEAP results tiles (Avg open, Since open with em dashes), results container, "Show full breakdown", filter funnel with engine funnel data, the "Adjust short delta" banner, rejected-pairs list. Needs its own rendered mock (Dean cannot review ASCII) and Dane's UI check first (Mock 3 assumed a surface that does not exist).
+5. **EARNINGS-NO-DATE-0001** (draft; missing-earnings-date caution; sequenced after D, which is done): needs Paul's scope and Diane's tag copy.
+6. **PMCC registry migration** (SCREENER-CONFIG-0001 phase after CC): prerequisites met. It absorbs the PMCC scan receipt component, the dropped "always on" debit row and the F1 receipt row.
+7. Small follow-ups: held card nested-button accessibility (Refresh Portfolio sits inside the card's expand button; split the header toggle), `pmccHeldReadinessClient` labels every blocked held pair `quote-quality`, `pmccScore.legLiquidityFraction` review (C1 fixed the held-long null-OI case), inline error text for invalid PMCC delta (Run is silently disabled).
 
 ## Later (on the horizon, not yet scoped)
 
-- MERGED 2026-09-24 (`116f47e`, deploy green): PMCC-RECEIPT-0001 part 1 (Active PMCC rules line; heading reads "Held LEAP" since runPMCCScan only runs held LEAPs today) and SCAN-GUIDE-0001 part 3 (PMCC width help lines). Remaining in SCAN-GUIDE-0001: parts 1-2 (after-scan removed-count line and a muted pointer; the "K more would qualify at $0.75" clause was removed), held by Paul until their own weight check.
-- Test hygiene: `CspCandidateDiscovery.test.tsx` "CSP-IVR-0001 ... disqualifies every candidate of an unavailable-IVR symbol" looks up a "35 DTE" button and fails after UTC midnight (day-count boundary); passes earlier in the day. Make it date-independent.
-- PMCC-RECEIPT-0001 (scoped by Paul 2026-09-24): ambient "Active PMCC rules" line from the scan snapshot (DTE, delta window, spread %, width ceiling, OI min) closing the silent-empty gap F2 opens; part 2 (delta window on the scan-complete status line) ships right after F2 merges. Before SCAN-GUIDE-0001. Needs Diane's rendered mock (Dean cannot review ASCII).
-- Follow-ups from D and E (2026-09-24, unticketed): the CC pre-check at page.tsx ~:1468 (and CSP ~:1280) compares local-time daysUntil against the scan DTE range, not the contract expiry (likely Dean's false earnings warning); other local-time or UTC earnings comparisons in pmccScore.ts:83, pmccStopGtcPrompt.ts:27, pmccReadiness.ts:29, page.tsx:3880/:8190, portfolio/page.tsx:2341, checklist.ts, covered-call-finder.ts:212, screener.ts, rinse-repeat/page.tsx:1395, csp-finder.ts:161. Also: the PMCC "always on" debit-below-width receipt row moves to the PMCC registry migration. Ian to confirm the E test-coverage loss (breakeven-above-short-strike warning case unreachable for new-entry pairs).
-- SCAN-GUIDE-0001 (proposed by Paul 2026-09-24, Dean's request): report-only post-scan note on what the width ceiling removed, a majority-removed nudge, and plain-English help beside the width fields. After D, E, F1; item 3 (help text only) can ship early. Needs Ian wording sign-off and a rendered Diane mock.
-- PMCC-HELD-BREAKEVEN-0001C (P2): held-LEAP results tiles (Avg open and Since open with em dashes), results container, "Show full breakdown", filter funnel and engine funnel data, "Adjust short delta" banner, rejected-pairs list. Needs its own mock and approval; not tied to PR1.
-- Follow-ups found building A and B (2026-09-24, unticketed; Paul to scope):
-  - Earnings-date comparisons elsewhere still use raw strings, UTC or host-local dates: `pmccReadiness.ts:29`, `pmccScore.ts:76`, `pmccLifecycle.ts:14,30` (regex-only `isDate`), `covered-call-finder.ts:185`, `lib/screener.ts:245`; `page.tsx` unchecked. Owned by slice D and EARNINGS-NO-DATE-0001.
-  - `page.tsx:5685` pair lookup for a held long does not apply the breakeven floor.
-  - Held pair card: the Refresh Portfolio action and banner sit inside the card's expand `<button>` (nested interactive content; screen readers may not reach Refresh, same as the existing chart button). Fix = split the header into its own toggle; changes the click target and the `Expand/Collapse … PMCC details` aria-label existing tests use (found in 0001B-1 QA, 2026-09-24).
-  - `pmccHeldReadinessClient.ts` labels every blocked held pair `quality: quote-quality` (its `QUOTE|BID_ASK|MARKET` match hits the always-present QUOTES_READY gate); fold into 0001B or a separate ticket.
+- PMCC-HELD-LONG-FLAGGED-0001: draft, not approved. Held LEAPs that go OTM are dropped silently (`LONG_NOT_ITM`); needs a rendered flagged-state mock. Approve after 0001C's surface exists.
 - Paper trading parity, six phases: (1) stock + CC, (2) PMCC, (3) LEAP-only, (4) rolls, (5) GTC/stop simulation via Vercel Cron, (6) assignment/expiration. Plan lives in `docs/paper-trading-full-parity-plan.md`. No phase ticketed or scoped yet.
 - PMCC three-stage discovery flow: partially implemented. `isPairedPmccLong` in `lib/portfolio-data/pmccPairDetection.ts` is reusable. Blocks AI-POLICY-0001E.
-- EARNINGS-NO-DATE-0001: draft (Ian, 2026-09-24). Missing-earnings-date caution. Needs Paul scope; sequenced after D.
-- PMCC registry migration (SCREENER-CONFIG-0001 phase after CC): A through E, and F or a recorded delta difference, must land first.
 - Task manager / background scan track (TE-0001 through TE-0005D, RF-0001): tickets read "Ready for Implementation" but reference `feature/autopilot-paper-mode`, which no longer exists. Status unverified; reconcile against main before scoping.
-- LCC-0001A through E (equity-aware LEAPS/CC/PMCC lifecycle): the epic is "Approved for technical specification" and B through E read "Ready after" their predecessor. A is merged per Project state; B-E build status unverified.
+- LCC-0001A through E (equity-aware LEAPS/CC/PMCC lifecycle): the epic is "Approved for technical specification" and B through E read "Ready after" their predecessor. A is merged; B-E build status unverified.
 - AI-POLICY-0001 (B, C, D, E, F): drafts. C is blocked on Diane's mocks, E on the PMCC three-stage flow landing, and F blocks enabling any route in Production.
+
+## Process notes (learned 2026-09-24)
+
+- Diane's mocks for Dean must be rendered (HTML artifact or screenshot); Dean cannot review ASCII. Where he delegates to Ian, record it in the mock doc.
+- Before merging code to main run a real `next build` (es5 target rejects `for...of` over Maps; tsconfig.check.json and vitest do not catch it) and confirm Vercel's production status on the exact commit afterward. Merge from a scratch worktree so uncommitted local work is untouched. No full suite after a merge when the branch already ran it and main did not move.
+- Agents read files from origin/main (`git show origin/main:<path>`) because the local checkout is stale while Dean has uncommitted work in `page.tsx`.
 
 ## Parked / deferred (with why, and what would unstick it)
 
-- (moved to build 2026-09-24) SCAN-ALIGN-0001F2: Dean approved building now ("Do F2 now"), reduced held-card reason accepted, LEAPS-ADVISOR-0001B waived (not a dependency). Building to the F ticket's F2 rulings.
+- SCAN-ALIGN-0001F2: DONE (moved out of Parked; merged `a34098d`).
 - LEAPS-ADVISOR-0001B: scoped, not built; no ticket file in docs/tickets/. Unstick: team go-ahead, or a re-scope decision. Gates F2.
 - PMCC-ASSIGNMENT-RISK-0001: draft. Short-to-LEAP expiry-gap investigation goes now. Ex-dividend part is deferred. Unstick: Dean's ex-dividend data-source decision.
 - After-hours CC "not ready" chip: rides with C as a display state only, held. Unstick: Ian's confirmation (his open item 2, management rules and "not ready").
