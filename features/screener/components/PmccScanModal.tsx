@@ -129,8 +129,10 @@ export function PmccScanModal({
       <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-delta-hint">Absolute delta of the short call. Lower = further OTM.</p>
       {field('shortOiMin', 'Short OI min', '1')}
       {field('maxSpreadPct', 'Max spread %', '1')}
+      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-spread-help">Calls with a wider bid/ask gap than this are removed (minimum allowance $0.05).</p>
       {field('widthCeiling', 'Width ceiling ($)', '0.01')}
-      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-width-hint">Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling. Warns above 5% of mid (or $0.05).</p>
+      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-ceiling-help">Removes calls whose gap exceeds this many dollars per share, even if the percent rule passes.</p>
+      <p className="col-span-full text-[10px] text-neutral-400" data-testid="pmcc-width-hint">Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling.</p>
     </div>
     {!discoveryLoading && symbols.length > 0 && selectedCount === 0 && (
       <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">

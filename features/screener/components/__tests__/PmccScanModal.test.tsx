@@ -86,3 +86,26 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
     expect(screen.getByRole('button', { name: /RUN PMCC SCAN/ })).toBeDisabled();
   });
 });
+
+describe('SCAN-GUIDE-0001 part 3 PMCC width help lines', () => {
+  it('shows one muted help line under Max spread % and Width ceiling ($), no tooltip', () => {
+    renderModal();
+    const spread = screen.getByText('Calls with a wider bid/ask gap than this are removed (minimum allowance $0.05).');
+    const ceiling = screen.getByText('Removes calls whose gap exceeds this many dollars per share, even if the percent rule passes.');
+    expect(spread).toHaveClass('text-neutral-400');
+    expect(ceiling).toHaveClass('text-neutral-400');
+    expect(spread).not.toHaveAttribute('title');
+    expect(ceiling).not.toHaveAttribute('title');
+    // Each help line sits directly after its own field.
+    expect(screen.getByLabelText('Max spread %').closest('label')!.nextElementSibling).toBe(spread);
+    expect(screen.getByLabelText('Width ceiling ($)').closest('label')!.nextElementSibling).toBe(ceiling);
+  });
+
+  it('keeps existing labels, the F1 hint and the width hint', () => {
+    renderModal();
+    expect(screen.getByLabelText('Max spread %')).toBeInTheDocument();
+    expect(screen.getByLabelText('Width ceiling ($)')).toBeInTheDocument();
+    expect(screen.getByText('Absolute delta of the short call. Lower = further OTM.')).toBeInTheDocument();
+    expect(screen.getByTestId('pmcc-width-hint')).toBeInTheDocument();
+  });
+});

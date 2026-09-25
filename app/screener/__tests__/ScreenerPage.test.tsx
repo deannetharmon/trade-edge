@@ -689,7 +689,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(maxSpread.value).toBe('10');
     // SCAN-ALIGN-0001C2: the short-leg width ceiling cell and its static hint.
     expect((screen.getByLabelText('Width ceiling ($)') as HTMLInputElement).value).toBe('0.5');
-    expect(screen.getByTestId('pmcc-width-hint')).toHaveTextContent('Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling. Warns above 5% of mid (or $0.05).');
+    expect(screen.getByTestId('pmcc-width-hint')).toHaveTextContent('Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling.');
 
     fireEvent.change(shortMin, { target: { value: '14' } });
     fireEvent.change(shortMax, { target: { value: '35' } });
