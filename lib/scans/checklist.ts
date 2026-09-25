@@ -6,6 +6,7 @@ import { DEFAULT_ETF_RULES, INDEX_IVR_MIN } from './constants';
 import { daysUntil, formatDisplayDate, estimateNextEarningsDate, normalizeIv } from './scan-utils';
 import { findBestIC, findBestSpread, findBestICUnfiltered, findBestSpreadUnfiltered } from './spread-finder';
 import { assessOiLiquidity } from './oiLiquidity';
+import { daysUntilNy, earningsOnOrBeforeExpiration } from './earningsPrecheck';
 
 export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', metrics: any, chainData: { expirations: string[]; chains: Record<string, any[]>; isEtfOrIndex?: boolean; classification?: 'index' | 'etf' | 'stock' }, price: number | null, STOCK_RULES: RulesType, trendResult?: TrendResult, stockPresetLabel?: string, ETF_RULES_PARAM?: RulesType, etfPresetLabel?: string, strictOnly = false): ScreenResult {
   const failReasons: string[] = [], ivrValue = metrics.ivRank, earningsDate = metrics.earningsExpectedDate;
@@ -27,8 +28,12 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
   } else if (!earningsDate) {
     earningsCheck = { status: 'pass', value: 'None found', reason: 'Safe to trade' };
   } else {
-    const d = daysUntil(earningsDate);
-    if (d < 0) {
+    // EARNINGS-DATEBASIS-0001: earnings math is on the New York calendar basis.
+    // A bad date (null) keeps the prior fall-through (neither past nor within buffer).
+    const d = daysUntilNy(earningsDate);
+    if (d == null) {
+      earningsCheck = { status: 'pass', value: `${earningsDate}`, reason: 'Earnings date unavailable' };
+    } else if (d < 0) {
       earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
     } else if (d < earningsBuffer) {
       if (strictOnly) {
@@ -42,7 +47,7 @@ export function runChecklist(symbol: string, strategy: 'BPS' | 'BCS' | 'IC', met
     }
   }
 
-  const validExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); if (dte < effectiveRules.DTE_MIN || dte > effectiveRules.DTE_MAX) return false; if (strictOnly && !isIndex && earningsDate) { const ed = daysUntil(earningsDate); if (ed >= 0 && ed <= dte) return false; } return true; });
+  const validExpirations = chainData.expirations.filter(exp => { const dte = daysUntil(exp); if (dte < effectiveRules.DTE_MIN || dte > effectiveRules.DTE_MAX) return false; if (strictOnly && !isIndex && earningsDate) { if (earningsOnOrBeforeExpiration(earningsDate, exp) === true) return false; } return true; });
   let bestCandidate: SpreadCandidate | null = null;
   
   // Rank mode fallback: if strict rules found nothing, try relaxed rules first, then fully unfiltered
@@ -79,10 +84,16 @@ bestCandidate = strategy === 'IC'
     // before a specific expiration was picked, so it could flag earnings
     // that fall safely AFTER this trade's own expiry as a false positive).
     if (!isIndex && earningsDate) {
-      const ed = daysUntil(earningsDate);
-      if (ed < 0) {
+      const ed = daysUntilNy(earningsDate);
+      // Inclusion is decided on the trade's own expiration date (ISO compare, NY today);
+      // bestCandidate.dte stays on the old DTE basis and is only a display value / fallback.
+      const onOrBeforeExpiry = earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration);
+      const beforeExpiry = onOrBeforeExpiry ?? (ed != null && ed <= bestCandidate.dte);
+      if (ed == null) {
+        // unparseable earnings date: leave the earlier check untouched
+      } else if (ed < 0) {
         earningsCheck = { status: 'pass', value: `${earningsDate} (past)`, reason: `Already reported · next est. ${formatDisplayDate(estimateNextEarningsDate(earningsDate))}` };
-      } else if (ed <= bestCandidate.dte) {
+      } else if (beforeExpiry) {
         if (strictOnly) {
           failReasons.push(`Earnings in ${ed}d — before this trade's expiry`);
           earningsCheck = { status: 'fail', value: `${ed}d (${earningsDate})`, reason: `Falls before this trade's ${bestCandidate.dte}d expiry` };
