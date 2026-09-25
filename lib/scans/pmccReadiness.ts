@@ -1,5 +1,6 @@
 import type { PmccPairResult } from './pmccTypes';
 import type { EventRiskResult } from './eventRisk';
+import { earningsOnOrBeforeExpiration } from './earningsPrecheck';
 
 export type PmccReadinessStatus = 'PMCC_STRUCTURE_QUALIFIED' | 'LONG_QUALIFIED_SHORT_NOT_READY' | 'WAIT_MONITOR' | 'NOT_QUALIFIED';
 export interface PmccReadinessGate { id: string; status: 'pass' | 'fail' | 'unavailable'; message: string; }
@@ -26,7 +27,8 @@ export function evaluatePmccReadiness(input: {
   } else gates.push({ id: 'quotes', status: 'pass', message: 'Both-leg quotes are current and actionable' });
   if (!pair.qualified || pair.failureReasons.length) gates.push({ id: 'structure', status: 'fail', message: pair.primaryFailureReason?.message ?? 'The proposed structure does not meet current rules' });
   else gates.push({ id: 'structure', status: 'pass', message: 'Strike, expiry, debit, and liquidity rules pass' });
-  const earningsBeforeShort = Boolean(input.earningsDate && input.earningsDate >= new Date().toISOString().slice(0, 10) && input.earningsDate <= pair.shortLeg.expiration);
+  // EARNINGS-DATEBASIS-0001: New York calendar day (was the UTC date).
+  const earningsBeforeShort = earningsOnOrBeforeExpiration(input.earningsDate, pair.shortLeg.expiration) === true;
   if (earningsBeforeShort && input.policy.earnings === 'block') gates.push({ id: 'earnings', status: 'fail', message: 'Earnings fall before short-call expiration' });
   else gates.push({ id: 'earnings', status: 'pass', message: earningsBeforeShort ? 'Earnings caution acknowledged by policy' : 'No earnings event before short expiration' });
   if (input.eventRisk?.status === 'NOT_QUALIFIED') gates.push({ id: 'eventRisk', status: 'fail', message: input.eventRisk.blockers.join(' · ') || 'Event risk blocks this structure' });

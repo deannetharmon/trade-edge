@@ -18,13 +18,8 @@
 // logic is simple enough that duplication is safer than adding new
 // cross-boundary coupling for six lines of date math.
 function isUpcomingEarningsRisk(earningsDate: string | null, expDate: string): boolean {
-  if (!earningsDate) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const earnings = new Date(`${earningsDate}T00:00:00`);
-  const expiry = new Date(`${expDate}T23:59:59`);
-  if (Number.isNaN(earnings.getTime()) || Number.isNaN(expiry.getTime())) return false;
-  return earnings >= today && earnings <= expiry;
+  // EARNINGS-DATEBASIS-0001: New York calendar basis via the shared helper (bad data stays false).
+  return earningsOnOrBeforeExpiration(earningsDate, expDate) === true;
 }
 
 // Position/underlying-level context (buffer, earnings, IVR, profit-capture
@@ -55,6 +50,7 @@ export function buildStopGtcFlags(input: {
   ].filter(Boolean).join(' | ') || 'None';
 }
 
+import { earningsOnOrBeforeExpiration } from '../scans/earningsPrecheck';
 import { canonicalShortLegEntryCredit, canonicalShortLegCreditPerContract, type PmccShortLegLike } from './pmccLegEconomics';
 
 export interface PmccShortLegPromptContext {
