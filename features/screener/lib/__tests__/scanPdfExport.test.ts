@@ -22,6 +22,72 @@ function completedSession(): ScreenerScanSession {
   return completeSession(session);
 }
 
+const leapsRow = (over: Partial<Parameters<typeof buildLeapsExportReport>[0][number]> = {}) => ({
+  symbol: 'QQQ', expiration: '2027-06-17', dte: 265, strike: 545, delta: .85, openInterest: 1289, bid: 219.73, ask: 223, underlyingPrice: 740.27,
+  spreadPct: 1.5, extrinsicValue: 26.1, ivRank: 6, ivx: 26.3, dataQuality: 'ok' as const, score: 73, ...over,
+});
+const criteria = { deltaMin: .7, deltaMax: .85, dteMin: 180, dteMax: 730, oiMin: 100, extrinsicPctMax: 20, hiddenSymbols: [] as string[] };
+
+describe('LEAPS summary table export', () => {
+  it('computes cost, breakeven, ITM % of underlying and extrinsic % of cost', () => {
+    const report = buildLeapsExportReport([leapsRow()], 'full', 1, ['QQQ'], 'summary', criteria);
+    const row = report.leapsSummary!.qualified[0];
+    expect(row.cost).toBeCloseTo(22136.5, 1);
+    expect(row.breakeven).toBeCloseTo(766.365, 2);
+    expect(row.breakevenPct).toBeCloseTo(3.53, 1);
+    expect(row.itmPct).toBeCloseTo(26.4, 1);
+    expect(row.extrinsicPctOfCost).toBeCloseTo(11.8, 1);
+    expect(row.status).toBe('Q');
+  });
+
+  it('keeps one global list sorted by score with ranks, regardless of symbol', () => {
+    const rows = [leapsRow({ symbol: 'AAPL', score: 60 }), leapsRow({ symbol: 'QQQ', score: 73 }), leapsRow({ symbol: 'AAPL', score: 70 })];
+    const q = buildLeapsExportReport(rows, 'full', 1, ['AAPL', 'QQQ'], 'summary', criteria).leapsSummary!.qualified;
+    expect(q.map(r => [r.rank, r.symbol, r.score])).toEqual([[1, 'QQQ', 73], [2, 'AAPL', 70], [3, 'AAPL', 60]]);
+  });
+
+  it('lists every failed criterion for a disqualified row', () => {
+    const report = buildLeapsExportReport([leapsRow({ symbol: 'NVDA', delta: .86, openInterest: 85 })], 'full', 1, ['NVDA'], 'summary', criteria);
+    const [row] = report.leapsSummary!.excluded;
+    expect(row.status).toBe('DQ');
+    expect(row.reasons).toEqual(['Delta 0.86 above 0.85', 'Open interest 85 below 100']);
+    expect(report.leapsSummary!.qualified).toHaveLength(0);
+  });
+
+  it('marks insufficient rows DATA? naming the missing field, never a zero', () => {
+    const report = buildLeapsExportReport([leapsRow({ symbol: 'MU', delta: null, dataQuality: 'insufficient', ask: null, bid: null })], 'full', 1, ['MU'], 'summary', criteria);
+    const [row] = report.leapsSummary!.excluded;
+    expect(row.status).toBe('DATA?');
+    expect(row.reasons[0]).toContain('delta');
+    expect(row.ask).toBeNull();
+    expect(row.cost).toBeNull();
+  });
+
+  it('cards layout does not produce a summary, so today\'s export is unchanged', () => {
+    expect(buildLeapsExportReport([leapsRow()], 'full', 1, ['QQQ'], 'cards', criteria).leapsSummary).toBeUndefined();
+    expect(buildLeapsExportReport([leapsRow()], 'full', 1, ['QQQ']).leapsSummary).toBeUndefined();
+  });
+
+  it('renders landscape print HTML with counts, legend, DQ words, and no cut-off rows', () => {
+    const rows = [leapsRow(), leapsRow({ symbol: 'NVDA', delta: .86, score: null }), leapsRow({ symbol: 'MU', delta: null, dataQuality: 'insufficient', score: null })];
+    const html = buildScanPrintHtml(buildLeapsExportReport(rows, 'full', 1, ['QQQ', 'NVDA', 'MU'], 'summary', criteria));
+    expect(html).toContain('size: Letter landscape');
+    expect(html).toContain('1 qualified');
+    expect(html).toContain('2 disqualified or incomplete rows included');
+    expect(html).toContain('Q = qualified · DQ = disqualified · DATA? = insufficient data');
+    expect(html).toContain('none are cut off');
+    expect(html).toContain('>DQ<');
+    expect(html).toContain('>DATA?<');
+    expect(html).toContain('$22,137');
+    expect(html).toContain('Research snapshot only. Quotes and eligibility are not live execution authorization.');
+  });
+
+  it('escapes HTML in symbols and reasons', () => {
+    const html = buildScanPrintHtml(buildLeapsExportReport([leapsRow({ symbol: '<b>X' })], 'full', 1, [], 'summary', criteria));
+    expect(html).not.toContain('<b>X');
+  });
+});
+
 describe('scan PDF export view model', () => {
   it('uses the whole completed session for a full export regardless of the current view', () => {
     const session = completedSession();

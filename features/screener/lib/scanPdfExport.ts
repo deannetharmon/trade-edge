@@ -1,3 +1,5 @@
+// features/screener/lib/scanPdfExport.ts
+
 // Scan-session report view model.  This module is deliberately pure: it only
 // reads the completed scan snapshot and never asks the scanner, broker, or a
 // market-data provider for anything.
@@ -28,6 +30,28 @@ export interface ScanExportReport {
   heldLeapCandidates: ScanExportCandidate[];
   otherCandidates: ScanExportCandidate[];
   symbolOutcomes: Array<{ symbol: string; status: string; reason: string; candidateCount: number }>;
+  leapsSummary?: LeapsSummary;
+}
+
+export type LeapsExportLayout = 'summary' | 'cards';
+
+export interface LeapsExportCriteria {
+  deltaMin: number; deltaMax: number; dteMin: number; dteMax: number;
+  oiMin: number; extrinsicPctMax: number; hiddenSymbols: string[];
+}
+
+export interface LeapsSummaryRow {
+  rank: number | null; symbol: string; contract: string; dte: number; delta: number | null;
+  ask: number | null; cost: number | null; breakeven: number | null; breakevenPct: number | null;
+  itmPct: number | null; extrinsicPctOfCost: number | null; spreadPct: number | null;
+  openInterest: number | null; ivRank: number | null; score: number | null;
+  status: 'Q' | 'DQ' | 'DATA?'; reasons: string[];
+}
+
+export interface LeapsSummary {
+  qualified: LeapsSummaryRow[];
+  excluded: LeapsSummaryRow[];
+  criteria: Array<{ label: string; value: string }>;
 }
 
 export interface LeapsExportRow {
@@ -127,8 +151,65 @@ export function buildScanExportReport(
   };
 }
 
+const num = (value: number | null | undefined) => value != null && Number.isFinite(value) ? value : null;
+
+/** Mirrors the LEAPS screen's display filters and reports every failed criterion. */
+function summarizeLeapsRow(row: LeapsExportRow, criteria: LeapsExportCriteria): LeapsSummaryRow {
+  const bid = num(row.bid), ask = num(row.ask), underlying = num(row.underlyingPrice);
+  const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+  const cost = mid != null ? mid * 100 : null;
+  const extrinsic = num(row.extrinsicValue);
+  const extrinsicPctOfCost = extrinsic != null && cost != null && cost > 0 ? (extrinsic * 100 / cost) * 100 : null;
+  const breakeven = mid != null ? row.strike + mid : null;
+  const breakevenPct = breakeven != null && underlying != null && underlying > 0 ? (breakeven - underlying) / underlying * 100 : null;
+  const itmPct = underlying != null && underlying > 0 ? (underlying - row.strike) / underlying * 100 : null;
+  const reasons: string[] = [];
+  let status: LeapsSummaryRow['status'] = 'Q';
+  if (criteria.hiddenSymbols.includes(row.symbol)) {
+    status = 'DQ'; reasons.push('Symbol hidden in the scan view');
+  } else if (row.dataQuality === 'insufficient') {
+    status = 'DATA?';
+    const missing = [row.delta == null ? 'delta' : null, row.openInterest == null ? 'open interest' : null].filter(Boolean);
+    reasons.push(`Missing ${missing.length ? missing.join(' and ') : 'quote data'} in this scan snapshot`);
+  } else {
+    const delta = row.delta ?? -1;
+    if (delta < criteria.deltaMin) reasons.push(`Delta ${delta.toFixed(2)} below ${criteria.deltaMin.toFixed(2)}`);
+    if (delta > criteria.deltaMax) reasons.push(`Delta ${delta.toFixed(2)} above ${criteria.deltaMax.toFixed(2)}`);
+    if (row.dte < criteria.dteMin) reasons.push(`DTE ${row.dte} below ${criteria.dteMin}`);
+    if (row.dte > criteria.dteMax) reasons.push(`DTE ${row.dte} above ${criteria.dteMax}`);
+    if ((row.openInterest ?? 0) < criteria.oiMin) reasons.push(`Open interest ${row.openInterest ?? 0} below ${criteria.oiMin}`);
+    if (criteria.extrinsicPctMax > 0) {
+      if (extrinsicPctOfCost == null) reasons.push('Extrinsic % of cost unavailable (no bid/ask)');
+      else if (extrinsicPctOfCost > criteria.extrinsicPctMax) reasons.push(`Extrinsic ${extrinsicPctOfCost.toFixed(1)}% of cost above ${criteria.extrinsicPctMax}%`);
+    }
+    if (reasons.length) status = 'DQ';
+  }
+  return {
+    rank: null, symbol: row.symbol, contract: `$${row.strike} C ${row.expiration}`, dte: row.dte, delta: num(row.delta),
+    ask, cost, breakeven, breakevenPct, itmPct, extrinsicPctOfCost, spreadPct: num(row.spreadPct),
+    openInterest: num(row.openInterest), ivRank: num(row.ivRank), score: num(row.score), status, reasons,
+  };
+}
+
+const byScoreDesc = (a: LeapsSummaryRow, b: LeapsSummaryRow) => (b.score ?? -Infinity) - (a.score ?? -Infinity);
+
+function buildLeapsSummary(rows: LeapsExportRow[], criteria: LeapsExportCriteria): LeapsSummary {
+  const summarized = rows.map(row => summarizeLeapsRow(row, criteria));
+  const qualified = summarized.filter(row => row.status === 'Q').sort(byScoreDesc).map((row, index) => ({ ...row, rank: index + 1 }));
+  const excluded = summarized.filter(row => row.status !== 'Q').sort(byScoreDesc);
+  return {
+    qualified, excluded,
+    criteria: [
+      { label: 'Delta', value: `${criteria.deltaMin.toFixed(2)}–${criteria.deltaMax.toFixed(2)}` },
+      { label: 'DTE', value: `${criteria.dteMin}–${criteria.dteMax}` },
+      { label: 'Open interest', value: `≥ ${criteria.oiMin}` },
+      { label: 'Extrinsic', value: criteria.extrinsicPctMax > 0 ? `≤ ${criteria.extrinsicPctMax}% of cost` : 'Any' },
+    ],
+  };
+}
+
 /** Standalone LEAPS uses its own persisted result cache, not ScreenerScanSession. */
-export function buildLeapsExportReport(rows: LeapsExportRow[], scope: ScanExportScope, completedAt: number | null, selectedSymbols: string[]): ScanExportReport {
+export function buildLeapsExportReport(rows: LeapsExportRow[], scope: ScanExportScope, completedAt: number | null, selectedSymbols: string[], layout: LeapsExportLayout = 'cards', criteria?: LeapsExportCriteria): ScanExportReport {
   const candidates: ScanExportCandidate[] = rows.map(row => ({
     symbol: row.symbol, status: row.dataQuality === 'ok' ? 'Qualified opportunity' : 'Other non-actionable candidate', strategy: 'LEAPS',
     details: [
@@ -147,5 +228,6 @@ export function buildLeapsExportReport(rows: LeapsExportRow[], scope: ScanExport
     configuration: [{ label: 'Export scope', value: scope === 'full' ? 'Full completed scan' : 'Current filtered view' }, { label: 'Scan mode', value: 'LEAPS' }, { label: 'Selected universe', value: `${selectedSymbols.length} symbols: ${selectedSymbols.join(', ') || unavailable}` }, { label: 'Ruleset version', value: 'Not available in this scan snapshot' }],
     quoteStatement: 'LEAPS scan snapshot. Quotes are not live execution pricing. Revalidate before trading.',
     qualified, heldLeapCandidates: [], otherCandidates, symbolOutcomes: [],
+    ...(layout === 'summary' && criteria ? { leapsSummary: buildLeapsSummary(rows, criteria) } : {}),
   };
 }
