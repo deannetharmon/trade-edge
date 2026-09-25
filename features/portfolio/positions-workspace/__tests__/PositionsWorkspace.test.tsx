@@ -195,11 +195,37 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();
     expect(screen.getByText('AT-EXP B/E $165.65')).toBeInTheDocument();
     const chartButton = screen.getByRole('button', { name: 'Quick chart for AAPL' });
-    const strikeGapCellText = chartButton.closest('td')?.textContent ?? '';
-    expect(strikeGapCellText.indexOf('12.5% OTM')).toBeLessThan(strikeGapCellText.indexOf('chart'));
+    // The chart link is the last line of the Position cell, below the contract count, and no longer in Strike Gap.
+    const positionCellText = chartButton.closest('td')?.textContent ?? '';
+    expect(positionCellText).toMatch(/contracts?\s*chart$/);
+    expect(positionCellText).not.toContain('OTM');
+    const headerTexts = screen.getAllByRole('columnheader').map(header => header.textContent);
+    const strikeGapCell = screen.getByRole('columnheader', { name: 'Strike Gap' }).closest('table')?.querySelectorAll('tbody tr')[0]?.querySelectorAll('td')[headerTexts.indexOf('Strike Gap')];
+    expect(strikeGapCell?.textContent ?? '').not.toContain('chart');
     const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
     expect(headers.indexOf('Notes')).toBeLessThan(headers.indexOf('Suggested Action'));
     expect(screen.getByRole('button', { name: 'Take Profit Now' })).toHaveClass('min-h-8');
+  });
+
+  it('Portfolio tab: each symbol row carries a chart link as its third line, and using it does not change the selected symbol', async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (String(input).startsWith('/api/chart')) return { ok: true, json: async () => ({ bars: [{ c: 100 }, { c: 102 }] }) } as Response;
+      return { ok: true, json: async () => ({ notes: {} }) } as Response;
+    });
+    const second = { ...model.symbolGroups[0], symbol: 'MSFT' };
+    render(<PositionsWorkspace model={{ ...model, symbolGroups: [model.symbolGroups[0], second] }} th={THEMES.dark} />);
+    const link = screen.getByRole('button', { name: 'Quick chart for MSFT' });
+    const cellText = link.closest('span.block')?.parentElement?.textContent ?? '';
+    expect(cellText.indexOf('instrument')).toBeLessThan(cellText.indexOf('chart'));
+    expect(screen.getByRole('button', { name: /^AAPL/ })).toHaveAttribute('aria-current', 'true');
+    await user.click(link);
+    expect(await screen.findByRole('dialog', { name: 'Quick chart for MSFT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^AAPL/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: /^MSFT/ })).not.toHaveAttribute('aria-current');
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: /^MSFT/ }));
+    expect(screen.getByRole('button', { name: /^MSFT/ })).toHaveAttribute('aria-current', 'true');
   });
 
   it('lazy-loads one underlying chart at a time and links to TradingView', async () => {
