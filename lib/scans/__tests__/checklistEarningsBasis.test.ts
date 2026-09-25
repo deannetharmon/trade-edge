@@ -97,7 +97,12 @@ describe('checklist earnings on the New York basis', () => {
     expect(onExpiry.bestCandidate).not.toBeNull();
     expect(onExpiry.checks.earnings.status).toBe('warn');
     expect(onExpiry.checks.earnings.reason).toContain("this trade's");
-    const after = run('2026-10-27', false);
+    // EARNINGS-MARGIN-0001 phase 2: 1 to 9 days after expiry is inside the 10-day buffer (warn); 10+ is clear.
+    const dayAfter = run('2026-10-27', false);
+    expect(dayAfter.checks.earnings.status).toBe('warn');
+    expect(dayAfter.checks.earnings.reason).toContain('1d after this trade');
+    expect(run('2026-11-04', false).checks.earnings.status).toBe('warn');
+    const after = run('2026-11-05', false);
     expect(after.checks.earnings.status).toBe('pass');
     expect(after.checks.earnings.reason).toContain('Outside');
     const past = run('2026-09-23', false);

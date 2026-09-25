@@ -2,7 +2,7 @@
 
 ## Status
 
-**Decided 2026-09-25 (Ian and Paul lenses, accepted by Dean): CSP and covered call first (phase 1), then Ranked spreads and PMCC (phase 2). Buffer fixed at 10 days for now; a scan control (0 = off) is a later follow-up. **Phase 1 (CSP and covered call) built 2026-09-25 and pushed to `main`; phase 2 (Ranked spreads, PMCC) not built.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25.
+**Decided 2026-09-25 (Ian and Paul lenses, accepted by Dean): CSP and covered call first (phase 1), then Ranked spreads and PMCC (phase 2). Buffer fixed at 10 days for now; a scan control (0 = off) is a later follow-up. **Phase 1 (CSP and covered call) and phase 2a (Ranked spreads) built 2026-09-25 and pushed to `main`. Phase 2b (PMCC) is held: it conflicts with the SCAN-ALIGN-0001D ruling and needs Dean's decision.** Split out of `SCAN-EARNINGS-TARGETED-0001` on 2026-09-25.
 
 ## Problem
 
@@ -37,4 +37,20 @@ The 21-DTE management-date cutoff, the FMP plan gap, and the stale past-date han
 - Symbol-level advisory (both CSP and CC) uses the buffer, so "no eligible expiration" and "outside window" agree with the per-contract rule.
 - Copy: CSP and CC registry entries, the candidate failure text (names the gap in days when earnings is after expiry), and the advisory text. Existing tests that encoded "day after expiry is clear" were updated to 10+ days; new tests pin the 1-9 day band.
 - Still on the old rule (phase 2): Ranked spreads (checklist rank mode and `page.tsx:3888`), PMCC (`pmccScore`, `pmccReadiness`, `page.tsx:8217`, PMCC earnings removal). Portfolio position-management call sites are not scan qualification and are unchanged.
+
+## Phase 2a build notes (2026-09-25): Ranked spreads
+
+- `lib/scans/checklist.ts` per-trade re-check (rank mode) now treats earnings within 10 days after the trade's expiry like earnings inside it: status `warn` ("scored lower in rank mode"), which keeps the row from qualifying (the qualified flag needs earnings = pass), the same as inside-expiry today. Reason text names the gap: "Earnings 5d after this trade's 35d expiry, inside the 10-day buffer".
+- Test `checklistEarningsBasis.test.ts` updated: 1 and 9 days after expiry warn; 10 days passes.
+- Left unchanged on purpose: `page.tsx` `earningsWithinExpiry` (position-card advisory text about "this position's expiration window"), portfolio position-management call sites, and the `lib/screener.ts` duplicate (follow-up ticket).
+
+## Phase 2b: PMCC (held, needs a ruling)
+
+PMCC already has a designed earnings model (SCAN-ALIGN-0001D, Ian): earnings on or before the short call's expiry removes the call from results; earnings up to 5 NYSE business days after expiry is a **warning-only ambient tag that never affects qualification or ranking** (`lib/scans/earningsExpiryZone.ts`, `EARNINGS_AFTER_EXPIRY_WINDOW_BD = 5`, used by `pmccDecision.ts` and `pmccEarningsRemoval.ts`). A hard 10-day rule would reverse that ruling. Options:
+
+1. Leave PMCC as designed (ambient tag, 5 business days).
+2. Keep it ambient but widen the tag window to about 10 calendar days (7 business days), so the tag covers the observed date error.
+3. Make the 10 days after expiry a removal like the on-or-before case, reversing the ambient-only ruling.
+
+Other PMCC call sites still on the old one-day rule: `pmccScore.ts:83`, `pmccReadiness.ts:31`, `page.tsx` `pmccEarningsBlocksBestFit`.
 

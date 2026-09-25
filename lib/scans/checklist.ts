@@ -100,7 +100,10 @@ bestCandidate = strategy === 'IC'
       const ed = daysUntilNy(earningsDate);
       // Inclusion is decided on the trade's own expiration date (ISO compare, NY today);
       // bestCandidate.dte stays on the old DTE basis and is only a display value / fallback.
-      const onOrBeforeExpiry = earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration);
+      // EARNINGS-MARGIN-0001 phase 2: earnings within EARNINGS_MIN_DAYS_AFTER_EXPIRY days after the
+      // expiration counts like inside it (warn in rank mode, fail in strict mode).
+      const onOrBeforeExpiry = earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration, undefined, EARNINGS_MIN_DAYS_AFTER_EXPIRY);
+      const gapAfterExpiry = ed != null ? ed - (daysUntilNy(bestCandidate.expiration) ?? ed) : 0;
       // Unparseable expiration: fail toward at-risk (never compare the NY-basis day count against the old-basis DTE).
       const beforeExpiry = onOrBeforeExpiry ?? (ed != null);
       if (ed == null) {
@@ -112,7 +115,9 @@ bestCandidate = strategy === 'IC'
           failReasons.push(`Earnings in ${ed}d — before this trade's expiry`);
           earningsCheck = { status: 'fail', value: `${ed}d (${earningsDate})`, reason: `Falls before this trade's ${bestCandidate.dte}d expiry` };
         } else {
-          earningsCheck = { status: 'warn', value: `${ed}d (${earningsDate})`, reason: `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
+          earningsCheck = { status: 'warn', value: `${ed}d (${earningsDate})`, reason: gapAfterExpiry > 0
+            ? `Earnings ${gapAfterExpiry}d after this trade's ${bestCandidate.dte}d expiry, inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer — scored lower in rank mode`
+            : `Falls within this trade's ${bestCandidate.dte}d expiry — scored lower in rank mode` };
         }
       } else {
         earningsCheck = { status: 'pass', value: `${ed}d (${earningsDate})`, reason: `Outside this trade's ${bestCandidate.dte}d expiry` };
