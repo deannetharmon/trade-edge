@@ -2860,7 +2860,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE CSP ORDER — {result.symbol}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
@@ -3820,7 +3820,7 @@ function LeapsTradeModal({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oi
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4" onClick={onClose}>
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md`} onClick={e => e.stopPropagation()}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>BUY LEAPS — {candidate.symbol}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
@@ -4173,7 +4173,7 @@ function TradeModal({ result, th, onClose, qualification }: {
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE ORDER — {result.symbol}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
@@ -4483,7 +4483,7 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax 
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>SELL SHORT CALL — {result.symbol}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
@@ -4772,7 +4772,7 @@ function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, sho
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-md max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+      <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE PMCC ENTRY — {result.symbol}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
