@@ -75,3 +75,21 @@ describe('Stock holdings quick chart', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('Stock holdings column widths', () => {
+  const widths = { identity: 120, dates: 100, underlying: 150, strike: 130, capital: 90, entry: 80, value: 100, pnl: 190, orders: 130, notes: 140, priceAlert: 110, recommendation: 200 };
+
+  it('takes its column widths from the options table above when they are measured', () => {
+    render(<StockHoldings {...props(holding({}))} columnWidths={widths} />);
+    const header = screen.getAllByRole('row')[0];
+    expect(header).toHaveStyle({ gridTemplateColumns: '120px 100px 150px 130px 90px 180px 320px 140px 110px 200px' });
+    expect(screen.getByTestId('stock-row-equity:MRVL:long')).toHaveStyle({ gridTemplateColumns: '120px 100px 150px 130px 90px 180px 320px 140px 110px 200px' });
+    expect(screen.getByTestId('stock-totals')).toHaveStyle({ gridTemplateColumns: '120px 100px 150px 130px 90px 180px 320px 140px 110px 200px' });
+  });
+
+  it('keeps its own default widths when nothing usable was measured', () => {
+    render(<StockHoldings {...props(holding({}))} columnWidths={{ ...widths, notes: 0 }} />);
+    expect(screen.getAllByRole('row')[0].getAttribute('style') ?? '').not.toContain('gridTemplateColumns');
+    expect(screen.getAllByRole('row')[0].getAttribute('style') ?? '').not.toContain('grid-template-columns');
+  });
+});

@@ -14,6 +14,7 @@ import { derivePmccMarketSession } from '@/lib/scans/pmccProduction';
 import { buildStockHoldingRows, buildStockTotals, isPriceAlertCrossed, stockPricesAsOf, type CoveredTone, type StockHoldingRow } from './model/stockHoldings';
 import type { SymbolGroupViewModel } from './model/types';
 import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
+import { alignedStockColumns } from './model/stockColumnAlignment';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
@@ -97,13 +98,13 @@ function StockAlertEditor({ id, symbol, price, savedAlert, onSave }: { id: strin
 type SaveNote = (accountNumber: string, key: string, note: string) => Promise<void>;
 type SaveAlert = (accountNumber: string, key: string, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 
-function Row({ row, th, chart, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
-  row: StockHoldingRow; chart: ReactNode; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
+function Row({ row, th, chart, gridStyle, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
+  row: StockHoldingRow; chart: ReactNode; gridStyle?: { gridTemplateColumns: string }; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
 }) {
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
   return (
-    <div role="row" className={`grid ${COLUMNS} items-start border-t ${th.border}`} data-testid={`stock-row-${row.key}`}>
+    <div role="row" style={gridStyle} className={`grid ${COLUMNS} items-start border-t ${th.border}`} data-testid={`stock-row-${row.key}`}>
       <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span><span className="mt-1 block">{chart}</span></div>
       <div className="p-3 font-mono text-white">{row.shares}{row.sharesNote && <span className={`block font-sans text-[10px] ${th.textFaint}`}>{row.sharesNote}</span>}</div>
       <div className="p-3 font-mono text-white">{row.price != null ? money(row.price) : '—'}</div>
@@ -141,7 +142,9 @@ function Row({ row, th, chart, savedNote, onSaveNote, savedAlert, onSaveAlert, o
   );
 }
 
-export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
+export function StockHoldings({ columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
+  /** Measured widths of the options table above (by column id); when complete, this table lines up with it. */
+  columnWidths?: Record<string, number> | null;
   groups: Array<Pick<SymbolGroupViewModel, 'symbol' | 'equities' | 'capacity'>>;
   quoteAsOf: string | null;
   th: typeof THEMES[AppTheme];
@@ -155,6 +158,8 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
   sellDeps?: SellStockDialogDeps;
 }) {
   const rows = buildStockHoldingRows(groups);
+  const aligned = alignedStockColumns(columnWidths);
+  const gridStyle = aligned ? { gridTemplateColumns: aligned.template } : undefined;
   const [sellRow, setSellRow] = useState<StockHoldingRow | null>(null);
   // The same quick chart the option rows use: one open at a time, closes cached per symbol.
   const [openChartKey, setOpenChartKey] = useState<string | null>(null);
@@ -177,12 +182,12 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
         {asOf && <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300" data-testid="stock-prices-as-of">{asOf.text}</span>}
       </div>
       <div className={`max-w-full overflow-x-auto rounded-xl border ${th.border}`} tabIndex={0} aria-label="Stock holdings, horizontally scrollable">
-        <div role="table" className="min-w-[1180px] text-[11px]">
-          <div role="row" className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
+        <div role="table" className={aligned ? 'text-[11px]' : 'min-w-[1180px] text-[11px]'} style={aligned ? { width: aligned.total } : undefined}>
+          <div role="row" style={gridStyle} className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
             {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert', 'Sell'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
           </div>
           {rows.map(row => (
-            <Row key={row.key} row={row} th={th}
+            <Row key={row.key} row={row} th={th} gridStyle={gridStyle}
               chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
                 showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
                 sparkData={chartData[row.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.symbol]: data }))}
@@ -191,7 +196,7 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
               savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
               onSell={sellDeps ? setSellRow : () => {}} />
           ))}
-          <div role="row" className={`grid ${COLUMNS} items-center border-t ${th.border} bg-white/5`} data-testid="stock-totals">
+          <div role="row" style={gridStyle} className={`grid ${COLUMNS} items-center border-t ${th.border} bg-white/5`} data-testid="stock-totals">
             <div className={`p-3 text-[11px] font-semibold tracking-wider ${th.textFaint}`}>STOCKS TOTAL{!totals.complete && <span className="block text-[10px] font-normal text-amber-300">partial</span>}</div>
             <div className="p-3" /><div className="p-3" />
             <div className={`p-3 font-mono ${th.textFaint}`}>{totals.costBasis != null ? money(totals.costBasis) : ''}</div>
