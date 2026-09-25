@@ -95,7 +95,7 @@ Portfolio chart popup: `position: fixed`, `z-[9999]`, anchored via `cardRef.getB
 
 ## Trading methodology
 
-Premium-selling strategies: BPS, BCS, IC, CSP, CC, PMCC, LEAPS. Capital preservation, defined-risk structures, 50% profit exits, 21-DTE management stops, 2x credit loss stops.
+Premium-selling strategies: BPS, BCS, IC, CSP, CC, PMCC, LEAPS. Capital preservation, defined-risk structures, 50% profit exits, 21-DTE management stops, 2x credit loss stops. Exception: the 21-DTE rule does not apply to CSP and CC, where assignment is an acceptable outcome (Dean, 2026-09-25; see DECIDE-0001).
 
 ## Project state
 
