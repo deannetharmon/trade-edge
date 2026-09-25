@@ -6,12 +6,13 @@ import { INTENT_LABELS, intentFamilyFor, intentOptionsFor, isPositionIntent, nor
 const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P') => ({ direction, optionType });
 
 describe('intentFamilyFor', () => {
-  it('a single long call 365+ days out is a LEAP', () => {
-    expect(intentFamilyFor({ strategy: 'CALL', dte: 365, legs: [leg('Long', 'C')] })).toBe('LEAP');
+  it('a single long call with more than 120 days left is a LEAP, and stays one as it ages (bought at 392, now 356)', () => {
+    expect(intentFamilyFor({ strategy: 'CALL', dte: 121, legs: [leg('Long', 'C')] })).toBe('LEAP');
+    expect(intentFamilyFor({ strategy: 'CALL', dte: 356, legs: [leg('Long', 'C')] })).toBe('LEAP');
     expect(intentFamilyFor({ strategy: 'CALL', dte: 392, legs: [leg('Long', 'C')] })).toBe('LEAP');
   });
-  it('a bought call under 365 days, and any bought put, has no intent to choose', () => {
-    expect(intentFamilyFor({ strategy: 'CALL', dte: 364, legs: [leg('Long', 'C')] })).toBeNull();
+  it('a bought call with 120 days or fewer left, and any bought put, has no intent to choose', () => {
+    expect(intentFamilyFor({ strategy: 'CALL', dte: 120, legs: [leg('Long', 'C')] })).toBeNull();
     expect(intentFamilyFor({ strategy: 'PUT', dte: 55, legs: [leg('Long', 'P')] })).toBeNull();
     expect(intentFamilyFor({ strategy: 'PUT', dte: 500, legs: [leg('Long', 'P')] })).toBeNull();
   });

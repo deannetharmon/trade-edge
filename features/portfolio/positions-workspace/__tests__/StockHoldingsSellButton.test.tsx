@@ -4,6 +4,7 @@
 // a tooltip, before the dialog can ever open, whenever 0 shares are sellable
 // -- the dialog itself never has to say no.
 
+import { THEMES } from '@/lib/theme';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
@@ -12,7 +13,7 @@ import { StockHoldings } from '../StockHoldings';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import type { CapacityViewModel } from '../model/types';
 
-const th = { border: 'border-white/10', textFaint: 'text-white/50' };
+const th = THEMES.dark;
 const holding = (over: Partial<EquityHolding>): EquityHolding => ({
   accountNumber: 'ACCT-1', symbol: 'MRVL', direction: 'Long', quantity: 200, settledQuantity: null, basis: 60, basisComplete: true, currentPrice: 74.5, marketValue: 14900, unrealizedPnl: 2900,
   quoteAsOf: null, staleQuote: false, deliverable: 'standard', dataQualityWarnings: [], ...over,
@@ -57,5 +58,20 @@ describe('Stock holdings Sell action', () => {
     render(<StockHoldings {...rest} />);
     await userEvent.click(screen.getByTestId('sell-button-equity:MRVL:long'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('Stock holdings quick chart', () => {
+  it('each holding has the same chart link under its symbol, and opening it shows the RSI strip for that symbol', async () => {
+    const base = [...Array.from({ length: 11 }, () => [100, 101]).flat(), 100];
+    const closes = [...base, 99, 98, 97, 96, 95, 94, 93, 94, 95.5];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ bars: closes.map(c => ({ c })) }) }));
+    render(<StockHoldings {...props(holding({}))} />);
+    const link = screen.getByRole('button', { name: 'Quick chart for MRVL' });
+    expect(link.closest('[role="row"]')).toHaveAttribute('data-testid', 'stock-row-equity:MRVL:long');
+    await userEvent.click(link);
+    expect(await screen.findByRole('dialog', { name: 'Quick chart for MRVL' })).toBeInTheDocument();
+    expect(await screen.findByTestId('rsi-strip')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

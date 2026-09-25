@@ -5,7 +5,9 @@
 // workspace model's equity holdings and the symbol's covered-call capacity; nothing is computed or guessed here.
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ChartLinkButton } from '@/components/ChartLinkButton';
+import type { THEMES, Theme as AppTheme } from '@/lib/theme';
 import { money } from '@/lib/leaps-analysis/dashboard';
 import { signedMoney } from '@/lib/leaps-position-intelligence/incomeCard';
 import { derivePmccMarketSession } from '@/lib/scans/pmccProduction';
@@ -15,6 +17,8 @@ import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
+
+const INDEX_CHART_SYMBOLS: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
 
 type SavedAlert = { targetPrice: number; direction: 'above' | 'below' };
 type Theme = { border: string; textFaint: string };
@@ -93,14 +97,14 @@ function StockAlertEditor({ id, symbol, price, savedAlert, onSave }: { id: strin
 type SaveNote = (accountNumber: string, key: string, note: string) => Promise<void>;
 type SaveAlert = (accountNumber: string, key: string, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 
-function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
-  row: StockHoldingRow; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
+function Row({ row, th, chart, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
+  row: StockHoldingRow; chart: ReactNode; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
 }) {
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
   return (
     <div role="row" className={`grid ${COLUMNS} items-start border-t ${th.border}`} data-testid={`stock-row-${row.key}`}>
-      <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span></div>
+      <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span><span className="mt-1 block">{chart}</span></div>
       <div className="p-3 font-mono text-white">{row.shares}{row.sharesNote && <span className={`block font-sans text-[10px] ${th.textFaint}`}>{row.sharesNote}</span>}</div>
       <div className="p-3 font-mono text-white">{row.price != null ? money(row.price) : '—'}</div>
       <div className="p-3 font-mono text-white">{row.avgCost != null ? <>{money(row.avgCost)}<span className={`block font-sans text-[10px] ${th.textFaint}`}>cost {money(row.costBasis ?? 0)}</span></> : <span className="text-amber-300">— <span className="block font-sans text-[10px]">basis incomplete</span></span>}</div>
@@ -140,7 +144,7 @@ function Row({ row, th, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }
 export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
   groups: Array<Pick<SymbolGroupViewModel, 'symbol' | 'equities' | 'capacity'>>;
   quoteAsOf: string | null;
-  th: Theme;
+  th: typeof THEMES[AppTheme];
   /** The same accountNumber::key scheme the option notes and alerts use. */
   storageKey: (accountNumber: string, key: string) => string;
   notes: Record<string, string>;
@@ -152,6 +156,10 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
 }) {
   const rows = buildStockHoldingRows(groups);
   const [sellRow, setSellRow] = useState<StockHoldingRow | null>(null);
+  // The same quick chart the option rows use: one open at a time, closes cached per symbol.
+  const [openChartKey, setOpenChartKey] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<Record<string, number[] | null>>({});
+  const [chartLoadingSymbol, setChartLoadingSymbol] = useState<string | null>(null);
   if (rows.length === 0) return null;
   const totals = buildStockTotals(rows);
   const nowMs = Date.now();
@@ -175,6 +183,10 @@ export function StockHoldings({ groups, quoteAsOf, th, storageKey, notes, onSave
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th}
+              chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
+                showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
+                sparkData={chartData[row.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.symbol]: data }))}
+                sparkLoading={chartLoadingSymbol === row.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.symbol : null)} />}
               savedNote={notes[storageKey(row.accountNumber, row.key)] ?? ''} onSaveNote={onSaveNote}
               savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
               onSell={sellDeps ? setSellRow : () => {}} />
