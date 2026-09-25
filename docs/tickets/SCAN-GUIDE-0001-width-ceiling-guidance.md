@@ -10,9 +10,9 @@ C2 added a $0.50 absolute width ceiling on the CC leg and PMCC short, plus perce
 
 ## Scope (in)
 
-1. **Post-scan info line (report-only).** Per scan and per symbol: "Width rule removed N of M short calls (ceiling: X, percent rule: Y)". Where cheap, add "K more would qualify at $0.75". Never changes results, ranking or settings.
-2. **Nudge, only when width/ceiling removed a majority (>50%) of a symbol's otherwise-eligible candidates.** One neutral line pointing at the setting ("Most calls on SYM were removed by the width ceiling. See Width ceiling in scan settings."). States the fact and the location. Does not say "raise it".
-3. **Help text beside the fields, one line, no tooltip.** Reuse Dean's wording: "Caps how wide the bid/ask gap can be on the call you sell. The gap is a hidden cost; the percent rule alone would let a $20 call with a $2 gap through." Applies to CC "Max width"/"Width ceiling" and PMCC "Max spread %"/"Width ceiling ($)".
+1. **Post-scan info line (report-only).** Per scan and per symbol: "Width rule removed N of M short calls (ceiling: X, percent rule: Y)". **Ian 2026-09-24: the "K more would qualify at $0.75" clause is REMOVED (it nudges toward loosening and breaks "trust the qualified realm"); show the count and the cause only.** Never changes results, ranking or settings.
+2. **Nudge (muted and ambient, not amber; Ian and Paul: Paul holds the nudge until its own weight check), only when width/ceiling removed a majority (>50%) of a symbol's otherwise-eligible candidates.** One neutral line pointing at the setting ("Most calls on SYM were removed by the width ceiling. See Width ceiling in scan settings."). States the fact and the location. Does not say "raise it".
+3. **Help text beside the fields, one line, no tooltip (Ian, 2026-09-24; drops the "Warns above 5%" claim because warnings are not shown anywhere in the UI, and the "$20 call with a $2 gap" example):** "Max spread %": "Calls with a wider bid/ask gap than this are removed." "Width ceiling ($)": "Removes calls whose gap exceeds this many dollars per share, even if the percent rule passes." Applies to CC "Max width"/"Width ceiling" and PMCC "Max spread %"/"Width ceiling ($)". Paul: ships with or right after PMCC-RECEIPT-0001 part 1.
 
 ## Non-goals
 

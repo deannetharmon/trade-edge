@@ -10,6 +10,8 @@ F2 makes the PMCC short delta window a hard filter. A delta window persisted fro
 
 ## Scope
 
+**Mock v2 reviewed 2026-09-24 (Ian, Paul, Diane; screenshot of the rendered mock), edits applied to the mock; Dean to approve the rendered mock v2.** Changes vs the first draft: the line uses the same amber panel as Active CC rules with the heading "Active PMCC rules · new LEAP + short call" (or "Held LEAP"); it drops "Short Δ" (already on the status line directly above); it adds the earnings rule ("short calls expiring on or after the report are removed") and the caption "Short call rules only. LEAP rules are not shown."; values in neutral, normal weight. Short OI stays (listed in this ticket).
+
 1. **Active PMCC rules line** (ambient tier), shown with PMCC results after a scan. It shows the rules the scan ran with, read from the scan's **snapshot criteria**, not live controls: DTE range, short delta window (two decimals), max spread % and width ceiling, short OI minimum. Visual weight matches the CC panel.
 2. **Interim, own small commit right after F2 merges:** append the delta window to the scan-complete status line, like the earnings-removed suffix.
 
