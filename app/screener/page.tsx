@@ -200,7 +200,7 @@ import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
 import { buildCspCsv } from '@/features/screener/lib/cspCsv';
-import { buildLeapsExportReport, buildScanExportReport, type ScanExportScope } from '@/features/screener/lib/scanPdfExport';
+import { buildLeapsExportReport, buildScanExportReport, type LeapsExportLayout, type ScanExportScope } from '@/features/screener/lib/scanPdfExport';
 import { printScanPdfReport } from '@/features/screener/lib/printScanPdfReport';
 import { ExpirationDisclosure } from '@/features/screener/components/ExpirationDisclosure';
 import { PmccTickerDisclosure } from '@/features/screener/components/PmccTickerDisclosure';
@@ -8964,6 +8964,7 @@ export default function Home() {
   const [showPmccAdvisorPanel, setShowPmccAdvisorPanel] = useState(false);
   const [showCcAdvisorPanel, setShowCcAdvisorPanel] = useState(false);
   const [showPdfExportMenu, setShowPdfExportMenu] = useState(false);
+  const [leapsPdfLayout, setLeapsPdfLayout] = useState<LeapsExportLayout>('summary');
   // BEST-OPP-JUMP-LINK-0001: ref registry (keyed by the same resultKey
   // already used to match a Qualified card to its Best Opportunities
   // row) so "Jump to full card" can scroll to the exact card, plus a
@@ -11270,7 +11271,7 @@ export default function Home() {
       return true;
     });
     const report = screenMode === 'leaps'
-      ? buildLeapsExportReport(scope === 'full' ? leapsResults : visibleLeaps, scope, leapsScanCompletedAt, opportunityUniverse)
+      ? buildLeapsExportReport(scope === 'full' ? leapsResults : visibleLeaps, scope, leapsScanCompletedAt, opportunityUniverse, leapsPdfLayout, { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax, hiddenSymbols: leapsHiddenSymbols })
       : activeSession ? buildScanExportReport(activeSession, scope, currentPdfViewResults) : null;
     if (!report) return;
     if (!printScanPdfReport(report)) setError('Your browser blocked the print window. Allow pop-ups for TradeEdge and try Export PDF again.');
@@ -13103,11 +13104,16 @@ export default function Home() {
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     {canExportPdf && (
                       <div className="relative order-last ml-auto">
-                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className="text-[11px] px-4 py-1.5 rounded-md border font-bold tracking-wide transition-colors border-emerald-400 bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>
                           ↓ Export PDF
                         </button>
                         {showPdfExportMenu && (
                           <div role="menu" aria-label="PDF export scope" className={`absolute right-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
+                            <div role="group" aria-label="PDF layout" className="flex gap-1 px-1 pb-2">
+                              {([['summary', 'Summary table'], ['cards', 'Detailed cards']] as const).map(([value, label]) => (
+                                <button key={value} type="button" role="menuitemradio" aria-checked={leapsPdfLayout === value} onClick={() => setLeapsPdfLayout(value)} className={`flex-1 rounded border px-2 py-1 text-[10px] font-bold ${leapsPdfLayout === value ? 'border-emerald-400 text-emerald-300' : `${th.border} ${th.textMuted}`}`}>{label}</button>
+                              ))}
+                            </div>
                             <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Full completed scan</span><span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span></button>
                             <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Current filtered view</span><span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span></button>
                             <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
