@@ -88,7 +88,8 @@ bestCandidate = strategy === 'IC'
       // Inclusion is decided on the trade's own expiration date (ISO compare, NY today);
       // bestCandidate.dte stays on the old DTE basis and is only a display value / fallback.
       const onOrBeforeExpiry = earningsOnOrBeforeExpiration(earningsDate, bestCandidate.expiration);
-      const beforeExpiry = onOrBeforeExpiry ?? (ed != null && ed <= bestCandidate.dte);
+      // Unparseable expiration: fail toward at-risk (never compare the NY-basis day count against the old-basis DTE).
+      const beforeExpiry = onOrBeforeExpiry ?? (ed != null);
       if (ed == null) {
         // unparseable earnings date: leave the earlier check untouched
       } else if (ed < 0) {

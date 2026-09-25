@@ -80,7 +80,7 @@ function earningsFallsBeforeShortExpiration(earningsDate: string | null, shortEx
   if (!earningsDate) return false;
   // EARNINGS-DATEBASIS-0001: New York calendar basis (ISO compare), injectable clock.
   // Bad data (null) stays false; a timestamp-suffixed earnings value uses its leading date.
-  return earningsOnOrBeforeExpiration(earningsDate, shortExpiration, newYorkDateFromAsOf(now.toISOString()) ?? undefined) === true;
+  return earningsOnOrBeforeExpiration(earningsDate, shortExpiration, newYorkDateFromAsOf(Number.isFinite(now.getTime()) ? now.toISOString() : null) ?? undefined) === true;
 }
 
 /**
