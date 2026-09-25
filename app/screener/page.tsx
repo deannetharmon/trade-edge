@@ -13104,7 +13104,7 @@ export default function Home() {
                   <div className="mt-2 flex flex-wrap items-center gap-3">
                     {canExportPdf && (
                       <div className="relative order-last ml-auto">
-                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className="text-[11px] px-4 py-1.5 rounded-md border font-bold tracking-wide transition-colors border-emerald-400 bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>
                           ↓ Export PDF
                         </button>
                         {showPdfExportMenu && (
