@@ -9,13 +9,14 @@
 // own ruleSnapshot.deltaMin/deltaMax; the chip remains a one-click override,
 // including an explicit "Any" that shows everything again.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
+import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS, WARM_FLOW_TIMEOUT_MS } from './helpers/warmScreenerPage';
 
 const getMarketMetricsMock = vi.fn();
 const getChainMock = vi.fn();
@@ -75,19 +76,23 @@ function renderScreener() {
   );
 }
 
-async function runAmdCspScan() {
+async function runAmdCspScan(readyTimeout?: number) {
   getChainMock.mockResolvedValue(chain());
   getMarketMetricsMock.mockResolvedValue([{ symbol: 'AMD', price: 477.85, ivRank: 40, earningsExpectedDate: null, expirationIvxMap: {} }]);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
 
   renderScreener();
-  const input = await screen.findByPlaceholderText(/Add tickers \(comma-separated\)/i);
+  const opts = readyTimeout ? { timeout: readyTimeout } : undefined;
+  const input = await screen.findByPlaceholderText(/Add tickers \(comma-separated\)/i, undefined, opts);
   await userEvent.type(input, 'AMD');
   await userEvent.click(screen.getByRole('button', { name: 'Add' }));
   await userEvent.click(screen.getByRole('button', { name: /Find CSPs/i }));
-  await userEvent.click(screen.getByRole('button', { name: /RUN CSP SCAN/i }));
-  await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
+  await userEvent.click(await screen.findByRole('button', { name: /RUN CSP SCAN/i }, opts));
+  await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled(), opts);
 }
+
+// CI-FLAKY-0001 follow-up: the first test flaked ('RUN CSP SCAN' not found) on the ScreenerPage cold start; warm it once here.
+beforeAll(() => warmScreenerPage(async () => { await runAmdCspScan(WARM_FLOW_TIMEOUT_MS); }), WARM_HOOK_TIMEOUT_MS);
 
 /** The result-controls row containing the Delta chip (label + all its preset buttons, including "Any") -- unique via its "0.10–0.16" preset label. */
 function deltaControlsRow(): HTMLElement {
