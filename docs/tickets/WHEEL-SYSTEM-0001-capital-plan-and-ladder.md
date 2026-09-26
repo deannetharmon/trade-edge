@@ -63,7 +63,7 @@ Sample plan XLF 2 + XLE 2 + XLU 4 + XLP 1 = 44,200 deployed (within 45,000). Str
 
 ## Open items
 
-- **O1** Spread risk cap: 5% of the account ($2,500)? Dean to confirm.
+- **O1** DECIDED (Dean 2026-09-26, "a good middle ground"): total most-you-can-lose across all open spreads on liked names is capped at 5% of the account ($2,500); Ian adds a single-spread cap of 2% ($1,000). Spread collateral counts inside the $45,000. Not enforced in W1 (display only: the plan shows the cap and the room left); enforcement belongs with the spread-entry flow.
 - **O2** Sector for each symbol (ETFs are their own sector; single stocks need a mapping). W1 can ship with ETFs only and a manual sector field.
 - **O3** Target delta 0.20 is Ian's proposal; Dean or Ian to confirm.
 - **O4** Whether `A` follows live net liquidation value or stays a typed number. Recommend typed for W1, so the plan does not move with the market.
