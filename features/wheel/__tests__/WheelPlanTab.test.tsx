@@ -17,7 +17,7 @@ const chain = (strike: number | null, failedBatches = 0): WheelChainResult =>
     ? { expirations: [], chains: {}, failedBatches }
     : { expirations: ['2026-11-06'], chains: { '2026-11-06': [put(strike)] }, failedBatches };
 
-const STRIKES: Record<string, number> = { XLF: 51, XLE: 58, XLU: 37, XLP: 76, XLV: 159, BIG: 250 };
+const STRIKES: Record<string, number> = { XLF: 51, XLE: 58, XLU: 37, XLP: 76, XLV: 159, BIG: 250, NVDA: 205 };
 const openAdjust = () => userEvent.click(screen.getByRole('button', { name: /Adjust any default/ }));
 
 function makeDeps(plan: Partial<WheelPlan> | 'error', over: Partial<WheelPlanDeps> = {}) {
@@ -226,5 +226,44 @@ describe('starter ETFs and zero stress', () => {
     const { deps } = makeDeps({});
     render(<WheelPlanTab deps={deps} />);
     expect(await screen.findByText('$0 (0.0%)')).toBeInTheDocument();
+  });
+});
+
+describe('putting a name that does not fit on the wheel anyway', () => {
+  it('places the contracts asked for, tags them, warns about the cost, and never blocks', async () => {
+    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    await waitFor(() => expect(within(row).getByText('$20,500')).toBeInTheDocument());
+    expect(within(row).getByText(/Unlocks in/)).toBeInTheDocument(); // does not fit, so nothing in the plan yet
+    expect(screen.getByText(/Today \(\$0 in the plan\)/)).toBeInTheDocument();
+
+    const input = within(row).getByLabelText('Contracts for NVDA');
+    await userEvent.type(input, '1{Enter}');
+
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByText('Your override')).toBeInTheDocument());
+    expect(screen.getByText(/Today \(\$20,500 in the plan\)/)).toBeInTheDocument();
+    expect(screen.getByText(/NVDA: 1 contract ties up \$20,500 \(41.0% of the account\), above your \$15,000 limit for one name/)).toBeInTheDocument();
+    expect(screen.getByText(/A 30% fall would cost \$6,150 \(12.3% of the account\), above your 9% budget/)).toBeInTheDocument();
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((posts[posts.length - 1] as { wheelList: unknown[] }).wheelList).toEqual([{ symbol: 'NVDA', contracts: 1 }]);
+  });
+
+  it('an invalid count is ignored and clearing it returns the name to the plan\'s own sizing', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 1 }] });
+    render(<WheelPlanTab deps={deps} />);
+    const input = await screen.findByLabelText('Contracts for NVDA');
+    await userEvent.clear(input);
+    await userEvent.type(input, '0{Enter}');
+    await waitFor(() => expect(screen.getByLabelText('Contracts for NVDA')).toHaveValue('1')); // 0 refused, value restored
+    await userEvent.clear(screen.getByLabelText('Contracts for NVDA'));
+    await userEvent.tab();
+    await waitFor(() => expect(screen.queryByText('Your override')).not.toBeInTheDocument());
+  });
+
+  it('warns when the plan uses more than the wheel cash', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 2 }] });
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByText(/The plan uses \$41,000, \$1,000 more than your \$40,000 of wheel cash/)).toBeInTheDocument();
   });
 });

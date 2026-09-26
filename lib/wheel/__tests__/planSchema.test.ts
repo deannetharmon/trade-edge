@@ -28,6 +28,18 @@ describe('parseStoredPlan never throws', () => {
   });
 });
 
+describe('the per-name contract override', () => {
+  it('is kept when it is a whole number from 1 to 100 and dropped otherwise', () => {
+    const plan = parseStoredPlan(JSON.stringify({ wheelList: [
+      { symbol: 'NVDA', contracts: 2 }, { symbol: 'AMZN', contracts: 0 }, { symbol: 'XLF', contracts: 1.5 }, { symbol: 'XLE', contracts: 101 }, { symbol: 'XLU', contracts: '3' },
+    ] }));
+    expect(plan.wheelList).toEqual([{ symbol: 'NVDA', contracts: 2 }, { symbol: 'AMZN' }, { symbol: 'XLF' }, { symbol: 'XLE' }, { symbol: 'XLU' }]);
+  });
+  it('is accepted on save', () => {
+    expect(validatePlanPatch({ wheelList: [{ symbol: 'NVDA', contracts: 1 }] })).toMatchObject({ ok: true, wheelList: [{ symbol: 'NVDA', contracts: 1 }] });
+  });
+});
+
 describe('sanitizeOverrides', () => {
   it('ignores non-objects and arrays', () => {
     expect(sanitizeOverrides(null)).toEqual({});

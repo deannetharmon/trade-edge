@@ -29,6 +29,7 @@ import {
   lossBudgetBps,
   maxCashPerNameCents,
   monthsToUnlock,
+  pctTenthsOfAccount,
   resolveParams,
   summarizeStress,
   validateParams,
@@ -38,7 +39,7 @@ import {
   type UnlockMonths,
 } from '@/lib/wheel/capitalPlan';
 import { classifyRow, type FetchOutcome, type RowStatus } from '@/lib/wheel/planPut';
-import { MAX_WHEEL_LIST, SYMBOL_PATTERN, type WheelListEntry, type WheelPlan } from '@/lib/wheel/planSchema';
+import { MAX_OVERRIDE_CONTRACTS, MAX_WHEEL_LIST, SYMBOL_PATTERN, type WheelListEntry, type WheelPlan } from '@/lib/wheel/planSchema';
 
 export interface WheelPlanDeps {
   getToken: () => Promise<string>;
@@ -322,7 +323,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
     if (!limits) return null;
     const okRows = rows.filter((r): r is Extract<typeof r, { kind: 'ok' }> => r.kind === 'ok');
     return allocate(
-      okRows.map((r) => ({ symbol: r.entry.symbol, sector: (r.entry.sector || r.entry.symbol).toUpperCase(), cashCents: r.cashCents, maxCashCents: r.maxCash })),
+      okRows.map((r) => ({ symbol: r.entry.symbol, sector: (r.entry.sector || r.entry.symbol).toUpperCase(), cashCents: r.cashCents, maxCashCents: r.maxCash, forcedContracts: r.entry.contracts })),
       limits.wheelCashCents,
       limits.sectorLimitCents,
     );
@@ -330,6 +331,31 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
 
   const stress = useMemo(() => (limits && allocation ? summarizeStress(params, limits, allocation.deployedCents) : null), [params, limits, allocation]);
   const inPlan = (symbol: string) => allocation?.rows.find((r) => r.symbol === symbol)?.contracts ?? 0;
+  const isForced = (symbol: string) => allocation?.rows.find((r) => r.symbol === symbol)?.forced ?? false;
+
+  // Warnings for the trader's own contract counts: shown, never blocking.
+  const overrideWarnings = useMemo(() => {
+    if (!limits || !allocation) return [] as string[];
+    const out: string[] = [];
+    for (const row of rows) {
+      if (row.kind !== 'ok' || !row.entry.contracts) continue;
+      const total = row.entry.contracts * row.cashCents;
+      if (total <= row.maxCash) continue;
+      const drop = row.entry.dropBps ?? params.dropBps;
+      const lossCents = Math.round((total * drop) / 10_000);
+      out.push(
+        `${row.entry.symbol}: ${row.entry.contracts} contract${row.entry.contracts === 1 ? '' : 's'} tie${row.entry.contracts === 1 ? 's' : ''} up ${formatCents(total)} (${formatPctTenths(pctTenthsOfAccount(total, params.accountCents))} of the account), above your ${formatCents(row.maxCash)} limit for one name. ` +
+        `A ${formatBps(drop)} fall would cost ${formatCents(lossCents)} (${formatPctTenths(pctTenthsOfAccount(lossCents, params.accountCents))} of the account), above your ${formatBps(limits.lossBudgetBps)} budget.`,
+      );
+    }
+    if (allocation.deployedCents > limits.wheelCashCents) {
+      out.push(`The plan uses ${formatCents(allocation.deployedCents)}, ${formatCents(allocation.deployedCents - limits.wheelCashCents)} more than your ${formatCents(limits.wheelCashCents)} of wheel cash. The extra comes out of your spread cap or reserve.`);
+    }
+    for (const [sector, cents] of Object.entries(allocation.bySector)) {
+      if (cents > limits.sectorLimitCents) out.push(`${sector} holds ${formatCents(cents)}, above your ${formatCents(limits.sectorLimitCents)} sector limit.`);
+    }
+    return out;
+  }, [rows, limits, allocation, params]);
 
   // ── Render ──────────────────────────────────────────────────────────────────────────────────────
   if (loadState === 'loading') return <p className="text-sm text-white/40">Loading your plan…</p>;
@@ -481,11 +507,12 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               {addError && <span role="alert" className="text-xs text-red-300">{addError}</span>}
             </div>
 
+            {overrideWarnings.map((w) => <p key={w} className="text-xs text-amber-300">{w}</p>)}
             {wheelList.length === 0 ? (
               <p className="text-sm text-white/40">Add a symbol to see the cash one put needs, whether it fits, and when it unlocks.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full min-w-[900px] text-xs">
+                <table className="w-full min-w-[980px] text-xs">
                   <thead>
                     <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
                       <th className="px-3 py-2 text-left">Stock</th>
@@ -495,6 +522,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                       <th className="px-3 py-2 text-right">Cash for one put</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
+                      <th className="px-3 py-2 text-right">Your contracts</th>
                       <th className="px-3 py-2 text-right">Fits at account</th>
                       <th className="px-3 py-2 text-left">Today</th>
                       <th className="px-3 py-2" />
@@ -526,9 +554,29 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             <td className="px-3 py-2 text-right">{formatCents(row.cashCents)}</td>
                             <td className="px-3 py-2 text-right">{row.fit}</td>
                             <td className="px-3 py-2 text-right font-bold">{inPlan(row.entry.symbol)}</td>
+                            <td className="px-3 py-2 text-right">
+                              <input
+                                key={`${row.entry.symbol}-${row.entry.contracts ?? 'auto'}`}
+                                aria-label={`Contracts for ${row.entry.symbol}`}
+                                defaultValue={row.entry.contracts ?? ''}
+                                placeholder="auto"
+                                inputMode="numeric"
+                                onBlur={(e) => {
+                                  const text = e.target.value.trim();
+                                  const n = text === '' ? undefined : Number.parseInt(text, 10);
+                                  if (n !== undefined && !(Number.isInteger(n) && n >= 1 && n <= MAX_OVERRIDE_CONTRACTS)) { e.target.value = String(row.entry.contracts ?? ''); return; }
+                                  if (n === row.entry.contracts) return;
+                                  updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, contracts: n } : x)));
+                                }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                className="w-16 rounded border border-white/10 bg-white/5 px-2 py-1 text-right text-xs focus:border-white/30 focus:outline-none"
+                              />
+                            </td>
                             <td className="px-3 py-2 text-right">{formatCents(row.fitsAt)}</td>
                             <td className="px-3 py-2">
-                              {row.unlock.kind === 'fits' ? (
+                              {isForced(row.entry.symbol) ? (
+                                <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Your override</span>
+                              ) : row.unlock.kind === 'fits' ? (
                                 <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Wheel now</span>
                               ) : row.fitsConcentrated ? (
                                 <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Concentrated only</span>
@@ -538,10 +586,10 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             </td>
                           </>
                         )}
-                        {row.kind === 'loading' && <td colSpan={6} className="px-3 py-2 text-white/40">Loading…</td>}
-                        {row.kind === 'leveraged' && <td colSpan={6} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
+                        {row.kind === 'loading' && <td colSpan={7} className="px-3 py-2 text-white/40">Loading…</td>}
+                        {row.kind === 'leveraged' && <td colSpan={7} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
                         {row.kind === 'state' && (
-                          <td colSpan={6} className="px-3 py-2">
+                          <td colSpan={7} className="px-3 py-2">
                             {row.status.kind === 'chain-error' && <span className="text-red-300">Chain error: {row.status.message}</span>}
                             {row.status.kind === 'quote-unavailable' && <span className="text-amber-300">Quote unavailable, and no put was found. Retry.</span>}
                             {row.status.kind === 'no-put' && <span className="text-white/50">No put found near delta {(params.targetDeltaBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}

@@ -188,6 +188,39 @@ describe('allocation and stress', () => {
   });
 });
 
+describe('the trader\'s own contract counts', () => {
+  const limits = computeLimits(balanced);
+  const base = [
+    { symbol: 'XLF', sector: 'XLF', cashCents: dollars(5250), maxCashCents: limits.maxCashPerNameCents },
+    { symbol: 'NVDA', sector: 'NVDA', cashCents: dollars(20500), maxCashCents: limits.maxCashPerNameCents, forcedContracts: 1 },
+    { symbol: 'AMZN', sector: 'AMZN', cashCents: dollars(22500), maxCashCents: limits.maxCashPerNameCents, forcedContracts: 1 },
+  ];
+
+  it('are placed as asked, first, outside the per-name limit; the rest share what is left', () => {
+    const { rows, deployedCents } = allocate(base, limits.wheelCashCents, limits.sectorLimitCents);
+    expect(rows.map((r) => [r.symbol, r.contracts, r.forced])).toEqual([['XLF', 0, false], ['NVDA', 1, true], ['AMZN', 1, true]]);
+    expect(rows[1].fitContracts).toBe(0); // it does not fit; the count is the trader's choice
+    expect(deployedCents).toBe(dollars(43000)); // more than the 40,000 of wheel cash: the tab warns
+  });
+
+  it('a forced name is placed before earlier names in the list can use the cash', () => {
+    const { rows } = allocate([base[0], { ...base[1] }], dollars(30000), limits.sectorLimitCents);
+    expect(rows.map((r) => r.contracts)).toEqual([1, 1]); // 30,000 - 20,500 = 9,500 left buys one XLF (5,250)
+  });
+
+  it('a forced count is not capped by the sector limit', () => {
+    const { rows, bySector } = allocate([{ ...base[1] }], limits.wheelCashCents, dollars(10000));
+    expect(rows[0].contracts).toBe(1);
+    expect(bySector.NVDA).toBe(dollars(20500));
+  });
+
+  it('without a forced count nothing changes', () => {
+    const plain = base.map(({ forcedContracts: _f, ...rest }) => rest);
+    const { rows } = allocate(plain, limits.wheelCashCents, limits.sectorLimitCents);
+    expect(rows.every((r) => !r.forced)).toBe(true);
+  });
+});
+
 describe('months to unlock (simple monthly rate, ceil)', () => {
   const A = dollars(50000);
   it('XLV (53,000) and PLTR (58,700) at 0.75% a month', () => {

@@ -21,6 +21,8 @@ export interface WheelListEntry {
   sector?: string;
   /** Per-symbol assumed drop in basis points; overrides the plan-wide drop for this name. */
   dropBps?: number;
+  /** The trader's own contract count for this name; the plan places it as asked and warns instead of limiting it. */
+  contracts?: number;
 }
 
 export interface WheelPlan {
@@ -32,6 +34,7 @@ export interface WheelPlan {
 export const MAX_WHEEL_LIST = 40;
 export const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 const MAX_SECTOR_LENGTH = 32;
+export const MAX_OVERRIDE_CONTRACTS = 100;
 
 export function emptyPlan(): WheelPlan {
   return { overrides: {}, wheelList: [], updatedAt: new Date(0).toISOString() };
@@ -78,6 +81,7 @@ export function sanitizeWheelEntry(input: unknown): WheelListEntry | null {
   const entry: WheelListEntry = { symbol };
   if (typeof raw.sector === 'string' && raw.sector.trim()) entry.sector = raw.sector.trim().slice(0, MAX_SECTOR_LENGTH);
   if (isInt(raw.dropBps) && raw.dropBps > 0 && raw.dropBps <= 10_000) entry.dropBps = raw.dropBps;
+  if (isInt(raw.contracts) && raw.contracts >= 1 && raw.contracts <= MAX_OVERRIDE_CONTRACTS) entry.contracts = raw.contracts;
   return entry;
 }
 

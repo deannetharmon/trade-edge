@@ -234,6 +234,8 @@ export interface AllocationInput {
   sector: string;
   cashCents: number;
   maxCashCents: number;
+  /** The trader's own contract count for this name. Bypasses the per-name and sector limits (the tab warns). */
+  forcedContracts?: number;
 }
 
 export interface AllocationRow {
@@ -242,10 +244,13 @@ export interface AllocationRow {
   fitContracts: number;
   contracts: number;
   deployedCents: number;
+  /** True when the trader set the contract count, so the limits were not applied to it. */
+  forced: boolean;
 }
 
 /**
- * Cash goes to names in list order (until the ranking exists in W2). Each name gets
+ * Names the trader set a contract count for are placed first, exactly as asked and outside the per-name, sector and wheel-cash
+ * limits (the tab warns about each). The rest get cash in list order (until the ranking exists in W2), each taking
  * min(per-name cap, wheel cash still available, sector room still available).
  */
 export function allocate(inputs: AllocationInput[], wheelCashCents: number, sectorLimitCents: number): {
@@ -253,9 +258,19 @@ export function allocate(inputs: AllocationInput[], wheelCashCents: number, sect
   deployedCents: number;
   bySector: Record<string, number>;
 } {
-  let remaining = Math.max(0, wheelCashCents);
   const bySector: Record<string, number> = {};
-  const rows: AllocationRow[] = inputs.map((input) => {
+  const result = new Map<string, AllocationRow>();
+  const isForced = (i: AllocationInput) => typeof i.forcedContracts === 'number' && i.forcedContracts > 0;
+
+  let remaining = Math.max(0, wheelCashCents);
+  for (const input of inputs.filter(isForced)) {
+    const contracts = input.forcedContracts as number;
+    const deployedCents = contracts * input.cashCents;
+    remaining = Math.max(0, remaining - deployedCents);
+    bySector[input.sector] = (bySector[input.sector] ?? 0) + deployedCents;
+    result.set(input.symbol, { symbol: input.symbol, sector: input.sector, fitContracts: contractsThatFit(input.maxCashCents, input.cashCents), contracts, deployedCents, forced: true });
+  }
+  for (const input of inputs.filter((i) => !isForced(i))) {
     const fit = contractsThatFit(input.maxCashCents, input.cashCents);
     const sectorUsed = bySector[input.sector] ?? 0;
     const sectorRoom = Math.max(0, sectorLimitCents - sectorUsed);
@@ -265,9 +280,10 @@ export function allocate(inputs: AllocationInput[], wheelCashCents: number, sect
     const deployedCents = contracts * input.cashCents;
     remaining -= deployedCents;
     bySector[input.sector] = sectorUsed + deployedCents;
-    return { symbol: input.symbol, sector: input.sector, fitContracts: fit, contracts, deployedCents };
-  });
-  return { rows, deployedCents: rows.reduce((s, r) => s + r.deployedCents, 0), bySector };
+    result.set(input.symbol, { symbol: input.symbol, sector: input.sector, fitContracts: fit, contracts, deployedCents, forced: false });
+  }
+  const rows = inputs.map((i) => result.get(i.symbol) as AllocationRow);
+  return { rows, deployedCents: rows.reduce((sum, r) => sum + r.deployedCents, 0), bySector };
 }
 
 /** Dollars lost if every holding falls by stressBps, in cents (half-up). */
