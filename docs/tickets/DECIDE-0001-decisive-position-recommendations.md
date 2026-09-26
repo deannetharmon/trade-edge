@@ -284,7 +284,7 @@ Checked in this order: null, then LOW, then MEDIUM, then HIGH.
 
 | # | Item | Owner |
 |---|---|---|
-| O1 | Recommendation card mock | Diane |
+| O1 | Recommendation card mock: drafted in `mockups/decide-0001-recommendation-cards.html`, awaiting Dean's approval | Diane |
 | O2 | Confirm the stop-loss wiring file for the short-premium adapter | Dane, before 0001B |
 | O3 | N and X for the news classifier confidence cap | Ian, before 0001E |
 | O4 | Record the D2/D9 amendments in the AI-POLICY-0001 epic | Paul |

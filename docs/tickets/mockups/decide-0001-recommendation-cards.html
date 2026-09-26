@@ -1,0 +1,334 @@
+<title>Position Recommendation Cards</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --page:#F5F5F5; --surface:#FFFFFF; --surface-2:#F0F1F2; --text:#111111; --muted:#555F6D; --faint:#6B7280; --border:#E0E0E0;
+  --accent:#00A887; --accent-bg:rgba(0,168,135,.10);
+  --red:#B53C49; --red-bg:rgba(181,60,73,.09); --amber:#9C6500; --amber-bg:rgba(156,101,0,.10);
+  --blue:#2457D6; --blue-bg:rgba(36,87,214,.08); --neutral-bg:rgba(85,95,109,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --page:#0A0A0A; --surface:#171717; --surface-2:#222222; --text:#FFFFFF; --muted:#B8B8B8; --faint:#8A8A8A; --border:#2C2C2C;
+    --accent:#00D4AA; --accent-bg:rgba(0,212,170,.12);
+    --red:#FF6675; --red-bg:rgba(255,102,117,.12); --amber:#F5B84B; --amber-bg:rgba(245,184,75,.12);
+    --blue:#6F96FF; --blue-bg:rgba(111,150,255,.12); --neutral-bg:rgba(184,184,184,.10);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#0A0A0A; --surface:#171717; --surface-2:#222222; --text:#FFFFFF; --muted:#B8B8B8; --faint:#8A8A8A; --border:#2C2C2C;
+  --accent:#00D4AA; --accent-bg:rgba(0,212,170,.12);
+  --red:#FF6675; --red-bg:rgba(255,102,117,.12); --amber:#F5B84B; --amber-bg:rgba(245,184,75,.12);
+  --blue:#6F96FF; --blue-bg:rgba(111,150,255,.12); --neutral-bg:rgba(184,184,184,.10);
+}
+body{background:var(--page);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding-inline:16px;padding-block:24px 48px;display:grid;gap:18px}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+h1{font-size:22px;margin:0;font-weight:600;text-wrap:balance}
+.note{color:var(--muted);margin:2px 0 0;max-width:75ch;font-size:13px}
+.sample{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);background:var(--amber-bg);padding:1px 8px;border-radius:999px;margin-left:8px;vertical-align:3px}
+
+/* Summary strip */
+.summary{display:flex;flex-wrap:wrap;gap:8px}
+.summary span{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;color:var(--muted)}
+.summary b{color:var(--text);font-weight:600}
+.summary .urgent b{color:var(--red)}
+
+.section-h{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:6px 0 -6px}
+
+/* Card */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:grid;overflow:hidden}
+.card.urgent{border-color:var(--red)}
+.head{display:grid;grid-template-columns:1fr auto;gap:10px 16px;padding:14px 16px 12px;align-items:start}
+.pos{font-size:13px;color:var(--muted)}
+.pos b{color:var(--text);font-weight:600;font-size:14px;margin-right:6px}
+.decision{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:6px}
+.action{font-size:13px;font-weight:700;letter-spacing:.05em;padding:4px 10px;border-radius:6px}
+.a-close{color:var(--accent);background:var(--accent-bg)}
+.a-stop,.a-broken{color:var(--red);background:var(--red-bg)}
+.a-roll{color:var(--blue);background:var(--blue-bg)}
+.a-time{color:var(--accent);background:var(--accent-bg)}
+.a-assign{color:var(--blue);background:var(--blue-bg)}
+.a-blocked{color:var(--amber);background:var(--amber-bg)}
+.a-hold{color:var(--muted);background:var(--neutral-bg)}
+.headline{font-size:16px;font-weight:600;text-wrap:balance}
+.conf{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);white-space:nowrap}
+.bars{display:inline-flex;gap:2px}
+.bars i{width:5px;height:12px;border-radius:1px;background:var(--border)}
+.bars.h i{background:var(--text)}
+.bars.m i:nth-child(-n+2){background:var(--text)}
+.bars.l i:nth-child(1){background:var(--text)}
+.cta{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+button{font:inherit;font-size:13px;font-weight:500;border-radius:7px;padding:7px 12px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text)}
+button.primary{background:var(--text);color:var(--page);border-color:var(--text)}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.body{display:grid;grid-template-columns:1.3fr 1fr;gap:0;border-top:1px solid var(--border)}
+@media (max-width:720px){.body{grid-template-columns:1fr}.head{grid-template-columns:1fr}.cta{align-items:flex-start;flex-direction:row}}
+.col{padding:12px 16px;display:grid;gap:6px;align-content:start}
+.col + .col{border-left:1px solid var(--border)}
+@media (max-width:720px){.col + .col{border-left:0;border-top:1px solid var(--border)}}
+.k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+ol,ul{margin:0;padding-left:18px;display:grid;gap:3px;font-size:13px}
+.flip li{color:var(--muted)}
+.flip li b{color:var(--text);font-weight:500}
+.support{color:var(--faint);font-size:12px}
+
+.facts{display:flex;flex-wrap:wrap;gap:4px 18px;padding:9px 16px;background:var(--surface-2);font-size:12px;color:var(--muted)}
+.facts b{color:var(--text);font-weight:500}
+details{border-top:1px solid var(--border)}
+summary{padding:9px 16px;font-size:13px;color:var(--muted);cursor:pointer;list-style-position:inside}
+details p{margin:0;padding:0 16px 12px;font-size:13px;color:var(--muted);max-width:80ch}
+.dissent{margin:0 16px 12px;padding:8px 10px;border-left:3px solid var(--amber);background:var(--amber-bg);font-size:13px;color:var(--text)}
+
+.banner{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 16px;font-size:13px}
+.banner.pending{background:var(--red-bg);color:var(--text)}
+.banner.data{background:var(--amber-bg);color:var(--text)}
+.timer{font-weight:600}
+
+/* Hold rows: ambient */
+.holds{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:620px}
+th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);padding:8px 14px;border-bottom:1px solid var(--border)}
+td{padding:9px 14px;border-bottom:1px solid var(--border);color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td b{color:var(--text);font-weight:500}
+
+.disclaimer{font-size:12px;color:var(--faint);max-width:90ch;margin:0}
+.spec{background:var(--surface);border:1px dashed var(--border);border-radius:10px;padding:14px 16px;display:grid;gap:8px}
+.spec h2{font-size:14px;margin:0}
+.spec ul{color:var(--muted)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Position recommendations <span class="sample">Mock · sample data</span></h1>
+    <p class="note">Diane's mock for DECIDE-0001 (open item O1). One card per open position that needs action; holds collapse into a table. Visual weight follows the three tiers: decision (action and headline), risk context (reasons and what would change it), ambient (position facts and the AI explanation).</p>
+  </header>
+
+  <div class="summary" aria-label="Summary">
+    <span class="urgent"><b>2</b> urgent</span>
+    <span><b>4</b> need action</span>
+    <span><b>3</b> holding</span>
+    <span>Evaluated <b class="mono">10:42:18 ET</b></span>
+  </div>
+
+  <p class="section-h">Urgent</p>
+
+  <!-- STOP PENDING CONFIRMATION -->
+  <article class="card urgent" aria-label="SPY bull put spread">
+    <div class="head">
+      <div>
+        <div class="pos"><b>SPY</b>Bull put spread · 540/535 · Oct 17 · 22 DTE</div>
+        <div class="decision">
+          <span class="action a-blocked">CONFIRMING STOP</span>
+          <span class="headline">Stop triggered on a wide quote. Confirming before it fires.</span>
+        </div>
+      </div>
+      <div class="cta">
+        <button type="button">Refresh now</button>
+      </div>
+    </div>
+    <div class="banner pending">
+      <span>Mark <b class="mono">$3.12</b> is past the stop at <b class="mono">$3.00</b> (3× the $1.00 credit), but the quote is <b class="mono">31%</b> wide.</span>
+      <span class="timer mono">Rechecks in 4:12</span>
+    </div>
+    <div class="body">
+      <div class="col">
+        <span class="k">What happens next</span>
+        <ul>
+          <li>Another reading past $3.00 in 5 min fires <b>Close at stop</b>.</li>
+          <li>A narrow quote past $3.00 fires it immediately.</li>
+          <li>A reading under $3.00 clears this.</li>
+        </ul>
+      </div>
+      <div class="col">
+        <span class="k">Why not Hold</span>
+        <p class="support" style="margin:0">A position past its stop never shows as Hold. Confidence is not rated until the stop is confirmed.</p>
+      </div>
+    </div>
+    <div class="facts mono"><span>Credit <b>$1.00</b></span><span>Mark <b>$3.12</b></span><span>P&amp;L <b>−$212</b></span><span>Short Δ <b>0.58</b></span><span>Max loss <b>$400</b></span></div>
+  </article>
+
+  <!-- CLOSE BROKEN -->
+  <article class="card urgent" aria-label="NKE iron condor">
+    <div class="head">
+      <div>
+        <div class="pos"><b>NKE</b>Iron condor · 70/65 · 95/100 · Nov 21 · 57 DTE</div>
+        <div class="decision">
+          <span class="action a-broken">CLOSE · BROKEN</span>
+          <span class="headline">Close all four legs. The stock has broken below its entry support.</span>
+        </div>
+      </div>
+      <div class="cta">
+        <span class="conf">Confidence <span class="bars m" aria-hidden="true"><i></i><i></i><i></i></span> Medium</span>
+        <button type="button" class="primary">Review close order</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="col">
+        <span class="k">Why</span>
+        <ol>
+          <li>Closed 2.1% below entry support ($74.30) on 1.8× normal volume.</li>
+          <li>Gap down 9.4% on Sep 19; recovered less than half in 5 sessions.</li>
+          <li>Down 17 pts against SPY over 20 sessions (supporting).</li>
+        </ol>
+        <p class="support" style="margin:0">Medium: the support break is within 10% of its threshold (Low), lifted one step by the weakness against SPY.</p>
+      </div>
+      <div class="col flip">
+        <span class="k">What would change this</span>
+        <ul>
+          <li><b>Hold</b> if NKE closes back above $73.56 on normal volume.</li>
+          <li>Broken-stock checks run on the put side only.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="facts mono"><span>Credit <b>$1.85</b></span><span>Mark <b>$1.04</b></span><span>P&amp;L <b>+$81</b></span><span>Put Δ <b>0.31</b></span><span>4-leg limit order</span></div>
+    <details><summary>Why the advisor agrees</summary><p>NKE has lost the level the trade was built on, and the gap has not been bought. The call side is nearly worthless, so closing all four legs now costs little and removes the put-side risk before it reaches the short strike.</p></details>
+  </article>
+
+  <p class="section-h">Needs action</p>
+
+  <!-- CLOSE PROFIT -->
+  <article class="card" aria-label="AAPL bull put spread">
+    <div class="head">
+      <div>
+        <div class="pos"><b>AAPL</b>Bull put spread · 215/210 · Nov 7 · 43 DTE</div>
+        <div class="decision">
+          <span class="action a-close">CLOSE · PROFIT</span>
+          <span class="headline">Take the win. 56% of max profit is captured.</span>
+        </div>
+      </div>
+      <div class="cta">
+        <span class="conf">Confidence <span class="bars h" aria-hidden="true"><i></i><i></i><i></i></span> High</span>
+        <button type="button" class="primary">Review close order</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="col">
+        <span class="k">Why</span>
+        <ol>
+          <li>Profit target reached: 56% of max against a 50% rule.</li>
+          <li>43 days of risk left for the remaining 44% of credit.</li>
+        </ol>
+      </div>
+      <div class="col flip">
+        <span class="k">What would change this</span>
+        <ul><li>Mechanical exit. Nothing changes it once hit.</li></ul>
+      </div>
+    </div>
+    <div class="facts mono"><span>Credit <b>$1.40</b></span><span>Mark <b>$0.62</b></span><span>P&amp;L <b>+$78</b></span><span>Short Δ <b>0.12</b></span></div>
+    <details><summary>Why the advisor agrees</summary><p>Most of the premium is already earned, and holding for the rest means carrying the same downside for a shrinking reward.</p></details>
+  </article>
+
+  <!-- ROLL LEAPS, LOW -->
+  <article class="card" aria-label="MSFT LEAP">
+    <div class="head">
+      <div>
+        <div class="pos"><b>MSFT</b>LEAP call · 420 · Jan 2027 · 479 DTE</div>
+        <div class="decision">
+          <span class="action a-roll">ROLL</span>
+          <span class="headline">Roll to a deeper strike. Delta has slipped below 0.60.</span>
+        </div>
+      </div>
+      <div class="cta">
+        <span class="conf">Confidence <span class="bars l" aria-hidden="true"><i></i><i></i><i></i></span> Low</span>
+        <button type="button" class="primary">Find roll</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="col">
+        <span class="k">Why</span>
+        <ol>
+          <li>Delta 0.58, just under the 0.60 roll trigger.</li>
+          <li>Delta was 0.66 at entry; MSFT is down 6% since.</li>
+        </ol>
+        <p class="support" style="margin:0">Low: delta is within 10% of the trigger.</p>
+      </div>
+      <div class="col flip">
+        <span class="k">What would change this</span>
+        <ul><li><b>Hold</b> if delta recovers to 0.60 (about MSFT $436).</li></ul>
+      </div>
+    </div>
+    <div class="facts mono"><span>Paid <b>$62.10</b></span><span>Mark <b>$58.40</b></span><span>Stock <b>$428.00</b></span><span>Intrinsic <b>$8.00</b></span><span>Extrinsic <b>$50.40</b></span></div>
+    <details><summary>Why the advisor agrees, plus one dissent</summary>
+      <p>A deeper strike restores stock-like behavior and cuts the time value at risk.</p>
+      <div class="dissent"><b>Advisor dissent:</b> earnings are in 12 days; waiting until after the print may give a better roll price. The recommendation stays Roll; this note is logged.</div>
+    </details>
+  </article>
+
+  <!-- ACCEPT ASSIGNMENT -->
+  <article class="card" aria-label="KO covered call">
+    <div class="head">
+      <div>
+        <div class="pos"><b>KO</b>Covered call · 70 · Oct 10 · 15 DTE · Acquire mode</div>
+        <div class="decision">
+          <span class="action a-assign">ACCEPT ASSIGNMENT</span>
+          <span class="headline">Let the shares be called away at $70.</span>
+        </div>
+      </div>
+      <div class="cta">
+        <span class="conf">Confidence <span class="bars h" aria-hidden="true"><i></i><i></i><i></i></span> High</span>
+        <button type="button">Mark as planned</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="col">
+        <span class="k">Why</span>
+        <ol>
+          <li>Short call delta 0.71; assignment is likely.</li>
+          <li>Acquire mode accepts assignment at the strike.</li>
+        </ol>
+      </div>
+      <div class="col flip">
+        <span class="k">What would change this</span>
+        <ul><li><b>Close · broken</b> if KO breaks entry support; the 21-day rule does not apply to covered calls.</li></ul>
+      </div>
+    </div>
+    <div class="facts mono"><span>Credit <b>$0.95</b></span><span>Stock <b>$71.80</b></span><span>Basis <b>$66.40</b></span></div>
+  </article>
+
+  <!-- DATA UNAVAILABLE -->
+  <article class="card" aria-label="TSLA bear call spread">
+    <div class="head">
+      <div>
+        <div class="pos"><b>TSLA</b>Bear call spread · 300/305 · Oct 24 · 29 DTE</div>
+        <div class="decision">
+          <span class="action a-blocked">NO RECOMMENDATION</span>
+          <span class="headline">Can't evaluate: the quote is stale after one refresh.</span>
+        </div>
+      </div>
+      <div class="cta"><button type="button" class="primary">Refresh quotes</button></div>
+    </div>
+    <div class="banner data"><span>Last quote <b class="mono">10:31:02 ET</b> (11 min old). Missing: <b>mark</b>, <b>short delta</b>. No action is shown until data is current.</span></div>
+  </article>
+
+  <p class="section-h">Holding</p>
+  <div class="holds">
+    <table>
+      <thead><tr><th>Position</th><th>Action</th><th>Nearest trigger</th><th>Confidence</th></tr></thead>
+      <tbody>
+        <tr><td><b>AMD</b> CSP 140 · 34 DTE</td><td>Hold</td><td class="mono">Short Δ 0.38 → 0.50</td><td>High</td></tr>
+        <tr><td><b>QQQ</b> IC 440/435 · 480/485 · 38 DTE</td><td>Hold</td><td class="mono">Profit 41% → 50%</td><td>High</td></tr>
+        <tr><td><b>JPM</b> BPS 230/225 · 27 DTE</td><td>Hold</td><td class="mono">Short Δ 0.46 → 0.50</td><td>Low</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="disclaimer">Recommendations come from TradeEdge's rules applied to your positions and settings. They are not orders; nothing is placed until you review and send it. Market data can be delayed.</p>
+
+  <section class="spec">
+    <h2>Notes for Dane</h2>
+    <ul>
+      <li>Order: urgent (confirming stop, stop, broken) → needs action (profit, time, roll, assignment, no recommendation) → holding table.</li>
+      <li>The action label is the only saturated color on the card. Red for stop and broken, teal for profit and time closes, blue for roll and assignment, amber for blocked, grey for hold.</li>
+      <li>Confidence uses three bars plus the word, never color alone. BLOCKED shows no confidence.</li>
+      <li>The UI branches on <span class="mono">reasonCode</span>: <span class="mono">STOP_PENDING_CONFIRMATION</span> gets the red banner with a countdown; <span class="mono">DATA_UNAVAILABLE</span> gets the amber banner listing the missing fields.</li>
+      <li>Reasons: top 3 only. Supporting signals are labeled "(supporting)".</li>
+      <li>The AI explanation and any dissent stay collapsed. The disclaimer appears once per page.</li>
+      <li>Buttons open the existing order review. No order is sent from the card.</li>
+    </ul>
+  </section>
+</div>
