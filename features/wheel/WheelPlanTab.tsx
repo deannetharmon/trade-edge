@@ -13,6 +13,7 @@ import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { fetchWheelChain, getWheelQuote, type WheelChainResult } from '@/lib/wheel/chainSearch';
 import {
   DEFAULT_PLAN_PARAMS,
+  PLAN_PARAM_KEYS,
   PROFILE_LABELS,
   allocate,
   cashForOnePutCents,
@@ -25,6 +26,7 @@ import {
   formatUnlock,
   isLeveragedEtf,
   isOverridden,
+  lossBudgetBps,
   maxCashPerNameCents,
   monthsToUnlock,
   resolveParams,
@@ -86,11 +88,11 @@ const FIELDS: FieldSpec[] = [
   bpsField('singleSpreadCapBps', 'Single spread cap', 'Most any one spread may risk.'),
   bpsField('dropBps', 'Assumed drop of one stock', 'How far one holding is assumed to fall when sizing a position.'),
   bpsField('stressBps', 'Stress fall (all together)', 'The fall applied to every holding at once in the worst-case line.'),
-  bpsField('sectorLimitBps', 'Most in one sector', 'Cash tied up in one sector, as a share of the account.'),
   { key: 'targetDeltaBps', label: 'Target delta of the put', help: 'The put to price is the one nearest this delta.', suffix: 'delta',
     toText: (v) => (v / 10_000).toFixed(2), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 10_000); } },
   { key: 'dteMin', label: 'Days to expiry, from', help: 'Earliest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   { key: 'dteMax', label: 'Days to expiry, to', help: 'Latest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
+  bpsField('sectorLimitBps', 'Most in one sector', 'Cash tied up in one sector, as a share of the account.'),
   { key: 'monthlyGrowthBps', label: 'Assumed monthly growth', help: 'Used only for "months to unlock". A simple monthly rate; ignores losses, fees and taxes.', suffix: '% a month',
     toText: (v) => trimNumber(v / 100), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 100); } },
 ];
@@ -155,6 +157,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   const [addError, setAddError] = useState<string | null>(null);
   const [data, setData] = useState<Record<string, RowData>>({});
   const [tokenProblem, setTokenProblem] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
 
   const dirty = useRef(false);
   const dataRef = useRef(data);
@@ -309,7 +312,8 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
       const fitsAt = fitsAtAccountCents(cashCents, params, dropBps);
       return {
         entry, kind: 'ok' as const, status, quote: row.outcome.quote, cashCents, maxCash,
-        fit: contractsThatFit(maxCash, cashCents), fitsAt, unlock: monthsToUnlock(fitsAt, params.accountCents, params.monthlyGrowthBps),
+        fit: contractsThatFit(maxCash, cashCents), fitsAt,
+        fitsConcentrated: cashCents <= maxCashPerNameCents({ ...params, profile: 'concentrated' }, dropBps), unlock: monthsToUnlock(fitsAt, params.accountCents, params.monthlyGrowthBps),
       };
     });
   }, [wheelList, data, params, limits, hasErrors]);
@@ -339,31 +343,74 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
 
   const profile = params.profile;
   const saveText: Record<SaveState, string> = {
-    idle: '', saving: 'Saving…', saved: 'Saved', error: 'Could not save. Your changes are still on screen.', blocked: 'Not saved: fix the values above first.',
+    idle: '', saving: 'Saving…', saved: 'Saved', error: 'Could not save. Your changes are still on screen.', blocked: 'Not saved: fix the values below first.',
+  };
+  const changedCount = PLAN_PARAM_KEYS.filter((k) => isOverridden(overrides, k)).length;
+  const adjustOpen = showAdjust || hasErrors;
+
+  // One card per profile with the figures that matter side by side (as in the approved mock).
+  const profileCards = (['careful', 'balanced', 'concentrated', 'custom'] as PlanProfile[]).map((p) => {
+    const pp: PlanParams = { ...params, profile: p };
+    const l = computeLimits(pp);
+    return {
+      p,
+      lossCents: Math.floor((lossBudgetBps(pp) * params.accountCents) / 10_000),
+      maxCash: l.maxCashPerNameCents,
+      strike: l.highestStrikeDollars,
+      names: limits && l.maxCashPerNameCents > 0 ? Math.ceil(limits.wheelCashCents / l.maxCashPerNameCents) : 0,
+      lossBps: lossBudgetBps(pp),
+    };
+  });
+  const PROFILE_NOTE: Record<PlanProfile, string> = {
+    careful: 'Smallest positions and the widest spread across names.',
+    balanced: 'The recommended starting point.',
+    concentrated: 'Opens bigger names, but one bad name hurts more.',
+    custom: 'Set your own loss budget below.',
   };
 
   return (
     <div className="space-y-6" data-testid="wheel-plan-tab">
-      <p className="text-xs text-white/50">
-        The plan turns your account size and a loss limit into what fits today, and when the names you like unlock. Defaults are recommendations; change anything, any time.
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="max-w-3xl text-xs text-white/50">
+          What fits your account today, and when the names you like unlock. Defaults are recommendations; change anything, any time.
+        </p>
+        <span aria-live="polite" className="text-[11px] text-white/40">{saveText[saveState]}</span>
+      </div>
 
-      {/* Profile */}
-      <section className="space-y-3">
+      {validation.errors.map((e) => <p key={e} role="alert" className="text-xs text-red-300">{e}</p>)}
+      {validation.warnings.map((w) => <p key={w} className="text-xs text-amber-300">{w}</p>)}
+
+      {/* 1. Profile cards */}
+      <section className="space-y-3" aria-label="Profile">
         <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">How much one bad name may cost you</h2>
-        <div role="radiogroup" aria-label="Profile" className="flex flex-wrap gap-2">
-          {(['careful', 'balanced', 'concentrated', 'custom'] as PlanProfile[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              role="radio"
-              aria-checked={profile === p}
-              onClick={() => setParam('profile', p)}
-              className={`rounded border px-3 py-2 text-xs ${profile === p ? 'border-teal-400/60 bg-teal-400/10 text-white' : 'border-white/10 text-white/60 hover:text-white/80'}`}
-            >
-              {PROFILE_LABELS[p]}{p === 'careful' ? ' · 6%' : p === 'balanced' ? ' · 9% (recommended)' : p === 'concentrated' ? ' · 12%' : ''}
-            </button>
-          ))}
+        <div role="radiogroup" aria-label="Profile" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {profileCards.map((c) => {
+            const selected = profile === c.p;
+            return (
+              <button
+                key={c.p}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setParam('profile', c.p)}
+                className={`flex flex-col gap-2 rounded-lg border p-4 text-left ${selected ? 'border-teal-400/60 bg-teal-400/5' : 'border-white/10 hover:border-white/25'}`}
+              >
+                <span className="flex items-center justify-between gap-2 text-sm font-bold">
+                  {PROFILE_LABELS[c.p]}
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${c.p === 'balanced' ? 'border-emerald-500/40 text-emerald-300' : 'border-white/15 text-white/50'}`}>
+                    {formatBps(c.lossBps)} per name{c.p === 'balanced' ? ', recommended' : ''}
+                  </span>
+                </span>
+                <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[11px]">
+                  <dt className="text-white/45">Loss if one name falls {formatBps(params.dropBps)}</dt><dd className="text-right">{formatCents(c.lossCents)}</dd>
+                  <dt className="text-white/45">Cash on one name</dt><dd className="text-right">{formatCents(c.maxCash)}</dd>
+                  <dt className="text-white/45">Highest put strike</dt><dd className="text-right">${c.strike}</dd>
+                  <dt className="text-white/45">Names to fill wheel cash</dt><dd className="text-right">{c.names || '—'}</dd>
+                </dl>
+                <span className="text-[10px] text-white/40">{PROFILE_NOTE[c.p]}</span>
+              </button>
+            );
+          })}
         </div>
         {profile === 'custom' && (
           <ParamField
@@ -371,50 +418,43 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
             params={params} overrides={overrides} onCommit={setParam} onReset={resetParam}
           />
         )}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {FIELDS.map((spec) => (
-            <ParamField key={spec.key} spec={spec} params={params} overrides={overrides} onCommit={setParam} onReset={resetParam} />
-          ))}
-        </div>
-        <div className="flex items-center gap-4 text-[11px]">
-          <button type="button" onClick={resetAll} className="text-white/50 hover:text-white/80">Reset all to defaults</button>
-          <span aria-live="polite" className="text-white/40">{saveText[saveState]}</span>
-        </div>
-        {validation.errors.map((e) => <p key={e} role="alert" className="text-xs text-red-300">{e}</p>)}
-        {validation.warnings.map((w) => <p key={w} className="text-xs text-amber-300">{w}</p>)}
       </section>
 
       {limits && stress && allocation && (
         <>
-          {/* Limits */}
-          <section className="grid gap-3 rounded-lg border border-white/10 p-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Cash reserve</div><div className="text-sm font-bold">{formatCents(limits.reserveCents)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Spread risk cap (each spread up to {formatCents(limits.singleSpreadCents)})</div><div className="text-sm font-bold">{formatCents(limits.spreadCapCents)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Wheel cash</div><div className="text-sm font-bold">{formatCents(limits.wheelCashCents)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Most cash on one name</div><div className="text-sm font-bold">{formatCents(limits.maxCashPerNameCents)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Highest put strike that fits</div><div className="text-sm font-bold">${limits.highestStrikeDollars}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-white/40">Most in one sector</div><div className="text-sm font-bold">{formatCents(limits.sectorLimitCents)}</div></div>
+          {/* 2. Limits and worst case, side by side */}
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-2 rounded-lg border border-white/10 p-4 text-xs" data-testid="wheel-plan-limits">
+              <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">Common to every profile</h2>
+              <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1">
+                <dt className="text-white/60">Cash reserve ({formatBps(params.reserveBps)})</dt><dd className="text-right">{formatCents(limits.reserveCents)}</dd>
+                <dt className="text-white/60">Spread risk cap ({formatBps(params.spreadCapBps)}, {formatCents(limits.singleSpreadCents)} each)</dt><dd className="text-right">{formatCents(limits.spreadCapCents)}</dd>
+                <dt className="font-bold">Wheel cash</dt><dd className="text-right font-bold">{formatCents(limits.wheelCashCents)}</dd>
+                <dt className="text-white/60">Most cash on one name</dt><dd className="text-right">{formatCents(limits.maxCashPerNameCents)}</dd>
+                <dt className="text-white/60">Highest put strike that fits</dt><dd className="text-right">${limits.highestStrikeDollars}</dd>
+                <dt className="text-white/60">Most in one sector ({formatBps(params.sectorLimitBps)})</dt><dd className="text-right">{formatCents(limits.sectorLimitCents)}</dd>
+              </dl>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-white/10 p-4 text-xs" aria-label="Worst case">
+              <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+                Stress test: every holding falls {formatBps(params.stressBps)} together
+              </h2>
+              <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1">
+                <dt className="text-white/60">Today ({formatCents(stress.deployedCents)} in the plan)</dt>
+                <dd className="text-right">−{formatCents(stress.wheelLossCents)} ({formatPctTenths(stress.wheelLossPctTenths)})</dd>
+                <dt className="text-white/60">Wheel fully deployed ({formatCents(stress.fullWheelCents)})</dt>
+                <dd className="text-right">−{formatCents(stress.fullWheelLossCents)} ({formatPctTenths(stress.fullWheelLossPctTenths)})</dd>
+                <dt className="font-bold">Plus spreads at full loss ({formatCents(stress.spreadCapCents)})</dt>
+                <dd className="text-right font-bold text-amber-300">−{formatCents(stress.worstCaseCents)} ({formatPctTenths(stress.worstCasePctTenths)})</dd>
+              </dl>
+              <p className="text-[10px] text-white/40">A rough worst case, not a forecast. It needs everything to go wrong at once, and sector ETFs can fall further than this in a crash.</p>
+            </div>
           </section>
 
-          {/* Stress */}
-          <section className="space-y-2 rounded-lg border border-white/10 p-4 text-xs" aria-label="Worst case">
-            <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">
-              If every holding fell {formatBps(params.stressBps)} together
-            </h2>
-            <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1">
-              <dt className="text-white/60">Today ({formatCents(stress.deployedCents)} in the plan)</dt>
-              <dd className="text-right">−{formatCents(stress.wheelLossCents)} ({formatPctTenths(stress.wheelLossPctTenths)})</dd>
-              <dt className="text-white/60">Wheel fully deployed ({formatCents(stress.fullWheelCents)})</dt>
-              <dd className="text-right">−{formatCents(stress.fullWheelLossCents)} ({formatPctTenths(stress.fullWheelLossPctTenths)})</dd>
-              <dt className="font-bold">Plus spreads at full loss ({formatCents(stress.spreadCapCents)})</dt>
-              <dd className="text-right font-bold">−{formatCents(stress.worstCaseCents)} ({formatPctTenths(stress.worstCasePctTenths)})</dd>
-            </dl>
-            <p className="text-[10px] text-white/40">A rough worst case, not a forecast. It needs everything to go wrong at once, and sector ETFs can fall further than this in a crash.</p>
-          </section>
-
-          {/* Ladder */}
+          {/* 3. Unlock ladder */}
           <section className="space-y-3">
-            <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">Unlock ladder</h2>
+            <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">Unlock ladder: what fits now, and what you grow into</h2>
             {tokenProblem && (
               <div role="alert" className="flex items-center gap-3 rounded border border-amber-400/40 bg-amber-400/5 p-3 text-xs text-amber-200">
                 <span>Reconnect TastyTrade: your session is missing or expired, so live prices could not load.</span>
@@ -443,18 +483,18 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               <p className="text-sm text-white/40">Add a symbol to see the cash one put needs, whether it fits, and when it unlocks.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full min-w-[860px] text-xs">
+                <table className="w-full min-w-[900px] text-xs">
                   <thead>
                     <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
-                      <th className="px-3 py-2 text-left">Symbol</th>
+                      <th className="px-3 py-2 text-left">Stock</th>
                       <th className="px-3 py-2 text-left">Sector</th>
                       <th className="px-3 py-2 text-right">Price</th>
                       <th className="px-3 py-2 text-left">Put priced</th>
-                      <th className="px-3 py-2 text-right">Cash for one</th>
+                      <th className="px-3 py-2 text-right">Cash for one put</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
                       <th className="px-3 py-2 text-right">Fits at account</th>
-                      <th className="px-3 py-2 text-left">Unlocks in</th>
+                      <th className="px-3 py-2 text-left">Today</th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
@@ -485,7 +525,15 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             <td className="px-3 py-2 text-right">{row.fit}</td>
                             <td className="px-3 py-2 text-right font-bold">{inPlan(row.entry.symbol)}</td>
                             <td className="px-3 py-2 text-right">{formatCents(row.fitsAt)}</td>
-                            <td className="px-3 py-2">{row.unlock.kind === 'fits' ? <span className="text-emerald-300">Fits now</span> : formatUnlock(row.unlock as UnlockMonths)}</td>
+                            <td className="px-3 py-2">
+                              {row.unlock.kind === 'fits' ? (
+                                <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Wheel now</span>
+                              ) : row.fitsConcentrated ? (
+                                <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Concentrated only</span>
+                              ) : (
+                                <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-bold text-white/60">Unlocks in {formatUnlock(row.unlock as UnlockMonths)}</span>
+                              )}
+                            </td>
                           </>
                         )}
                         {row.kind === 'loading' && <td colSpan={6} className="px-3 py-2 text-white/40">Loading…</td>}
@@ -508,12 +556,35 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               </div>
             )}
             <p className="text-[10px] text-white/40">
-              Cash for one is the strike times 100 at the put nearest delta {(params.targetDeltaBps / 10_000).toFixed(2)}. "Fits at account" is the account size at which one contract first fits your loss limit, using your chosen profile.
+              Cash for one put is the strike times 100 at the put nearest delta {(params.targetDeltaBps / 10_000).toFixed(2)}. "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
               Cash goes to names in list order until ranking arrives. No open-interest or spread filter is applied yet.
             </p>
           </section>
         </>
       )}
+
+      {/* 4. Adjust any default (collapsed until you change something or hit an error) */}
+      <section className="space-y-3 rounded-lg border border-white/10 p-4">
+        <button
+          type="button"
+          aria-expanded={adjustOpen}
+          onClick={() => setShowAdjust((v) => !v)}
+          className="flex w-full items-center justify-between text-left text-xs font-bold text-white/70 hover:text-white"
+        >
+          <span>Adjust any default{changedCount ? ` (${changedCount} changed)` : ''}</span>
+          <span aria-hidden="true">{adjustOpen ? '▾' : '▸'}</span>
+        </button>
+        {adjustOpen && (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {FIELDS.map((spec) => (
+                <ParamField key={spec.key} spec={spec} params={params} overrides={overrides} onCommit={setParam} onReset={resetParam} />
+              ))}
+            </div>
+            <button type="button" onClick={resetAll} className="text-[11px] text-white/50 hover:text-white/80">Reset all to defaults</button>
+          </>
+        )}
+      </section>
 
       <p className="text-[10px] text-white/30">Guidance from TradeEdge rules. You decide; no orders are placed automatically.</p>
     </div>

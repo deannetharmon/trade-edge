@@ -165,3 +165,7 @@ Implementation decisions the spec left open (Ian or Alan may overrule):
 3. The tab offers an "Add starter ETFs" button (XLU, XLF, XLE, XLP, XLV) when the list is empty; the saved default list stays empty.
 4. Reserve and caps are edited as percentages (the dollar amounts show in the limits panel), not as dollars.
 5. Not done in W1 by design: ranking and the hurdle (W2), cycles (W3), idle-capital view (W4), spread-cap enforcement, removal of the old Candidates tab or the simulator. Alan's formal re-check of the recomputed fixtures is still owed (the fixtures are encoded in the tests and pass).
+
+### Layout correction (2026-09-26, after Dean compared the built tab with the approved mock)
+
+The first build put an eleven-field parameter form above everything, so the limits, the worst case and the ladder sat below the fold, and it did not match the approved mock. The Diane gate ("confirm the tab against the approved mock") had been skipped. Corrected: the tab now leads with four profile cards (loss if one name falls, cash on one name, highest put strike, names to fill the wheel cash), then "Common to every profile" beside the stress test, then the unlock ladder with "Wheel now / Concentrated only / Unlocks in N months" tags, and the parameters sit under "Adjust any default (N changed)", which opens on demand and whenever a value is invalid. Overrides, reset and saving are unchanged. Tests: 116 in the wheel set (2 new layout tests).

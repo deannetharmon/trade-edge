@@ -17,7 +17,8 @@ const chain = (strike: number | null, failedBatches = 0): WheelChainResult =>
     ? { expirations: [], chains: {}, failedBatches }
     : { expirations: ['2026-11-06'], chains: { '2026-11-06': [put(strike)] }, failedBatches };
 
-const STRIKES: Record<string, number> = { XLF: 51, XLE: 58, XLU: 37, XLP: 76, XLV: 159 };
+const STRIKES: Record<string, number> = { XLF: 51, XLE: 58, XLU: 37, XLP: 76, XLV: 159, BIG: 250 };
+const openAdjust = () => userEvent.click(screen.getByRole('button', { name: /Adjust any default/ }));
 
 function makeDeps(plan: Partial<WheelPlan> | 'error', over: Partial<WheelPlanDeps> = {}) {
   const posts: unknown[] = [];
@@ -59,16 +60,20 @@ describe('WheelPlanTab', () => {
   });
 
   it('renders the ladder from live data: cash for one, contracts that fit, fits-at and months to unlock', async () => {
-    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }, { symbol: 'XLV' }] });
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }, { symbol: 'XLV' }, { symbol: 'BIG' }] });
     render(<WheelPlanTab deps={deps} />);
     const xlf = await screen.findByTestId('ladder-row-XLF');
     await waitFor(() => expect(within(xlf).getByText('$5,100')).toBeInTheDocument());
     expect(within(xlf).getByText('$17,000')).toBeInTheDocument(); // fits at account
-    expect(within(xlf).getByText('Fits now')).toBeInTheDocument();
+    expect(within(xlf).getByText('Wheel now')).toBeInTheDocument();
     const xlv = screen.getByTestId('ladder-row-XLV');
     await waitFor(() => expect(within(xlv).getByText('$15,900')).toBeInTheDocument());
     expect(within(xlv).getByText('$53,000')).toBeInTheDocument();
-    expect(within(xlv).getByText('8 months')).toBeInTheDocument();
+    expect(within(xlv).getByText('Concentrated only')).toBeInTheDocument(); // fits the 12% profile, not Balanced
+    const big = screen.getByTestId('ladder-row-BIG');
+    await waitFor(() => expect(within(big).getByText('$25,000')).toBeInTheDocument());
+    expect(within(big).getByText('$83,333.34')).toBeInTheDocument();
+    expect(within(big).getByText('Unlocks in 69 months')).toBeInTheDocument();
   });
 
   it('a leveraged ETF is flagged and never priced or counted', async () => {
@@ -127,10 +132,12 @@ describe('WheelPlanTab', () => {
     render(<WheelPlanTab deps={deps} />);
     await screen.findByText(/Add a symbol/);
     await userEvent.click(screen.getByRole('radio', { name: /Concentrated/ }));
-    expect(await screen.findByText('$20,000')).toBeInTheDocument(); // most cash on one name at 12%
+    const limits = screen.getByTestId('wheel-plan-limits');
+    await waitFor(() => expect(within(limits).getByText('$20,000')).toBeInTheDocument()); // most cash on one name at 12%
     await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
     expect(posts[posts.length - 1]).toEqual({ overrides: { profile: 'concentrated' }, wheelList: [] });
 
+    await openAdjust();
     const reserve = screen.getByLabelText('Cash reserve');
     await userEvent.clear(reserve);
     await userEvent.type(reserve, '5{Enter}');
@@ -146,13 +153,14 @@ describe('WheelPlanTab', () => {
     const { deps, posts } = makeDeps({});
     render(<WheelPlanTab deps={deps} />);
     await screen.findByText(/Add a symbol/);
+    await openAdjust();
     const cap = screen.getByLabelText('Spread risk cap (total)');
     await userEvent.clear(cap);
     await userEvent.type(cap, '95{Enter}'); // reserve 10% + 95% > 100%
     expect(await screen.findByRole('alert')).toHaveTextContent(/cannot be more than 100%/);
     await new Promise((r) => setTimeout(r, 800));
     expect(posts).toHaveLength(0);
-    expect(screen.getByText(/Not saved: fix the values above first/)).toBeInTheDocument();
+    expect(screen.getByText(/Not saved: fix the values below first/)).toBeInTheDocument();
   });
 
   it('Reset all returns every field to its default', async () => {
@@ -160,6 +168,7 @@ describe('WheelPlanTab', () => {
     render(<WheelPlanTab deps={deps} />);
     await screen.findByText(/Add a symbol/);
     expect(screen.getByRole('radio', { name: /Careful/ })).toHaveAttribute('aria-checked', 'true');
+    await openAdjust();
     await userEvent.click(screen.getByRole('button', { name: 'Reset all to defaults' }));
     expect(screen.getByRole('radio', { name: /Balanced/ })).toHaveAttribute('aria-checked', 'true');
   });
@@ -172,5 +181,31 @@ describe('WheelPlanTab', () => {
     expect(await screen.findByText(/already on the list/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Add symbol'), 'not valid{Enter}');
     expect(await screen.findByText(/is not a valid symbol/)).toBeInTheDocument();
+  });
+});
+
+describe('WheelPlanTab layout (matches the approved mock)', () => {
+  it('leads with the profile cards showing each profile side by side, before any parameter form', async () => {
+    const { deps } = makeDeps({});
+    render(<WheelPlanTab deps={deps} />);
+    await screen.findByText(/Add a symbol/);
+    const cards = screen.getAllByRole('radio');
+    expect(cards.map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Careful'), expect.stringContaining('Balanced'), expect.stringContaining('Concentrated'), expect.stringContaining('Custom'),
+    ]);
+    const balanced = screen.getByRole('radio', { name: /Balanced/ });
+    expect(balanced).toHaveTextContent('$4,500'); // loss if one name falls 30%
+    expect(balanced).toHaveTextContent('$15,000'); // cash on one name
+    expect(balanced).toHaveTextContent('$150'); // highest put strike
+    expect(balanced).toHaveTextContent('recommended');
+    // The parameter form is collapsed until asked for.
+    expect(screen.queryByLabelText('Cash reserve')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Adjust any default/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('shows how many defaults have been changed on the collapsed section', async () => {
+    const { deps } = makeDeps({ overrides: { reserveBps: 500, profile: 'careful' } });
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByRole('button', { name: /Adjust any default \(2 changed\)/ })).toBeInTheDocument();
   });
 });
