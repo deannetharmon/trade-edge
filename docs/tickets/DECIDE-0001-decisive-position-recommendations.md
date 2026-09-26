@@ -1,7 +1,7 @@
 # DECIDE-0001 — Calm, decisive position recommendations (Epic)
 
-**Status:** REVISION 4 (2026-09-26). **Not approved to build.** Revision 4 folds in Ian's review of Diane's mock (2026-09-26) on top of the five lens reviews of revision 2. Two new rules came out of it (a fallback stop for a spread whose stop can never trigger; a stricter gate on the broken-stock exit) and both still need Alan's check. Approved so far (Paul): Phase 0 and 0001A only.
-**Rendered mock (revision 2, for Dean to approve):** https://claude.ai/artifact/1mhkVcQUysMBL2vPvrmucA
+**Status:** REVISION 5 (2026-09-26). **Not approved to build.** Revision 5 adds Ian's complete coverage review: every status the app can show today now has a home in the design or is explicitly dropped, and the mock (revision 3) shows every situation. It also folds in Dean's pasted review points. Approved so far (Paul): Phase 0 and 0001A only; Paul must re-check the wider scope of the screen slice.
+**Rendered mock (revision 3 with Dean's pasted points, for Dean to approve):** https://claude.ai/artifact/1mhkVcQUysMBL2vPvrmucA
 **Sponsor:** Dean. **Team review record:** `docs/tickets/DECIDE-0001-review-2026-09-25.md`.
 **Dean's decisions (2026-09-25):** production's stop stays (a mark of 2x the credit received, a loss of 1x the credit); proceed with this epic now and do CUT-LOSSES-REVIEW-0001 after it; no 21-DTE rule for CSP and CC; Finnhub is the chosen news source (a later ticket); a CSP with an Acquire or Wheel aspect gets no strong recommended action; no loud red commands.
 **Approved scope so far (Paul, G4):** Phase 0 and 0001A only. Everything after is approved slice by slice.
@@ -10,15 +10,15 @@
 
 | Who | What they still need to do | Blocks | Status |
 |---|---|---|---|
-| **Dean** | (1) Approve the rendered mock (link above). (2) Say yes or no to the two new rules: the fallback stop for an unreachable stop (O14) and the stricter broken-stock gate. (3) Decide when to start (Paul approved only Phase 0 and 0001A). | The UI slice (S3), and the rules in B1 | Waiting |
-| **Alan** | Check the two new rules and their fixtures (fallback stop at 80% of width; the broken-stock gate at 0.5x credit or delta 0.30; the wide-quote timeout of 3 readings or 15 minutes, O15); write fixtures for the new states K to N and the `Rule met` confidence change; confirm the Phase 0 conventions still stand | B1 (S2) | Not started on revision 4 |
-| **Ian** | Confirm his own fallback-stop proposal as written (O14), define the support-break and volume confidence bands and whether a fired gap clears on recovery (O12), and approve the S2 disagreement list when it exists | B1 and the S2 to S3 gate | Reviewed the mock; three rulings still open |
-| **Quinn** | Re-review revision 4 for the new states: what data each needs, which already exists (working orders, quote age, earnings date, sign-in state, DTE) and which does not (ex-dividend date, assignment detection); whether the wide-quote timeout fits `evaluateStopBreach`; the hover and refresh changes | S3 | Reviewed revision 2; revision 4 pending |
-| **Paul** | Approve which states ship in S3 and which are later (see the state table); update the roadmap; confirm the slice order still holds | S3 scope | Approved Phase 0 and 0001A only |
-| **Diane** | Check that the numbers line, the stop styling and the confidence change fit her spec and the 256px cell; record her approval once Dean approves the mock | S3 | Spec approved with changes; the mock now follows Ian's review |
-| **Dane (developer)** | Pre-development review of the whole ticket and the code it touches; runs LAST, after all of the above | Any development | Not started |
+| **Dean** | (1) Approve the rendered mock (link above). (2) Decide the broken-stock gate: any loss (`P&L < 0`, as first written and as his pasted note keeps it) or Ian's stricter version (a loss of at least 0.5x the credit, or short delta 0.30 or more) (O17). (3) Yes or no to Ian's fallback stop for an unreachable stop (O14) and to dropping the behaviors listed under "Behavior being dropped". (4) Say when to start; only Phase 0 and 0001A are approved. | The screen slice (S3) and the rules slice (B1) | Waiting |
+| **Alan** | Check the new rules and write their fixtures: the fallback stop (O14); the broken-stock gate (O17); the wide-quote timeout (O15); the expires-soon and at-maximum-loss precedence and window (M, N); uncovered-short-call cover detection (V); the CC net P/L figure; "roll cost" (new breakeven and new maximum loss) | B1 | Not started on revision 5 |
+| **Ian** | Confirm the new states V, W, U, S, G0 and the rulings in "Coverage of every current status"; O12 (support-break and volume confidence bands, whether a fired gap clears on recovery, whether an unreachable stop needs another protection); approve the S2 disagreement list when it exists | B1, S2 to S3 | Coverage review done; O12 open |
+| **Quinn** | Re-review for the wider scope: data each new state needs (working orders, quote age, stop-order status, structure ambiguity, cover detection for V, PMCC pair detection for W); the position-card banners and the priority, mission-control and panel surfaces added to the cutover map; the missing-recommendation fallback | S3 | Revision 2 reviewed; revision 5 pending |
+| **Paul** | Re-check scope now that the screen slice is wider (about 20 states plus banner and surface changes); decide what ships in S3 versus later; update the roadmap | S3 scope | Approved Phase 0 and 0001A only |
+| **Diane** | Confirm revision 3 of the mock against her spec and the 256px cell (numbers line, stop styling, grouped states); record approval after Dean approves | S3 | Spec approved with changes |
+| **Dane (developer)** | Pre-development review of the whole ticket and the code it touches; runs LAST | Any development | Not started |
 
-**Nothing is built until every row above is done.** Phase 0 and 0001A can start once Dean says so, because Paul has approved them and they change no recommendation.
+**Nothing is built until every row above is done.** Phase 0 and 0001A can start once Dean says so.
 
 ## Problem
 
@@ -279,6 +279,67 @@ An unconfirmed intent shows the chip "Acquire (default, not chosen) · Choose in
 
 One standing line at the foot of the Positions workspace and the analysis dialog: "Guidance from TradeEdge rules. You decide; no orders are placed automatically." Each reason code maps to a plain-language sentence with no jargon, in one file, with a test that every code has one. Accessibility: `role="group"` with `aria-label="Recommendation for {symbol}"`; native `<details>`; `aria-live="polite"` on the pending-stop state; the dot is `aria-hidden` and the label carries the meaning; 9 to 10px faint text meets 4.5:1 on `#171717`.
 
+## Coverage of every current status (Ian's complete review, 2026-09-26)
+
+Ian checked every status the app can show today, every strategy from open to expiry, and every other place a status appears. Result: the first 20 states covered the short-premium paths; **14 things had no home**, three of them safety issues. All are addressed below and in the mock (revision 3). The mock is the canonical wording; this section records the rules and the mapping.
+
+### Safety issues fixed
+
+1. **A missing recommendation must never show "Hold".** Today `PositionsWorkspace.tsx:747-748` shows `p.recommendation?.label ?? 'Hold'` with "Continue monitoring". Replace with "No recommendation" and "Recommendation could not be calculated. Refresh." plus a Refresh button.
+2. **Bought options (long call, long put, debit spread), LEAPS and short calls with no cover must not fall through.** Long call, long put and debit spread show "Not covered yet" (state U), which **removes today's Take Profit and Cut Losses labels on these positions** (they currently resolve through the 'other-position' context, `managementIntent.ts:119`). A **short call with no shares or long call behind it** (state V) is an amber, stop-styled recommendation: "No shares or long call found behind this call. The loss has no limit. Close it, or confirm the cover is in another account." It must never take the covered-call rules (which never stop). A **PMCC short call** (state W) shows "Not covered by shares: Rolling or closing is the plan. Do not take assignment; that would use your LEAP." and never the covered-call "you sell 100 shares" wording. Cover detection (shares owned, a long call on the same underlying, PMCC pairing via `isPairedPmccLong`) is an input to the evaluator; Alan and Quinn define it.
+3. **A working closing order must never replace the recommendation.** A profit-target order is the normal case (`PositionsWorkspace.tsx:741`, "Profit Target Live"). It is a context line ("Closing order working at $0.85.") on whatever state applies, and it never hides a stop, maximum-loss or expires-soon state. "Order working" is not a state.
+
+### New rules from the coverage review
+
+- **Profit target:** the recommendation uses the trader's own target (`hitTarget`, `app/portfolio/page.tsx:8212`, `pos.profitTarget`), not a fixed 50%; the reason and detail read the real target. The "Consider extending" hint (`page.tsx:1736-1750`) contradicts this and is removed.
+- **Time limit (21 DTE, spreads and IC):** the label is "Time limit reached (21 days)" for both a loser with no roll (G1) and a winner (G0: "Up $80, 24% of the credit. Closing takes the gain; winners are not rolled."). A roll that qualifies is "Consider rolling" (G2), and its detail states **the new breakeven and the new maximum loss** before the trader clicks Roll (Dean, 2026-09-26: rolling for a small credit can still add dollar risk when the new spread is wider).
+- **Expires soon (M) and At maximum loss (N) precedence:** Data, then Stop **or** N, then M, then profit target, then time, then delta, then Hold. **M applies at 7 DTE or less with the short strike in the money or within 2%**, with spread, covered-call and put wordings (an Acquire or Wheel put uses "Expect assignment" instead). **N replaces "Stop level reached" once the mark is 98% of the spread width or more** and adds "Your stop level was passed." M's detail: "It can be assigned any day, and is almost certain at expiry if it stays in the money." Alan sets the exact windows.
+- **Delta breach with no roll (S), short-dated entry, let-expire, watch and place-GTC** become plain context lines on Hold, never actions: "Short strike delta is 0.55 and no roll qualifies. The rules will ask you to act at your stop or 21 DTE." "Opened with 12 days left, so the 21-day rule does not apply." "Expires in 2 days, $4.20 out of the money. Letting it expire is fine; close it only if you want to remove the last risk." "The stock is 3.2% from your short strike." "No profit-target order is working." The health-score "watch" is dropped.
+- **Other "no recommendation" states, each with its own reason:** stale quote (I), could not be calculated (I0), no entry price (I2: "TradeEdge cannot see what you were paid for this position, so it cannot say how it is doing."), legs do not fit together (I3: "TradeEdge cannot tell how these legs fit together, so nothing is suggested."), verify pricing ("Checking prices", hollow amber ring, Refresh), and sign-in expired (T: one banner; each row keeps a faint "Last shown 10:42: Hold" so the trader is not blind).
+- **Dean's pasted review points (2026-09-26):**
+  1. **The Acquire-to-Income switch must not be a trap.** When the current mark is already past the Income stop, the detail says so: "Choosing Income now shows Stop level reached; the mark ($4.40) is already past $4.00 (twice the $2.00 credit)." The reverse holds too: choosing Acquire removes the stop, so the recommendation changes to Expect assignment.
+  2. **A covered call shows the call's P/L together with the shares:** "Call −$97 · shares +$540 · net +$443", with the call's own number in neutral color, never the warning color. A call loss offset by the shares must not invite a buyback (Ian ruled that a covered call never gets `CLOSE_STOP` or `CLOSE_BROKEN`).
+  3. **The unreachable-stop flag is visible:** an amber context line, for example on a 5-wide spread with a $2.55 credit: "Stop cannot trigger; max loss is $245 per contract." (Ian still owes O12: does such a position need another protection?)
+  4. **The roll's cost is shown:** new breakeven and new maximum loss in the detail (above).
+  5. **Broken-stock says why it fired:** "Why it fired: the stock broke its trend and this position is at a loss. A winning position would show Hold with this as a note." **Open decision O17 (Dean):** the gate is currently "any loss" as first written and as Dean's pasted note keeps it, but Ian's mock review recommended a stricter gate (a loss of at least 0.5x the credit, or short delta 0.30 or more) so a nearly flat trade does not say "close". The mock's wording is true under either gate.
+
+### Behavior being dropped (Dean has not yet seen this list together; all fit earlier decisions)
+
+The weak-health loss exit (`positionObjective.ts:996`, "Cut Losses" at −50% with a low health score); "Reduce Risk" (net-edge decay, trend against, gamma and DTE); the health-score "watch"; earnings-risk ranking above the profit target (it becomes a context line); the 21-DTE roll suggestion for CSP and CC; the CSP 21-DTE banners; "Consider extending"; Take Profit and Cut Losses labels on bought options.
+
+### Mapping of every current status to the new design
+
+| Current status | New state |
+|---|---|
+| Hold Position | Hold (with context lines: D1, J, K, L, S, X, Y, Z) |
+| Take Profit (`close-winner`) | A, R (the trader's own target) |
+| Cut Losses (material loss) | B, E (stop); Acquire and Wheel puts become D1 or D2; N at maximum loss |
+| Cut Losses (weak-health loss) | Dropped; F (stock has weakened) covers the trend case |
+| Roll Position (`roll-soon`, 21 DTE) | G1, G0, G2 (spreads and IC only) |
+| Roll Position (explicit roll flag) | G2 only when a roll qualifies |
+| Accept Assignment / assignment-risk | D2, D3, H, M1, M2, M3, W |
+| Reduce Risk | Dropped (net edge stays on the card) |
+| earnings-risk | Context line L1, L2 |
+| place-gtc, let-expire, watch | Context lines (Y, X) |
+| Verify Pricing and its pending notice | VP "Checking prices" |
+| Recommendation Unavailable and the workspace default "Hold" | I0 "No recommendation" |
+| Structure ambiguous | I3 |
+| Unsupported or incomplete entry economics | I2 |
+| Pending stop confirmation | C |
+| Bought options, debit spreads | U "Not covered yet" |
+| LEAPS and PMCC long legs | Q |
+| Short call with no cover | V |
+| PMCC short call | W |
+| Expired token | T |
+| Assigned, called away, early assignment risk | P, P2, O (later: need data that does not exist) |
+| Deploy Idle Cash | Not a position state; needs a label rule in the priority lists |
+| Replace Working Order | Pending Orders list only |
+| Stop-order line (Aligned, Too loose, Too tight, Unverified, Invalid, No stop) | Kept as information, renamed "Stop order: Aligned" so it is not confused with "Stop level reached"; "Invalid" loses its red |
+
+### Added to the cutover map (Ian found these outside it)
+
+Position-card banners in `app/portfolio/page.tsx`: "CLOSE NOW" red and "REVIEW" amber (`:8228-8244`, becomes G0/G1/G2), the CSP 21-DTE banners "ACQUIRE" and "evaluate roll or take assignment" (`:8258-8283`, **deleted**: contradicts Dean's no-21-DTE rule for CSP and CC), the red structure-ambiguous banner (`:8285`, becomes I3), "PROFIT TARGET HIT" (`:8252`, duplicate, removed), "SHORT-DATED ENTRY" (`:8246`, becomes a context line), "Consider extending" (`:1736-1750`, deleted). Red urgency colors in `PositionRecommendationBadge.tsx:5-24`, `PositionIntelligencePanel.tsx:46` and `:178-195` (heading "Suggested Action" versus "Recommendation"), `DailyPriorityList.tsx:7-18`, `TodaysPrioritiesDashboard.tsx:25`, and mission control `SummaryStrip.tsx:22` ("Action Required" is red). The panel vocabulary (`managementChoices.ts:11-21`, `nextLifecycleEvent.ts:17-25`) is rewritten to the new labels. The priority lists need a mapping because `PositionDecision` has no urgency: a rule you set has been met first, then worth a look, then a planned step, then nothing to do (amber at most, no red). `recommendationTone` (`PositionsWorkspace.tsx:562-573`) returns red for any label containing "cut" or "close"; it is replaced by the dot table. The position list sort `canonicalRecommendationPriority` (`presentation.ts:66-77`) and the section order (`page.tsx:296`) are re-ranked on the new states. The raw `CUT_LOSSES` enum text in the AI panel (`PositionsWorkspace.tsx:543`) is removed. The manual Cut Losses button stays, neutral; Ian suggests "Close at a loss" as its label.
+
 ## DECIDE-0001D — Recommendation vs. action log
 
 - **Auto-recording every shown decision changes the contract of `lib/decision-review` (PI-0008C: "the trader alone chooses"; `types.ts:1-20`)** and needs Paul's approval. Extend the module with **additive fields only** (`TraderAction` gains CLOSE_TIME and BLOCKED equivalents; the evidence snapshot gains the `PositionDecision`).
@@ -348,6 +409,8 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | O8, O9 | Price basis; reconstructed entry support | Alan | **Resolved** (see Conventions and Phase 0) |
 | O11 | LEAPS long-leg policy, the short-call guard, delta source | Ian | Deferred to its own ticket |
 | O12 | Support-break and volume confidence bands; whether a fired gap clears on recovery; whether an unreachable stop needs another protection | Ian | Open, blocks B1 |
+| O17 | Broken-stock gate: any loss (`P&L < 0`, Dean's pasted note) or the stricter 0.5x credit or delta 0.30 (Ian) | **Dean** | Open, blocks B1 |
+| O18 | Cover detection for the uncovered-short-call state V and PMCC pairing for W; M and N windows | Alan, Quinn | Open |
 | O14 | Fallback stop for a spread whose stop can never trigger: `mark ≥ 0.80·width` (Ian's proposal); and the stricter broken-stock gate (a loss of at least 0.5x the credit or short delta ≥ 0.30) | Alan checks; Ian confirms; **Dean approves** | Open, blocks B1 |
 | O15 | Wide-quote timeout (3 readings or 15 minutes still wide becomes "Stop level reached (wide quote)") against `evaluateStopBreach` | Alan, Quinn | Open |
 | O16 | Data for the new states: which exist (working orders, quote age, earnings date, token state) and which do not (ex-dividend date, assignment detection, both deferred) | Quinn, Paul | Open |
