@@ -139,3 +139,21 @@ The touch fixtures (Alan's T1 to T8) are recorded for KEEP-CREDIT-0002 and not b
 | **Paul** | Reviewed draft 1: scope and slices adopted above | Done |
 | **Diane** | Reviewed draft 1: note, fold-out, strip, Part A layout; the rendered mock follows her spec | Done |
 | **Dane (developer)** | Pre-development review of draft 2; runs last | Started after this draft |
+
+## Dane's developer review of draft 2 (2026-09-26)
+
+Verdicts: **B1 can start** after the S3-0a decision (needs items 3-7 below settled in wording). **A1 blocked** (no fee model; items 2-5, 8). **A2 and B3 blocked** on DECIDE-0001 S3-B. **B2 blocked** on B1, S3-0c and the "Hold with a loss" label mapping (item 9).
+
+Required changes before build (evidence from the review; verify each line when the change is made):
+
+1. File path: `features/portfolio/positions-workspace/PositionsWorkspace.tsx` (not `components/portfolio/`); the "Strike" comment is at `:726`, the row at `:731`. Add this file to the A/B file list for the row relabel. The other three wrong "touch" comments are at the cited lines.
+2. No fee model or roll-net code exists in any `.ts`/`.tsx`; `rollNet`, `floor_to_cent` appear only in DECIDE-0001 (~line 186), and `page.tsx:4230` says fees are excluded from P&L. A1 needs a named per-contract fee constant with source, a rounding rule (whole cent per share, or mills), and integer-cents arithmetic so the lines add up (2.28 - 2.10 - 0.04).
+3. The card's fields do not match the example. `findRollCandidates` (`page.tsx:586-690`) uses `closeCost = pos.currentValue` (dollars, position total) and `openCredit` = the 85% limit (the `RollSuggestion` comment says 0.7, the code uses 0.85); `netRollPnl = openCredit - closeCost`. The ticket must say which net the line uses (limit-based card math vs DECIDE's mid-minus-mid) and stop mixing them in the example.
+4. Two roll paths (`fetchRollSuggestion` `page.tsx:1359`, `:1455-1461`, and the batch cards) must share one `rollExplanation.ts`. List the inputs: old credit C (`creditReceived` is floored for debits), old width W, old short strike, all derivable from `pos`. Iron condor (4-leg), CC and CSP rolls: state out of scope or define.
+5. "Stop moves to $3.58 / -$179" has no code behind it (no 2C' logic in `stopLossPolicy.ts`). Define the formula (mark = 2C', loss = C' x 100) and recheck the $179 and $165 figures. Confirm the batch dialog's Close Only mode receives `Position.stopLossPolicy` / `stopLossPrice`.
+6. IV source is ambiguous: `ivMap[symbol]` (`acquisition.ts:1441-1442`) reads `implied-volatility ?? iv ?? implied-volatility-30-day`, rounded to a whole percent into `Position.iv`. Decision: v1 uses `Position.iv`, labeled "implied volatility" (not "30-day"); the expiry-matched / short-leg IV preference is deferred (no plumbing).
+7. Fixtures need a tolerance (the code uses the Abramowitz-Stegun normalCdf approximation, `positionMetrics.ts:306-320`, about 1e-7 off exact). State +/-0.01 percentage points. Alan's four fixtures were recomputed and match (52.7085, 68.0686, 48.6350, 38.4833). The IC (29.653), 60-day and IV-variant and call-mirror fixtures still need computing; there is no existing IC test (`positionMetrics.test.ts:480-502` covers CSP only).
+8. Sequencing: A1 says "before S0, after S3-0c"; B1 says "after S3-0a". State the single-file queue for `page.tsx` explicitly. S3-0c is blocked on S3-0b, so A1 is transitively blocked; say whether A1 may start before S3-0c (the red card styling at `:4275-4280` is in S3-0c's scope).
+9. "Hold with a loss" does not exist as a string or state in `lib` or `features`; the label mapping table is owed by Quinn. Specify predicate field names, the "at least 25% of credit" rounding rule, and the intent field for "Income put". Earnings field is `Position.earningsDate` (within expiry) with `nextEarningsDate`; the hidden-state text uses `earningsDate`.
+10. Rounding to 5%: define ties (52.5 rounds to 55) and ends ("over 95%" above 97.5%, "under 5%" below 2.5%).
+11. DTE: `Math.round` on a UTC-midnight difference makes DTE 0 from about noon the day before expiry, so "expires today" would show a day early. Decide in the ticket (use the New York calendar date).
