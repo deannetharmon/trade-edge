@@ -16,6 +16,8 @@ Dean wants one wheel-native system that (a) helps him decide what to wheel next 
 4. Sector ETFs move together in a selloff; the stress test is the honest number (Dean agrees).
 5. Hurdle (used from W2, not W1): premium return must clear **10% a year**, measured at the actual bid, after fees. Below it the answer is "wait"; parked cash is counted at what it earns.
 6. Spreads on names he likes get a **total risk cap** (Ian proposed 5% of the account, $2,500; Dean to confirm the number).
+7. **Leveraged and inverse ETFs (TQQQ and similar) stay off the wheel list**; they may be traded only as small put spreads inside the spread-risk cap (Dean agreed 2026-09-26, after Ian's ruling; see O7).
+8. The Income Engine's SPX bucket is retired; SPY, VOO, QQQ and DIA are not part of this plan.
 
 ## Scope (W1 only)
 
