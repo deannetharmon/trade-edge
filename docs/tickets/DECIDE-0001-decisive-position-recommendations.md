@@ -1,130 +1,97 @@
-# DECIDE-0001 — Decisive position recommendations (Epic)
+# DECIDE-0001 — Calm, decisive position recommendations (Epic)
 
-**Status:** REVISION 2 (2026-09-25), **not yet approved to build.** Revision 1 was aligned by Ian, Alan, Quinn and Paul; the team review in `docs/tickets/DECIDE-0001-review-2026-09-25.md` found three blocking issues and three serious ones. This revision addresses them. It now needs the independent lens reviews (Ian, Alan, Quinn, Paul, Diane), and then the developer's (Dane's) pre-development review, before any code. See "Review gates" at the end.
-**Dean's decisions (2026-09-25):** the stop stays at production's level (a mark of 2x the credit); proceed with this epic now and do CUT-LOSSES-REVIEW-0001 after it; the CSP/CC 21-DTE exception; Finnhub for news.
-**Sponsor:** Dean.
-**Follow-up:** DECIDE-0002 (ex-dividend assignment guard, earnings-before-expiry rule, PMCC short-leg column, CC Growth-mode upside test).
+**Status:** REVISION 3 (2026-09-25). **Not approved to build.** Revision 2 went through five independent lens reviews (Ian G1, Alan G2, Quinn G3, Paul G4, Diane G5); all five returned "approve with changes" or "do not build yet" and every required change is folded in below. Next: Dean's answers to the open decisions, Diane's rendered mock approved by Dean, then the developer's (Dane's) pre-development review (G6). See "Review gates".
+**Sponsor:** Dean. **Team review record:** `docs/tickets/DECIDE-0001-review-2026-09-25.md`.
+**Dean's decisions (2026-09-25):** production's stop stays (a mark of 2x the credit received, a loss of 1x the credit); proceed with this epic now and do CUT-LOSSES-REVIEW-0001 after it; no 21-DTE rule for CSP and CC; Finnhub is the chosen news source (a later ticket); a CSP with an Acquire or Wheel aspect gets no strong recommended action; no loud red commands.
+**Approved scope so far (Paul, G4):** Phase 0 and 0001A only. Everything after is approved slice by slice.
 
 ## Problem
 
-TradeEdge collects most of the data a trader needs to manage a position, but it never says what to do. The AI panels hedge because their prompts forbid a recommendation. For example, `app/api/leaps-analysis/route.ts` says "Never select a contract, direct a transaction … or use authority language", and `app/api/advisor/route.ts` says "You do not select a contract or direct a transaction" and requires a `disclosure` field in every response.
+TradeEdge collects most of the data a trader needs to manage a position, but its recommendations are inconsistent and, in places, loud. Two facts found in review:
+
+1. There is **one live recommendation engine**, not three: `scorePortfolioPositionObjective` (`lib/portfolio-data/acquisition.ts:208`) calls `evaluatePositionObjective` and `selectManagementIntent` (`lib/portfolio-intelligence`). Its result is `pos.recommendation`, which feeds every recommendation display in the app (see the cutover map). `getRecommendation` (`acquisition.ts:2221`), which holds the Acquire and Wheel exemption, is **never called by the app** (it is only imported at `app/portfolio/page.tsx:259` and called by tests). So the Acquire and Wheel exemption Dean wants is **not implemented in the live path today**: a default CSP can show "Cut Losses".
+2. Dean reported that a loud "Cut Losses" led to panic closes on positions that later recovered (Trade Log: 21 of 28 losses were closed before reaching 2x credit; CSPs net +$2,957 over 13 trades, spreads net -$530 over 52).
 
 ## Outcome
 
-For every open position, TradeEdge shows **one recommended action**, with its reasons, what would change it, and a confidence level. Code makes the recommendation and the AI explains it. This keeps the AI-POLICY-0001 principle that "TradeEdge code stays the only authority".
+For every open position TradeEdge shows **either a calm recommended action or a plain "Hold"**, with its top reason, what would change it, and what the position needs to recover. Positions the trader has set to Acquire or Wheel never show a stop or a close action. The recommendation is guidance only; the trader decides and no order is placed automatically. Code makes the recommendation; an AI (a later ticket) may explain it but cannot change it.
 
 ## Architecture
 
 ```
-facts (market data, broker, entry records, news)
+facts (market data, broker, entry records)
   → signals (pure: broken stock)
-  → decision (pure evaluators → adapters → PositionDecision)
-  → AI explanation (states and explains the decision; cannot change it)
+  → PositionDecision (pure evaluators; intent, stop trigger and clock are explicit inputs)
+  → replaces pos.recommendation everywhere it is read (one source of truth)
   → log (recommendation vs. what the trader did)
 ```
 
-**Engines (Paul, P1):** keep the existing rule engines. Do not merge them. There are three that shape what the trader sees today, not two:
+- **The live engine is replaced, not joined.** `PositionDecision` becomes the value behind `pos.recommendation` (or the only input to everything that reads it). A position must never display two different actions.
+- **Manual actions stay.** The Take Profit / Cut Losses / Close / Roll buttons are manual actions that stay available whatever the recommendation is (`isActionRelevant`, `app/portfolio/page.tsx:1707-1723`). Only the "suggested" markers and the colors change.
+- **Stop trigger comes from the trusted stop policy**, not a constant in the evaluator (see Stop rule).
+- **LEAPS long-leg decisions are deferred** (see below). There is no engine for them today.
+- **Dead code:** `getRecommendation` and its test blocks are deleted only after the cutover, after deciding which of its tests port over. The helper and trust-boundary tests in `lib/portfolio-data/__tests__/stopLossWiring.test.ts` (OCO identity, stop classification, `derivePositionQuoteQuality`, the MU production-incident fixtures) **do not change**.
 
-- **Legacy recommendation:** `getRecommendation` in `lib/portfolio-data/acquisition.ts`. This is the source of today's Hold and Cut Losses, and of the Acquire exemption (a lone short put set to Acquire or Wheel returns Hold and skips the breach and stop exits, `acquisition.ts` around line 2314). The stop trigger itself comes from `lib/portfolio/stopLossPolicy.ts` (`DEFAULT_ENTRY_STOP_MULTIPLE = 2`) and the stop-loss wiring in `lib/portfolio-data`. **This answers open item O2.**
-- **Portfolio intelligence:** `lib/portfolio-intelligence/managementIntent.ts` and `objectives/positionObjective.ts`, with settings in `lib/portfolio-intelligence/policies/defaults.ts` (50% profit, 21 DTE, a material loss of -100% of the credit).
-- **LEAPS:** `lib/leaps-position-intelligence/evaluate.ts`.
-- **Adapter:** one thin adapter per engine that maps its result to the shared `PositionDecision`.
-- **Cutover (open item O7):** the app must show exactly one recommended action per position. This ticket states which existing recommendation display each adapter replaces, and the old display is removed in the same slice, not left beside the new one.
-- **Revisit a merge** only if the adapters start duplicating logic.
+## Phases and slice order
 
-## Phases
+| Slice | Ticket | What Dean sees | Depends on |
+|---|---|---|---|
+| S0 | **DECIDE-0001-0** Data prerequisites | Nothing new on screen; a separate history endpoint and stored entry support levels | — |
+| S1 | **DECIDE-0001A** Broken-stock signals, **display only** | A calm information line on each position; no action changes | S0 |
+| S2 | **DECIDE-0001B1** `PositionDecision` pure module, **shadow mode** | Nothing on screen; a logged list of where it disagrees with today's recommendation | S1, O5, O6 answered, O11 |
+| S3 | **DECIDE-0001B2** Cutover and calm UI | One calm action per position; all red and old markers removed in the same change | S2 approved by Ian on the disagreement list; Diane's mock approved by Dean |
+| S4 | **DECIDE-0001D** Recommendation vs. action log | Agreement rates on the Performance page | S3 |
+| — | DECIDE-0001C AI explanation, DECIDE-0001E Finnhub news | **Separate tickets, not part of this approval** | see below |
 
-| Ticket | Title | Depends on |
-|---|---|---|
-| DECIDE-0001-0 | Data prerequisites (chart history and volume, entry support level, log investigation) | — |
-| DECIDE-0001A | Broken-stock signals (display only, no action changes) | 0001-0 |
-| DECIDE-0001B | Decision rules and the `PositionDecision` adapters | 0001A |
-| DECIDE-0001C | AI explains the decision (prompt rewrite) | 0001B; Paul's D2/D9 amendment |
-| DECIDE-0001D | Recommendation vs. action log (extends `lib/decision-review`) | 0001B |
-| DECIDE-0001E | Finnhub news and analyst-action feed | 0001A |
+CUT-LOSSES-REVIEW-0001 (Dean: do it after this epic) keeps only the MAX_LOSS label question and the close-versus-expiry price capture; calm presentation, the Acquire and Wheel logic and the log are owned here.
 
 ## Conventions (all phases)
 
-- `n` is the last **completed** session. A partial intraday bar is never used. Bars are sorted by `t` and de-duplicated.
-- Prices are per-share. Stop, target and roll math use the combo **mid**; the natural price is shown as the expected fill. Money comparisons use integer cents.
-- `C` is the cumulative net credit per share, including all rolls.
-- `P&L = C − mark`.
-- DTE is in calendar days, New York time.
-- Short delta is the largest |delta| across the short legs.
-- Every value the evaluator needs is an explicit input. The evaluator reads no hidden state.
-- **Intent is an explicit input** for a lone short put or short call: the stored value from `/api/position-intent` (`income`, `acquisition`, `wheel`, `neutral`). A missing value is treated as the position's default, and the default is part of the rules below.
-- **Presentation (Dean, 2026-09-25):** an action is never shown as a loud red command. The UI states the action calmly with its top reasons, the flip conditions, and what the position needs to recover. Diane's mock governs the exact look.
+- `n` is the last **completed** session. A partial intraday bar is never used. A bar is complete when its NY date is before today, or after `meta.currentTradingPeriod.regular.end` + 15 minutes (this handles early closes). Bars are sorted by `t`, de-duplicated, and a bar with any null field is dropped, so the test is on the count of complete bars.
+- **Integer math for every threshold test.** Prices and credits in cents; a mid test as `bid_c + ask_c ≥ 4·C_c`; relative bid-ask spread as `8·(ask_c − bid_c) > bid_c + ask_c`; deltas in 1/10000; returns and gaps in basis points; ADM and T in basis points. Where a ratio of floats must be compared it uses a 1e-9 tolerance and says so in the code. (Float traps found by Alan: `92/100 − 1` is not exactly −0.08; `|0.45 − 0.5|/0.5` is 0.09999999999999998.)
+- **Prices are per share.** Stop, target and roll math use the combo **mid**; the natural price is shown as the expected fill. `C` is the cumulative net credit per share including all rolls. `P&L = C − mark`. DTE is calendar days, New York time. Short delta is the largest |delta| across the short legs.
+- **Every input is explicit**, including `now` (the evaluator never calls `Date`; `evaluatedAt` equals the input `now`), the stored intent, the stop trigger and the prior stop readings.
+- **Intent** for a lone short put or short call is the value stored through `/api/position-intent` under the position's key. A missing value uses the default: `acquisition` for a lone short put (existing app default, `acquisition.ts:1977`), `income` for a short call. `neutral` is treated as `income`.
+- **Price basis:** split-adjusted, dividend-unadjusted closes (`indicators.quote`), rounded to cents. `adjclose` is never used. (Verified by Alan on live data: NVDA's 2024 split is continuous in `quote.close`; KO's 2-year `quote.close[0]` is 71.40 versus 67.52 in `adjclose`.)
+- **Presentation (Dean, 2026-09-25):** no loud red command anywhere. The enum names are internal; visible labels come from Diane's table below and never use "stop", "cut" or "broken" as a command word. Confidence is plain neutral text ("High confidence"), never a color, and BLOCKED shows none.
+- The fee constant `f` (per contract, from the broker's published schedule, rounded up) lives in one file with its source and date.
 
 ## DECIDE-0001-0 — Data prerequisites
 
-The signals in 0001A cannot run on today's data. Verified 2026-09-25:
+Verified 2026-09-25 (Alan, Quinn):
 
-- `app/api/chart/route.ts` requests `interval=1d&range=6mo` from Yahoo (about 125 bars). The trend rule needs 201 completed bars.
-- The route returns bars with only `t, o, h, l, c`. The support-break rule needs volume `v`.
-- Positions opened before 2026-09-25 have no entry snapshot, so no support level `S` exists for them (the Trade Log CSV has empty Score, Entry State and Entry Overrides columns on all 65 rows).
-- `lib/decision-review` holds 0 stored reviews on Dean's account; nothing writes to it today.
+- `app/api/chart/route.ts` requests `interval=1d&range=6mo` (about 125 bars) and returns bars with only `t, o, h, l, c`. The signals need 201 complete bars and volume.
+- **Do not change `GET /api/chart?symbol=X`.** It has ten callers (`app/portfolio/page.tsx:2921` and `:8329`; `app/screener/page.tsx:5261` and `:6114`; `app/rinse-repeat/page.tsx:960`; `app/engine/page.tsx:2675`; `components/RsiLine.tsx:20`; `components/ChartLinkButton.tsx:66`; `lib/scans/trend.ts:10`; `lib/portfolio/trendFetch.ts:45`). Changing 6 months to 2 years would silently change `lib/scans/trend.ts:65-67` (its "200-day average" is today an average of all ~125 bars) and so scan trend classification (a non-goal), RSI values, and would break `components/__tests__/RsiLine.test.tsx`, which asserts the exact URL.
+- **Add a separate history endpoint** (or an explicit opt-in such as `range=2y&fields=ohlcv`) used only by `lib/market-intelligence/brokenStock.ts`. It is auth-protected, cached server-side per symbol per NY session date, returns volume `v`, drops the in-progress bar, treats 429 or upstream failure as **not evaluated, never clear**, and has a per-user rate limit.
+- SPY bars over the same range and identical timestamps for relative weakness.
+- **Entry support level `S`.** Stored in the entry record when a position opens (`lib/leaps-position-intelligence/entryRecords.ts` and the short-premium entry record). For a position with no record: computed on first evaluation as the lowest low of the 20 bars whose NY date is strictly **before** the NY date of the position's original open (bars, not weekdays, so holidays are skipped; an entry-day or after-close entry excludes the entry day itself), stored **write-once** with `source: 'reconstructed'`, `asOf`, and the price basis, and displayed as reconstructed. Unknown entry date, fewer than 20 prior bars, or a split after entry makes support **not evaluated**. A rolled position uses the original open date.
+- **Decision log finding (replaces the earlier "investigation"):** `lib/decision-review` holds 0 records because records are created only when the trader opens the section and saves (`DecisionReviewSection.tsx:84` → `app/portfolio/page.tsx:10346` → `/api/decision-reviews`). Nothing auto-writes. There is nothing to investigate.
+- **Coordinate with RSI-TURN-0001:** only one of them edits `app/api/chart/route.ts` at a time; RSI's live-bar timestamp fix and this endpoint's completed-session rule should share the helper.
 
-Work in this phase:
+**Acceptance:** a 2-year fixture yields 201+ complete bars with volume; `GET /api/chart?symbol=X` returns the same bars and shape as today (fixture) and `RsiLine.test.tsx` passes unmodified; partial-bar, null-bar, split and dividend fixtures pass (Alan's Phase 0 table).
 
-1. **Chart route:** request at least `range=2y` and return volume. Alan rules on adjusted versus unadjusted closes (splits must be adjusted; dividend adjustment must be consistent between the bars used for ma200, the gap rule and the support level). Cache per symbol per session date; a partial intraday bar is never returned as complete. The route must keep its current response shape for existing callers (add fields, do not remove).
-2. **Relative-weakness benchmark:** SPY bars over the same range and the same timestamps.
-3. **Entry support level `S`:** stored in the entry record when a position opens (as written). For positions with no record, compute `S` on first evaluation from the 20 completed sessions before the recorded entry date, mark it `source: 'reconstructed'`, store it write-once, and show it as reconstructed. If the entry date is unknown, the support signal is NE.
-4. **Log investigation:** find out why no `DecisionReview` is ever created (where `lib/decision-review` is called from, and whether a UI action was expected to create one). Report before 0001D is scoped.
+## DECIDE-0001A — Broken-stock signals (display only)
 
-Acceptance: a unit test with a 2y fixture yields 201+ completed bars and volume; the existing chart callers (quick chart, RSI strip, order-window RSI line) still work unchanged.
+New pure module `lib/market-intelligence/brokenStock.ts`. It changes **no recommendation and no action**.
 
-## DECIDE-0001A — Broken-stock signals
-
-New pure module: `lib/market-intelligence/brokenStock.ts`.
-
-`broken = trend ∨ gap ∨ support ∨ fundamental`. Relative weakness is corroborating only (see below).
+`broken = trend ∨ gap ∨ support ∨ fundamental`. Relative weakness is corroborating only.
 
 | Signal | Fires when | Not evaluated (NE) when |
 |---|---|---|
-| Trend break | `c[n] < ma200(n)` **and** `c[n−1] < ma200(n−1)` **and** `ma50(n) < ma200(n)`. Each close is compared with its own day's ma200. | Fewer than 201 completed bars (needs 0001-0) |
-| Failed gap | See the formulas below the table. The gap day `g` is within the last 20 sessions. | Fewer than 21 closes before `g` |
-| Support break | `c[n]·100 < 99·S` (in cents) **and** `v[n] ≥ 1.5 · avg(v[n−20..n−1])`. The volume average excludes today. | No entry record, or any missing `v` in those 21 bars |
-| Fundamental hit | A guidance cut, or ≥ 2 analyst downgrades within 10 days (from 0001E) | Always, until 0001E ships. A signal that isn't built yet is exempt from the confidence rules. |
+| Trend break | `c[n] < ma200(n)` **and** `c[n−1] < ma200(n−1)` **and** `ma50(n) < ma200(n)`; ma is the simple mean of closes including day `n`. **It fires only if it was not already true at the recorded entry date;** if it pre-existed, it is shown as context and does not count toward `broken` (the trader chose that entry). | Fewer than 201 complete bars |
+| Failed gap | See formulas | Fewer than 21 closes before `g` |
+| Support break | `c[n]_c·100 < 99·S_c` and `40·v[n] ≥ 3·Σ v[n−20..n−1]` (volume ≥ 1.5x the prior-20 average, today excluded) | No support level, or any missing or zero `v` in those 21 bars, or a split after entry |
+| Fundamental hit | Guidance cut or ≥ 2 analyst downgrades in 10 days | Always, until the news ticket ships; an unbuilt signal never lowers confidence |
 
-**Failed-gap formulas**
+**Failed gap.** `gap = O[g]/C[g−1] − 1`; `ADM20 = mean over i = g−20 … g−1 of |C[i]/C[i−1] − 1|`; `T = max(0.08, 3·ADM20)` (in bps; no fallback to 8% when data is short); `R = O[g] + 0.5·(C[g−1] − O[g])`. `g` is any session in `n−19 … n`; if several qualify, any one is enough. It is **evaluated when `n ≥ g+4`**: the window is the 5 closes `g … g+4` (the gap day is the first). It **fires** when `gap ≤ −T` and every one of those closes is below `R`. If any close from `g` to `n` is already `≥ R` the state is **CLEAR at once**; before `g+4` with no close `≥ R` it is **PENDING**. Prices are rounded to cents first; ex-dividend gaps are not excluded. *(Ian to rule: does a fired gap clear when `c[n]` recovers above `R`? Until ruled, it clears when `c[n] ≥ R`.)*
 
-- `gap = O[g]/C[g−1] − 1`
-- `ADM20 = mean over i = g−20 … g−1 of |C[i]/C[i−1] − 1|`
-- Threshold `T = max(0.08, 3·ADM20)`. There is no fallback to 8% when the data is short.
-- Recovery level `R = O[g] + 0.5·(C[g−1] − O[g])`
-- It fires when `gap ≤ −T` and `max(C[g..g+4]) < R`, once `g+4 ≤ n`. The gap day counts as session 1.
-- Before `g+4` it is **pending**: not fired and not NE.
+**Relative weakness (corroborating only).** `r20(stock) − r20(SPY) ≤ −1500 bps`, with `r20` defined **by date**: the close at `t[n]` against the close 20 SPY sessions earlier; both series must contain both timestamps or it is NE. It never marks a stock broken and never changes an action; when another signal fires it is added as a reason and can lift LOW to MEDIUM only; its NE never lowers confidence.
 
-**Support at entry:** `S` is the lowest low of the 20 completed sessions before entry, frozen when the position opens and stored in `lib/leaps-position-intelligence/entryRecords.ts` (and the short-premium entry record). Positions with no record use the reconstructed, write-once value from 0001-0 and say so. The short strike is **not** used; a breached short strike is handled by the stop and delta rules.
+**Applicability.** BCS: N/A (a falling stock helps a BCS). IC: put side only. All others: all signals.
 
-**Display only in this phase.** 0001A shows the signals as information. It changes no recommendation and no action.
+**Output:** `{ broken, signals: [{ code, state: 'FIRED'|'CLEAR'|'PENDING'|'NE'|'NA', value, threshold }] }`. Missing data can never make a signal fire.
 
-**Relative weakness (corroborating only)**
-
-- Fires when `r20(stock) − r20(SPY) ≤ −0.15`.
-- Returns are joined on identical `t` at both endpoints. A date mismatch makes it NE.
-- It never marks a stock broken and never changes an action.
-- When another signal fires, it is added as a reason and raises confidence one step, LOW to MEDIUM only.
-- When nothing else fires, it is shown as risk context.
-- Its NE never lowers confidence.
-
-**Applicability**
-
-| Position | Rule |
-|---|---|
-| BCS | Broken-stock signals are **N/A**, which is distinct from NE. A falling stock helps a BCS. |
-| IC | Only the put side is evaluated. |
-| All others | All signals apply. |
-
-**Output**
-
-```
-{ broken, signals: [{ code, state: 'FIRED'|'CLEAR'|'PENDING'|'NE'|'NA', value, threshold }] }
-```
-
-Missing data can never make a signal fire.
-
-## DECIDE-0001B — Decision rules
+## DECIDE-0001B — Decision rules (B1 shadow, then B2 cutover)
 
 ```ts
 type DecisionAction =
@@ -134,15 +101,24 @@ type DecisionAction =
 interface PositionDecision {
   action: DecisionAction;
   reasonCode: string;                          // BLOCKED uses DATA_UNAVAILABLE or STOP_PENDING_CONFIRMATION
-  reasons: string[];                           // reason codes; the UI shows the top 3
-  flipConditions: string[];                    // e.g. "ROLL if XYZ closes below $92"
+  reasons: string[];                           // reason codes; the UI shows the top 1 and collapses the rest
+  contextLines: string[];                      // information that is not the action (loss vs credit, broken stock on an Acquire position, delta breach)
+  flipConditions: string[];
   confidence: 'HIGH' | 'MEDIUM' | 'LOW' | null; // null if and only if action === 'BLOCKED'
   pendingStop?: { firstReadingAt: string; mark: number } | null;
-  evaluatedAt: string;
+  evaluatedAt: string;                         // equals the input now
 }
 ```
 
-Every `switch` on `action` or `confidence` ends with a `satisfies never` exhaustiveness check.
+Every consumer of `action` or `confidence` uses a `Record<DecisionAction, …>` or an `assertNever` helper (compile-time exhaustiveness; see Acceptance for how it is verified).
+
+### Stop rule (all short premium)
+
+`mark ≥ stopTrigger`, where **`stopTrigger` is an explicit input taken from the trusted stop policy** (`pos.stopLossPolicy`, ALIGNED or TOO_LOOSE only; `lib/portfolio/stopLossPolicy.ts:184-260`). The default policy is `2·C` (`DEFAULT_ENTRY_STOP_MULTIPLE = 2`, a loss of 1x the credit). An untrusted or absent policy falls back to `2·C` for display but **never produces `CLOSE_STOP`** (production incident, TE-0002 round 3). The integer test is `bid_c + ask_c ≥ 4·C_c` for the default.
+
+**Confirmation reuses production.** `evaluateStopBreach` (`PENDING_CONFIRMATION` / `CONFIRMED_BREACH`) and `QUOTE_WIDTH_THRESHOLDS` (net width 0.15 of mid, per leg 0.50; `stopLossPolicy.ts:406-412`). This ticket does **not** introduce a second confirmation rule; the earlier 0.25 width, 300-second and two-reading design is dropped unless Ian and Dean choose it as a deliberate change to production semantics. The evaluator is pure: the caller builds `priorReading` from `snapshotHistory` (Redis position-snapshots) and passes it in. A first wide-quote reading returns `BLOCKED` / `STOP_PENDING_CONFIRMATION` (never HOLD).
+
+**Unreachable stop.** Flag when `2·C ≥ width` (for an IC, per wing): "Stop cannot trigger; max loss is $(width − C)×100 per contract." Rule 2 then never fires; rules 3, 5 and 6 still apply. *(Ian to rule whether that is enough protection.)* Worked cases (Alan): 5-wide C 1.00 reachable; C 1.67 reachable; C 2.50 flagged (2C = 5.00 = width, reachable only at expiry); C 2.51 flagged; 10-wide C 2.51 reachable; IC 5/5 wings C 2.60 both sides flagged; IC 10/10 C 3.50 no flag; IC put 5 / call 10 C 3.00 put side flagged only.
 
 ### Precedence (first match wins)
 
@@ -151,206 +127,178 @@ Every `switch` on `action` or `confidence` ends with a `satisfies never` exhaust
 | # | Rule | Action |
 |---|---|---|
 | 1 | Data (see Data rules) | `BLOCKED` |
-| 2 | Stop: `mark ≥ 2·C` (a loss of 1× the credit; production's trigger, `DEFAULT_ENTRY_STOP_MULTIPLE = 2`) | `CLOSE_STOP` |
-| 3 | Broken stock (N/A for BCS; IC put side only) | `CLOSE_BROKEN`. Close the whole position (IC: all 4 legs). Never roll. |
-| 4 | Profit: `(C − mark)/C ≥ 0.50` | `CLOSE_PROFIT` |
-| 5 | Time: DTE ≤ 21, and entry DTE was > 21 | If `P&L ≥ 0` → `CLOSE_TIME`. If `P&L < 0` → `ROLL` if a qualifying roll exists, else `CLOSE_TIME`. Winners never roll. |
-| 6 | Short delta ≥ 0.50 | `ROLL` if a qualifying roll exists, else `CLOSE_STOP` |
+| 2 | Stop: `mark ≥ stopTrigger` | `CLOSE_STOP` |
+| 3 | Profit: `(C − mark)/C ≥ 0.50` | `CLOSE_PROFIT` |
+| 4 | Broken stock (N/A for BCS; IC put side only) **and** (`P&L < 0` **or** short delta ≥ 0.30) | `CLOSE_BROKEN` (IC: all 4 legs; never roll). Otherwise `HOLD` with the signal as a context line. |
+| 5 | Time: DTE ≤ 21 and entry DTE was > 21 | If `P&L ≥ 0` → `CLOSE_TIME`. If `P&L < 0` → `ROLL` if a qualifying roll exists, else `CLOSE_TIME`. Winners never roll. |
+| 6 | Short delta ≥ 0.50 | `ROLL` if a qualifying roll exists (losers only), else `HOLD` with a delta-breach context line. **Never `CLOSE_STOP`**; that action requires the stop trigger. A winner at rule 6 follows rule 3 or 5. |
 | 7 | Default | `HOLD` |
 
-**CSP and CC** (Dean approved: no 21-DTE rule and no delta-roll rule). **The intent branch below is evaluated first.**
+*Why 3 and 4 are swapped from revision 2 (Ian):* a 70%-profit spread on a stock that just lost its 200-day average should read "profit target reached", not "broken stock". *Why 4 is gated:* a trend break alone on a healthy, far-out-of-the-money spread would otherwise cause exactly the early-exit pattern behind Dean's losses.
 
-| # | Rule | Action |
-|---|---|---|
-| 1 | Data | `BLOCKED` |
-| 2 | Stop: `mark ≥ 2·C` | `CLOSE_STOP` (see the intent branch below: not for Acquire or Wheel) |
-| 3 | Broken stock | `CLOSE_BROKEN`. CC closes the call only; whether to sell the shares is shown as a separate note, never recommended by this rule. (Not for Acquire or Wheel: see below.) |
-| 4 | Profit ≥ 50% (CC: the call leg only) | `CLOSE_PROFIT` |
-| 5 | Assignment: short delta ≥ 0.50 and the stock is not broken | See below |
-| 6 | Default | `HOLD` |
+**Lone short put or short call (CSP, CC): the intent branch (Dean, 2026-09-25) is evaluated first.**
 
-### Intent branch for lone short puts and short calls (Dean, 2026-09-25)
+A put or call sold to be assigned (to own the shares, or to start a wheel) has an Acquire or Wheel aspect, so a strong recommended action does not make sense for it.
 
-A put or call sold to be assigned (to own the shares, or to start a wheel) has an Acquire or Wheel aspect, so a strong recommended action does not make sense for it. This matches the existing behavior in `getRecommendation` (Acquire returns Hold and skips the breach and stop exits).
+| Intent | Rules |
+|---|---|
+| **`income`** (and `neutral`) **CSP** | 1 Data → 2 Stop (`CLOSE_STOP`) → 3 Profit ≥ 50% (`CLOSE_PROFIT`) → 4 Broken stock, gated as above (`CLOSE_BROKEN`) → 5 Assignment (short delta ≥ 0.50): `ROLL` if a qualifying roll exists with `K' ≤ K`, `DTE_new > DTE_old`, `DTE_new ≤ 60`, else `ACCEPT_ASSIGNMENT` → 6 `HOLD`. No 21-DTE rule and no delta-roll rule (Dean). |
+| **`acquisition`, `wheel` CSP** | 1 Data → 3 Profit ≥ 50% (`CLOSE_PROFIT`) → 5 short delta ≥ 0.50: `ACCEPT_ASSIGNMENT` (**never `ROLL`**) → 6 `HOLD`. **Rules 2 and 4 never produce an action.** No hard loss limit (Ian, O5). Risk control for these positions is at entry (cash-secured sizing and the 10% symbol and 25% sector caps in `policies/defaults.ts:39-46`). |
+| **Any CC, any intent** | **Never `CLOSE_STOP` or `CLOSE_BROKEN`:** the call's loss is opportunity cost offset by the shares, and buying it back strips the income cushion. 1 Data → 3 Profit ≥ 50% on the call leg (`CLOSE_PROFIT`) → 5 short delta ≥ 0.50: `income` uses the roll test below (`ROLL` or `ACCEPT_ASSIGNMENT`); `acquisition` and `wheel` → `ACCEPT_ASSIGNMENT` → 6 `HOLD`. A broken stock is a context line only; the decision about the shares belongs to DECIDE-0002. |
 
-| Intent | Rules that apply | Result |
-|---|---|---|
-| `income` (and `neutral`) | The table above unchanged | As above |
-| `acquisition`, `wheel` | Rule 1 (Data) and rule 4 (Profit ≥ 50%: `CLOSE_PROFIT`) only. Rules 2 and 3 (stop, broken stock) do **not** produce an action. | `HOLD`, or `ACCEPT_ASSIGNMENT` when the short delta is ≥ 0.50, with the loss versus credit and the broken-stock signal shown as context lines, never as the action |
+**Context lines for Acquire and Wheel positions (mandatory, never the action, never colored as an action):**
+1. The loss in plain multiples of the credit: "Down $X, N times the credit."
+2. When the stock is broken **and** the loss is ≥ 2x the credit: "Assignment would be into a broken stock."
+3. If the intent was defaulted rather than chosen: "Acquire (default, not chosen)" with a one-tap "Choose intent".
 
-- A missing intent uses the position's default. Today the app **defaults every lone short put to `acquisition`**, which means a default CSP is never stopped. **Open item O6 (Ian): keep that default, or change it?** This ticket does not change it.
-- **Open item O5 (Ian):** does a hard loss limit still apply to Acquire and Wheel positions (for example, an action at a loss of 3x the credit)? Recommendation: no hard limit, matching production behavior, but the context line must state the loss plainly.
-- For a CC, the intent is the intent stored on the short call. Growth mode remains DECIDE-0002.
+**The live engine must not re-add the loss exit.** Today `MATERIAL_LOSS = 100` (`decisionQualityMatrix.ts:76`, the same point as the 2x stop) beats `ASSIGNMENT_PREFERRED = 90` (`:198`) in `managementIntent.ts` (~line 629), so a default CSP can show "Cut Losses". The adapter suppresses that path for `acquisition` and `wheel`, or the two engines contradict each other. This is **new behavior for the live path**, not preservation of existing behavior; the exemption in `getRecommendation` (`acquisition.ts:2325`, strategy `PUT` only, after the 21-DTE lines) does not run in the app. Tests for the intent branch run against the **live adapter output**.
 
-Rule 5 by position:
-
-- **CSP:** `ROLL` if a qualifying roll exists with `K' ≤ K`, `DTE_new > DTE_old` and `DTE_new ≤ 60`. Otherwise `ACCEPT_ASSIGNMENT`.
-- **CC, Income mode:** `ROLL` if a qualifying roll exists with `K' ≥ K` and `AR_roll > AR_entry`. Otherwise `ACCEPT_ASSIGNMENT`.
-  - `AR_roll = (rollNet + (K' − K))/S × 365/DTE_new`
-  - `AR_entry = C/S_entry × 365/DTE_entry`
-- **CC, Acquire or Growth mode:** `ACCEPT_ASSIGNMENT`. The Growth-mode upside test is in DECIDE-0002.
-
-**LEAPS long**
-
-| # | Rule | Action |
-|---|---|---|
-| 1 | Data | `BLOCKED` |
-| 2 | Broken stock | `CLOSE_BROKEN` |
-| 3 | DTE < 180, or long delta < 0.60 | `ROLL` |
-| 4 | Default | `HOLD` |
+**Default intent (O6):** every lone short put defaults to `acquisition` (`acquisition.ts:1977`), so as built an unclassified CSP has **no exit rule**, and Dean never chose that. Ian's ruling: keep the no-strong-action behavior for the unclassified default, but show it as "Acquire (default, not chosen)" with a one-tap "Choose intent"; `income` (stop-eligible) is always an explicit choice. **Dean must confirm he accepts that an unconfirmed CSP has no stop until he chooses Income.**
 
 ### Qualifying roll
 
-- `rollNet = floor_to_cent(mid(new short combo) − mid(close old combo)) − fees/(100·qty)`
-- `fees = f × Σ contracts across every leg closed or opened`
-  - `f` is a fixed per-contract constant from the broker's published schedule, rounded up. It is always available.
-  - Charging closing legs is deliberately conservative.
-- The roll **qualifies** when `rollNet ≥ $0.10/share`, `DTE_new > DTE_old`, and the strike rule for the position is met:
-  - Short puts (BPS, CSP): new strike ≤ old strike.
-  - Short calls (BCS, CC): new strike ≥ old strike.
-- Fee example: an IC roll has 8 legs. With `f = $1` that is 0.08/share, so a 0.17 mid gap gives `rollNet = 0.09`, which does not qualify.
+- `rollNet = floor_to_cent(mid(new short combo) − mid(close old combo)) − fees/(100·qty)` (credit-positive; fees after the floor; compare in mills or round fees up to a whole cent per share).
+- `fees = f × Σ contracts across every leg closed or opened`. **An IC roll is the tested side only (4 legs)**, and it must satisfy that side's strike rule; otherwise there is no qualifying roll.
+- Qualifies when `rollNet ≥ $0.10/share`, `DTE_new > DTE_old`, and the strike rule is met (short puts: new strike ≤ old; short calls: new strike ≥ old).
+- **CC Income roll test (replaces `AR_roll`/`AR_entry`, Alan):** roll when `rollNet_c · DTE0 > c0_c · (DTE_new − DTE_old)`, where `c0` and `DTE0` are the credit and DTE of the **current short call when it was opened** (needs a stored per-leg record). `(K' − K)` is shown as a note, not in the test; no stock price appears in the comparison.
 
 ### Data rules
 
-- **Required inputs:** mark, credit, DTE and short or long delta.
-  - A missing required input returns `BLOCKED` / `DATA_UNAVAILABLE`, never `HOLD`.
-  - An earlier rule that fires on the inputs it has still decides. For example, mark and credit are enough to return the stop.
-  - `HOLD` requires every rule to have been evaluated.
-- **Stale quote:** refresh once. If it is still stale, return `BLOCKED` / `DATA_UNAVAILABLE`.
-- **Expired token:** return `BLOCKED` immediately, without guessing.
-
-**Wide-quote stop.** Applies when the combo `(ask − bid)/mid > 0.25`.
-
-- The stop needs 2 readings past the trigger, with distinct quote timestamps, at least 300 s apart, both in regular trading hours. They may span adjacent sessions.
-- `priorReading` is a required, nullable input.
-- **First reading:** return `BLOCKED` / `STOP_PENDING_CONFIRMATION`, with `pendingStop` set and the text "Stop triggered on a wide quote; confirming, recheck in 5 min". It is never `HOLD`.
-- **Reset:** any reading below the trigger clears the pending state.
-- **Narrow quote:** a single narrow-quote reading past the trigger fires the stop immediately.
-
-**Unreachable stop:** when `2·C > width` (that is, `C > width/2`), show the flag "Stop unreachable; max loss $X is the stop".
+- **Required inputs:** mark, credit, DTE, delta, stop trigger, intent (where it applies). A missing required input, **unsupported entry economics** (`hasSupportedCreditEntryEconomics` false), `structureAmbiguous`, or a `verify-pricing` state returns `BLOCKED` / `DATA_UNAVAILABLE`, never `HOLD`. An earlier rule that fires on the inputs it has still decides (mark and credit are enough for the stop). `HOLD` requires every rule to have been evaluated. A stale quote is refreshed once, then `BLOCKED`. An expired token returns `BLOCKED` immediately.
+- **Not modelled here (kept as they are today):** `PLACE_GTC`, "verify pricing or stop" management states, earnings-risk, watch, let-expire.
 
 ### Confidence
 
-Checked in this order: null, then LOW, then MEDIUM, then HIGH.
+Checked in order: null, LOW, MEDIUM, HIGH. `null` only for `BLOCKED`. **HIGH, always,** once a mechanical rule fires (the stop, the profit target, 21 DTE, `CLOSE_TIME`), and a `HOLD` near a mechanical threshold (49% profit, 1.95x credit) is not LOW. **Judgment values** use margin `m = |x − T|/|T|` computed in integers; `m < 0.10` is LOW and `m = 0.10` exactly is HIGH:
 
-- **null:** only for `BLOCKED`.
-- **HIGH, always:** once a mechanical rule fires (the stop, the profit target, 21 DTE, `CLOSE_TIME`).
-- **Presentation of confidence:** shown as a small plain label next to the action; never the reason to color the action red or green.
-- **Judgment values:** short delta, LEAPS delta, gap size and support-break distance.
-  - Margin `m = |x − T|/|T|`. `m < 0.10` gives LOW; otherwise HIGH.
-  - A `HOLD` is judged against the nearest threshold it has not reached.
-  - Bands:
-    - Short delta: [0.50, 0.55) fired; [0.45, 0.50) HOLD.
-    - LEAPS delta: [0.54, 0.60) fired; [0.60, 0.66) HOLD.
-    - LEAPS DTE: 180 ± 18.
-    - Gap: `T` to `1.1·T`.
-- **MEDIUM:** another rule points the other way. Relative weakness can lift LOW to MEDIUM only. Signals that aren't built yet, and N/A signals, never lower confidence.
+| Value | LOW when |
+|---|---|
+| Short delta | [0.50, 0.55) fired; (0.45, 0.50) HOLD |
+| LEAPS delta | (0.54, 0.60) fired; [0.60, 0.66) HOLD |
+| LEAPS DTE | 163 to 179 fired; 180 to 197 HOLD |
+| Failed gap | [T, 1.1T) |
+| Support break distance and volume ratio | **Ian to define; until defined they are never LOW** |
 
-## DECIDE-0001C — AI explains the decision
+**MEDIUM:** a lower-precedence rule would have fired or would give a different action. Relative weakness can lift LOW to MEDIUM only. Unbuilt and N/A signals never lower confidence.
 
-- Rewrite the prompts in `app/api/advisor/route.ts` and `app/api/leaps-analysis/route.ts`.
-  - The AI receives the `PositionDecision` and its evidence.
-  - It returns the action as a structured enum field, then plain-language reasons and flip conditions.
-  - D8 (no numbers in prose) still applies.
-- **Server-side check:** parse `action` and compare it with the input action as an exact enum match (no substring or synonym matching). On a mismatch, discard the AI text, show the code-only reasons, and log it as a dissent.
-- **Dissent field:** the AI may disagree only in a separate `dissent` field, which is shown collapsed and logged.
-- **Presentation:** the AI text follows the calm-presentation rule in Conventions (reasons, flip conditions, what the position needs; no command language beyond the enum action).
-- **Disclaimer:** remove the per-response `disclosure` and show one standing disclaimer in the UI. Before removing the field, grep its consumers and tests.
-- **Paul's conditions for amending AI-POLICY D2 and D9:**
-  - D2's exception is narrowed to this prompt rewrite; there are no new advisor capabilities.
-  - D9 gets a scoped exception: stating an action code has already decided is allowed. There are no other lexicon changes.
+### LEAPS (deferred out of 0001B)
+
+There is no engine for a long LEAPS hold, roll or close decision: `lib/leaps-position-intelligence/evaluate.ts` decides income-call candidates only. The revision-2 LEAPS table (roll at DTE < 180 or delta < 0.60) is **removed from this ticket** and becomes its own ticket needing Ian's sign-off, a delta data source, and intent (Hold versus PMCC). Two safety rules are recorded now so they are not lost: (1) with a short call open against a long LEAP the recommendation is about the short call first and **never to close or roll the long leg alone** (that would leave a naked short call); (2) a low delta means "roll" only for a PMCC, never for a Hold. *(O11, Ian.)*
+
+## DECIDE-0001 cutover map (O7) and B2 rules
+
+Everything below reads `pos.recommendation` and is **replaced in the same change (S3)**:
+
+1. Positions table "Recommendation" column: `PositionsWorkspace.tsx:744-748`, tone via `recommendationTone` (`:562-569`).
+2. "← suggested" markers on the action buttons: `PositionsWorkspace.tsx:762`, `:771`, via `canonicalRecommendationToAction` (`lib/portfolio/canonicalRecommendationPresentation.ts:4-17`).
+3. Position card: `canonicalRecommendationForCard`, `PositionRecommendationBadge` (`app/portfolio/page.tsx:8145-8146`, `:8365`), and the Position Intelligence panel (`:8994`, `:9050`; `features/portfolio/intelligence/*`).
+4. AI explanation panel and the analyze prompt block "RULE ENGINE'S EXISTING CALL" (`page.tsx:5229`, `:2072-2085`) and `projectCanonicalRecommendationForAi` (`canonicalRecommendationPresentation.ts`, `page.tsx:2716-2727`, action union at `:440`).
+5. Priority, briefing and sort surfaces: `features/portfolio/priorities/*`, `dashboard/TodaysPrioritiesDashboard.tsx`, `components/DailyPriorityList.tsx`, `briefing/suggestedFocus.ts`, `todaysPriorities/*`, `lib/todaysPriorities/*`, `lib/dailyBriefing/buildDailyBriefing.ts`, `lib/morning-briefing/attentionFeed.ts`, `lib/priorityScore/priorityScore.ts`, `lib/command-center/buildCommandCenterViewModel.ts`, `components/mission-control`; and the position sort `canonicalRecommendationPriority` (`acquisition.ts:371-372`).
+6. **Snapshot engine:** `lib/position-snapshot/snapshotEngine.ts:90-99` compares the stored recommendation **label string**; a new label vocabulary would fire a spurious "recommendation changed" snapshot for every position. In the same change it compares a stable reason or action code instead.
+7. Decision review: `DecisionReviewSection.tsx:84`, `lib/decision-review/decisionReview.ts:48` (`buildEvidenceSnapshot(PortfolioRecommendation)`), `DecisionHistoryView`.
+8. **Not replaced:** the hardcoded manual action buttons and labels (`page.tsx:2982-2983`, batch bar `:3100-3348`, `:9886-9941`, `PositionsWorkspace.tsx:547`); the pricing, verification and GTC states that `PositionDecision` cannot express (`pos.recommendation.kind === 'verify-pricing'` is used as control flow at `acquisition.ts:365` and `VerifyPricingRefreshButton.tsx:98`).
+9. Not affected: `app/api/advisor/route.ts`, `app/api/leaps-advisor/route.ts`, `app/api/leaps-analysis/route.ts` (scan candidates and LEAPS contracts, not open positions).
+
+**S2 shadow mode:** compute `PositionDecision` beside `pos.recommendation`, no UI, and record a disagreement list. Ian approves the list before S3. **S3:** switch every reader in one change; remove every red element from the recommendation zone (the red Cut Losses action button at `PositionsWorkspace.tsx` ~line 765 with `border-red-500/50 text-red-300`, the red and orange classes in `PositionRecommendationBadge`, the old "suggested" tags); the manual buttons stay but neutral. No red text, border or fill appears for any action or state.
+
+**Tests that change at S3 (with Ian approval):** `lib/portfolio-intelligence/__tests__/managementIntent.test.ts`, `positionObjective.test.ts`, `decisionQualityMatrix.test.ts`, `recommendationScorecard.test.ts`, `pi0014MarketablePricingFixtures.test.ts`; `PositionsWorkspace.test.tsx` (about 20 label assertions; note it asserts `/api/chart` is not fetched in one state, so do not add chart fetching to the workspace); `canonicalRecommendationPresentation.test.ts`, `RecommendationExplanationPage.test.tsx`, `snapshotEngine.test.ts`, the decision-review, priority, briefing, mission-control and attention-feed tests; `PortfolioPage.test.tsx` if the decision-reviews fetch changes. **Tests that must not change:** the helper and trust-boundary tests in `stopLossWiring.test.ts`, and `RsiLine.test.tsx`.
+
+## Presentation (Diane's spec, G5; a rendered mock must be approved by Dean before S3)
+
+**Cell layout (top to bottom):** the "Recommendation" caption; a row with a 6px tone dot and the label (11px semibold, plain white, not colored, not all caps, not a filled pill) and right-aligned neutral confidence text; **one** reason (10px, max 2 lines); one "Changes if …" line from `flipConditions[0]` (omit when empty); amber context lines only when present; a collapsed "Why and what would change" detail (reasons 2 and 3, all flips, timestamps, a reconstructed-support note, later the AI text and any disagreement); then the existing Actions zone with neutral borders only. One standing line at the foot of the Positions workspace and the analysis dialog: "Guidance from TradeEdge rules. You decide; no orders are placed automatically." (The per-response `disclosure` field in the screener advisor routes is **not touched**; see DECIDE-0001C.)
+
+| Internal action | Visible label | Dot |
+|---|---|---|
+| `HOLD` | "Hold" | neutral |
+| `CLOSE_PROFIT` | "Take profit" | emerald |
+| `CLOSE_STOP` | "Stop level reached" (line 2: "The loss now equals the credit received. Closing caps the loss here.") | amber |
+| `CLOSE_BROKEN` | "Stock has weakened" | amber |
+| `CLOSE_TIME` | "Time to close" | sky |
+| `ROLL` | "Consider rolling" | sky |
+| `ACCEPT_ASSIGNMENT` | "Expect assignment" | sky |
+| `BLOCKED` / `DATA_UNAVAILABLE` | "No recommendation" — "Data unavailable. Refresh, or check again shortly." | hollow neutral ring, no confidence |
+| `BLOCKED` / `STOP_PENDING_CONFIRMATION` | "Checking stop level" — "Stop level reached on a wide quote; confirming. Recheck in 5 min." | hollow amber ring, no confidence |
+
+Each reason code maps to a plain-language sentence with no jargon (for example a delta breach reads "The short option is close to being in the money"); the map lives in one file with a test that every code has a sentence. Accessibility: a `role="group"` with `aria-label="Recommendation for {symbol}"`; native `<details>`; `aria-live="polite"` on the pending-stop state; the dot is `aria-hidden` and the label carries the meaning; 9 to 10px faint text meets 4.5:1 on `#171717`. The ten states to mock are listed in the review record and rendered in Diane's mock (O10).
 
 ## DECIDE-0001D — Recommendation vs. action log
 
-- **Extend `lib/decision-review` (PI-0008C) instead of building a second log.** Its `DecisionReview` already has a trader-action vocabulary, an outcome status and an evidence snapshot. Map `PositionDecision` onto it (add fields, do not fork). The 0001-0 investigation says first why it holds 0 records.
-- Record each `PositionDecision` shown, in Redis keyed by user, de-duplicated per position, action and session.
-- **Attribution:** a trader action counts against a decision if it happens on the same position within 3 trading sessions after the decision was shown. If there is none, the row is logged as `no_action`; it is never dropped.
-- `BLOCKED` / `STOP_PENDING_CONFIRMATION` rows are kept apart from data failures and excluded from agreement-rate stats.
-- **Performance page:**
-  - agreement rate by rule and by confidence
-  - P&L of recommendations followed vs. overridden
+- **Auto-recording every shown decision changes the contract of `lib/decision-review` (PI-0008C: "the trader alone chooses"; `types.ts:1-20`)** and needs Paul's approval. Extend the module with **additive fields only** (`TraderAction` gains CLOSE_TIME and BLOCKED equivalents; the evidence snapshot gains the `PositionDecision`).
+- **Do not use the existing single-blob-per-user store** (`app/api/decision-reviews/route.ts:19-21`, read-modify-write, no atomicity, two-tab races) for one row per position, action and session. Specify a new keyed store with retention and an idempotent write.
+- Record each decision shown, de-duplicated per position, action and session. **Session calendar** = NYSE trading days in one helper, tested for holidays and half days.
+- **Attribution:** a trader action counts against a decision if it happens on the same position within 3 trading sessions after the decision was shown; otherwise the row is `no_action`, never dropped. Matching uses closed-trade and lifecycle data (`outcomeAnalysis.ts`), including rolls that change `Position.key`. `BLOCKED` and `STOP_PENDING_CONFIRMATION` rows are kept apart from data failures and excluded from agreement stats.
+- Performance page: agreement rate by rule and by confidence; P&L of recommendations followed versus overridden.
+- CUT-LOSSES-REVIEW-0001's capture fields (symbol, DTE, strike distance, P/L %, intent, underlying at close and expiry) become extra fields here; there is one capture path.
 
-## DECIDE-0001E — Finnhub news and analyst-action feed
+## Separate tickets (not part of this approval)
 
-- **Provider:** Finnhub.
-  - The key is `FINNHUB_API_KEY`, a Vercel server-only environment variable. Never use a `NEXT_PUBLIC_` prefix (see SEC-0001).
-  - Fetch server-side and cache per symbol.
-- **Classification:** classify items as `GUIDANCE_CUT`, `DOWNGRADE`, `UPGRADE` or `OTHER`.
-  - Finnhub's structured analyst-rating data is used first.
-  - The AI classifies only untagged headlines.
-- **Signal input:** only `GUIDANCE_CUT` and `DOWNGRADE` feed the "Fundamental hit" signal.
-- **Confidence cap:** an action driven by an AI-classified headline is capped at MEDIUM until 0001D logs at least N classifications with at least X% precision against Ian's manual spot-check sample. Ian sets N and X before 0001E ships.
+**DECIDE-0001C — AI explains the decision.** `app/api/advisor/route.ts`, `app/api/leaps-advisor/route.ts` and `app/api/leaps-analysis/route.ts` analyze scan candidates and LEAPS contracts, not open positions, and AI-POLICY D2 freezes the advisor routes as-is. So this is a **new open-position explanation route** under the AI-POLICY gateway pattern, not a rewrite of those routes; the position-analysis prompt (`page.tsx:2060-2090`) and `projectCanonicalRecommendationForAi` are the touchpoints. Prerequisites before any code: Paul adds a D2 row in `docs/tickets/AI-POLICY-0001-epic.md`; **Ian** makes a versioned change to the D9 lexicon (`lib/ai-policy/lexicon.ts`, which bans "recommend", "suggest you", "you should") with a test that the exception admits only the enum action; Alan confirms D8 (no numbers in prose) and the exact-match enum check fit the gateway. The AI returns the action as a structured enum, then calm reasons; the server compares it to the input action by exact enum match and on a mismatch discards the AI text and logs a dissent, shown only inside the collapsed detail under "The assistant sees this differently". **The screener's `disclosure` field is not removed** (about ten consumers depend on it: `app/screener/page.tsx`, `lib/screener/advisorCache.ts`, `leapsAdvisorCache.ts`, tests). The LEAP dashboard principle "none recommends an action" changes only for open positions, not for scan or qualification analysis.
+
+**DECIDE-0001E — Finnhub news and analyst actions.** `FINNHUB_API_KEY` as a server-only variable (never `NEXT_PUBLIC_`, SEC-0001), cached per symbol, structured analyst ratings first, an AI classifier only for untagged headlines, capped at MEDIUM confidence until the log has enough classifications checked against Ian's sample (Ian sets N and X). When the feed is down the fundamental signal is NE, never CLEAR. Deferred until the log has data.
 
 ## Non-goals
 
-- No automated order placement. Recommendations only.
-- No change to scan qualification or scoring.
-- No change to autopilot scope.
-- DECIDE-0002 items (see header).
+No automated order placement. No change to scan qualification or scoring. No change to autopilot scope. No change to `GET /api/chart` behavior. No change to the LEAP dashboard for scan analysis. DECIDE-0002 items (ex-dividend assignment guard, earnings-before-expiry rule, PMCC short-leg column, CC Growth-mode upside test, the share decision on a broken CC).
 
 ## Acceptance criteria
 
-1. Alan's golden fixtures pass (list below). Every precedence rule, every adjacent rule-pair conflict, and every threshold boundary is covered.
-2. A property test shows the same inputs always give the same `PositionDecision`, and that `action === 'BLOCKED'` if and only if `confidence === null`.
-3. A missing required input, a stale quote after one refresh, or an expired token returns `BLOCKED` / `DATA_UNAVAILABLE`, never `HOLD`.
-4. The AI route rejects any response whose parsed action is not exactly the input action. Fixtures cover near-miss synonyms such as "close" vs. `CLOSE_PROFIT`.
-5. Every `switch` on `action` and `confidence` fails the build if a case is missing.
-6. The UI branches on `reasonCode`, not only on `BLOCKED`. The UI follows Diane's approved mock and shows no red command (calm presentation).
-7. The log de-duplicates repeats, records `no_action`, and excludes pending-stop rows from agreement stats.
-8. **Intent:** an Acquire or Wheel CSP or CC never receives `CLOSE_STOP` or `CLOSE_BROKEN`, and a test proves an Income position at the same numbers does.
-9. **Cutover:** each position shows exactly one recommended action; the display it replaces is removed in the same change.
-10. **Data:** the chart route serves 201+ completed bars and volume, and the existing chart callers are unchanged.
+1. Alan's golden fixtures pass (below), covering every precedence rule, every adjacent rule-pair conflict and every threshold boundary in integers.
+2. **Property tests (fast-check):** (a) the same inputs give a deep-equal `PositionDecision` and the evaluator never reads the clock; (b) `acquisition` or `wheel` never yields `CLOSE_STOP` or `CLOSE_BROKEN` for any numeric input; (c) raising the mark never moves `CLOSE_STOP` to a less severe action; (d) `action === 'BLOCKED'` if and only if `confidence === null`.
+3. A missing required input, unsupported economics, a stale quote after one refresh, or an expired token returns `BLOCKED` / `DATA_UNAVAILABLE`, never `HOLD`.
+4. Every consumer of `action` and `confidence` fails the build if a case is missing. This is a compile-time guarantee only; a test cannot prove it. Verification requires `tsc` with `tsconfig.check.json` **and** a real `next build` (Vercel preview), per CLAUDE.md.
+5. The UI branches on `reasonCode`, not only on `BLOCKED`, follows Diane's approved mock, shows no red for any action or state, and never shows an enum name.
+6. **Intent:** an Acquire or Wheel CSP or CC never receives `CLOSE_STOP` or `CLOSE_BROKEN`, an Income CSP at the same numbers does, and the test runs against the live adapter output.
+7. **Cutover:** a position never shows two different actions; S2's disagreement list is approved by Ian; S3 removes every red element and switches every reader in one change; no spurious snapshot "recommendation changed" events fire.
+8. **Data:** the history endpoint serves 201+ complete bars and volume; `GET /api/chart?symbol=X` is unchanged and `RsiLine.test.tsx` passes unmodified.
+9. The log de-duplicates, records `no_action`, excludes pending-stop rows from agreement stats, and uses a keyed, idempotent store.
 
-## Golden fixtures (Alan)
+## Golden fixtures (Alan; verified in python3)
 
 | Area | Cases |
 |---|---|
-| Stop | mark 1.99·C (no fire) and 2.00·C (fire); `C = 2.51` on a 5-wide (`2·C` = 5.02 > width, unreachable flag) and `C = 2.50` (reachable exactly at width); combo width 0.25 / 0.26 of mid |
-| Wide-quote stop | one reading (`BLOCKED` pending); 299 s (still pending); 300 s (`CLOSE_STOP`); a reset in between; narrow quote on the second reading (`CLOSE_STOP`); stale timestamp (`BLOCKED` / `DATA_UNAVAILABLE`) |
+| Stop (cents) | BPS 5-wide C 1.67: mark 3.33 no fire / 3.34 `CLOSE_STOP`; C 1.00: 1.99 / 2.00; 5-wide C 2.50 flagged (rule 2 dormant); C 2.51 flagged, max loss 2.49 = $249; 10-wide C 2.51 no flag; IC 5/5 C 2.60 both sides flagged; IC 10/10 C 3.50 no flag; IC put 5 / call 10 C 3.00 put side only |
+| Wide quote | Relative spread bid 0.70 / ask 0.90 is exactly 0.25, narrow; 0.70 / 0.91 wide; a first wide reading is `STOP_PENDING_CONFIRMATION`; a narrow reading past the trigger fires at once; a reading below the trigger resets (production semantics via `evaluateStopBreach`) |
 | Profit | 49.99% / 50.00% for IC, CSP and CC |
 | 21 DTE | 22 / 21; P&L 0.00 (`CLOSE_TIME`); −0.01 with rollNet 0.10 (`ROLL`); −0.01 with rollNet 0.09 (`CLOSE_TIME`); entry DTE ≤ 21 (rule skipped) |
-| Short delta | 0.4999 / 0.50; IC with only the call side breaching |
-| Trend | one close below ma200 (no fire); two closes (fire); close = ma200 (no fire); 200 bars (NE) |
-| Gap | ADM 2.66% / 2.67% around `T = 8%`; gap exactly −10.5% with ADM 3.5%; −7.99% / −8.00%; recovery 94.99 / 95.00; 4 sessions elapsed (pending); 20 prior closes (NE) |
-| Support | close = 0.99·S (no fire); 0.99·S − 0.01 (fire); volume 1.49× / 1.50×; a volume that fires only if today is included (must not fire); one missing `v` (NE); no entry record (NE) |
-| Relative weakness | −14.99 / −15.00 pts; SPY date misaligned (NE); firing alone gives `broken = false` |
-| Applicability | BCS never returns `CLOSE_BROKEN` and falls through to profit; IC with only the call side weak gives not broken; IC broken closes 4 legs; CC broken closes the call only (the shares are a separate note) |
-| Intent branch | CSP `acquisition` and `wheel` with mark 5·C (no `CLOSE_STOP`; `HOLD` with the loss shown); the same with delta 0.50 (`ACCEPT_ASSIGNMENT`); `acquisition` at 50% profit (`CLOSE_PROFIT`); `income` at mark 2.00·C (`CLOSE_STOP`); a stock broken with `acquisition` (no `CLOSE_BROKEN`; signal shown as context); a missing intent uses the default; CC with intent on the call |
-| CSP/CC assignment | delta 0.4999 (`HOLD`) / 0.50; delta 0.50 with the stock broken (`CLOSE_BROKEN`); CSP `DTE_new` 60 (`ROLL`) / 61 (`ACCEPT_ASSIGNMENT`); `K' = K + 1` (`ACCEPT_ASSIGNMENT`); CC `AR_roll` equal to `AR_entry` (no roll) vs. one cent above |
-| Fees | IC roll with rollNet 0.09 (does not qualify); CSP 0.10 before fees and 0.08 after (does not qualify) |
-| LEAPS | DTE 180 / 179; delta 0.60 / 0.5999 and 0.54 / 0.5399 |
-| Precedence conflicts | stop and broken both true (stop wins); broken and profit both true (broken wins); profit and 21 DTE both true (profit wins); for `acquisition` or `wheel`, stop true and profit false (`HOLD`) |
-| Confidence | the delta and gap band edges; mechanical rules always HIGH; relative weakness lifts LOW to MEDIUM only; an unbuilt signal does not lower confidence |
-| Data | missing mark (`BLOCKED`); stop decided on mark and credit while delta is missing (`CLOSE_STOP`); expired token (`BLOCKED`) |
+| Fees | IC tested side, 4 legs, f = $1: mid gap 0.17 gives rollNet 0.13, qualifies; IC both sides 8 legs: 0.17 gives 0.09, no; 0.18 gives 0.10, yes; CSP 2 legs: 0.10 gives 0.08, no. rollNet values are after fees |
+| CC roll | `c0` 90c, DTE0 30, ΔDTE 30: rollNet 90c no roll (equal), 91c roll; rollNet 95c with DTE_old 5, DTE_new 35: roll (ΔDTE 30) |
+| Short delta | 0.4999 / 0.50; IC with only the call side breaching; a winner at delta 0.50 follows rule 3 or 5, not 6; a loser at delta 0.50 with no roll is `HOLD` with a delta context line (never `CLOSE_STOP`) |
+| Broken gating | BPS at 70% profit on a broken stock: `CLOSE_PROFIT`; a healthy far-OTM BPS with a trend break only: `HOLD` with context; a losing BPS with a trend break: `CLOSE_BROKEN`; short delta 0.30 exactly with a break: `CLOSE_BROKEN` |
+| Confidence | Short delta 0.5499 LOW, 0.5500 HIGH, HOLD 0.4501 LOW, 0.4500 HIGH; LEAPS delta 0.5401 LOW, 0.5400 HIGH, HOLD 0.6599 LOW, 0.6600 HIGH; LEAPS DTE 163 / 162 and 197 / 198 |
+| Trend | one close below ma200 (no fire); two closes with ma50 ≥ ma200 (no fire); two closes with ma50 < ma200 (fire); already true at entry (context, not counted); 200 bars NE / 201 evaluable |
+| Gap | ADM 2.67%: gap −8.00% no fire, −8.01% fires; ADM 3.5%: gap exactly −10.5% (O = 0.895·C) fires; ADM 2.00%: −8.00% fires, −7.99% no; C_prev 100, O 90, R 95, closes 93, 94.99, 92, 91, 90 fires; one close 95.00 no fire; n = g+3 with none ≥ R PENDING, with one ≥ R CLEAR; gap at n−19 evaluated, n−20 out; 20 prior closes NE; two gap days: fire if either qualifies |
+| Support | S 37.55: close 37.17 fires / 37.18 no; volume prior sum 2000: v 150 fires / 149 no; a volume that fires only if today is included must not fire; any missing `v` NE; split after entry NE |
+| Relative weakness | SPY flat, stock 100 to 85.00 fires / 85.01 no; SPY missing `t[n−20]` NE; SPY offset one day NE; firing alone gives `broken = false` |
+| Applicability | BCS never `CLOSE_BROKEN`; IC with only the call side weak is not broken; IC broken closes 4 legs |
+| Intent (CSP, C 1.00, delta 0.30 unless stated) | `income` mark 2.00: `CLOSE_STOP`; `acquisition` and `wheel` mark 5.00: `HOLD` with "Down $400, 4.0 times the credit"; delta 0.50: `ACCEPT_ASSIGNMENT` (never `ROLL`); mark 0.50: `CLOSE_PROFIT`; broken stock with delta 0.30: `HOLD` with the broken context; `income` and broken: gated `CLOSE_BROKEN`; missing intent on a lone put: `acquisition` shown "default, not chosen"; missing intent on a CC: `income`; a CC with any intent never `CLOSE_STOP` or `CLOSE_BROKEN` |
+| Data | missing mark `BLOCKED`; stop decided on mark and credit while delta is missing (`CLOSE_STOP`); expired token `BLOCKED`; unsupported economics `BLOCKED`; `structureAmbiguous` `BLOCKED` |
+| Phase 0 | 2y fixture ≥ 201 complete bars with `v`; partial bar (14:00 NY, last bar dated today) dropped; last bar after `regular.end` + 15 min kept; null-close bar dropped; NVDA 2024-06-10 split shows no gap (−0.43%); KO 2y `c[0] = 71.40`; entry 2026-07-06T14:15Z: S window 2026-06-04 to 2026-07-02; entry 2026-07-07T01:00Z: same window (NY date 07-06); entry 2026-11-27: window ends 2026-11-25; entry-day low excluded; low on the 21st prior session excluded; a second evaluation leaves a reconstructed S unchanged; no entry date NE |
 
 ## Open items
 
-| # | Item | Owner |
-|---|---|---|
-| O1 | Recommendation card mock | Diane |
-| O2 | Confirm the stop-loss wiring file for the short-premium adapter | Dane, before 0001B |
-| O3 | N and X for the news classifier confidence cap | Ian, before 0001E |
-| O4 | Record the D2/D9 amendments in the AI-POLICY-0001 epic | Paul |
-| O5 | Does any hard loss limit apply to Acquire and Wheel positions? (recommendation: none, state the loss plainly) | Ian |
-| O6 | Keep the default of Acquire for every lone short put (it exempts default CSPs from the stop), or change it? | Ian, Dean |
-| O7 | Cutover: which existing recommendation display each adapter replaces, and removal of the old one | Paul, Dane |
-| O8 | Adjusted versus unadjusted closes for ma200, gaps and support | Alan |
-| O9 | Entry support level for positions with no record: reconstructed, write-once, labeled | Alan, Quinn |
-| O10 | Diane's calm-presentation mock, including the recommendation beside the intent chip and the extrinsic rows | Diane |
+| # | Item | Owner | Status |
+|---|---|---|---|
+| O1, O10 | Diane's calm-presentation mock, rendered for Dean (O1 is superseded by O10) | Diane, then Dean approves | Spec done (G5); **rendered mock pending** |
+| O2 | Stop wiring file | Dane | Answered: `lib/portfolio/stopLossPolicy.ts` + the live engine; `getRecommendation` is dead code |
+| O3 | N and X for the news classifier confidence cap | Ian | Deferred with 0001E |
+| O4 | AI-POLICY D2 row (Paul) and versioned D9 lexicon change (Ian) | Paul, Ian | Deferred with 0001C |
+| O5 | Hard loss limit for Acquire and Wheel | Ian | **Resolved: none**; context lines only |
+| O6 | Default of Acquire for every lone short put | Ian, **Dean** | Ian ruled (keep the no-action behavior, show "default, not chosen", Income is an explicit choice); **Dean must confirm** |
+| O7 | Cutover map | Paul, Dane | Written above; Dane confirms in G6 |
+| O8, O9 | Price basis; reconstructed entry support | Alan | **Resolved** (see Conventions and Phase 0) |
+| O11 | LEAPS long-leg policy, the short-call guard, delta source | Ian | Deferred to its own ticket |
+| O12 | Support-break and volume confidence bands; whether a fired gap clears on recovery; whether an unreachable stop needs another protection | Ian | Open, blocks B1 |
+| O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | **Dean**, Ian | **Dean to decide** |
 
-(O2 is answered in "Engines": the stop wiring is `lib/portfolio/stopLossPolicy.ts` with `getRecommendation` in `lib/portfolio-data/acquisition.ts`.)
-
-## Review gates (every lens, then the developer)
-
-Nothing is built until every gate below is recorded here.
+## Review gates
 
 | Gate | Reviewer | Focus | Status |
 |---|---|---|---|
-| G1 | Ian | Rules, the intent branch, O5, O6, the 2x stop | pending |
-| G2 | Alan | Formulas, fixtures at 2x, data conventions (O8, O9), confidence bands | pending |
-| G3 | Quinn | Testability, three engines, the cutover (O7), the log reuse, regressions | pending |
-| G4 | Paul | Scope, sequencing (first slice 0001-0 then 0001A), AI-POLICY amendments | pending |
-| G5 | Diane | The calm-presentation mock (O10) before any UI code | pending |
-| G6 | Dane (the developer) | Pre-development review: reads the whole ticket and the code it touches, lists ambiguities, missing inputs, estimate and risks, and confirms he can build each phase from the text alone. Runs only after G1 to G5 are done. | pending |
+| G1 | Ian | Rules, intent branch, O5, O6, the 2x stop | Returned with changes (2026-09-25); folded into revision 3; O12 remains |
+| G2 | Alan | Formulas, fixtures at 2x, O8, O9, confidence bands | Returned with changes; folded in |
+| G3 | Quinn | Testability, cutover, log reuse, regressions, chart route | Returned "do not build yet"; folded in |
+| G4 | Paul | Scope, sequencing, AI-POLICY | Approved Phase 0 and 0001A only; the rest slice by slice |
+| G5 | Diane | Calm presentation spec | Approved with changes; spec folded in; rendered mock pending (O10) |
+| G6 | Dane (developer) | Pre-development review of the whole ticket and the code it touches: ambiguities, missing inputs, estimate, risks; confirms each phase is buildable from the text alone | **Pending; runs on revision 3 before any development starts** |
 
 Dean is the sponsor and final decision-maker for every open item.
