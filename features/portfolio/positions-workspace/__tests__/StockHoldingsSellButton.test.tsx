@@ -118,7 +118,8 @@ describe('Stock holdings intent', () => {
 
 describe('Stock holdings symbol cell order and earnings', () => {
   it('reads: symbol, intent, chart link, then the next earnings date (the same order as the options table)', async () => {
-    const future = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    // New York calendar date, the same basis the app uses (a UTC date is a day off in the evening).
+    const future = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + 30 * 86400000));
     const fetchMock = vi.fn().mockImplementation(async (url: string) => (
       String(url).startsWith('/api/tastytrade/proxy')
         ? { json: async () => ({ data: { items: [{ symbol: 'MRVL', earnings: { 'expected-report-date': future, estimated: true } }] } }) }

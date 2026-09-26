@@ -205,6 +205,11 @@ export function computeRawPositionValuation(pos: Position) {
 // evidence object -- and `liquidityTrapTriggered`, owned by
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
+/** A single short put leg (a cash-secured put). A bought put or a spread is not one. */
+function isLoneShortPut(pos: Position): boolean {
+  return pos.strategy === 'PUT' && pos.legs.length === 1 && pos.legs[0]?.direction === 'Short' && pos.legs[0]?.optionType === 'P';
+}
+
 export function scorePortfolioPositionObjective(
   pos: Position,
   now: Date = new Date(),
@@ -291,6 +296,8 @@ export function scorePortfolioPositionObjective(
     marketableQuoteCapturedAt: pos.quoteCapturedAt,
     priorPricingVerificationUnresolved,
     technicalAlignment,
+    // POSITION-INTENT-0001: a lone short put set to Acquire or Wheel is meant to be assigned, so a paper loss is not a loss exit.
+    assignmentPlanned: isLoneShortPut(pos) && (pos.intent === 'acquisition' || pos.intent === 'wheel') ? pos.intent : null,
   }, now);
 
   return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };

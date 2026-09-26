@@ -288,7 +288,7 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | O8, O9 | Price basis; reconstructed entry support | Alan | **Resolved** (see Conventions and Phase 0) |
 | O11 | LEAPS long-leg policy, the short-call guard, delta source | Ian | Deferred to its own ticket |
 | O12 | Support-break and volume confidence bands; whether a fired gap clears on recovery; whether an unreachable stop needs another protection | Ian | Open, blocks B1 |
-| O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | **Dean**, Ian | Dean asked for plain-language context (2026-09-25); awaiting his decision |
+| O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | Dean, Ian | **Done 2026-09-25** (Dean: fix it now if Ian is aligned; Ian approved with changes, all applied): a lone short put set to Acquire or Wheel gets no loss exit and no 21-DTE roll suggestion in the live engine; earnings-risk is a medium note; the loss is stated plainly as a context line; Income puts, calls, spreads and bought options are unchanged |
 
 ## Review gates
 

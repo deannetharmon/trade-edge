@@ -198,6 +198,10 @@ export interface PositionObjectiveInput {
   // which are unchanged from PI-0002/TE-0006B.
   positionStrategy?: PositionStrategy | null;
   assignmentPreference?: AssignmentPreference | null;
+  // POSITION-INTENT-0001 (Dean and Ian, 2026-09-25): set ONLY for a lone short put the trader has set to Acquire or Wheel.
+  // Assignment is the plan, so a paper loss and the 21-DTE window must not produce a loss exit or a roll suggestion.
+  // Every other position leaves this null and behaves exactly as before.
+  assignmentPlanned?: 'acquisition' | 'wheel' | null;
   // PI-0006B: optional evidence for intent selection (see
   // ../managementIntent.ts's doc comment for why each is optional and what
   // "absent" means for each). None of these are read by the trigger-
@@ -867,11 +871,14 @@ export function evaluatePositionObjective(
   // existing if/else-if priority order already produces the correct
   // "Take Profit -> Hold/Manage/Cut Losses" behavior once this input is
   // corrected. See docs/design/PI-0014-Marketable-Pricing-Risk-Gating.md.
+  const assignmentPlanned = shortPremium && (input.assignmentPlanned === 'acquisition' || input.assignmentPlanned === 'wheel') ? input.assignmentPlanned : null;
   const midMaterialLoss = pnlPct != null && pnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
   const rawMarketableMaterialLoss =
     marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.materialLossPct;
   const marketableMaterialLoss = marketableDecisionEligible && rawMarketableMaterialLoss;
-  const materialLoss = midMaterialLoss || marketableMaterialLoss;
+  // A loss that would have fired, whether or not it is allowed to drive an action (used for the plain context line below).
+  const materialLossWouldFire = midMaterialLoss || marketableMaterialLoss;
+  const materialLoss = !assignmentPlanned && materialLossWouldFire;
   // EXIT-PRESSURE-0001 -- true only when materialLoss ALSO fired AND the
   // loss has reached the trader's own pre-set stop specifically (not just
   // the generic policy default). Never fires materialLoss on its own, and
@@ -889,7 +896,8 @@ export function evaluatePositionObjective(
     marketablePnlPct != null && marketablePnlPct <= DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthLossPct &&
     healthScore != null && healthScore < DEFAULT_POSITION_MANAGEMENT_POLICY.weakHealthScoreThreshold;
   const marketableWeakHealthLoss = marketableDecisionEligible && rawMarketableWeakHealthLoss;
-  const weakHealthLoss = midWeakHealthLoss || marketableWeakHealthLoss;
+  const weakHealthLossWouldFire = midWeakHealthLoss || marketableWeakHealthLoss;
+  const weakHealthLoss = !assignmentPlanned && weakHealthLossWouldFire;
 
   const midProfitTargetReached =
     Boolean(input.hitTarget) || hasHealthFactor(input, 'profit-target') ||
@@ -906,14 +914,14 @@ export function evaluatePositionObjective(
   // callers combine with lib/positionValuation's liquidityTier to set
   // PositionValuation.liquidityTrapTriggered).
   const executionRealityPromoted =
-    (!midMaterialLoss && marketableMaterialLoss) ||
-    (!midWeakHealthLoss && marketableWeakHealthLoss) ||
+    (!assignmentPlanned && !midMaterialLoss && marketableMaterialLoss) ||
+    (!assignmentPlanned && !midWeakHealthLoss && marketableWeakHealthLoss) ||
     (midProfitTargetReached && !profitTargetReached);
   const pricingConflictRequiresVerification =
     marketablePnlPct != null &&
     !marketableDecisionEligible &&
-    ((!midMaterialLoss && rawMarketableMaterialLoss) ||
-      (!midWeakHealthLoss && rawMarketableWeakHealthLoss) ||
+    ((!assignmentPlanned && !midMaterialLoss && rawMarketableMaterialLoss) ||
+      (!assignmentPlanned && !midWeakHealthLoss && rawMarketableWeakHealthLoss) ||
       (midProfitTargetReached && rawMarketableContradictsProfitTarget));
   const pricingVerificationUnresolved =
     !marketableDecisionEligible &&
@@ -949,7 +957,9 @@ export function evaluatePositionObjective(
     earningsActionable,
     earningsProximityFraction,
     rollFlagged,
-    assignmentPreference: input.assignmentPreference,
+    // For a planned assignment the preference counts only with a real ITM or tight-buffer signal, so a calm out-of-the-money
+    // put stays a Hold or a Take Profit instead of reading "Accept Assignment" (Ian, 2026-09-25).
+    assignmentPreference: assignmentPlanned ? (itmOrCriticalBuffer ? 'PREFER' : undefined) : input.assignmentPreference,
     positionStrategy: input.positionStrategy,
     netEdgeDeclinePct: input.netEdgeDeclinePct,
     netEdgeNegative: input.netEdgeNegative,
@@ -958,6 +968,12 @@ export function evaluatePositionObjective(
     remainingOpportunityPct: input.remainingOpportunityPct,
   };
   const intentResult = selectManagementIntent(intentEvidence);
+  if (assignmentPlanned && (materialLossWouldFire || weakHealthLossWouldFire) && pnlPct != null) {
+    const owed = Math.abs(pnlPct);
+    supportingReasons.unshift(
+      `Set to ${assignmentPlanned === 'wheel' ? 'Wheel' : 'Acquire'}: assignment is the plan, so no loss exit is suggested. Down ${owed.toFixed(0)}% of credit (${(owed / 100).toFixed(1)}x the credit received).`,
+    );
+  }
 
   let legacy: PortfolioRecommendation;
 
@@ -986,9 +1002,13 @@ export function evaluatePositionObjective(
     );
   } else if (earningsUpcoming) {
     legacy = makeLegacyRecommendation(
-      input, 'earnings-risk', 'high', 86,
-      `Upcoming earnings before expiration (${input.earningsDate}).`,
-      'Decide whether to close, reduce risk, or intentionally hold through earnings.',
+      input, 'earnings-risk', assignmentPlanned ? 'medium' : 'high', 86,
+      assignmentPlanned
+        ? `Earnings on ${input.earningsDate} before expiration. Assignment is the plan.`
+        : `Upcoming earnings before expiration (${input.earningsDate}).`,
+      assignmentPlanned
+        ? 'Confirm you still want the shares at this strike.'
+        : 'Decide whether to close, reduce risk, or intentionally hold through earnings.',
       supportingReasons, now, intentResult,
     );
   } else if (profitTargetReached) {
@@ -998,7 +1018,7 @@ export function evaluatePositionObjective(
       'Take profit or confirm the GTC target order is working.',
       supportingReasons, now, intentResult,
     );
-  } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium) {
+  } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium && !assignmentPlanned) {
     legacy = makeLegacyRecommendation(
       input, 'roll-soon', 'medium', 80,
       `${dte} DTE is inside the standard management window.`,

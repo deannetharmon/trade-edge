@@ -266,7 +266,8 @@ describe('PositionsWorkspace', () => {
 
   it('the Position cell shows the next earnings date under the chart link when it is known, even if it is after expiry', async () => {
     const user = userEvent.setup();
-    const future = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
+    // New York calendar date, the same basis the app uses (a UTC date is a day off in the evening).
+    const future = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + 40 * 86400000));
     const withDate = { ...position, nextEarningsDate: future, nextEarningsEstimated: true, expDate: '2099-01-15' } as unknown as Position;
     const next = { ...model, analysisRows: [{ id: withDate.key, position: withDate, symbol: withDate.symbol, strategy: withDate.strategy, needsAttention: false }] };
     render(<PositionsWorkspace model={next} th={THEMES.dark} />);
