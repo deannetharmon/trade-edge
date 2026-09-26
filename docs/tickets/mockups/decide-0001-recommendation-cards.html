@@ -1,0 +1,271 @@
+<title>Calm Recommendation Cell</title>
+<style>
+/* Dark only by design: matches the TradeEdge Positions workspace (surface #171717). */
+:root{
+  color-scheme:dark;
+  --page:#0A0A0A; --surface:#171717; --surface-2:#1F1F1F; --border:#2C2C2C;
+  --text:#FFFFFF; --muted:#B8B8B8; --faint:#8F8F8F;
+  --teal:#2DD4BF; --amber:#FCD34D; --emerald:#34D399; --sky:#38BDF8; --neutral:#9CA3AF;
+}
+body{background:var(--page);color:var(--text);font:13px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:24px 40px;display:grid;gap:18px}
+h1{font-size:20px;font-weight:600;margin:0;text-wrap:balance}
+.lede{color:var(--muted);margin:4px 0 0;max-width:80ch;font-size:13px}
+.tag{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);border:1px solid rgba(252,211,77,.35);padding:1px 7px;border-radius:999px;margin-left:8px;vertical-align:3px}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+
+.frame{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);padding:0 12px}
+.tabs span{padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--faint);border-bottom:2px solid transparent}
+.tabs .on{color:var(--text);border-color:var(--teal)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:1040px}
+th{text-align:left;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{vertical-align:top;padding:12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+.num{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+.sym{color:var(--text);font-weight:700;font-size:13px;display:block}
+.strat{color:var(--amber);display:block;font-size:11px}
+.small{display:block;font-size:11px;color:var(--faint)}
+.intent{display:inline-flex;align-items:center;gap:4px;margin-top:5px;font-size:11px;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:2px 7px;background:var(--surface-2)}
+.intent i{font-style:normal;color:var(--faint)}
+.link{color:var(--teal);font-size:11px;display:block;margin-top:4px}
+.pos{color:#86EFAC}.neg{color:#FDBA74}
+.rows{display:grid;grid-template-columns:auto auto;gap:1px 10px;font-size:11px}
+.rows span:nth-child(odd){color:var(--faint)}
+
+/* Recommendation cell (Diane's G5 spec) */
+.rec{width:290px}
+.rec .cap{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.rec .line1{display:flex;align-items:center;gap:7px;margin-top:3px}
+.dot{width:6px;height:6px;border-radius:50%;flex:none}
+.d-neutral{background:var(--neutral)} .d-emerald{background:var(--emerald)} .d-amber{background:var(--amber)} .d-sky{background:var(--sky)}
+.ring{width:7px;height:7px;border-radius:50%;flex:none;background:transparent}
+.r-neutral{border:1.5px solid var(--neutral)} .r-amber{border:1.5px solid var(--amber)}
+.label{font-size:11px;font-weight:600;color:var(--text)}
+.conf{margin-left:auto;font-size:10px;color:var(--faint)}
+.reason{font-size:10px;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.flip{font-size:10px;color:var(--faint);margin-top:2px}
+.ctx{font-size:10px;color:var(--amber);margin-top:3px}
+.ctx button{font:inherit;font-size:10px;color:var(--teal);background:none;border:0;padding:0;margin-left:4px;cursor:pointer;text-decoration:underline}
+details{margin-top:5px}
+summary{font-size:10px;color:var(--faint);cursor:pointer}
+details ul{margin:4px 0 0;padding-left:14px;font-size:10px;color:var(--muted);display:grid;gap:2px}
+
+.actions .cap{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);display:block;margin-bottom:5px}
+.actions{white-space:nowrap}
+.btn{font:inherit;font-size:11px;color:var(--text);background:transparent;border:1px solid var(--border);border-radius:5px;padding:5px 9px;margin:0 4px 4px 0;cursor:pointer}
+.btn.match{border-color:#4B5563}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+
+.foot{padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--faint)}
+
+.notes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:760px){.notes{grid-template-columns:1fr}}
+.note{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.note h2{font-size:13px;margin:0 0 6px;font-weight:600}
+.note ul{margin:0;padding-left:16px;color:var(--muted);font-size:12px;display:grid;gap:3px}
+.legend{width:100%;border-collapse:collapse;min-width:0}
+.legend td{padding:5px 6px;font-size:11px;border-bottom:1px solid var(--border)}
+.legend td:first-child{white-space:nowrap}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Calm recommendation cell <span class="tag">Mock · sample data</span></h1>
+    <p class="lede">Diane's rendered mock for DECIDE-0001 revision 3 (open item O10). It shows all ten states in the Position Analysis table, beside the intent chip and the extrinsic and intrinsic rows. There is no red anywhere, labels are plain white, and the color lives only in a 6px dot. The stop follows production: a mark of 2× the credit.</p>
+  </header>
+
+  <div class="frame">
+    <div class="tabs" aria-hidden="true"><span>PORTFOLIO</span><span class="on">POSITION ANALYSIS</span></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Position</th><th>Legs · DTE</th><th>Value</th><th>Int / Ext</th><th>Recommendation</th><th>Actions</th></tr></thead>
+        <tbody>
+
+        <!-- 1 HOLD -->
+        <tr>
+          <td><span class="sym">QQQ</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−440P / +435P<span class="small">Nov 7 · 42 DTE</span></td>
+          <td class="num">Credit $1.30<span class="small">Mark $0.84</span><span class="small pos">P/L +$46</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$0.84</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for QQQ">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-neutral" aria-hidden="true"></span><span class="label">Hold</span><span class="conf">High</span></div>
+            <div class="reason">Nothing needs doing. 35% of the credit is earned; the target is 50%.</div>
+            <div class="flip">Changes if the mark falls to $0.65 (take profit).</div>
+            <details><summary>Why and what would change</summary><ul><li>Short put is well out of the money.</li><li>Changes at 21 DTE (Oct 17) if still open.</li><li>Evaluated 10:42:18 ET.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn">Close</button><button class="btn">Adjust</button></td>
+        </tr>
+
+        <!-- 2 TAKE PROFIT -->
+        <tr>
+          <td><span class="sym">AAPL</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−215P / +210P<span class="small">Nov 7 · 42 DTE</span></td>
+          <td class="num">Credit $1.40<span class="small">Mark $0.62</span><span class="small pos">P/L +$78</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$0.62</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for AAPL">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-emerald" aria-hidden="true"></span><span class="label">Take profit</span><span class="conf">High</span></div>
+            <div class="reason">56% of the credit is earned, past the 50% target.</div>
+            <details><summary>Why and what would change</summary><ul><li>42 days of risk remain for the last 44% of the credit.</li><li>Evaluated 10:42:18 ET.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn match">Close</button><button class="btn">Adjust</button></td>
+        </tr>
+
+        <!-- 3 STOP LEVEL REACHED -->
+        <tr>
+          <td><span class="sym">IWM</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−210P / +205P<span class="small">Oct 24 · 28 DTE</span></td>
+          <td class="num">Credit $1.10<span class="small">Mark $2.24</span><span class="small neg">P/L −$114</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.35</span><span>Ext left</span><span>$1.89</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for IWM">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-amber" aria-hidden="true"></span><span class="label">Stop level reached</span><span class="conf">High</span></div>
+            <div class="reason">The loss now equals the credit received. Closing caps the loss here.</div>
+            <details><summary>Why and what would change</summary><ul><li>Mark $2.24 is at or above the stop of $2.20 (2× the $1.10 credit).</li><li>Quote width is within limits, so no confirmation was needed.</li><li>Evaluated 10:42:18 ET.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn match">Close</button><button class="btn">Roll</button></td>
+        </tr>
+
+        <!-- 4 CHECKING STOP LEVEL -->
+        <tr>
+          <td><span class="sym">SPY</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−540P / +535P<span class="small">Oct 17 · 21 DTE</span></td>
+          <td class="num">Credit $1.00<span class="small">Mark $2.06</span><span class="small neg">P/L −$106</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.40</span><span>Ext left</span><span>$1.66</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for SPY" aria-live="polite">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="ring r-amber" aria-hidden="true"></span><span class="label">Checking stop level</span></div>
+            <div class="reason">Stop level reached on a wide quote; confirming. Recheck in 5 min.</div>
+            <details><summary>Why and what would change</summary><ul><li>First reading 10:41:55 ET at $2.06; the quote is 22% wide (limit 15% of mid).</li><li>A confirmed reading shows "Stop level reached". A reading below $2.00 clears this.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn">Refresh</button><button class="btn">Close</button></td>
+        </tr>
+
+        <!-- 5 STOCK HAS WEAKENED -->
+        <tr>
+          <td><span class="sym">NKE</span><span class="strat">Iron Condor</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">70/65P · 95/100C<span class="small">Nov 21 · 56 DTE</span></td>
+          <td class="num">Credit $1.85<span class="small">Mark $2.10</span><span class="small neg">P/L −$25</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$2.10</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for NKE">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-amber" aria-hidden="true"></span><span class="label">Stock has weakened</span><span class="conf">Medium</span></div>
+            <div class="reason">NKE closed below the support it had when you entered, on heavy volume.</div>
+            <div class="flip">Changes if NKE closes back above $73.56.</div>
+            <details><summary>Why and what would change</summary><ul><li>Gap down on Sep 19 has not recovered half.</li><li>Weaker than SPY over 20 sessions (supporting).</li><li>Close all four legs in one order; not a roll.</li><li>Support is reconstructed from the 20 sessions before entry.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn match">Close</button><button class="btn">Adjust</button></td>
+        </tr>
+
+        <!-- 6 TIME TO CLOSE -->
+        <tr>
+          <td><span class="sym">MSFT</span><span class="strat">Bear Call Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−460C / +465C<span class="small">Oct 17 · 21 DTE</span></td>
+          <td class="num">Credit $1.20<span class="small">Mark $0.95</span><span class="small pos">P/L +$25</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$0.95</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for MSFT">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-sky" aria-hidden="true"></span><span class="label">Time to close</span><span class="conf">High</span></div>
+            <div class="reason">21 days left and the trade is ahead. Close it and redeploy through a scan.</div>
+            <details><summary>Why and what would change</summary><ul><li>Winners are closed at 21 DTE, never rolled.</li><li>Opened at 45 DTE.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn match">Close</button><button class="btn">Adjust</button></td>
+        </tr>
+
+        <!-- 7 CONSIDER ROLLING -->
+        <tr>
+          <td><span class="sym">JPM</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−230P / +225P<span class="small">Oct 17 · 21 DTE</span></td>
+          <td class="num">Credit $1.05<span class="small">Mark $1.60</span><span class="small neg">P/L −$55</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.80</span><span>Ext left</span><span>$0.80</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for JPM">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-sky" aria-hidden="true"></span><span class="label">Consider rolling</span><span class="conf">High</span></div>
+            <div class="reason">21 days left and the trade is behind. A roll to Nov 21, 225/220 collects $0.34 more.</div>
+            <div class="flip">Changes to "Time to close" if no roll collects at least $0.10.</div>
+            <details><summary>Why and what would change</summary><ul><li>Roll credit after fees: $0.34 per share.</li><li>New short strike is lower and the expiry is later.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn match">Roll</button><button class="btn">Close</button></td>
+        </tr>
+
+        <!-- 8 EXPECT ASSIGNMENT -->
+        <tr>
+          <td><span class="sym">KO</span><span class="strat">Covered Call</span><span class="small">100 shares · 1 contract</span><span class="intent">Acquire <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−70C<span class="small">Oct 10 · 14 DTE</span></td>
+          <td class="num">Credit $0.95<span class="small">Mark $1.92</span><span class="small neg">Call P/L −$97</span></td>
+          <td><div class="rows num"><span>Int</span><span>$1.80</span><span>Ext left</span><span>$0.12</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for KO">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-sky" aria-hidden="true"></span><span class="label">Expect assignment</span><span class="conf">High</span></div>
+            <div class="reason">The call is in the money; the shares will likely be called away at $70.</div>
+            <details><summary>Why and what would change</summary><ul><li>Short call delta 0.78.</li><li>A covered call is never stopped out; the shares offset the call's loss.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn">Roll</button><button class="btn">Close</button></td>
+        </tr>
+
+        <!-- 9 ACQUIRE DEFAULT: HOLD WITH CONTEXT -->
+        <tr>
+          <td><span class="sym">AMD</span><span class="strat">Cash-Secured Put</span><span class="small">1 contract</span><span class="intent">Acquire <i>(default) ▾</i></span><span class="link">chart</span></td>
+          <td class="num">−140P<span class="small">Oct 31 · 35 DTE</span></td>
+          <td class="num">Credit $2.40<span class="small">Mark $5.10</span><span class="small neg">P/L −$270</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$5.10</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for AMD">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="dot d-neutral" aria-hidden="true"></span><span class="label">Hold</span><span class="conf">High</span></div>
+            <div class="reason">Assignment is the plan, so no loss exit is suggested.</div>
+            <div class="ctx">Down $270, 1.1 times the credit.</div>
+            <div class="ctx">Acquire (default, not chosen)<button type="button">Choose intent</button></div>
+            <details><summary>Why and what would change</summary><ul><li>Choosing Income turns on the stop at a mark of $4.80.</li><li>Changes to "Expect assignment" at short delta 0.50 (now 0.47).</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn">Close</button><button class="btn">Roll</button></td>
+        </tr>
+
+        <!-- 10 NO RECOMMENDATION -->
+        <tr>
+          <td><span class="sym">TSLA</span><span class="strat">Bear Call Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
+          <td class="num">−300C / +305C<span class="small">Oct 24 · 28 DTE</span></td>
+          <td class="num">Credit $1.15<span class="small">Mark —</span><span class="small">P/L —</span></td>
+          <td><div class="rows num"><span>Int</span><span>—</span><span>Ext left</span><span>—</span></div></td>
+          <td class="rec"><div role="group" aria-label="Recommendation for TSLA">
+            <div class="cap">Recommendation</div>
+            <div class="line1"><span class="ring r-neutral" aria-hidden="true"></span><span class="label">No recommendation</span></div>
+            <div class="reason">Data unavailable. Refresh, or check again shortly.</div>
+            <details><summary>Why and what would change</summary><ul><li>The quote was still stale after one refresh (last 10:31:02 ET).</li><li>Missing: mark, short delta.</li></ul></details>
+          </div></td>
+          <td class="actions"><span class="cap">Actions</span><button class="btn">Refresh</button></td>
+        </tr>
+
+        </tbody>
+      </table>
+    </div>
+    <div class="foot">Guidance from TradeEdge rules. You decide; no orders are placed automatically.</div>
+  </div>
+
+  <section class="notes">
+    <div class="note">
+      <h2>Label and dot map (spec G5)</h2>
+      <table class="legend">
+        <tr><td><span class="dot d-neutral" style="display:inline-block"></span> Hold</td><td>neutral dot</td></tr>
+        <tr><td><span class="dot d-emerald" style="display:inline-block"></span> Take profit</td><td>emerald dot</td></tr>
+        <tr><td><span class="dot d-amber" style="display:inline-block"></span> Stop level reached · Stock has weakened</td><td>amber dot</td></tr>
+        <tr><td><span class="dot d-sky" style="display:inline-block"></span> Time to close · Consider rolling · Expect assignment</td><td>sky dot</td></tr>
+        <tr><td><span class="ring r-amber" style="display:inline-block"></span> Checking stop level</td><td>hollow amber ring, no confidence, polite live region</td></tr>
+        <tr><td><span class="ring r-neutral" style="display:inline-block"></span> No recommendation</td><td>hollow neutral ring, no confidence</td></tr>
+      </table>
+    </div>
+    <div class="note">
+      <h2>Notes for Dean and Dane</h2>
+      <ul>
+        <li>No red anywhere. The old red Cut Losses button and the red and orange badge classes go away.</li>
+        <li>Label: 11px semibold, plain white, not all caps, not a pill. The dot carries tone and is <span class="mono">aria-hidden</span>; the label carries the meaning.</li>
+        <li>One reason, max two lines, and one "Changes if" line when a flip exists. Everything else sits in the collapsed detail.</li>
+        <li>Amber context lines only for information that is not the action (row 9: loss multiple and the default intent).</li>
+        <li>Actions keep neutral borders. The button that matches the recommendation gets a slightly stronger border, not a color.</li>
+        <li>The P/L colors in the Value column are today's table colors and are not part of this change.</li>
+      </ul>
+    </div>
+  </section>
+</div>
