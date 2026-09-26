@@ -209,3 +209,22 @@ describe('WheelPlanTab layout (matches the approved mock)', () => {
     expect(await screen.findByRole('button', { name: /Adjust any default \(2 changed\)/ })).toBeInTheDocument();
   });
 });
+
+describe('starter ETFs and zero stress', () => {
+  it('the starter button stays while any starter is missing, and adds only the missing ones', async () => {
+    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'XLV' }] });
+    render(<WheelPlanTab deps={deps} />);
+    const button = await screen.findByRole('button', { name: /Add remaining starter ETFs \(XLU, XLF, XLE, XLP\)/ });
+    await userEvent.click(button);
+    await waitFor(() => expect(screen.getByTestId('ladder-row-XLU')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /starter ETFs/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((posts[posts.length - 1] as { wheelList: { symbol: string }[] }).wheelList.map((e) => e.symbol)).toEqual(['XLV', 'XLU', 'XLF', 'XLE', 'XLP']);
+  });
+
+  it('shows plain $0, not -$0, when nothing is deployed', async () => {
+    const { deps } = makeDeps({});
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByText('$0 (0.0%)')).toBeInTheDocument();
+  });
+});

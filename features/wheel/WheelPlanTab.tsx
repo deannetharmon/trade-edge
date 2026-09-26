@@ -347,6 +347,8 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   };
   const changedCount = PLAN_PARAM_KEYS.filter((k) => isOverridden(overrides, k)).length;
   const adjustOpen = showAdjust || hasErrors;
+  const missingStarters = STARTER_ETFS.filter((sym) => !wheelList.some((e) => e.symbol === sym));
+  const loss = (cents: number) => (cents === 0 ? formatCents(0) : `−${formatCents(cents)}`);
 
   // One card per profile with the figures that matter side by side (as in the approved mock).
   const profileCards = (['careful', 'balanced', 'concentrated', 'custom'] as PlanProfile[]).map((p) => {
@@ -442,11 +444,11 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               </h2>
               <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1">
                 <dt className="text-white/60">Today ({formatCents(stress.deployedCents)} in the plan)</dt>
-                <dd className="text-right">−{formatCents(stress.wheelLossCents)} ({formatPctTenths(stress.wheelLossPctTenths)})</dd>
+                <dd className="text-right">{loss(stress.wheelLossCents)} ({formatPctTenths(stress.wheelLossPctTenths)})</dd>
                 <dt className="text-white/60">Wheel fully deployed ({formatCents(stress.fullWheelCents)})</dt>
-                <dd className="text-right">−{formatCents(stress.fullWheelLossCents)} ({formatPctTenths(stress.fullWheelLossPctTenths)})</dd>
+                <dd className="text-right">{loss(stress.fullWheelLossCents)} ({formatPctTenths(stress.fullWheelLossPctTenths)})</dd>
                 <dt className="font-bold">Plus spreads at full loss ({formatCents(stress.spreadCapCents)})</dt>
-                <dd className="text-right font-bold text-amber-300">−{formatCents(stress.worstCaseCents)} ({formatPctTenths(stress.worstCasePctTenths)})</dd>
+                <dd className="text-right font-bold text-amber-300">{loss(stress.worstCaseCents)} ({formatPctTenths(stress.worstCasePctTenths)})</dd>
               </dl>
               <p className="text-[10px] text-white/40">A rough worst case, not a forecast. It needs everything to go wrong at once, and sector ETFs can fall further than this in a crash.</p>
             </div>
@@ -471,9 +473,9 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                 className="w-44 rounded border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-white/30 focus:outline-none"
               />
               <button type="button" onClick={() => { addSymbols([newSymbol]); setNewSymbol(''); }} className="rounded bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15">Add</button>
-              {wheelList.length === 0 && (
-                <button type="button" onClick={() => addSymbols(STARTER_ETFS)} className="text-xs text-teal-300 hover:text-teal-200">
-                  Add starter ETFs ({STARTER_ETFS.join(', ')})
+              {missingStarters.length > 0 && (
+                <button type="button" onClick={() => addSymbols(missingStarters)} className="text-xs text-teal-300 hover:text-teal-200">
+                  {wheelList.length === 0 ? 'Add starter ETFs' : 'Add remaining starter ETFs'} ({missingStarters.join(', ')})
                 </button>
               )}
               {addError && <span role="alert" className="text-xs text-red-300">{addError}</span>}
