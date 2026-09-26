@@ -153,7 +153,7 @@ A put or call sold to be assigned (to own the shares, or to start a wheel) has a
 
 **The live engine must not re-add the loss exit.** Today `MATERIAL_LOSS = 100` (`decisionQualityMatrix.ts:76`, the same point as the 2x stop) beats `ASSIGNMENT_PREFERRED = 90` (`:198`) in `managementIntent.ts` (~line 629), so a default CSP can show "Cut Losses". The adapter suppresses that path for `acquisition` and `wheel`, or the two engines contradict each other. This is **new behavior for the live path**, not preservation of existing behavior; the exemption in `getRecommendation` (`acquisition.ts:2325`, strategy `PUT` only, after the 21-DTE lines) does not run in the app. Tests for the intent branch run against the **live adapter output**.
 
-**Default intent (O6):** every lone short put defaults to `acquisition` (`acquisition.ts:1977`), so as built an unclassified CSP has **no exit rule**, and Dean never chose that. Ian's ruling: keep the no-strong-action behavior for the unclassified default, but show it as "Acquire (default, not chosen)" with a one-tap "Choose intent"; `income` (stop-eligible) is always an explicit choice. **Dean must confirm he accepts that an unconfirmed CSP has no stop until he chooses Income.**
+**Default intent (O6):** every lone short put defaults to `acquisition` (`acquisition.ts:1977`), so as built an unclassified CSP has **no exit rule**, and Dean never chose that. Ian's ruling: keep the no-strong-action behavior for the unclassified default, but show it as "Acquire (default, not chosen)" with a one-tap "Choose intent"; `income` (stop-eligible) is always an explicit choice. **Dean confirmed (2026-09-25): he accepts that an unconfirmed CSP shows "Acquire (default, not chosen)" and has no stop until he chooses Income.**
 
 ### Qualifying roll
 
@@ -283,12 +283,12 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | O3 | N and X for the news classifier confidence cap | Ian | Deferred with 0001E |
 | O4 | AI-POLICY D2 row (Paul) and versioned D9 lexicon change (Ian) | Paul, Ian | Deferred with 0001C |
 | O5 | Hard loss limit for Acquire and Wheel | Ian | **Resolved: none**; context lines only |
-| O6 | Default of Acquire for every lone short put | Ian, **Dean** | Ian ruled (keep the no-action behavior, show "default, not chosen", Income is an explicit choice); **Dean must confirm** |
+| O6 | Default of Acquire for every lone short put | Ian, Dean | **Resolved.** Ian ruled (keep the no-action behavior, show "default, not chosen", Income is an explicit choice); **Dean confirmed 2026-09-25** |
 | O7 | Cutover map | Paul, Dane | Written above; Dane confirms in G6 |
 | O8, O9 | Price basis; reconstructed entry support | Alan | **Resolved** (see Conventions and Phase 0) |
 | O11 | LEAPS long-leg policy, the short-call guard, delta source | Ian | Deferred to its own ticket |
 | O12 | Support-break and volume confidence bands; whether a fired gap clears on recovery; whether an unreachable stop needs another protection | Ian | Open, blocks B1 |
-| O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | **Dean**, Ian | **Dean to decide** |
+| O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | **Dean**, Ian | Dean asked for plain-language context (2026-09-25); awaiting his decision |
 
 ## Review gates
 
