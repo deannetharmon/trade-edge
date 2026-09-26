@@ -1,9 +1,24 @@
 # DECIDE-0001 — Calm, decisive position recommendations (Epic)
 
-**Status:** REVISION 3 (2026-09-25). **Not approved to build.** Revision 2 went through five independent lens reviews (Ian G1, Alan G2, Quinn G3, Paul G4, Diane G5); all five returned "approve with changes" or "do not build yet" and every required change is folded in below. Next: Dean's answers to the open decisions, Diane's rendered mock approved by Dean, then the developer's (Dane's) pre-development review (G6). See "Review gates".
+**Status:** REVISION 4 (2026-09-26). **Not approved to build.** Revision 4 folds in Ian's review of Diane's mock (2026-09-26) on top of the five lens reviews of revision 2. Two new rules came out of it (a fallback stop for a spread whose stop can never trigger; a stricter gate on the broken-stock exit) and both still need Alan's check. Approved so far (Paul): Phase 0 and 0001A only.
+**Rendered mock (revision 2, for Dean to approve):** https://claude.ai/artifact/1mhkVcQUysMBL2vPvrmucA
 **Sponsor:** Dean. **Team review record:** `docs/tickets/DECIDE-0001-review-2026-09-25.md`.
 **Dean's decisions (2026-09-25):** production's stop stays (a mark of 2x the credit received, a loss of 1x the credit); proceed with this epic now and do CUT-LOSSES-REVIEW-0001 after it; no 21-DTE rule for CSP and CC; Finnhub is the chosen news source (a later ticket); a CSP with an Acquire or Wheel aspect gets no strong recommended action; no loud red commands.
 **Approved scope so far (Paul, G4):** Phase 0 and 0001A only. Everything after is approved slice by slice.
+
+## Who reviews what (one table)
+
+| Who | What they still need to do | Blocks | Status |
+|---|---|---|---|
+| **Dean** | (1) Approve the rendered mock (link above). (2) Say yes or no to the two new rules: the fallback stop for an unreachable stop (O14) and the stricter broken-stock gate. (3) Decide when to start (Paul approved only Phase 0 and 0001A). | The UI slice (S3), and the rules in B1 | Waiting |
+| **Alan** | Check the two new rules and their fixtures (fallback stop at 80% of width; the broken-stock gate at 0.5x credit or delta 0.30; the wide-quote timeout of 3 readings or 15 minutes, O15); write fixtures for the new states K to N and the `Rule met` confidence change; confirm the Phase 0 conventions still stand | B1 (S2) | Not started on revision 4 |
+| **Ian** | Confirm his own fallback-stop proposal as written (O14), define the support-break and volume confidence bands and whether a fired gap clears on recovery (O12), and approve the S2 disagreement list when it exists | B1 and the S2 to S3 gate | Reviewed the mock; three rulings still open |
+| **Quinn** | Re-review revision 4 for the new states: what data each needs, which already exists (working orders, quote age, earnings date, sign-in state, DTE) and which does not (ex-dividend date, assignment detection); whether the wide-quote timeout fits `evaluateStopBreach`; the hover and refresh changes | S3 | Reviewed revision 2; revision 4 pending |
+| **Paul** | Approve which states ship in S3 and which are later (see the state table); update the roadmap; confirm the slice order still holds | S3 scope | Approved Phase 0 and 0001A only |
+| **Diane** | Check that the numbers line, the stop styling and the confidence change fit her spec and the 256px cell; record her approval once Dean approves the mock | S3 | Spec approved with changes; the mock now follows Ian's review |
+| **Dane (developer)** | Pre-development review of the whole ticket and the code it touches; runs LAST, after all of the above | Any development | Not started |
+
+**Nothing is built until every row above is done.** Phase 0 and 0001A can start once Dean says so, because Paul has approved them and they change no recommendation.
 
 ## Problem
 
@@ -118,7 +133,7 @@ Every consumer of `action` or `confidence` uses a `Record<DecisionAction, …>` 
 
 **Confirmation reuses production.** `evaluateStopBreach` (`PENDING_CONFIRMATION` / `CONFIRMED_BREACH`) and `QUOTE_WIDTH_THRESHOLDS` (net width 0.15 of mid, per leg 0.50; `stopLossPolicy.ts:406-412`). This ticket does **not** introduce a second confirmation rule; the earlier 0.25 width, 300-second and two-reading design is dropped unless Ian and Dean choose it as a deliberate change to production semantics. The evaluator is pure: the caller builds `priorReading` from `snapshotHistory` (Redis position-snapshots) and passes it in. A first wide-quote reading returns `BLOCKED` / `STOP_PENDING_CONFIRMATION` (never HOLD).
 
-**Unreachable stop.** Flag when `2·C ≥ width` (for an IC, per wing): "Stop cannot trigger; max loss is $(width − C)×100 per contract." Rule 2 then never fires; rules 3, 5 and 6 still apply. *(Ian to rule whether that is enough protection.)* Worked cases (Alan): 5-wide C 1.00 reachable; C 1.67 reachable; C 2.50 flagged (2C = 5.00 = width, reachable only at expiry); C 2.51 flagged; 10-wide C 2.51 reachable; IC 5/5 wings C 2.60 both sides flagged; IC 10/10 C 3.50 no flag; IC put 5 / call 10 C 3.00 put side flagged only.
+**Unreachable stop.** Flag when `2·C ≥ width` (for an IC, per wing): "Stop cannot trigger; max loss is $(width − C)×100 per contract." Rule 2 then never fires. **Proposed fallback stop (Ian, 2026-09-26; new rule, Alan to check, O14):** for a spread whose stop is unreachable, use `mark ≥ 0.80·width` as the stop level (reason code `STOP_FALLBACK`, label unchanged: "Stop level reached"). Example: 5-wide with C 2.51: fallback at a mark of 4.00, a loss of $149 against a maximum loss of $249. Until the rule is approved and built, the position shows the amber context line "No stop can trigger on this spread. It was opened for more than half its width. Most you can lose: $249 per contract. Your only exits are 50% profit and 21 DTE." and the mock's state J. Worked cases (Alan): 5-wide C 1.00 reachable; C 1.67 reachable; C 2.50 flagged (2C = 5.00 = width, reachable only at expiry); C 2.51 flagged; 10-wide C 2.51 reachable; IC 5/5 wings C 2.60 both sides flagged; IC 10/10 C 3.50 no flag; IC put 5 / call 10 C 3.00 put side flagged only.
 
 ### Precedence (first match wins)
 
@@ -129,12 +144,12 @@ Every consumer of `action` or `confidence` uses a `Record<DecisionAction, …>` 
 | 1 | Data (see Data rules) | `BLOCKED` |
 | 2 | Stop: `mark ≥ stopTrigger` | `CLOSE_STOP` |
 | 3 | Profit: `(C − mark)/C ≥ 0.50` | `CLOSE_PROFIT` |
-| 4 | Broken stock (N/A for BCS; IC put side only) **and** (`P&L < 0` **or** short delta ≥ 0.30) | `CLOSE_BROKEN` (IC: all 4 legs; never roll). Otherwise `HOLD` with the signal as a context line. |
+| 4 | Broken stock (N/A for BCS; IC put side only) **and** (a loss of at least 0.5x the credit, that is `mark ≥ 1.5·C`, **or** short delta ≥ 0.30) | `CLOSE_BROKEN` (IC: all 4 legs; never roll). Otherwise `HOLD` with the signal as a context line. |
 | 5 | Time: DTE ≤ 21 and entry DTE was > 21 | If `P&L ≥ 0` → `CLOSE_TIME`. If `P&L < 0` → `ROLL` if a qualifying roll exists, else `CLOSE_TIME`. Winners never roll. |
 | 6 | Short delta ≥ 0.50 | `ROLL` if a qualifying roll exists (losers only), else `HOLD` with a delta-breach context line. **Never `CLOSE_STOP`**; that action requires the stop trigger. A winner at rule 6 follows rule 3 or 5. |
 | 7 | Default | `HOLD` |
 
-*Why 3 and 4 are swapped from revision 2 (Ian):* a 70%-profit spread on a stock that just lost its 200-day average should read "profit target reached", not "broken stock". *Why 4 is gated:* a trend break alone on a healthy, far-out-of-the-money spread would otherwise cause exactly the early-exit pattern behind Dean's losses.
+*Why 3 and 4 are swapped from revision 2 (Ian):* a 70%-profit spread on a stock that just lost its 200-day average should read "profit target reached", not "broken stock". *Why 4 is gated:* a trend break alone on a healthy spread, or one with a tiny loss, would otherwise cause exactly the early-exit pattern behind Dean's losses (21 of 28 losses closed before reaching 2x credit). Ian (2026-09-26): any loss is not enough; it takes at least half the credit or a delta of 0.30. **Alan checks the threshold and its fixtures (O14 companion).**
 
 **Lone short put or short call (CSP, CC): the intent branch (Dean, 2026-09-25) is evaluated first.**
 
@@ -203,23 +218,66 @@ Everything below reads `pos.recommendation` and is **replaced in the same change
 
 **Tests that change at S3 (with Ian approval):** `lib/portfolio-intelligence/__tests__/managementIntent.test.ts`, `positionObjective.test.ts`, `decisionQualityMatrix.test.ts`, `recommendationScorecard.test.ts`, `pi0014MarketablePricingFixtures.test.ts`; `PositionsWorkspace.test.tsx` (about 20 label assertions; note it asserts `/api/chart` is not fetched in one state, so do not add chart fetching to the workspace); `canonicalRecommendationPresentation.test.ts`, `RecommendationExplanationPage.test.tsx`, `snapshotEngine.test.ts`, the decision-review, priority, briefing, mission-control and attention-feed tests; `PortfolioPage.test.tsx` if the decision-reviews fetch changes. **Tests that must not change:** the helper and trust-boundary tests in `stopLossWiring.test.ts`, and `RsiLine.test.tsx`.
 
-## Presentation (Diane's spec, G5; a rendered mock must be approved by Dean before S3)
+## Presentation (Diane's spec G5, revised by Ian's mock review 2026-09-26; Dean approves the rendered mock)
 
-**Cell layout (top to bottom):** the "Recommendation" caption; a row with a 6px tone dot and the label (11px semibold, plain white, not colored, not all caps, not a filled pill) and right-aligned neutral confidence text; **one** reason (10px, max 2 lines); one "Changes if …" line from `flipConditions[0]` (omit when empty); amber context lines only when present; a collapsed "Why and what would change" detail (reasons 2 and 3, all flips, timestamps, a reconstructed-support note, later the AI text and any disagreement); then the existing Actions zone with neutral borders only. One standing line at the foot of the Positions workspace and the analysis dialog: "Guidance from TradeEdge rules. You decide; no orders are placed automatically." (The per-response `disclosure` field in the screener advisor routes is **not touched**; see DECIDE-0001C.)
+**One design for every user.** No experience-level variants. The three trader lenses (novice, intermediate, expert) were used only to test the wording.
 
-| Internal action | Visible label | Dot |
+**Cell layout (top to bottom):** the "Recommendation" caption; a row with a dot and the label (11px semibold, plain white, never colored text, never all caps, never a filled pill) and, right-aligned, either a plain "Rule met" (mechanical rules), a plain "Medium confidence" or "High confidence" (judgment states only), or nothing (Hold, and BLOCKED); **one** reason; one "Changes if …" line from `flipConditions[0]` (with a dollar or numeric figure where a wait-and-see would otherwise be invited; never a line that teaches switching intent); amber context lines when present; **one line of key numbers**: `Mark · Stop · Δ · DTE · P&L · Quote age` (omit the parts that do not apply); a visible Refresh button when data is stale; a collapsed "Why and what would change" detail; then the Actions zone with neutral borders and one "← suggested" marker that always follows the label.
+
+**A stop is visible without being red:** when a rule the trader set has been met (`CLOSE_STOP`, `STOP_FALLBACK`), the cell gets a thin amber left edge, a larger filled dot and a bolder "← suggested". No red text, border or fill anywhere.
+
+**Confidence (Ian):** "High confidence" on a stop or a Hold reads as "high confidence this is safe". So mechanical rules show "Rule met", Hold and BLOCKED show none, and only judgment states (broken stock, close to assignment) show Medium or High. Confidence is never a color.
+
+**Jargon:** "200-day average", "assignment", "extrinsic value", "ex-dividend", "legs", "delta" and "intent" each have a one-line hover explanation, in one file with a test that every hover term has text.
+
+**Wide-quote stop (Ian):** after 3 readings or 15 minutes still wide, the state becomes "Stop level reached (wide quote)" so it never stays "checking" forever. *(Alan and Quinn check this against `evaluateStopBreach`, O15.)*
+
+**Labels (internal action to visible label, dot):**
+
+| Internal | Visible label | Dot |
 |---|---|---|
 | `HOLD` | "Hold" | neutral |
 | `CLOSE_PROFIT` | "Take profit" | emerald |
-| `CLOSE_STOP` | "Stop level reached" (line 2: "The loss now equals the credit received. Closing caps the loss here.") | amber |
+| `CLOSE_STOP`, `STOP_FALLBACK` | "Stop level reached" | amber, with the edge and larger dot |
 | `CLOSE_BROKEN` | "Stock has weakened" | amber |
-| `CLOSE_TIME` | "Time to close" | sky |
+| `CLOSE_TIME` with no qualifying roll | "Time to close" | sky |
 | `ROLL` | "Consider rolling" | sky |
-| `ACCEPT_ASSIGNMENT` | "Expect assignment" | sky |
-| `BLOCKED` / `DATA_UNAVAILABLE` | "No recommendation" — "Data unavailable. Refresh, or check again shortly." | hollow neutral ring, no confidence |
-| `BLOCKED` / `STOP_PENDING_CONFIRMATION` | "Checking stop level" — "Stop level reached on a wide quote; confirming. Recheck in 5 min." | hollow amber ring, no confidence |
+| `ACCEPT_ASSIGNMENT` (delta ≥ 0.50 on a put) | "Expect assignment" | sky |
+| `ACCEPT_ASSIGNMENT` (covered call) | "Close to assignment" | sky |
+| `BLOCKED` / `DATA_UNAVAILABLE` | "No recommendation" | hollow neutral ring |
+| `BLOCKED` / `STOP_PENDING_CONFIRMATION` | "Checking stop level" | hollow amber ring |
 
-Each reason code maps to a plain-language sentence with no jargon (for example a delta breach reads "The short option is close to being in the money"); the map lives in one file with a test that every code has a sentence. Accessibility: a `role="group"` with `aria-label="Recommendation for {symbol}"`; native `<details>`; `aria-live="polite"` on the pending-stop state; the dot is `aria-hidden` and the label carries the meaning; 9 to 10px faint text meets 4.5:1 on `#171717`. The ten states to mock are listed in the review record and rendered in Diane's mock (O10).
+**States in the mock (revision 2), and when each ships:**
+
+| State | Label | Ships in | Data it needs |
+|---|---|---|---|
+| A Spread at 52% profit | Take profit | S3 | exists |
+| B Spread at the stop | Stop level reached | S3 | exists (stop policy, quotes) |
+| C Wide quote, first reading | Checking stop level | S3 | exists (`evaluateStopBreach`) |
+| D1 Acquire put, stock above the strike | Hold, with the loss as context | S3 | exists |
+| D2 Acquire put in the money | Expect assignment, with the assignment cost | S3 | exists |
+| E Income put at the stop | Stop level reached | S3 | exists |
+| F Iron condor, stock weakened | Stock has weakened | S3 (needs S1 signals) | Phase 0 data |
+| G1 Time limit, no roll | Time to close | S3 | exists (roll test) |
+| G2 Time limit, a roll exists | Consider rolling | S3 | exists (roll test) |
+| H Covered call at the money | Close to assignment | S3 | exists |
+| I Data unavailable | No recommendation | S3 | exists (quote age) |
+| J Stop can never trigger | Hold with the amber warning; later the fallback stop | S3 (warning), B1 (fallback, after O14) | exists |
+| K A closing order is working | Order working | S3 | exists (pending orders); Quinn confirms |
+| L Earnings before expiry | Hold with an amber line | S3 | exists (next earnings date) |
+| M Expires soon and in the money | Expires soon | S3 | exists |
+| N Spread at maximum loss | At maximum loss | S3 | exists |
+| Q LEAPS or PMCC | No recommendation | S3 | exists |
+| R Acquire put at 50% profit | Take profit, "If you still want the shares, keep the put." | S3 | exists |
+| T Sign-in expired | No recommendation | S3 | exists (token state) |
+| O Early assignment risk | Early assignment risk | **Later (DECIDE-0002, the ex-dividend assignment guard)** | needs an ex-dividend date source (does not exist) |
+| P Assigned | Assigned | **Later** | needs assignment detection from broker transactions (does not exist) |
+
+An unconfirmed intent shows the chip "Acquire (default, not chosen) · Choose intent", a one-tap link, not a separate state.
+
+**Wording table for the mock's states** (Ian's replacement wording is in the rendered mock; the mock is the canonical copy and this table only summarizes the changes): B states the dollar cost to close, the credit, the loss so far and the maximum loss; D never says "so no stop applies" (it says "Acquire positions have no loss stop. Your protection is the size you chose at entry."), never offers "change your intent" as the visible next step, and states the cost of assignment and, when the stock is in a downtrend and the loss is 2x or more, "Assignment would be into a stock in a downtrend."; E says "this position is set to Income"; F names the trend line and the loss and says "Closing both sides (4 legs) is the plan."; G is split into two states; H reads "If it is called away you sell 100 shares at $X"; I states the quote age and "This is not a safety signal"; J states the maximum loss and the only remaining exits.
+
+One standing line at the foot of the Positions workspace and the analysis dialog: "Guidance from TradeEdge rules. You decide; no orders are placed automatically." Each reason code maps to a plain-language sentence with no jargon, in one file, with a test that every code has one. Accessibility: `role="group"` with `aria-label="Recommendation for {symbol}"`; native `<details>`; `aria-live="polite"` on the pending-stop state; the dot is `aria-hidden` and the label carries the meaning; 9 to 10px faint text meets 4.5:1 on `#171717`.
 
 ## DECIDE-0001D — Recommendation vs. action log
 
@@ -263,7 +321,9 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | Fees | IC tested side, 4 legs, f = $1: mid gap 0.17 gives rollNet 0.13, qualifies; IC both sides 8 legs: 0.17 gives 0.09, no; 0.18 gives 0.10, yes; CSP 2 legs: 0.10 gives 0.08, no. rollNet values are after fees |
 | CC roll | `c0` 90c, DTE0 30, ΔDTE 30: rollNet 90c no roll (equal), 91c roll; rollNet 95c with DTE_old 5, DTE_new 35: roll (ΔDTE 30) |
 | Short delta | 0.4999 / 0.50; IC with only the call side breaching; a winner at delta 0.50 follows rule 3 or 5, not 6; a loser at delta 0.50 with no roll is `HOLD` with a delta context line (never `CLOSE_STOP`) |
-| Broken gating | BPS at 70% profit on a broken stock: `CLOSE_PROFIT`; a healthy far-OTM BPS with a trend break only: `HOLD` with context; a losing BPS with a trend break: `CLOSE_BROKEN`; short delta 0.30 exactly with a break: `CLOSE_BROKEN` |
+| Fallback stop (proposed) | 5-wide C 2.51: fallback stop at mark 4.00 fires `STOP_FALLBACK`; mark 3.99 no fire; 10-wide C 5.10: fallback 8.00; a spread with a reachable 2x stop never uses the fallback; the fallback never applies to a CSP |
+| New states | Working closing order: label "Order working", no close suggestion; expiry in 2 days and in the money: "Expires soon"; both strikes in the money: "At maximum loss"; earnings before expiry: a context line only, action unchanged; stale quote 22 minutes: "No recommendation" with the quote age; expired token: "No recommendation" |
+| Broken gating | BPS at 70% profit on a broken stock: `CLOSE_PROFIT`; a healthy far-OTM BPS with a trend break only: `HOLD` with context; a BPS with a trend break and a loss of 0.4x the credit (mark 1.40·C) and delta 0.20: `HOLD` with context; loss 0.5x the credit (mark 1.50·C): `CLOSE_BROKEN`; short delta 0.30 exactly with a break and any loss: `CLOSE_BROKEN`; the confidence line shows "Rule met" on stop, profit and time rules and nothing on `HOLD` |
 | Confidence | Short delta 0.5499 LOW, 0.5500 HIGH, HOLD 0.4501 LOW, 0.4500 HIGH; LEAPS delta 0.5401 LOW, 0.5400 HIGH, HOLD 0.6599 LOW, 0.6600 HIGH; LEAPS DTE 163 / 162 and 197 / 198 |
 | Trend | one close below ma200 (no fire); two closes with ma50 ≥ ma200 (no fire); two closes with ma50 < ma200 (fire); already true at entry (context, not counted); 200 bars NE / 201 evaluable |
 | Gap | ADM 2.67%: gap −8.00% no fire, −8.01% fires; ADM 3.5%: gap exactly −10.5% (O = 0.895·C) fires; ADM 2.00%: −8.00% fires, −7.99% no; C_prev 100, O 90, R 95, closes 93, 94.99, 92, 91, 90 fires; one close 95.00 no fire; n = g+3 with none ≥ R PENDING, with one ≥ R CLEAR; gap at n−19 evaluated, n−20 out; 20 prior closes NE; two gap days: fire if either qualifies |
@@ -288,17 +348,22 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | O8, O9 | Price basis; reconstructed entry support | Alan | **Resolved** (see Conventions and Phase 0) |
 | O11 | LEAPS long-leg policy, the short-call guard, delta source | Ian | Deferred to its own ticket |
 | O12 | Support-break and volume confidence bands; whether a fired gap clears on recovery; whether an unreachable stop needs another protection | Ian | Open, blocks B1 |
+| O14 | Fallback stop for a spread whose stop can never trigger: `mark ≥ 0.80·width` (Ian's proposal); and the stricter broken-stock gate (a loss of at least 0.5x the credit or short delta ≥ 0.30) | Alan checks; Ian confirms; **Dean approves** | Open, blocks B1 |
+| O15 | Wide-quote timeout (3 readings or 15 minutes still wide becomes "Stop level reached (wide quote)") against `evaluateStopBreach` | Alan, Quinn | Open |
+| O16 | Data for the new states: which exist (working orders, quote age, earnings date, token state) and which do not (ex-dividend date, assignment detection, both deferred) | Quinn, Paul | Open |
 | O13 | Live-engine fix: build the Acquire and Wheel protection into `pos.recommendation` now as a small change ahead of this epic | Dean, Ian | **Done 2026-09-25** (Dean: fix it now if Ian is aligned; Ian approved with changes, all applied): a lone short put set to Acquire or Wheel gets no loss exit and no 21-DTE roll suggestion in the live engine; earnings-risk is a medium note; the loss is stated plainly as a context line; Income puts, calls, spreads and bought options are unchanged |
 
 ## Review gates
 
-| Gate | Reviewer | Focus | Status |
-|---|---|---|---|
-| G1 | Ian | Rules, intent branch, O5, O6, the 2x stop | Returned with changes (2026-09-25); folded into revision 3; O12 remains |
-| G2 | Alan | Formulas, fixtures at 2x, O8, O9, confidence bands | Returned with changes; folded in |
-| G3 | Quinn | Testability, cutover, log reuse, regressions, chart route | Returned "do not build yet"; folded in |
-| G4 | Paul | Scope, sequencing, AI-POLICY | Approved Phase 0 and 0001A only; the rest slice by slice |
-| G5 | Diane | Calm presentation spec | Approved with changes; spec folded in; rendered mock pending (O10) |
-| G6 | Dane (developer) | Pre-development review of the whole ticket and the code it touches: ambiguities, missing inputs, estimate, risks; confirms each phase is buildable from the text alone | **Pending; runs on revision 3 before any development starts** |
+The single "Who reviews what" table at the top of this ticket is the current record. History:
+
+| Gate | Reviewer | Result |
+|---|---|---|
+| G1 | Ian | Revision 2: approve with changes. Mock review 2026-09-26: approve with changes (folded into revision 4) |
+| G2 | Alan | Revision 2: approve with changes; revision 4 items pending |
+| G3 | Quinn | Revision 2: do not build yet; revision 4 items pending |
+| G4 | Paul | Approved Phase 0 and 0001A only |
+| G5 | Diane | Spec approved with changes; the rendered mock (revision 2) awaits Dean |
+| G6 | Dane (developer) | Pending; runs last |
 
 Dean is the sponsor and final decision-maker for every open item.
