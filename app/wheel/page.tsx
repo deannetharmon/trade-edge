@@ -14,6 +14,7 @@ import {
   type WheelChainLeg,
 } from '@/lib/wheel/chainSearch';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
+import WheelPlanTab from '@/features/wheel/WheelPlanTab';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -140,6 +141,8 @@ function listCandidateContracts(
 }
 
 export default function WheelPage() {
+  // WHEEL-SYSTEM-0001 (W1): Candidates stays mounted (hidden, not unmounted) so switching tabs never re-runs its searches.
+  const [tab, setTab] = useState<'candidates' | 'plan'>('candidates');
   const [config, setConfig] = useState<WheelConfig | null>(null);
   const [candidates, setCandidates] = useState<Record<string, WheelCandidate>>({});
   const [results, setResults] = useState<Record<string, RowResult>>({});
@@ -396,16 +399,32 @@ export default function WheelPage() {
         </div>
       </div>
 
-      {/* Wheel sub-tab bar -- Candidates is the only tab for now */}
+      {/* Wheel sub-tab bar */}
       <div className="border-b border-white/10 px-6">
-        <div className="flex gap-0">
-          <span className="flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 text-white" style={{ borderColor: '#00d4aa' }}>
-            Candidates
-          </span>
+        <div className="flex gap-0" role="tablist" aria-label="Wheel">
+          {(['candidates', 'plan'] as const).map(t => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 ${tab === t ? 'text-white' : 'text-white/50 hover:text-white/80 border-transparent'}`}
+              style={tab === t ? { borderColor: '#00d4aa' } : undefined}
+            >
+              {t === 'candidates' ? 'Candidates' : 'Plan'}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+      {tab === 'plan' && (
+        <div className="max-w-6xl mx-auto px-6 py-6">
+          <WheelPlanTab />
+        </div>
+      )}
+
+      <div className={`max-w-6xl mx-auto px-6 py-6 space-y-4 ${tab === 'candidates' ? '' : 'hidden'}`} data-testid="wheel-candidates-panel">
         {config && (
           <div className="border border-white/10 rounded-lg p-3 flex items-center gap-6 text-xs text-white/50">
             <span>Default delta: {config.defaultDeltaMin}-{config.defaultDeltaMax}</span>

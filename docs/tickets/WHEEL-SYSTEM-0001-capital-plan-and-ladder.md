@@ -1,6 +1,6 @@
 # WHEEL-SYSTEM-0001 — Wheel capital plan and unlock ladder (slice W1)
 
-**Status:** DRAFT 3, 2026-09-26, ready for Dean's approval to build W1 (Alan, Quinn and Dane reviews folded in below; Ian and Paul inline earlier; the $40,000 / $5,000 split accepted by Dean). Not approved to build. Owner: Dean Harmon.
+**Status:** W1 BUILT 2026-09-26 (approved by Dean the same day); see "Build notes" at the end. Earlier: DRAFT 3, ready for Dean's approval to build W1 (Alan, Quinn and Dane reviews folded in below; Ian and Paul inline earlier; the $40,000 / $5,000 split accepted by Dean). Not approved to build. Owner: Dean Harmon.
 **Mock:** https://claude.ai/artifact/PqJWm8PT2WvR4SwZHwDmTH (screens 1 and 1b are approved by Dean; screens 2 to 4 are layout only).
 **Roadmap:** item 14.
 
@@ -154,3 +154,14 @@ Principle: the app ships with sensible defaults, and Dean can change any paramet
 - Changing a default constant in code changes the effective value for every field that is not overridden (test with a stubbed default).
 - Hard-error and soft-warning cases each have a test; a soft warning never blocks saving.
 - Route tests accept a partial overrides object and reject unknown keys and invalid types.
+
+## Build notes (W1, 2026-09-26)
+
+Built as specified in draft 3 plus Revision 2 and the defaults-and-overrides section. Files: `lib/wheel/capitalPlan.ts`, `lib/wheel/planSchema.ts`, `lib/wheel/planPut.ts`, `app/api/wheel-plan/route.ts`, `features/wheel/WheelPlanTab.tsx`, a Plan tab in `app/wheel/page.tsx` (Candidates stays mounted, hidden), and `failedBatches` added (optional, backward compatible) to `WheelChainResult` in `lib/wheel/chainSearch.ts`. Tests: 114 new or touched (capitalPlan 53, planSchema 22, planPut 14, route 10, Plan tab 13, Wheel page tabs 2). Verification run: `tsc --noEmit -p tsconfig.check.json` clean; a real `next build` exit 0 with `/api/wheel-plan` listed; full suite 397 files / 5,769 tests passing.
+
+Implementation decisions the spec left open (Ian or Alan may overrule):
+1. A put more than 0.10 delta from the target is not used ("no put found"); the target itself and its default are editable.
+2. Row state precedence: chain error, then failed quote batch with no put (chain error), then missing quote with no put (quote unavailable), then no put found. A missing quote with a put found still prices the row and shows "unavailable" for the price.
+3. The tab offers an "Add starter ETFs" button (XLU, XLF, XLE, XLP, XLV) when the list is empty; the saved default list stays empty.
+4. Reserve and caps are edited as percentages (the dollar amounts show in the limits panel), not as dollars.
+5. Not done in W1 by design: ranking and the hurdle (W2), cycles (W3), idle-capital view (W4), spread-cap enforcement, removal of the old Candidates tab or the simulator. Alan's formal re-check of the recomputed fixtures is still owed (the fixtures are encoded in the tests and pass).

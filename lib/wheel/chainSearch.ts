@@ -28,6 +28,9 @@ export interface WheelChainLeg {
 export interface WheelChainResult {
   expirations: string[];
   chains: Record<string, WheelChainLeg[]>; // keyed by expirationDate
+  // Number of live-greeks batches that failed and were skipped. Optional so existing callers are unaffected;
+  // the wheel plan (WHEEL-SYSTEM-0001) uses it so a failed batch is never mistaken for "no put found".
+  failedBatches?: number;
 }
 
 function daysUntil(dateStr: string): number {
@@ -86,8 +89,9 @@ export async function fetchWheelChain(
     expirations.push(expDate);
   }
 
-  if (allOccSymbols.length === 0) return { expirations, chains };
+  if (allOccSymbols.length === 0) return { expirations, chains, failedBatches: 0 };
 
+  let failedBatches = 0;
   for (let i = 0; i < allOccSymbols.length; i += 100) {
     const chunk = allOccSymbols.slice(i, i + 100);
     const qs = chunk.map(s => `equity-option=${encodeURIComponent(s)}`).join('&');
@@ -95,6 +99,7 @@ export async function fetchWheelChain(
     try {
       greeksData = await ttFetchWheel(`/market-data/by-type?${qs}`, token);
     } catch {
+      failedBatches += 1;
       continue;
     }
 
@@ -123,7 +128,7 @@ export async function fetchWheelChain(
   }
 
   expirations.sort();
-  return { expirations, chains };
+  return { expirations, chains, failedBatches };
 }
 
 // Fetches a live equity quote (last price, falling back to bid/ask midpoint).
