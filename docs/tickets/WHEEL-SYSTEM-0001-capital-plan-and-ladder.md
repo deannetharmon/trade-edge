@@ -104,7 +104,7 @@ Alan recomputed every fixture in the ticket by script and they are correct (2/2/
 6. Extra fixtures (Balanced, A = 50,000, maxCash 15,000 unless noted): cash 15,000.00 fits 1, cash 15,000.01 fits 0; Careful (maxCash 10,000): XLU 3,700 fits 2, XLV fits at 79,500; Concentrated (maxCash 20,000): XLV 15,900 fits 1; A = 80,000: maxCash 24,000, reserve 8,000 (10%), spread cap 8,000 (10%), wheelCash 64,000; `fitsAt = A` exactly; `g = 0`; `g = 1e-9`.
 
 **Persistence and failure states (Quinn)**
-7. Copy the pattern of `app/api/wheel-config/route.ts:8-93` (`wheel-plan:${userId}`, `getServerSession`, 401 on every method, same DELETE) but not its unvalidated body spread (`:68-72`) or its 500 on malformed stored JSON (`:46-49`). Schema: `{ accountValue, profile, monthlyGrowth, wheelList: [{ symbol, sector?, dropOverride? }], updatedAt }`. POST validates: `accountValue > 0`, profile is one of three, `monthlyGrowth` finite, symbols unique uppercase. A parse failure on read returns defaults. GET before any POST returns defaults (50,000, Balanced, 0.75%, empty list).
+7. Copy the pattern of `app/api/wheel-config/route.ts:8-93` (`wheel-plan:${userId}`, `getServerSession`, 401 on every method, same DELETE) but not its unvalidated body spread (`:68-72`) or its 500 on malformed stored JSON (`:46-49`). Schema: `{ overrides: Partial<Params>, wheelList: [{ symbol, sector?, dropOverride? }], updatedAt }` (see "Defaults and overrides" below: only overrides are stored, never a copy of the defaults). POST validates: `accountValue > 0`, profile is one of three, `monthlyGrowth` finite, symbols unique uppercase. A parse failure on read returns defaults. GET before any POST returns defaults (50,000, Balanced, 0.75%, empty list).
 8. Per-row states, so a failure never looks like "no put": "quote unavailable" (`getWheelQuote` returned null, `chainSearch.ts:133-145`), "chain error" (`fetchWheelChain` threw, `:62`, or a greeks batch failed; batches are skipped silently at `:94-99`, so W1 must treat an empty result from a failed batch as "chain error", not "no put found"), and "no put found". One failed symbol never blanks the tab; each row has a retry.
 9. Token: `getAccessToken` from `lib/auth/tastytradeToken` (as `app/wheel/page.tsx:23`); missing or expired shows "Reconnect TastyTrade". Never fall back to a stale strike.
 10. Empty wheel list: profile chooser and limits still render, stress is $0, a plain "Add a symbol" line. Fetches run one symbol at a time (or a small fixed concurrency) and ignore a response that arrives after the profile or symbol changed.
@@ -119,3 +119,38 @@ Alan recomputed every fixture in the ticket by script and they are correct (2/2/
 ## Accepted by Dean (2026-09-26)
 
 Dean proposed a $5,000 spread-risk cap and $40,000 for the wheel (instead of $2,500 and $42,500), leaving the $5,000 reserve. Ian supports it with conditions: single-spread cap stays 2% ($1,000); the screen shows the honest worst case (wheel at a 25% fall plus spreads at full loss, about $15,000 or 30% of the account); review the cap after about ten spreads under the new rules, falling back to $2,500 if panic-closing returns. Dean accepted it. Applied above: O1 cap is now $5,000 total and $1,000 per spread (2%), wheelCash is $40,000, the sample plan and stress fixtures are recomputed. Alan to re-verify the recomputed fixtures.
+
+## Defaults and overrides (Dean, 2026-09-26): every parameter has a default and can be changed at any time
+
+Principle: the app ships with sensible defaults, and Dean can change any parameter whenever he wants. The app may warn; it never blocks a value that is mathematically valid ("trust the qualified realm", "you decide").
+
+**Editable parameters in W1, with defaults**
+
+| Parameter | Default | Notes |
+|---|---|---|
+| Account value A | $50,000 | typed number (O4) |
+| Reserve | 10% of A ($5,000) | dollars or percent |
+| Spread-risk cap, total | 10% of A ($5,000) | |
+| Spread cap, single spread | 2% of A ($1,000) | |
+| Profile | Balanced (900 bps) | Careful 600, Concentrated 1200, or Custom (any loss budget in bps) |
+| Assumed drop d | 30% (3000 bps) | applies to every name unless overridden |
+| Per-symbol drop override | none | leveraged ETFs default to their own history (O7) |
+| Stress fall | 25% | the stress test line |
+| Sector limit | 35% of A | |
+| Target delta | 0.20 | strike rule |
+| DTE window | 30 to 45 | strike rule |
+| Assumed monthly growth g | 0.75% | months-to-unlock |
+| Later slices (recorded now) | premium hurdle 10% a year; IV rank floor about 20 | W2 |
+
+**Behavior**
+1. Each field shows its current value, a "default" tag when unchanged, and a "changed from default (was X)" note plus a one-tap "Reset" when changed. A "Reset all to defaults" action is available.
+2. Storage: the plan stores **only the overrides** (`overrides: Partial<Params>`), never a copy of the defaults. The effective value is `{ ...DEFAULTS, ...overrides }`, defaults live in `lib/wheel/capitalPlan.ts`, and resetting a field deletes its key. A later change to a default therefore never overwrites something Dean set, and never leaves a stale copy behind.
+3. Validation is split in two. **Hard errors** (refuse to save) only for values that break the math: non-finite, A <= 0, percentages below 0 or above 100, reserve plus spread cap above 100%, delta outside (0, 1), DTE min above max. **Soft warnings** (save anyway, amber line) for values outside Ian's recommended ranges, for example a per-name loss budget above 12%, a drop assumption under 20%, a reserve under 5%, a total spread cap above 10%, a delta above 0.35. The warning says plainly what the value does to the worst-case figure.
+4. Every figure on the tab recalculates from the effective values, and the worst-case line always shows the current numbers, so an override that raises risk is visible immediately.
+5. Nothing here changes an order or a recommendation, and defaults are Ian's recommendations, not rules.
+
+**Added acceptance criteria and tests**
+- Changing any parameter updates the tab; resetting returns it to the default; a stored plan with only overrides loads correctly and an empty plan loads all defaults.
+- Changing a default constant in code changes the effective value for every field that is not overridden (test with a stubbed default).
+- Hard-error and soft-warning cases each have a test; a soft warning never blocks saving.
+- Route tests accept a partial overrides object and reject unknown keys and invalid types.
