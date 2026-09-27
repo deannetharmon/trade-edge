@@ -14,7 +14,7 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 |---|---|
 | SEC-0001 | S1 (Dean: rotate credentials) unresolved; S2 (untrack the file) and S3 (route triage) not started |
 | DECIDE-0001 | Revision 7. All 7 decisions approved 2026-09-27; **S3-0 (a/b/c) built and pushed 2026-09-27**. Remaining: the big cutover (S1-S3-D), gated on Ian's rulings and Alan's fixtures. Tracked in ROADMAP item 12 |
-| KEEP-CREDIT-0001 | Draft 2. Dean's approval of the mock + 5 decisions, Dane's pre-build review. ROADMAP item 13 |
+| KEEP-CREDIT-0001 | Draft 2. All 5 decisions approved 2026-09-27; **Part A (A1) built and pushed 2026-09-27**. Remaining: Part A's second surface (the roll suggestion detail), and all of Part B (A2, B1, B2, B3). ROADMAP item 13 |
 | WHEEL-SYSTEM-0003 | Draft 1. Mock published 2026-09-27 (https://claude.ai/artifact/2tHjMxgDDzSWtfRZbB4KmX). Awaiting Dean's approval on the mock and the ticket's 5 "Decisions for Dean". ROADMAP item 14 |
 | LEAPS-PMCC-RECOVERY-0001 (issue #49) | Ian/Paul's 9 questions ruled on; mock published and corrected 2026-09-27 (Ian caught a sign-convention bug — "Opportunity Cost" renamed "Call Advantage"; Diane fixed a Wait-button weight issue). Ready for Dean's build approval |
 | LEAPS-PMCC-RECOVERY-0002 (issue #50) | Reviewed 2026-09-27 (Ian/Paul/Alan): formula sound, reuse `reconstructTrades.ts`'s already-fee-inclusive `ClosedTrade.pnl` for realized short-call income (no new fee model needed). One open decision for Dean/Paul: Trade Log's 12-month lookback cap would silently undercount income on longer-held LEAPS campaigns — needs a scoping call before build |
@@ -26,10 +26,9 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | AI-POLICY-0001-epic | D3 (pick the reasoning-tier model, verify OpenAI org data controls, set attestation env vars) and D6 (real per-route hourly limits and USD budget numbers) still open, from 2026-09-19 — genuine Dean-only decisions (real spend/vendor verification), not stale; these are what's actually blocking 0001A/B/F from being enabled in Production |
 | CSP-WORKFLOW-0001 | Explicitly "partially implemented" |
 | ENTRY-0002 | Deferred until a reviewable complete-snapshot cohort exists (data-gated, not a decision) |
-| LCC-0001B/C/D/E | Each "Ready after" the previous slice; 0001A itself is implemented but pending Gate A acceptance, so B-E have not started |
+| LCC-0001B/C/D/E | Each "Ready after" the previous slice; 0001A itself is implemented but pending Gate A acceptance, so B-E have not started. **Confirmed 2026-09-27: this is a real operational blocker, not stale docs** — Gate A needs live shadow-parity telemetry (`NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=true` in Vercel, a rebuild/redeploy, real production usage time to accumulate comparisons, then a query of `GET /api/telemetry/cc-capacity-shadow`) — Dean's action, not something buildable further from here |
 | STOCKS-ORDERS-0001 | Proposed, touches the order path; needs Diane's mocks and Alan/Ian's review before any build |
 | TRADELOG-0002 | Proposed, not started |
-| LEAPS-PI-0001 | A Dane-facing implementation plan; says implementation is not authorized by the doc alone — confirm whether its plan was ever actually greenlit and run |
 
 ## ⚪ Superseded / duplicate — safe to ignore, already marked or noted here
 
@@ -40,6 +39,7 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | DECIDE-0001-O10-mock-approval.md | Same |
 | DECIDE-0001-O12-ian-rulings.md | Same |
 | LEAPS-PMCC-RECOVERY-0001-held-leaps-recovery-vs-income.md | Repo mirror of GitHub issue #49; had drifted out of sync (still had the self-approved "READY FOR IMPLEMENTATION" text the issue itself later corrected), reconciled 2026-09-27 to match the issue exactly |
+| LEAPS-PI-0001-implementation-plan.md | Marked SUPERSEDED 2026-09-27; its "not yet enabled" foundation was fully completed and shipped as LEAPS-MANDATE-0001, LEAPS-LEDGER-0001, LEAPS-POS-0001/0002, LEAPS-CYCLES-0001, LEAPS-DASH-0001-4, LEAPS-ENTRY-0001, LEAPS-EVENTS-0001, LEAPS-SINCE-0001, LEAPS-SPARK-0001 — same class of gap as the PMCC-0001 collision |
 
 ## 🔵 Reference / not a build ticket
 
