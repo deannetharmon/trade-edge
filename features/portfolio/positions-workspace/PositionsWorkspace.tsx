@@ -730,11 +730,9 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     })(),
     // POP-0001: two readings of the same lognormal engine, different
     // thresholds. Breakeven = "will I keep my credit" (existing p.pop).
-    // Strike = the risk-neutral probability of finishing beyond the short
-    // strike at expiry (p.popVsStrike) -- KEEP-CREDIT-0001 (Alan): not
-    // "will price ever touch my strike" (a touch/barrier probability, which
-    // this is not). Both null for debit/long positions (NFLX/UBER/MRNA-style)
-    // -- same limitation calcPositionPop already has, not a regression.
+    // Strike = "will price ever touch my strike" (new, p.popVsStrike). Both
+    // null for debit/long positions (NFLX/UBER/MRNA-style) -- same
+    // limitation calcPositionPop already has, not a regression.
     pop: <>
       <span className="block"><span className={th.textFaint}>Breakeven </span><b className="text-white">{p.pop == null ? '—' : `${p.pop.toFixed(1)}%`}</b></span>
       <span className="block"><span className={th.textFaint}>Strike </span><b className="text-white">{p.popVsStrike == null ? '—' : `${p.popVsStrike.toFixed(1)}%`}</b></span>

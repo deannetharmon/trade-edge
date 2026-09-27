@@ -2114,13 +2114,11 @@ export async function loadPositions(
       // floored $0.00 "credit" (isNetDebit guard).
       pop: !entryEconomicsComplete || isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
       // POP-0001: same lognormal engine as `pop` above, but the threshold is
-      // the raw short strike instead of the credit-adjusted breakeven.
-      // KEEP-CREDIT-0001 (Alan): this is the risk-neutral probability of
-      // finishing beyond the short strike at expiry, not "will price ever
-      // touch my strike" (a touch/barrier probability, which this is not).
-      // Gated the same as `pop` (entry economics + not-a-debit) so the two
-      // numbers have identical availability -- no surprise case where one
-      // shows and the other doesn't.
+      // the raw short strike instead of the credit-adjusted breakeven --
+      // "will price ever touch my strike" rather than "will I keep my
+      // credit". Gated the same as `pop` (entry economics + not-a-debit) so
+      // the two numbers have identical availability -- no surprise case
+      // where one shows and the other doesn't.
       popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       // Display only: the next earnings date whether or not it falls inside this position's life (earningsDate above stays the risk input).
